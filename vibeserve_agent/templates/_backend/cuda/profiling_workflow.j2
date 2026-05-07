@@ -1,0 +1,42 @@
+An NVIDIA Nsight Systems analysis toolkit is available at `nsys_profiler/analyze_nsys.py`. A profile run takes several minutes (FlashInfer JIT + capture + export), which is why profiling is gated by the diagnosis step above.
+
+1. Pre-warm FlashInfer JIT (CRITICAL — first-time kernel compilation takes minutes and will otherwise dominate the capture):
+   ```
+   pkill -f "python main.py" 2>/dev/null || true; sleep 2
+   PORT=8077 uv run python main.py > /tmp/prewarm.log 2>&1 &
+   PID=$!
+   for i in $(seq 1 120); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
+   curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
+     -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 300
+   kill $PID 2>/dev/null; wait $PID 2>/dev/null; sleep 2
+   ```
+
+2. Profile under a representative benchmark load (pick the load level closest to saturation from your earlier runs):
+   ```
+   PORT=8077 nsys profile --trace=cuda,nvtx --cuda-memory-usage=true --force-overwrite true \
+     -o /tmp/profile uv run python main.py &
+   NSYS_PID=$!
+   for i in $(seq 1 120); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
+   curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
+     -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 300
+   uv run python bench/benchmark.py --url http://localhost:8077 --rate <chosen_rate> --duration 10 --max-tokens 64
+   kill -INT $NSYS_PID 2>/dev/null; wait $NSYS_PID 2>/dev/null; sleep 3
+   ```
+
+3. Export and analyze:
+   ```
+   python nsys_profiler/analyze_nsys.py export /tmp/profile.nsys-rep
+   python nsys_profiler/analyze_nsys.py tables /tmp/profile.sqlite
+   ```
+   Then run only the analyses relevant to what you saw at the system level. Decision rule:
+   - If `graph-replays` shows data → decode is graphed; focus on replay timing and inter-replay scheduling gaps.
+   - If `graph-replays` is empty → decode is eager; use `step-timeline` and `cpu-overhead` to diagnose launch-bound vs. kernel-bound.
+   - Other useful subcommands: `kernels`, `idle-gaps`, `memory`, `query "<SQL>"`.
+
+4. Classify the **primary bottleneck** into exactly one of:
+   `cpu_launch_bound`, `python_overhead_bound`, `input_pipeline_bound`,
+   `sync_bound`, `memcpy_bound`, `comm_bound`, `kernel_bound`, `mixed_or_unclear`.
+
+   Cite specific numbers from the analysis output as evidence (e.g. "GPU idle gaps total 412 ms over the 2 s capture; median CPU launch gap 1.8 ms between kernels").
+
+If profiling fails (server won't start, nsys hangs, capture is empty), file a `bug` issue describing what you tried and proceed to opportunities without profiler evidence.

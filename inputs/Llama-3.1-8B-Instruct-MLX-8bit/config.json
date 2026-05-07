@@ -1,0 +1,19 @@
+{
+  "model_id": "mlx-community/Meta-Llama-3.1-8B-Instruct-8bit",
+  "revision": "142d428004044c37c441272c91316251d9aecc58",
+  "task": "text-generation",
+  "reference": "reference",
+  "benchmark": "benchmark",
+  "accuracy_checker": "accuracy_checker",
+  "served_endpoints": [
+    "/health",
+    "/v1/completions",
+    "/v1/chat/completions"
+  ],
+  "default_endpoint": "/v1/completions",
+  "quantization": {
+    "format": "mlx",
+    "bits": 8,
+    "group_size": 64
+  }
+}

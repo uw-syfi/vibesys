@@ -1,0 +1,5 @@
+## Modality: text-to-speech
+
+**Audio I/O invariant** (verify on whichever TTS endpoint the orchestrator scoped in): `Content-Type` must match the requested `response_format` (e.g. `mp3`→`audio/mpeg`, `wav`→`audio/wav`). Response body must be non-empty and in a valid container for its declared format (e.g. WAV starts with `RIFF....WAVE`, MP3 starts with `ID3` or `0xFF 0xFB`).
+
+**API contract**: verify whichever endpoints and response shapes the orchestrator's `pass_criteria` for this round specifies. Do NOT flag "missing" endpoints that the orchestrator did not scope in. When you need contract details for a scoped endpoint, consult `skills/serving-systems/tooling/openai-api/SKILL.md`.

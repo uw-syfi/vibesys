@@ -1,0 +1,14 @@
+[
+  {
+    "file": "sample1.wav",
+    "duration_s": 13.69,
+    "sampling_rate": 16000,
+    "text": "Going along slushy country roads and speaking to damp audiences in draughty schoolrooms day after day for a fortnight, he'll have to put in an appearance at some place of worship on Sunday morning, and he can come to us immediately afterwards."
+  },
+  {
+    "file": "sample_30s.wav",
+    "duration_s": 30.0,
+    "sampling_rate": 16000,
+    "text": "going along slushy country roads and speaking to damp audiences in drafty schoolrooms day after day for a fortnight. He'll have to put in an appearance at some place of worship on Sunday morning and he can come to us immediately afterwards. I have a dream that one day this nation will rise up and live out the true meaning of its creed. And so, my fellow Americans,"
+  }
+]

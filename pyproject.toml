@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vibe-serve"
+version = "0.1.0"
+description = "AI agent system for generating bespoke LLM serving systems"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "agentshim>=0.5.0",
+    "deepagents",
+    "jinja2>=3.1",
+    "langchain-google-vertexai>=3.2.2",
+    "langchain-openai",
+    "huggingface_hub",
+    "openai>=1.28.0",
+    "python-dotenv>=1.0.1",
+    "loguru>=0.7.2",
+    "mcp>=1.0",
+    "datasets>=4.8.4",
+    "soundfile>=0.13.1",
+    "librosa>=0.11.0",
+    "modal>=1.4.2",
+]
+
+[project.scripts]
+vibe-serve = "vibeserve_agent.cli:main"
+vibe-serve-issue-mcp = "vibeserve_agent.loops.plain.mcp_server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vibeserve_agent*", "libs*"]
+
+[tool.setuptools.package-data]
+vibeserve_agent = ["templates/*.j2", "loops/agent/templates/*.j2", "loops/agent/templates/_modality/*/*.j2", "loops/evolve/templates/*.j2", "loops/plain/templates/*.j2", "loops/plain/templates/*/*.j2"]
+
+[dependency-groups]
+dev = [
+    "matplotlib>=3.10.8",
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv]
+package = true
+
+[tool.uv.workspace]
+exclude = ["exp_env"]
+members = []
+
+[tool.uv.sources]
+agentshim = { git = "https://github.com/vic-lsh/agentshim.git", rev = "codex/executor-injection" }

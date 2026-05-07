@@ -1,0 +1,1 @@
+Load the model on the Apple Silicon GPU (`device="mps"`) with an efficient dtype (`torch.float16`). Do NOT use `float32` or CPU — inference will be far too slow. If a kernel hits an MPS gap, set `PYTORCH_ENABLE_MPS_FALLBACK=1` rather than falling back to `device="cpu"` for the whole model.

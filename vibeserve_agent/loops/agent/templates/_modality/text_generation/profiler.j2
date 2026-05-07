@@ -1,0 +1,32 @@
+{% if env_kind is not defined %}{% set env_kind = "local" %}{% endif %}
+## Server Type: Text Generation (Causal LM)
+
+The server exposes OpenAI-compatible text generation endpoints:
+- `POST /v1/completions` — `{prompt, max_tokens, temperature, stream}`
+- `POST /v1/chat/completions` — `{messages, max_tokens, temperature, stream}`
+- `GET /health` — health check
+
+Key performance axes: **time-to-first-token (TTFT)**, **time-per-output-token (TPOT)**, **throughput** (tokens/s under concurrent requests). Prefill and decode are distinct phases with different bottlenecks.
+
+{% if env_kind == "modal" %}
+## Profiling workload (Modal mode)
+
+You do **not** start a server in this editor container — there is no GPU here and the deployed server runs on Modal. The representative workload runs *inside* the Modal `profile_remote` function the implementer is required to expose. That function should drive a steady-state mix matching the benchmark (multiple `Server().<inference-method>.local(...)` calls or equivalent direct generate calls).
+
+After `modal run main.py::modal_profile -- --output /workspace/prof.json` completes, run the analyze subcommands locally on the resulting JSON. Per-token throughput, if computed, should come from the function's `wall_time_sec` field and `num_iters * max_tokens`, not from any local timing in this container.
+{% else %}
+## Profiling Commands
+
+**Warmup** (run after server health check, before and during profiling):
+```
+curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 300
+```
+
+**Workload** (run during profiling when no benchmark tool is available):
+```
+for i in 1 2 3 4 5; do
+  curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
+    -d '{"prompt":"The capital of France is","max_tokens":32,"temperature":0}'
+done
+```
+{% endif %}

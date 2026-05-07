@@ -1,0 +1,5 @@
+## Modality: realtime audio (WebSocket)
+
+**Transport invariant** (verify on whichever WebSocket path the orchestrator scoped in): WebSocket accepts connection; server emits `session.created` on connect; audio frames are base64-encoded JSON payloads; default format is PCM16 unless the session explicitly overrides it.
+
+**API contract**: verify whichever endpoints, session-config fields, and client/server events the orchestrator's `pass_criteria` for this round specifies. Do NOT flag "missing" events that the orchestrator did not scope in. When you need contract details for a scoped endpoint or event, consult `skills/serving-systems/tooling/openai-api/SKILL.md`.

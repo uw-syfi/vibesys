@@ -1,0 +1,10 @@
+{
+  "model_id": "mlx-community/Meta-Llama-3.1-8B-Instruct-8bit",
+  "revision": "142d428004044c37c441272c91316251d9aecc58",
+  "snapshot_size": "about 8 GB",
+  "quantization": {
+    "format": "mlx",
+    "group_size": 64,
+    "bits": 8
+  }
+}

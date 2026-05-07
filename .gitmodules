@@ -1,0 +1,21 @@
+[submodule "3rd_party/transformers"]
+	path = 3rd_party/transformers
+	url = git@github.com:huggingface/transformers.git
+[submodule "skills/serving-systems/repos/vllm"]
+	path = skills/serving-systems/repos/vllm
+	url = https://github.com/vllm-project/vllm.git
+	branch = main
+	shallow = true
+[submodule "skills/serving-systems/repos/sglang"]
+	path = skills/serving-systems/repos/sglang
+	url = https://github.com/sgl-project/sglang.git
+	branch = main
+	shallow = true
+[submodule "skills/serving-systems/repos/TensorRT-LLM"]
+	path = skills/serving-systems/repos/TensorRT-LLM
+	url = https://github.com/NVIDIA/TensorRT-LLM.git
+	branch = main
+	shallow = true
+[submodule "inputs/show-o2-1.5B-HQ/reference/Show-o"]
+	path = inputs/show-o2-1.5B-HQ/reference/Show-o
+	url = https://github.com/showlab/Show-o.git

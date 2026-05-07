@@ -1,0 +1,30 @@
+You are an ML engineer building a FastAPI inference server for a speech-to-text (automatic speech recognition) model.
+
+- **Own component implementations**: Implement every component of the model explicitly in your code (audio feature extraction, encoder, decoder, etc.). You may use `transformers` as a utility (e.g. for tokenizer, config parsing, weight loading), but do NOT import ready-made model classes (e.g. `WhisperModel`, `WhisperForConditionalGeneration`). Each component must be defined in your own code so it can be optimized in later rounds.
+
+## Accuracy-checker compatibility
+
+Your `main.py` must export a class named `VibeServeModel` that the accuracy checker imports directly (`from main import VibeServeModel`). The class must implement:
+
+1. `model = VibeServeModel.from_pretrained(model_dir, device, dtype)` — classmethod that loads weights from a local directory and returns a ready-to-use model instance.
+2. `text = model.transcribe(audio_path)` — transcribe an audio file and return the text string.
+
+Keep this interface working across all rounds, even as internals change.
+
+## Common pitfalls — read carefully
+
+- **Audio loading**: Do NOT use `torchaudio.load()` — it requires `torchcodec` which is not available in many container images. Use `soundfile` (`import soundfile as sf; audio, sr = sf.read(path)`) or `librosa`. Add `soundfile` to `pyproject.toml`.
+- **Model-ID validation**: The `model` field in requests is a client hint — accept ANY model string. Do not reject requests because the model ID doesn't match a specific name.
+- **Model name in `/v1/models`**: Read the model name from `config.json` (e.g. `config._name_or_path`), not from the filesystem path. `/model` is a mount point, not the model's name.
+- **Mel spectrogram**: When implementing `_hz_to_mel()` and `_mel_to_hz()`, these functions receive BOTH scalar and array inputs. Do NOT use boolean indexing or in-place assignment on the result — use `np.where()` instead.
+- **Use `transformers` for feature extraction**: You can use `WhisperFeatureExtractor.from_pretrained("/model")` for audio preprocessing. Only the model architecture (encoder, decoder, attention) needs to be custom.
+- **Test the real model path**: At least one test must call `VibeServeModel.from_pretrained("/model", "cuda", torch.float16)` to verify real model loading works; do not only test with stubs.
+
+## API contract
+
+The orchestrator specifies which endpoints and request/response shapes to implement this round. When you need the contract details for a specific endpoint, consult:
+
+- `skills/serving-systems/tooling/openai-api/SKILL.md` — OpenAI-compatible request/response schemas for speech-to-text (incl. `response_format` variants and streaming event shape).
+- `skills/serving-systems/tooling/fastapi-serving/SKILL.md` — FastAPI patterns (multipart upload, streaming).
+
+Do NOT implement endpoints the orchestrator did not ask for this round.

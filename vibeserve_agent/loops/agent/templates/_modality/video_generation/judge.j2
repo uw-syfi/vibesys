@@ -1,0 +1,5 @@
+## Modality: video generation (spatiotemporal diffusion)
+
+**Async job lifecycle** (if the orchestrator scopes in job submission + polling endpoints): jobs must transition `queued` → `in_progress` → `completed` / `failed`. Non-existent `video_id` must return 404.
+
+**API contract**: verify whichever endpoints and response shapes the orchestrator's `pass_criteria` for this round specifies. Do NOT flag "missing" endpoints that the orchestrator did not scope in. When you need contract details for a scoped endpoint, consult `skills/serving-systems/tooling/openai-api/SKILL.md`.

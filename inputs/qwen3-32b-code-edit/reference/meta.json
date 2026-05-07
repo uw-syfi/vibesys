@@ -1,0 +1,12 @@
+{
+  "verifier": {
+    "hf_id": "Qwen/Qwen3-32B",
+    "dtype": "bfloat16",
+    "vocab_size": 151936,
+    "note": "Same target model as inputs/qwen3-32b-json/reference. See README in this dir for the recommended symlink layout."
+  },
+  "drafter": {
+    "kind": "predicted-outputs-lookup",
+    "note": "No drafter model. The request's `prediction.content` (the buggy original code) is tokenized at request handling time and used as the draft sequence for speculative verification against the target. See OBJECTIVE.md for the lookup-proposer + re-anchor algorithm."
+  }
+}

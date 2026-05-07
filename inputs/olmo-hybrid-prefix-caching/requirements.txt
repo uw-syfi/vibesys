@@ -1,0 +1,5 @@
+torch>=2.4
+transformers>=4.52
+httpx>=0.27
+fastapi>=0.110
+uvicorn>=0.29
