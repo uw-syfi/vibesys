@@ -28,6 +28,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
+from vibe_serve.config import Config, as_config
 from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND
 from vibe_serve.context import _RunContext
 from vibe_serve.loops.plain.render import render_all
@@ -335,7 +336,7 @@ def _ensure_bootstrap_issue(
 
 
 def run_plain_loop(
-    config: dict,
+    config: Config,
     exp_name: str,
     reference_path: str,
     *,
@@ -361,6 +362,7 @@ def run_plain_loop(
     exhausted with open work remaining, or if the run gets stuck (every
     remaining issue is BLOCKED).
     """
+    config = as_config(config)
     # Issue loop always uses git tracking so judge test scripts and the
     # issue tracker mirror persist across iterations.
     git_tracking = True
@@ -463,8 +465,7 @@ def run_plain_loop(
                 + f", running up to {max_rounds} more rounds"
             )
 
-        perf_eval_config = config.get("perf_eval", {})
-        load_levels = perf_eval_config.get("load_levels")
+        load_levels = config.perf_eval.load_levels
         previous_evaluator_feedback: list[str] | None = None
 
         while i < end_iteration:

@@ -105,9 +105,19 @@ name = "cuda"                 # or "metal" for Apple Silicon (local exec only)
 [agent]
 backend = "cli"               # "cli" (codex/claude/gemini/opencode) or "deepagents"
 cli_provider = "codex"        # which coding-agent harness to drive
+# cli_model = "gpt-5-codex"   # override the model the CLI tool uses
+# cli_timeout = 1800          # per-invocation timeout (seconds)
+
+# Optional: benchmark load levels handed to the perf evaluator.
+# [[perf_eval.load_levels]]
+# rate = 1
+# duration = 20
+# max_tokens = 128
 ```
 
 Provider credentials live in `.env` — see `.env.example`. The CLI flags `--agent-backend` / `--cli-provider` / `--backend` override these.
+
+The config is validated against a typed schema on load (`vibe_serve/config.py`): unknown sections or keys, unknown providers/backends, and missing required fields are rejected with an error rather than silently ignored.
 
 ## Skills library
 

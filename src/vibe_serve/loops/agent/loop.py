@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from vibe_serve.config import Config
 from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND
 from vibe_serve.context import _RunContext
 from vibe_serve.loops.agent import issue_board
@@ -411,7 +412,7 @@ def _run_judge(
 
 
 def run_agent_loop(
-    config: dict,
+    config: Config,
     exp_name: str,
     reference_path: str,
     objective: str,

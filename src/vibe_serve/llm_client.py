@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from vibe_serve.config import Config, ThinkingCfg
 from vibe_serve.constants import _ANTHROPIC_PREFIXES, _GOOGLE_PREFIXES, _OPENAI_PREFIXES
 
 
@@ -16,15 +17,15 @@ def _is_openai_model(model_name: str) -> bool:
     return any(model_name.startswith(p) for p in _OPENAI_PREFIXES)
 
 
-def _has_thinking(thinking: dict) -> bool:
-    return bool(thinking.get("level") or thinking.get("budget"))
+def _has_thinking(thinking: ThinkingCfg) -> bool:
+    return bool(thinking.level or thinking.budget)
 
 
-def _build_model(config: dict):
-    """Build the chat model from a parsed config dict."""
-    model_name = config["model"]["name"]
-    provider = config["model"].get("provider")
-    thinking = config.get("thinking", {})
+def _build_model(config: Config):
+    """Build the chat model from a parsed :class:`Config`."""
+    model_name = config.model.name
+    provider = config.model.provider
+    thinking = config.thinking
 
     if provider == "vertex-ai":
         return _build_vertex_model(model_name, config, thinking)
@@ -75,18 +76,18 @@ def _build_model(config: dict):
     raise NotImplementedError(f"Provider {provider!r} is not yet supported")
 
 
-def _build_openai_compatible_model(model_name: str, config: dict):
+def _build_openai_compatible_model(model_name: str, config: Config):
     """Build a model using an OpenAI-compatible API (e.g. vLLM, Ollama)."""
     from langchain_openai import ChatOpenAI
 
-    oc = config.get("providers", {}).get("openai-compatible", {})
-    base_url = oc.get("base_url")
+    oc = config.providers.openai_compatible
+    base_url = oc.base_url if oc else None
     if not base_url:
         raise ValueError(
             "openai-compatible provider requires 'base_url' "
             "(e.g. 'http://localhost:8000/v1')"
         )
-    api_key = oc.get("api_key", "no-key")
+    api_key = oc.api_key
 
     return ChatOpenAI(
         model=model_name,
@@ -95,14 +96,14 @@ def _build_openai_compatible_model(model_name: str, config: dict):
     )
 
 
-def _build_vertex_model(model_name: str, config: dict, thinking: dict):
+def _build_vertex_model(model_name: str, config: Config, thinking: ThinkingCfg):
     """Build a Vertex AI model (Claude via Model Garden or Gemini via GenAI)."""
     from google.oauth2 import service_account
 
-    vx = config.get("providers", {}).get("vertex-ai", {})
-    vertex_json = vx.get("json")
-    vertex_project = vx.get("project")
-    vertex_region = vx.get("region", "us-east5")
+    vx = config.providers.vertex_ai
+    vertex_json = vx.json_path if vx else None
+    vertex_project = vx.project if vx else None
+    vertex_region = vx.region if vx else "us-east5"
 
     if not vertex_json:
         raise ValueError("vertex-ai provider requires 'json' key path")
@@ -125,8 +126,8 @@ def _build_vertex_model(model_name: str, config: dict, thinking: dict):
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         thinking_kwargs = {}
-        thinking_level = thinking.get("level")
-        thinking_budget = thinking.get("budget")
+        thinking_level = thinking.level
+        thinking_budget = thinking.budget
         if thinking_level is not None:
             thinking_kwargs["thinking_level"] = thinking_level
             thinking_kwargs["include_thoughts"] = True

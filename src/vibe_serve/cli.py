@@ -22,7 +22,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from vibe_serve.config import _load_config
+from vibe_serve.config import Config, _load_config
 from vibe_serve.constants import (
     ComputeBackend,
     KNOWN_COMPUTE_BACKENDS,
@@ -264,7 +264,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 def load_config_and_skills(
     args: argparse.Namespace,
-) -> tuple[dict, list[str] | None, ComputeBackend]:
+) -> tuple[Config, list[str] | None, ComputeBackend]:
     """Load config from args.config, process skills_dir, and resolve the backend."""
     try:
         config = _load_config(args.config)
@@ -277,7 +277,7 @@ def load_config_and_skills(
         if isinstance(args.skills_dir, list)
         else ([str(args.skills_dir)] if args.skills_dir else None)
     )
-    backend: ComputeBackend = args.backend or config["backend"]["name"]
+    backend: ComputeBackend = args.backend or config.backend.name
     return config, skills, backend
 
 

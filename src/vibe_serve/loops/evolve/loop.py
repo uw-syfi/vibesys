@@ -32,6 +32,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
+from vibe_serve.config import Config
 from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND
 from vibe_serve.context import _RunContext
 from vibe_serve.loops.evolve.population import (
@@ -266,7 +267,7 @@ def _run_profiler(
 
 
 def run_evolve_loop(
-    config: dict,
+    config: Config,
     exp_name: str,
     reference_path: str,
     objective: str,
