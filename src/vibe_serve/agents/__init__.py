@@ -11,6 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from vibe_serve.constants import DEFAULT_AGENT_BACKEND
+
 from .base import AgentRunner
 from .cli_runner import CliAgentRunner
 from .deepagents_runner import DeepAgentsRunner
@@ -38,7 +40,8 @@ def build_agent_runner(
     Args:
         config: Parsed ``agent.toml`` dict (may contain an ``[agent]`` section).
         agent_backend: CLI override; if set, takes precedence over
-            ``config["agent"]["backend"]``. Falls back to ``"deepagents"``.
+            ``config["agent"]["backend"]``. Falls back to
+            :data:`vibe_serve.constants.DEFAULT_AGENT_BACKEND` (``"cli"``).
         cli_provider: CLI override for ``config["agent"]["cli_provider"]``.
         backends: Mapping ``{"implementer": BaseSandbox, "judge": ..., "perf_eval": ...}``.
             Required for the deepagents path; ignored for the cli path.
@@ -68,7 +71,7 @@ def build_agent_runner(
     backend = (
         agent_backend
         or (config.get("agent") or {}).get("backend")
-        or "cli"
+        or DEFAULT_AGENT_BACKEND
     )
 
     if backend == "deepagents":

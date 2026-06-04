@@ -37,7 +37,7 @@ from deepagents.backends.sandbox import BaseSandbox
 
 from vibe_serve.backends import ModalOptions, SandboxKind
 from vibe_serve.backends.base import ComputeBackendImpl, SetupFn
-from vibe_serve.constants import PROJECT_ROOT
+from vibe_serve.constants import DEFAULT_AGENT_BACKEND, PROJECT_ROOT
 
 
 @dataclass(frozen=True)
@@ -756,7 +756,7 @@ def _container_mount_plan(
 
     if (
         include_cli_provider_mounts
-        and (request.agent_backend or "cli") == "cli"
+        and (request.agent_backend or DEFAULT_AGENT_BACKEND) == "cli"
         and request.cli_provider
     ):
         from vibe_serve.agents.cli_docker import auth_bind_mounts
@@ -770,7 +770,7 @@ def _container_mount_plan(
 def _cli_container_setup(
     request: RunEnvironmentRequest,
 ) -> tuple[list[str], dict[str, str]]:
-    effective_agent = request.agent_backend or "cli"
+    effective_agent = request.agent_backend or DEFAULT_AGENT_BACKEND
     if effective_agent != "cli" or not request.cli_provider:
         return [], {}
     from vibe_serve.agents.cli_docker import (

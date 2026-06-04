@@ -12,7 +12,12 @@ from pathlib import Path
 from vibe_serve import backends
 from vibe_serve.agent_runner import _log_and_print
 from vibe_serve.agents import build_agent_runner
-from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT
+from vibe_serve.constants import (
+    ComputeBackend,
+    DEFAULT_AGENT_BACKEND,
+    DEFAULT_COMPUTE_BACKEND,
+    PROJECT_ROOT,
+)
 from vibe_serve.llm_client import _build_model
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentRequest,
@@ -180,7 +185,7 @@ class _RunContext:
         self._resolved_backend = (
             agent_backend
             or (config.get("agent") or {}).get("backend")
-            or "cli"
+            or DEFAULT_AGENT_BACKEND
         )
         self._cli_provider = (
             cli_provider or (config.get("agent") or {}).get("cli_provider")

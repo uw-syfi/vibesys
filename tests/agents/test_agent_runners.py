@@ -1132,3 +1132,46 @@ class TestAgentLoggerEventHandler:
 
         assert logger._input_tokens == 12_345
         assert logger._latest_usage == usage
+
+
+class TestBuildAgentRunnerBackendSelection:
+    """``build_agent_runner`` backend resolution.
+
+    The default agent backend is ``"cli"`` (provider ``"codex"``) when neither
+    the ``--agent-backend`` flag nor an ``[agent].backend`` config key is set.
+    Pinned here so the default cannot silently flip.
+    """
+
+    def _build(self, config, *, agent_backend=None, cli_provider=None):
+        return build_agent_runner(
+            config,
+            agent_backend=agent_backend,
+            cli_provider=cli_provider,
+            backends=None,
+            skills=[],
+            skill_source_dirs=[],
+            model=None,
+            model_name="",
+            run_log_file=None,
+            use_docker=False,
+        )
+
+    def test_default_backend_is_cli_with_empty_config(self):
+        runner = self._build({})
+        assert isinstance(runner, CliAgentRunner)
+        assert runner._provider == "codex"
+
+    def test_empty_agent_section_defaults_to_cli(self):
+        runner = self._build({"agent": {}})
+        assert isinstance(runner, CliAgentRunner)
+        assert runner._provider == "codex"
+
+    def test_agent_backend_flag_overrides_config(self):
+        # An explicit --agent-backend flag wins over [agent].backend.
+        runner = self._build({"agent": {"backend": "deepagents"}}, agent_backend="cli")
+        assert isinstance(runner, CliAgentRunner)
+
+    def test_config_can_select_cli_provider(self):
+        runner = self._build({"agent": {"backend": "cli", "cli_provider": "claude"}})
+        assert isinstance(runner, CliAgentRunner)
+        assert runner._provider == "claude"

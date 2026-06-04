@@ -41,3 +41,8 @@ class ComputeBackend(StrEnum):
 
 DEFAULT_COMPUTE_BACKEND = ComputeBackend.CUDA
 KNOWN_COMPUTE_BACKENDS: tuple[str, ...] = tuple(b.value for b in ComputeBackend)
+
+# Agent backend used when neither the ``--agent-backend`` flag nor an
+# ``[agent].backend`` config key is set. Resolved in a single place so
+# build_agent_runner and ComputeContext cannot drift.
+DEFAULT_AGENT_BACKEND = "cli"
