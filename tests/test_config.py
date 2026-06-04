@@ -161,6 +161,36 @@ EMPTY=
             assert os.environ["OPENAI_API_KEY"] == "existing"
 
 
+class TestLoadConfigAgentSection:
+    def test_agent_section_preserved(self, tmp_path):
+        # The [agent] table drives build_agent_runner (cli_model, cli_timeout,
+        # backend, cli_provider). _load_config must carry it through verbatim;
+        # previously it was parsed and silently dropped, so cli_model never
+        # reached the CLI agent (no --model flag was ever passed).
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text("""\
+[model]
+name = "claude-sonnet-4-6"
+
+[agent]
+backend = "cli"
+cli_provider = "claude"
+cli_model = "claude-opus-4-8[1m]"
+cli_timeout = 1800
+""")
+        config = _load_config(cfg_file)
+        assert config["agent"]["cli_model"] == "claude-opus-4-8[1m]"
+        assert config["agent"]["cli_timeout"] == 1800
+        assert config["agent"]["backend"] == "cli"
+        assert config["agent"]["cli_provider"] == "claude"
+
+    def test_agent_section_defaults_to_empty(self, tmp_path):
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
+        config = _load_config(cfg_file)
+        assert config.get("agent") == {}
+
+
 class TestLoadConfigThinking:
     def test_thinking_parsed(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"

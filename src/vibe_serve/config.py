@@ -95,6 +95,10 @@ def _load_config(path: Path) -> dict:
         "thinking": thinking,
         "providers": providers,
         "backend": {"name": backend},
+        # Preserve the [agent] section so its settings (cli_model, cli_timeout,
+        # backend, cli_provider) actually reach build_agent_runner. Without this
+        # the table is parsed and silently discarded.
+        "agent": raw.get("agent", {}) or {},
     }
     # Preserve any non-`name` fields the user added to [backend] for forward
     # compatibility (future backends may carry their own sub-config).
