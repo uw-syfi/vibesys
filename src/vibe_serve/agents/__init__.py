@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from vibe_serve.config import Config
+from vibe_serve.constants import DEFAULT_AGENT_BACKEND
 
 from .base import AgentRunner
 from .cli_runner import CliAgentRunner
@@ -41,7 +42,8 @@ def build_agent_runner(
         config: Parsed :class:`~vibe_serve.config.Config`; the ``[agent]``
             section drives backend/provider/model/timeout selection.
         agent_backend: CLI override; if set, takes precedence over
-            ``config.agent.backend``. Falls back to ``"cli"``.
+            ``config.agent.backend``. Falls back to
+            :data:`vibe_serve.constants.DEFAULT_AGENT_BACKEND` (``"cli"``).
         cli_provider: CLI override for ``config.agent.cli_provider``.
         backends: Mapping ``{"implementer": BaseSandbox, "judge": ..., "perf_eval": ...}``.
             Required for the deepagents path; ignored for the cli path.
@@ -69,7 +71,7 @@ def build_agent_runner(
             without a provider.
     """
     agent_cfg = config.agent
-    backend = agent_backend or agent_cfg.backend or "cli"
+    backend = agent_backend or agent_cfg.backend or DEFAULT_AGENT_BACKEND
 
     if backend == "deepagents":
         if backends is None:
