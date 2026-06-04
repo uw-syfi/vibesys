@@ -17,6 +17,7 @@ import tomllib
 from pathlib import Path
 from typing import Literal, Mapping
 
+from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT
@@ -237,41 +238,14 @@ def as_config(config: "Config | Mapping") -> "Config":
 
 
 def _load_dotenv_file(path: Path = PROJECT_ROOT / ".env") -> None:
-    """Load environment variables from a .env-style file.
+    """Load environment variables from a ``.env`` file via ``python-dotenv``.
 
-    Supports KEY=VALUE lines with optional quotes. Existing environment variables
-    are preserved and not overwritten.
+    Existing environment variables take precedence (``override=False``); a
+    missing file is a no-op. Delegating to ``python-dotenv`` gets us correct
+    handling of ``export`` prefixes, quoting, inline comments, and multiline
+    values for free.
     """
-    if not path.exists():
-        return
-
-    with path.open(encoding="utf-8") as f:
-        for raw_line in f:
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-
-            if line.startswith("export "):
-                line = line[len("export ") :].strip()
-
-            if "=" not in line:
-                continue
-
-            key, value = line.split("=", 1)
-            key = key.strip()
-            if not key:
-                continue
-
-            value = value.strip()
-            if not value:
-                os.environ.setdefault(key, "")
-                continue
-            if (
-                (value[0] == value[-1] == '"')
-                or (value[0] == value[-1] == "'")
-            ):
-                value = value[1:-1]
-            os.environ.setdefault(key, value)
+    load_dotenv(path, override=False)
 
 
 def _apply_vertex_env_overrides(config: Config) -> None:

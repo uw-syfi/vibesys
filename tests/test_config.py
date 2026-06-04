@@ -190,6 +190,20 @@ EMPTY=
             _load_dotenv_file(env_file)
             assert os.environ["OPENAI_API_KEY"] == "existing"
 
+    def test_load_dotenv_file_strips_inline_comments(self, tmp_path):
+        # python-dotenv strips trailing inline comments on unquoted values, but
+        # preserves a '#' inside quotes (the prior hand-rolled parser did neither).
+        env_file = tmp_path / ".env"
+        env_file.write_text('PLAIN=value # trailing comment\nQUOTED="val # hash"\n')
+        with patch.dict("os.environ", {}, clear=True):
+            _load_dotenv_file(env_file)
+            assert os.environ["PLAIN"] == "value"
+            assert os.environ["QUOTED"] == "val # hash"
+
+    def test_load_dotenv_file_missing_file_is_noop(self, tmp_path):
+        with patch.dict("os.environ", {}, clear=True):
+            _load_dotenv_file(tmp_path / "does-not-exist.env")  # no error
+
 
 class TestLoadConfigThinking:
     def test_thinking_parsed(self, tmp_path):
