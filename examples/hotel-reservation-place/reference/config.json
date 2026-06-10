@@ -1,0 +1,42 @@
+{
+  "scenario": "hotel-reservation-place",
+  "base_url": "http://localhost:8000",
+
+  "setup": {
+    "num_hotels": 5,
+    "rooms_per_hotel": 10,
+    "room_types": ["single", "double", "suite"],
+    "rooms_per_type": {"single": 5, "double": 3, "suite": 2},
+    "rate_per_night": {"single": 99.0, "double": 149.0, "suite": 299.0},
+    "num_users": 20
+  },
+
+  "benchmark": {
+    "concurrent_clients": 20,
+    "total_reservations": 200,
+    "date_range_days": 30,
+    "max_stay_nights": 5,
+    "interleave_reads": true,
+    "read_fraction": 0.2,
+    "warmup_requests": 10
+  },
+
+  "correctness": {
+    "held_out_sequences": 5,
+    "held_out_concurrent_clients": 10,
+    "held_out_reservations": 50
+  },
+
+  "endpoints": {
+    "health":               "GET  /health",
+    "reset":                "POST /reset",
+    "create_hotel":         "POST /hotels",
+    "get_hotel":            "GET  /hotels/{hotel_id}",
+    "list_hotels":          "GET  /hotels",
+    "create_user":          "POST /users",
+    "get_availability":     "GET  /hotels/{hotel_id}/availability",
+    "place_reservation":    "POST /reservations",
+    "get_reservation":      "GET  /reservations/{reservation_id}",
+    "cancel_reservation":   "DELETE /reservations/{reservation_id}"
+  }
+}
