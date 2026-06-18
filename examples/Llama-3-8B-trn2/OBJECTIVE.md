@@ -19,31 +19,29 @@ as `perf_metric` every round; do not substitute or invert it.
 
 ## Implementation rules
 
-- Target the NeuronCore through **raw `torch-neuronx` / `torch_xla`**: build the
-  model with explicit layers (your own attention / MLP / RMSNorm / RoPE), place
-  tensors on the XLA device (`xm.xla_device()`), and compile the hot path with
-  `torch_neuronx.trace` (or XLA lazy execution + `xm.mark_step()`). Use
-  `transformers` only as a utility for config / tokenizer / weight loading — do
-  **not** import a turnkey serving library (no `vllm`, no `transformers-neuronx`
-  high-level model classes, no `optimum.neuron` pipelines). The point is a
-  bespoke, from-scratch Neuron implementation.
-- **BF16** is the baseline dtype. Do not run the hot path on CPU or in
-  `float32` — a server that loads but silently falls back to CPU is incorrect
-  for this target.
-- NeuronCores compile static-shape graphs with `neuronx-cc`. The **first**
-  compile of each new shape takes minutes; keep shapes static (fixed bucket
-  sizes for prompt/decode), reuse the persistent compile cache
-  (`NEURON_COMPILE_CACHE_URL`), and avoid shapes that force recompilation on the
-  hot path.
-- Quantization, sequence/continuous batching, KV-cache layout tuning, and core
-  parallelism across the 4 NeuronCores are optimizations, not prerequisites.
+- Build the model yourself — explicit layers (your own attention / MLP /
+  RMSNorm / RoPE), using `transformers` only as a utility for config /
+  tokenizer / weight loading. Do **not** import a turnkey serving library (no
+  `vllm`, no high-level `transformers-neuronx` / `optimum.neuron` model
+  classes). The point is a bespoke implementation.
+- Run it on the NeuronCore through the AWS Neuron SDK's PyTorch support. Choose
+  an approach that is current and works for this hardware — consult the Neuron
+  skills / docs rather than assuming a particular API. Use **BF16**; do not run
+  the hot path on CPU or in `float32` (a server that loads but silently falls
+  back to CPU is incorrect for this target).
+- NeuronCores execute compiled graphs and recompiling is expensive, so keep
+  shapes static (fixed prompt/decode buckets) and reuse the persistent compile
+  cache.
+- Quantization, batching, KV-cache layout, and using more than one of the 4
+  NeuronCores are optimizations, not prerequisites.
 
 ## Notes
 
 - Text-generation, dense causal LM (Llama-3-8B: 32 layers, hidden 4096, GQA
   with 8 KV heads, vocab 128256, RoPE theta 5e5, 8192-token context, no
   rope-scaling).
-- The benchmark harness drives the server over HTTP and reports req/s and tok/s.
-  Prefer `aggregate_throughput` (tok/s) as the primary metric.
+- The benchmark drives the server over HTTP with a fixed-length Poisson sweep
+  (input == output length of 128/256/512 tokens, rates up to 2.0 req/s) and
+  reports `aggregate_throughput` (tok/s) — the primary metric.
 - Correctness is judged by the accuracy checker against the HuggingFace
   Transformers reference; match its tolerance before chasing throughput.

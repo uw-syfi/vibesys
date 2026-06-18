@@ -1,1 +1,1 @@
-Is the model actually executing on a NeuronCore (tensors on the XLA device via `torch_xla` / `torch-neuronx`, work materialized with `xm.mark_step()` or a `torch_neuronx.trace`-compiled graph) in `bfloat16` — not silently running the hot path on CPU or in `float32`? A server that loads but falls back to CPU is incorrect for this target.
+Is the model actually executing on a NeuronCore in `bfloat16` (compiled graphs running on-device) — not silently running the hot path on CPU or in `float32`? A server that loads but falls back to CPU is incorrect for this target.

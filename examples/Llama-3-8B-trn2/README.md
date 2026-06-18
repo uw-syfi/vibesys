@@ -2,8 +2,8 @@ Llama-3-8B input bundle — AWS Trainium (trn2) target.
 
 This is the `examples/Llama-3-8B` bundle retargeted from H100 to a single
 Trainium2 device. Same model, reference, accuracy checker, and benchmark; the
-difference is the deployment target described in `OBJECTIVE.md` (raw
-`torch-neuronx` / `torch_xla`, BF16, NeuronCore via `/dev/neuron0`).
+difference is the deployment target described in `OBJECTIVE.md` (from-scratch
+model on a NeuronCore via the AWS Neuron SDK, BF16, `/dev/neuron0`).
 
 Use:
 - `--ref examples/Llama-3-8B-trn2/reference`

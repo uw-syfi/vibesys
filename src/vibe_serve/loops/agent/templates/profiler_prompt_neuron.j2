@@ -24,7 +24,7 @@ A benchmark tool is available at `{{ bench_path }}/benchmark.py`.
 
 ## How NeuronCore profiling works
 
-NeuronCores execute *compiled graphs* (NEFFs). You cannot profile work that never reached the device — so first confirm the model actually runs on a NeuronCore (tensors on the XLA device, `xm.mark_step()` / `torch_neuronx.trace`), not on CPU. Profiling is two steps: **capture** a hardware profile around a live workload, then **analyze** it.
+NeuronCores execute *compiled graphs* (NEFFs). You cannot profile work that never reached the device — so first confirm the model actually runs on a NeuronCore (compiled graphs executing on-device), not on CPU. Profiling is two steps: **capture** a hardware profile around a live workload, then **analyze** it.
 
 ## Capturing a profile (shell — long-running, do this first)
 
@@ -35,7 +35,7 @@ NeuronCores execute *compiled graphs* (NEFFs). You cannot profile work that neve
    ```
    python neuron_profiler/analyze_neuron.py capture \
      --out-dir /tmp/neuronprof \
-     --workload "uv run python {{ bench_path or 'bench' }}/benchmark.py --url http://localhost:8077 --rate 1 --duration 10 --max-tokens 64"
+     --workload "uv run python {{ bench_path or 'bench' }}/benchmark.py --url http://localhost:8077 --lengths 256 --rates 1.0 --requests-per-scenario 8"
    ```
    `capture` wraps `neuron-explorer inspect`, which runs the workload and writes a system + device profile (NTFF) plus the NEFF into the out-dir. If it reports **no NTFF/NEFF produced**, the model is not executing on the NeuronCore — record that as the headline finding.
 
