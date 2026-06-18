@@ -33,7 +33,7 @@ from vibe_serve.sandbox.run_environment import (
     make_run_environment_spec,
 )
 
-_OUTER_LOOPS = ("agent", "plain", "evolve")
+_OUTER_LOOPS = ("agent", "plain", "evolve", "openevolve")
 _MODALITIES = (
     "text_generation",
     "image_generation",
@@ -175,6 +175,16 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--no-skills",
+        action="store_true",
+        help=(
+            "Disable skills entirely: no skill directories are copied into "
+            "the workspace and no per-CLI skill-discovery paths are populated. "
+            "Used for ablations measuring the skill library's contribution. "
+            "Overrides --skills-dir."
+        ),
+    )
+    parser.add_argument(
         "--docker",
         action="store_true",
         help="Run agent operations inside a Docker container.",
@@ -272,11 +282,14 @@ def load_config_and_skills(
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    skills = (
-        [str(s) for s in args.skills_dir]
-        if isinstance(args.skills_dir, list)
-        else ([str(args.skills_dir)] if args.skills_dir else None)
-    )
+    if getattr(args, "no_skills", False):
+        skills = None
+    else:
+        skills = (
+            [str(s) for s in args.skills_dir]
+            if isinstance(args.skills_dir, list)
+            else ([str(args.skills_dir)] if args.skills_dir else None)
+        )
     backend: ComputeBackend = args.backend or config.backend.name
     return config, skills, backend
 
@@ -389,6 +402,16 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--modality", default="text_generation", choices=_MODALITIES
     )
+    parser.add_argument(
+        "--inner-loop",
+        choices=["multi-agent", "single-agent"],
+        default="multi-agent",
+        help=(
+            "How to dispatch implement/judge/profile work each round. "
+            "'multi-agent' (default) uses three specialist agents. "
+            "'single-agent' (ablation) uses one agent for all three roles."
+        ),
+    )
     return parser
 
 
@@ -442,6 +465,7 @@ def _run_agent(args: argparse.Namespace) -> None:
         cli_provider=args.cli_provider,
         backend=backend,
         modality=args.modality,
+        inner_loop=args.inner_loop,
     )
 
     if success:
@@ -605,6 +629,84 @@ def _run_evolve(args: argparse.Namespace) -> None:
 
 
 # ===========================================================================
+# openevolve loop  (--outer-loop openevolve)
+# ===========================================================================
+
+
+def _build_openevolve_parser() -> argparse.ArgumentParser:
+    parser = _make_parser(
+        prog="vibe-serve --outer-loop openevolve",
+        description=(
+            "Run the OpenEvolve-style MAP-Elites search loop: behavioral "
+            "feature binning + cell-uniform parent selection."
+        ),
+    )
+    parser.add_argument("--max-iterations", type=int, default=16)
+    parser.add_argument("--k-inspirations", type=int, default=3)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument(
+        "--modality", default="text_generation", choices=_MODALITIES
+    )
+    return parser
+
+
+def _validate_openevolve(args: argparse.Namespace) -> None:
+    if args.modal and args.profiler == "nsys":
+        print("Error: --modal only supports --profiler=torch.", file=sys.stderr)
+        sys.exit(2)
+    if args.max_iterations < 1:
+        print("Error: --max-iterations must be >= 1.", file=sys.stderr)
+        sys.exit(2)
+    if args.k_inspirations < 0:
+        print("Error: --k-inspirations must be >= 0.", file=sys.stderr)
+        sys.exit(2)
+
+
+def _run_openevolve(args: argparse.Namespace) -> None:
+    config, skills, backend = load_config_and_skills(args)
+    from vibe_serve.loops.openevolve.loop import run_openevolve_loop
+
+    objective = _load_objective(args.ref)
+
+    existing = False
+    exp_name = args.exp_name
+    if args.resume is not None:
+        run_dir_name = _resolve_run_dir(args.resume)
+        exp_name = run_dir_name
+        existing = True
+        print(f"Resuming openevolve run: exp_env/{run_dir_name}/")
+
+    success = run_openevolve_loop(
+        config=config,
+        exp_name=exp_name,
+        reference_path=args.ref,
+        objective=objective,
+        max_iterations=args.max_iterations,
+        k_inspirations=args.k_inspirations,
+        seed=args.seed,
+        existing=existing,
+        debug=args.debug,
+        acc_checker=str(args.acc_checker) if args.acc_checker else None,
+        bench=str(args.bench) if args.bench else None,
+        nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
+        torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
+        profiler_kind=args.profiler,
+        skills_dirs=skills,
+        run_environment=run_environment_spec_from_args(args),
+        agent_backend=args.agent_backend,
+        cli_provider=args.cli_provider,
+        backend=backend,
+        modality=args.modality,
+    )
+
+    if success:
+        print(f"\nOpenEvolve loop completed {args.max_iterations} iterations.")
+    else:
+        print("\nOpenEvolve loop stopped early (exception or KeyboardInterrupt).")
+        sys.exit(1)
+
+
+# ===========================================================================
 # plain loop  (--outer-loop plain)
 # ===========================================================================
 
@@ -710,18 +812,21 @@ _PARSER_BUILDERS = {
     "agent": _build_agent_parser,
     "plain": _build_plain_parser,
     "evolve": _build_evolve_parser,
+    "openevolve": _build_openevolve_parser,
 }
 
 _VALIDATORS = {
     "agent": "_validate_agent",
     "plain": "_validate_plain",
     "evolve": "_validate_evolve",
+    "openevolve": "_validate_openevolve",
 }
 
 _RUNNERS = {
     "agent": "_run_agent",
     "plain": "_run_plain",
     "evolve": "_run_evolve",
+    "openevolve": "_run_openevolve",
 }
 
 

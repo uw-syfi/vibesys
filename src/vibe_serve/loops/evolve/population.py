@@ -128,6 +128,12 @@ class Individual:
     passed: bool = False
     summary: str = ""
     feedback: str = ""
+    # Behavioral feature descriptor used by the openevolve loop's
+    # MAP-Elites archive. Empty for runs that don't use that loop.
+    # Keys are feature names (e.g. "code_size_bucket"), values are the
+    # discrete bin index. Persisted to population.json so the archive
+    # can be rebuilt on resume.
+    features: dict[str, int] = field(default_factory=dict)
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -146,6 +152,7 @@ class Individual:
             passed=bool(data.get("passed", False)),
             summary=data.get("summary", ""),
             feedback=data.get("feedback", ""),
+            features={k: int(v) for k, v in (data.get("features") or {}).items()},
         )
 
 

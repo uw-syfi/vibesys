@@ -29,8 +29,12 @@ from vibe_serve.prompts import render_template
 from vibe_serve.schemas import (
     ImplementerResponse,
     JudgeResponse,
+    SingleAgentRoundResponse,
     Verdict,
 )
+
+
+_INNER_LOOPS = ("multi-agent", "single-agent")
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -406,6 +410,79 @@ def _run_judge(
     return response
 
 
+def _run_single_agent_round(
+    ctx: _RunContext,
+    *,
+    round_number: int,
+    retry: int,
+    plan: OrchestratorPlan,
+    modality: str,
+    feedback: str | None,
+    progress_path: Path,
+    objective: str,
+    profile_focus: str,
+) -> SingleAgentRoundResponse:
+    """Invoke one agent that plays implementer + judge + profiler.
+
+    Used when ``--inner-loop=single-agent``. The same backend that the
+    multi-agent loop hands to the implementer is used here — it has
+    workspace write access plus shell access for benchmarks/profiling.
+    """
+    system_prompt = render_template(
+        "single_agent_round_prompt.j2",
+        template_dir=_TEMPLATE_DIR,
+        reference_path=ctx.ref_name,
+        modality=modality,
+        task=plan.task,
+        pass_criteria=plan.pass_criteria,
+        retry=retry,
+        feedback=feedback,
+        objective=objective,
+        profile_focus=profile_focus,
+        profiler_kind=ctx.profiler_kind,
+        bench_path=ctx.judge_bench_path,
+        accuracy_checker_path=ctx.judge_acc_checker_path,
+        runtime_notes=ctx.run_environment_view.prompt_notes,
+        env_kind=ctx.run_environment_view.env_kind,
+    )
+    response = ctx.invoke(
+        kind="implementer",
+        system_prompt=system_prompt,
+        user_prompt=(
+            "Carry out the orchestrator's task above end-to-end "
+            "(implement, self-judge, profile) and return only the JSON object."
+        ),
+        response_cls=SingleAgentRoundResponse,
+        fallback_factory=lambda: SingleAgentRoundResponse(
+            summary="Single-agent produced no structured response.",
+            expected_behavior="unknown",
+            self_review="No structured response received.",
+            feedback="No structured response received.",
+            verdict=Verdict.FAIL,
+            bottlenecks="",
+            suggestions="",
+            profile_analysis="",
+        ),
+        round_label=f"round-{round_number}-retry-{retry}-single-agent",
+    )
+    issue_board.append_single_agent_round(progress_path, round_number, retry, response)
+    ctx.snapshot_workspace(f"round-{round_number}-retry-{retry}-single-agent")
+    return response
+
+
+def _profiler_summary_from_single_agent(
+    response: SingleAgentRoundResponse,
+) -> ProfilerSummary:
+    """Adapt a single-agent response into a ProfilerSummary for the orchestrator."""
+    return ProfilerSummary(
+        analysis=response.profile_analysis,
+        bottlenecks=response.bottlenecks,
+        suggestions=response.suggestions,
+        perf_metric=response.perf_metric,
+        perf_unit=response.perf_unit,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -433,12 +510,27 @@ def run_agent_loop(
     cli_provider: str | None = None,
     backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
     modality: str = "text_generation",
+    inner_loop: str = "multi-agent",
 ) -> bool:
     """Run the orchestrator-driven build loop.
 
     Returns True iff the orchestrator declared the objective met within
     ``max_rounds``.  Returns False when the round budget is exhausted.
+
+    ``inner_loop`` selects how each round's implement/judge/profile work
+    is dispatched:
+
+    - ``"multi-agent"`` (default): three specialist agents — implementer,
+      judge, profiler — invoked in sequence.
+    - ``"single-agent"``: one agent does all three in a single
+      invocation per retry. Pre-round decision and standalone profiler
+      passes are skipped; the prior round's profile output is fed to the
+      orchestrator as ``profiler_summary``.
     """
+    if inner_loop not in _INNER_LOOPS:
+        raise ValueError(
+            f"Unknown inner_loop {inner_loop!r}; choose from {', '.join(_INNER_LOOPS)}"
+        )
     run_environment = run_environment or make_run_environment_spec()
     ctx = _RunContext(
         config=config,
@@ -474,6 +566,14 @@ def run_agent_loop(
     carry = _CarryOver()
     round_number = start_round
 
+    # When inner_loop == "single-agent", we don't run a separate
+    # pre-round decision or profiler invocation. We thread the previous
+    # round's combined response into the orchestrator's next plan as a
+    # synthesized ProfilerSummary, and remember its profile focus across
+    # rounds. The first round has no prior profile to feed forward.
+    last_single_agent_response: SingleAgentRoundResponse | None = None
+    last_profile_focus: str = "general latency hotspots on /v1/completions"
+
     try:
         while round_number <= max_rounds:
             ctx.switch_log_file(f"round{round_number:03d}")
@@ -481,25 +581,34 @@ def run_agent_loop(
 
             # --- Pre-round decision (skip on fresh cold start) ---
             profiler_summary: ProfilerSummary | None = None
-            if not _is_fresh_cold_start(round_number, records):
-                pre = _run_pre_round_decision(
-                    ctx,
-                    round_number=round_number,
-                    objective=objective,
-                    carry=carry,
-                    progress_path=progress_path,
-                )
-                # FORCE-PROFILE override: every non-cold-start round profiles,
-                # ignoring orchestrator's need_profile decision. Revert this
-                # block to restore orchestrator-decided profiling.
-                profiler_summary = _run_profiler(
-                    ctx,
-                    round_number=round_number,
-                    profile_focus=pre.profile_focus or "general latency hotspots on /v1/completions",
-                    modality=modality,
-                    progress_path=progress_path,
-                    objective=objective,
-                )
+            pre_decision: PreRoundDecision | None = None
+            if inner_loop == "multi-agent":
+                if not _is_fresh_cold_start(round_number, records):
+                    pre_decision = _run_pre_round_decision(
+                        ctx,
+                        round_number=round_number,
+                        objective=objective,
+                        carry=carry,
+                        progress_path=progress_path,
+                    )
+                    # FORCE-PROFILE override: every non-cold-start round profiles,
+                    # ignoring orchestrator's need_profile decision. Revert this
+                    # block to restore orchestrator-decided profiling.
+                    profiler_summary = _run_profiler(
+                        ctx,
+                        round_number=round_number,
+                        profile_focus=pre_decision.profile_focus or "general latency hotspots on /v1/completions",
+                        modality=modality,
+                        progress_path=progress_path,
+                        objective=objective,
+                    )
+            else:
+                # single-agent: feed the previous round's profile into the
+                # orchestrator as ProfilerSummary so it has a bottleneck signal.
+                if last_single_agent_response is not None:
+                    profiler_summary = _profiler_summary_from_single_agent(
+                        last_single_agent_response
+                    )
 
             # --- Orchestrator plan ---
             roadmap_text = issue_board.read_roadmap(roadmap_path)
@@ -542,32 +651,51 @@ def run_agent_loop(
             # --- Implementer / Judge retry loop ---
             feedback: str | None = None
             passed = False
+            single_agent_response: SingleAgentRoundResponse | None = None
             for retry in range(1, max_retries_per_round + 1):
                 ctx.lprint(f"\n--- attempt {retry}/{max_retries_per_round} ---\n")
-                ctx.reselect_gpu()
-                _run_implementer(
-                    ctx,
-                    round_number=round_number,
-                    retry=retry,
-                    plan=plan,
-                    modality=modality,
-                    feedback=feedback,
-                    progress_path=progress_path,
-                )
-                ctx.reselect_gpu()
-                verdict = _run_judge(
-                    ctx,
-                    round_number=round_number,
-                    retry=retry,
-                    plan=plan,
-                    modality=modality,
-                    progress_path=progress_path,
-                    objective=objective,
-                )
-                if verdict.verdict == Verdict.PASS:
-                    passed = True
-                    break
-                feedback = verdict.feedback
+                if inner_loop == "multi-agent":
+                    ctx.reselect_gpu()
+                    _run_implementer(
+                        ctx,
+                        round_number=round_number,
+                        retry=retry,
+                        plan=plan,
+                        modality=modality,
+                        feedback=feedback,
+                        progress_path=progress_path,
+                    )
+                    ctx.reselect_gpu()
+                    verdict = _run_judge(
+                        ctx,
+                        round_number=round_number,
+                        retry=retry,
+                        plan=plan,
+                        modality=modality,
+                        progress_path=progress_path,
+                        objective=objective,
+                    )
+                    if verdict.verdict == Verdict.PASS:
+                        passed = True
+                        break
+                    feedback = verdict.feedback
+                else:
+                    ctx.reselect_gpu()
+                    single_agent_response = _run_single_agent_round(
+                        ctx,
+                        round_number=round_number,
+                        retry=retry,
+                        plan=plan,
+                        modality=modality,
+                        feedback=feedback,
+                        progress_path=progress_path,
+                        objective=objective,
+                        profile_focus=last_profile_focus,
+                    )
+                    if single_agent_response.verdict == Verdict.PASS:
+                        passed = True
+                        break
+                    feedback = single_agent_response.feedback
 
             # --- Record round result & update carry-over ---
             commit = _current_commit_sha(ctx)
@@ -575,17 +703,40 @@ def run_agent_loop(
             # (cold-start or the orchestrator/framework decided to skip).
             # The plateau detector ignores skipped-profile rounds so cached
             # / inherited perf numbers don't masquerade as fresh measurements.
-            profile_skipped = profiler_summary is None
-            perf_metric = (
-                profiler_summary.perf_metric
-                if (profiler_summary and passed)
-                else None
-            )
-            perf_unit = (
-                profiler_summary.perf_unit
-                if (profiler_summary and passed)
-                else None
-            )
+            #
+            # For single-agent inner loop, `profiler_summary` carries the
+            # PREVIOUS round's profile (fed forward to the orchestrator),
+            # so this round's perf comes from `single_agent_response` instead.
+            if inner_loop == "single-agent":
+                profile_skipped = single_agent_response is None or (
+                    single_agent_response.perf_metric is None
+                )
+                perf_metric = (
+                    single_agent_response.perf_metric
+                    if (single_agent_response and passed)
+                    else None
+                )
+                perf_unit = (
+                    single_agent_response.perf_unit
+                    if (single_agent_response and passed)
+                    else None
+                )
+                # Remember the latest profile for the orchestrator's next plan
+                # and carry forward the implicit profile focus.
+                if single_agent_response is not None:
+                    last_single_agent_response = single_agent_response
+            else:
+                profile_skipped = profiler_summary is None
+                perf_metric = (
+                    profiler_summary.perf_metric
+                    if (profiler_summary and passed)
+                    else None
+                )
+                perf_unit = (
+                    profiler_summary.perf_unit
+                    if (profiler_summary and passed)
+                    else None
+                )
             records.append(
                 _RoundRecord(
                     round_number=round_number,

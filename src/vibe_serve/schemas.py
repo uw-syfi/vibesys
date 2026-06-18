@@ -253,6 +253,39 @@ class OrchestratorPlan(BaseModel):
 
 
 # ===========================================================================
+# Agent loop — single-agent inner loop (ablation)
+# ===========================================================================
+
+
+class SingleAgentRoundResponse(BaseModel):
+    """One agent performs implementer + judge + profiler in a single shot.
+
+    Used by the agent outer-loop's ``--inner-loop=single-agent`` ablation:
+    instead of three specialist agents handing off through the framework,
+    the same agent implements the round's task, runs the always-on
+    correctness checks, and captures a profile, then returns the combined
+    verdict.
+    """
+
+    summary: str = Field(description="What was implemented or changed this round.")
+    expected_behavior: str = Field(description="What behavior the implementation should exhibit (server contract, etc.).")
+    self_review: str = Field(description="Self-review of correctness, accuracy, benchmark sanity, and reward-hack risk — same gates the judge would enforce.")
+    feedback: str = Field(description="Concrete issues to fix on retry; empty when verdict is PASS.")
+    verdict: Verdict = Field(description="PASS if all gates (orchestrator pass criteria + always-on checks) hold; FAIL otherwise.")
+    bottlenecks: str = Field(description="Ranked profile bottlenecks with concrete numbers.")
+    suggestions: str = Field(description="Actionable optimization suggestions for the next round, tied to bottlenecks.")
+    profile_analysis: str = Field(description="Detailed interpretation of the captured profile.")
+    perf_metric: float | None = Field(
+        default=None,
+        description="Headline perf metric from the benchmark (per OBJECTIVE.md). None if not measured.",
+    )
+    perf_unit: str | None = Field(
+        default=None,
+        description="Unit/field name for perf_metric (e.g. 'median_tok_per_sec'). None when perf_metric is None.",
+    )
+
+
+# ===========================================================================
 # Evolve loop (mutator)
 # ===========================================================================
 

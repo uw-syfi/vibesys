@@ -26,6 +26,7 @@ from vibe_serve.schemas import (
 from vibe_serve.schemas import (
     ImplementerResponse,
     JudgeResponse,
+    SingleAgentRoundResponse,
 )
 
 
@@ -237,6 +238,31 @@ def append_judge(
         f"- **verdict**: {response.verdict.value}\n\n"
         f"### Analysis\n{response.analysis}\n\n"
         f"### Feedback\n{response.feedback}\n"
+    )
+    _append(progress_path, block)
+
+
+def append_single_agent_round(
+    progress_path: Path,
+    round_number: int,
+    retry: int,
+    response: SingleAgentRoundResponse,
+) -> None:
+    perf_line = ""
+    if response.perf_metric is not None:
+        unit = response.perf_unit or ""
+        perf_line = f"- **perf_metric**: {response.perf_metric} {unit}\n".rstrip() + "\n"
+    block = (
+        f"## Round {round_number} — Single-agent (attempt {retry})\n"
+        f"- **verdict**: {response.verdict.value}\n"
+        f"- **expected_behavior**: {response.expected_behavior}\n"
+        f"{perf_line}"
+        f"### Summary\n{response.summary}\n\n"
+        f"### Self-review\n{response.self_review}\n\n"
+        f"### Feedback\n{response.feedback}\n\n"
+        f"### Bottlenecks\n{response.bottlenecks}\n\n"
+        f"### Suggestions\n{response.suggestions}\n\n"
+        f"### Profile analysis\n{response.profile_analysis}\n"
     )
     _append(progress_path, block)
 
