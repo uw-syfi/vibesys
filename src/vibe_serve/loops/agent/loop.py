@@ -262,10 +262,10 @@ def _run_profiler(
     progress_path: Path,
     objective: str,
 ) -> ProfilerSummary | None:
-    template = (
-        "profiler_prompt_torch.j2" if ctx.profiler_kind == "torch"
-        else "profiler_prompt_nsys.j2"
-    )
+    template = {
+        "torch": "profiler_prompt_torch.j2",
+        "neuron": "profiler_prompt_neuron.j2",
+    }.get(ctx.profiler_kind, "profiler_prompt_nsys.j2")
     system_prompt = render_template(
         template,
         template_dir=_TEMPLATE_DIR,
@@ -503,6 +503,7 @@ def run_agent_loop(
     bench: str | None = None,
     nsys_profiler: str | None = None,
     torch_profiler: str | None = None,
+    neuron_profiler: str | None = None,
     profiler_kind: str = "auto",
     skills_dirs: list[str] | None = None,
     run_environment: RunEnvironmentSpec | None = None,
@@ -542,6 +543,7 @@ def run_agent_loop(
         bench=bench,
         nsys_profiler=nsys_profiler,
         torch_profiler=torch_profiler,
+        neuron_profiler=neuron_profiler,
         profiler_kind=profiler_kind,
         skills_dirs=skills_dirs,
         run_environment=run_environment,

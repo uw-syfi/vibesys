@@ -170,9 +170,15 @@ class MetalComputeBackendFragment(ComputeBackendFragment):
     backend = ComputeBackend.METAL
 
 
+class TrainiumComputeBackendFragment(ComputeBackendFragment):
+    """Fragments for the Trainium backend (AWS NeuronCores)."""
+    backend = ComputeBackend.TRAINIUM
+
+
 _FRAGMENT_IMPLS: dict[ComputeBackend, type[ComputeBackendFragment]] = {
     ComputeBackend.CUDA: CudaComputeBackendFragment,
     ComputeBackend.METAL: MetalComputeBackendFragment,
+    ComputeBackend.TRAINIUM: TrainiumComputeBackendFragment,
 }
 
 

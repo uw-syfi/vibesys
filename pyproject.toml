@@ -35,7 +35,7 @@ where = ["src"]
 include = ["vibe_serve*"]
 
 [tool.setuptools.package-data]
-vibe_serve = ["templates/*.j2", "loops/agent/templates/*.j2", "loops/agent/templates/_modality/*/*.j2", "loops/evolve/templates/*.j2", "loops/plain/templates/*.j2", "loops/plain/templates/*/*.j2"]
+vibe_serve = ["templates/*.j2", "templates/_backend/*/*.j2", "loops/agent/templates/*.j2", "loops/agent/templates/_modality/*/*.j2", "loops/evolve/templates/*.j2", "loops/plain/templates/*.j2", "loops/plain/templates/*/*.j2"]
 
 [dependency-groups]
 dev = [

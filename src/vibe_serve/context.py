@@ -134,6 +134,7 @@ class _RunContext:
         bench: str | None = None,
         nsys_profiler: str | None = None,
         torch_profiler: str | None = None,
+        neuron_profiler: str | None = None,
         profiler_kind: str = "auto",
         skills_dirs: list[str] | None = None,
         run_environment: RunEnvironmentSpec | None = None,
@@ -196,12 +197,19 @@ class _RunContext:
         self.bench_path = self._coerce_dir_path(bench, "--bench")
         self.nsys_profiler_path = self._coerce_dir_path(nsys_profiler, "--nsys-profiler")
         self.torch_profiler_path = self._coerce_dir_path(torch_profiler, "--torch-profiler")
+        self.neuron_profiler_path = self._coerce_dir_path(neuron_profiler, "--neuron-profiler")
 
-        # Resolve profiler kind: 'auto' → the run environment's default.
+        # Resolve profiler kind: 'auto' → the compute backend's own profiler
+        # when it dictates one (e.g. Trainium → neuron-explorer), else the run
+        # environment's default (modal → torch, otherwise nsys).
         resolved_profiler = profiler_kind
         if resolved_profiler == "auto":
-            resolved_profiler = self.run_environment.default_profiler_kind
-        if resolved_profiler not in ("nsys", "torch"):
+            backend_profiler = getattr(self.backend_impl, "profiler_kind", None)
+            if backend_profiler == "neuron":
+                resolved_profiler = "neuron"
+            else:
+                resolved_profiler = self.run_environment.default_profiler_kind
+        if resolved_profiler not in ("nsys", "torch", "neuron"):
             raise ValueError(f"Unknown profiler kind: {profiler_kind!r}")
         self.profiler_kind = resolved_profiler
 
@@ -211,6 +219,12 @@ class _RunContext:
             default_tp = PROJECT_ROOT / "examples" / "torch_profiler"
             if default_tp.is_dir():
                 self.torch_profiler_path = str(default_tp)
+
+        # Likewise default neuron_profiler_path to examples/neuron_profiler/.
+        if self.profiler_kind == "neuron" and self.neuron_profiler_path is None:
+            default_np = PROJECT_ROOT / "examples" / "neuron_profiler"
+            if default_np.is_dir():
+                self.neuron_profiler_path = str(default_np)
 
         skill_source_paths = self._coerce_skills_dirs(skills_dirs)
         self._skill_source_paths: list[Path] = skill_source_paths
@@ -311,6 +325,9 @@ class _RunContext:
             if self.torch_profiler_path:
                 src = Path(self.torch_profiler_path)
                 self._copy_excluding_extras(src, self.workspace / "torch_profiler")
+            if self.neuron_profiler_path:
+                src = Path(self.neuron_profiler_path)
+                self._copy_excluding_extras(src, self.workspace / "neuron_profiler")
 
         # Always ensure profiler harnesses are present in the workspace, even
         # when resuming — the original run may not have had them.
@@ -322,6 +339,10 @@ class _RunContext:
             src = Path(self.torch_profiler_path)
             if not (self.workspace / "torch_profiler").exists():
                 self._copy_excluding_extras(src, self.workspace / "torch_profiler")
+        if existing and self.neuron_profiler_path:
+            src = Path(self.neuron_profiler_path)
+            if not (self.workspace / "neuron_profiler").exists():
+                self._copy_excluding_extras(src, self.workspace / "neuron_profiler")
 
         if git_tracking:
             self._init_git_tracking(existing)
@@ -339,6 +360,7 @@ class _RunContext:
                     bench_path=self.bench_path,
                     nsys_profiler_path=self.nsys_profiler_path,
                     torch_profiler_path=self.torch_profiler_path,
+                    neuron_profiler_path=self.neuron_profiler_path,
                     log=self.lprint,
                     project_root=PROJECT_ROOT,
                 )

@@ -577,3 +577,78 @@ class TestEnvVars:
         assert "-e" in cmd
         assert "MY_KEY=my_value" in cmd_str
         assert "OTHER=thing" in cmd_str
+
+
+class TestDevicePassthrough:
+    @patch("subprocess.run")
+    def test_devices_emit_device_flags_and_no_gpus(self, mock_run, tmp_path):
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="public.ecr.aws/neuron/pytorch-inference-neuronx:latest",
+            gpus=None,  # Neuron uses --device, not --gpus
+            devices=["/dev/neuron0", "/dev/neuron1"],
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+
+        sandbox.start()
+
+        cmd = mock_run.call_args_list[0][0][0]
+        assert "--gpus" not in cmd
+        # Each device forwarded with its own --device flag.
+        assert cmd.count("--device") == 2
+        for dev in ("/dev/neuron0", "/dev/neuron1"):
+            i = cmd.index(dev)
+            assert cmd[i - 1] == "--device"
+        assert sandbox._metadata["devices"] == ["/dev/neuron0", "/dev/neuron1"]
+
+    @patch("subprocess.run")
+    def test_no_devices_by_default(self, mock_run, tmp_path):
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+        cmd = mock_run.call_args_list[0][0][0]
+        assert "--device" not in cmd
+
+
+class TestEntrypointOverride:
+    @patch("subprocess.run")
+    def test_entrypoint_override_emitted_before_image(self, mock_run, tmp_path):
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="public.ecr.aws/neuron/pytorch-inference-neuronx:latest",
+            gpus=None,
+            entrypoint="",  # clear the DLC's baked-in model-server entrypoint
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+        cmd = mock_run.call_args_list[0][0][0]
+        assert "--entrypoint" in cmd
+        ep_idx = cmd.index("--entrypoint")
+        assert cmd[ep_idx + 1] == ""
+        # Override must precede the image positional, which precedes the command.
+        img_idx = cmd.index(sandbox._image)
+        assert ep_idx < img_idx
+        assert cmd[-2:] == ["sleep", "infinity"]
+        assert sandbox._metadata["entrypoint"] == ""
+
+    @patch("subprocess.run")
+    def test_no_entrypoint_flag_by_default(self, mock_run, tmp_path):
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+        cmd = mock_run.call_args_list[0][0][0]
+        assert "--entrypoint" not in cmd

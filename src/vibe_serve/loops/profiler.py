@@ -37,6 +37,12 @@ def mcp_spec(profiler_kind: str):
             command="python",
             args=["torch_profiler/server.py"],
         )
+    if profiler_kind == "neuron":
+        return MCPServerSpec(
+            name="vibeserve-neuron-profiler",
+            command="python",
+            args=["neuron_profiler/server.py"],
+        )
     return MCPServerSpec(
         name="vibeserve-nsys-profiler",
         command="python",

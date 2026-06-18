@@ -221,6 +221,9 @@ exp_env/
 artifacts/
 eval_results/
 inputs/**/model
+# Model weight dirs/symlinks under examples are materialized locally, never committed
+examples/**/model
+examples/**/draft_model
 
 # Agent instructions (kept local)
 AGENTS.md

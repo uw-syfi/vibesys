@@ -85,6 +85,8 @@ class DockerSandbox(BaseSandbox):
         host_workspace: str,
         image: str,
         gpus: str | None = None,
+        devices: list[str] | None = None,
+        entrypoint: str | None = None,
         default_timeout: int = 300,
         start_timeout: int = 120,
         max_output_bytes: int = 100_000,
@@ -103,6 +105,15 @@ class DockerSandbox(BaseSandbox):
                 their own default).
             gpus: GPU device spec for --gpus flag, or None to skip --gpus
                 entirely (e.g. for non-CUDA backends).
+            devices: Host device paths (e.g. ``["/dev/neuron0"]``) to forward
+                with ``--device``.  Used by non-CUDA accelerators (AWS Neuron)
+                that the NVIDIA container runtime's ``--gpus`` cannot expose.
+            entrypoint: Override the image ``ENTRYPOINT`` (emits
+                ``--entrypoint``).  Pass ``""`` to *clear* a baked-in
+                entrypoint so the container runs ``sleep infinity`` directly
+                — required for images like the AWS Neuron DLC whose entrypoint
+                would otherwise launch a model server and ignore our command.
+                ``None`` (default) leaves the image entrypoint untouched.
             default_timeout: Default command timeout in seconds.
             start_timeout: Timeout in seconds for the initial ``docker run``.
                 This bounds hidden image pulls or Docker daemon stalls before
@@ -122,6 +133,8 @@ class DockerSandbox(BaseSandbox):
         self._host_workspace = host_workspace
         self._image = image
         self._gpus = gpus
+        self._devices: list[str] = list(devices or [])
+        self._entrypoint = entrypoint
         self._default_timeout = default_timeout
         self._start_timeout = start_timeout
         self._max_output_bytes = max_output_bytes
@@ -275,6 +288,12 @@ class DockerSandbox(BaseSandbox):
             gpu_spec = self._resolve_gpu_device(self._gpus)
             cmd.extend(["--gpus", gpu_spec])
 
+        for device in self._devices:
+            cmd.extend(["--device", device])
+
+        if self._entrypoint is not None:
+            cmd.extend(["--entrypoint", self._entrypoint])
+
         for host_path, container_path, readonly in self._bind_mounts:
             mount = f"{host_path}:{container_path}"
             if readonly:
@@ -335,6 +354,8 @@ class DockerSandbox(BaseSandbox):
         self._metadata = {
             "image": self._image,
             "gpus": self._gpus,
+            "devices": list(self._devices),
+            "entrypoint": self._entrypoint,
             "bind_mounts": [
                 [host, container, ro]
                 for host, container, ro in self._bind_mounts
