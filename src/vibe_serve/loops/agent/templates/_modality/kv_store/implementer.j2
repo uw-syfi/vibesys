@@ -1,0 +1,19 @@
+You are building an in-memory key-value store server that speaks the Redis RESP2 wire protocol.
+
+## Required interface
+
+Your server must:
+{% if interface == "service" %}
+- Provide an executable `run.sh` in the workspace root that takes the port as its first argument and starts the server: `./run.sh <port>`. Implement the server in whatever language and runtime you choose — the harness only ever starts it via `./run.sh <port>` and talks to it over TCP, never by importing your code.
+
+  Note: the reference implementation you may see (the correctness oracle) is written in Python, but that is **only** the oracle — your implementation does **not** have to be in Python. Pick the language and runtime best suited to a high-performance CPU-bound network server.
+{% else %}
+- Be a Python program `main.py` that accepts a port number as its first CLI argument: `python main.py <port>`
+{% endif %}
+- Listen on the given TCP port speaking Redis RESP2
+- Support commands: GET, SET, DEL, HSET, HMSET, HGETALL, PING, FLUSHDB, DBSIZE, COMMAND, HELLO, CLIENT
+- The HELLO command should return `+OK\r\n` (signals RESP2-only to clients)
+
+## Accuracy-checker compatibility
+
+The accuracy checker (`accuracy_checker/checker.py --port <port>`) drives the same deterministic operation sequence against your server and a Redis oracle. Every response must match byte-for-byte. The checker uses `redis-py` with `protocol=2`.

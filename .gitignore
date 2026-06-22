@@ -253,3 +253,6 @@ CLAUDE.md
 # Per-experiment scratch — not part of the repo
 baseline_eval_*/
 sandbox-*/
+
+# Design/planning docs — local working artifacts, never PR content
+docs/design/

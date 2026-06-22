@@ -1,0 +1,40 @@
+{% if interface is not defined %}{% set interface = "inprocess" %}{% endif %}
+## Server Type: KV Store (Redis RESP2) — CPU only
+
+**Important: There is no GPU. Do NOT use nsys, ncu, or torch.profiler.** This is a CPU-bound TCP server. The nsys/MCP analysis toolkit described in the base template does not apply — ignore it entirely.
+
+Key performance axes: **throughput** (ops/sec), **p99 latency** (ms), **CPU utilization** per core.
+
+## How to profile this server
+
+1. Start the server: {% if interface == "service" %}`./run.sh 6380 &`{% else %}`uv run python main.py 6380 &`{% endif %}
+
+2. Get its PID by the listening port: `PID=$(lsof -ti tcp:6380 -s tcp:LISTEN)`
+3. Run the benchmark load in background: `uv run python bench/benchmark.py --port 6380 --num-ops 50000 --num-keys 5000 &`
+4. Profile with a sampler appropriate to the server's language:
+{% if interface == "service" %}
+   - Python: `py-spy record -o /tmp/profile.svg --pid <PID> --duration 10`
+   - Native/compiled (C, Rust, Go, …): `perf record -p <PID> -g -- sleep 10 && perf report`
+{% else %}
+   ```
+   py-spy record -o /tmp/profile.svg --pid <PID> --duration 10
+   ```
+{% endif %}
+5. Or for syscall breakdown (language-agnostic): `strace -c -p <PID> -e trace=read,write,epoll_wait` (Linux only)
+6. Kill the server after.
+
+## What to look for
+
+- If >30% time is in RESP parsing → recommend C extension for parser
+- If >20% time is in asyncio/selector internals → recommend uvloop or Protocol API
+- If >30% time is in socket read/write syscalls → recommend batched I/O, pipelining
+- If single-core bound at 100% → recommend SO_REUSEPORT + multi-process
+- If most time is in the hash-map get/set itself → the data structure is irreducibly fast, focus elsewhere
+
+## Performance metric
+
+The headline metric is **ops/sec** from YCSB Workload A. Run:
+```
+uv run python bench/benchmark.py --port 6380 --num-ops 10000 --num-keys 1000
+```
+Parse the "Throughput" line from output. Set `perf_metric` to that number, `perf_unit` to `"ops/sec"`.
