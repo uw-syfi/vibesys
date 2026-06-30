@@ -1,0 +1,273 @@
+Metadata:
+  description: Metadata associated with this profile, including details about the system configuration. Also see the NeffHeader table for metadata included in the NEFF header.
+  properties:
+    profile_schema_version:
+      type: string
+      example: "1.0.0"
+      description: |
+        The version of the data schema, which is the layout of the data contained within this profile. See the table "SchemaFields.parquet" for a full listing of what data tables and fields exist in this schema version. Different values may have a different schema.
+
+        Versioning scheme: MAJOR.MINOR.PATCH
+
+        MAJOR: incompatible change
+          - table removal or rename,
+          - field removal or rename,
+          - field type change,
+          - field becomes optional.
+
+        MINOR: compatible addition
+          - new table,
+          - new field,
+          - field becomes required.
+
+        PATCH: compatible change
+          - any field metadata change (description, example, minimum, unit, etc.),
+          - parquet compression, encoding, etc. (doesn't change data values, just how data is stored),
+          - spacing, formatting, or ordering change to schema definition yaml schema files.
+
+        Also note, things that this schema version does not track, but is tracked by the "profiler_version" field:
+          - the actual data values that are produced,
+          - the implementation that produced the data,
+          - the performance of producing the data.
+
+    ntff_version:
+      type: integer
+      format: int32
+      description: Version of the NTFF format used. This is the version of the raw profile data before processing.
+      minimum: 0
+
+    num_physical_cores:
+      type: integer
+      format: int32
+      description: The number of physical NeuronCores in the Logical NeuronCore.
+      minimum: 0
+
+    vnc_enabled:
+      type: boolean
+      description: Whether execution was on Logical NeuronCores consisting of multiple physical cores.
+      example: true
+
+    first_hw_timestamp:
+      type: integer
+      format: int64
+      description: First timestamp in the trace.
+      x-unit: nanoseconds
+      minimum: 0
+
+    last_hw_timestamp:
+      type: integer
+      format: int64
+      description: Last timestamp in the trace.
+      x-unit: nanoseconds
+      minimum: 0
+
+    first_ts:
+      type: string
+      description: First timestamp in Unix time format.
+      example: 1970-01-01T00:00:00Z
+
+    last_ts:
+      type: string
+      description: Last timestamp in Unix time format.
+      example: 1970-01-01T00:00:00Z
+
+    dma_ddr_bandwidth:
+      type: number
+      format: float
+      description: Maximum DMA DDR bandwidth available to a single physical NeuronCore on the system on which the profile was captured.
+      x-unit: bytes_per_second
+      minimum: 0.0
+
+    num_dma_engines_per_neuroncore:
+      type: integer
+      format: int32
+      description: Number of DMA engines per physical NeuronCore.
+      minimum: 0
+
+    hbm_ddr_bandwidth:
+      type: number
+      format: float
+      description: Maximum HBM bandwidth on the system on which the profile was captured. This is for a single HBM stack.
+      x-unit: bytes_per_second
+      minimum: 0.0
+
+    tensor_engine_num_rows: # previously named "pe_num_rows"
+      type: integer
+      format: int64
+      description: The number of rows in the systolic array of the Tensor Engine.
+      minimum: 0
+
+    tensor_engine_num_cols: # previously named "pe_num_cols"
+      type: integer
+      format: int64
+      description: The number of columns in the systolic array of the Tensor Engine.
+      minimum: 0
+
+    tensor_engine_clock_freq: # previously named "pe_clock_freq"
+      type: number
+      format: float
+      description: The clock frequency of the Tensor Engine.
+      x-unit: gigahertz
+      minimum: 0
+
+    vector_engine_clock_freq:
+      type: number
+      format: float
+      description: The clock frequency of the Vector Engine.
+      x-unit: gigahertz
+      minimum: 0
+
+    vector_engine_num_channels:
+      type: integer
+      format: int64
+      description: The number of channels in the Vector Engine.
+      minimum: 0
+
+    scalar_engine_clock_freq:
+      type: number
+      format: float
+      description: The clock frequency of the Scalar Engine.
+      x-unit: gigahertz
+      minimum: 0
+
+    scalar_engine_num_channels:
+      type: integer
+      format: int64
+      description: The number of channels in the Scalar Engine.
+      minimum: 0
+
+    gpsimd_engine_clock_freq:
+      type: number
+      format: float
+      description: The clock frequency of the GpSimd Engine.
+      x-unit: gigahertz
+      minimum: 0
+
+    gpsimd_engine_num_channels:
+      type: integer
+      format: int64
+      description: The number of channels in the GpSimd Engine.
+      minimum: 0
+
+    neuroncore_clock_freq: # previously named "pe_clock_others"
+      type: number
+      format: float
+      description: The clock frequency of the NeuronCore.
+      x-unit: gigahertz
+      minimum: 0
+
+    ticks_per_nanosec:
+      type: integer
+      format: int64
+      description: The number of ticks per nanosecond that the profile captures. Used to convert internal profile timestamps to nanoseconds.
+      minimum: 0
+
+    instance_type:
+      type: string
+      description: The instance type on which this profile was captured.
+      example: trn1.2xlarge
+
+    runtime_version:
+      type: string
+      description: The Neuron Runtime library version with which this profile was captured.
+      example: 2.19.1
+
+    collectives_version:
+      type: string
+      description: The Neuron Collectives library version with which this profile was captured.
+      example: 2.20.22
+
+    driver_version:
+      type: string
+      description: The Neuron driver version with which this profile was captured.
+      example: 2.15.9
+
+    explorer_version:
+      type: string
+      description: The Neuron Explorer version which post-processed this captured profile.
+      example: 2.19.1
+
+    compiler_version:
+      type: string
+      description: The Neuron Compiler version which built the NEFF that was executed during this profile. This is the tool_version field in the NEFF's info.json file.
+      example: 2.13.2
+
+    neuroncore_idx: # previously named "nc_idx" in the Summary table
+      type: integer
+      format: int64
+      description: The index of this NeuronCore.
+      minimum: 0
+
+    neuron_device_idx: # previously named "nd_idx" in the Summary table
+      type: integer
+      format: int64
+      description: The index of this NeuronDevice.
+      minimum: 0
+
+    ultraserver_id:
+      type: integer
+      format: int64
+      description: Unique UltraServer ID if this profile was captured on an UltraServer instance.
+      minimum: 0
+
+    ultraserver_type:
+      type: string
+      description: The type of instances connectivity within an UltraServer.
+      example: UltraCluster
+
+    ultraserver_size:
+      type: integer
+      format: int32
+      description: The total numbers of instance in an UltraServer.
+      minimum: 0
+
+    ultraserver_instance_index:
+      type: integer
+      format: int32
+      description: The instance index within the UltraServer on which this profile was captured.
+      minimum: 0
+
+    s3_bucket_path:
+      type: string
+      description: Full S3 path where profile files (NEFF/NTFF/source/debug) are stored and uploaded.
+      example: s3://my-bucket/profile/
+
+    profile_name:
+      type: string
+      description: User chosen name for this profile.
+      example: mlp_nki_mm
+
+    explorer_build_time:
+      type: string
+      description: The date and time when the `neuron-explorer` tool was built.
+      example: 2025-11-14T15:14:53Z
+    
+    is_simulation:
+      type: boolean
+      description: Whether this profile is a post-scheduler simulation produced by the compiler.
+      example: false
+
+  required:
+    - profile_schema_version
+    - ntff_version
+    - num_physical_cores
+    - vnc_enabled
+    - first_hw_timestamp
+    - last_hw_timestamp
+    - first_ts
+    - last_ts
+    - total_row_count
+    - dma_ddr_bandwidth
+    - num_dma_engines_per_neuroncore
+    - hbm_ddr_bandwidth
+    - tensor_engine_num_rows
+    - tensor_engine_num_cols
+    - tensor_engine_clock_freq
+    - vector_engine_clock_freq
+    - vector_engine_num_channels
+    - scalar_engine_clock_freq
+    - scalar_engine_num_channels
+    - gpsimd_engine_clock_freq
+    - gpsimd_engine_num_channels
+    - neuroncore_clock_freq
+    - ticks_per_nanosec

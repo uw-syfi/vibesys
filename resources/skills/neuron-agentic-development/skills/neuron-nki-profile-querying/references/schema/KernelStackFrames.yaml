@@ -1,0 +1,42 @@
+KernelStackFrames:
+  description: |
+    Call stack frames for kernel instructions forming a call stack. Each row represents one function in the call stack. When functions are nested, parent_stack_frame_id links to the caller function.
+    
+    Example: Function "output_projection_cte" defined at line 17 of mlp_with_mm_kernel.py, with stack_frame_id=42 and parent_stack_frame_id=41 (entry of the caller function).
+  properties:
+    stack_frame_id:
+      type: integer
+      format: int64
+      description: Unique identifier for this stack frame entry.
+      example: 42
+
+    fully_qualified_function_name:
+      type: string
+      description: Fully qualified function name for this stack frame.
+      example: neuronxcc.nki._pre_prod_nkl.output_projection_cte
+
+    parent_stack_frame_id:
+      type: integer
+      format: int64
+      description: Reference to the parent (caller) stack frame in the call stack. Null for the outermost function.
+      example: 41
+
+    pcore_idx:
+      type: integer
+      format: int64
+      description: Index of the physical NeuronCore within a Logical NeuronCore (LNC). A Logical NeuronCore is a group of physical NeuronCores. For LNC2 this field can have a value of either 0 or 1.
+      minimum: 0
+
+    file_path:
+      type: string
+      description: Source file path where this function is defined.
+      example: /home/ubuntu/mlp_with_mm_kernel.py
+
+    line_number:
+      type: integer
+      format: int64
+      description: Line number in the source file where this function is defined.
+      example: 17
+
+  required:
+    - stack_frame_id

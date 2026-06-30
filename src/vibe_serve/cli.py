@@ -153,14 +153,22 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Path to directory containing torch.profiler analysis script (analyze_torch_profile.py). Used when --profiler=torch.",
     )
     parser.add_argument(
+        "--neuron-profiler",
+        type=Path,
+        default=None,
+        help="Path to directory containing the neuron-explorer analysis script (analyze_neuron.py). Used when --profiler=neuron (default for --backend trainium).",
+    )
+    parser.add_argument(
         "--profiler",
-        choices=["nsys", "torch", "auto"],
+        choices=["nsys", "torch", "neuron", "auto"],
         default="auto",
         help=(
             "Which profiler to use between rounds. "
             "'nsys' for NVIDIA Nsight Systems (needs /proc/driver/nvidia), "
             "'torch' for torch.profiler (works in Modal sandboxes), "
-            "'auto' picks torch when --modal is set, else nsys. Default: auto."
+            "'neuron' for AWS neuron-explorer (Trainium/NeuronCores), "
+            "'auto' picks the compute backend's profiler (trainium → neuron), "
+            "else torch when --modal is set, else nsys. Default: auto."
         ),
     )
     parser.add_argument(
@@ -283,6 +291,8 @@ def load_config_and_skills(
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    backend: ComputeBackend = args.backend or config.backend.name
+
     if getattr(args, "no_skills", False):
         skills = None
     else:
@@ -291,7 +301,15 @@ def load_config_and_skills(
             if isinstance(args.skills_dir, list)
             else ([str(args.skills_dir)] if args.skills_dir else None)
         )
-    backend: ComputeBackend = args.backend or config.backend.name
+        # Trainium targets get the vendored AWS NKI skills automatically so the
+        # implementer can write NeuronCore kernels. Other backends are
+        # unaffected; --no-skills still disables everything.
+        if backend == ComputeBackend.TRAINIUM:
+            nki_skills = PROJECT_ROOT / "resources" / "skills" / "neuron-agentic-development" / "skills"
+            if nki_skills.is_dir():
+                skills = (skills or [])
+                if str(nki_skills) not in skills:
+                    skills.append(str(nki_skills))
     return config, skills, backend
 
 
@@ -470,6 +488,7 @@ def _run_agent(args: argparse.Namespace) -> None:
         bench=str(args.bench) if args.bench else None,
         nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
         torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
+        neuron_profiler=str(args.neuron_profiler) if args.neuron_profiler else None,
         profiler_kind=args.profiler,
         skills_dirs=skills,
         run_environment=run_environment_spec_from_args(args),

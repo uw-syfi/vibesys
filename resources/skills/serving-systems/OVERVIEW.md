@@ -8,9 +8,9 @@ Skills are layered by abstraction — [`README.md`](README.md) has the full tree
 
 - [`models/`](references/models/) — what does each model look like; what serving features it needs
 - [`algorithms/`](references/algorithms/) — serving concepts (attention variants, async scheduling, continuous batching, paged attention, speculative decoding, ...)
-- [`frameworks/`](references/frameworks/) — PyTorch / MLX idioms
+- [`frameworks/`](references/frameworks/) — PyTorch / MLX / Neuron (Trainium) idioms
 - [`backends/`](references/backends/) — how to call SDPA / FlashInfer / FlashAttention / Triton / CUDA graph
-- [`hardware/`](references/hardware/) — Hopper / Blackwell / MI300 / Apple Silicon specifics
+- [`hardware/`](references/hardware/) — Hopper / Blackwell / MI300 / Apple Silicon / AWS Trainium specifics
 - [`engines/`](references/engines/) — source-code lookup into vLLM / SGLang / TensorRT-LLM
 - [`tooling/`](references/tooling/) — FastAPI serving, accuracy checking, benchmarking, profiling, I/O
 - [`agent-gpu-skills`](https://github.com/slowlyC/agent-gpu-skills) (separate repo) — kernel implementation; out of scope here

@@ -1,0 +1,48 @@
+KernelIterationVariables:
+  description: |
+    Loop iteration variables for kernel instructions forming a loop nest. Each row represents one loop variable's value at a specific iteration. When loops are nested, parent_iteration_variable_id links to the outer loop variable.
+    
+    Example: Loop variable "k" defined at line 72 of mlp_with_mm_kernel.py has value 3, with iteration_variable_id=102 and parent_iteration_variable_id=101 (entry of the outer loop variable).
+  properties:
+    iteration_variable_id:
+      type: integer
+      format: int64
+      description: Unique identifier for this iteration variable entry.
+      example: 102
+
+    variable_name:
+      type: string
+      description: Name of the iteration variable.
+      example: k
+
+    variable_value:
+      type: integer
+      format: int64
+      description: Value of the iteration variable for this specific iteration.
+      example: 3
+
+    parent_iteration_variable_id:
+      type: integer
+      format: int64
+      description: Reference to the outer loop's iteration variable. Null for the outermost loop.
+      example: 101
+
+    pcore_idx:
+      type: integer
+      format: int64
+      description: Index of the physical NeuronCore within a Logical NeuronCore (LNC). A Logical NeuronCore is a group of physical NeuronCores. For LNC2 this field can have a value of either 0 or 1.
+      minimum: 0
+
+    file_path:
+      type: string
+      description: Source file path where this iteration variable is defined.
+      example: /home/ubuntu/mlp_with_mm_kernel.py
+
+    line_number:
+      type: integer
+      format: int64
+      description: Line number in the source file where this iteration variable is defined.
+      example: 72
+
+  required:
+    - iteration_variable_id

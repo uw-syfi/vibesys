@@ -85,6 +85,10 @@ class DockerSandbox(BaseSandbox):
         host_workspace: str,
         image: str,
         gpus: str | None = None,
+        devices: list[str] | None = None,
+        entrypoint: str | None = None,
+        shm_size: str | None = None,
+        auto_remove: bool = False,
         default_timeout: int = 300,
         start_timeout: int = 120,
         max_output_bytes: int = 100_000,
@@ -103,6 +107,20 @@ class DockerSandbox(BaseSandbox):
                 their own default).
             gpus: GPU device spec for --gpus flag, or None to skip --gpus
                 entirely (e.g. for non-CUDA backends).
+            devices: Host device paths (e.g. ``["/dev/neuron0"]``) to forward
+                with ``--device``.  Used by non-CUDA accelerators (AWS Neuron)
+                that the NVIDIA container runtime's ``--gpus`` cannot expose.
+            entrypoint: Override the image ``ENTRYPOINT`` (emits
+                ``--entrypoint``).  Pass ``""`` to *clear* a baked-in
+                entrypoint so the container runs ``sleep infinity`` directly
+                — required for images like the AWS Neuron DLC whose entrypoint
+                would otherwise launch a model server and ignore our command.
+                ``None`` (default) leaves the image entrypoint untouched.
+            shm_size: Value for ``--shm-size`` (e.g. ``"16g"``).  Docker's
+                default ``/dev/shm`` is 64 MB, which ML compilers/runtimes
+                (e.g. ``neuronx-cc``, PyTorch dataloaders) exhaust with
+                "No space left on device".  ``None`` (default) uses Docker's
+                default.
             default_timeout: Default command timeout in seconds.
             start_timeout: Timeout in seconds for the initial ``docker run``.
                 This bounds hidden image pulls or Docker daemon stalls before
@@ -122,6 +140,10 @@ class DockerSandbox(BaseSandbox):
         self._host_workspace = host_workspace
         self._image = image
         self._gpus = gpus
+        self._devices: list[str] = list(devices or [])
+        self._entrypoint = entrypoint
+        self._shm_size = shm_size
+        self._auto_remove = auto_remove
         self._default_timeout = default_timeout
         self._start_timeout = start_timeout
         self._max_output_bytes = max_output_bytes
@@ -271,9 +293,24 @@ class DockerSandbox(BaseSandbox):
             "--name", self._container_name,
             "-v", f"{self._host_workspace}:/workspace",
         ]
+        if self._auto_remove:
+            # Auto-remove the container (and its overlay, which can hold many GB
+            # of compiled artifacts) whenever it goes away — including when the
+            # framework process is killed and the container is later stopped,
+            # which the graceful stop()/rm path would miss.
+            cmd.append("--rm")
         if self._gpus is not None:
             gpu_spec = self._resolve_gpu_device(self._gpus)
             cmd.extend(["--gpus", gpu_spec])
+
+        for device in self._devices:
+            cmd.extend(["--device", device])
+
+        if self._entrypoint is not None:
+            cmd.extend(["--entrypoint", self._entrypoint])
+
+        if self._shm_size is not None:
+            cmd.extend(["--shm-size", self._shm_size])
 
         for host_path, container_path, readonly in self._bind_mounts:
             mount = f"{host_path}:{container_path}"
@@ -335,6 +372,9 @@ class DockerSandbox(BaseSandbox):
         self._metadata = {
             "image": self._image,
             "gpus": self._gpus,
+            "devices": list(self._devices),
+            "entrypoint": self._entrypoint,
+            "shm_size": self._shm_size,
             "bind_mounts": [
                 [host, container, ro]
                 for host, container, ro in self._bind_mounts
