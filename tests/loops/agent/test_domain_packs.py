@@ -91,6 +91,29 @@ def test_render_llm_serving_has_content():
     assert "## Required:" in impl
 
 
+def test_deeper_markdown_heading_does_not_delimit_role(tmp_path: Path):
+    """Only exact ``## <role>`` headings split sections."""
+    f = tmp_path / "d.md"
+    f.write_text(
+        "# D\n\n"
+        "## implementer\n"
+        "IMPL-BEFORE\n\n"
+        "### judge\n"
+        "This is an implementer subsection, not the judge role.\n\n"
+        "IMPL-AFTER\n\n"
+        "## judge\n"
+        "JUDGE-BODY\n"
+    )
+
+    impl = render_domain_section(f, "implementer")
+    judge = render_domain_section(f, "judge")
+
+    assert "IMPL-BEFORE" in impl
+    assert "### judge" in impl
+    assert "IMPL-AFTER" in impl
+    assert judge == "JUDGE-BODY"
+
+
 def test_render_role_branches_on_context():
     """A role section rendered with bench_path set should reference it."""
     d = resolve_domain("llm-serving")

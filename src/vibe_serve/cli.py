@@ -23,12 +23,12 @@ import tomllib
 from pathlib import Path
 
 from vibe_serve.config import Config, _load_config
-from vibe_serve.loops.agent.domain import DEFAULT_DOMAIN, builtin_domains
 from vibe_serve.constants import (
-    ComputeBackend,
     KNOWN_COMPUTE_BACKENDS,
     PROJECT_ROOT,
+    ComputeBackend,
 )
+from vibe_serve.loops.agent.domain import DEFAULT_DOMAIN, builtin_domains
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,

@@ -83,10 +83,10 @@ def _role_heading(line: str) -> str | None:
     section, so a body's own ``## Required: …`` sub-headings are left intact.
     """
     stripped = line.strip()
-    if not stripped.startswith("##"):
-        return None
-    name = stripped.lstrip("#").strip()
-    return name if name in DOMAIN_ROLES else None
+    for role in DOMAIN_ROLES:
+        if stripped == f"## {role}":
+            return role
+    return None
 
 
 def _load_sections(domain_file: Path) -> dict[str, str]:
