@@ -123,7 +123,7 @@ def _render_prompt(domain: str, role: str, context: dict[str, object]) -> str:
 
 
 def _snapshot_path(domain: str, case_name: str, role: str) -> Path:
-    return _SNAPSHOT_DIR / domain / case_name / f"{role}.txt"
+    return _SNAPSHOT_DIR / domain / case_name / f"{role}.md"
 
 
 def _assert_matches_snapshot(domain: str, case_name: str, role: str, rendered: str) -> None:
@@ -132,7 +132,7 @@ def _assert_matches_snapshot(domain: str, case_name: str, role: str, rendered: s
     if rendered == expected:
         return
 
-    rendered_name = Path("rendered") / domain / case_name / f"{role}.txt"
+    rendered_name = Path("rendered") / domain / case_name / f"{role}.md"
     diff = "".join(
         difflib.unified_diff(
             expected.splitlines(keepends=True),

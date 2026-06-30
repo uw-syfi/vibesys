@@ -5,7 +5,7 @@ domain interpolation, and conditional Jinja branches have run. They are grouped
 by:
 
 ```text
-<domain>/<context>/<role>.txt
+<domain>/<context>/<role>.md
 ```
 
 Contexts:
