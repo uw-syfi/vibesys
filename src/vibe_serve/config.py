@@ -2,7 +2,9 @@ import os
 import tomllib
 from pathlib import Path
 
-from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT
+from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
+from vibe_serve.features import FeatureFlag
+from vs_feature_flags import parse_feature_flag_overrides
 
 _KNOWN_PROVIDERS = {"vertex-ai", "anthropic", "google-genai", "openai", "openai-compatible"}
 
@@ -65,6 +67,7 @@ def _load_config(path: Path) -> dict:
 
     thinking = raw.get("thinking", {})
     providers = raw.get("providers", {})
+    feature_flags = parse_feature_flag_overrides(raw.get("feature_flags"), FeatureFlag)
 
     backend_section = raw.get("backend", {}) or {}
     raw_backend = backend_section.get("name", DEFAULT_COMPUTE_BACKEND)
@@ -95,6 +98,7 @@ def _load_config(path: Path) -> dict:
         "thinking": thinking,
         "providers": providers,
         "backend": {"name": backend},
+        "feature_flags": feature_flags,
     }
     # Preserve any non-`name` fields the user added to [backend] for forward
     # compatibility (future backends may carry their own sub-config).

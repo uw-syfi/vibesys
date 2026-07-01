@@ -23,6 +23,7 @@ dependencies = [
     "soundfile>=0.13.1",
     "librosa>=0.11.0",
     "modal>=1.4.2",
+    "vs-feature-flags",
 ]
 
 [project.scripts]
@@ -47,14 +48,14 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "libs/vs-feature-flags/tests"]
 addopts = "-ra"
 pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests"]
+src = ["src", "tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W"]
@@ -65,7 +66,8 @@ package = true
 
 [tool.uv.workspace]
 exclude = ["exp_env"]
-members = []
+members = ["libs/*"]
 
 [tool.uv.sources]
 agentshim = { git = "https://github.com/vic-lsh/agentshim.git", rev = "codex/executor-injection" }
+vs-feature-flags = { workspace = true }

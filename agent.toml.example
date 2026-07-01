@@ -30,6 +30,11 @@ name = "claude-sonnet-4-6"
                               # one of: claude, gemini, codex, opencode
 # cli_timeout = 1800          # per-iteration timeout in seconds (default: no timeout)
 
+# [feature_flags]
+# VibeServe feature flags are declared in src/vibe_serve/features.py.
+# There are no feature flags declared by default.
+# future_flag_name = true
+
 # [backend]
 # Hardware/runtime backend the serving stack targets. Supported values:
 #   "cuda"  — NVIDIA container, nvidia-smi GPU selection, nsys profiler,

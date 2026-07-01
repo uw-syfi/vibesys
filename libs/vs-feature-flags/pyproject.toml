@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vs-feature-flags"
+version = "0.1.0"
+description = "Typed feature flag utilities for VibeServe"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["vs_feature_flags*"]
+
+[tool.setuptools.package-data]
+vs_feature_flags = ["py.typed"]

@@ -1,8 +1,9 @@
 import os
-import pytest
 import tomllib
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from vibe_serve.config import _load_config, _load_dotenv_file
 
@@ -51,6 +52,7 @@ region = "us-east5"
         assert config["model"].get("provider") is None
         assert config.get("thinking") == {}
         assert config.get("providers") == {}
+        assert config.get("feature_flags") == {}
 
 
 class TestLoadConfigErrors:
@@ -78,6 +80,18 @@ name = "claude-sonnet-4-6"
 provider = "bedrock"
 """)
         with pytest.raises(ValueError, match="bedrock"):
+            _load_config(cfg_file)
+
+    def test_unknown_feature_flag(self, tmp_path):
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text("""\
+[model]
+name = "claude-sonnet-4-6"
+
+[feature_flags]
+new_loop = true
+""")
+        with pytest.raises(ValueError, match="Unknown feature flag 'new_loop'"):
             _load_config(cfg_file)
 
 
