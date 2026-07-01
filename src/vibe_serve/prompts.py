@@ -123,11 +123,13 @@ class ComputeBackendFragment(ABC):
     per name in ``NAMES``.
     """
 
-    NAMES: ClassVar[frozenset[str]] = frozenset({
-        "device_dtype",
-        "judge_device_correctness",
-        "profiling_workflow",
-    })
+    NAMES: ClassVar[frozenset[str]] = frozenset(
+        {
+            "device_dtype",
+            "judge_device_correctness",
+            "profiling_workflow",
+        }
+    )
     backend: ClassVar[ComputeBackend]  # set by subclasses
 
     def __init__(self, env: Environment) -> None:
@@ -143,12 +145,10 @@ class ComputeBackendFragment(ABC):
         an extra blank line at every substitution site.
         """
         if name not in self.NAMES:
-            raise ValueError(
-                f"Unknown fragment {name!r}; valid: {sorted(self.NAMES)}"
-            )
-        return self._env.get_template(
-            f"_backend/{self.backend.value}/{name}.j2"
-        ).render().rstrip("\n")
+            raise ValueError(f"Unknown fragment {name!r}; valid: {sorted(self.NAMES)}")
+        return (
+            self._env.get_template(f"_backend/{self.backend.value}/{name}.j2").render().rstrip("\n")
+        )
 
     def render_all(self) -> dict[str, str]:
         """Render every fragment in :attr:`NAMES` keyed by name."""
@@ -160,9 +160,7 @@ class ComputeBackendFragment(ABC):
         :attr:`NAMES`. Raises ``ValueError`` listing missing files.
         """
         backend_dir = _TEMPLATES_DIR / "_backend" / cls.backend.value
-        missing = [
-            n for n in cls.NAMES if not (backend_dir / f"{n}.j2").is_file()
-        ]
+        missing = [n for n in cls.NAMES if not (backend_dir / f"{n}.j2").is_file()]
         if missing:
             raise ValueError(
                 f"{cls.__name__}: missing fragment files under {backend_dir}: "
@@ -173,16 +171,19 @@ class ComputeBackendFragment(ABC):
 
 class CudaComputeBackendFragment(ComputeBackendFragment):
     """Fragments for the CUDA backend (NVIDIA GPUs)."""
+
     backend = ComputeBackend.CUDA
 
 
 class MetalComputeBackendFragment(ComputeBackendFragment):
     """Fragments for the Metal backend (Apple Silicon, MPS)."""
+
     backend = ComputeBackend.METAL
 
 
 class TrainiumComputeBackendFragment(ComputeBackendFragment):
     """Fragments for the Trainium backend (AWS NeuronCores)."""
+
     backend = ComputeBackend.TRAINIUM
 
 

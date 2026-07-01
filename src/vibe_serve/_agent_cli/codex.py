@@ -61,7 +61,8 @@ class CodexCodingAgent(CLICodingAgent):
 
     def _get_command(self, prompt: str) -> list[str]:
         cmd = [
-            self.binary_path, "exec",
+            self.binary_path,
+            "exec",
             "--dangerously-bypass-approvals-and-sandbox",
             "--skip-git-repo-check",
             "--json",
@@ -81,7 +82,11 @@ class CodexCodingAgent(CLICodingAgent):
         # stdin is actually consumed. (``codex exec`` is more lenient and
         # treats stdin as the default fallback, so we don't need this there.)
         cmd = [
-            self.binary_path, "exec", "resume", session_id, "-",
+            self.binary_path,
+            "exec",
+            "resume",
+            session_id,
+            "-",
             "--dangerously-bypass-approvals-and-sandbox",
             "--skip-git-repo-check",
             "--json",
@@ -111,9 +116,7 @@ class CodexCodingAgent(CLICodingAgent):
     def _extract_session_id(self, session: CodexGenerationSession) -> str | None:
         return session.session_id
 
-    def install_mcp_servers(
-        self, workspace: Path, servers: list[MCPServerSpec]
-    ) -> None:
+    def install_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:
         """Stash ``--config mcp_servers.<name>.<key>=<value>`` flags on the
         instance for the next ``codex exec`` invocation.
 
@@ -147,8 +150,6 @@ class CodexCodingAgent(CLICodingAgent):
                 )
         self.extra_config_args = flags
 
-    def uninstall_mcp_servers(
-        self, workspace: Path, servers: list[MCPServerSpec]
-    ) -> None:
+    def uninstall_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:
         """Clear the runtime ``--config`` flags. Idempotent."""
         self.extra_config_args = []

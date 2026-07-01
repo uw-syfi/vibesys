@@ -55,7 +55,9 @@ class TiledRangeIterator(NKIObject):
         return f"TiledRangeIterator(size={self.size}, index={self.index}, start_offset={self.start_offset}, end_offset={self.end_offset})"
 
 
-def TiledRange(size: Union[int, TiledRangeIterator], tile_size: int) -> Tuple[TiledRangeIterator, ...]:
+def TiledRange(
+    size: Union[int, TiledRangeIterator], tile_size: int
+) -> Tuple[TiledRangeIterator, ...]:
     """
     Divides a dimension into tiles and returns a tuple of TiledRangeIterators.
 

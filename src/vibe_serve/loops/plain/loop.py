@@ -29,17 +29,21 @@ from datetime import datetime
 from pathlib import Path
 
 from vibe_serve.config import Config, as_config
-from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND
+from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
-from vibe_serve.loops.plain.render import render_all
-from vibe_serve.loops.plain.runner_ext import PlainLoopAgentRunner
 from vibe_serve.loops.plain.issue_board import (
     Issue,
-    IssueStatus,
     IssueBoard,
+    IssueStatus,
     IssueType,
 )
+from vibe_serve.loops.plain.render import render_all
+from vibe_serve.loops.plain.runner_ext import PlainLoopAgentRunner
 from vibe_serve.prompts import Prompt
+from vibe_serve.sandbox.run_environment import (
+    RunEnvironmentSpec,
+    make_run_environment_spec,
+)
 from vibe_serve.schemas import (
     IssueImplementerResponse,
     IssueJudgeResponse,
@@ -47,10 +51,6 @@ from vibe_serve.schemas import (
     PerfMetrics,
     PerfTrend,
     Verdict,
-)
-from vibe_serve.sandbox.run_environment import (
-    RunEnvironmentSpec,
-    make_run_environment_spec,
 )
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
@@ -433,7 +433,11 @@ def run_plain_loop(
 
         state = resume_state if resume_state is not None else PlainLoopState()
         _ensure_bootstrap_issue(
-            store, state=state, log_dir=ctx.log_dir, ctx=ctx, prompt=prompt,
+            store,
+            state=state,
+            log_dir=ctx.log_dir,
+            ctx=ctx,
+            prompt=prompt,
         )
 
         # On resume, give every previously BLOCKED issue a fresh attempt
@@ -470,9 +474,9 @@ def run_plain_loop(
 
         while i < end_iteration:
             iter_label = i + 1
-            ctx.lprint(f"\n{'='*60}")
+            ctx.lprint(f"\n{'=' * 60}")
             ctx.lprint(f"  Iteration {iter_label}/{end_iteration}")
-            ctx.lprint(f"{'='*60}\n")
+            ctx.lprint(f"{'=' * 60}\n")
 
             # ---------------------------------------------------------------
             # DRAIN open issues
@@ -496,9 +500,7 @@ def run_plain_loop(
                         iteration=iter_label,
                         note=f"exhausted {max_attempts_per_issue} attempts",
                     )
-                    ctx.lprint(
-                        f"[block] issue #{issue.id} blocked after {issue.attempts} attempts"
-                    )
+                    ctx.lprint(f"[block] issue #{issue.id} blocked after {issue.attempts} attempts")
                     continue
 
                 # Claim the issue
@@ -519,8 +521,10 @@ def run_plain_loop(
                     _save_state(ctx.log_dir, state)
 
                     _sync_workspace_files(
-                        progress_path, perf_metrics_path,
-                        issues_dir, ctx.workspace,
+                        progress_path,
+                        perf_metrics_path,
+                        issues_dir,
+                        ctx.workspace,
                     )
                     ctx.reselect_gpu()
 
@@ -566,12 +570,8 @@ def run_plain_loop(
                     _update_progress_from_implementer(
                         progress_path, iter_label, issue, impl_response
                     )
-                    ctx.snapshot_workspace(
-                        f"iter-{iter_label}-impl-{issue.id}-att{issue.attempts}"
-                    )
-                    ctx.lprint(
-                        f"[snapshot] iter-{iter_label}-impl-{issue.id}-att{issue.attempts}"
-                    )
+                    ctx.snapshot_workspace(f"iter-{iter_label}-impl-{issue.id}-att{issue.attempts}")
+                    ctx.lprint(f"[snapshot] iter-{iter_label}-impl-{issue.id}-att{issue.attempts}")
 
                 # next_phase only kicks in for the first issue we resume on
                 next_phase = ""
@@ -583,8 +583,10 @@ def run_plain_loop(
                 _save_state(ctx.log_dir, state)
 
                 _sync_workspace_files(
-                    progress_path, perf_metrics_path,
-                    issues_dir, ctx.workspace,
+                    progress_path,
+                    perf_metrics_path,
+                    issues_dir,
+                    ctx.workspace,
                 )
                 ctx.reselect_gpu()
 
@@ -630,12 +632,8 @@ def run_plain_loop(
                 store.reload()
                 render_all(issues_dir, store)
 
-                _update_progress_from_judge(
-                    progress_path, iter_label, issue, judge_response
-                )
-                ctx.snapshot_workspace(
-                    f"iter-{iter_label}-judge-{issue.id}-att{issue.attempts}"
-                )
+                _update_progress_from_judge(progress_path, iter_label, issue, judge_response)
+                ctx.snapshot_workspace(f"iter-{iter_label}-judge-{issue.id}-att{issue.attempts}")
                 ctx.lprint(
                     f">>> Judge verdict on #{issue.id}: {judge_response.verdict.value.upper()}"
                 )
@@ -668,13 +666,8 @@ def run_plain_loop(
             # PERF_EVAL phase (after drain complete)
             # ---------------------------------------------------------------
             # Bail-out check: if every remaining issue is BLOCKED, we're stuck.
-            remaining = [
-                iss for iss in store.list()
-                if iss.status not in (IssueStatus.CLOSED,)
-            ]
-            blocked_only = remaining and all(
-                iss.status == IssueStatus.BLOCKED for iss in remaining
-            )
+            remaining = [iss for iss in store.list() if iss.status not in (IssueStatus.CLOSED,)]
+            blocked_only = remaining and all(iss.status == IssueStatus.BLOCKED for iss in remaining)
             if blocked_only:
                 ctx.lprint(
                     f"[stop] all remaining issues are blocked "
@@ -692,8 +685,10 @@ def run_plain_loop(
             _save_state(ctx.log_dir, state)
 
             _sync_workspace_files(
-                progress_path, perf_metrics_path,
-                issues_dir, ctx.workspace,
+                progress_path,
+                perf_metrics_path,
+                issues_dir,
+                ctx.workspace,
             )
             ctx.reselect_gpu()
 

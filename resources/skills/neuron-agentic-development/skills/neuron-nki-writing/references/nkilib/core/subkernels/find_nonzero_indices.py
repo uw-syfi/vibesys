@@ -92,7 +92,9 @@ def find_nonzero_indices(
     T_DIM, C_DIM = input_tensor.shape
     # Handle col_start_id parameter for processing subset of columns
     if col_start_id != None and n_cols != None:
-        col_start_id_sbuf = nl.ndarray((1, 1), dtype=nl.int32, buffer=nl.sbuf, name="col_start_id_sbuf")
+        col_start_id_sbuf = nl.ndarray(
+            (1, 1), dtype=nl.int32, buffer=nl.sbuf, name="col_start_id_sbuf"
+        )
         nisa.dma_copy(dst=col_start_id_sbuf, src=col_start_id[0:1])
         C = n_cols
     else:
@@ -111,7 +113,9 @@ def find_nonzero_indices(
     # Use chunk_size to limit SBUF usage for large T
     if chunk_size == None:
         chunk_size = T_DIM
-    kernel_assert(T_DIM % chunk_size == 0, f"T_DIM ({T_DIM}) must be divisible by chunk_size ({chunk_size})")
+    kernel_assert(
+        T_DIM % chunk_size == 0, f"T_DIM ({T_DIM}) must be divisible by chunk_size ({chunk_size})"
+    )
     CHUNK_T_TILES = chunk_size // T_TILE_SIZE
     NUM_CHUNKS = T_DIM // chunk_size
 
@@ -121,14 +125,19 @@ def find_nonzero_indices(
     # Initialize indices to -1 when processing in chunks (partial writes need padding)
     if NUM_CHUNKS > 1:
         sbuf_init = nl.ndarray(
-            (P_MAX, C_per_shard * T_DIM // P_MAX), dtype=index_dtype, buffer=nl.sbuf, name="sbuf_init"
+            (P_MAX, C_per_shard * T_DIM // P_MAX),
+            dtype=index_dtype,
+            buffer=nl.sbuf,
+            name="sbuf_init",
         )
         nisa.memset(dst=sbuf_init, value=-1)
         reshaped_dst = indices.reshape((P_MAX * 2, C_per_shard * T_DIM // P_MAX))
         nisa.dma_copy(dst=reshaped_dst[P_MAX * shard_id : P_MAX * (shard_id + 1), :], src=sbuf_init)
 
     nonzero_counts = nl.ndarray((C,), dtype=nl.int32, buffer=nl.shared_hbm)
-    nonzero_counts_local = nl.ndarray((1, C_per_shard), dtype=nl.int32, buffer=nl.sbuf, name="nonzero_counts_local")
+    nonzero_counts_local = nl.ndarray(
+        (1, C_per_shard), dtype=nl.int32, buffer=nl.sbuf, name="nonzero_counts_local"
+    )
     nisa.memset(dst=nonzero_counts_local, value=0)
 
     # Calculate iteration counts
@@ -140,12 +149,17 @@ def find_nonzero_indices(
     nisa.dma_copy(dst=identity_sb, src=identity_hbm)
 
     for column_round_idx in range(n_column_rounds):
-        n_columns_this_round = min(_NUM_GPSIMD_CORES, C_per_shard - _NUM_GPSIMD_CORES * column_round_idx)
+        n_columns_this_round = min(
+            _NUM_GPSIMD_CORES, C_per_shard - _NUM_GPSIMD_CORES * column_round_idx
+        )
         column_start_offset = column_round_idx * _NUM_GPSIMD_CORES + C_offset
 
         # Track cumulative offsets for writing indices
         offsets = nl.ndarray(
-            (1, _NUM_GPSIMD_CORES), dtype=nl.int32, buffer=nl.sbuf, name=f"offsets_er-{column_round_idx}"
+            (1, _NUM_GPSIMD_CORES),
+            dtype=nl.int32,
+            buffer=nl.sbuf,
+            name=f"offsets_er-{column_round_idx}",
         )
         nisa.memset(dst=offsets, value=0)
         for chunk_idx in range(NUM_CHUNKS):
@@ -164,7 +178,9 @@ def find_nonzero_indices(
                 dtype=input_tensor.dtype,
                 buffer=nl.sbuf,
             )
-            indices_sbuf = nl.ndarray((C_TILE_SIZE, 1, chunk_size + 1), dtype=nl.int32, buffer=nl.sbuf)
+            indices_sbuf = nl.ndarray(
+                (C_TILE_SIZE, 1, chunk_size + 1), dtype=nl.int32, buffer=nl.sbuf
+            )
             t_chunk_start = chunk_idx * chunk_size
 
             # --- Load phase: single DMA copy for all T tiles in the chunk ---
@@ -172,7 +188,11 @@ def find_nonzero_indices(
                 nisa.dma_copy(
                     dst=input_sbuf[:, 0:CHUNK_T_TILES, 0:n_columns_this_round],
                     src=input_tensor.ap(
-                        pattern=[[C_DIM, T_TILE_SIZE], [C_DIM * T_TILE_SIZE, CHUNK_T_TILES], [1, n_columns_this_round]],
+                        pattern=[
+                            [C_DIM, T_TILE_SIZE],
+                            [C_DIM * T_TILE_SIZE, CHUNK_T_TILES],
+                            [1, n_columns_this_round],
+                        ],
                         offset=column_start_offset + (t_chunk_start * C_DIM),
                         scalar_offset=col_start_id_sbuf,
                         indirect_dim=1,
@@ -183,7 +203,11 @@ def find_nonzero_indices(
                 nisa.dma_copy(
                     dst=input_sbuf[:, 0:CHUNK_T_TILES, 0:n_columns_this_round],
                     src=input_tensor.ap(
-                        pattern=[[C_DIM, T_TILE_SIZE], [C_DIM * T_TILE_SIZE, CHUNK_T_TILES], [1, n_columns_this_round]],
+                        pattern=[
+                            [C_DIM, T_TILE_SIZE],
+                            [C_DIM * T_TILE_SIZE, CHUNK_T_TILES],
+                            [1, n_columns_this_round],
+                        ],
                         offset=column_start_offset + (t_chunk_start * C_DIM),
                     ),
                 )
@@ -198,7 +222,9 @@ def find_nonzero_indices(
 
             # --- Scatter and transpose phase: per T tile ---
             for t_tile_idx in range(CHUNK_T_TILES):
-                transposed_psum = nl.ndarray((C_TILE_SIZE, T_TILE_SIZE), dtype=nl.float32, buffer=nl.psum)
+                transposed_psum = nl.ndarray(
+                    (C_TILE_SIZE, T_TILE_SIZE), dtype=nl.float32, buffer=nl.psum
+                )
                 nisa.nc_matmul(
                     dst=transposed_psum,
                     stationary=input_gpsimd_aligned_sbuf[:, t_tile_idx, :],
@@ -261,14 +287,18 @@ def find_nonzero_indices(
         # Copy final accumulated counts for this round of columns
         nisa.tensor_copy(
             dst=nonzero_counts_local[
-                0:1, column_round_idx * _NUM_GPSIMD_CORES : column_round_idx * _NUM_GPSIMD_CORES + n_columns_this_round
+                0:1,
+                column_round_idx * _NUM_GPSIMD_CORES : column_round_idx * _NUM_GPSIMD_CORES
+                + n_columns_this_round,
             ],
             src=offsets[0:1, 0:n_columns_this_round],
         )
 
     # Write nonzero counts to HBM
     nonzero_counts_reshape = nonzero_counts.reshape((1, C))
-    nisa.dma_copy(dst=nonzero_counts_reshape[0:1, C_offset : C_offset + C_per_shard], src=nonzero_counts_local)
+    nisa.dma_copy(
+        dst=nonzero_counts_reshape[0:1, C_offset : C_offset + C_per_shard], src=nonzero_counts_local
+    )
 
     return indices, nonzero_counts
 
@@ -328,7 +358,9 @@ def _store_indices_and_count(
     )
     nisa.tensor_copy(
         dst=src_data,
-        src=indices_sbuf[quadrant_idx * _QUADRANT_SIZE : quadrant_idx * _QUADRANT_SIZE + 1, 0, 0:chunk_size],
+        src=indices_sbuf[
+            quadrant_idx * _QUADRANT_SIZE : quadrant_idx * _QUADRANT_SIZE + 1, 0, 0:chunk_size
+        ],
     )
     nisa.dma_copy(
         dst=indices.ap(
@@ -349,7 +381,9 @@ def _store_indices_and_count(
     nisa.tensor_copy(
         dst=count_tile,
         src=indices_sbuf[
-            quadrant_idx * _QUADRANT_SIZE : quadrant_idx * _QUADRANT_SIZE + 1, 0, chunk_size : chunk_size + 1
+            quadrant_idx * _QUADRANT_SIZE : quadrant_idx * _QUADRANT_SIZE + 1,
+            0,
+            chunk_size : chunk_size + 1,
         ],
     )
     nisa.tensor_tensor(

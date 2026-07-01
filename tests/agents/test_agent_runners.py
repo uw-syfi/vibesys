@@ -8,9 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vibe_serve.agents import build_agent_runner
+from vibe_serve.agents.callbacks import AgentLogger
 from vibe_serve.agents.cli_runner import CliAgentRunner
 from vibe_serve.agents.deepagents_runner import DeepAgentsRunner
-from vibe_serve.agents.callbacks import AgentLogger
 from vibe_serve.config import Config
 from vibe_serve.schemas import (
     JudgeResponse,
@@ -40,11 +40,10 @@ class TestDeepAgentsRunner:
             feedback="",
             verdict=Verdict.PASS,
         )
-        with patch(
-            "vibe_serve.agents.deepagents_runner.create_deep_agent"
-        ) as mock_create, patch(
-            "vibe_serve.agents.deepagents_runner._run_typed_agent"
-        ) as mock_run:
+        with (
+            patch("vibe_serve.agents.deepagents_runner.create_deep_agent") as mock_create,
+            patch("vibe_serve.agents.deepagents_runner._run_typed_agent") as mock_run,
+        ):
             mock_create.return_value = MagicMock(name="deep_agent")
             mock_run.return_value = pass_response
 
@@ -87,12 +86,15 @@ class TestDeepAgentsRunner:
             captured_backends.append(kwargs["backend"])
             return MagicMock(name="deep_agent")
 
-        with patch(
-            "vibe_serve.agents.deepagents_runner.create_deep_agent",
-            side_effect=_capture,
-        ), patch(
-            "vibe_serve.agents.deepagents_runner._run_typed_agent",
-            return_value=_judge_fallback(),
+        with (
+            patch(
+                "vibe_serve.agents.deepagents_runner.create_deep_agent",
+                side_effect=_capture,
+            ),
+            patch(
+                "vibe_serve.agents.deepagents_runner._run_typed_agent",
+                return_value=_judge_fallback(),
+            ),
         ):
             runner = DeepAgentsRunner(
                 model="m",
@@ -188,9 +190,7 @@ def _make_fake_agent_class(
 class TestCliAgentRunner:
     """Tests for :class:`CliAgentRunner`."""
 
-    @pytest.mark.parametrize(
-        "provider", ["claude", "gemini", "codex", "opencode"]
-    )
+    @pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
     def test_cli_runner_invokes_provider_and_returns_parsed_response(
         self, monkeypatch, tmp_path, provider
     ):
@@ -231,9 +231,7 @@ class TestCliAgentRunner:
         assert len(captured) == 1
         assert captured[0].generate_calls[0]["cwd"] == str(workspace)
 
-    def test_cli_runner_falls_back_on_unparseable_output(
-        self, monkeypatch, tmp_path
-    ):
+    def test_cli_runner_falls_back_on_unparseable_output(self, monkeypatch, tmp_path):
         captured: list = []
         fake_cls = _make_fake_agent_class(
             generate_returns="banana",
@@ -273,11 +271,7 @@ class TestCliAgentRunner:
 
     def test_cli_runner_parses_fenced_json(self, monkeypatch, tmp_path):
         captured: list = []
-        fenced = (
-            '```json\n'
-            '{"analysis": "fenced", "feedback": "", "verdict": "pass"}\n'
-            '```'
-        )
+        fenced = '```json\n{"analysis": "fenced", "feedback": "", "verdict": "pass"}\n```'
         fake_cls = _make_fake_agent_class(
             generate_returns=fenced,
             captured=captured,
@@ -312,9 +306,7 @@ class TestCliAgentRunner:
         assert result.verdict == Verdict.PASS
         assert result.analysis == "fenced"
 
-    def test_cli_runner_materializes_skills_into_workspace(
-        self, monkeypatch, tmp_path
-    ):
+    def test_cli_runner_materializes_skills_into_workspace(self, monkeypatch, tmp_path):
         # Tier-organized source tree (like vibe-serve-skills):
         #   skill_src/
         #     algorithms/myskill/SKILL.md
@@ -375,9 +367,7 @@ class TestCliAgentRunner:
             assert (workspace / cli_dir / "myskill" / "file.txt").read_text() == "hello skill"
             assert (workspace / cli_dir / "tool-skill" / "SKILL.md").exists()
 
-    def test_cli_runner_materializes_single_skill_with_nested_content(
-        self, monkeypatch, tmp_path
-    ):
+    def test_cli_runner_materializes_single_skill_with_nested_content(self, monkeypatch, tmp_path):
         # Single-skill source (SKILL.md at the root, sub-dirs are reference
         # material inside the one skill). This mirrors the repo's
         # `serving-systems/` layout.
@@ -423,13 +413,15 @@ class TestCliAgentRunner:
         for cli_dir in (".claude/skills", ".agents/skills", ".gemini/skills"):
             assert (workspace / cli_dir / "serving-systems" / "SKILL.md").exists()
             assert (
-                workspace / cli_dir / "serving-systems"
-                / "algorithms" / "paged-attention" / "SKILL.md"
+                workspace
+                / cli_dir
+                / "serving-systems"
+                / "algorithms"
+                / "paged-attention"
+                / "SKILL.md"
             ).exists()
 
-    def test_cli_runner_appends_json_schema_to_prompt(
-        self, monkeypatch, tmp_path
-    ):
+    def test_cli_runner_appends_json_schema_to_prompt(self, monkeypatch, tmp_path):
         captured: list = []
         fake_cls = _make_fake_agent_class(
             generate_returns='{"analysis": "ok", "feedback": "", "verdict": "pass"}',
@@ -467,9 +459,7 @@ class TestCliAgentRunner:
         assert "JudgeResponse" in prompt
         assert prompt.startswith("THE-SYSTEM-PROMPT")
 
-    def test_cli_runner_writes_usage_jsonl_on_success(
-        self, monkeypatch, tmp_path
-    ):
+    def test_cli_runner_writes_usage_jsonl_on_success(self, monkeypatch, tmp_path):
         """CliAgentRunner appends one JSON record per invoke() to ``<log_dir>/usage.jsonl``."""
         captured: list = []
         fake_cls = _make_fake_agent_class(
@@ -535,9 +525,7 @@ class TestCliAgentRunner:
         assert record["duration_ms"] == 18_431
         assert "timestamp" in record
 
-    def test_cli_runner_usage_jsonl_appends_across_invocations(
-        self, monkeypatch, tmp_path
-    ):
+    def test_cli_runner_usage_jsonl_appends_across_invocations(self, monkeypatch, tmp_path):
         captured: list = []
         fake_cls = _make_fake_agent_class(
             generate_returns='{"analysis": "ok", "feedback": "", "verdict": "pass"}',
@@ -585,9 +573,7 @@ class TestCliAgentRunner:
         labels = [json.loads(line)["round_label"] for line in lines]
         assert labels == ["round #0", "round #1", "round #2"]
 
-    def test_cli_runner_usage_jsonl_written_on_parse_failure(
-        self, monkeypatch, tmp_path
-    ):
+    def test_cli_runner_usage_jsonl_written_on_parse_failure(self, monkeypatch, tmp_path):
         """Even when the CLI returns unparseable output, the tokens were spent —
         the usage record must still be appended so the audit log is complete."""
         captured: list = []
@@ -640,9 +626,7 @@ class TestCliAgentRunner:
         assert record["input_tokens"] == 7_000
         assert record["total_cost_usd"] == 0.0034
 
-    def test_cli_runner_usage_jsonl_noop_when_log_dir_none(
-        self, monkeypatch, tmp_path
-    ):
+    def test_cli_runner_usage_jsonl_noop_when_log_dir_none(self, monkeypatch, tmp_path):
         """Runners built without log_dir (tests, legacy callers) must still succeed."""
         captured: list = []
         fake_cls = _make_fake_agent_class(
@@ -683,9 +667,7 @@ class TestCliAgentRunner:
         )
         assert result.verdict == Verdict.PASS
 
-    def test_cli_runner_layers_env_into_subprocess_env(
-        self, monkeypatch, tmp_path
-    ):
+    def test_cli_runner_layers_env_into_subprocess_env(self, monkeypatch, tmp_path):
         captured: list = []
         fake_cls = _make_fake_agent_class(
             generate_returns='{"analysis": "ok", "feedback": "", "verdict": "pass"}',
@@ -722,9 +704,7 @@ class TestCliAgentRunner:
         assert len(captured) == 1
         assert captured[0].env.get("CUDA_VISIBLE_DEVICES") == "2"
 
-    def test_cli_runner_docker_uses_command_executor(
-        self, monkeypatch, tmp_path
-    ):
+    def test_cli_runner_docker_uses_command_executor(self, monkeypatch, tmp_path):
         from types import SimpleNamespace
 
         from vibe_serve.agents.docker_executor import DockerCommandExecutor
@@ -805,9 +785,7 @@ class TestCliAgentRunner:
         assert len(captured) == 1
         assert captured[0].executor.container_id == "container-two"
 
-    def test_cli_runner_invokes_install_then_generate_then_uninstall(
-        self, monkeypatch, tmp_path
-    ):
+    def test_cli_runner_invokes_install_then_generate_then_uninstall(self, monkeypatch, tmp_path):
         """The mcp_servers kwarg triggers a strict install → generate → uninstall sandwich."""
         from vibe_serve._agent_cli.base import MCPServerSpec
 
@@ -850,9 +828,7 @@ class TestCliAgentRunner:
         assert agent.uninstall_calls[0]["workspace"] == workspace
         assert agent.uninstall_calls[0]["servers"] == [spec]
 
-    def test_cli_runner_uninstalls_even_when_generate_raises(
-        self, monkeypatch, tmp_path
-    ):
+    def test_cli_runner_uninstalls_even_when_generate_raises(self, monkeypatch, tmp_path):
         """uninstall_mcp_servers must run in finally so a crashing generate
         doesn't leave stale config in the workspace."""
         from vibe_serve._agent_cli.base import MCPServerSpec
@@ -892,9 +868,7 @@ class TestCliAgentRunner:
         agent = captured[0]
         assert agent.event_log == ["install", "generate", "uninstall"]
 
-    def test_cli_runner_skips_install_uninstall_when_no_mcp_servers(
-        self, monkeypatch, tmp_path
-    ):
+    def test_cli_runner_skips_install_uninstall_when_no_mcp_servers(self, monkeypatch, tmp_path):
         """When mcp_servers is None or omitted, install/uninstall hooks are
         not called at all."""
         captured: list = []
@@ -974,17 +948,17 @@ class TestBuildAgentRunner:
     def test_build_agent_runner_cli_defaults_to_codex(self):
         """When backend=cli and no provider specified, defaults to codex."""
         runner = build_agent_runner(
-                _agent_config(backend="cli"),
-                agent_backend=None,
-                cli_provider=None,
-                backends=None,
-                skills=[],
-                skill_source_dirs=[],
-                model=None,
-                model_name="m",
-                run_log_file=None,
-                use_docker=False,
-            )
+            _agent_config(backend="cli"),
+            agent_backend=None,
+            cli_provider=None,
+            backends=None,
+            skills=[],
+            skill_source_dirs=[],
+            model=None,
+            model_name="m",
+            run_log_file=None,
+            use_docker=False,
+        )
         assert runner.backend_name == "cli"
         assert runner._provider == "codex"
 
@@ -1096,11 +1070,11 @@ class TestAgentLoggerEventHandler:
             agent_label="Judge",
         )
 
-        with patch.object(logger, "log_text") as mock_text, patch.object(
-            logger, "log_tool_call"
-        ) as mock_tool_call, patch.object(
-            logger, "log_tool_result"
-        ) as mock_tool_result:
+        with (
+            patch.object(logger, "log_text") as mock_text,
+            patch.object(logger, "log_tool_call") as mock_tool_call,
+            patch.object(logger, "log_tool_result") as mock_tool_result,
+        ):
             logger.on_thinking("hello")
             logger.on_tool_call("Bash", {"command": "ls"})
             logger.on_tool_result("Bash", stdout="output", exit_code=0)

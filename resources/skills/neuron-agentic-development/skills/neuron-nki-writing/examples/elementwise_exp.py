@@ -11,11 +11,12 @@ import nki
 import nki.isa as nisa
 import nki.language as nl
 
-
 # === Self-contained utilities ===
+
 
 def kernel_assert(condition: bool, error_text: str):
     assert condition, f"[INTERNAL_ERROR] [NCC_INKI016] Kernel validation exception: {error_text}"
+
 
 def div_ceil(n: int, d: int) -> int:
     return (n + d - 1) // d
@@ -125,12 +126,13 @@ if __name__ == "__main__":
     This test validates correctness against PyTorch reference implementation.
     """
     import os
+
     import torch
     from torch_xla.core import xla_model as xm
 
     # Set environment variables for profiling/debugging
-    os.environ['NEURON_RT_INSPECT_ENABLE'] = '1'
-    os.environ['NEURON_RT_INSPECT_DEVICE_PROFILE'] = '1'
+    os.environ["NEURON_RT_INSPECT_ENABLE"] = "1"
+    os.environ["NEURON_RT_INSPECT_DEVICE_PROFILE"] = "1"
     os.environ["NEURON_RT_INSPECT_OUTPUT_DIR"] = "./output_elementwise_exp"
     os.environ["NEURON_CC_FLAGS"] = "--target trn2"
     os.environ["NEURON_PLATFORM_TARGET_OVERRIDE"] = "trn2"

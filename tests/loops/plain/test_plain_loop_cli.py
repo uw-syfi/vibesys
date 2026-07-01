@@ -4,7 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
-from vibe_serve.cli import _build_plain_parser as build_parser, main
+from vibe_serve.cli import _build_plain_parser as build_parser
+from vibe_serve.cli import main
 from vibe_serve.loops.plain.loop import PlainLoopState
 
 
@@ -42,9 +43,14 @@ class TestBuildParser:
     def test_overrides_for_rounds(self):
         parser = build_parser()
         args = parser.parse_args(
-            ["--max-rounds", "10",
-             "--max-attempts-per-issue", "5",
-             "--max-issues-per-perf-eval", "2"]
+            [
+                "--max-rounds",
+                "10",
+                "--max-attempts-per-issue",
+                "5",
+                "--max-issues-per-perf-eval",
+                "2",
+            ]
         )
         assert args.max_rounds == 10
         assert args.max_attempts_per_issue == 5
@@ -94,16 +100,25 @@ class TestMain:
                 assert exc_info.value.code == 1
 
     def test_main_passes_round_args_to_run_loop(self):
-        with patch("sys.argv", [
-            *self._BASE_ARGV,
-            "--max-rounds", "7",
-            "--max-attempts-per-issue", "4",
-            "--max-issues-per-perf-eval", "2",
-        ]):
-            with self._patch_config(), patch(
-                "vibe_serve.loops.plain.loop.run_plain_loop",
-                return_value=True,
-            ) as mock_run:
+        with patch(
+            "sys.argv",
+            [
+                *self._BASE_ARGV,
+                "--max-rounds",
+                "7",
+                "--max-attempts-per-issue",
+                "4",
+                "--max-issues-per-perf-eval",
+                "2",
+            ],
+        ):
+            with (
+                self._patch_config(),
+                patch(
+                    "vibe_serve.loops.plain.loop.run_plain_loop",
+                    return_value=True,
+                ) as mock_run,
+            ):
                 main()
                 kwargs = mock_run.call_args.kwargs
                 assert kwargs["max_rounds"] == 7
@@ -111,18 +126,27 @@ class TestMain:
                 assert kwargs["max_issues_per_perf_eval"] == 2
 
     def test_main_start_round_overrides_loaded_state(self, tmp_path):
-        with patch("sys.argv", [
-            *self._BASE_ARGV,
-            "--resume", "fake-run-dir",
-            "--start-round", "3",
-        ]):
-            with self._patch_config(), patch(
-                "vibe_serve.cli._resolve_run_dir",
-                return_value="fake-run-dir",
-            ), patch(
-                "vibe_serve.loops.plain.loop.run_plain_loop",
-                return_value=True,
-            ) as mock_run:
+        with patch(
+            "sys.argv",
+            [
+                *self._BASE_ARGV,
+                "--resume",
+                "fake-run-dir",
+                "--start-round",
+                "3",
+            ],
+        ):
+            with (
+                self._patch_config(),
+                patch(
+                    "vibe_serve.cli._resolve_run_dir",
+                    return_value="fake-run-dir",
+                ),
+                patch(
+                    "vibe_serve.loops.plain.loop.run_plain_loop",
+                    return_value=True,
+                ) as mock_run,
+            ):
                 main()
                 kwargs = mock_run.call_args.kwargs
                 assert kwargs["existing"] is True
@@ -132,15 +156,23 @@ class TestMain:
                 assert state.bootstrap_done is True
 
     def test_main_forwards_agent_backend_and_cli_provider(self):
-        with patch("sys.argv", [
-            *self._BASE_ARGV,
-            "--agent-backend", "cli",
-            "--cli-provider", "claude",
-        ]):
-            with self._patch_config(), patch(
-                "vibe_serve.loops.plain.loop.run_plain_loop",
-                return_value=True,
-            ) as mock_run:
+        with patch(
+            "sys.argv",
+            [
+                *self._BASE_ARGV,
+                "--agent-backend",
+                "cli",
+                "--cli-provider",
+                "claude",
+            ],
+        ):
+            with (
+                self._patch_config(),
+                patch(
+                    "vibe_serve.loops.plain.loop.run_plain_loop",
+                    return_value=True,
+                ) as mock_run,
+            ):
                 main()
                 kwargs = mock_run.call_args.kwargs
                 assert kwargs["agent_backend"] == "cli"
@@ -148,29 +180,38 @@ class TestMain:
 
     def test_main_defaults_agent_backend_and_cli_provider_to_none(self):
         with patch("sys.argv", list(self._BASE_ARGV)):
-            with self._patch_config(), patch(
-                "vibe_serve.loops.plain.loop.run_plain_loop",
-                return_value=True,
-            ) as mock_run:
+            with (
+                self._patch_config(),
+                patch(
+                    "vibe_serve.loops.plain.loop.run_plain_loop",
+                    return_value=True,
+                ) as mock_run,
+            ):
                 main()
                 kwargs = mock_run.call_args.kwargs
                 assert kwargs["agent_backend"] is None
                 assert kwargs["cli_provider"] is None
 
-    @pytest.mark.parametrize(
-        "provider", ["claude", "gemini", "codex", "opencode"]
-    )
+    @pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
     def test_main_accepts_all_cli_providers(self, provider):
         """All four CLI providers must reach run_plain_loop without raising."""
-        with patch("sys.argv", [
-            *self._BASE_ARGV,
-            "--agent-backend", "cli",
-            "--cli-provider", provider,
-        ]):
-            with self._patch_config(), patch(
-                "vibe_serve.loops.plain.loop.run_plain_loop",
-                return_value=True,
-            ) as mock_run:
+        with patch(
+            "sys.argv",
+            [
+                *self._BASE_ARGV,
+                "--agent-backend",
+                "cli",
+                "--cli-provider",
+                provider,
+            ],
+        ):
+            with (
+                self._patch_config(),
+                patch(
+                    "vibe_serve.loops.plain.loop.run_plain_loop",
+                    return_value=True,
+                ) as mock_run,
+            ):
                 main()
                 kwargs = mock_run.call_args.kwargs
                 assert kwargs["agent_backend"] == "cli"

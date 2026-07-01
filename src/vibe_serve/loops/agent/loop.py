@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from vibe_serve.config import Config
-from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND
+from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
 from vibe_serve.loops.agent import issue_board
 from vibe_serve.loops.agent.domain import (
@@ -24,27 +24,23 @@ from vibe_serve.loops.agent.domain import (
     render_domain_section,
     resolve_domain,
 )
-from vibe_serve.schemas import (
-    OrchestratorPlan,
-    PreRoundDecision,
-    ProfilerSummary,
-)
 from vibe_serve.loops.profiler import invoke_profiler
 from vibe_serve.prompts import render_template
 from vibe_serve.schemas import (
     ImplementerResponse,
     JudgeResponse,
+    OrchestratorPlan,
+    PreRoundDecision,
+    ProfilerSummary,
     SingleAgentRoundResponse,
     Verdict,
 )
-
 
 _INNER_LOOPS = ("multi-agent", "single-agent")
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
 )
-
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -142,11 +138,7 @@ def _detect_plateau(
     The orchestrator gets this verbatim in its prompt; phrasing is
     user-facing.
     """
-    fresh = [
-        r
-        for r in records
-        if r.perf_metric is not None and not r.profile_skipped
-    ]
+    fresh = [r for r in records if r.perf_metric is not None and not r.profile_skipped]
     if len(fresh) < min_streak:
         return None
     latest_unit = fresh[-1].perf_unit
@@ -250,7 +242,9 @@ def _run_pre_round_decision(
         ),
         response_cls=PreRoundDecision,
         fallback_factory=lambda: PreRoundDecision(
-            need_profile=False, profile_focus="", reasoning="fallback: default to skip",
+            need_profile=False,
+            profile_focus="",
+            reasoning="fallback: default to skip",
         ),
         round_label=f"round-{round_number}-pre",
     )
@@ -388,8 +382,7 @@ def _run_implementer(
         kind="implementer",
         system_prompt=system_prompt,
         user_prompt=(
-            "Carry out the orchestrator's task above. Append your summary "
-            "to progress.md when done."
+            "Carry out the orchestrator's task above. Append your summary to progress.md when done."
         ),
         response_cls=ImplementerResponse,
         fallback_factory=lambda: ImplementerResponse(
@@ -434,8 +427,7 @@ def _run_judge(
         kind="judge",
         system_prompt=system_prompt,
         user_prompt=(
-            "Review the implementation per the criteria above. Return "
-            "only the JSON verdict."
+            "Review the implementation per the criteria above. Return only the JSON verdict."
         ),
         response_cls=JudgeResponse,
         fallback_factory=lambda: JudgeResponse(
@@ -628,7 +620,7 @@ def run_agent_loop(
     try:
         while round_number <= max_rounds:
             ctx.switch_log_file(f"round{round_number:03d}")
-            ctx.lprint(f"\n{'='*60}\n  Round {round_number}/{max_rounds}\n{'='*60}\n")
+            ctx.lprint(f"\n{'=' * 60}\n  Round {round_number}/{max_rounds}\n{'=' * 60}\n")
 
             # --- Pre-round decision (skip on fresh cold start) ---
             profiler_summary: ProfilerSummary | None = None
@@ -648,7 +640,8 @@ def run_agent_loop(
                     profiler_summary = _run_profiler(
                         ctx,
                         round_number=round_number,
-                        profile_focus=pre_decision.profile_focus or "general latency hotspots on /v1/completions",
+                        profile_focus=pre_decision.profile_focus
+                        or "general latency hotspots on /v1/completions",
                         modality=modality,
                         progress_path=progress_path,
                         objective=objective,
@@ -692,13 +685,11 @@ def run_agent_loop(
                 if target and target.commit:
                     _git_checkout(ctx, target.commit)
                     ctx.lprint(
-                        f"Reverted workspace to round {plan.revert_to_round} "
-                        f"({target.commit[:8]})."
+                        f"Reverted workspace to round {plan.revert_to_round} ({target.commit[:8]})."
                     )
                 else:
                     ctx.lprint(
-                        f"[warn] cannot revert: no commit recorded for round "
-                        f"{plan.revert_to_round}"
+                        f"[warn] cannot revert: no commit recorded for round {plan.revert_to_round}"
                     )
 
             # --- Implementer / Judge retry loop ---
@@ -773,9 +764,7 @@ def run_agent_loop(
                     else None
                 )
                 perf_unit = (
-                    single_agent_response.perf_unit
-                    if (single_agent_response and passed)
-                    else None
+                    single_agent_response.perf_unit if (single_agent_response and passed) else None
                 )
                 # Remember the latest profile for the orchestrator's next plan
                 # and carry forward the implicit profile focus.
@@ -784,15 +773,9 @@ def run_agent_loop(
             else:
                 profile_skipped = profiler_summary is None
                 perf_metric = (
-                    profiler_summary.perf_metric
-                    if (profiler_summary and passed)
-                    else None
+                    profiler_summary.perf_metric if (profiler_summary and passed) else None
                 )
-                perf_unit = (
-                    profiler_summary.perf_unit
-                    if (profiler_summary and passed)
-                    else None
-                )
+                perf_unit = profiler_summary.perf_unit if (profiler_summary and passed) else None
             records.append(
                 _RoundRecord(
                     round_number=round_number,
@@ -807,7 +790,10 @@ def run_agent_loop(
 
             if not passed:
                 issue_board.append_exhaustion_note(
-                    progress_path, round_number, max_retries_per_round, feedback or "",
+                    progress_path,
+                    round_number,
+                    max_retries_per_round,
+                    feedback or "",
                 )
                 carry.exhaustion_info = (
                     f"Round {round_number} did not pass after "

@@ -30,9 +30,9 @@ from pathlib import Path
 
 from vibe_serve.loops.plain.issue_board import (
     Issue,
+    IssueBoard,
     IssueEvent,
     IssueStatus,
-    IssueBoard,
 )
 
 _DEFAULT_SLUG = "untitled"
@@ -68,9 +68,7 @@ def slugify(title: str, max_len: int = _SLUG_MAX_LEN) -> str:
     # ASCII here — non-decomposable unicode chars (em-dash, etc.) are
     # left in place so the regex below treats them as separators.
     normalised = unicodedata.normalize("NFKD", title)
-    no_marks = "".join(
-        ch for ch in normalised if not unicodedata.combining(ch)
-    )
+    no_marks = "".join(ch for ch in normalised if not unicodedata.combining(ch))
     lowered = no_marks.lower()
     collapsed = re.sub(r"[^a-z0-9]+", "-", lowered)
     stripped = collapsed.strip("-")

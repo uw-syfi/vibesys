@@ -21,7 +21,6 @@ from vibe_serve.loops.evolve.population import (
     _dominates,
 )
 
-
 # ---------------------------------------------------------------------------
 # Individual: JSON round-trip
 # ---------------------------------------------------------------------------
@@ -137,9 +136,7 @@ def test_select_parent_low_temperature_concentrates_on_best():
     """A near-zero temperature should pick the best almost every time."""
     pop = Population([_passed(1, 1.0), _passed(2, 5.0), _passed(3, 10.0)])
     rng = random.Random(123)
-    counts = Counter(
-        pop.select_parent(rng=rng, temperature=0.01).id for _ in range(200)
-    )
+    counts = Counter(pop.select_parent(rng=rng, temperature=0.01).id for _ in range(200))
     # The best (id=3) should dominate.
     assert counts[3] > 180
 
@@ -148,9 +145,7 @@ def test_select_parent_high_temperature_spreads():
     """High temperature flattens the distribution toward uniform."""
     pop = Population([_passed(1, 1.0), _passed(2, 5.0), _passed(3, 10.0)])
     rng = random.Random(123)
-    counts = Counter(
-        pop.select_parent(rng=rng, temperature=100.0).id for _ in range(600)
-    )
+    counts = Counter(pop.select_parent(rng=rng, temperature=100.0).id for _ in range(600))
     # All three should be picked a meaningful number of times.
     assert all(counts[i] > 100 for i in (1, 2, 3))
 
@@ -193,7 +188,10 @@ def test_select_inspirations_top_first_then_random():
 def test_select_inspirations_handles_small_population():
     pop = Population([_passed(1, 5.0), _passed(2, 6.0)])
     picks = pop.select_inspirations(
-        parent_id=1, k_top=2, k_random=2, rng=random.Random(0),
+        parent_id=1,
+        k_top=2,
+        k_random=2,
+        rng=random.Random(0),
     )
     # Only one other passed individual exists; no dupes / no errors.
     assert [p.id for p in picks] == [2]
@@ -202,7 +200,10 @@ def test_select_inspirations_handles_small_population():
 def test_select_inspirations_empty_when_only_parent_passed():
     pop = Population([_passed(1, 5.0), _failed(2)])
     picks = pop.select_inspirations(
-        parent_id=1, k_top=3, k_random=3, rng=random.Random(0),
+        parent_id=1,
+        k_top=3,
+        k_random=3,
+        rng=random.Random(0),
     )
     assert picks == []
 
@@ -311,22 +312,26 @@ def test_dominates_missing_metric_treats_as_incomparable():
 
 
 def test_frontier_returns_only_non_dominated():
-    pop = Population([
-        _multi(1, {"tput": 100.0, "lat": 80.0}),  # frontier (high tput)
-        _multi(2, {"tput": 80.0, "lat": 50.0}),   # frontier (low lat)
-        _multi(3, {"tput": 70.0, "lat": 90.0}),   # dominated by id=1 and id=2
-        _multi(4, {"tput": 90.0, "lat": 60.0}),   # frontier (middle)
-    ])
+    pop = Population(
+        [
+            _multi(1, {"tput": 100.0, "lat": 80.0}),  # frontier (high tput)
+            _multi(2, {"tput": 80.0, "lat": 50.0}),  # frontier (low lat)
+            _multi(3, {"tput": 70.0, "lat": 90.0}),  # dominated by id=1 and id=2
+            _multi(4, {"tput": 90.0, "lat": 60.0}),  # frontier (middle)
+        ]
+    )
     objs = [Objective("tput", "max"), Objective("lat", "min")]
     front_ids = {i.id for i in pop.frontier(objs)}
     assert front_ids == {1, 2, 4}
 
 
 def test_frontier_excludes_individuals_missing_metrics():
-    pop = Population([
-        _multi(1, {"tput": 100.0, "lat": 80.0}),
-        _multi(2, {"tput": 80.0}),  # missing 'lat'
-    ])
+    pop = Population(
+        [
+            _multi(1, {"tput": 100.0, "lat": 80.0}),
+            _multi(2, {"tput": 80.0}),  # missing 'lat'
+        ]
+    )
     objs = [Objective("tput", "max"), Objective("lat", "min")]
     front_ids = {i.id for i in pop.frontier(objs)}
     # Only id=1 is fully metric'd.
@@ -345,16 +350,17 @@ def test_frontier_empty_when_no_objectives():
 
 def test_select_parent_pareto_mode_draws_from_frontier_with_full_bias():
     """frontier_bias=1.0 → parent always sampled from the Pareto front."""
-    pop = Population([
-        _multi(1, {"tput": 100.0, "lat": 80.0}),  # frontier
-        _multi(2, {"tput": 80.0, "lat": 50.0}),   # frontier
-        _multi(3, {"tput": 50.0, "lat": 200.0}),  # dominated
-    ])
+    pop = Population(
+        [
+            _multi(1, {"tput": 100.0, "lat": 80.0}),  # frontier
+            _multi(2, {"tput": 80.0, "lat": 50.0}),  # frontier
+            _multi(3, {"tput": 50.0, "lat": 200.0}),  # dominated
+        ]
+    )
     objs = [Objective("tput", "max"), Objective("lat", "min")]
     rng = random.Random(0)
     counts = Counter(
-        pop.select_parent(rng=rng, objectives=objs, frontier_bias=1.0).id
-        for _ in range(200)
+        pop.select_parent(rng=rng, objectives=objs, frontier_bias=1.0).id for _ in range(200)
     )
     assert counts[3] == 0  # never the dominated one
 
@@ -364,16 +370,22 @@ def test_select_parent_pareto_mode_falls_back_to_scalar_when_bias_zero():
 
     With temperature near 0, the highest perf_metric (id=1, perf=100) wins.
     """
-    pop = Population([
-        _multi(1, {"tput": 100.0, "lat": 80.0}),
-        _multi(2, {"tput": 80.0, "lat": 50.0}),
-    ])
+    pop = Population(
+        [
+            _multi(1, {"tput": 100.0, "lat": 80.0}),
+            _multi(2, {"tput": 80.0, "lat": 50.0}),
+        ]
+    )
     objs = [Objective("tput", "max"), Objective("lat", "min")]
     rng = random.Random(0)
     counts = Counter(
         pop.select_parent(
-            rng=rng, objectives=objs, frontier_bias=0.0, temperature=0.01,
-        ).id for _ in range(100)
+            rng=rng,
+            objectives=objs,
+            frontier_bias=0.0,
+            temperature=0.01,
+        ).id
+        for _ in range(100)
     )
     assert counts[1] > 90
 
@@ -381,10 +393,12 @@ def test_select_parent_pareto_mode_falls_back_to_scalar_when_bias_zero():
 def test_select_parent_falls_back_when_frontier_is_empty():
     """No individual reports both objectives → frontier is empty →
     even with bias=1.0, scalar softmax kicks in so the loop isn't blocked."""
-    pop = Population([
-        _multi(1, {"tput": 100.0}),  # missing 'lat'
-        _multi(2, {"tput": 80.0}),   # missing 'lat'
-    ])
+    pop = Population(
+        [
+            _multi(1, {"tput": 100.0}),  # missing 'lat'
+            _multi(2, {"tput": 80.0}),  # missing 'lat'
+        ]
+    )
     objs = [Objective("tput", "max"), Objective("lat", "min")]
     rng = random.Random(0)
     pick = pop.select_parent(rng=rng, objectives=objs, frontier_bias=1.0)
@@ -395,13 +409,15 @@ def test_select_parent_falls_back_when_frontier_is_empty():
 
 def test_select_inspirations_pareto_mode_pulls_from_frontier_first():
     """Top slots come from the Pareto frontier sorted by primary objective."""
-    pop = Population([
-        _multi(1, {"tput": 100.0, "lat": 80.0}),  # frontier
-        _multi(2, {"tput": 80.0, "lat": 50.0}),   # frontier
-        _multi(3, {"tput": 90.0, "lat": 60.0}),   # frontier
-        _multi(4, {"tput": 60.0, "lat": 100.0}),  # dominated
-        _multi(5, {"tput": 50.0, "lat": 110.0}),  # dominated
-    ])
+    pop = Population(
+        [
+            _multi(1, {"tput": 100.0, "lat": 80.0}),  # frontier
+            _multi(2, {"tput": 80.0, "lat": 50.0}),  # frontier
+            _multi(3, {"tput": 90.0, "lat": 60.0}),  # frontier
+            _multi(4, {"tput": 60.0, "lat": 100.0}),  # dominated
+            _multi(5, {"tput": 50.0, "lat": 110.0}),  # dominated
+        ]
+    )
     objs = [Objective("tput", "max"), Objective("lat", "min")]
     rng = random.Random(0)
     picks = pop.select_inspirations(
@@ -422,12 +438,14 @@ def test_select_inspirations_pareto_mode_pulls_from_frontier_first():
 def test_select_inspirations_backfills_when_frontier_smaller_than_k_top():
     """When the frontier has only one non-parent member but k_top=3,
     fill the remaining slots from non-frontier passers."""
-    pop = Population([
-        _multi(1, {"tput": 100.0, "lat": 80.0}),  # parent
-        _multi(2, {"tput": 80.0, "lat": 50.0}),   # frontier (only one besides parent)
-        _multi(3, {"tput": 70.0, "lat": 90.0}),   # dominated
-        _multi(4, {"tput": 60.0, "lat": 100.0}),  # dominated
-    ])
+    pop = Population(
+        [
+            _multi(1, {"tput": 100.0, "lat": 80.0}),  # parent
+            _multi(2, {"tput": 80.0, "lat": 50.0}),  # frontier (only one besides parent)
+            _multi(3, {"tput": 70.0, "lat": 90.0}),  # dominated
+            _multi(4, {"tput": 60.0, "lat": 100.0}),  # dominated
+        ]
+    )
     objs = [Objective("tput", "max"), Objective("lat", "min")]
     rng = random.Random(0)
     picks = pop.select_inspirations(

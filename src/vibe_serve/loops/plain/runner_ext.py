@@ -23,12 +23,12 @@ from __future__ import annotations
 from typing import Any, TypeVar
 
 from langchain_core.tools import BaseTool
-from vibe_serve._agent_cli.base import MCPServerSpec
 from pydantic import BaseModel
 
+from vibe_serve._agent_cli.base import MCPServerSpec
 from vibe_serve.agents.base import AgentRunner
-from vibe_serve.loops.plain.mcp_config import build_issue_mcp_spec
 from vibe_serve.loops.plain.issue_board import IssueBoard, IssueType
+from vibe_serve.loops.plain.mcp_config import build_issue_mcp_spec
 from vibe_serve.loops.plain.tools import build_issue_tools
 
 T = TypeVar("T", bound=BaseModel)

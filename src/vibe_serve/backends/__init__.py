@@ -43,7 +43,9 @@ def get(
     if backend not in _REGISTRY:
         raise ValueError(f"No backend impl registered for {backend!r}")
     return _REGISTRY[backend](
-        log_dir=log_dir, log=log, image=image,
+        log_dir=log_dir,
+        log=log,
+        image=image,
     )
 
 

@@ -20,11 +20,9 @@ from typing import Literal, Mapping
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT
+from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
 
-Provider = Literal[
-    "vertex-ai", "anthropic", "google-genai", "openai", "openai-compatible"
-]
+Provider = Literal["vertex-ai", "anthropic", "google-genai", "openai", "openai-compatible"]
 
 
 class _Strict(BaseModel):
@@ -34,9 +32,7 @@ class _Strict(BaseModel):
 
 
 class ModelCfg(_Strict):
-    name: str = Field(
-        description="Model identifier, e.g. 'claude-sonnet-4-6'. Required."
-    )
+    name: str = Field(description="Model identifier, e.g. 'claude-sonnet-4-6'. Required.")
     provider: Provider | None = Field(
         default=None,
         description=(
@@ -122,9 +118,7 @@ class ProvidersCfg(_Strict):
     openai_compatible: OpenAICompatCfg | None = Field(
         default=None,
         alias="openai-compatible",
-        description=(
-            "OpenAI-compatible endpoint settings ([providers.openai-compatible])."
-        ),
+        description=("OpenAI-compatible endpoint settings ([providers.openai-compatible])."),
     )
     anthropic: _CredEnvProviderCfg | None = Field(
         default=None,
@@ -173,8 +167,7 @@ class AgentCfg(_Strict):
     cli_timeout: int | None = Field(
         default=None,
         description=(
-            "Per-invocation timeout for the CLI agent, in seconds. None → the "
-            "runner default."
+            "Per-invocation timeout for the CLI agent, in seconds. None → the runner default."
         ),
     )
 
@@ -187,9 +180,7 @@ class LoadLevelCfg(_Strict):
 
     rate: int = Field(description="Request rate (requests/sec) for this load level.")
     duration: int = Field(description="Benchmark duration in seconds at this load level.")
-    max_tokens: int = Field(
-        description="Max output tokens per request at this load level."
-    )
+    max_tokens: int = Field(description="Max output tokens per request at this load level.")
 
 
 class PerfEvalCfg(_Strict):
@@ -205,9 +196,7 @@ class PerfEvalCfg(_Strict):
 class Config(_Strict):
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
-    model: ModelCfg = Field(
-        description="[model] — model name and provider. Required."
-    )
+    model: ModelCfg = Field(description="[model] — model name and provider. Required.")
     thinking: ThinkingCfg = Field(
         default_factory=ThinkingCfg, description="[thinking] — reasoning/thinking controls."
     )

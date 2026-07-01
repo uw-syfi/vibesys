@@ -24,7 +24,6 @@ from statistics import mean
 
 import httpx
 
-
 PROMPT_POOL = [
     "a small red robot holding a handwritten sign that says VibeServe",
     "a studio product photo of a ceramic mug shaped like a rocket",
@@ -34,7 +33,9 @@ PROMPT_POOL = [
 ]
 
 
-def select_prompt(args: argparse.Namespace, rng: random.Random, idx: int, *, warmup: bool = False) -> str:
+def select_prompt(
+    args: argparse.Namespace, rng: random.Random, idx: int, *, warmup: bool = False
+) -> str:
     if args.prompt is not None:
         return args.prompt
     if warmup:
@@ -207,7 +208,9 @@ def summarize_results(results: list[dict], wall_clock: float) -> dict:
     }
 
 
-async def run_warmup(client: httpx.AsyncClient, args: argparse.Namespace, url: str) -> tuple[list[dict], float]:
+async def run_warmup(
+    client: httpx.AsyncClient, args: argparse.Namespace, url: str
+) -> tuple[list[dict], float]:
     if args.warmup_requests <= 0:
         return [], 0.0
 
@@ -428,7 +431,9 @@ def main() -> None:
     parser.add_argument("--url", default="http://localhost:8000", help="Server base URL")
     parser.add_argument("--endpoint", default="/v1/images/generations", help="Endpoint path")
     parser.add_argument("--rate", type=float, default=1.0, help="Request rate in req/s")
-    parser.add_argument("--duration", type=float, default=60.0, help="Duration when num requests is unset")
+    parser.add_argument(
+        "--duration", type=float, default=60.0, help="Duration when num requests is unset"
+    )
     parser.add_argument("--num-requests", type=int, default=None, help="Total requests")
     parser.add_argument(
         "--closed-loop",
@@ -458,18 +463,30 @@ def main() -> None:
         default=0,
         help="Requests to run before measurement and exclude from latency/throughput stats",
     )
-    parser.add_argument("--steps", type=int, default=20, help="Diffusion inference steps per request")
-    parser.add_argument("--guidance-scale", type=float, default=5.0, help="Classifier-free guidance scale")
-    parser.add_argument("--prompt", type=str, default=None, help="Fixed prompt for every benchmark request")
+    parser.add_argument(
+        "--steps", type=int, default=20, help="Diffusion inference steps per request"
+    )
+    parser.add_argument(
+        "--guidance-scale", type=float, default=5.0, help="Classifier-free guidance scale"
+    )
+    parser.add_argument(
+        "--prompt", type=str, default=None, help="Fixed prompt for every benchmark request"
+    )
     parser.add_argument("--seed", type=int, default=42, help="Benchmark scheduling seed")
-    parser.add_argument("--request-seed", type=int, default=None, help="Base model seed for deterministic requests")
+    parser.add_argument(
+        "--request-seed", type=int, default=None, help="Base model seed for deterministic requests"
+    )
     parser.add_argument(
         "--fixed-request-seed",
         action="store_true",
         help="Use request seed unchanged for every request instead of incrementing it by request index",
     )
-    parser.add_argument("--timeout", type=float, default=600.0, help="Per-request timeout in seconds")
-    parser.add_argument("--output-json", type=str, default=None, help="Write structured result JSON")
+    parser.add_argument(
+        "--timeout", type=float, default=600.0, help="Per-request timeout in seconds"
+    )
+    parser.add_argument(
+        "--output-json", type=str, default=None, help="Write structured result JSON"
+    )
     parser.add_argument(
         "--save-images-dir",
         type=str,

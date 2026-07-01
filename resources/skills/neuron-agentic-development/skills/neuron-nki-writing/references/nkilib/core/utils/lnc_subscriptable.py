@@ -72,7 +72,9 @@ def _verify_protocol_sync(func: Callable, protocol: TorchRefProtocolType):
     )
 
     for (fn, fp), (pn, pp) in zip(func_params, protocol_params):
-        kernel_assert(fn == pn, f"Parameter name mismatch: function has '{fn}', Protocol has '{pn}'")
+        kernel_assert(
+            fn == pn, f"Parameter name mismatch: function has '{fn}', Protocol has '{pn}'"
+        )
         kernel_assert(
             fp.annotation == pp.annotation,
             f"Parameter '{fn}' annotation mismatch: function has {fp.annotation}, Protocol has {pp.annotation}",
@@ -129,7 +131,9 @@ def _extract_var_docstring(source: str, var_name: str) -> str | None:
             if node.target.id == var_name:
                 if i + 1 < len(tree.body):
                     next_node = tree.body[i + 1]
-                    if isinstance(next_node, ast.Expr) and isinstance(next_node.value, ast.Constant):
+                    if isinstance(next_node, ast.Expr) and isinstance(
+                        next_node.value, ast.Constant
+                    ):
                         if isinstance(next_node.value.value, str):
                             return next_node.value.value
     return None

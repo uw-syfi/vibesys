@@ -10,8 +10,8 @@ import asyncio
 
 import pytest
 
-from vibe_serve.loops.plain.mcp_server import build_parser, build_server
 from vibe_serve.loops.plain.issue_board import IssueType
+from vibe_serve.loops.plain.mcp_server import build_parser, build_server
 
 
 def _ns(tmp_path, *extra: str):
@@ -45,18 +45,20 @@ class TestArgparse:
         assert args.creator == "agent"
         assert args.iteration == 1
         assert args.cap is None
-        assert args.allowed_types == frozenset(
-            {IssueType.BUG, IssueType.FEATURE, IssueType.PERF}
-        )
+        assert args.allowed_types == frozenset({IssueType.BUG, IssueType.FEATURE, IssueType.PERF})
         assert args.read_only is False
 
     def test_full_judge_policy(self, tmp_path):
         args = _ns(
             tmp_path,
-            "--creator", "judge",
-            "--iteration", "3",
-            "--cap", "1",
-            "--allowed-types", "bug",
+            "--creator",
+            "judge",
+            "--iteration",
+            "3",
+            "--cap",
+            "1",
+            "--allowed-types",
+            "bug",
         )
         assert args.creator == "judge"
         assert args.iteration == 3
@@ -69,9 +71,7 @@ class TestArgparse:
 
     def test_allowed_types_with_whitespace(self, tmp_path):
         args = _ns(tmp_path, "--allowed-types", "bug, perf , feature")
-        assert args.allowed_types == frozenset(
-            {IssueType.BUG, IssueType.FEATURE, IssueType.PERF}
-        )
+        assert args.allowed_types == frozenset({IssueType.BUG, IssueType.FEATURE, IssueType.PERF})
 
     def test_allowed_types_rejects_garbage(self, tmp_path):
         with pytest.raises(SystemExit):
@@ -96,7 +96,10 @@ class TestToolRegistration:
         server = build_server(_ns(tmp_path))
         names = asyncio.run(_list_tool_names(server))
         assert names == {
-            "list_issues", "get_issue", "search_issues", "create_issue",
+            "list_issues",
+            "get_issue",
+            "search_issues",
+            "create_issue",
         }
 
     def test_read_only_omits_create_issue(self, tmp_path):
@@ -121,8 +124,11 @@ class TestEndToEnd:
         server = build_server(_ns(tmp_path, "--creator", "perf_eval"))
         created = asyncio.run(
             _call_tool(
-                server, "create_issue",
-                type="perf", title="paged kv", description="reduce frag",
+                server,
+                "create_issue",
+                type="perf",
+                title="paged kv",
+                description="reduce frag",
             )
         )
         assert created == "created issue #1"
@@ -135,22 +141,31 @@ class TestEndToEnd:
         server = build_server(
             _ns(
                 tmp_path,
-                "--creator", "judge",
-                "--cap", "1",
-                "--allowed-types", "bug",
+                "--creator",
+                "judge",
+                "--cap",
+                "1",
+                "--allowed-types",
+                "bug",
             )
         )
         msg1 = asyncio.run(
             _call_tool(
-                server, "create_issue",
-                type="bug", title="t1", description="d",
+                server,
+                "create_issue",
+                type="bug",
+                title="t1",
+                description="d",
             )
         )
         assert msg1 == "created issue #1"
         msg2 = asyncio.run(
             _call_tool(
-                server, "create_issue",
-                type="bug", title="t2", description="d",
+                server,
+                "create_issue",
+                type="bug",
+                title="t2",
+                description="d",
             )
         )
         assert "cap reached" in msg2
@@ -159,15 +174,21 @@ class TestEndToEnd:
         server = build_server(
             _ns(
                 tmp_path,
-                "--creator", "judge",
-                "--cap", "1",
-                "--allowed-types", "bug",
+                "--creator",
+                "judge",
+                "--cap",
+                "1",
+                "--allowed-types",
+                "bug",
             )
         )
         msg = asyncio.run(
             _call_tool(
-                server, "create_issue",
-                type="perf", title="p", description="d",
+                server,
+                "create_issue",
+                type="perf",
+                title="p",
+                description="d",
             )
         )
         assert "may only file types" in msg
@@ -177,14 +198,20 @@ class TestEndToEnd:
         server = build_server(_ns(tmp_path, "--creator", "perf_eval"))
         asyncio.run(
             _call_tool(
-                server, "create_issue",
-                type="perf", title="Add paged KV", description="d",
+                server,
+                "create_issue",
+                type="perf",
+                title="Add paged KV",
+                description="d",
             )
         )
         asyncio.run(
             _call_tool(
-                server, "create_issue",
-                type="bug", title="unrelated", description="d",
+                server,
+                "create_issue",
+                type="bug",
+                title="unrelated",
+                description="d",
             )
         )
         out = asyncio.run(_call_tool(server, "search_issues", query="paged"))
@@ -195,8 +222,11 @@ class TestEndToEnd:
         server = build_server(_ns(tmp_path, "--creator", "perf_eval"))
         asyncio.run(
             _call_tool(
-                server, "create_issue",
-                type="perf", title="paged kv", description="reduce frag",
+                server,
+                "create_issue",
+                type="perf",
+                title="paged kv",
+                description="reduce frag",
             )
         )
         out = asyncio.run(_call_tool(server, "get_issue", issue_id=1))

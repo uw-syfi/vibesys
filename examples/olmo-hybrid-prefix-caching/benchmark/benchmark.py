@@ -36,11 +36,10 @@ import random
 import statistics
 import sys
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import httpx
-
 
 DEFAULT_MODEL_ID = "allenai/Olmo-Hybrid-7B"
 
@@ -138,13 +137,12 @@ async def stream_one_request(
             if resp.status_code != 200:
                 body_bytes = await resp.aread()
                 raise RuntimeError(
-                    f"http {resp.status_code}: "
-                    f"{body_bytes.decode('utf-8', errors='replace')[:500]}"
+                    f"http {resp.status_code}: {body_bytes.decode('utf-8', errors='replace')[:500]}"
                 )
             async for line in resp.aiter_lines():
                 if not line or not line.startswith("data: "):
                     continue
-                data = line[len("data: "):]
+                data = line[len("data: ") :]
                 if data == "[DONE]":
                     break
                 try:
@@ -258,15 +256,23 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         # tokens) then dominates, which is the regime we want to measure.
         if args.warmup > 0:
             warm_shared, warm_uniques = build_token_ids(
-                args.shared_len, args.unique_len, args.warmup, vocab_size,
-                seed=args.seed - 1, shared_seed=args.shared_seed,
+                args.shared_len,
+                args.unique_len,
+                args.warmup,
+                vocab_size,
+                seed=args.seed - 1,
+                shared_seed=args.shared_seed,
             )
             for w in range(args.warmup):
                 warm_prompt = warm_shared + warm_uniques[w]
                 t0 = time.perf_counter()
                 warm = await stream_one_request(
-                    client, base_url, args.model, warm_prompt,
-                    max_tokens=min(8, args.max_tokens), idx=-1 - w,
+                    client,
+                    base_url,
+                    args.model,
+                    warm_prompt,
+                    max_tokens=min(8, args.max_tokens),
+                    idx=-1 - w,
                 )
                 t1 = time.perf_counter()
                 print(
@@ -282,13 +288,19 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
             file=sys.stderr,
         )
         t_run0 = time.perf_counter()
-        results: list[RequestResult] = await asyncio.gather(*[
-            stream_one_request(
-                client, base_url, args.model, prompts[i],
-                args.max_tokens, i,
-            )
-            for i in range(n_requests)
-        ])
+        results: list[RequestResult] = await asyncio.gather(
+            *[
+                stream_one_request(
+                    client,
+                    base_url,
+                    args.model,
+                    prompts[i],
+                    args.max_tokens,
+                    i,
+                )
+                for i in range(n_requests)
+            ]
+        )
         t_run = time.perf_counter() - t_run0
 
     # --- Aggregate ---
@@ -390,47 +402,93 @@ def main() -> None:
     )
     p.add_argument("--url", default="http://localhost:8000", help="Server base URL")
     p.add_argument(
-        "--model", default=DEFAULT_MODEL_ID,
+        "--model",
+        default=DEFAULT_MODEL_ID,
         help="HF model id, used both for tokenizer and the `model` field in completions calls",
     )
-    p.add_argument("--shared-len", type=int, default=32_768,
-                   help="Shared prefix length in tokens (default 32768).")
-    p.add_argument("--unique-len", type=int, default=128,
-                   help="Unique tail length per request in tokens (default 128).")
-    p.add_argument("--max-tokens", type=int, default=128,
-                   help="Output tokens per request (default 128).")
-    p.add_argument("--requests", type=int, default=20,
-                   help="Number of concurrent requests (default 20).")
+    p.add_argument(
+        "--shared-len",
+        type=int,
+        default=32_768,
+        help="Shared prefix length in tokens (default 32768).",
+    )
+    p.add_argument(
+        "--unique-len",
+        type=int,
+        default=128,
+        help="Unique tail length per request in tokens (default 128).",
+    )
+    p.add_argument(
+        "--max-tokens", type=int, default=128, help="Output tokens per request (default 128)."
+    )
+    p.add_argument(
+        "--requests", type=int, default=20, help="Number of concurrent requests (default 20)."
+    )
     # Alias for orchestrate's sanity-check invocation, which uses
     # `--num-requests 2`. Mirrors the convention from other input bundles.
-    p.add_argument("--num-requests", type=int, default=None,
-                   help="Alias for --requests (orchestrate sanity-check uses this name).")
-    p.add_argument("--warmup", type=int, default=1,
-                   help="Number of warmup requests to populate the prefix cache (default 1).")
-    p.add_argument("--seed", type=int, default=int(time.time()),
-                   help="RNG seed for per-request unique tails (default: wall clock).")
-    p.add_argument("--shared-seed", type=int, default=0,
-                   help=("RNG seed for the shared prefix. Default 0 keeps the "
-                         "32k prefix identical across invocations, which is the "
-                         "whole point of measuring shared-prefix caching."))
-    p.add_argument("--output-json", type=str, default=None,
-                   help="Optional path to write structured results.")
+    p.add_argument(
+        "--num-requests",
+        type=int,
+        default=None,
+        help="Alias for --requests (orchestrate sanity-check uses this name).",
+    )
+    p.add_argument(
+        "--warmup",
+        type=int,
+        default=1,
+        help="Number of warmup requests to populate the prefix cache (default 1).",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=int(time.time()),
+        help="RNG seed for per-request unique tails (default: wall clock).",
+    )
+    p.add_argument(
+        "--shared-seed",
+        type=int,
+        default=0,
+        help=(
+            "RNG seed for the shared prefix. Default 0 keeps the "
+            "32k prefix identical across invocations, which is the "
+            "whole point of measuring shared-prefix caching."
+        ),
+    )
+    p.add_argument(
+        "--output-json", type=str, default=None, help="Optional path to write structured results."
+    )
 
     # Back-compat no-ops so the orchestrate sanity / profiler invocations
     # (which default to `--rate 1 --num-requests 5 --max-tokens 64`) do not
     # choke on flags this benchmark doesn't need.
-    p.add_argument("--rate", type=float, default=None,
-                   help="Ignored — this benchmark is closed-loop concurrent only.")
-    p.add_argument("--duration", type=float, default=None,
-                   help="Ignored — this benchmark runs to --requests / --num-requests.")
-    p.add_argument("--prompt-len", type=int, default=None,
-                   help="Ignored — prompts are synthesised from --shared-len + --unique-len.")
-    p.add_argument("--temperature", type=float, default=None,
-                   help="Ignored — temperature is fixed at 0 for deterministic decoding.")
-    p.add_argument("--endpoint", type=str, default=None,
-                   help="Ignored — endpoint is /v1/completions.")
-    p.add_argument("--audio-dir", type=str, default=None,
-                   help="Ignored — text-only benchmark.")
+    p.add_argument(
+        "--rate",
+        type=float,
+        default=None,
+        help="Ignored — this benchmark is closed-loop concurrent only.",
+    )
+    p.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Ignored — this benchmark runs to --requests / --num-requests.",
+    )
+    p.add_argument(
+        "--prompt-len",
+        type=int,
+        default=None,
+        help="Ignored — prompts are synthesised from --shared-len + --unique-len.",
+    )
+    p.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="Ignored — temperature is fixed at 0 for deterministic decoding.",
+    )
+    p.add_argument(
+        "--endpoint", type=str, default=None, help="Ignored — endpoint is /v1/completions."
+    )
+    p.add_argument("--audio-dir", type=str, default=None, help="Ignored — text-only benchmark.")
 
     args = p.parse_args()
     asyncio.run(run_benchmark(args))

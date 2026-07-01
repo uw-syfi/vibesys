@@ -15,10 +15,10 @@ from vibe_serve.agent_runner import _log_and_print
 from vibe_serve.agents import build_agent_runner
 from vibe_serve.config import Config, as_config
 from vibe_serve.constants import (
-    ComputeBackend,
     DEFAULT_AGENT_BACKEND,
     DEFAULT_COMPUTE_BACKEND,
     PROJECT_ROOT,
+    ComputeBackend,
 )
 from vibe_serve.llm_client import _build_model
 from vibe_serve.sandbox.run_environment import (
@@ -171,8 +171,14 @@ class _RunContext:
         # the Docker ancestor-mount redirect dir for the same reason.
         # ``.cache`` holds any HF-download fallback (drafter, etc.).
         self.EXCLUDED_WORKSPACE_DIRS = {
-            ".claude", "__pycache__", ".git", "repos",
-            "_auth", "_opt_vibeserve", "_mounts", ".cache",
+            ".claude",
+            "__pycache__",
+            ".git",
+            "repos",
+            "_auth",
+            "_opt_vibeserve",
+            "_mounts",
+            ".cache",
         }
         self.debug = debug
         self.git_tracking = git_tracking
@@ -186,9 +192,7 @@ class _RunContext:
         )
         # Resolve agent backend + cli provider early so Docker setup can
         # add provider-specific bind mounts and init commands.
-        self._resolved_backend = (
-            agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND
-        )
+        self._resolved_backend = agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND
         self._cli_provider = cli_provider or config.agent.cli_provider or "codex"
 
         self.model = _build_model(config)
@@ -276,7 +280,13 @@ class _RunContext:
         # fresh sandbox volume at start, and codex-cli fails to load them
         # (e.g. skill description exceeds a newer CLI's length limit).
         # Mirrors _materialize_skills destinations inside cli_runner.
-        _cli_skill_dirs = (".agents/skills", ".claude/skills", ".gemini/skills", ".cursor/skills", ".opencode/skills")
+        _cli_skill_dirs = (
+            ".agents/skills",
+            ".claude/skills",
+            ".gemini/skills",
+            ".cursor/skills",
+            ".opencode/skills",
+        )
         for src in skill_source_paths:
             rel = src.name
             if (self.workspace / rel).exists():
@@ -564,10 +574,7 @@ class _RunContext:
                 else:
                     shutil.copy2(child, child_dst)
             except PermissionError:
-                self.lprint(
-                    f"[warn] _copy_excluding_extras: could not copy "
-                    f"{child.name} to {dst}"
-                )
+                self.lprint(f"[warn] _copy_excluding_extras: could not copy {child.name} to {dst}")
         if self.run_environment.isolated:
             # In containerized mode, external symlinks become bind mounts
             # (Docker) or volume uploads (Modal). Remove the broken symlinks
@@ -629,7 +636,9 @@ class _RunContext:
             "GIT_CONFIG_VALUE_0": str(self.workspace),
         }
 
-    def _git_run(self, cmd: list[str], *, check: bool = True, env: dict | None = None) -> subprocess.CompletedProcess:
+    def _git_run(
+        self, cmd: list[str], *, check: bool = True, env: dict | None = None
+    ) -> subprocess.CompletedProcess:
         """Run a git command in workspace, logging stderr on failure."""
         if env is None:
             env = {**os.environ, **self._GIT_ENV}
@@ -647,8 +656,11 @@ class _RunContext:
     # pointed at the workspace (or a torch.compile dump) would otherwise be
     # committed and bloat history across rounds.
     _ARTIFACT_GITIGNORE_PATTERNS: tuple[str, ...] = (
-        "*.neff", "*.ntff", "*.neuron",
-        "neuroncc_compile_workdir/", "neuron-compile-cache/",
+        "*.neff",
+        "*.ntff",
+        "*.neuron",
+        "neuroncc_compile_workdir/",
+        "neuron-compile-cache/",
     )
 
     def _workspace_gitignore(self) -> str:
@@ -737,10 +749,7 @@ class _RunContext:
         prefix = "" if (not existing or existing.endswith("\n")) else "\n"
         exclude_file.write_text(existing + prefix + "\n".join(new) + "\n")
         shown = ", ".join(new[:5]) + ("…" if len(new) > 5 else "")
-        self.lprint(
-            f"[git-tracking] excluded {len(new)} unreadable path(s) from "
-            f"snapshot: {shown}"
-        )
+        self.lprint(f"[git-tracking] excluded {len(new)} unreadable path(s) from snapshot: {shown}")
 
     def _git_add_all(self) -> None:
         """``git add -A``, resilient to files the host user cannot read.
@@ -765,9 +774,13 @@ class _RunContext:
         """Commit current workspace state with *label* as the commit message."""
         self._git_add_all()
         # git diff --cached --quiet exits 1 when there are staged changes
-        has_changes = self._git_run(
-            ["git", "diff", "--cached", "--quiet"], check=False,
-        ).returncode != 0
+        has_changes = (
+            self._git_run(
+                ["git", "diff", "--cached", "--quiet"],
+                check=False,
+            ).returncode
+            != 0
+        )
         if has_changes:
             self._git_run(["git", "commit", "-m", label])
         else:

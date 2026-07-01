@@ -17,7 +17,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 REFERENCE_DIR = Path(__file__).resolve().parent
 DEFAULT_SOURCE_DIR = REFERENCE_DIR / "Show-o" / "show-o2"
 DEFAULT_MODEL_DIR = REFERENCE_DIR / "model"
@@ -276,7 +275,9 @@ class ShowO2Model:
         repr=False,
     )
     _attention_mask_cache: dict[tuple[Any, ...], Any] = field(default_factory=dict, repr=False)
-    _attention_mask_identity_cache: dict[tuple[Any, ...], Any] = field(default_factory=dict, repr=False)
+    _attention_mask_identity_cache: dict[tuple[Any, ...], Any] = field(
+        default_factory=dict, repr=False
+    )
     _prepared_prompt_cache: dict[tuple[Any, ...], tuple[Any, Any]] = field(
         default_factory=dict,
         repr=False,
@@ -334,7 +335,9 @@ class ShowO2Model:
         if vae_conv2d_tail_start < 0:
             raise ValueError(f"Unsupported VAE conv2d tail start: {vae_conv2d_tail_start}")
         if vae_conv2d_tail_max_modules is not None and vae_conv2d_tail_max_modules < 0:
-            raise ValueError(f"Unsupported VAE conv2d tail max modules: {vae_conv2d_tail_max_modules}")
+            raise ValueError(
+                f"Unsupported VAE conv2d tail max modules: {vae_conv2d_tail_max_modules}"
+            )
         if vae_upsample_mode not in {"default", "convtranspose"}:
             raise ValueError(f"Unsupported VAE upsample mode: {vae_upsample_mode}")
         if vae_decoder_backend not in {"torch", "coreml", "mlx"}:
@@ -346,12 +349,17 @@ class ShowO2Model:
         if vae_mlx_dtype not in {"float32", "float16", "bfloat16"}:
             raise ValueError(f"Unsupported MLX VAE dtype: {vae_mlx_dtype}")
         if vae_mlx_low_rank_highres_rank < 0:
-            raise ValueError(f"Unsupported MLX low-rank high-res rank: {vae_mlx_low_rank_highres_rank}")
+            raise ValueError(
+                f"Unsupported MLX low-rank high-res rank: {vae_mlx_low_rank_highres_rank}"
+            )
         if vae_mlx_low_rank_highres_min_size < 0:
             raise ValueError(
                 f"Unsupported MLX low-rank high-res min size: {vae_mlx_low_rank_highres_min_size}"
             )
-        if vae_mlx_low_rank_highres_tail_rank is not None and vae_mlx_low_rank_highres_tail_rank < 0:
+        if (
+            vae_mlx_low_rank_highres_tail_rank is not None
+            and vae_mlx_low_rank_highres_tail_rank < 0
+        ):
             raise ValueError(
                 f"Unsupported MLX low-rank high-res tail rank: {vae_mlx_low_rank_highres_tail_rank}"
             )
@@ -362,8 +370,7 @@ class ShowO2Model:
             )
         if vae_mlx_low_rank_override_layer is not None and vae_mlx_low_rank_override_layer < 0:
             raise ValueError(
-                "Unsupported MLX low-rank override layer: "
-                f"{vae_mlx_low_rank_override_layer}"
+                f"Unsupported MLX low-rank override layer: {vae_mlx_low_rank_override_layer}"
             )
         if (
             vae_mlx_low_rank_override_conv_index is not None
@@ -375,8 +382,7 @@ class ShowO2Model:
             )
         if vae_mlx_low_rank_override_rank is not None and vae_mlx_low_rank_override_rank < 0:
             raise ValueError(
-                "Unsupported MLX low-rank override rank: "
-                f"{vae_mlx_low_rank_override_rank}"
+                f"Unsupported MLX low-rank override rank: {vae_mlx_low_rank_override_rank}"
             )
         if (
             vae_mlx_approx_highres_residual_start_layer is not None
@@ -458,9 +464,7 @@ class ShowO2Model:
             source_dir=source,
             resolution=resolution,
             vae_path=(
-                ensure_wan_vae(vae_path)
-                if load_vae and vae_decoder_backend != "coreml"
-                else None
+                ensure_wan_vae(vae_path) if load_vae and vae_decoder_backend != "coreml" else None
             ),
             vae_device=resolved_vae_device,
             vae_dtype=resolved_vae_dtype,
@@ -484,7 +488,9 @@ class ShowO2Model:
                 if vae_mlx_low_rank_highres_tail_rank is None
                 else int(vae_mlx_low_rank_highres_tail_rank)
             ),
-            vae_mlx_low_rank_highres_tail_start_layer=int(vae_mlx_low_rank_highres_tail_start_layer),
+            vae_mlx_low_rank_highres_tail_start_layer=int(
+                vae_mlx_low_rank_highres_tail_start_layer
+            ),
             vae_mlx_low_rank_override_layer=(
                 None
                 if vae_mlx_low_rank_override_layer is None
@@ -534,8 +540,12 @@ class ShowO2Model:
         else:
             self.vae_path = self.vae_path or ensure_wan_vae()
             vae_path = str(self.vae_path)
-        vae_device = "cpu" if self.vae_decoder_backend == "mlx" else (self.vae_device or self.device)
-        vae_dtype = torch.float32 if self.vae_decoder_backend == "mlx" else (self.vae_dtype or self.dtype)
+        vae_device = (
+            "cpu" if self.vae_decoder_backend == "mlx" else (self.vae_device or self.device)
+        )
+        vae_dtype = (
+            torch.float32 if self.vae_decoder_backend == "mlx" else (self.vae_dtype or self.dtype)
+        )
         self.vae_model = WanVAE(
             vae_pth=vae_path,
             dtype=vae_dtype,
@@ -772,7 +782,9 @@ class ShowO2Model:
         return sample_fn
 
     @staticmethod
-    def _limited_cache_set(cache: dict, key: tuple[Any, ...], value: Any, *, limit: int = 64) -> None:
+    def _limited_cache_set(
+        cache: dict, key: tuple[Any, ...], value: Any, *, limit: int = 64
+    ) -> None:
         if len(cache) >= limit:
             cache.clear()
         cache[key] = value
@@ -796,7 +808,9 @@ class ShowO2Model:
             dtype=torch.bool,
             device=self.device,
         ).triu(diagonal=1)
-        mask.masked_fill_(upper_triangle.view(1, 1, int(max_seq_len), int(max_seq_len)), blocked_value)
+        mask.masked_fill_(
+            upper_triangle.view(1, 1, int(max_seq_len), int(max_seq_len)), blocked_value
+        )
         self._limited_cache_set(self._attention_base_mask_cache, key, mask, limit=16)
         return mask, False
 
@@ -807,7 +821,9 @@ class ShowO2Model:
         if cached is not None:
             return cached, True
 
-        position_values = tuple(int(value) for value in positions.detach().cpu().reshape(-1).tolist())
+        position_values = tuple(
+            int(value) for value in positions.detach().cpu().reshape(-1).tolist()
+        )
         key = (*base_key, position_values)
         cached = self._attention_mask_cache.get(key)
         if cached is not None:
@@ -824,8 +840,8 @@ class ShowO2Model:
                     mask[
                         batch_index,
                         :,
-                        offset:offset + length,
-                        offset:offset + length,
+                        offset : offset + length,
+                        offset : offset + length,
                     ] = 0
         self._limited_cache_set(self._attention_mask_cache, key, mask)
         self._limited_cache_set(self._attention_mask_identity_cache, identity_key, mask)
@@ -895,7 +911,11 @@ class ShowO2Model:
             torch.manual_seed(seed)
             if self.device.type == "cuda":
                 torch.cuda.manual_seed_all(seed)
-            elif self.device.type == "mps" and hasattr(torch, "mps") and hasattr(torch.mps, "manual_seed"):
+            elif (
+                self.device.type == "mps"
+                and hasattr(torch, "mps")
+                and hasattr(torch.mps, "manual_seed")
+            ):
                 torch.mps.manual_seed(seed)
 
         (
@@ -964,9 +984,13 @@ class ShowO2Model:
             timings["mask_cache_hit"] = 1.0 if mask_cache_hit else 0.0
 
             sampler_started = time.perf_counter()
-            sample_fn = None if num_inference_steps == 1 else self._get_sample_fn(
-                num_inference_steps,
-                num_t2i_image_tokens,
+            sample_fn = (
+                None
+                if num_inference_steps == 1
+                else self._get_sample_fn(
+                    num_inference_steps,
+                    num_t2i_image_tokens,
+                )
             )
             timings["sampler_setup_ms"] = (time.perf_counter() - sampler_started) * 1000.0
 

@@ -9,7 +9,6 @@ import pytest
 
 from vibe_serve.cli import _extract_flag, _extract_loop_selection, main
 
-
 # ---------------------------------------------------------------------------
 # Flag extraction
 # ---------------------------------------------------------------------------
@@ -85,9 +84,7 @@ def test_extract_loop_selection_unknown_outer_loop_exits():
 )
 def test_main_routes_to_runner(loop_name: str, runner_attr: str):
     argv = ["vibe-serve", "--outer-loop", loop_name, "--exp-name", "x"]
-    with patch.object(sys, "argv", argv), patch(
-        f"vibe_serve.cli.{runner_attr}"
-    ) as runner:
+    with patch.object(sys, "argv", argv), patch(f"vibe_serve.cli.{runner_attr}") as runner:
         main()
         runner.assert_called_once()
         args = runner.call_args.args[0]

@@ -33,27 +33,22 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 
 from vibe_serve.config import Config
-from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND
+from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
 from vibe_serve.loops.evolve.population import (
     Individual,
     Objective,
     Population,
 )
-from vibe_serve.schemas import MutatorResponse
-from vibe_serve.schemas import ProfilerSummary
 from vibe_serve.loops.profiler import invoke_profiler
-from vibe_serve.schemas import JudgeResponse, Verdict
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
 )
-
+from vibe_serve.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
-_AGENT_TEMPLATE_DIR = (
-    Path(__file__).resolve().parent.parent / "agent" / "templates"
-)
+_AGENT_TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "agent" / "templates"
 
 # Templates here include the orchestrate loop's modality fragments (e.g.
 # `_modality/text_generation/implementer.j2`) and reuse its profiler
@@ -117,8 +112,6 @@ def _current_commit_sha(ctx: _RunContext) -> str | None:
 # Profiler MCP wiring (reused from orchestrate; kept here to avoid an
 # import-time dependency on the orchestrate loop)
 # ---------------------------------------------------------------------------
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -189,10 +182,7 @@ def _run_judge(
     return ctx.invoke(
         kind="judge",
         system_prompt=system_prompt,
-        user_prompt=(
-            "Review the offspring per the criteria above. Return only "
-            "the JSON verdict."
-        ),
+        user_prompt=("Review the offspring per the criteria above. Return only the JSON verdict."),
         response_cls=JudgeResponse,
         fallback_factory=lambda: JudgeResponse(
             analysis="Judge produced no structured response.",
@@ -219,8 +209,7 @@ If the benchmark JSON does not contain a field, set its entry to `null` rather t
 
 def _format_objectives_for_profiler(objectives: list[Objective]) -> str:
     return "\n".join(
-        f"- `{o.name}` ({'maximize' if o.direction == 'max' else 'minimize'})"
-        for o in objectives
+        f"- `{o.name}` ({'maximize' if o.direction == 'max' else 'minimize'})" for o in objectives
     )
 
 
@@ -234,8 +223,7 @@ def _run_profiler(
     objectives: list[Objective] | None = None,
 ) -> ProfilerSummary | None:
     template = (
-        "profiler_prompt_torch.j2" if ctx.profiler_kind == "torch"
-        else "profiler_prompt_nsys.j2"
+        "profiler_prompt_torch.j2" if ctx.profiler_kind == "torch" else "profiler_prompt_nsys.j2"
     )
     base_prompt = _render(
         template,
@@ -349,13 +337,15 @@ def run_evolve_loop(
         for generation in range(1, max_generations + 1):
             ctx.switch_log_file(f"gen{generation:03d}")
             ctx.lprint(
-                f"\n{'='*60}\n  Generation {generation}/{max_generations} — "
+                f"\n{'=' * 60}\n  Generation {generation}/{max_generations} — "
                 f"population={len(population)} (passed={len(population.passed)})\n"
-                f"{'='*60}\n"
+                f"{'=' * 60}\n"
             )
 
             for child_idx in range(1, children_per_generation + 1):
-                ctx.lprint(f"\n--- gen {generation} child {child_idx}/{children_per_generation} ---\n")
+                ctx.lprint(
+                    f"\n--- gen {generation} child {child_idx}/{children_per_generation} ---\n"
+                )
 
                 # 1. Pick parent + inspirations.
                 parent = population.select_parent(
@@ -449,9 +439,7 @@ def run_evolve_loop(
                 )
 
                 # 6. Commit + record.
-                ctx.snapshot_workspace(
-                    f"gen-{generation}-child-{child_idx}"
-                )
+                ctx.snapshot_workspace(f"gen-{generation}-child-{child_idx}")
                 commit = _current_commit_sha(ctx)
                 child = Individual(
                     id=population.next_id(),

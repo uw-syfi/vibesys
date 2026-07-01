@@ -55,8 +55,11 @@ def _load_tokenizer(model_path):
 
             tok = AutoTokenizer.from_pretrained(path)
             excluded = set(getattr(tok, "all_special_ids", []) or [])
-            pool = [t for t in range(len(tok))
-                    if t not in excluded and tok.decode([t], skip_special_tokens=True).strip()]
+            pool = [
+                t
+                for t in range(len(tok))
+                if t not in excluded and tok.decode([t], skip_special_tokens=True).strip()
+            ]
             if pool:
                 print(f"[prompt] tokenizer from {path}; pool={len(pool)}")
                 return tok, pool
@@ -68,7 +71,9 @@ def _load_tokenizer(model_path):
 
 def make_prompt(tokenizer, pool, input_len, rng):
     if tokenizer is not None and pool:
-        return tokenizer.decode([rng.choice(pool) for _ in range(input_len)], skip_special_tokens=True)
+        return tokenizer.decode(
+            [rng.choice(pool) for _ in range(input_len)], skip_special_tokens=True
+        )
     return " ".join(["token"] * input_len)
 
 
@@ -98,7 +103,7 @@ async def send_request(client, url, prompt, output_len, temperature):
             async for raw in resp.aiter_lines():
                 if not raw.startswith("data: "):
                     continue
-                payload = raw[len("data: "):]
+                payload = raw[len("data: ") :]
                 if payload.strip() == "[DONE]":
                     break
                 chunk = json.loads(payload)
@@ -116,7 +121,13 @@ async def send_request(client, url, prompt, output_len, temperature):
     gen = usage_tokens if usage_tokens is not None else out_tokens
     ttft = (t_first - t_send) if t_first is not None else None
     tpot = (t_done - t_first) / (gen - 1) if (t_first is not None and gen > 1) else None
-    return {"error": error, "gen_tokens": gen, "ttft_s": ttft, "tpot_s": tpot, "latency_s": t_done - t_send}
+    return {
+        "error": error,
+        "gen_tokens": gen,
+        "ttft_s": ttft,
+        "tpot_s": tpot,
+        "latency_s": t_done - t_send,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +140,7 @@ def _pct(vals, p):
         return None
     s = sorted(vals)
     import math
+
     return s[max(0, min(int(math.ceil(p / 100 * len(s))) - 1, len(s) - 1))]
 
 
@@ -150,15 +162,25 @@ async def measure(client, url, tokenizer, pool, length, concurrency, duration, t
     ttfts = [r["ttft_s"] for r in ok if r["ttft_s"] is not None]
     tpots = [r["tpot_s"] for r in ok if r["tpot_s"] is not None]
     return {
-        "input_len": length, "output_len": length, "concurrency": concurrency,
-        "completed": len(ok), "failed": len(results) - len(ok),
-        "wall_s": wall, "generated_tokens": gen,
+        "input_len": length,
+        "output_len": length,
+        "concurrency": concurrency,
+        "completed": len(ok),
+        "failed": len(results) - len(ok),
+        "wall_s": wall,
+        "generated_tokens": gen,
         "output_tokens_per_s": gen / wall if wall > 0 else 0.0,
         "request_throughput_per_s": len(ok) / wall if wall > 0 else 0.0,
-        "ttft_s": {"p50": _pct(ttfts, 50), "p90": _pct(ttfts, 90),
-                   "mean": statistics.fmean(ttfts) if ttfts else None},
-        "tpot_s": {"p50": _pct(tpots, 50), "p90": _pct(tpots, 90),
-                   "mean": statistics.fmean(tpots) if tpots else None},
+        "ttft_s": {
+            "p50": _pct(ttfts, 50),
+            "p90": _pct(ttfts, 90),
+            "mean": statistics.fmean(ttfts) if ttfts else None,
+        },
+        "tpot_s": {
+            "p50": _pct(tpots, 50),
+            "p90": _pct(tpots, 90),
+            "mean": statistics.fmean(tpots) if tpots else None,
+        },
     }
 
 
@@ -174,9 +196,19 @@ async def run_benchmark(args):
     tokenizer, pool = _load_tokenizer(args.model_path)
     rng = random.Random(args.seed)
 
-    print(json.dumps({"url": url, "lengths": lengths, "concurrency": concs,
-                      "duration_s": args.duration, "warmup_requests": args.warmup_requests}, indent=2),
-          flush=True)
+    print(
+        json.dumps(
+            {
+                "url": url,
+                "lengths": lengths,
+                "concurrency": concs,
+                "duration_s": args.duration,
+                "warmup_requests": args.warmup_requests,
+            },
+            indent=2,
+        ),
+        flush=True,
+    )
 
     scenarios: list[dict] = []
     async with httpx.AsyncClient() as client:
@@ -186,33 +218,52 @@ async def run_benchmark(args):
             warm = []
             for length in lengths:
                 for _ in range(args.warmup_requests):
-                    warm.append(send_request(client, url,
-                                             make_prompt(tokenizer, pool, length, rng),
-                                             length, args.temperature))
+                    warm.append(
+                        send_request(
+                            client,
+                            url,
+                            make_prompt(tokenizer, pool, length, rng),
+                            length,
+                            args.temperature,
+                        )
+                    )
             await asyncio.gather(*warm)
             print("Warm-up done.\n", flush=True)
 
         # --- Timed closed-loop sweep over (length, concurrency). ---
         for length in lengths:
             for c in concs:
-                print(f"MEASURE length={length} concurrency={c} for {args.duration}s ...", flush=True)
-                s = await measure(client, url, tokenizer, pool, length, c,
-                                  args.duration, args.temperature, rng)
+                print(
+                    f"MEASURE length={length} concurrency={c} for {args.duration}s ...", flush=True
+                )
+                s = await measure(
+                    client, url, tokenizer, pool, length, c, args.duration, args.temperature, rng
+                )
                 scenarios.append(s)
-                print(f"  -> {s['output_tokens_per_s']:.1f} tok/s "
-                      f"({s['completed']} reqs, tpot_p50={s['tpot_s']['p50']})", flush=True)
+                print(
+                    f"  -> {s['output_tokens_per_s']:.1f} tok/s "
+                    f"({s['completed']} reqs, tpot_p50={s['tpot_s']['p50']})",
+                    flush=True,
+                )
 
     # Headline: peak sustained output tok/s across the sweep (warm, no overload).
     peak = max((s["output_tokens_per_s"] for s in scenarios), default=0.0)
     best = max(scenarios, key=lambda s: s["output_tokens_per_s"], default=None)
 
     result = {
-        "config": {"url": url, "lengths": lengths, "concurrency": concs,
-                   "duration_s": args.duration, "warmup_requests": args.warmup_requests,
-                   "temperature": args.temperature, "seed": args.seed},
-        "aggregate_throughput": peak,            # headline: peak steady-state tok/s
-        "peak_scenario": {k: best[k] for k in ("input_len", "concurrency",
-                          "output_tokens_per_s")} if best else None,
+        "config": {
+            "url": url,
+            "lengths": lengths,
+            "concurrency": concs,
+            "duration_s": args.duration,
+            "warmup_requests": args.warmup_requests,
+            "temperature": args.temperature,
+            "seed": args.seed,
+        },
+        "aggregate_throughput": peak,  # headline: peak steady-state tok/s
+        "peak_scenario": {k: best[k] for k in ("input_len", "concurrency", "output_tokens_per_s")}
+        if best
+        else None,
         "scenarios": scenarios,
     }
 
@@ -220,8 +271,10 @@ async def run_benchmark(args):
     print("  Benchmark summary (warm, closed-loop)")
     print("=" * 56)
     for s in scenarios:
-        print(f"  len={s['input_len']:>4} c={s['concurrency']:>2}  "
-              f"{s['output_tokens_per_s']:7.1f} tok/s   req/s={s['request_throughput_per_s']:.2f}")
+        print(
+            f"  len={s['input_len']:>4} c={s['concurrency']:>2}  "
+            f"{s['output_tokens_per_s']:7.1f} tok/s   req/s={s['request_throughput_per_s']:.2f}"
+        )
     print(f"\nAggregate throughput (peak steady-state): {peak:.1f} tok/s  (headline)")
 
     if args.output_json:
@@ -232,22 +285,41 @@ async def run_benchmark(args):
 
 
 def main():
-    p = argparse.ArgumentParser(description="Warm, closed-loop benchmark for an OpenAI-compatible server.")
+    p = argparse.ArgumentParser(
+        description="Warm, closed-loop benchmark for an OpenAI-compatible server."
+    )
     p.add_argument("--url", default="http://localhost:8000")
     p.add_argument("--endpoint", default="/v1/completions")
-    p.add_argument("--lengths", default="128,256,512",
-                   help="Comma-separated fixed in/out token lengths (input_len == output_len).")
-    p.add_argument("--concurrency", default="1,2,4,8",
-                   help="Comma-separated closed-loop concurrency levels to sweep.")
-    p.add_argument("--duration", type=float, default=20.0,
-                   help="Seconds to hold each (length, concurrency) measurement.")
-    p.add_argument("--warmup-requests", type=int, default=2,
-                   help="Untimed requests per length to compile buckets before timing.")
+    p.add_argument(
+        "--lengths",
+        default="128,256,512",
+        help="Comma-separated fixed in/out token lengths (input_len == output_len).",
+    )
+    p.add_argument(
+        "--concurrency",
+        default="1,2,4,8",
+        help="Comma-separated closed-loop concurrency levels to sweep.",
+    )
+    p.add_argument(
+        "--duration",
+        type=float,
+        default=20.0,
+        help="Seconds to hold each (length, concurrency) measurement.",
+    )
+    p.add_argument(
+        "--warmup-requests",
+        type=int,
+        default=2,
+        help="Untimed requests per length to compile buckets before timing.",
+    )
     p.add_argument("--temperature", type=float, default=0.0)
     p.add_argument("--model-path", default=None)
     p.add_argument("--seed", type=int, default=1234)
-    p.add_argument("--output-json", default=None,
-                   help="Write structured results (incl. aggregate_throughput) here.")
+    p.add_argument(
+        "--output-json",
+        default=None,
+        help="Write structured results (incl. aggregate_throughput) here.",
+    )
     args = p.parse_args()
     asyncio.run(run_benchmark(args))
 

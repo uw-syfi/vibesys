@@ -115,15 +115,23 @@ class RunEnvironment(Protocol):
     backend_image: str | None
 
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession: ...
-    def repair_workspace(self, workspace: Path, *, backend: ComputeBackendImpl, log: Callable[[str], None]) -> None: ...
-    def remove_workspace_child(self, workspace: Path, rel_path: str, *, backend: ComputeBackendImpl) -> bool: ...
+    def repair_workspace(
+        self, workspace: Path, *, backend: ComputeBackendImpl, log: Callable[[str], None]
+    ) -> None: ...
+    def remove_workspace_child(
+        self, workspace: Path, rel_path: str, *, backend: ComputeBackendImpl
+    ) -> bool: ...
 
 
 class _NoopWorkspaceRecovery:
-    def repair_workspace(self, workspace: Path, *, backend: ComputeBackendImpl, log: Callable[[str], None]) -> None:
+    def repair_workspace(
+        self, workspace: Path, *, backend: ComputeBackendImpl, log: Callable[[str], None]
+    ) -> None:
         return
 
-    def remove_workspace_child(self, workspace: Path, rel_path: str, *, backend: ComputeBackendImpl) -> bool:
+    def remove_workspace_child(
+        self, workspace: Path, rel_path: str, *, backend: ComputeBackendImpl
+    ) -> bool:
         return False
 
 
@@ -235,7 +243,9 @@ class DockerEnvironment:
             stop_on_close=True,
         )
 
-    def repair_workspace(self, workspace: Path, *, backend: ComputeBackendImpl, log: Callable[[str], None]) -> None:
+    def repair_workspace(
+        self, workspace: Path, *, backend: ComputeBackendImpl, log: Callable[[str], None]
+    ) -> None:
         """Chown workspace files back to the host user after Docker writes."""
         if not workspace.exists():
             return
@@ -257,7 +267,9 @@ class DockerEnvironment:
         except Exception as exc:
             log(f"[warn] chown failed for {workspace}: {exc}")
 
-    def remove_workspace_child(self, workspace: Path, rel_path: str, *, backend: ComputeBackendImpl) -> bool:
+    def remove_workspace_child(
+        self, workspace: Path, rel_path: str, *, backend: ComputeBackendImpl
+    ) -> bool:
         target = workspace / rel_path
         try:
             _docker_workspace_run(
@@ -296,9 +308,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                 image=str(options["image"]) if options.get("image") else None,
                 gpu=str(options.get("gpu") or "H100"),
                 model_volume=(
-                    str(options["model_volume"])
-                    if options.get("model_volume")
-                    else None
+                    str(options["model_volume"]) if options.get("model_volume") else None
                 ),
                 app=str(options.get("app") or "vibeserve"),
             )
@@ -394,10 +404,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                 f"meta.json at {meta_path} missing required 'model_id' field "
                 "(needed for Modal auto-upload)"
             )
-        hf_available = bool(
-            os.environ.get("HF_TOKEN")
-            or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-        )
+        hf_available = bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"))
         local_model = request.ref_dir / "model"
         local_path = None
         if not hf_available and local_model.exists() and local_model.resolve().is_dir():
@@ -410,7 +417,8 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         )
 
     def _ensure_draft_volume(
-        self, request: RunEnvironmentRequest,
+        self,
+        request: RunEnvironmentRequest,
     ) -> str | None:
         """Auto-provision a Modal Volume for an auxiliary draft model.
 
@@ -430,20 +438,12 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         draft_model_id = draft_meta.get("model_id")
         if not draft_model_id:
             raise ValueError(
-                f"draft_meta.json at {draft_meta_path} missing required "
-                "'model_id' field"
+                f"draft_meta.json at {draft_meta_path} missing required 'model_id' field"
             )
-        hf_available = bool(
-            os.environ.get("HF_TOKEN")
-            or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-        )
+        hf_available = bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"))
         local_draft = request.ref_dir / "draft_model"
         local_path = None
-        if (
-            not hf_available
-            and local_draft.exists()
-            and local_draft.resolve().is_dir()
-        ):
+        if not hf_available and local_draft.exists() and local_draft.resolve().is_dir():
             local_path = str(local_draft.resolve())
         return ensure_model_volume(
             draft_model_id,
@@ -535,12 +535,12 @@ def _modal_runtime_notes(gpu: str, app_name: str) -> str:
         "queues, or auxiliary volumes:\n"
         f"      • App: `app = modal.App({app_name!r})`\n"
         f"      • Web endpoint labels (if any): "
-        f"`@modal.fastapi_endpoint(label=\"{app_name}-<purpose>\")` — "
+        f'`@modal.fastapi_endpoint(label="{app_name}-<purpose>")` — '
         "without a unique label two runs collide on the same public URL "
         "and the second deploy overwrites the first.\n"
         f"      • Auxiliary Volumes / Dicts / Queues / Secrets you "
         f"create: prefix the name with `{app_name}-` "
-        f"(e.g. `modal.Volume.from_name(\"{app_name}-traces\", "
+        f'(e.g. `modal.Volume.from_name("{app_name}-traces", '
         "create_if_missing=True)`).\n"
         "    Model-weight Volumes that the framework pre-stages "
         "(named `vibeserve-model-<...>`, see below) are intentionally "
@@ -565,7 +565,7 @@ def _modal_runtime_notes(gpu: str, app_name: str) -> str:
         "The framework normalizes each `model_id` into the volume "
         "name with this exact rule (matches "
         "`vibe_serve/modal_model_setup.py::_volume_name_for`):\n"
-        "      `re.sub(r\"[^a-z0-9]+\", \"-\", model_id.lower()).strip(\"-\")`\n"
+        '      `re.sub(r"[^a-z0-9]+", "-", model_id.lower()).strip("-")`\n'
         "    prefixed with `vibeserve-model-`. Every run of non-"
         "alphanumeric characters (slashes, dots, underscores, etc.) "
         "collapses to a single `-`. So `org/Foo-1.2-X` becomes "
@@ -672,10 +672,15 @@ def _docker_workspace_run(
     image = getattr(backend, "image", "ubuntu:latest")
     return subprocess.run(
         [
-            "docker", "run", "--rm",
-            "-v", f"{workspace}:/workspace",
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{workspace}:/workspace",
             image,
-            "bash", "-c", shell_command,
+            "bash",
+            "-c",
+            shell_command,
         ],
         capture_output=True,
         check=False,

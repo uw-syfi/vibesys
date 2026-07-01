@@ -77,9 +77,7 @@ class GeminiCodingAgent(CLICodingAgent):
             executor=self.executor,
         )
 
-    def install_mcp_servers(
-        self, workspace: Path, servers: list[MCPServerSpec]
-    ) -> None:
+    def install_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:
         """Write ``<workspace>/.gemini/settings.json`` so Gemini CLI
         auto-discovers the MCP servers from cwd. ``trust: true`` skips
         Gemini's per-tool approval prompts for these servers."""
@@ -96,13 +94,9 @@ class GeminiCodingAgent(CLICodingAgent):
                 for s in servers
             }
         }
-        (gemini_dir / "settings.json").write_text(
-            json.dumps(config, indent=2), encoding="utf-8"
-        )
+        (gemini_dir / "settings.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
-    def uninstall_mcp_servers(
-        self, workspace: Path, servers: list[MCPServerSpec]
-    ) -> None:
+    def uninstall_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:
         """Remove ``<workspace>/.gemini/settings.json``. Leaves the
         ``.gemini/`` directory itself in place because Gemini also writes
         session data into it (e.g. ``.gemini/tmp/``)."""

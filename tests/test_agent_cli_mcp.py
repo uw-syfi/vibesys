@@ -265,7 +265,7 @@ class TestCodexMCP:
         spec = MCPServerSpec(
             name="weird",
             command='py"thon',
-            args=['back\\slash', 'quoted"value'],
+            args=["back\\slash", 'quoted"value'],
         )
         agent.install_mcp_servers(tmp_path, [spec])
         joined = "\n".join(agent.extra_config_args)

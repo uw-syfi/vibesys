@@ -53,12 +53,12 @@ class TestCheckCreateAllowed:
     def test_in_allowlist_no_cap_returns_none(self, tmp_path):
         store = _make_store(tmp_path)
         policy = CreateIssuePolicy(
-            creator="x", iteration=1, cap=None, allowed_types=_all_types(),
+            creator="x",
+            iteration=1,
+            cap=None,
+            allowed_types=_all_types(),
         )
-        assert (
-            check_create_allowed(store, type_enum=IssueType.BUG, policy=policy)
-            is None
-        )
+        assert check_create_allowed(store, type_enum=IssueType.BUG, policy=policy) is None
 
     def test_out_of_allowlist_returns_error(self, tmp_path):
         store = _make_store(tmp_path)
@@ -68,9 +68,7 @@ class TestCheckCreateAllowed:
             cap=1,
             allowed_types=frozenset({IssueType.BUG}),
         )
-        err = check_create_allowed(
-            store, type_enum=IssueType.PERF, policy=policy
-        )
+        err = check_create_allowed(store, type_enum=IssueType.PERF, policy=policy)
         assert err is not None
         assert err.startswith("error:")
         assert "may only file types" in err
@@ -86,10 +84,7 @@ class TestCheckCreateAllowed:
             allowed_types=frozenset({IssueType.BUG}),
         )
         # First creation must be allowed.
-        assert (
-            check_create_allowed(store, type_enum=IssueType.BUG, policy=policy)
-            is None
-        )
+        assert check_create_allowed(store, type_enum=IssueType.BUG, policy=policy) is None
         # Pre-populate the store with one judge-authored issue in iteration 1.
         store.create(
             type=IssueType.BUG,
@@ -99,9 +94,7 @@ class TestCheckCreateAllowed:
             iteration=1,
         )
         # Now the cap is reached.
-        err = check_create_allowed(
-            store, type_enum=IssueType.BUG, policy=policy
-        )
+        err = check_create_allowed(store, type_enum=IssueType.BUG, policy=policy)
         assert err is not None
         assert "cap reached" in err
         assert "(1/1)" in err
@@ -122,10 +115,7 @@ class TestCheckCreateAllowed:
             cap=1,
             allowed_types=frozenset({IssueType.BUG}),
         )
-        assert (
-            check_create_allowed(store, type_enum=IssueType.BUG, policy=policy)
-            is None
-        )
+        assert check_create_allowed(store, type_enum=IssueType.BUG, policy=policy) is None
 
     def test_cap_scoped_per_creator(self, tmp_path):
         store = _make_store(tmp_path)
@@ -143,10 +133,7 @@ class TestCheckCreateAllowed:
             cap=1,
             allowed_types=frozenset({IssueType.BUG}),
         )
-        assert (
-            check_create_allowed(store, type_enum=IssueType.BUG, policy=policy)
-            is None
-        )
+        assert check_create_allowed(store, type_enum=IssueType.BUG, policy=policy) is None
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +219,10 @@ class TestCreateIssueUnderPolicy:
     def test_unlimited_cap(self, tmp_path):
         store = _make_store(tmp_path)
         policy = CreateIssuePolicy(
-            creator="x", iteration=1, cap=None, allowed_types=_all_types(),
+            creator="x",
+            iteration=1,
+            cap=None,
+            allowed_types=_all_types(),
         )
         for i in range(5):
             issue, msg = create_issue_under_policy(
@@ -261,10 +251,7 @@ class TestFormatHelpers:
             created_by="perf_eval",
             iteration=2,
         )
-        assert (
-            format_issue_short(issue)
-            == "#1 [perf] [open] paged kv"
-        )
+        assert format_issue_short(issue) == "#1 [perf] [open] paged kv"
 
     def test_format_issue_full_byte_for_byte(self, tmp_path):
         store = _make_store(tmp_path)

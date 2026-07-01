@@ -14,7 +14,9 @@
 
 
 def kernel_assert(condition: bool, error_text: str):
-    assert condition, f"[INTERNAL_ERROR] [NCC_INKI016] Kernel validation exception: {error_text} - Please check the validation message and adjust kernel inputs accordingly"  # noqa: S101
+    assert condition, (
+        f"[INTERNAL_ERROR] [NCC_INKI016] Kernel validation exception: {error_text} - Please check the validation message and adjust kernel inputs accordingly"
+    )  # noqa: S101
 
 
 def assert_shape(tensor, expected_shape, tensor_name, error_text=""):

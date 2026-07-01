@@ -69,8 +69,7 @@ def invoke_profiler(
             kind="profiler",
             system_prompt=system_prompt,
             user_prompt=(
-                "Profile the server and return exactly one JSON object "
-                "matching the schema above."
+                "Profile the server and return exactly one JSON object matching the schema above."
             ),
             response_cls=ProfilerSummary,
             fallback_factory=lambda: ProfilerSummary(

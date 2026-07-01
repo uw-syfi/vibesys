@@ -105,13 +105,19 @@ def rmsnorm_mx_quantize_tkg(
     # Step 2: LNC sharding setup
     _, num_shards, shard_id = get_verified_program_sharding_info("rmsnorm_mx_quantize_tkg", (0, 1))
     kernel_assert(num_shards == 2, "rmsnorm_mx_quantize_tkg kernel only supports LNC=2")
-    kernel_assert(BxS % 4 == 0, f"BxS must be divisible by 4")  # Required for LNC2 sharding alignment
+    kernel_assert(
+        BxS % 4 == 0, f"BxS must be divisible by 4"
+    )  # Required for LNC2 sharding alignment
 
     shard_size = BxS // num_shards
     BxS_offset = shard_id * shard_size
 
     # Step 3: Allocate buffers and load constants
-    residual_sb = nl.ndarray((H0, shard_size, H1), dtype=residual.dtype, buffer=nl.sbuf) if is_residual_add else None
+    residual_sb = (
+        nl.ndarray((H0, shard_size, H1), dtype=residual.dtype, buffer=nl.sbuf)
+        if is_residual_add
+        else None
+    )
     gamma_sb = nl.ndarray((H0, H1), dtype=gamma.dtype, buffer=nl.sbuf)
     zero_bias = nl.ndarray((H0, 1), dtype=inter_dtype, buffer=nl.sbuf)
     reduction_const_matrix = nl.ndarray((H0, H0), dtype=inter_dtype, buffer=nl.sbuf)
@@ -123,7 +129,9 @@ def rmsnorm_mx_quantize_tkg(
 
     # Load gamma with transpose: (1, H) -> (H) -> (H1, H0) -> (H0, H1)
     gamma_hbm = TensorView(gamma).flatten_dims(start_dim=0, end_dim=1)
-    gamma_hbm_view = gamma_hbm.reshape_dim(dim=0, shape=[H1, H0]).expand_dim(dim=1).expand_dim(dim=1)
+    gamma_hbm_view = (
+        gamma_hbm.reshape_dim(dim=0, shape=[H1, H0]).expand_dim(dim=1).expand_dim(dim=1)
+    )
     gamma_sb_view = TensorView(gamma_sb).expand_dim(dim=1).expand_dim(dim=1)
     nisa.dma_transpose(dst=gamma_sb_view.get_view(), src=gamma_hbm_view.get_view())
 
@@ -161,18 +169,25 @@ def rmsnorm_mx_quantize_tkg(
         dst: (H0, BxS_tile_size, H1) -> flatten -> (H0, 1, 1, BxS_tile_size*H1)
         """
         input_src_view = (
-            input_hbm_view.slice(dim=0, start=hbm_tile_offset, end=hbm_tile_offset + BxS_tile_size * H1)
+            input_hbm_view.slice(
+                dim=0, start=hbm_tile_offset, end=hbm_tile_offset + BxS_tile_size * H1
+            )
             .expand_dim(dim=1)
             .expand_dim(dim=1)
         )
         input_dst_view = (
-            TensorView(input_tile_sb).flatten_dims(start_dim=1, end_dim=2).expand_dim(dim=1).expand_dim(dim=1)
+            TensorView(input_tile_sb)
+            .flatten_dims(start_dim=1, end_dim=2)
+            .expand_dim(dim=1)
+            .expand_dim(dim=1)
         )
 
         if is_residual_add:
             # Transpose load residual
             residual_src_view = (
-                residual_hbm_view.slice(dim=0, start=hbm_tile_offset, end=hbm_tile_offset + BxS_tile_size * H1)
+                residual_hbm_view.slice(
+                    dim=0, start=hbm_tile_offset, end=hbm_tile_offset + BxS_tile_size * H1
+                )
                 .expand_dim(dim=1)
                 .expand_dim(dim=1)
             )
@@ -197,10 +212,17 @@ def rmsnorm_mx_quantize_tkg(
             )
 
             # Input ^2
-            nisa.activation(dst=square, op=nl.square, data=residual_sb[:, residual_tile_BxS_slice, :], bias=zero_bias)
+            nisa.activation(
+                dst=square,
+                op=nl.square,
+                data=residual_sb[:, residual_tile_BxS_slice, :],
+                bias=zero_bias,
+            )
 
             # Input * gamma (broadcast gamma across BxS_tile_size)
-            gamma_sb_view = TensorView(gamma_sb).expand_dim(dim=1).broadcast(dim=1, size=BxS_tile_size)
+            gamma_sb_view = (
+                TensorView(gamma_sb).expand_dim(dim=1).broadcast(dim=1, size=BxS_tile_size)
+            )
             nisa.tensor_tensor(
                 input_tile_sb,
                 residual_sb[:, residual_tile_BxS_slice, :],
@@ -215,7 +237,9 @@ def rmsnorm_mx_quantize_tkg(
             nisa.activation(dst=square, op=nl.square, data=input_tile_sb, bias=zero_bias)
 
             # Input * gamma (broadcast gamma across BxS_tile_size)
-            gamma_sb_view = TensorView(gamma_sb).expand_dim(dim=1).broadcast(dim=1, size=BxS_tile_size)
+            gamma_sb_view = (
+                TensorView(gamma_sb).expand_dim(dim=1).broadcast(dim=1, size=BxS_tile_size)
+            )
             nisa.tensor_tensor(
                 input_tile_sb,
                 input_tile_sb,
@@ -230,7 +254,9 @@ def rmsnorm_mx_quantize_tkg(
         nisa.nc_matmul(dst=final_reduced, stationary=reduction_const_matrix, moving=reduced)
 
         # Compute 1/sqrt(mean(x^2) + eps)
-        nisa.activation(dst=sqrt, op=nl.rsqrt, data=final_reduced, scale=(1.0 / hidden_actual), bias=eps_loaded)
+        nisa.activation(
+            dst=sqrt, op=nl.rsqrt, data=final_reduced, scale=(1.0 / hidden_actual), bias=eps_loaded
+        )
 
         # Compute input * 1/RMS(input)
         sqrt_view = TensorView(sqrt).expand_dim(dim=2).broadcast(dim=2, size=H1)
@@ -252,9 +278,13 @@ def rmsnorm_mx_quantize_tkg(
         # Quantize to MXFP8
         for h512_tile_idx in nl.sequential_range(num_H512_tiles):
             nisa.quantize_mx(
-                src=output_tile_swizzled[0:H0, h512_tile_idx : h512_tile_idx + 1, 0:BxS_tile_size, 0:_q_width],
+                src=output_tile_swizzled[
+                    0:H0, h512_tile_idx : h512_tile_idx + 1, 0:BxS_tile_size, 0:_q_width
+                ],
                 dst=output_quant[0:H0, h512_tile_idx : h512_tile_idx + 1, output_tile_BxS_slice],
-                dst_scale=output_scale[0:H0, h512_tile_idx : h512_tile_idx + 1, output_tile_BxS_slice],
+                dst_scale=output_scale[
+                    0:H0, h512_tile_idx : h512_tile_idx + 1, output_tile_BxS_slice
+                ],
             )
 
     # Step 5: Gather output_quant and output_scale across LNC cores
@@ -293,7 +323,9 @@ def rmsnorm_mx_quantize_tkg(
         AP: [[shard_size*H1, H0], [H1, tile_tokens_actual]], offset = pmax_token_tile_idx * pmax * H1 + H1_idx
         """
 
-        residual_transposed_sb = nl.ndarray((pmax, num_pmax_token_tiles, H), dtype=residual_dtype, buffer=nl.sbuf)
+        residual_transposed_sb = nl.ndarray(
+            (pmax, num_pmax_token_tiles, H), dtype=residual_dtype, buffer=nl.sbuf
+        )
         for pmax_token_tile_idx in nl.affine_range(num_pmax_token_tiles):
             tile_tokens_actual = min(pmax, shard_size - pmax_token_tile_idx * pmax)
             residual_sb_ap = [[shard_size * H1, H0], [H1, tile_tokens_actual]]
@@ -304,8 +336,12 @@ def rmsnorm_mx_quantize_tkg(
                 for h1_in_tile_idx in nl.affine_range(num_H1_per_transpose_tile):
                     H1_idx = transpose_tile_idx * num_H1_per_transpose_tile + h1_in_tile_idx
                     nisa.nc_transpose(
-                        dst=residual_transposed_tile_psum[0:tile_tokens_actual, nl.ds(h1_in_tile_idx * H0, H0)],
-                        data=residual_sb.ap(residual_sb_ap, offset=pmax_token_tile_idx * pmax * H1 + H1_idx),
+                        dst=residual_transposed_tile_psum[
+                            0:tile_tokens_actual, nl.ds(h1_in_tile_idx * H0, H0)
+                        ],
+                        data=residual_sb.ap(
+                            residual_sb_ap, offset=pmax_token_tile_idx * pmax * H1 + H1_idx
+                        ),
                     )
                 # TODO: fine tune the tensor_copy to allow both DVE and ACT engines to perform the copy
                 nisa.tensor_copy(

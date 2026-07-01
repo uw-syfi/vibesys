@@ -22,8 +22,9 @@ from pathlib import Path
 from typing import Any, Callable, Protocol, TypeVar
 
 from langchain_core.tools import BaseTool
-from vibe_serve._agent_cli.base import MCPServerSpec
 from pydantic import BaseModel
+
+from vibe_serve._agent_cli.base import MCPServerSpec
 
 T = TypeVar("T", bound=BaseModel)
 
