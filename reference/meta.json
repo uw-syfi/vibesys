@@ -1,0 +1,89 @@
+{
+  "scenario": "social-network-read-timeline",
+  "issue": "#48",
+  "target": "DeathStarBench socialNetwork",
+  "repo": "https://github.com/delimitrou/DeathStarBench",
+  "subdir": "socialNetwork",
+  "nginx_port": 8080,
+  "deploy_cmd": "cd DeathStarBench/socialNetwork && docker compose up -d",
+  "init_cmd": "cd DeathStarBench/socialNetwork && python3 scripts/init_social_graph.py --graph=socfb-Reed98 --ip=localhost --port=8080",
+  "teardown_cmd": "cd DeathStarBench/socialNetwork && docker compose down -v",
+
+  "workload": {
+    "description": "Read-heavy. 50% user-timeline reads, 40% home-timeline reads, 10% composes to keep content fresh.",
+    "primary_metric": "p50_ms (combined read latency)",
+    "secondary_metrics": ["p95_ms", "p99_ms", "p999_ms", "throughput_rps", "success_rate", "cpu_percent", "memory_mb"]
+  },
+
+  "api": {
+    "user_timeline_read": {
+      "method": "GET",
+      "path": "/wrk2-api/user-timeline/read",
+      "params": ["user_id", "start", "stop"],
+      "timing_header": "X-UserTimeline-Thrift-Ms",
+      "response": "JSON array of post objects, descending timestamp order"
+    },
+    "home_timeline_read": {
+      "method": "GET",
+      "path": "/wrk2-api/home-timeline/read",
+      "params": ["user_id", "start", "stop"],
+      "timing_header": "X-HomeTimeline-Thrift-Ms",
+      "response": "JSON array of post objects, descending timestamp order"
+    },
+    "compose": {
+      "method": "POST",
+      "path": "/wrk2-api/post/compose",
+      "params": ["username", "user_id", "text", "media_ids", "media_types", "post_type"],
+      "response_success": "Successfully upload post",
+      "timing_header": "X-Compose-Thrift-Ms"
+    }
+  },
+
+  "check_api": {
+    "user_timeline_contains": {
+      "method": "GET",
+      "path": "/check-api/user-timeline/contains",
+      "params": ["user_id", "post_id"],
+      "response": "{\"found\": true|false}",
+      "note": "Calls UserTimeline Thrift service directly. No DB query."
+    },
+    "home_timeline_contains": {
+      "method": "GET",
+      "path": "/check-api/home-timeline/contains",
+      "params": ["user_id", "post_id"],
+      "response": "{\"found\": true|false}",
+      "note": "Calls HomeTimeline Thrift service directly. No DB query."
+    },
+    "social_graph_followees": {
+      "method": "GET",
+      "path": "/check-api/social-graph/get_followees",
+      "params": ["user_id"],
+      "response": "JSON array of followee_id strings",
+      "note": "Calls SocialGraph Thrift service. No auth required."
+    }
+  },
+
+  "post_object_schema": {
+    "post_id": "string",
+    "creator": {"user_id": "string", "username": "string"},
+    "text": "string",
+    "timestamp": "string (unix ms)",
+    "req_id": "string",
+    "user_mentions": "[] or {}",
+    "media": "[] or {}",
+    "urls": "[] or {}",
+    "post_type": "integer"
+  },
+
+  "user_namespaces": {
+    "checker": {"prefix": "rchk_", "user_id_start": 600000, "note": "timestamp-seeded to avoid reuse"},
+    "benchmark": {"prefix": "rbnch_", "user_id_start": 700000}
+  },
+
+  "known_issues": {
+    "compose_zadd_error": "Compose may return HTTP 500 with ZADD error for new users' first fan-out. Post IS written to user-timeline. Treated as soft success.",
+    "empty_timeline_as_object": "Empty timeline returns {} not [] from Lua cjson. Treated as empty array.",
+    "home_timeline_not_cleared_on_unfollow": "Unfollow does not remove existing posts from home timeline. Only stops future fan-out.",
+    "intermediate_latency_scope": "X-UserTimeline-Thrift-Ms and X-HomeTimeline-Thrift-Ms measure nginx-to-first-service hop only. Deeper service-to-service hops not instrumented."
+  }
+}

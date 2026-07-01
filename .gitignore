@@ -1,0 +1,5 @@
+build/
+.DS_Store
+**/.DS_Store
+3rd_party/deathstarbench/socialNetwork/datasets/
+3rd_party/deathstarbench/socialNetwork/scripts/__pycache__/
