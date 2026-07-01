@@ -7,6 +7,7 @@ from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
 
+from vibe_serve.agents.progress import AgentProgress
 from vibe_serve.constants import _BOLD, _CYAN, _DIM, _GREEN, _RED, _RESET, _YELLOW
 
 ContextWindowLookup = Callable[[str | None], int | None]
@@ -128,7 +129,7 @@ class AgentLogger(BaseCallbackHandler):
         log_file=None,
         model_name: str | None = None,
         agent_label: str | None = None,
-        progress_label: str | None = None,
+        progress: AgentProgress | None = None,
         context_window_lookup: ContextWindowLookup | None = None,
     ):
         self._streaming = False
@@ -138,7 +139,7 @@ class AgentLogger(BaseCallbackHandler):
         self._call_count = 0
         self._model_name = model_name
         self._agent_label = agent_label
-        self._progress_label = progress_label
+        self._progress = progress
         self._start_time = time.monotonic()
         self._input_tokens = 0
         # Most recent usage dict from the cli backend (see ``update_usage``).
@@ -154,7 +155,8 @@ class AgentLogger(BaseCallbackHandler):
         Computed lazily on each use so the elapsed-time and token-count
         readings reflect the latest state when the prefix is printed.
         """
-        if not self._agent_label and not self._progress_label:
+        progress_text = self._progress.label() if self._progress is not None else None
+        if not self._agent_label and not progress_text:
             return ""
         elapsed = time.monotonic() - self._start_time
         used = _format_token_count(self._input_tokens)
@@ -163,8 +165,8 @@ class AgentLogger(BaseCallbackHandler):
         else:
             tokens_str = used
         parts = []
-        if self._progress_label:
-            parts.append(self._progress_label)
+        if progress_text:
+            parts.append(progress_text)
         if self._agent_label:
             parts.append(self._agent_label)
         parts.extend([f"{elapsed:.1f}s", tokens_str])

@@ -3,6 +3,7 @@ import re
 from unittest.mock import MagicMock
 
 from vibe_serve.agents.callbacks import AgentLogger
+from vibe_serve.agents.progress import RoundProgress
 from vibe_serve.constants import _DIM, _GREEN, _RED, _RESET
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
@@ -538,10 +539,10 @@ class TestPrefixFormat:
         # Format: [Implementer | <float>s | 0/1.0M] hi
         assert re.search(r"\[Implementer \| \d+\.\ds \| 0/1\.0M\]", out), out
 
-    def test_prefix_includes_progress_label(self, capsys):
+    def test_prefix_includes_progress(self, capsys):
         logger = AgentLogger(
             agent_label="Implementer",
-            progress_label="Round 3/24",
+            progress=RoundProgress(3, 24),
             model_name="claude-sonnet-4-6",
         )
         logger.on_llm_new_token("hi")

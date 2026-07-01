@@ -55,7 +55,6 @@ def invoke_profiler(
     *,
     system_prompt: str,
     round_label: str,
-    progress_label: str | None = None,
     fallback_suggestions: str = "Re-run profiling on the next round.",
 ) -> ProfilerSummary | None:
     """Run the Profiler agent and return its :class:`ProfilerSummary`.
@@ -81,7 +80,6 @@ def invoke_profiler(
                 perf_unit=None,
             ),
             round_label=round_label,
-            progress_label=progress_label,
             mcp_servers=[spec] if spec is not None else None,
         )
     except Exception as exc:

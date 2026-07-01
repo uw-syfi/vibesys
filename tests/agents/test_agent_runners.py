@@ -11,6 +11,7 @@ from vibe_serve.agents import build_agent_runner
 from vibe_serve.agents.callbacks import AgentLogger
 from vibe_serve.agents.cli_runner import CliAgentRunner
 from vibe_serve.agents.deepagents_runner import DeepAgentsRunner
+from vibe_serve.agents.progress import RoundProgress
 from vibe_serve.config import Config
 from vibe_serve.schemas import (
     JudgeResponse,
@@ -67,7 +68,7 @@ class TestDeepAgentsRunner:
                 response_cls=JudgeResponse,
                 fallback_factory=_judge_fallback,
                 round_label="judge #1",
-                progress_label="Round 1/5",
+                progress=RoundProgress(1, 5),
             )
 
         assert result is pass_response
@@ -76,7 +77,7 @@ class TestDeepAgentsRunner:
         assert kwargs["response_cls"] is JudgeResponse
         assert kwargs["fallback_factory"] is _judge_fallback
         callbacks = kwargs["callbacks"]
-        assert callbacks[0]._progress_label == "Round 1/5"
+        assert callbacks[0]._progress.label() == "Round 1/5"
 
     def test_deepagents_runner_picks_backend_by_kind(self, tmp_path):
         impl_backend = MagicMock(name="impl-backend")
@@ -272,7 +273,7 @@ class TestCliAgentRunner:
         assert result.feedback == "fallback-feedback"
         assert result.analysis == "fallback"
 
-    def test_cli_runner_passes_progress_label_to_logger(self, monkeypatch, tmp_path):
+    def test_cli_runner_passes_progress_to_logger(self, monkeypatch, tmp_path):
         captured: list = []
         fake_cls = _make_fake_agent_class(
             generate_returns='{"analysis": "ok", "feedback": "", "verdict": "pass"}',
@@ -303,10 +304,10 @@ class TestCliAgentRunner:
             response_cls=JudgeResponse,
             fallback_factory=_judge_fallback,
             round_label="judge #1",
-            progress_label="Round 2/5",
+            progress=RoundProgress(2, 5),
         )
 
-        assert captured[0].event_handler._progress_label == "Round 2/5"
+        assert captured[0].event_handler._progress.label() == "Round 2/5"
 
     def test_cli_runner_parses_fenced_json(self, monkeypatch, tmp_path):
         captured: list = []

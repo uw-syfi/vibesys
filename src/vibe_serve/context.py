@@ -6,13 +6,15 @@ import re
 import shutil
 import subprocess
 import sys
-from contextlib import ExitStack
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from datetime import datetime
 from pathlib import Path
 
 from vibe_serve import backends
 from vibe_serve.agent_runner import _log_and_print
 from vibe_serve.agents import build_agent_runner
+from vibe_serve.agents.progress import AgentProgress
 from vibe_serve.config import Config, as_config
 from vibe_serve.constants import (
     DEFAULT_AGENT_BACKEND,
@@ -161,6 +163,7 @@ class _RunContext:
         sys.stderr = _TeeWriter(self._original_stderr, self.run_log_file)
         self._closed = False
         self._run_environment_stack = ExitStack()
+        self._progress_stack: list[AgentProgress] = []
 
         # Dirs excluded from workspace copy, git tracking, and the
         # Modal-side tar download. ``_auth`` and ``_opt_vibeserve`` are
@@ -437,6 +440,21 @@ class _RunContext:
             return {}
         return {"CUDA_VISIBLE_DEVICES": str(dev.index)}
 
+    @contextmanager
+    def progress(self, progress: AgentProgress) -> Iterator[None]:
+        """Temporarily attach loop progress to agent invocations in this context."""
+        self._progress_stack.append(progress)
+        try:
+            yield
+        finally:
+            self._progress_stack.pop()
+
+    def current_progress(self) -> AgentProgress | None:
+        """Return the active loop progress, if a loop has scoped one."""
+        if not self._progress_stack:
+            return None
+        return self._progress_stack[-1]
+
     def invoke(
         self,
         *,
@@ -446,7 +464,7 @@ class _RunContext:
         response_cls,
         fallback_factory=None,
         round_label: str = "",
-        progress_label: str | None = None,
+        progress: AgentProgress | None = None,
         **extra,
     ):
         """Invoke an agent through ``self.agent_runner`` with workspace+env defaults.
@@ -466,7 +484,7 @@ class _RunContext:
             response_cls=response_cls,
             fallback_factory=fallback_factory,
             round_label=round_label,
-            progress_label=progress_label,
+            progress=progress if progress is not None else self.current_progress(),
             **extra,
         )
 

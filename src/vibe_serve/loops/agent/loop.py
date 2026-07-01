@@ -12,6 +12,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from vibe_serve.agents.progress import RoundProgress
 from vibe_serve.config import Config
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
@@ -222,7 +223,6 @@ def _run_pre_round_decision(
     objective: str,
     carry: _CarryOver,
     progress_path: Path,
-    progress_label: str | None = None,
 ) -> PreRoundDecision:
     system_prompt = render_template(
         "orchestrator_pre_round_prompt.j2",
@@ -245,7 +245,6 @@ def _run_pre_round_decision(
             reasoning="fallback: default to skip",
         ),
         round_label=f"round-{round_number}-pre",
-        progress_label=progress_label,
     )
     issue_board.append_pre_round_decision(progress_path, round_number, decision)
     return decision
@@ -259,7 +258,6 @@ def _run_profiler(
     modality: str,
     progress_path: Path,
     objective: str,
-    progress_label: str | None = None,
 ) -> ProfilerSummary | None:
     template = {
         "torch": "profiler_prompt_torch.j2",
@@ -279,7 +277,6 @@ def _run_profiler(
         ctx,
         system_prompt=system_prompt,
         round_label=f"round-{round_number}-profiler",
-        progress_label=progress_label,
     )
     if summary is None:
         return None
@@ -319,7 +316,6 @@ def _run_orchestrator_plan(
     plateau_warning: str | None,
     modality: str,
     domain_path: Path,
-    progress_label: str | None = None,
 ) -> OrchestratorPlan:
     domain_orchestrator = render_domain_section(
         domain_path, "orchestrator", **_domain_render_context(ctx, modality)
@@ -348,7 +344,6 @@ def _run_orchestrator_plan(
             reasoning="fallback: orchestrator produced no structured response",
         ),
         round_label=f"round-{round_number}-plan",
-        progress_label=progress_label,
     )
     issue_board.append_orchestrator_plan(progress_path, round_number, plan)
     return plan
@@ -364,7 +359,6 @@ def _run_implementer(
     domain_path: Path,
     feedback: str | None,
     progress_path: Path,
-    progress_label: str | None = None,
 ) -> ImplementerResponse:
     domain_implementer = render_domain_section(
         domain_path, "implementer", **_domain_render_context(ctx, modality)
@@ -394,7 +388,6 @@ def _run_implementer(
             expected_behavior="unknown",
         ),
         round_label=f"round-{round_number}-retry-{retry}-implementer",
-        progress_label=progress_label,
     )
     issue_board.append_implementer(progress_path, round_number, retry, response)
     ctx.snapshot_workspace(f"round-{round_number}-retry-{retry}-implementer")
@@ -411,7 +404,6 @@ def _run_judge(
     domain_path: Path,
     progress_path: Path,
     objective: str,
-    progress_label: str | None = None,
 ) -> JudgeResponse:
     domain_judge = render_domain_section(
         domain_path, "judge", **_domain_render_context(ctx, modality)
@@ -442,7 +434,6 @@ def _run_judge(
             verdict=Verdict.FAIL,
         ),
         round_label=f"round-{round_number}-retry-{retry}-judge",
-        progress_label=progress_label,
     )
     issue_board.append_judge(progress_path, round_number, retry, response)
     ctx.snapshot_workspace(f"round-{round_number}-retry-{retry}-judge")
@@ -461,7 +452,6 @@ def _run_single_agent_round(
     progress_path: Path,
     objective: str,
     profile_focus: str,
-    progress_label: str | None = None,
 ) -> SingleAgentRoundResponse:
     """Invoke one agent that plays implementer + judge + profiler.
 
@@ -509,7 +499,6 @@ def _run_single_agent_round(
             profile_analysis="",
         ),
         round_label=f"round-{round_number}-retry-{retry}-single-agent",
-        progress_label=progress_label,
     )
     issue_board.append_single_agent_round(progress_path, round_number, retry, response)
     ctx.snapshot_workspace(f"round-{round_number}-retry-{retry}-single-agent")
@@ -629,210 +618,209 @@ def run_agent_loop(
     try:
         while round_number <= max_rounds:
             ctx.switch_log_file(f"round{round_number:03d}")
-            progress_label = f"Round {round_number}/{max_rounds}"
-            ctx.lprint(f"\n{'=' * 60}\n  Round {round_number}/{max_rounds}\n{'=' * 60}\n")
+            round_progress = RoundProgress(round_number, max_rounds)
+            ctx.lprint(f"\n{'=' * 60}\n  {round_progress.label()}\n{'=' * 60}\n")
 
-            # --- Pre-round decision (skip on fresh cold start) ---
-            profiler_summary: ProfilerSummary | None = None
-            pre_decision: PreRoundDecision | None = None
-            if inner_loop == "multi-agent":
-                if not _is_fresh_cold_start(round_number, records):
-                    pre_decision = _run_pre_round_decision(
-                        ctx,
-                        round_number=round_number,
-                        objective=objective,
-                        carry=carry,
-                        progress_path=progress_path,
-                        progress_label=progress_label,
-                    )
-                    # FORCE-PROFILE override: every non-cold-start round profiles,
-                    # ignoring orchestrator's need_profile decision. Revert this
-                    # block to restore orchestrator-decided profiling.
-                    profiler_summary = _run_profiler(
-                        ctx,
-                        round_number=round_number,
-                        profile_focus=pre_decision.profile_focus
-                        or "general latency hotspots on /v1/completions",
-                        modality=modality,
-                        progress_path=progress_path,
-                        objective=objective,
-                        progress_label=progress_label,
-                    )
-            else:
-                # single-agent: feed the previous round's profile into the
-                # orchestrator as ProfilerSummary so it has a bottleneck signal.
-                if last_single_agent_response is not None:
-                    profiler_summary = _profiler_summary_from_single_agent(
-                        last_single_agent_response
-                    )
-
-            # --- Orchestrator plan ---
-            roadmap_text = issue_board.read_roadmap(roadmap_path)
-            plateau_warning = _detect_plateau(records)
-            plan = _run_orchestrator_plan(
-                ctx,
-                round_number=round_number,
-                objective=objective,
-                profiler_summary=profiler_summary,
-                carry=carry,
-                progress_path=progress_path,
-                roadmap_text=roadmap_text,
-                plateau_warning=plateau_warning,
-                modality=modality,
-                domain_path=domain_path,
-                progress_label=progress_label,
-            )
-
-            # No early stop: the loop always consumes the full max_rounds
-            # budget. Previously OrchestratorPlan had a ``done`` field that
-            # could halt the loop; it was removed because the orchestrator
-            # can't reliably tell when the objective is "fully met" and
-            # early-stopping masks further optimization opportunities.
-
-            # --- Optional rollback ---
-            if plan.revert_to_round is not None:
-                target = next(
-                    (r for r in records if r.round_number == plan.revert_to_round),
-                    None,
-                )
-                if target and target.commit:
-                    _git_checkout(ctx, target.commit)
-                    ctx.lprint(
-                        f"Reverted workspace to round {plan.revert_to_round} ({target.commit[:8]})."
-                    )
-                else:
-                    ctx.lprint(
-                        f"[warn] cannot revert: no commit recorded for round {plan.revert_to_round}"
-                    )
-
-            # --- Implementer / Judge retry loop ---
-            feedback: str | None = None
-            passed = False
-            single_agent_response: SingleAgentRoundResponse | None = None
-            for retry in range(1, max_retries_per_round + 1):
-                ctx.lprint(f"\n--- attempt {retry}/{max_retries_per_round} ---\n")
+            with ctx.progress(round_progress):
+                # --- Pre-round decision (skip on fresh cold start) ---
+                profiler_summary: ProfilerSummary | None = None
+                pre_decision: PreRoundDecision | None = None
                 if inner_loop == "multi-agent":
-                    ctx.reselect_gpu()
-                    _run_implementer(
-                        ctx,
-                        round_number=round_number,
-                        retry=retry,
-                        plan=plan,
-                        modality=modality,
-                        domain_path=domain_path,
-                        feedback=feedback,
-                        progress_path=progress_path,
-                        progress_label=progress_label,
-                    )
-                    ctx.reselect_gpu()
-                    verdict = _run_judge(
-                        ctx,
-                        round_number=round_number,
-                        retry=retry,
-                        plan=plan,
-                        modality=modality,
-                        domain_path=domain_path,
-                        progress_path=progress_path,
-                        objective=objective,
-                        progress_label=progress_label,
-                    )
-                    if verdict.verdict == Verdict.PASS:
-                        passed = True
-                        break
-                    feedback = verdict.feedback
+                    if not _is_fresh_cold_start(round_number, records):
+                        pre_decision = _run_pre_round_decision(
+                            ctx,
+                            round_number=round_number,
+                            objective=objective,
+                            carry=carry,
+                            progress_path=progress_path,
+                        )
+                        # FORCE-PROFILE override: every non-cold-start round profiles,
+                        # ignoring orchestrator's need_profile decision. Revert this
+                        # block to restore orchestrator-decided profiling.
+                        profiler_summary = _run_profiler(
+                            ctx,
+                            round_number=round_number,
+                            profile_focus=pre_decision.profile_focus
+                            or "general latency hotspots on /v1/completions",
+                            modality=modality,
+                            progress_path=progress_path,
+                            objective=objective,
+                        )
                 else:
-                    ctx.reselect_gpu()
-                    single_agent_response = _run_single_agent_round(
-                        ctx,
-                        round_number=round_number,
-                        retry=retry,
-                        plan=plan,
-                        modality=modality,
-                        domain_path=domain_path,
-                        feedback=feedback,
-                        progress_path=progress_path,
-                        objective=objective,
-                        profile_focus=last_profile_focus,
-                        progress_label=progress_label,
-                    )
-                    if single_agent_response.verdict == Verdict.PASS:
-                        passed = True
-                        break
-                    feedback = single_agent_response.feedback
-
-            # --- Record round result & update carry-over ---
-            commit = _current_commit_sha(ctx)
-            # `profile_skipped` is True when no fresh profile ran this round
-            # (cold-start or the orchestrator/framework decided to skip).
-            # The plateau detector ignores skipped-profile rounds so cached
-            # / inherited perf numbers don't masquerade as fresh measurements.
-            #
-            # For single-agent inner loop, `profiler_summary` carries the
-            # PREVIOUS round's profile (fed forward to the orchestrator),
-            # so this round's perf comes from `single_agent_response` instead.
-            if inner_loop == "single-agent":
-                profile_skipped = single_agent_response is None or (
-                    single_agent_response.perf_metric is None
-                )
-                perf_metric = (
-                    single_agent_response.perf_metric
-                    if (single_agent_response and passed)
-                    else None
-                )
-                perf_unit = (
-                    single_agent_response.perf_unit if (single_agent_response and passed) else None
-                )
-                # Remember the latest profile for the orchestrator's next plan
-                # and carry forward the implicit profile focus.
-                if single_agent_response is not None:
-                    last_single_agent_response = single_agent_response
-            else:
-                profile_skipped = profiler_summary is None
-                perf_metric = (
-                    profiler_summary.perf_metric if (profiler_summary and passed) else None
-                )
-                perf_unit = profiler_summary.perf_unit if (profiler_summary and passed) else None
-            records.append(
-                _RoundRecord(
-                    round_number=round_number,
-                    commit=commit,
-                    perf_metric=perf_metric,
-                    perf_unit=perf_unit,
-                    passed=passed,
-                    profile_skipped=profile_skipped,
-                )
-            )
-            _save_rounds_state(rounds_state_path, records)
-
-            if not passed:
-                issue_board.append_exhaustion_note(
-                    progress_path,
-                    round_number,
-                    max_retries_per_round,
-                    feedback or "",
-                )
-                carry.exhaustion_info = (
-                    f"Round {round_number} did not pass after "
-                    f"{max_retries_per_round} attempts. Last judge feedback: "
-                    f"{feedback or '(empty)'}"
-                )
-                carry.regression_info = None
-            else:
-                carry.exhaustion_info = None
-                if perf_metric is not None:
-                    best = _best_round(records[:-1])
-                    if best is None or perf_metric > best.perf_metric:
-                        carry.regression_info = None
-                    else:
-                        carry.regression_info = (
-                            f"Round {round_number} perf_metric="
-                            f"{perf_metric}{(' ' + perf_unit) if perf_unit else ''} "
-                            f"did not beat best={best.perf_metric}"
-                            f"{(' ' + (best.perf_unit or '')) if best.perf_unit else ''} "
-                            f"at round {best.round_number}."
+                    # single-agent: feed the previous round's profile into the
+                    # orchestrator as ProfilerSummary so it has a bottleneck signal.
+                    if last_single_agent_response is not None:
+                        profiler_summary = _profiler_summary_from_single_agent(
+                            last_single_agent_response
                         )
 
-            round_number += 1
+                # --- Orchestrator plan ---
+                roadmap_text = issue_board.read_roadmap(roadmap_path)
+                plateau_warning = _detect_plateau(records)
+                plan = _run_orchestrator_plan(
+                    ctx,
+                    round_number=round_number,
+                    objective=objective,
+                    profiler_summary=profiler_summary,
+                    carry=carry,
+                    progress_path=progress_path,
+                    roadmap_text=roadmap_text,
+                    plateau_warning=plateau_warning,
+                    modality=modality,
+                    domain_path=domain_path,
+                )
+
+                # No early stop: the loop always consumes the full max_rounds
+                # budget. Previously OrchestratorPlan had a ``done`` field that
+                # could halt the loop; it was removed because the orchestrator
+                # can't reliably tell when the objective is "fully met" and
+                # early-stopping masks further optimization opportunities.
+
+                # --- Optional rollback ---
+                if plan.revert_to_round is not None:
+                    target = next(
+                        (r for r in records if r.round_number == plan.revert_to_round),
+                        None,
+                    )
+                    if target and target.commit:
+                        _git_checkout(ctx, target.commit)
+                        ctx.lprint(
+                            f"Reverted workspace to round {plan.revert_to_round} ({target.commit[:8]})."
+                        )
+                    else:
+                        ctx.lprint(
+                            f"[warn] cannot revert: no commit recorded for round {plan.revert_to_round}"
+                        )
+
+                # --- Implementer / Judge retry loop ---
+                feedback: str | None = None
+                passed = False
+                single_agent_response: SingleAgentRoundResponse | None = None
+                for retry in range(1, max_retries_per_round + 1):
+                    ctx.lprint(f"\n--- attempt {retry}/{max_retries_per_round} ---\n")
+                    if inner_loop == "multi-agent":
+                        ctx.reselect_gpu()
+                        _run_implementer(
+                            ctx,
+                            round_number=round_number,
+                            retry=retry,
+                            plan=plan,
+                            modality=modality,
+                            domain_path=domain_path,
+                            feedback=feedback,
+                            progress_path=progress_path,
+                        )
+                        ctx.reselect_gpu()
+                        verdict = _run_judge(
+                            ctx,
+                            round_number=round_number,
+                            retry=retry,
+                            plan=plan,
+                            modality=modality,
+                            domain_path=domain_path,
+                            progress_path=progress_path,
+                            objective=objective,
+                        )
+                        if verdict.verdict == Verdict.PASS:
+                            passed = True
+                            break
+                        feedback = verdict.feedback
+                    else:
+                        ctx.reselect_gpu()
+                        single_agent_response = _run_single_agent_round(
+                            ctx,
+                            round_number=round_number,
+                            retry=retry,
+                            plan=plan,
+                            modality=modality,
+                            domain_path=domain_path,
+                            feedback=feedback,
+                            progress_path=progress_path,
+                            objective=objective,
+                            profile_focus=last_profile_focus,
+                        )
+                        if single_agent_response.verdict == Verdict.PASS:
+                            passed = True
+                            break
+                        feedback = single_agent_response.feedback
+
+                # --- Record round result & update carry-over ---
+                commit = _current_commit_sha(ctx)
+                # `profile_skipped` is True when no fresh profile ran this round
+                # (cold-start or the orchestrator/framework decided to skip).
+                # The plateau detector ignores skipped-profile rounds so cached
+                # / inherited perf numbers don't masquerade as fresh measurements.
+                #
+                # For single-agent inner loop, `profiler_summary` carries the
+                # PREVIOUS round's profile (fed forward to the orchestrator),
+                # so this round's perf comes from `single_agent_response` instead.
+                if inner_loop == "single-agent":
+                    profile_skipped = single_agent_response is None or (
+                        single_agent_response.perf_metric is None
+                    )
+                    perf_metric = (
+                        single_agent_response.perf_metric
+                        if (single_agent_response and passed)
+                        else None
+                    )
+                    perf_unit = (
+                        single_agent_response.perf_unit
+                        if (single_agent_response and passed)
+                        else None
+                    )
+                    # Remember the latest profile for the orchestrator's next plan
+                    # and carry forward the implicit profile focus.
+                    if single_agent_response is not None:
+                        last_single_agent_response = single_agent_response
+                else:
+                    profile_skipped = profiler_summary is None
+                    perf_metric = (
+                        profiler_summary.perf_metric if (profiler_summary and passed) else None
+                    )
+                    perf_unit = (
+                        profiler_summary.perf_unit if (profiler_summary and passed) else None
+                    )
+                records.append(
+                    _RoundRecord(
+                        round_number=round_number,
+                        commit=commit,
+                        perf_metric=perf_metric,
+                        perf_unit=perf_unit,
+                        passed=passed,
+                        profile_skipped=profile_skipped,
+                    )
+                )
+                _save_rounds_state(rounds_state_path, records)
+
+                if not passed:
+                    issue_board.append_exhaustion_note(
+                        progress_path,
+                        round_number,
+                        max_retries_per_round,
+                        feedback or "",
+                    )
+                    carry.exhaustion_info = (
+                        f"Round {round_number} did not pass after "
+                        f"{max_retries_per_round} attempts. Last judge feedback: "
+                        f"{feedback or '(empty)'}"
+                    )
+                    carry.regression_info = None
+                else:
+                    carry.exhaustion_info = None
+                    if perf_metric is not None:
+                        best = _best_round(records[:-1])
+                        if best is None or perf_metric > best.perf_metric:
+                            carry.regression_info = None
+                        else:
+                            carry.regression_info = (
+                                f"Round {round_number} perf_metric="
+                                f"{perf_metric}{(' ' + perf_unit) if perf_unit else ''} "
+                                f"did not beat best={best.perf_metric}"
+                                f"{(' ' + (best.perf_unit or '')) if best.perf_unit else ''} "
+                                f"at round {best.round_number}."
+                            )
+
+                round_number += 1
 
         ctx.lprint(f"Reached max_rounds={max_rounds}. Stopping.")
         return True

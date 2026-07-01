@@ -26,6 +26,7 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 
 from vibe_serve._agent_cli.base import MCPServerSpec
+from vibe_serve.agents.progress import AgentProgress
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -49,7 +50,7 @@ class AgentRunner(Protocol):
         response_cls: type[T],
         fallback_factory: Callable[[], T],
         round_label: str,
-        progress_label: str | None = None,
+        progress: AgentProgress | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
         tools: list[BaseTool] | None = None,
     ) -> T:
@@ -72,8 +73,8 @@ class AgentRunner(Protocol):
                 used when the agent fails to produce a parseable response.
                 Implementations must call this rather than raise.
             round_label: Short label used in log headers (e.g. ``"judge #3"``).
-            progress_label: Optional short run-position label shown in the live
-                terminal prefix (e.g. ``"Round 3/24"``).
+            progress: Optional loop-owned progress state shown in the live
+                terminal prefix (e.g. ``RoundProgress(3, 24)``).
             mcp_servers: Optional list of stdio MCP servers to install for
                 the duration of this call. The cli runner forwards these to
                 the underlying ``CodingAgent``'s

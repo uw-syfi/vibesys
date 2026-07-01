@@ -25,6 +25,7 @@ from vibe_serve.agent_runner import (
     _run_typed_agent,
 )
 from vibe_serve.agents.callbacks import AgentLogger
+from vibe_serve.agents.progress import AgentProgress
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -65,7 +66,7 @@ class DeepAgentsRunner:
         response_cls: type[T],
         fallback_factory: Callable[[], T],
         round_label: str,
-        progress_label: str | None = None,
+        progress: AgentProgress | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,  # noqa: ARG002 — cli-only injection point; deepagents uses tools=
         tools: list[BaseTool] | None = None,
     ) -> T:
@@ -94,7 +95,7 @@ class DeepAgentsRunner:
                 log_file=self._run_log_file,
                 model_name=self._model_name,
                 agent_label=label,
-                progress_label=progress_label,
+                progress=progress,
             )
         ]
 

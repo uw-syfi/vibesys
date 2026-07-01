@@ -3,7 +3,7 @@
 The ``build_agent_runner`` function is added at the bottom once the concrete
 runner classes are imported, so the public API of this package is::
 
-    from vibe_serve.agents import AgentRunner, build_agent_runner
+    from vibe_serve.agents import AgentRunner, RoundProgress, build_agent_runner
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from vibe_serve.config import Config
 from vibe_serve.constants import DEFAULT_AGENT_BACKEND
 
 from .base import AgentRunner
+from .progress import AgentProgress, CandidateProgress, RoundProgress
 
 # ``CliAgentRunner`` and ``DeepAgentsRunner`` are imported lazily to break a
 # circular import: ``vibe_serve.agent_runner`` imports
@@ -22,7 +23,15 @@ from .base import AgentRunner
 # concrete runners import back from ``vibe_serve.agent_runner``. Importing
 # them eagerly here turned the cycle into an ImportError on the first entry
 # point that hits ``agent_runner`` first (e.g. the ``vibe-serve`` script).
-__all__ = ["AgentRunner", "DeepAgentsRunner", "CliAgentRunner", "build_agent_runner"]
+__all__ = [
+    "AgentProgress",
+    "AgentRunner",
+    "CandidateProgress",
+    "CliAgentRunner",
+    "DeepAgentsRunner",
+    "RoundProgress",
+    "build_agent_runner",
+]
 
 
 def __getattr__(name: str):

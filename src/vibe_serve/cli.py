@@ -649,7 +649,7 @@ def _run_evolve(args: argparse.Namespace) -> None:
     if success:
         print(
             f"\nEvolve loop completed {args.max_generations} generations "
-            f"× {args.children_per_generation} children."
+            f"× {args.children_per_generation} cands."
         )
     else:
         print("\nEvolve loop stopped early (exception or KeyboardInterrupt).")
@@ -726,7 +726,7 @@ def _run_openevolve(args: argparse.Namespace) -> None:
     )
 
     if success:
-        print(f"\nOpenEvolve loop completed {args.max_iterations} iterations.")
+        print(f"\nOpenEvolve loop completed {args.max_iterations} rounds.")
     else:
         print("\nOpenEvolve loop stopped early (exception or KeyboardInterrupt).")
         sys.exit(1)

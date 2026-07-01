@@ -40,6 +40,7 @@ from vibe_serve.agent_runner import (
     _parse_typed_response_text,
 )
 from vibe_serve.agents.callbacks import AgentLogger
+from vibe_serve.agents.progress import AgentProgress
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -202,7 +203,7 @@ class CliAgentRunner:
         response_cls: type[T],
         fallback_factory: Callable[[], T],
         round_label: str,
-        progress_label: str | None = None,
+        progress: AgentProgress | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
         tools: list[BaseTool] | None = None,  # noqa: ARG002 — deepagents-only injection point; cli uses mcp_servers
     ) -> T:
@@ -222,7 +223,7 @@ class CliAgentRunner:
             log_file=self._run_log_file,
             model_name=self._model_name,
             agent_label=label,
-            progress_label=progress_label,
+            progress=progress,
         )
 
         # 4. Reuse or construct the underlying agent.  Reusing preserves the

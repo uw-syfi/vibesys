@@ -32,6 +32,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
+from vibe_serve.agents.progress import CandidateProgress
 from vibe_serve.config import Config
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
@@ -130,7 +131,6 @@ def _run_mutator(
     modality: str,
     is_cold_start: bool,
     objectives: list[Objective] | None = None,
-    progress_label: str | None = None,
 ) -> MutatorResponse:
     system_prompt = _render(
         "mutator_prompt.j2",
@@ -158,7 +158,6 @@ def _run_mutator(
             expected_behavior="unknown",
         ),
         round_label=f"gen-{generation}-cand-{child_idx}-mutator",
-        progress_label=progress_label,
     )
 
 
@@ -170,7 +169,6 @@ def _run_judge(
     modality: str,
     objective: str,
     pass_criteria: str,
-    progress_label: str | None = None,
 ) -> JudgeResponse:
     system_prompt = _render(
         "judge_prompt.j2",
@@ -193,7 +191,6 @@ def _run_judge(
             verdict=Verdict.FAIL,
         ),
         round_label=f"gen-{generation}-cand-{child_idx}-judge",
-        progress_label=progress_label,
     )
 
 
@@ -225,7 +222,6 @@ def _run_profiler(
     modality: str,
     objective: str,
     objectives: list[Objective] | None = None,
-    progress_label: str | None = None,
 ) -> ProfilerSummary | None:
     template = (
         "profiler_prompt_torch.j2" if ctx.profiler_kind == "torch" else "profiler_prompt_nsys.j2"
@@ -250,7 +246,6 @@ def _run_profiler(
         ctx,
         system_prompt=system_prompt,
         round_label=f"gen-{generation}-cand-{child_idx}-profiler",
-        progress_label=progress_label,
         fallback_suggestions="n/a",
     )
 
@@ -349,135 +344,133 @@ def run_evolve_loop(
             )
 
             for child_idx in range(1, children_per_generation + 1):
-                progress_label = (
-                    f"Round {generation}/{max_generations} "
-                    f"Cand {child_idx}/{children_per_generation}"
+                candidate_progress = CandidateProgress(
+                    generation,
+                    max_generations,
+                    child_idx,
+                    children_per_generation,
                 )
-                ctx.lprint(
-                    f"\n--- Gen {generation} Cand {child_idx}/{children_per_generation} ---\n"
-                )
+                with ctx.progress(candidate_progress):
+                    ctx.lprint(f"\n--- {candidate_progress.label()} ---\n")
 
-                # 1. Pick parent + inspirations.
-                parent = population.select_parent(
-                    rng=rng,
-                    temperature=selection_temperature,
-                    objectives=objectives,
-                    frontier_bias=frontier_bias,
-                )
-                inspirations = population.select_inspirations(
-                    parent_id=parent.id if parent else None,
-                    k_top=k_top_inspirations,
-                    k_random=k_random_inspirations,
-                    rng=rng,
-                    objectives=objectives,
-                )
-                is_cold_start = parent is None
+                    # 1. Pick parent + inspirations.
+                    parent = population.select_parent(
+                        rng=rng,
+                        temperature=selection_temperature,
+                        objectives=objectives,
+                        frontier_bias=frontier_bias,
+                    )
+                    inspirations = population.select_inspirations(
+                        parent_id=parent.id if parent else None,
+                        k_top=k_top_inspirations,
+                        k_random=k_random_inspirations,
+                        rng=rng,
+                        objectives=objectives,
+                    )
+                    is_cold_start = parent is None
 
-                # 2. Materialize parent's tree (skip on cold start —
-                # _RunContext seeded the workspace from the reference).
-                if parent is not None and parent.commit:
-                    if not _checkout_commit_tree(ctx, parent.commit):
+                    # 2. Materialize parent's tree (skip on cold start —
+                    # _RunContext seeded the workspace from the reference).
+                    if parent is not None and parent.commit:
+                        if not _checkout_commit_tree(ctx, parent.commit):
+                            ctx.lprint(
+                                f"[warn] could not check out parent {parent.id} "
+                                f"(commit {parent.commit[:8]}); skipping cand"
+                            )
+                            continue
+
+                    ctx.lprint(
+                        f"parent={'COLD-START' if parent is None else f'#{parent.id} (perf={parent.perf_metric})'}; "
+                        f"inspirations={[i.id for i in inspirations]}"
+                    )
+
+                    # 3. Mutator edits the workspace.
+                    ctx.reselect_gpu()
+                    mutator = _run_mutator(
+                        ctx,
+                        generation=generation,
+                        child_idx=child_idx,
+                        objective=objective,
+                        parent=parent,
+                        inspirations=inspirations,
+                        modality=modality,
+                        is_cold_start=is_cold_start,
+                        objectives=objectives,
+                    )
+
+                    # 4. Judge.
+                    ctx.reselect_gpu()
+                    verdict = _run_judge(
+                        ctx,
+                        generation=generation,
+                        child_idx=child_idx,
+                        modality=modality,
+                        objective=objective,
+                        pass_criteria=pass_criteria,
+                    )
+
+                    if verdict.verdict != Verdict.PASS:
+                        # Record the failed child (no commit) so its feedback
+                        # is visible to future mutators reading the population.
+                        failed = Individual(
+                            id=population.next_id(),
+                            generation=generation,
+                            parent_id=parent.id if parent else None,
+                            inspiration_ids=[i.id for i in inspirations],
+                            commit=None,
+                            perf_metric=None,
+                            perf_unit=None,
+                            passed=False,
+                            summary=mutator.summary,
+                            feedback=verdict.feedback,
+                        )
+                        population.add(failed)
+                        population.save(population_path)
+                        _discard_working_tree(ctx)
                         ctx.lprint(
-                            f"[warn] could not check out parent {parent.id} "
-                            f"(commit {parent.commit[:8]}); skipping cand"
+                            f"[Gen {generation}] Cand {failed.id} FAILED — "
+                            f"feedback: {(verdict.feedback or '').splitlines()[0][:120]}"
                         )
                         continue
 
-                ctx.lprint(
-                    f"parent={'COLD-START' if parent is None else f'#{parent.id} (perf={parent.perf_metric})'}; "
-                    f"inspirations={[i.id for i in inspirations]}"
-                )
+                    # 5. Profile the offspring to get its fitness.
+                    ctx.reselect_gpu()
+                    summary = _run_profiler(
+                        ctx,
+                        generation=generation,
+                        child_idx=child_idx,
+                        modality=modality,
+                        objective=objective,
+                        objectives=objectives,
+                    )
 
-                # 3. Mutator edits the workspace.
-                ctx.reselect_gpu()
-                mutator = _run_mutator(
-                    ctx,
-                    generation=generation,
-                    child_idx=child_idx,
-                    objective=objective,
-                    parent=parent,
-                    inspirations=inspirations,
-                    modality=modality,
-                    is_cold_start=is_cold_start,
-                    objectives=objectives,
-                    progress_label=progress_label,
-                )
-
-                # 4. Judge.
-                ctx.reselect_gpu()
-                verdict = _run_judge(
-                    ctx,
-                    generation=generation,
-                    child_idx=child_idx,
-                    modality=modality,
-                    objective=objective,
-                    pass_criteria=pass_criteria,
-                    progress_label=progress_label,
-                )
-
-                if verdict.verdict != Verdict.PASS:
-                    # Record the failed child (no commit) so its feedback
-                    # is visible to future mutators reading the population.
-                    failed = Individual(
+                    # 6. Commit + record.
+                    ctx.snapshot_workspace(f"gen-{generation}-child-{child_idx}")
+                    commit = _current_commit_sha(ctx)
+                    child = Individual(
                         id=population.next_id(),
                         generation=generation,
                         parent_id=parent.id if parent else None,
                         inspiration_ids=[i.id for i in inspirations],
-                        commit=None,
-                        perf_metric=None,
-                        perf_unit=None,
-                        passed=False,
+                        commit=commit,
+                        perf_metric=summary.perf_metric if summary else None,
+                        perf_unit=summary.perf_unit if summary else None,
+                        metrics=dict(summary.metrics) if summary and summary.metrics else {},
+                        passed=True,
                         summary=mutator.summary,
                         feedback=verdict.feedback,
                     )
-                    population.add(failed)
+                    population.add(child)
                     population.save(population_path)
-                    _discard_working_tree(ctx)
-                    ctx.lprint(
-                        f"[Gen {generation}] Cand {failed.id} FAILED — "
-                        f"feedback: {(verdict.feedback or '').splitlines()[0][:120]}"
+                    metrics_repr = (
+                        " ".join(f"{k}={v:g}" for k, v in child.metrics.items())
+                        if child.metrics
+                        else f"{child.perf_metric} {child.perf_unit or ''}"
                     )
-                    continue
-
-                # 5. Profile the offspring to get its fitness.
-                ctx.reselect_gpu()
-                summary = _run_profiler(
-                    ctx,
-                    generation=generation,
-                    child_idx=child_idx,
-                    modality=modality,
-                    objective=objective,
-                    objectives=objectives,
-                    progress_label=progress_label,
-                )
-
-                # 6. Commit + record.
-                ctx.snapshot_workspace(f"gen-{generation}-child-{child_idx}")
-                commit = _current_commit_sha(ctx)
-                child = Individual(
-                    id=population.next_id(),
-                    generation=generation,
-                    parent_id=parent.id if parent else None,
-                    inspiration_ids=[i.id for i in inspirations],
-                    commit=commit,
-                    perf_metric=summary.perf_metric if summary else None,
-                    perf_unit=summary.perf_unit if summary else None,
-                    metrics=dict(summary.metrics) if summary and summary.metrics else {},
-                    passed=True,
-                    summary=mutator.summary,
-                    feedback=verdict.feedback,
-                )
-                population.add(child)
-                population.save(population_path)
-                metrics_repr = (
-                    " ".join(f"{k}={v:g}" for k, v in child.metrics.items())
-                    if child.metrics
-                    else f"{child.perf_metric} {child.perf_unit or ''}"
-                )
-                ctx.lprint(
-                    f"[Gen {generation}] Cand {child.id} PASSED — "
-                    f"{metrics_repr} (parent={parent.id if parent else 'cold'})"
-                )
+                    ctx.lprint(
+                        f"[Gen {generation}] Cand {child.id} PASSED — "
+                        f"{metrics_repr} (parent={parent.id if parent else 'cold'})"
+                    )
 
         if objectives:
             front = population.frontier(objectives)
