@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from vibe_serve.config import _load_config, _load_dotenv_file
+from vibe_serve.features import FeatureFlag
 
 
 class TestLoadConfigValid:
@@ -95,6 +96,21 @@ new_loop = true
 """)
         with pytest.raises(ValueError, match="Unknown feature flag 'new_loop'"):
             _load_config(cfg_file)
+
+
+class TestLoadConfigFeatureFlags:
+    def test_feature_flags_parsed_as_typed_overrides(self, tmp_path):
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text("""\
+[model]
+name = "claude-sonnet-4-6"
+
+[feature_flags]
+example_feature = true
+""")
+        config = _load_config(cfg_file)
+
+        assert config.feature_flags == {FeatureFlag.EXAMPLE_FEATURE: True}
 
 
 class TestLoadConfigStrict:

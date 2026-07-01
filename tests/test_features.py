@@ -2,49 +2,43 @@ from types import SimpleNamespace
 
 import pytest
 
-from vibe_serve import features
-from vibe_serve.features import FEATURES, FeatureFlag, _feature_flag_overrides, is_feature_enabled
+from vibe_serve.features import FEATURES, FeatureFlag, is_feature_enabled
 
 
-def test_vibeserve_has_no_declared_feature_flags_yet():
-    assert list(FeatureFlag) == []
-    assert FEATURES.definitions == {}
+def test_vibeserve_declares_example_feature():
+    assert list(FeatureFlag) == [FeatureFlag.EXAMPLE_FEATURE]
+    assert FeatureFlag.EXAMPLE_FEATURE.value == "example_feature"
+    assert FEATURES.definitions[FeatureFlag.EXAMPLE_FEATURE].description
+    assert FEATURES.definitions[FeatureFlag.EXAMPLE_FEATURE].default is False
 
 
-def test_is_feature_enabled_delegates_to_registry(monkeypatch):
-    sentinel_flag = object()
-    sentinel_overrides = object()
-
-    class StubRegistry:
-        def is_enabled(self, flag, overrides):
-            assert flag is sentinel_flag
-            assert overrides is sentinel_overrides
-            return True
-
-    monkeypatch.setattr(features, "FEATURES", StubRegistry())
-    monkeypatch.setattr(features, "_feature_flag_overrides", lambda config: sentinel_overrides)
-
-    assert is_feature_enabled(sentinel_flag, object()) is True
+def test_is_feature_enabled_uses_manifest_default():
+    assert is_feature_enabled(FeatureFlag.EXAMPLE_FEATURE) is False
 
 
-def test_feature_flag_overrides_defaults_to_empty_mapping():
-    assert _feature_flag_overrides(None) == {}
-    assert _feature_flag_overrides(SimpleNamespace(feature_flags=None)) == {}
+@pytest.mark.parametrize("enabled", [False, True])
+def test_is_feature_enabled_uses_config_object_override(enabled):
+    config = SimpleNamespace(feature_flags={FeatureFlag.EXAMPLE_FEATURE: enabled})
+
+    assert is_feature_enabled(FeatureFlag.EXAMPLE_FEATURE, config) is enabled
 
 
-def test_feature_flag_overrides_accepts_config_attribute():
-    overrides = {FeatureFlag: True}
+def test_is_feature_enabled_treats_missing_config_overrides_as_empty():
+    config = SimpleNamespace(feature_flags=None)
 
-    assert _feature_flag_overrides(SimpleNamespace(feature_flags=overrides)) is overrides
-
-
-def test_feature_flag_overrides_accepts_mapping_config():
-    overrides = {FeatureFlag: False}
-
-    assert _feature_flag_overrides({"feature_flags": overrides}) is overrides
-    assert _feature_flag_overrides({}) == {}
+    assert is_feature_enabled(FeatureFlag.EXAMPLE_FEATURE, config) is False
 
 
-def test_feature_flag_overrides_rejects_non_mapping_overrides():
+def test_is_feature_enabled_accepts_mapping_config():
+    config = {"feature_flags": {FeatureFlag.EXAMPLE_FEATURE: True}}
+
+    assert is_feature_enabled(FeatureFlag.EXAMPLE_FEATURE, config) is True
+
+
+def test_is_feature_enabled_treats_missing_mapping_overrides_as_empty():
+    assert is_feature_enabled(FeatureFlag.EXAMPLE_FEATURE, {}) is False
+
+
+def test_is_feature_enabled_rejects_non_mapping_overrides():
     with pytest.raises(ValueError, match="config.feature_flags must be a mapping"):
-        _feature_flag_overrides(SimpleNamespace(feature_flags=True))
+        is_feature_enabled(FeatureFlag.EXAMPLE_FEATURE, SimpleNamespace(feature_flags=True))

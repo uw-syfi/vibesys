@@ -32,8 +32,8 @@ name = "claude-sonnet-4-6"
 
 # [feature_flags]
 # VibeServe feature flags are declared in src/vibe_serve/features.py.
-# There are no feature flags declared by default.
-# future_flag_name = true
+# `example_feature` is a non-product sample flag used for plumbing tests.
+# example_feature = false
 
 # [backend]
 # Hardware/runtime backend the serving stack targets. Supported values:

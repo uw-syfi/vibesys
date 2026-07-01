@@ -30,7 +30,8 @@ FEATURES = FeatureRegistry(
 )
 ```
 
-There are currently no declared VibeServe feature flags.
+`example_feature` is a non-product sample flag used to exercise feature flag
+plumbing and tests. Remove it when the first real VibeServe feature flag exists.
 
 ## Config
 

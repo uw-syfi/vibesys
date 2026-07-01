@@ -9,14 +9,22 @@ from __future__ import annotations
 from collections.abc import Mapping
 from enum import StrEnum
 
-from vs_feature_flags import FeatureRegistry
+from vs_feature_flags import FeatureDefinition, FeatureRegistry
 
 
 class FeatureFlag(StrEnum):
-    pass
+    EXAMPLE_FEATURE = "example_feature"
 
 
-FEATURES = FeatureRegistry(FeatureFlag, {})
+FEATURES = FeatureRegistry(
+    FeatureFlag,
+    {
+        FeatureFlag.EXAMPLE_FEATURE: FeatureDefinition(
+            description="Exercise VibeServe feature flag plumbing.",
+            default=False,
+        ),
+    },
+)
 
 
 def is_feature_enabled(
