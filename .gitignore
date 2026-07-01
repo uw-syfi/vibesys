@@ -1,5 +1,23 @@
 # macOS metadata
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100/
+.TemporaryItems/
+.Trashes/
+.fseventsd/
+
+# Windows metadata
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Editor backup/swap files
+*.swp
+*.swo
+*~
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
