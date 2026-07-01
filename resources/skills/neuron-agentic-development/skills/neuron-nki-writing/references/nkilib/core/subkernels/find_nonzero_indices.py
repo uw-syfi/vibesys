@@ -91,7 +91,7 @@ def find_nonzero_indices(
     """
     T_DIM, C_DIM = input_tensor.shape
     # Handle col_start_id parameter for processing subset of columns
-    if col_start_id != None and n_cols != None:
+    if col_start_id is not None and n_cols is not None:
         col_start_id_sbuf = nl.ndarray(
             (1, 1), dtype=nl.int32, buffer=nl.sbuf, name="col_start_id_sbuf"
         )
@@ -111,7 +111,7 @@ def find_nonzero_indices(
     C_TILE_SIZE = P_MAX  # Tile size for the C dimension / SBUF partition count
 
     # Use chunk_size to limit SBUF usage for large T
-    if chunk_size == None:
+    if chunk_size is None:
         chunk_size = T_DIM
     kernel_assert(
         T_DIM % chunk_size == 0, f"T_DIM ({T_DIM}) must be divisible by chunk_size ({chunk_size})"
@@ -184,7 +184,7 @@ def find_nonzero_indices(
             t_chunk_start = chunk_idx * chunk_size
 
             # --- Load phase: single DMA copy for all T tiles in the chunk ---
-            if col_start_id_sbuf != None:
+            if col_start_id_sbuf is not None:
                 nisa.dma_copy(
                     dst=input_sbuf[:, 0:CHUNK_T_TILES, 0:n_columns_this_round],
                     src=input_tensor.ap(

@@ -14,8 +14,6 @@
 
 """LayerNorm subkernel optimized for token generation (TKG) inference with LNC sharding support."""
 
-from typing import Optional
-
 import nki.isa as nisa
 import nki.language as nl
 
@@ -36,10 +34,10 @@ def layernorm_tkg(
     input: nl.ndarray,
     gamma: nl.ndarray,
     output: nl.ndarray,
-    beta: Optional[nl.ndarray] = None,
+    beta: nl.ndarray | None = None,
     eps: float = 1e-6,
     use_heap_memory: bool = False,
-    sbm: Optional[SbufManager] = None,
+    sbm: SbufManager | None = None,
 ):
     """
     LayerNorm implementation optimized for inference token generation (decoding) phase.
@@ -200,7 +198,7 @@ def layernorm_tkg(
 def layernorm_tkg_llama_impl(
     input: nl.ndarray,
     gamma: nl.ndarray,
-    beta: Optional[nl.ndarray],
+    beta: nl.ndarray | None,
     result: nl.ndarray,
     bs_lb: int,
     bs_count: int,
@@ -279,7 +277,6 @@ def layernorm_tkg_llama_impl(
         H = _H0 * H1
     else:
         B, S, H = input.shape
-        full_BxS = B * S
         kernel_assert(H % H0 == 0, f"inp tensor H dimension must be divisible by {H0}, got {H}")
         H1 = H // H0
 
@@ -296,7 +293,7 @@ def layernorm_tkg_llama_impl(
     )
 
     # Beta check
-    is_beta = beta != None
+    is_beta = beta is not None
 
     # Check if the kernel uses auto or manual allocation
     is_auto_alloc = sbm.is_auto_alloc()

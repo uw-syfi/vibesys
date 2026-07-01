@@ -1,7 +1,5 @@
 """Tests for the issue-tracker tools (list/get/search/create)."""
 
-import pytest
-
 from vibe_serve.loops.plain.issue_board import IssueBoard, IssueStatus, IssueType
 from vibe_serve.loops.plain.tools import build_issue_tools
 
@@ -47,7 +45,7 @@ class TestReadTools:
 
     def test_list_issues_filters_by_status(self, tmp_path):
         store = _make_store(tmp_path)
-        a = store.create(
+        store.create(
             type=IssueType.BUG, title="open one", description="d", created_by="x", iteration=1
         )
         b = store.create(

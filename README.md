@@ -222,6 +222,7 @@ resources/skills/serving-systems/ # Agent Skills library
 ```bash
 ./scripts/format.sh                                # format checked Python dirs
 ./scripts/check_format.sh                          # check formatting for CI
+./scripts/check_lint.sh                            # check Ruff lint for CI
 uv run pytest                                       # full suite
 uv run pytest tests/loops/plain/test_plain_loop.py  # one file
 uv run pytest -k orchestrator                       # by keyword

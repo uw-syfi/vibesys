@@ -14,7 +14,6 @@
 
 
 from dataclasses import dataclass
-from typing import Optional
 
 import nki.language as nl
 from nki.language import NKIObject
@@ -49,7 +48,7 @@ class TiledDimInfo(NKIObject):
     # The number of tiles needed to cover the dimension being tiled
     tile_count: int
     # Subtile information (if there is any)
-    subtile_dim_info: "Optional[TiledDimInfo]" = None
+    subtile_dim_info: "TiledDimInfo | None" = None
 
     # Factory methods
     # ONLY CONSTRUCT THIS USING THE FACTORY METHODS BELOW
@@ -63,7 +62,7 @@ class TiledDimInfo(NKIObject):
         return TiledDimInfo.build(tiled_dim_size, tile_size, subtiled_dim_info)
 
     def is_subtiled(self) -> bool:
-        return self.subtile_dim_info != None
+        return self.subtile_dim_info is not None
 
     # Calculate indices for the tile given a tile number and offset
     # TODO: Now this only works if last item from mgrid.

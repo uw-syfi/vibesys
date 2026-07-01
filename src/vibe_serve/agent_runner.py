@@ -542,7 +542,7 @@ def run_profiler_agent(
     if structured_response is None:
         structured_response = _parse_profiler_response_text(last_ai_message)
     if structured_response is None:
-        _log_and_print(f"\n=== PROFILER ROUND OUTPUT (missing response) ===", log_file)
+        _log_and_print("\n=== PROFILER ROUND OUTPUT (missing response) ===", log_file)
         _log_and_print("No structured response received from profiler.", log_file)
         if last_ai_message:
             _log_and_print("\n=== PROFILER ROUND OUTPUT (raw ai message) ===", log_file)

@@ -12,7 +12,6 @@ Run this script on Trainium/Inferentia hardware with the NKI venv activated.
 """
 
 import os
-import subprocess
 from datetime import datetime
 from pathlib import Path
 

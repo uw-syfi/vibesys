@@ -1,7 +1,6 @@
 """Tests for ModalSandbox — all mock modal.Sandbox/Volume, no Modal auth required."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

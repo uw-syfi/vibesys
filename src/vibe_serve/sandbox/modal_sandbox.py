@@ -26,8 +26,9 @@ import socket
 import tempfile
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import Callable, TypeVar
+from typing import TypeVar
 
 import modal
 from deepagents.backends.protocol import (
@@ -39,7 +40,7 @@ from deepagents.backends.protocol import (
 from deepagents.backends.sandbox import BaseSandbox
 
 # Global registry of live sandboxes for cleanup on exit / SIGINT.
-_live_sandboxes: dict[str, "ModalSandbox"] = {}
+_live_sandboxes: dict[str, ModalSandbox] = {}
 
 T = TypeVar("T")
 
@@ -187,7 +188,7 @@ class ModalSandbox(BaseSandbox):
         extra_writable_volumes: dict[str, str] | None = None,
         log_path: str | Path | None = None,
         extra_init_commands: list[str] | None = None,
-        setup_fns: list["Callable[[ModalSandbox], None]"] | None = None,
+        setup_fns: list[Callable[[ModalSandbox], None]] | None = None,
         app_name: str = "vibeserve",
         enable_fallback_restart: bool = True,
         max_restart_attempts: int = 2,
@@ -872,7 +873,7 @@ class ModalSandbox(BaseSandbox):
 
     # -- context manager ---------------------------------------------------
 
-    def __enter__(self) -> "ModalSandbox":
+    def __enter__(self) -> ModalSandbox:
         self.start()
         return self
 

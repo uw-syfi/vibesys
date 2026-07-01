@@ -14,8 +14,6 @@
 
 """RMSNorm kernel optimized for token generation (decoding) phase with efficient sharding and memory management."""
 
-from typing import Optional, Tuple, Union
-
 import nki.isa as nisa
 import nki.language as nl
 
@@ -38,15 +36,15 @@ BxS_FULL_TILE_SIZE = 512
 
 
 def rmsnorm_tkg(
-    input: Union[TensorView, nl.ndarray],
-    gamma: Union[TensorView, nl.ndarray],
-    output: Union[TensorView, nl.ndarray],
+    input: TensorView | nl.ndarray,
+    gamma: TensorView | nl.ndarray,
+    output: TensorView | nl.ndarray,
     eps: float = 1e-6,
-    hidden_actual: Optional[int] = None,
+    hidden_actual: int | None = None,
     hidden_dim_tp: bool = False,
     single_core_forced: bool = False,
     use_heap_memory: bool = False,
-    sbm: Optional[SbufManager] = None,
+    sbm: SbufManager | None = None,
 ):
     """
     RMSNorm implementation optimized for inference token generation (decoding) phase.
@@ -201,7 +199,7 @@ def process_rmsnorm_tile(
     output_sb_view: TensorView,
     eps_view: TensorView,
     matmul_reduction_const_view: TensorView,
-    bxs_tile: Tuple,
+    bxs_tile: tuple,
     hidden_actual: int,
     use_heap_memory: bool = False,
     sbm: SbufManager = None,
@@ -318,7 +316,7 @@ def rmsnorm_tkg_llama_impl(
     gamma: TensorView,
     output: TensorView,
     num_H_shards: int,
-    hidden_actual: Optional[int],
+    hidden_actual: int | None,
     eps: float,
     hidden_dim_tp: bool = False,
     use_heap_memory: bool = False,

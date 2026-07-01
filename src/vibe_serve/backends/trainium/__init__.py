@@ -23,8 +23,8 @@ is a no-op (parity with :class:`MetalBackend`).
 from __future__ import annotations
 
 import glob
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from deepagents.backends import LocalShellBackend
 from deepagents.backends.sandbox import BaseSandbox

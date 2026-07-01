@@ -7,8 +7,7 @@ ProfilerResponse / parser / nsys-toolkit tests.
 
 import json
 import sqlite3
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -17,10 +16,7 @@ from vibe_serve.agent_runner import (
     run_profiler_agent,
 )
 from vibe_serve.schemas import (
-    ImplementerResponse,
-    JudgeResponse,
     ProfilerResponse,
-    Verdict,
 )
 
 # ---------------------------------------------------------------------------

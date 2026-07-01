@@ -21,7 +21,6 @@ TiledRangeIterator represents a single tile with size, index, and start_offset p
 """
 
 import math
-from typing import Tuple, Union
 
 from nki.language import NKIObject
 
@@ -55,9 +54,7 @@ class TiledRangeIterator(NKIObject):
         return f"TiledRangeIterator(size={self.size}, index={self.index}, start_offset={self.start_offset}, end_offset={self.end_offset})"
 
 
-def TiledRange(
-    size: Union[int, TiledRangeIterator], tile_size: int
-) -> Tuple[TiledRangeIterator, ...]:
+def TiledRange(size: int | TiledRangeIterator, tile_size: int) -> tuple[TiledRangeIterator, ...]:
     """
     Divides a dimension into tiles and returns a tuple of TiledRangeIterators.
 

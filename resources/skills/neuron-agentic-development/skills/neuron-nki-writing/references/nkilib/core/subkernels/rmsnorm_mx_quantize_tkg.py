@@ -14,8 +14,6 @@
 
 """Fused optional residual add + RMSNorm + MX quantization kernel optimized for token generation (decoding) phase."""
 
-from typing import Optional
-
 import nki.isa as nisa
 import nki.language as nl
 
@@ -32,10 +30,10 @@ def rmsnorm_mx_quantize_tkg(
     output: nl.ndarray,
     output_quant: nl.ndarray,
     output_scale: nl.ndarray,
-    residual: Optional[nl.ndarray] = None,
-    output_residual: Optional[nl.ndarray] = None,
+    residual: nl.ndarray | None = None,
+    output_residual: nl.ndarray | None = None,
     eps: float = 1e-6,
-    hidden_actual: Optional[int] = None,
+    hidden_actual: int | None = None,
     hidden_dim_tp: bool = True,
 ):
     """
@@ -82,7 +80,7 @@ def rmsnorm_mx_quantize_tkg(
     # Configuration
     pmax = H0 = nl.tile_size.pmax
     psum_fmax = nl.tile_size.gemm_moving_fmax
-    is_residual_add = residual != None
+    is_residual_add = residual is not None
     inter_dtype = nl.float32
 
     # Step 1: Validate shapes
@@ -96,17 +94,17 @@ def rmsnorm_mx_quantize_tkg(
         hidden_dim_tp=hidden_dim_tp,
         is_residual_add=is_residual_add,
         residual_shape=residual.shape if is_residual_add else None,
-        output_residual_shape=output_residual.shape if output_residual != None else None,
+        output_residual_shape=output_residual.shape if output_residual is not None else None,
     )
 
-    if hidden_actual == None:
+    if hidden_actual is None:
         hidden_actual = H
 
     # Step 2: LNC sharding setup
     _, num_shards, shard_id = get_verified_program_sharding_info("rmsnorm_mx_quantize_tkg", (0, 1))
     kernel_assert(num_shards == 2, "rmsnorm_mx_quantize_tkg kernel only supports LNC=2")
     kernel_assert(
-        BxS % 4 == 0, f"BxS must be divisible by 4"
+        BxS % 4 == 0, "BxS must be divisible by 4"
     )  # Required for LNC2 sharding alignment
 
     shard_size = BxS // num_shards

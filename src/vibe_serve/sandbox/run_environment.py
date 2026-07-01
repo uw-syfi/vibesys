@@ -29,13 +29,14 @@ import json
 import os
 import shlex
 import subprocess
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Mapping, Protocol
+from typing import Protocol
 
 from deepagents.backends.sandbox import BaseSandbox
 
-from vibe_serve.backends import ModalOptions, SandboxKind
+from vibe_serve.backends import SandboxKind
 from vibe_serve.backends.base import ComputeBackendImpl, SetupFn
 from vibe_serve.constants import DEFAULT_AGENT_BACKEND, PROJECT_ROOT
 
@@ -103,7 +104,7 @@ class RunEnvironmentSession(Protocol):
     sandbox: BaseSandbox
     view: RunEnvironmentView
 
-    def __enter__(self) -> "RunEnvironmentSession": ...
+    def __enter__(self) -> RunEnvironmentSession: ...
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None: ...
     def close(self) -> None: ...
 
@@ -142,7 +143,7 @@ class _DefaultRunEnvironmentSession:
     stop_on_close: bool = False
     _closed: bool = False
 
-    def __enter__(self) -> "_DefaultRunEnvironmentSession":
+    def __enter__(self) -> _DefaultRunEnvironmentSession:
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
@@ -202,7 +203,7 @@ class DockerEnvironment:
         self.backend_image = config.image
 
     @classmethod
-    def from_options(cls, options: Mapping[str, object]) -> "DockerEnvironment":
+    def from_options(cls, options: Mapping[str, object]) -> DockerEnvironment:
         image = options.get("image")
         return cls(DockerEnvironmentConfig(image=str(image) if image else None))
 
@@ -302,7 +303,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         self.backend_image = config.image
 
     @classmethod
-    def from_options(cls, options: Mapping[str, object]) -> "ModalEnvironment":
+    def from_options(cls, options: Mapping[str, object]) -> ModalEnvironment:
         return cls(
             ModalEnvironmentConfig(
                 image=str(options["image"]) if options.get("image") else None,

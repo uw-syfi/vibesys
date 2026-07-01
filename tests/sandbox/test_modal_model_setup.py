@@ -1,6 +1,6 @@
 """Tests for the auto-provisioning of Modal Volumes holding model weights."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

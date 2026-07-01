@@ -20,7 +20,6 @@ The class is implemented to run in a NKI enviornment.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 import nki.language as nl
 
@@ -81,7 +80,7 @@ class SbufManager(nl.NKIObject):
         self,
         sb_lower_bound: int,
         sb_upper_bound: int,
-        logger: Optional[Logger] = None,
+        logger: Logger | None = None,
         use_auto_alloc: bool = False,
         default_stack_alloc: bool = True,
     ):
@@ -104,7 +103,7 @@ class SbufManager(nl.NKIObject):
         self.use_auto_alloc = use_auto_alloc
         self.default_stack_alloc = default_stack_alloc
         self.logger = logger
-        if self.logger == None:
+        if self.logger is None:
             self.logger = get_logger("SBM")
         self.scopes = []
         self.heap = []
@@ -307,7 +306,7 @@ class SbufManager(nl.NKIObject):
             self.logger.debug(f"Stack state: no open scopes, stack_addr={self.stack_curr_addr}")
             kernel_assert(False, "Cannot allocate in stack without an open scope")
 
-        if align == None:
+        if align is None:
             align = sizeinbytes(dtype)
         self.stack_curr_addr = align_to(self.stack_curr_addr, align)
         tensor_name = self._get_prefixed_name(name)
@@ -372,7 +371,7 @@ class SbufManager(nl.NKIObject):
             self._print_stats()
             kernel_assert(False, "Heap out of memory")
 
-        if align != None:
+        if align is not None:
             self.heap_curr_addr = align_to(self.heap_curr_addr, align)
         base_addr = self.heap_curr_addr - bytes_per_partition
         self.heap_curr_addr -= bytes_per_partition
@@ -477,6 +476,6 @@ class SbufManager(nl.NKIObject):
         self.tree_logger.flush()
 
 
-def create_auto_alloc_manager(logger: Optional[Logger] = None):
+def create_auto_alloc_manager(logger: Logger | None = None):
     """create a default auto allocated SBM initialized with total SBUF space"""
     return SbufManager(0, nl.tile_size.total_available_sbuf_size, logger, use_auto_alloc=True)

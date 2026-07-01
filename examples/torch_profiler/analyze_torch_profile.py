@@ -54,10 +54,9 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -158,7 +157,7 @@ def cmd_capture(args: argparse.Namespace) -> None:
     events_json = _summarize_prof(prof, num_iters=args.num_iters)
     events_json.update(
         {
-            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "captured_at": datetime.now(UTC).isoformat(),
             "mode": "model",
             "device": args.device,
             "dtype": args.dtype,
@@ -214,7 +213,7 @@ def cmd_capture_server(args: argparse.Namespace) -> None:
         f"[capture-server] sending {args.requests} requests (max_tokens={args.max_tokens})...",
         file=sys.stderr,
     )
-    for i in range(args.requests):
+    for _i in range(args.requests):
         _post(
             "/v1/completions",
             {
@@ -233,7 +232,7 @@ def cmd_capture_server(args: argparse.Namespace) -> None:
             "is the server implementing the expected contract?"
         )
 
-    result.setdefault("captured_at", datetime.now(timezone.utc).isoformat())
+    result.setdefault("captured_at", datetime.now(UTC).isoformat())
     result.setdefault("mode", "server")
     result.setdefault("num_iters", args.requests)
     Path(args.output).write_text(json.dumps(result, indent=2))

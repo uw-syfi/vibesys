@@ -71,7 +71,6 @@ def load_test_samples(audio_dir: Path):
 def transcribe_reference(model, proj_out, tokenizer, audio: np.ndarray, sr: int) -> str:
     """Greedy decode with HF MoonshineStreamingModel + a separately-loaded
     proj_out (lm_head) projection.  Matches the offline-transcribe contract."""
-    from transformers.cache_utils import DynamicCache, EncoderDecoderCache
 
     device = next(model.parameters()).device
     dtype = next(model.parameters()).dtype
@@ -184,7 +183,7 @@ def main():
 
     print("Generating reference outputs ...")
     ref_outputs: list[str] = []
-    for desc, audio, sr, _ in test_samples:
+    for _desc, audio, sr, _ in test_samples:
         ref_outputs.append(transcribe_reference(ref_model, proj_out, tokenizer, audio, sr))
 
     del ref_model, proj_out, sd

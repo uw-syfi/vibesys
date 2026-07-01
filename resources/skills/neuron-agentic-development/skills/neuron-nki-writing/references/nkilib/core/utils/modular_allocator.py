@@ -23,8 +23,6 @@ See `ModularAllocator.alloc_sbuf_tensor` for examples.
 
 """
 
-from typing import List, Tuple, Union
-
 import nki.language as nl
 
 from .allocator import align_to as align_to_fn
@@ -87,13 +85,13 @@ class ModularAllocator(nl.NKIObject):
 
     def alloc_sbuf_tensor(
         self,
-        shape: Tuple[int, ...],
+        shape: tuple[int, ...],
         dtype,
-        block_dim: List[int] = None,
-        num_free_tiles: List[int] = None,
+        block_dim: list[int] = None,
+        num_free_tiles: list[int] = None,
         base_partition: int = 0,
         align_to: int = None,
-    ) -> Union[List, object]:
+    ) -> list | object:
         """
         Allocate SBUF tensors with modular address pattern for circular buffering.
 
@@ -158,15 +156,15 @@ class ModularAllocator(nl.NKIObject):
           # k_loaded[0][j] and k_loaded[2][j] share the same address
         """
         # Apply alignment if requested
-        if align_to != None:
+        if align_to is not None:
             self._current_address = align_to_fn(self._current_address, align_to)
 
         # Handle default block_dim
-        if block_dim == None:
+        if block_dim is None:
             block_dim = []
 
         # Handle default num_free_tiles
-        if num_free_tiles == None:
+        if num_free_tiles is None:
             num_free_tiles = block_dim.copy() if block_dim else []
 
         kernel_assert(
@@ -217,11 +215,11 @@ class ModularAllocator(nl.NKIObject):
 
 
 def _allocate_recursive(
-    indices: List[int],
+    indices: list[int],
     depth: int,
-    block_dim: List[int],
-    num_free_tiles: List[int],
-    shape: Tuple[int, ...],
+    block_dim: list[int],
+    num_free_tiles: list[int],
+    shape: tuple[int, ...],
     dtype,
     base_partition: int,
     sca: int,

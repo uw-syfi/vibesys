@@ -22,8 +22,6 @@ These utilities are designed to be reusable across different kernel types
 and provide consistent behavior for common operations.
 """
 
-from typing import List, Optional, Tuple
-
 import nki.isa as nisa
 import nki.language as nl
 
@@ -275,7 +273,7 @@ def normalization_uses_weights(norm_type: NormType) -> bool:
     return norm_type == NormType.RMS_NORM or norm_type == NormType.LAYER_NORM
 
 
-def get_program_sharding_info() -> Tuple[int, int, int]:
+def get_program_sharding_info() -> tuple[int, int, int]:
     """
     Get program sharding information for current execution.
 
@@ -311,9 +309,9 @@ def get_program_sharding_info() -> Tuple[int, int, int]:
 
 def get_verified_program_sharding_info(
     kernel_name: str = "",
-    allowed_ndims: Optional[Tuple[int, ...]] = None,
-    max_sharding: Optional[int] = None,
-) -> Tuple[int, int, int]:
+    allowed_ndims: tuple[int, ...] | None = None,
+    max_sharding: int | None = None,
+) -> tuple[int, int, int]:
     """
     Get and optionally verify program sharding information.
 
@@ -336,11 +334,7 @@ def get_verified_program_sharding_info(
         # Optional validation checks
         return (grid_ndim, n_prgs, prg_id)
     """
-    grid_ndim, n_prgs, prg_id = get_program_sharding_info()
-    ndim_check = allowed_ndims is None or (
-        grid_ndim == allowed_ndims[0] if len(allowed_ndims) == 1 else False
-    )
-    return grid_ndim, n_prgs, prg_id
+    return get_program_sharding_info()
 
 
 def div_ceil(n, d):
@@ -396,7 +390,7 @@ def get_max_positive_value_for_dtype(dtype) -> float:
     return result
 
 
-def reduce(op="mul", input: List = None, initial_value=None):
+def reduce(op="mul", input: list = None, initial_value=None):
     """
     Perform reduction operation on a list of values.
 
@@ -432,8 +426,8 @@ def reduce(op="mul", input: List = None, initial_value=None):
                 result = max(result, value)
         return result
     """
-    kernel_assert(initial_value is not None, f"initial_value need to set")
-    kernel_assert(input is not None, f"input need to be set")
+    kernel_assert(initial_value is not None, "initial_value need to set")
+    kernel_assert(input is not None, "input need to be set")
     kernel_assert(op in ["mul", "add", "max", "min"], f"only op {op} is supported")
     for value in input:
         if op == "mul":

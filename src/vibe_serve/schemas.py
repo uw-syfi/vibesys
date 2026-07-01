@@ -21,7 +21,7 @@ This module has no local imports, so templates and tests can pull
 schemas in without dragging in the rest of the agent runtime.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
@@ -30,12 +30,12 @@ from pydantic import BaseModel, Field
 # ===========================================================================
 
 
-class Verdict(str, Enum):
+class Verdict(StrEnum):
     PASS = "pass"
     FAIL = "fail"
 
 
-class PerfTrend(str, Enum):
+class PerfTrend(StrEnum):
     IMPROVED = "improved"
     REGRESSED = "regressed"
     MIXED = "mixed"

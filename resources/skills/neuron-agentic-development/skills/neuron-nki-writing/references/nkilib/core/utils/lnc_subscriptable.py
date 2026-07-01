@@ -15,7 +15,8 @@
 import ast
 import inspect
 import textwrap
-from typing import Callable, Generic, TypeAlias, TypeVar
+from collections.abc import Callable
+from typing import Generic, TypeAlias, TypeVar
 
 from .kernel_assert import kernel_assert
 
@@ -71,7 +72,7 @@ def _verify_protocol_sync(func: Callable, protocol: TorchRefProtocolType):
         f"Parameter count mismatch: function has {len(func_params)}, Protocol has {len(protocol_params)}",
     )
 
-    for (fn, fp), (pn, pp) in zip(func_params, protocol_params):
+    for (fn, fp), (pn, pp) in zip(func_params, protocol_params, strict=True):
         kernel_assert(
             fn == pn, f"Parameter name mismatch: function has '{fn}', Protocol has '{pn}'"
         )

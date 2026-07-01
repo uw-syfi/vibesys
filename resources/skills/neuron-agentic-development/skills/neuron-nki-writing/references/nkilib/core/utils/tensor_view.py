@@ -20,8 +20,6 @@ similar to PyTorch tensor views. It allows for efficient tensor manipulation wit
 data copying by using NKI's array pattern (ap) functionality.
 """
 
-from typing import Dict, List, Optional, Tuple, Union
-
 import nki.language as nl
 
 from .allocator import num_elts, sizeinbytes
@@ -49,12 +47,12 @@ class TensorView(nl.NKIObject):
     """
 
     base_tensor: nl.ndarray
-    shape: Tuple[int, ...]
-    strides: Tuple[int, ...]
+    shape: tuple[int, ...]
+    strides: tuple[int, ...]
     offset: int
     dtype: object
     scalar_offset: nl.ndarray = None
-    indirect_dim: Optional[int] = None
+    indirect_dim: int | None = None
 
     def get_dim(self) -> int:
         return len(self.shape)
@@ -66,7 +64,7 @@ class TensorView(nl.NKIObject):
         return is_hbm_buffer(self.base_tensor)
 
     @staticmethod
-    def get_trivial_strides(shape: Tuple[int, ...], base_stride: int = 1) -> Tuple[int, ...]:
+    def get_trivial_strides(shape: tuple[int, ...], base_stride: int = 1) -> tuple[int, ...]:
         """Compute row-major (C-style) strides for given tensor shape.
         Args:
             shape: Tuple of dimension sizes
@@ -201,12 +199,12 @@ class TensorView(nl.NKIObject):
 
     def _copy(
         self,
-        shape: Tuple[int, ...] = None,
-        strides: Tuple[int, ...] = None,
+        shape: tuple[int, ...] = None,
+        strides: tuple[int, ...] = None,
         offset: int = None,
         scalar_offset: nl.ndarray = None,
         vector_offset: nl.ndarray = None,
-        indirect_dim: Optional[int] = None,
+        indirect_dim: int | None = None,
         dtype: object = None,
         base_tensor: nl.ndarray = None,
     ) -> "TensorView":
@@ -272,7 +270,7 @@ class TensorView(nl.NKIObject):
         # Build array pattern as list of (stride, size) tuples
         ap_pattern, offset = self._get_pattern_and_offset()
 
-        if self.indirect_dim != None:
+        if self.indirect_dim is not None:
             if self.vector_offset is not None:
                 result = self.base_tensor.ap(
                     pattern=ap_pattern,
@@ -336,7 +334,7 @@ class TensorView(nl.NKIObject):
         return self._copy(shape=new_shape, strides=new_strides, offset=new_offset)
 
     @staticmethod
-    def validate_permutation(permutation: Tuple[int, ...], dim: int, is_sbuf: bool) -> None:
+    def validate_permutation(permutation: tuple[int, ...], dim: int, is_sbuf: bool) -> None:
         kernel_assert(
             len(permutation) == dim,
             f"Permutation length {len(permutation)} != dimension count {dim}",
@@ -357,7 +355,7 @@ class TensorView(nl.NKIObject):
         if is_sbuf:
             kernel_assert(permutation[0] == 0, "Partition dimension stay the outermost dimension")
 
-    def permute(self, dims: Tuple[int, ...]) -> "TensorView":
+    def permute(self, dims: tuple[int, ...]) -> "TensorView":
         """Create a permuted view by reordering dimensions.
         Args:
             dims: New order of dimensions (tuple of dimension indices)
@@ -420,7 +418,7 @@ class TensorView(nl.NKIObject):
 
         return self._copy(shape=new_shape, strides=new_strides)
 
-    def _reshape_dim_handle_minus_one(self, dim: int, shape: Tuple[int]) -> Tuple[int]:
+    def _reshape_dim_handle_minus_one(self, dim: int, shape: tuple[int]) -> tuple[int]:
         """Handle -1 in reshape shape by computing the inferred dimension size.
         Args:
             dim: Dimension being reshaped
@@ -451,7 +449,7 @@ class TensorView(nl.NKIObject):
                 new_shape.append(self.shape[dim] // prod_shape)
         return tuple(new_shape)
 
-    def reshape_dim(self, dim: int, shape: Tuple[int, ...]) -> "TensorView":
+    def reshape_dim(self, dim: int, shape: tuple[int, ...]) -> "TensorView":
         """Reshape a single dimension into multiple dimensions.
         Args:
             dim: Dimension to reshape
@@ -705,7 +703,7 @@ class TensorView(nl.NKIObject):
 
         kernel_assert(False, f"Cannot create base dim with stride {view_stride}")
 
-    def select(self, dim: int, index: Union[int, nl.ndarray]) -> "TensorView":
+    def select(self, dim: int, index: int | nl.ndarray) -> "TensorView":
         """Select a single element along a dimension, reducing dimensionality.
         Args:
             dim: Dimension to select from
@@ -732,8 +730,8 @@ class TensorView(nl.NKIObject):
 
     @staticmethod
     def _rearrange_detect_src_reshapes(
-        src_pattern: Tuple[Union[str, Tuple[str]]], fixed_sizes: Dict[str, int]
-    ) -> List[Dict]:
+        src_pattern: tuple[str | tuple[str]], fixed_sizes: dict[str, int]
+    ) -> list[dict]:
         """Detect reshape operations needed in source pattern based on grouped dimensions.
 
         Args:
@@ -758,7 +756,7 @@ class TensorView(nl.NKIObject):
         return src_reshapes
 
     @staticmethod
-    def _rearrange_detect_dst_flattens(dst_pattern: Tuple[Union[str, Tuple[str]]]) -> List[Dict]:
+    def _rearrange_detect_dst_flattens(dst_pattern: tuple[str | tuple[str]]) -> list[dict]:
         """Detect flatten operations needed in destination pattern based on grouped dimensions.
 
         Args:
@@ -781,7 +779,7 @@ class TensorView(nl.NKIObject):
         return dst_flattens
 
     @staticmethod
-    def _rearrange_expand_pattern(pattern: Tuple[Union[str, Tuple[str]]]) -> Tuple[str]:
+    def _rearrange_expand_pattern(pattern: tuple[str | tuple[str]]) -> tuple[str]:
         """Expand grouped dimension patterns into flat list of dimension names.
 
         Args:
@@ -801,8 +799,8 @@ class TensorView(nl.NKIObject):
 
     @staticmethod
     def _rearrange_get_permutation(
-        src_pattern: Tuple[str], dst_pattern: Tuple[str]
-    ) -> Tuple[int, ...]:
+        src_pattern: tuple[str], dst_pattern: tuple[str]
+    ) -> tuple[int, ...]:
         """Calculate permutation indices to reorder dimensions from source to destination pattern.
 
         Args:
@@ -822,9 +820,9 @@ class TensorView(nl.NKIObject):
 
     def rearrange(
         self,
-        src_pattern: Tuple[Union[str, Tuple[str]]],
-        dst_pattern: Tuple[Union[str, Tuple[str]]],
-        fixed_sizes: Dict[str, int] = None,
+        src_pattern: tuple[str | tuple[str]],
+        dst_pattern: tuple[str | tuple[str]],
+        fixed_sizes: dict[str, int] = None,
     ) -> "TensorView":
         """Rearrange tensor dimensions using einops-style patterns.
 
@@ -965,7 +963,7 @@ class TensorView(nl.NKIObject):
 
         return tuple(new_strides)
 
-    def reshape(self, new_shape: Tuple[int, ...]) -> "TensorView":
+    def reshape(self, new_shape: tuple[int, ...]) -> "TensorView":
         """Reshape the tensor to new dimensions without copying data.
 
         Returns a new TensorView with the given shape over the same underlying
@@ -1004,4 +1002,4 @@ class TensorView(nl.NKIObject):
         Returns:
             True if the tensor has dynamic access, False otherwise
         """
-        return self.scalar_offset != None and self.indirect_dim != None
+        return self.scalar_offset is not None and self.indirect_dim is not None

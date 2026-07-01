@@ -9,7 +9,6 @@ import pytest
 from vibe_serve.loops.plain.issue_board import (
     Issue,
     IssueBoard,
-    IssueEvent,
     IssueStatus,
     IssueType,
 )
