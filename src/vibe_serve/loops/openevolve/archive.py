@@ -40,20 +40,24 @@ from pathlib import Path
 
 from vibe_serve.loops.evolve.population import Individual, Population
 
-
 # ---------------------------------------------------------------------------
 # Feature extraction
 # ---------------------------------------------------------------------------
 
 _CODE_SIZE_THRESHOLDS = (300, 600, 1000)  # → 4 buckets: <300, <600, <1000, ≥1000
-_TECHNIQUE_THRESHOLDS = (1, 2, 3)         # → 4 buckets: 0, 1, 2, ≥3
+_TECHNIQUE_THRESHOLDS = (1, 2, 3)  # → 4 buckets: 0, 1, 2, ≥3
 _DEFAULT_GRID_SHAPE = (4, 4)
 
 _TECHNIQUE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("cuda_graph", re.compile(r"cuda[_\s\-]?graph", re.IGNORECASE)),
     ("flash_attention", re.compile(r"flash[_\s\-]?attn|flashattention|flashinfer", re.IGNORECASE)),
     ("paged_attention", re.compile(r"paged[_\s\-]?attention|page[_\s\-]?table", re.IGNORECASE)),
-    ("speculative_decoding", re.compile(r"\beagle[0-9]?\b|spec(?:ulative)?[_\s\-]?decod|\bdraft[_\s\-]?model\b", re.IGNORECASE)),
+    (
+        "speculative_decoding",
+        re.compile(
+            r"\beagle[0-9]?\b|spec(?:ulative)?[_\s\-]?decod|\bdraft[_\s\-]?model\b", re.IGNORECASE
+        ),
+    ),
     ("torch_compile", re.compile(r"torch\.compile|@compile\b", re.IGNORECASE)),
     ("continuous_batching", re.compile(r"continuous[_\s\-]?batch", re.IGNORECASE)),
     ("low_precision", re.compile(r"\bfp8\b|\bint8\b|\bawq\b|\bgptq\b|\bbnb\b", re.IGNORECASE)),
@@ -170,9 +174,7 @@ class MapElitesArchive:
                 bins[key] = ind
                 continue
             cur_perf = current.perf_metric or float("-inf")
-            if ind.perf_metric > cur_perf or (
-                ind.perf_metric == cur_perf and ind.id > current.id
-            ):
+            if ind.perf_metric > cur_perf or (ind.perf_metric == cur_perf and ind.id > current.id):
                 bins[key] = ind
         return bins
 
@@ -239,7 +241,8 @@ class MapElitesArchive:
             if parent_id is not None:
                 picked_ids.add(parent_id)
             spare = [
-                ind for ind in self._population.passed
+                ind
+                for ind in self._population.passed
                 if ind.id not in picked_ids and ind.perf_metric is not None
             ]
             rng.shuffle(spare)

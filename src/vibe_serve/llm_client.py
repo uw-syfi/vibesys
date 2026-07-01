@@ -84,8 +84,7 @@ def _build_openai_compatible_model(model_name: str, config: Config):
     base_url = oc.base_url if oc else None
     if not base_url:
         raise ValueError(
-            "openai-compatible provider requires 'base_url' "
-            "(e.g. 'http://localhost:8000/v1')"
+            "openai-compatible provider requires 'base_url' (e.g. 'http://localhost:8000/v1')"
         )
     api_key = oc.api_key
 

@@ -15,7 +15,6 @@ from vibe_serve.backends.cuda.gpu_monitor import (
     query_gpu_info,
 )
 
-
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
@@ -26,8 +25,12 @@ GPU_B = "GPU-bbbb"
 
 def _gpu(index: int, uuid: str, used: int = 0, total: int = 81559, util: int = 0) -> GpuInfo:
     return GpuInfo(
-        index=index, uuid=uuid, name="H100",
-        memory_used_mib=used, memory_total_mib=total, utilization_pct=util,
+        index=index,
+        uuid=uuid,
+        name="H100",
+        memory_used_mib=used,
+        memory_total_mib=total,
+        utilization_pct=util,
     )
 
 
@@ -39,10 +42,14 @@ def _gpu(index: int, uuid: str, used: int = 0, total: int = 81559, util: int = 0
 class TestQueryGpuInfo:
     @patch("vibe_serve.backends.cuda.gpu_monitor.subprocess.run")
     def test_parses_csv(self, mock_run):
-        mock_run.return_value = type("R", (), {
-            "returncode": 0,
-            "stdout": f"0, {GPU_A}, H100, 5000, 81559, 30\n1, {GPU_B}, H100, 100, 81559, 0\n",
-        })()
+        mock_run.return_value = type(
+            "R",
+            (),
+            {
+                "returncode": 0,
+                "stdout": f"0, {GPU_A}, H100, 5000, 81559, 30\n1, {GPU_B}, H100, 100, 81559, 0\n",
+            },
+        )()
         gpus = query_gpu_info()
         assert len(gpus) == 2
         assert gpus[0].index == 0
@@ -113,7 +120,9 @@ class TestMonitorLifecycle:
     def test_start_stop(self, mock_procs, _mock_gpus):
         mock_procs.return_value = ""
         mon = GpuContentionMonitor(
-            log_dir=Path("/tmp"), gpu_uuid=GPU_A, interval=0.05,
+            log_dir=Path("/tmp"),
+            gpu_uuid=GPU_A,
+            interval=0.05,
         )
         mon.start()
         assert mon._thread is not None
@@ -128,7 +137,9 @@ class TestMonitorLifecycle:
         """PIDs present at start() time become the baseline."""
         mock_procs.return_value = f"100, python, 4096, {GPU_A}\n"
         mon = GpuContentionMonitor(
-            log_dir=Path("/tmp"), gpu_uuid=GPU_A, interval=0.05,
+            log_dir=Path("/tmp"),
+            gpu_uuid=GPU_A,
+            interval=0.05,
         )
         mon.start()
         assert 100 in mon._baseline_pids
@@ -144,16 +155,15 @@ class TestMonitorLifecycle:
         # Baseline: only PID 100
         mock_procs.return_value = f"100, python, 4096, {GPU_A}\n"
         mon = GpuContentionMonitor(
-            log_dir=Path("/tmp"), gpu_uuid=GPU_A, interval=0.05,
+            log_dir=Path("/tmp"),
+            gpu_uuid=GPU_A,
+            interval=0.05,
         )
         mon.start()
         time.sleep(0.05)
 
         # New PID 200 appears on the same GPU
-        mock_procs.return_value = (
-            f"100, python, 4096, {GPU_A}\n"
-            f"200, train.py, 8192, {GPU_A}\n"
-        )
+        mock_procs.return_value = f"100, python, 4096, {GPU_A}\n200, train.py, 8192, {GPU_A}\n"
         time.sleep(0.15)
         status = mon.status
         mon.stop()
@@ -166,16 +176,15 @@ class TestMonitorLifecycle:
         """A new PID on a different GPU is not contention."""
         mock_procs.return_value = f"100, python, 4096, {GPU_A}\n"
         mon = GpuContentionMonitor(
-            log_dir=Path("/tmp"), gpu_uuid=GPU_A, interval=0.05,
+            log_dir=Path("/tmp"),
+            gpu_uuid=GPU_A,
+            interval=0.05,
         )
         mon.start()
         time.sleep(0.05)
 
         # PID 200 appears but on GPU_B
-        mock_procs.return_value = (
-            f"100, python, 4096, {GPU_A}\n"
-            f"200, train.py, 8192, {GPU_B}\n"
-        )
+        mock_procs.return_value = f"100, python, 4096, {GPU_A}\n200, train.py, 8192, {GPU_B}\n"
         time.sleep(0.15)
         status = mon.status
         mon.stop()
@@ -189,15 +198,14 @@ class TestMonitorLifecycle:
 
         mock_procs.return_value = f"100, python, 4096, {GPU_A}\n"
         mon = GpuContentionMonitor(
-            log_dir=log_dir, gpu_uuid=GPU_A, interval=0.05,
+            log_dir=log_dir,
+            gpu_uuid=GPU_A,
+            interval=0.05,
         )
         mon.start()
         time.sleep(0.05)
 
-        mock_procs.return_value = (
-            f"100, python, 4096, {GPU_A}\n"
-            f"200, train.py, 8192, {GPU_A}\n"
-        )
+        mock_procs.return_value = f"100, python, 4096, {GPU_A}\n200, train.py, 8192, {GPU_A}\n"
         time.sleep(0.2)
         mon.stop()
 
@@ -218,7 +226,9 @@ class TestMonitorLifecycle:
 
         mock_procs.return_value = f"100, python, 4096, {GPU_A}\n"
         mon = GpuContentionMonitor(
-            log_dir=log_dir, gpu_uuid=GPU_A, interval=0.05,
+            log_dir=log_dir,
+            gpu_uuid=GPU_A,
+            interval=0.05,
         )
         mon.start()
         time.sleep(0.15)
@@ -234,7 +244,9 @@ class TestMonitorLifecycle:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         mon = GpuContentionMonitor(
-            log_dir=log_dir, gpu_uuid=GPU_A, interval=0.05,
+            log_dir=log_dir,
+            gpu_uuid=GPU_A,
+            interval=0.05,
         )
         mon.start()
         time.sleep(0.15)
@@ -278,12 +290,14 @@ class TestReselectGpu:
         # the backend so reselect_device's iteration over self._sandboxes
         # finds them.
         from vibe_serve.backends.base import SandboxKind
+
         if use_docker:
             ctx.implementer_backend = MagicMock(spec=DockerSandbox)
             ctx.judge_backend = MagicMock(spec=DockerSandbox)
             kind = SandboxKind.DOCKER
         else:
             from deepagents.backends import LocalShellBackend
+
             ctx.implementer_backend = MagicMock(spec=LocalShellBackend)
             ctx.judge_backend = MagicMock(spec=LocalShellBackend)
             # _env mutated by reselect_device — give it a real dict.

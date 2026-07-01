@@ -33,11 +33,17 @@ def _cleanup_containers() -> None:
         try:
             subprocess.run(
                 ["docker", "stop", container_id],
-                capture_output=True, text=True, check=False, timeout=30,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
             )
             subprocess.run(
                 ["docker", "rm", container_id],
-                capture_output=True, text=True, check=False, timeout=10,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
             )
         except Exception:
             pass
@@ -171,7 +177,12 @@ class DockerSandbox(BaseSandbox):
         logger.addHandler(handler)
         return logger
 
-    def _log_cmd(self, cmd: list[str], result: subprocess.CompletedProcess | None = None, error: str | None = None) -> None:
+    def _log_cmd(
+        self,
+        cmd: list[str],
+        result: subprocess.CompletedProcess | None = None,
+        error: str | None = None,
+    ) -> None:
         if self._logger is None:
             return
         self._logger.info("CMD: %s", " ".join(cmd))
@@ -239,27 +250,27 @@ class DockerSandbox(BaseSandbox):
             return WriteResult(path=file_path, error=result.stderr.strip())
         return WriteResult(path=file_path)
 
-    def edit(self, file_path: str, old_string: str, new_string: str,
-             replace_all: bool = False) -> EditResult:
+    def edit(
+        self, file_path: str, old_string: str, new_string: str, replace_all: bool = False
+    ) -> EditResult:
         return super().edit(self._vpath(file_path), old_string, new_string, replace_all)
 
     def glob_info(self, pattern: str, path: str = "/"):
         return super().glob_info(pattern, self._vpath(path))
 
-    def grep_raw(self, pattern: str, path: str | None = None,
-                 glob: str | None = None):
+    def grep_raw(self, pattern: str, path: str | None = None, glob: str | None = None):
         # Check container is still running before issuing grep; a dead
         # container causes docker-exec to emit an error on stderr that the
         # parent parser cannot parse (e.g. "No such container").
         if self._container_id is not None:
             check = subprocess.run(
                 ["docker", "inspect", "--format={{.State.Running}}", self._container_id],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
             if check.returncode != 0 or "true" not in check.stdout.lower():
-                raise RuntimeError(
-                    f"Docker container {self._container_id} is no longer running"
-                )
+                raise RuntimeError(f"Docker container {self._container_id} is no longer running")
         return super().grep_raw(
             pattern,
             self._vpath(path) if path is not None else self._CONTAINER_ROOT,
@@ -289,9 +300,13 @@ class DockerSandbox(BaseSandbox):
         """Start the Docker container."""
         self._container_name = f"vibeserve-{uuid.uuid4().hex[:12]}"
         cmd = [
-            "docker", "run", "-d",
-            "--name", self._container_name,
-            "-v", f"{self._host_workspace}:/workspace",
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            self._container_name,
+            "-v",
+            f"{self._host_workspace}:/workspace",
         ]
         if self._auto_remove:
             # Auto-remove the container (and its overlay, which can hold many GB
@@ -321,11 +336,15 @@ class DockerSandbox(BaseSandbox):
         for key, value in self._env.items():
             cmd.extend(["-e", f"{key}={value}"])
 
-        cmd.extend([
-            "--workdir", "/workspace",
-            self._image,
-            "sleep", "infinity",
-        ])
+        cmd.extend(
+            [
+                "--workdir",
+                "/workspace",
+                self._image,
+                "sleep",
+                "infinity",
+            ]
+        )
 
         self._log_cmd(cmd)
         try:
@@ -375,10 +394,7 @@ class DockerSandbox(BaseSandbox):
             "devices": list(self._devices),
             "entrypoint": self._entrypoint,
             "shm_size": self._shm_size,
-            "bind_mounts": [
-                [host, container, ro]
-                for host, container, ro in self._bind_mounts
-            ],
+            "bind_mounts": [[host, container, ro] for host, container, ro in self._bind_mounts],
             "env": dict(self._env),
             "symlink_commands": [],
         }
@@ -403,8 +419,12 @@ class DockerSandbox(BaseSandbox):
         # Unlike uv, these are required — a failure raises RuntimeError.
         for init_cmd_str in self._extra_init_commands:
             init_cmd = [
-                "docker", "exec", self._container_id,
-                "bash", "-c", init_cmd_str,
+                "docker",
+                "exec",
+                self._container_id,
+                "bash",
+                "-c",
+                init_cmd_str,
             ]
             self._log_cmd(init_cmd)
             try:
@@ -425,9 +445,7 @@ class DockerSandbox(BaseSandbox):
                     )
             except subprocess.TimeoutExpired:
                 self._log_cmd(init_cmd, error=f"init command timed out after 600s: {init_cmd_str}")
-                raise RuntimeError(
-                    f"Container init command timed out after 600s: {init_cmd_str}"
-                )
+                raise RuntimeError(f"Container init command timed out after 600s: {init_cmd_str}")
 
         # Run caller-supplied setup functions.  These re-execute on every
         # restart (so e.g. docker symlinks survive ``reselect_device``).
@@ -493,10 +511,14 @@ class DockerSandbox(BaseSandbox):
         effective_timeout = timeout if timeout is not None else self._default_timeout
 
         exec_cmd = [
-            "docker", "exec",
-            "-w", "/workspace",
+            "docker",
+            "exec",
+            "-w",
+            "/workspace",
             self._container_id,
-            "bash", "-c", command,
+            "bash",
+            "-c",
+            command,
         ]
         self._log_cmd(exec_cmd)
         try:
@@ -529,7 +551,10 @@ class DockerSandbox(BaseSandbox):
         truncated = False
 
         if len(output) > self._max_output_bytes:
-            output = output[: self._max_output_bytes] + f"\n... [truncated, {len(result.stdout + result.stderr) - self._max_output_bytes} bytes omitted]"
+            output = (
+                output[: self._max_output_bytes]
+                + f"\n... [truncated, {len(result.stdout + result.stderr) - self._max_output_bytes} bytes omitted]"
+            )
             truncated = True
 
         return ExecuteResponse(

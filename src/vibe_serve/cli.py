@@ -69,7 +69,7 @@ def _extract_flag(argv: list[str], flag: str) -> tuple[str | None, list[str]]:
             i += 2
             continue
         if tok.startswith(eq_form):
-            value = tok[len(eq_form):]
+            value = tok[len(eq_form) :]
             i += 1
             continue
         out.append(tok)
@@ -305,9 +305,11 @@ def load_config_and_skills(
         # implementer can write NeuronCore kernels. Other backends are
         # unaffected; --no-skills still disables everything.
         if backend == ComputeBackend.TRAINIUM:
-            nki_skills = PROJECT_ROOT / "resources" / "skills" / "neuron-agentic-development" / "skills"
+            nki_skills = (
+                PROJECT_ROOT / "resources" / "skills" / "neuron-agentic-development" / "skills"
+            )
             if nki_skills.is_dir():
-                skills = (skills or [])
+                skills = skills or []
                 if str(nki_skills) not in skills:
                     skills.append(str(nki_skills))
     return config, skills, backend
@@ -418,9 +420,7 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-rounds", type=int, default=24)
     parser.add_argument("--max-retries-per-round", type=int, default=3)
     parser.add_argument("--start-round", type=int, default=None, metavar="N")
-    parser.add_argument(
-        "--modality", default="text_generation", choices=_MODALITIES
-    )
+    parser.add_argument("--modality", default="text_generation", choices=_MODALITIES)
     parser.add_argument(
         "--domain",
         default=DEFAULT_DOMAIN,
@@ -517,9 +517,7 @@ def _parse_cli_objective(spec: str):
     from vibe_serve.loops.evolve.population import Objective
 
     if ":" not in spec:
-        raise argparse.ArgumentTypeError(
-            f"--objective {spec!r} must be 'name:max' or 'name:min'"
-        )
+        raise argparse.ArgumentTypeError(f"--objective {spec!r} must be 'name:max' or 'name:min'")
     name, _, direction = spec.partition(":")
     name = name.strip()
     direction = direction.strip().lower()
@@ -580,9 +578,7 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
         metavar="NAME:DIRECTION",
     )
     parser.add_argument("--frontier-bias", type=float, default=0.7)
-    parser.add_argument(
-        "--modality", default="text_generation", choices=_MODALITIES
-    )
+    parser.add_argument("--modality", default="text_generation", choices=_MODALITIES)
     return parser
 
 
@@ -676,9 +672,7 @@ def _build_openevolve_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-iterations", type=int, default=16)
     parser.add_argument("--k-inspirations", type=int, default=3)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument(
-        "--modality", default="text_generation", choices=_MODALITIES
-    )
+    parser.add_argument("--modality", default="text_generation", choices=_MODALITIES)
     return parser
 
 
@@ -787,7 +781,8 @@ def _run_plain(args: argparse.Namespace) -> None:
 
         if args.start_round is not None:
             resume_state = PlainLoopState(
-                round_idx=args.start_round - 1, bootstrap_done=True,
+                round_idx=args.start_round - 1,
+                bootstrap_done=True,
             )
         else:
             resume_state = _load_state(log_dir)

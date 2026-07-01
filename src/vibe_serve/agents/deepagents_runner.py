@@ -15,9 +15,9 @@ from deepagents import create_deep_agent
 from langchain.agents.structured_output import AutoStrategy
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import MemorySaver
-from vibe_serve._agent_cli.base import MCPServerSpec
 from pydantic import BaseModel
 
+from vibe_serve._agent_cli.base import MCPServerSpec
 from vibe_serve.agent_runner import (
     _DEFAULT_MAX_TEXT_LEN,
     _log_agent_config,

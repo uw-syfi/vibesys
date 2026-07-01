@@ -56,8 +56,7 @@ class TestTrainiumSandbox:
         assert sb._gpus is None
         # Persistent compile cache is bind-mounted and passthrough-registered.
         assert any(
-            container == "/opt/neuron-compile-cache"
-            for _host, container, _ro in sb._bind_mounts
+            container == "/opt/neuron-compile-cache" for _host, container, _ro in sb._bind_mounts
         )
         assert "/opt/neuron-compile-cache" in sb._passthrough_prefixes
         assert sb._env.get("NEURON_COMPILE_CACHE_URL") == "/opt/neuron-compile-cache"

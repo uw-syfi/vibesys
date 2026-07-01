@@ -48,6 +48,7 @@ def mock_modal(monkeypatch):
 @pytest.fixture()
 def sandbox(tmp_path, mock_modal):
     from vibe_serve.sandbox.modal_sandbox import ModalSandbox
+
     ws = tmp_path / "workspace"
     ws.mkdir()
     return ModalSandbox(
@@ -66,6 +67,7 @@ class TestVpath:
 
     def test_preserves_passthrough(self, tmp_path, mock_modal):
         from vibe_serve.sandbox.modal_sandbox import ModalSandbox
+
         sb = ModalSandbox(
             host_workspace=str(tmp_path),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
@@ -81,6 +83,7 @@ class TestVpath:
 class TestStart:
     def test_start_creates_sandbox_with_gpu_and_timeout(self, sandbox, mock_modal):
         import modal
+
         sandbox.start()
         modal.Sandbox.create.assert_called_once()
         kwargs = modal.Sandbox.create.call_args.kwargs
@@ -90,6 +93,7 @@ class TestStart:
 
     def test_start_mounts_model_volume_when_name_given(self, tmp_path, mock_modal):
         from vibe_serve.sandbox.modal_sandbox import ModalSandbox
+
         sb = ModalSandbox(
             host_workspace=str(tmp_path),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
@@ -97,13 +101,17 @@ class TestStart:
         )
         sb.start()
         import modal
+
         kwargs = modal.Sandbox.create.call_args.kwargs
         assert "/model" in kwargs["volumes"]
 
     def test_start_uploads_bind_mounts_into_workspace_volume(
-        self, tmp_path, mock_modal,
+        self,
+        tmp_path,
+        mock_modal,
     ):
         from vibe_serve.sandbox.modal_sandbox import ModalSandbox
+
         ws = tmp_path / "ws"
         ws.mkdir()
         bench = tmp_path / "bench"
@@ -120,9 +128,12 @@ class TestStart:
         assert any("bench" in str(c) and "'/bench'" in str(c) for c in calls)
 
     def test_start_skips_model_bind_mount_from_workspace_volume(
-        self, tmp_path, mock_modal,
+        self,
+        tmp_path,
+        mock_modal,
     ):
         from vibe_serve.sandbox.modal_sandbox import ModalSandbox
+
         ws = tmp_path / "ws"
         ws.mkdir()
         sb = ModalSandbox(
@@ -136,7 +147,9 @@ class TestStart:
             assert "/host/model" not in str(c)
 
     def test_start_skips_hf_cache_bind_mount_from_workspace_volume(
-        self, tmp_path, mock_modal,
+        self,
+        tmp_path,
+        mock_modal,
     ):
         from vibe_serve.sandbox.modal_sandbox import ModalSandbox
 
@@ -159,7 +172,9 @@ class TestStart:
             assert ".hf_cache" not in str(c)
 
     def test_start_excludes_local_runtime_dirs_from_workspace_upload(
-        self, tmp_path, mock_modal,
+        self,
+        tmp_path,
+        mock_modal,
     ):
         from vibe_serve.sandbox.modal_sandbox import ModalSandbox
 
@@ -189,7 +204,9 @@ class TestStart:
         assert not any(".git" in c for c in uploaded)
 
     def test_start_uploads_minimal_codex_auth_snapshot(
-        self, tmp_path, mock_modal,
+        self,
+        tmp_path,
+        mock_modal,
     ):
         from vibe_serve.sandbox.modal_sandbox import ModalSandbox
 
@@ -225,7 +242,9 @@ class TestExecute:
         assert resp.exit_code == 0
         assert resp.output == "hello\n"
         mock_modal["sandbox"].exec.assert_called_with(
-            "bash", "-c", "ls",
+            "bash",
+            "-c",
+            "ls",
             workdir="/workspace",
             timeout=300,
         )
@@ -275,6 +294,7 @@ class TestStop:
 class TestTransientRetry:
     def test_is_transient_detects_dns_and_connection_errors(self):
         import socket
+
         from vibe_serve.sandbox.modal_sandbox import _is_transient
 
         assert _is_transient(socket.gaierror(-2, "Name or service not known"))
@@ -291,12 +311,14 @@ class TestTransientRetry:
 
     def test_retry_recovers_after_transient_error(self, monkeypatch):
         import socket
+
         from vibe_serve.sandbox.modal_sandbox import _retry_transient
 
         # Avoid actual sleeping in the test.
         monkeypatch.setattr("vibe_serve.sandbox.modal_sandbox.time.sleep", lambda _: None)
 
         calls = {"n": 0}
+
         def flaky():
             calls["n"] += 1
             if calls["n"] < 3:
@@ -310,6 +332,7 @@ class TestTransientRetry:
         from vibe_serve.sandbox.modal_sandbox import _retry_transient
 
         calls = {"n": 0}
+
         def fatal():
             calls["n"] += 1
             raise ValueError("real bug")
@@ -320,11 +343,13 @@ class TestTransientRetry:
 
     def test_retry_gives_up_after_max_attempts(self, monkeypatch):
         import socket
+
         from vibe_serve.sandbox.modal_sandbox import _retry_transient
 
         monkeypatch.setattr("vibe_serve.sandbox.modal_sandbox.time.sleep", lambda _: None)
 
         calls = {"n": 0}
+
         def always_fails():
             calls["n"] += 1
             raise socket.gaierror(-2, "Name or service not known")
@@ -346,6 +371,7 @@ class TestTransientRetry:
         proc_ok.wait.return_value = 0
 
         attempt = {"n": 0}
+
         def flaky_exec(*args, **kwargs):
             attempt["n"] += 1
             if attempt["n"] < 3:
@@ -367,6 +393,7 @@ class TestModalCommandExecutor:
 
     def _make_executor(self, fake_exec_result=None):
         from vibe_serve.agents.modal_executor import ModalCommandExecutor
+
         fake_sandbox = MagicMock()
         fake_sandbox._sandbox_id = "sb-abc123"
         fake_sandbox._sandbox = MagicMock()
@@ -385,6 +412,7 @@ class TestModalCommandExecutor:
 
     def _request(self, argv, stdin="", cwd="/workspace", env=None, timeout=None):
         from agentshim.executor import CommandRequest
+
         return CommandRequest(
             argv=list(argv),
             stdin=stdin,
@@ -395,6 +423,7 @@ class TestModalCommandExecutor:
 
     def _sink(self):
         from agentshim.executor import CallbackCommandStreamSink
+
         sink = CallbackCommandStreamSink(
             on_stdout=lambda _: None,
             on_stderr=lambda _: None,
@@ -417,6 +446,7 @@ class TestModalCommandExecutor:
 
     def test_run_raises_when_sandbox_not_started(self):
         from vibe_serve.agents.modal_executor import ModalCommandExecutor
+
         fake_sandbox = MagicMock()
         fake_sandbox._sandbox = None
         executor = ModalCommandExecutor(fake_sandbox)
@@ -426,6 +456,7 @@ class TestModalCommandExecutor:
     def test_run_picks_up_restarted_sandbox_lazily(self):
         """A fallback restart that swaps ``_sandbox`` should be used by the next run()."""
         from vibe_serve.agents.modal_executor import ModalCommandExecutor
+
         wrapper = MagicMock()
         wrapper._sandbox = MagicMock()
         wrapper._sandbox.exec.return_value = self._fake_container_proc(stdout_lines=["first\n"])
@@ -469,11 +500,15 @@ class TestSandboxFallbackRestart:
         assert _is_sandbox_dead(RuntimeError("sandbox is not running"))
         # Non-sandbox-dead errors must NOT trigger the restart path.
         import socket
+
         assert not _is_sandbox_dead(socket.gaierror(-2, "Name or service not known"))
         assert not _is_sandbox_dead(ValueError("bad argument"))
 
     def test_execute_restarts_sandbox_on_death_and_retries(
-        self, sandbox, mock_modal, monkeypatch,
+        self,
+        sandbox,
+        mock_modal,
+        monkeypatch,
     ):
         """A dead sandbox should be recreated once, then the command re-run."""
         monkeypatch.setattr("vibe_serve.sandbox.modal_sandbox.time.sleep", lambda _: None)
@@ -485,6 +520,7 @@ class TestSandboxFallbackRestart:
         proc_ok.wait.return_value = 0
 
         call = {"n": 0}
+
         def flaky_exec(*args, **kwargs):
             call["n"] += 1
             if call["n"] == 1:
@@ -522,6 +558,7 @@ class TestSandboxFallbackRestart:
         sb.start()
 
         call = {"n": 0}
+
         def dies(*args, **kwargs):
             call["n"] += 1
             raise RuntimeError("Sandbox has already shut down")
@@ -535,6 +572,7 @@ class TestSandboxFallbackRestart:
     def test_extra_readonly_volumes_are_mounted(self, tmp_path, mock_modal):
         """Auxiliary volumes like /draft_model should be added to volumes dict."""
         import modal
+
         from vibe_serve.sandbox.modal_sandbox import ModalSandbox
 
         sb = ModalSandbox(
@@ -550,9 +588,7 @@ class TestSandboxFallbackRestart:
 class TestPathOverrides:
     def test_read_translates_virtual_path(self, sandbox, mock_modal):
         sandbox.start()
-        mock_modal["proc"].stdout.read.return_value = (
-            "     1\thello\n"
-        )
+        mock_modal["proc"].stdout.read.return_value = "     1\thello\n"
         sandbox.read("/foo.txt")
         # The base class builds a python3 heredoc command — check /workspace/foo.txt appears
         # (it gets base64-encoded; easier to check via _vpath directly).

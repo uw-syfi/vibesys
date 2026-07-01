@@ -1,7 +1,8 @@
 import json
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from vibe_serve.config import Config
 from vibe_serve.llm_client import _build_model
@@ -183,7 +184,9 @@ class TestVertexAIProvider:
 
     @patch("google.oauth2.service_account.Credentials.from_service_account_info")
     @patch("langchain_google_genai.ChatGoogleGenerativeAI")
-    def test_vertex_gemini_thinking_level_takes_precedence(self, mock_chat_cls, mock_from_sa, key_file):
+    def test_vertex_gemini_thinking_level_takes_precedence(
+        self, mock_chat_cls, mock_from_sa, key_file
+    ):
         mock_creds = MagicMock()
         mock_from_sa.return_value = mock_creds
         config = _make_config(
@@ -202,7 +205,13 @@ class TestVertexAIProvider:
         config = _make_config(
             "claude-sonnet-4-6",
             provider="vertex-ai",
-            providers={"vertex-ai": {"json": "/nonexistent/key.json", "project": None, "region": "us-east5"}},
+            providers={
+                "vertex-ai": {
+                    "json": "/nonexistent/key.json",
+                    "project": None,
+                    "region": "us-east5",
+                }
+            },
         )
         with pytest.raises(ValueError, match="service account key not found"):
             _build_model(config)
@@ -215,7 +224,13 @@ class TestVertexAIProvider:
         config = _make_config(
             "claude-sonnet-4-6",
             provider="vertex-ai",
-            providers={"vertex-ai": {"json": str(key_file), "project": "override-project", "region": "us-east5"}},
+            providers={
+                "vertex-ai": {
+                    "json": str(key_file),
+                    "project": "override-project",
+                    "region": "us-east5",
+                }
+            },
         )
         _build_model(config)
         mock_chat_cls.assert_called_once_with(
@@ -286,7 +301,9 @@ class TestOpenAIProvider:
 
 class TestThinkingNotSupported:
     def test_anthropic_with_thinking_raises(self):
-        config = _make_config("claude-sonnet-4-6", provider="anthropic", thinking={"level": "medium"})
+        config = _make_config(
+            "claude-sonnet-4-6", provider="anthropic", thinking={"level": "medium"}
+        )
         with pytest.raises(ValueError, match="[Tt]hinking.*not supported"):
             _build_model(config)
 

@@ -16,9 +16,7 @@ def _args(tmp_path, backend, *, no_skills=False, skills_dir=None):
     cfg.write_text('[model]\nname = "gpt-5.5"\n')
     if skills_dir is None:
         skills_dir = [Path("resources/skills/serving-systems")]
-    return SimpleNamespace(
-        config=cfg, no_skills=no_skills, skills_dir=skills_dir, backend=backend
-    )
+    return SimpleNamespace(config=cfg, no_skills=no_skills, skills_dir=skills_dir, backend=backend)
 
 
 def test_trainium_auto_includes_nki_skills(tmp_path):
@@ -35,9 +33,7 @@ def test_cuda_does_not_include_nki(tmp_path):
 
 
 def test_no_skills_disables_even_for_trainium(tmp_path):
-    _, skills, _ = load_config_and_skills(
-        _args(tmp_path, ComputeBackend.TRAINIUM, no_skills=True)
-    )
+    _, skills, _ = load_config_and_skills(_args(tmp_path, ComputeBackend.TRAINIUM, no_skills=True))
     assert skills is None
 
 

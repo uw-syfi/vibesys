@@ -73,9 +73,7 @@ class OpencodeCodingAgent(CLICodingAgent):
             executor=self.executor,
         )
 
-    def install_mcp_servers(
-        self, workspace: Path, servers: list[MCPServerSpec]
-    ) -> None:
+    def install_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:
         """Write ``<workspace>/opencode.json`` so opencode auto-discovers
         the MCP servers from cwd. opencode uses the ``mcp`` key (not
         ``mcpServers``) and a single combined ``command`` array. Non-
@@ -93,13 +91,9 @@ class OpencodeCodingAgent(CLICodingAgent):
                 for s in servers
             },
         }
-        (workspace / "opencode.json").write_text(
-            json.dumps(config, indent=2), encoding="utf-8"
-        )
+        (workspace / "opencode.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
-    def uninstall_mcp_servers(
-        self, workspace: Path, servers: list[MCPServerSpec]
-    ) -> None:
+    def uninstall_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:
         """Remove ``<workspace>/opencode.json``. Idempotent."""
         target = workspace / "opencode.json"
         if target.exists():

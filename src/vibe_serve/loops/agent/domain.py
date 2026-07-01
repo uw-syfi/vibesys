@@ -50,9 +50,7 @@ def builtin_domains() -> list[str]:
     """Names of the built-in domain packs (``<name>.md`` files under ``_domain/``)."""
     if not _BUILTIN_DOMAINS_DIR.is_dir():
         return []
-    return sorted(
-        p.stem for p in _BUILTIN_DOMAINS_DIR.glob("*.md") if p.name != "README.md"
-    )
+    return sorted(p.stem for p in _BUILTIN_DOMAINS_DIR.glob("*.md") if p.name != "README.md")
 
 
 def resolve_domain(spec: str) -> Path:
@@ -123,9 +121,7 @@ def render_domain_section(domain_file: Path, role: str, **context: object) -> st
     raw = sections.get(role)
     if raw is None and role == "single_agent":
         raw = "\n\n".join(
-            text
-            for text in (sections.get("implementer"), sections.get("judge"))
-            if text
+            text for text in (sections.get("implementer"), sections.get("judge")) if text
         )
     if not raw:
         return ""

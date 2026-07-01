@@ -15,7 +15,7 @@ from __future__ import annotations
 import random
 from pathlib import Path
 
-from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND
+from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
 from vibe_serve.loops.evolve.loop import (
     _checkout_commit_tree,
@@ -104,11 +104,11 @@ def run_openevolve_loop(
         for iteration in range(1, max_iterations + 1):
             ctx.switch_log_file(f"iter{iteration:03d}")
             ctx.lprint(
-                f"\n{'='*60}\n  Iteration {iteration}/{max_iterations} — "
+                f"\n{'=' * 60}\n  Iteration {iteration}/{max_iterations} — "
                 f"archive cells={len(archive)} "
                 f"(coverage={archive.coverage():.0%}), "
                 f"population={len(population)} (passed={len(population.passed)})\n"
-                f"{'='*60}\n"
+                f"{'=' * 60}\n"
             )
 
             # 1. Pick parent (cell-uniform) + inspirations (other cells).
@@ -240,8 +240,7 @@ def run_openevolve_loop(
             ctx.lprint("\nNo passing individual produced. Inspect logs.")
 
         ctx.lprint(
-            f"\nFinal archive: {len(archive)} cells filled "
-            f"({archive.coverage():.0%} coverage)"
+            f"\nFinal archive: {len(archive)} cells filled ({archive.coverage():.0%} coverage)"
         )
         return True
     except KeyboardInterrupt:

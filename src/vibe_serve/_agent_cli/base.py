@@ -52,9 +52,7 @@ class CodingAgent(ABC):
             Generated text.
         """
 
-    def install_mcp_servers(
-        self, workspace: Path, servers: list[MCPServerSpec]
-    ) -> None:
+    def install_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:
         """Install per-agent MCP server config so the next :meth:`generate`
         call exposes these stdio servers as tools.
 
@@ -65,9 +63,7 @@ class CodingAgent(ABC):
         """
         return None
 
-    def uninstall_mcp_servers(
-        self, workspace: Path, servers: list[MCPServerSpec]
-    ) -> None:
+    def uninstall_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:
         """Remove anything written by :meth:`install_mcp_servers`.
 
         Idempotent. Default implementation is a no-op.

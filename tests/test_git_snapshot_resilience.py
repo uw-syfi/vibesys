@@ -24,8 +24,10 @@ def _make_ctx(ws):
         workspace=ws,
         lprint=lambda *a, **k: None,
         _GIT_ENV={
-            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
         },
     )
     ctx._collect_unreadable = lambda: _RunContext._collect_unreadable(ctx)
@@ -92,7 +94,10 @@ def test_git_add_all_excludes_unreadable_and_succeeds(tmp_path):
         ctx._git_add_all()
         staged = subprocess.run(
             ["git", "diff", "--cached", "--name-only"],
-            cwd=ws, capture_output=True, text=True, check=True,
+            cwd=ws,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.split()
         assert "code.py" in staged
         assert "system_profile.json" not in staged

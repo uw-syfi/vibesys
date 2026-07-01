@@ -1,8 +1,9 @@
 import os
-import pytest
 import tomllib
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from vibe_serve.config import _load_config, _load_dotenv_file
 
@@ -88,25 +89,19 @@ class TestLoadConfigStrict:
 
     def test_unknown_top_level_section_rejected(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
-        cfg_file.write_text(
-            '[model]\nname = "claude-sonnet-4-6"\n\n[bogus]\nx = 1\n'
-        )
+        cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n\n[bogus]\nx = 1\n')
         with pytest.raises(ValueError, match="bogus"):
             _load_config(cfg_file)
 
     def test_unknown_key_in_known_section_rejected(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
-        cfg_file.write_text(
-            '[model]\nname = "claude-sonnet-4-6"\n\n[agent]\ncli_modle = "x"\n'
-        )
+        cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n\n[agent]\ncli_modle = "x"\n')
         with pytest.raises(ValueError, match="cli_modle"):
             _load_config(cfg_file)
 
     def test_unknown_backend_rejected(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
-        cfg_file.write_text(
-            '[model]\nname = "claude-sonnet-4-6"\n\n[backend]\nname = "tpu"\n'
-        )
+        cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n\n[backend]\nname = "tpu"\n')
         with pytest.raises(ValueError, match="tpu"):
             _load_config(cfg_file)
 

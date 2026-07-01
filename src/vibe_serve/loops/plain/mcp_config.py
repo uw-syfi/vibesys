@@ -14,7 +14,6 @@ MCP path; everything else is provider-agnostic and lives in
 from __future__ import annotations
 
 from vibe_serve._agent_cli.base import MCPServerSpec
-
 from vibe_serve.loops.plain.issue_board import IssueType
 
 

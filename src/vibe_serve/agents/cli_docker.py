@@ -44,7 +44,7 @@ def _apt_install(pkgs: str, check_bin: str | None = None) -> str:
         f"command -v {bin_} >/dev/null || "
         "{ for i in 1 2 3 4 5; do "
         f"  apt-get update -qq && apt-get install -y -qq {pkgs} && break || "
-        "  (echo \"apt retry $i...\" >&2; sleep $((i*5))); "
+        '  (echo "apt retry $i..." >&2; sleep $((i*5))); '
         "done; "
         f"command -v {bin_} >/dev/null; }}"
     )
@@ -58,7 +58,7 @@ _NODE_TARBALL_INSTALL = (
     "V=v20.18.1; A=linux-x64; "
     "cd /tmp && "
     "curl -fsSL --retry 5 --retry-delay 5 -o node.tgz "
-    "  \"https://nodejs.org/dist/$V/node-$V-$A.tar.gz\" && "
+    '  "https://nodejs.org/dist/$V/node-$V-$A.tar.gz" && '
     "mkdir -p /opt/node && "
     "tar -xzf node.tgz -C /opt/node --strip-components=1 && "
     "ln -sf /opt/node/bin/node /usr/local/bin/node && "

@@ -18,6 +18,7 @@ _ANTHROPIC_PREFIXES = ("claude-",)
 _GOOGLE_PREFIXES = ("gemini-", "gemma-")
 _OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4")
 
+
 class ComputeBackend(StrEnum):
     """Compute backends the agent can target.
 

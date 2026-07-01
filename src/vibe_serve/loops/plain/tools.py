@@ -24,8 +24,8 @@ from __future__ import annotations
 from langchain_core.tools import BaseTool, tool
 
 from vibe_serve.loops.plain.issue_board import (
-    IssueStatus,
     IssueBoard,
+    IssueStatus,
     IssueType,
 )
 from vibe_serve.loops.plain.tool_impl import (
@@ -105,9 +105,7 @@ def build_issue_tools(
             iteration=iteration,
             cap=create_cap,
             allowed_types=frozenset(
-                allowed_create_types
-                if allowed_create_types is not None
-                else IssueType
+                allowed_create_types if allowed_create_types is not None else IssueType
             ),
         )
 

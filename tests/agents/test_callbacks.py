@@ -1,13 +1,12 @@
 import io
 import json
 import re
+from unittest.mock import MagicMock
 
 import pytest
-from unittest.mock import MagicMock
 
 from vibe_serve.agents.callbacks import AgentLogger
 from vibe_serve.constants import _BOLD, _CYAN, _DIM, _GREEN, _RED, _RESET, _YELLOW
-
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
@@ -198,6 +197,7 @@ class TestOnToolError:
     def test_prints_error_in_red(self, capsys):
         logger = AgentLogger()
         from uuid import uuid4
+
         logger.on_tool_error(Exception("something broke"), run_id=uuid4())
         out = capsys.readouterr().out
         assert _RED in out
@@ -207,6 +207,7 @@ class TestOnToolError:
     def test_does_not_use_dim(self, capsys):
         logger = AgentLogger()
         from uuid import uuid4
+
         logger.on_tool_error(Exception("fail"), run_id=uuid4())
         out = capsys.readouterr().out
         assert _DIM not in out
@@ -337,7 +338,10 @@ class TestOnChatModelStart:
     def test_first_call_logs_model_info(self, capsys):
         log = io.StringIO()
         logger = AgentLogger(log_file=log)
-        serialized = {"id": ["langchain", "chat_models", "anthropic", "ChatAnthropic"], "kwargs": {"model": "claude-sonnet-4-6"}}
+        serialized = {
+            "id": ["langchain", "chat_models", "anthropic", "ChatAnthropic"],
+            "kwargs": {"model": "claude-sonnet-4-6"},
+        }
         messages = [[self._make_system_message(), self._make_human_message()]]
         logger.on_chat_model_start(serialized, messages)
         log_text = log.getvalue()
@@ -346,7 +350,10 @@ class TestOnChatModelStart:
     def test_first_call_logs_system_prompt(self, capsys):
         log = io.StringIO()
         logger = AgentLogger(log_file=log)
-        serialized = {"id": ["langchain", "chat_models", "anthropic", "ChatAnthropic"], "kwargs": {"model": "claude-sonnet-4-6"}}
+        serialized = {
+            "id": ["langchain", "chat_models", "anthropic", "ChatAnthropic"],
+            "kwargs": {"model": "claude-sonnet-4-6"},
+        }
         system_prompt = "You are an expert ML engineer."
         messages = [[self._make_system_message(system_prompt), self._make_human_message()]]
         logger.on_chat_model_start(serialized, messages)
@@ -357,14 +364,16 @@ class TestOnChatModelStart:
         log = io.StringIO()
         logger = AgentLogger(log_file=log)
         serialized = {"id": ["langchain", "chat_models"], "kwargs": {}}
-        messages = [[
-            self._make_system_message(),
-            self._make_human_message(),
-            self._make_ai_message(),
-            self._make_tool_message(),
-            self._make_tool_message(),
-            self._make_human_message("follow up"),
-        ]]
+        messages = [
+            [
+                self._make_system_message(),
+                self._make_human_message(),
+                self._make_ai_message(),
+                self._make_tool_message(),
+                self._make_tool_message(),
+                self._make_human_message("follow up"),
+            ]
+        ]
         logger.on_chat_model_start(serialized, messages)
         log_text = log.getvalue()
         assert "1 system" in log_text
@@ -387,12 +396,14 @@ class TestOnChatModelStart:
         log = io.StringIO()
         logger = AgentLogger(log_file=log)
         serialized = {"id": ["langchain"], "kwargs": {}}
-        messages = [[
-            self._make_system_message(),
-            self._make_human_message("first question"),
-            self._make_ai_message("first answer"),
-            self._make_human_message("second question"),
-        ]]
+        messages = [
+            [
+                self._make_system_message(),
+                self._make_human_message("first question"),
+                self._make_ai_message("first answer"),
+                self._make_human_message("second question"),
+            ]
+        ]
         logger.on_chat_model_start(serialized, messages)
         log_text = log.getvalue()
         assert "second question" in log_text
@@ -428,15 +439,18 @@ class TestOnChatModelStart:
 class TestFormatTokenCount:
     def test_zero(self):
         from vibe_serve.agents.callbacks import _format_token_count
+
         assert _format_token_count(0) == "0"
 
     def test_under_thousand(self):
         from vibe_serve.agents.callbacks import _format_token_count
+
         assert _format_token_count(523) == "523"
         assert _format_token_count(999) == "999"
 
     def test_thousands_boundary(self):
         from vibe_serve.agents.callbacks import _format_token_count
+
         assert _format_token_count(1000) == "1k"
         assert _format_token_count(20_100) == "20k"
         assert _format_token_count(199_500) == "199k"
@@ -444,6 +458,7 @@ class TestFormatTokenCount:
 
     def test_millions(self):
         from vibe_serve.agents.callbacks import _format_token_count
+
         assert _format_token_count(1_000_000) == "1.0M"
         assert _format_token_count(1_200_000) == "1.2M"
         assert _format_token_count(1_048_576) == "1.0M"
@@ -452,33 +467,39 @@ class TestFormatTokenCount:
 class TestDefaultContextWindowLookup:
     def test_claude_4_6_resolves_to_1m(self):
         from vibe_serve.agents.callbacks import _default_context_window_lookup
+
         assert _default_context_window_lookup("claude-opus-4-6") == 1_000_000
         assert _default_context_window_lookup("claude-sonnet-4-6") == 1_000_000
 
     def test_older_claude_falls_back_to_200k(self):
         # Regression guard: claude- fallback comes after the 4-6 entries
         from vibe_serve.agents.callbacks import _default_context_window_lookup
+
         assert _default_context_window_lookup("claude-haiku-4-5") == 200_000
         assert _default_context_window_lookup("claude-sonnet-4-5") == 200_000
         assert _default_context_window_lookup("claude-opus-4-1") == 200_000
 
     def test_gemini(self):
         from vibe_serve.agents.callbacks import _default_context_window_lookup
+
         assert _default_context_window_lookup("gemini-2.5-flash") == 1_048_576
         assert _default_context_window_lookup("gemini-3-pro") == 1_048_576
 
     def test_gemma(self):
         from vibe_serve.agents.callbacks import _default_context_window_lookup
+
         assert _default_context_window_lookup("gemma-2") == 8_192
 
     def test_gpt5_4_resolves_to_1m(self):
         # Regression guard: gpt-5.4 entry must come before gpt-5
         from vibe_serve.agents.callbacks import _default_context_window_lookup
+
         assert _default_context_window_lookup("gpt-5.4") == 1_050_000
         assert _default_context_window_lookup("gpt-5.4-pro") == 1_050_000
 
     def test_gpt5_family_falls_back_to_400k(self):
         from vibe_serve.agents.callbacks import _default_context_window_lookup
+
         assert _default_context_window_lookup("gpt-5") == 400_000
         assert _default_context_window_lookup("gpt-5-mini") == 400_000
         assert _default_context_window_lookup("gpt-5-nano") == 400_000
@@ -486,6 +507,7 @@ class TestDefaultContextWindowLookup:
 
     def test_gpt4_and_o_series(self):
         from vibe_serve.agents.callbacks import _default_context_window_lookup
+
         assert _default_context_window_lookup("gpt-4o") == 128_000
         assert _default_context_window_lookup("gpt-4-turbo") == 128_000
         assert _default_context_window_lookup("o1") == 200_000
@@ -494,10 +516,12 @@ class TestDefaultContextWindowLookup:
 
     def test_unknown_model_returns_none(self):
         from vibe_serve.agents.callbacks import _default_context_window_lookup
+
         assert _default_context_window_lookup("unknown-model-xyz") is None
 
     def test_none_model_name_returns_none(self):
         from vibe_serve.agents.callbacks import _default_context_window_lookup
+
         assert _default_context_window_lookup(None) is None
 
 
@@ -543,9 +567,15 @@ class TestPrefixFormat:
 
     def test_prefix_updates_after_on_llm_end(self, capsys):
         logger = AgentLogger(agent_label="Implementer", model_name="claude-sonnet-4-6")
-        logger.on_llm_end(_make_response(
-            usage_metadata={"input_tokens": 20_100, "output_tokens": 100, "total_tokens": 20_200}
-        ))
+        logger.on_llm_end(
+            _make_response(
+                usage_metadata={
+                    "input_tokens": 20_100,
+                    "output_tokens": 100,
+                    "total_tokens": 20_200,
+                }
+            )
+        )
         capsys.readouterr()  # discard
         logger.on_llm_new_token("next")
         out = _strip_ansi(capsys.readouterr().out)
@@ -554,10 +584,12 @@ class TestPrefixFormat:
     def test_tool_call_path_uses_dynamic_prefix(self, capsys):
         logger = AgentLogger(agent_label="Implementer", model_name="gpt-5.4")
         tc = [{"name": "shell", "args": {"cmd": "ls"}}]
-        logger.on_llm_end(_make_response(
-            tool_calls=tc,
-            usage_metadata={"input_tokens": 5_000, "output_tokens": 50, "total_tokens": 5_050},
-        ))
+        logger.on_llm_end(
+            _make_response(
+                tool_calls=tc,
+                usage_metadata={"input_tokens": 5_000, "output_tokens": 50, "total_tokens": 5_050},
+            )
+        )
         out = _strip_ansi(capsys.readouterr().out)
         # Tool-call line should carry the dynamic prefix with elapsed and tokens
         assert re.search(r"\[Implementer \| \d+\.\ds \| 5k/1\.\dM\] → shell\(", out), out
@@ -576,6 +608,7 @@ class TestPrefixFormat:
 
     def test_default_lookup_used_when_not_injected(self):
         from vibe_serve.agents.callbacks import _default_context_window_lookup
+
         logger = AgentLogger(agent_label="Test", model_name="gpt-5.4")
         assert logger._context_window_lookup is _default_context_window_lookup
         assert logger._context_window == 1_050_000
@@ -583,6 +616,7 @@ class TestPrefixFormat:
     def test_elapsed_time_advances(self, capsys, monkeypatch):
         # Fake time.monotonic so we can verify the elapsed value reaches the prefix
         from vibe_serve.agents import callbacks
+
         ticks = iter([1000.0, 1308.2])
         monkeypatch.setattr(callbacks.time, "monotonic", lambda: next(ticks))
         logger = AgentLogger(agent_label="Implementer", model_name="claude-sonnet-4-6")
@@ -596,9 +630,15 @@ class TestUsageMetadataExtraction:
     def test_extracts_input_tokens(self):
         logger = AgentLogger(agent_label="X", model_name="claude-sonnet-4-6")
         assert logger._input_tokens == 0
-        logger.on_llm_end(_make_response(
-            usage_metadata={"input_tokens": 12_345, "output_tokens": 100, "total_tokens": 12_445}
-        ))
+        logger.on_llm_end(
+            _make_response(
+                usage_metadata={
+                    "input_tokens": 12_345,
+                    "output_tokens": 100,
+                    "total_tokens": 12_445,
+                }
+            )
+        )
         assert logger._input_tokens == 12_345
 
     def test_no_usage_metadata_keeps_zero(self):
@@ -611,18 +651,22 @@ class TestUsageMetadataExtraction:
         # on_llm_end during streaming must update tokens before its early-return
         logger = AgentLogger(agent_label="X", model_name="claude-sonnet-4-6")
         logger._streaming = True
-        logger.on_llm_end(_make_response(
-            usage_metadata={"input_tokens": 5_000, "output_tokens": 100, "total_tokens": 5_100}
-        ))
+        logger.on_llm_end(
+            _make_response(
+                usage_metadata={"input_tokens": 5_000, "output_tokens": 100, "total_tokens": 5_100}
+            )
+        )
         assert logger._input_tokens == 5_000
 
     def test_zero_input_tokens_does_not_overwrite(self):
         # Defensive: a usage block reporting 0 input tokens should not clobber a real prior value
         logger = AgentLogger(agent_label="X", model_name="claude-sonnet-4-6")
         logger._input_tokens = 1234
-        logger.on_llm_end(_make_response(
-            usage_metadata={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-        ))
+        logger.on_llm_end(
+            _make_response(
+                usage_metadata={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+            )
+        )
         assert logger._input_tokens == 1234
 
 

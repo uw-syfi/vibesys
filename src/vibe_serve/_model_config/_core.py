@@ -87,7 +87,9 @@ class ModelConfig:
         if self.thinking_budget is not None and (
             not isinstance(self.thinking_budget, int) or self.thinking_budget <= 0  # pyright: ignore[reportUnnecessaryIsInstance]
         ):
-            raise ValueError(f"thinking_budget must be a positive int, got {self.thinking_budget!r}")
+            raise ValueError(
+                f"thinking_budget must be a positive int, got {self.thinking_budget!r}"
+            )
 
     # ------------------------------------------------------------------
     # Factory: from SDS provider alias + bare model name
@@ -115,8 +117,12 @@ class ModelConfig:
             )
         canonical = _ALIAS_TO_CANONICAL.get(alias)
         if canonical is None:
-            raise ValueError(f"Unknown provider alias {provider!r}. Known aliases: {sorted(_ALIAS_TO_CANONICAL)}")
-        return cls(provider=canonical, model=model, location=location, thinking_budget=thinking_budget)
+            raise ValueError(
+                f"Unknown provider alias {provider!r}. Known aliases: {sorted(_ALIAS_TO_CANONICAL)}"
+            )
+        return cls(
+            provider=canonical, model=model, location=location, thinking_budget=thinking_budget
+        )
 
     # ------------------------------------------------------------------
     # Factory: from model string (with optional hints)
@@ -148,30 +154,62 @@ class ModelConfig:
         for prefix, canonical in _COLON_PREFIX_MAP:
             if lower.startswith(prefix):
                 bare = model_str[len(prefix) :]
-                return cls(provider=canonical, model=bare, location=location, thinking_budget=thinking_budget)
+                return cls(
+                    provider=canonical,
+                    model=bare,
+                    location=location,
+                    thinking_budget=thinking_budget,
+                )
 
         # Step 2: slash-prefix
         for prefix, canonical in _SLASH_PREFIX_MAP:
             if lower.startswith(prefix):
                 bare = model_str[len(prefix) :]
-                return cls(provider=canonical, model=bare, location=location, thinking_budget=thinking_budget)
+                return cls(
+                    provider=canonical,
+                    model=bare,
+                    location=location,
+                    thinking_budget=thinking_budget,
+                )
 
         # Step 3: provider_hint
         if provider_hint is not None and provider_hint.lower() not in _UNRESOLVABLE_ALIASES:
             canonical = _ALIAS_TO_CANONICAL.get(provider_hint.lower())
             if canonical is not None:
-                return cls(provider=canonical, model=model_str, location=location, thinking_budget=thinking_budget)
+                return cls(
+                    provider=canonical,
+                    model=model_str,
+                    location=location,
+                    thinking_budget=thinking_budget,
+                )
 
         # Step 4: heuristics
         if "claude" in lower:
-            return cls(provider="anthropic", model=model_str, location=location, thinking_budget=thinking_budget)
+            return cls(
+                provider="anthropic",
+                model=model_str,
+                location=location,
+                thinking_budget=thinking_budget,
+            )
         if "gpt" in lower or "o1" in lower or "o3" in lower:
-            return cls(provider="openai", model=model_str, location=location, thinking_budget=thinking_budget)
+            return cls(
+                provider="openai",
+                model=model_str,
+                location=location,
+                thinking_budget=thinking_budget,
+            )
         if "gemini" in lower:
-            return cls(provider="gemini", model=model_str, location=location, thinking_budget=thinking_budget)
+            return cls(
+                provider="gemini",
+                model=model_str,
+                location=location,
+                thinking_budget=thinking_budget,
+            )
 
         # Step 5: fallback
-        return cls(provider="openai", model=model_str, location=location, thinking_budget=thinking_budget)
+        return cls(
+            provider="openai", model=model_str, location=location, thinking_budget=thinking_budget
+        )
 
     # ------------------------------------------------------------------
     # Conversion methods
@@ -251,12 +289,21 @@ class ModelConfig:
             if not os.environ.get("GOOGLE_CLOUD_PROJECT"):
                 missing.append("GOOGLE_CLOUD_PROJECT")
             # Location: self.location → GOOGLE_CLOUD_LOCATION → VERTEX_LOCATION
-            location = self.location or os.environ.get("GOOGLE_CLOUD_LOCATION") or os.environ.get("VERTEX_LOCATION")
+            location = (
+                self.location
+                or os.environ.get("GOOGLE_CLOUD_LOCATION")
+                or os.environ.get("VERTEX_LOCATION")
+            )
             if not location:
-                missing.append("location (set ModelConfig.location, GOOGLE_CLOUD_LOCATION, or VERTEX_LOCATION)")
+                missing.append(
+                    "location (set ModelConfig.location, GOOGLE_CLOUD_LOCATION, or VERTEX_LOCATION)"
+                )
 
         if missing:
-            raise OSError(f"Missing required environment for provider {self.provider!r}: " + ", ".join(missing))
+            raise OSError(
+                f"Missing required environment for provider {self.provider!r}: "
+                + ", ".join(missing)
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +334,9 @@ def from_provider_and_model(
     thinking_budget: int | None = None,
 ) -> ModelConfig:
     """Convenience wrapper for ``ModelConfig.from_provider_and_model``."""
-    return ModelConfig.from_provider_and_model(provider, model, location=location, thinking_budget=thinking_budget)
+    return ModelConfig.from_provider_and_model(
+        provider, model, location=location, thinking_budget=thinking_budget
+    )
 
 
 def from_string(

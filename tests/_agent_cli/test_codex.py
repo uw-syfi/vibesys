@@ -95,7 +95,7 @@ class TestGetResumeCommand:
     def test_resume_command_passes_model_and_extra_config(self):
         agent = _agent()
         agent.model = "gpt-5"
-        agent.extra_config_args = ["--config", "mcp_servers.x.command=\"python\""]
+        agent.extra_config_args = ["--config", 'mcp_servers.x.command="python"']
         cmd = agent._get_resume_command("prompt", "sess-123")
         assert "--model" in cmd and cmd[cmd.index("--model") + 1] == "gpt-5"
         assert cmd[-2:] == ["--config", 'mcp_servers.x.command="python"']
@@ -223,9 +223,7 @@ class TestProcessStdout:
                 }
             )
         )
-        handler.on_tool_call.assert_called_once_with(
-            "error", {"message": "rate limited"}
-        )
+        handler.on_tool_call.assert_called_once_with("error", {"message": "rate limited"})
 
     def test_command_execution_forwards_tool_call_and_result(self):
         handler = MagicMock()
@@ -285,9 +283,7 @@ class TestProcessStdout:
     def test_thread_started_emits_marker(self):
         handler = MagicMock()
         session = _session(event_handler=handler)
-        session._process_stdout(
-            json.dumps({"type": "thread.started", "thread_id": "t-1"})
-        )
+        session._process_stdout(json.dumps({"type": "thread.started", "thread_id": "t-1"}))
         assert session.session_id == "t-1"
         handler.on_thinking.assert_called_once_with("[codex thread t-1 started]")
 
@@ -302,7 +298,9 @@ class TestProcessStdout:
         text so nothing codex emits is silently swallowed."""
         handler = MagicMock()
         session = _session(event_handler=handler)
-        raw = json.dumps({"type": "item.updated", "item": {"type": "reasoning", "delta": "thinking..."}})
+        raw = json.dumps(
+            {"type": "item.updated", "item": {"type": "reasoning", "delta": "thinking..."}}
+        )
         session._process_stdout(raw)
         handler.on_thinking.assert_called_once_with(raw)
 
@@ -334,9 +332,7 @@ class TestProcessStderr:
         handler = MagicMock()
         session = _session(event_handler=handler)
         session._process_stderr("panic: index out of bounds\n")
-        handler.on_thinking.assert_called_once_with(
-            "[codex stderr] panic: index out of bounds"
-        )
+        handler.on_thinking.assert_called_once_with("[codex stderr] panic: index out of bounds")
         assert session.stderr_lines == ["panic: index out of bounds\n"]
 
     def test_stderr_empty_line_ignored(self):

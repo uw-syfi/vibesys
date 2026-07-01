@@ -22,12 +22,7 @@ from vibe_serve.loops.agent.domain import (
 from vibe_serve.prompts import render_template
 
 _TEMPLATE_DIR = (
-    Path(__file__).resolve().parents[3]
-    / "src"
-    / "vibe_serve"
-    / "loops"
-    / "agent"
-    / "templates"
+    Path(__file__).resolve().parents[3] / "src" / "vibe_serve" / "loops" / "agent" / "templates"
 )
 
 
@@ -117,12 +112,8 @@ def test_deeper_markdown_heading_does_not_delimit_role(tmp_path: Path):
 def test_render_role_branches_on_context():
     """A role section rendered with bench_path set should reference it."""
     d = resolve_domain("llm-serving")
-    with_bench = render_domain_section(
-        d, "judge", modality="text_generation", bench_path="/BENCHX"
-    )
-    without_bench = render_domain_section(
-        d, "judge", modality="text_generation", bench_path=None
-    )
+    with_bench = render_domain_section(d, "judge", modality="text_generation", bench_path="/BENCHX")
+    without_bench = render_domain_section(d, "judge", modality="text_generation", bench_path=None)
     assert "/BENCHX" in with_bench
     assert "/BENCHX" not in without_bench
 
@@ -130,18 +121,14 @@ def test_render_role_branches_on_context():
 def test_single_agent_uses_explicit_section_when_present():
     # llm-serving.md ships a bespoke ## single_agent section
     d = resolve_domain("llm-serving")
-    sa = render_domain_section(
-        d, "single_agent", modality="text_generation", reference_path="/ref"
-    )
+    sa = render_domain_section(d, "single_agent", modality="text_generation", reference_path="/ref")
     assert "do not let yourself cheat" in sa  # text unique to that section
 
 
 def test_single_agent_derives_from_implementer_and_judge(tmp_path: Path):
     # no ## single_agent section -> derived from implementer + judge
     f = tmp_path / "d.md"
-    f.write_text(
-        "# D\n\n## implementer\nIMPL-BODY\n\n## judge\nJUDGE-BODY\n"
-    )
+    f.write_text("# D\n\n## implementer\nIMPL-BODY\n\n## judge\nJUDGE-BODY\n")
     sa = render_domain_section(f, "single_agent")
     assert "IMPL-BODY" in sa
     assert "JUDGE-BODY" in sa

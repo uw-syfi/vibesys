@@ -70,9 +70,7 @@ def check_create_allowed(
         )
     if policy.cap is not None:
         store.reload()
-        already = store.open_count_by_creator_in_iter(
-            policy.creator, policy.iteration
-        )
+        already = store.open_count_by_creator_in_iter(policy.creator, policy.iteration)
         if already >= policy.cap:
             return (
                 f"error: per-iteration cap reached "
@@ -102,8 +100,7 @@ def create_issue_under_policy(
         type_enum = parse_type(type_str)
     except ValueError:
         return None, (
-            f"error: type must be one of {[t.value for t in IssueType]}, "
-            f"got '{type_str}'"
+            f"error: type must be one of {[t.value for t in IssueType]}, got '{type_str}'"
         )
     err = check_create_allowed(store, type_enum=type_enum, policy=policy)
     if err is not None:

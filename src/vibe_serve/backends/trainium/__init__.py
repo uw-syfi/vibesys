@@ -43,8 +43,7 @@ from vibe_serve.sandbox.docker_sandbox import DockerSandbox
 # torch-neuronx, torch_xla, and the neuronx-cc compiler.  Override with
 # ``--docker-image`` if the host SDK differs.
 _DEFAULT_IMAGE = (
-    "public.ecr.aws/neuron/pytorch-inference-neuronx:"
-    "2.9.0-neuronx-py312-sdk2.30.0-ubuntu24.04"
+    "public.ecr.aws/neuron/pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.30.0-ubuntu24.04"
 )
 
 # Docker's default /dev/shm is 64 MB; neuronx-cc and the Neuron runtime use
@@ -69,11 +68,7 @@ def _discover_neuron_devices() -> list[str]:
     Matches the numbered device nodes (``/dev/neuron0`` …) and skips the
     control node ``/dev/neuron_*`` if present.
     """
-    devs = [
-        d
-        for d in glob.glob("/dev/neuron*")
-        if d[len("/dev/neuron"):].isdigit()
-    ]
+    devs = [d for d in glob.glob("/dev/neuron*") if d[len("/dev/neuron") :].isdigit()]
     return sorted(devs)
 
 
@@ -99,8 +94,7 @@ class TrainiumBackend:
         self._devices = _discover_neuron_devices()
         if self._devices:
             self._lprint(
-                f"[neuron] Forwarding {len(self._devices)} device(s): "
-                f"{', '.join(self._devices)}"
+                f"[neuron] Forwarding {len(self._devices)} device(s): {', '.join(self._devices)}"
             )
         else:
             self._lprint(
