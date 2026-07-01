@@ -135,8 +135,12 @@ def clip_metrics(
             text_inputs = processor(text=[prompt], return_tensors="pt", padding=True)
             text_features = model.get_text_features(**text_inputs)
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-            result["baseline_prompt_cosine"] = float((image_features[0] * text_features[0]).sum().item())
-            result["candidate_prompt_cosine"] = float((image_features[1] * text_features[0]).sum().item())
+            result["baseline_prompt_cosine"] = float(
+                (image_features[0] * text_features[0]).sum().item()
+            )
+            result["candidate_prompt_cosine"] = float(
+                (image_features[1] * text_features[0]).sum().item()
+            )
     return result
 
 
@@ -168,7 +172,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Compare two generated PNG images.")
     parser.add_argument("--baseline", required=True, help="Baseline PNG path")
     parser.add_argument("--candidate", required=True, help="Candidate PNG path")
-    parser.add_argument("--prompt", default=None, help="Optional prompt for CLIP prompt-image scoring")
+    parser.add_argument(
+        "--prompt", default=None, help="Optional prompt for CLIP prompt-image scoring"
+    )
     parser.add_argument(
         "--clip-model",
         default=None,

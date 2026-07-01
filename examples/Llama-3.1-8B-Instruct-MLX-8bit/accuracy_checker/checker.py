@@ -13,7 +13,6 @@ from typing import Any
 import httpx
 from jsonschema.validators import validator_for
 
-
 BUNDLE_DIR = Path(__file__).resolve().parents[1]
 DATASET_ID = "epfl-dlab/JSONSchemaBench"
 DATASET_REVISION = "5bd0f4640badc6f3f02df796421d21cb0ca0b141"
@@ -59,7 +58,10 @@ def load_cases(
         cases.append(
             {
                 "unique_id": str(row.get("unique_id") or row.get("id") or idx),
-                "description": row.get("description") or row.get("title") or schema.get("description") or "",
+                "description": row.get("description")
+                or row.get("title")
+                or schema.get("description")
+                or "",
                 "schema": schema,
             }
         )
@@ -85,7 +87,9 @@ def schema_can_hold_sentinel(schema: Any) -> bool:
             isinstance(additional, dict) and schema_can_hold_sentinel(additional)
         )
     for key in ("oneOf", "anyOf", "allOf"):
-        if any(schema_can_hold_sentinel(item) for item in schema.get(key, []) if isinstance(item, dict)):
+        if any(
+            schema_can_hold_sentinel(item) for item in schema.get(key, []) if isinstance(item, dict)
+        ):
             return True
     return False
 
@@ -100,8 +104,7 @@ def build_prompt(schema: dict, description: str, sentinel: str | None) -> str:
     sentinel_text = ""
     if sentinel is not None:
         sentinel_text = (
-            f"\nInclude the exact token {sentinel!r} somewhere inside the JSON "
-            "as a string value."
+            f"\nInclude the exact token {sentinel!r} somewhere inside the JSON as a string value."
         )
     return (
         f"Task: {description or 'Generate one JSON value.'}\n\n"
@@ -178,7 +181,9 @@ def validate_output(text: str, schema: dict) -> tuple[bool, str | None]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Check JSON-schema output from an MLX 8-bit Llama server.")
+    parser = argparse.ArgumentParser(
+        description="Check JSON-schema output from an MLX 8-bit Llama server."
+    )
     parser.add_argument("--url", default="http://localhost:8000")
     parser.add_argument("--endpoint", default="/v1/completions")
     parser.add_argument("--dataset-subset", default="full")
@@ -232,8 +237,10 @@ def main() -> None:
 
     valid_rate = valid / len(cases)
     sentinel_rate = sentinel_ok / sentinel_checked if sentinel_checked else 1.0
-    passed = valid_rate >= args.min_valid_rate and sentinel_rate >= args.min_sentinel_rate and not any(
-        failure.startswith("[") and "request failed" in failure for failure in failures
+    passed = (
+        valid_rate >= args.min_valid_rate
+        and sentinel_rate >= args.min_sentinel_rate
+        and not any(failure.startswith("[") and "request failed" in failure for failure in failures)
     )
 
     print(

@@ -13,29 +13,29 @@ Run this script on Trainium/Inferentia hardware with the NKI venv activated.
 
 import os
 import subprocess
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 # =============================================================================
 # Step 1: Set profiling environment variables BEFORE any neuronx imports
 # =============================================================================
 
-os.environ['NEURON_RT_INSPECT_ENABLE'] = '1'
-os.environ['NEURON_RT_INSPECT_DEVICE_PROFILE'] = '1'
-os.environ['NEURON_RT_INSPECT_OUTPUT_DIR'] = './output'
-os.environ['NEURON_CC_FLAGS'] = '--target trn2 --lnc 1'
+os.environ["NEURON_RT_INSPECT_ENABLE"] = "1"
+os.environ["NEURON_RT_INSPECT_DEVICE_PROFILE"] = "1"
+os.environ["NEURON_RT_INSPECT_OUTPUT_DIR"] = "./output"
+os.environ["NEURON_CC_FLAGS"] = "--target trn2 --lnc 1"
 
 # Now import neuronx packages
+import nki
+import nki.isa as nisa
+import nki.language as nl
 import torch
 from torch_xla.core import xla_model as xm
-import nki
-import nki.language as nl
-import nki.isa as nisa
-
 
 # =============================================================================
 # Define kernel to profile
 # =============================================================================
+
 
 def kernel_assert(condition, message=""):
     """Validate kernel preconditions (raises at trace time)."""
@@ -43,6 +43,7 @@ def kernel_assert(condition, message=""):
 
 
 os.environ["NEURON_PLATFORM_TARGET_OVERRIDE"] = "trn2"
+
 
 @nki.jit
 def add_kernel(a_input, b_input):
@@ -107,15 +108,15 @@ print(f"Step 3: Created profile directory: {profile_dir}")
 # Step 4: Find NEFF and prepare capture command
 # =============================================================================
 
-output_dir = Path('./output')
-neff_files = list(output_dir.glob('*/*.neff'))
+output_dir = Path("./output")
+neff_files = list(output_dir.glob("*/*.neff"))
 
 if not neff_files:
     print("ERROR: No NEFF files found in output directory")
     exit(1)
 
 neff_path = neff_files[0]
-ntff_path = profile_dir / 'profile.ntff'
+ntff_path = profile_dir / "profile.ntff"
 
 print(f"Step 4: Found NEFF: {neff_path}")
 

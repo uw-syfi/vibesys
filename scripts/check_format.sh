@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-uv run ruff check --select I src tests
-uv run ruff format --check src tests
+targets=(src tests examples resources)
+
+uv run ruff check --select I "${targets[@]}"
+uv run ruff format --check "${targets[@]}"

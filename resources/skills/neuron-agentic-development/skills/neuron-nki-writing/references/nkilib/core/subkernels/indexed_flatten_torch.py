@@ -49,7 +49,9 @@ def indexed_flatten_torch_ref(
     partitions_per_row = T // f_len
     num_output_blocks = output_len // f_len
 
-    output = torch.full((output_len,), padding_val, dtype=input_tensor.dtype, device=input_tensor.device)
+    output = torch.full(
+        (output_len,), padding_val, dtype=input_tensor.dtype, device=input_tensor.device
+    )
     output_blocks = output.reshape(num_output_blocks, f_len)
     input_reshaped = input_tensor.reshape(E, partitions_per_row, f_len)
 

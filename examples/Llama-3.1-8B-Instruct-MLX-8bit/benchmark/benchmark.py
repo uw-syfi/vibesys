@@ -15,7 +15,6 @@ from typing import Any
 import httpx
 from jsonschema.validators import validator_for
 
-
 BUNDLE_DIR = Path(__file__).resolve().parents[1]
 DATASET_ID = "epfl-dlab/JSONSchemaBench"
 DATASET_REVISION = "5bd0f4640badc6f3f02df796421d21cb0ca0b141"
@@ -80,7 +79,10 @@ def load_cases(
         cases.append(
             {
                 "unique_id": str(row.get("unique_id") or row.get("id") or idx),
-                "description": row.get("description") or row.get("title") or schema.get("description") or "",
+                "description": row.get("description")
+                or row.get("title")
+                or schema.get("description")
+                or "",
                 "schema": schema,
             }
         )
@@ -184,7 +186,9 @@ async def send_request(
         "error": None,
         "latency": done - started,
         "ttft": None if first_token is None else first_token - started,
-        "tpot": None if first_token is None or output_tokens <= 1 else (done - first_token) / (output_tokens - 1),
+        "tpot": None
+        if first_token is None or output_tokens <= 1
+        else (done - first_token) / (output_tokens - 1),
         "output_tokens": output_tokens,
         "parse_ok": parse_ok,
         "schema_ok": schema_ok,
@@ -262,7 +266,9 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     print(f"Endpoint:          {url}")
     print(f"Schemas:           {len(cases)}")
     print(f"Completed:         {summary['num_completed']}/{summary['num_requests']}")
-    print(f"Schema valid:      {summary['schema_ok']}/{summary['num_completed']} ({summary['schema_ok_frac']:.3f})")
+    print(
+        f"Schema valid:      {summary['schema_ok']}/{summary['num_completed']} ({summary['schema_ok_frac']:.3f})"
+    )
     print(f"Token throughput:  {summary['token_throughput']:.2f} tok/s")
     if summary["latency_ms"]:
         print(f"Latency p50:       {summary['latency_ms']['p50']:.1f} ms")
@@ -279,7 +285,9 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark JSON-schema generation on an MLX 8-bit Llama server.")
+    parser = argparse.ArgumentParser(
+        description="Benchmark JSON-schema generation on an MLX 8-bit Llama server."
+    )
     parser.add_argument("--url", default="http://localhost:8000")
     parser.add_argument("--endpoint", default="/v1/completions")
     parser.add_argument("--dataset-subset", default="full")
@@ -290,7 +298,11 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-tokens", type=int, default=256)
     parser.add_argument("--timeout", type=float, default=600.0)
-    parser.add_argument("--closed-loop", action="store_true", help="Send requests sequentially instead of concurrently.")
+    parser.add_argument(
+        "--closed-loop",
+        action="store_true",
+        help="Send requests sequentially instead of concurrently.",
+    )
     parser.add_argument("--output-json", type=str, default=None)
     args = parser.parse_args()
     asyncio.run(run_benchmark(args))

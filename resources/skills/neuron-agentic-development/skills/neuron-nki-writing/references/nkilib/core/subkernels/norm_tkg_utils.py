@@ -136,7 +136,10 @@ def contiguous_load_transpose(
     for bxs_tile in TiledRange(BxS, H0):
         # Load [bxs_tile.size, H] from HBM to SBUF
         input_sbuf_temp = sbm.alloc_heap(
-            (bxs_tile.size, H), dtype=input_hbm.dtype, buffer=nl.sbuf, name=f"cont_load_transpose_buff_{bxs_tile.index}"
+            (bxs_tile.size, H),
+            dtype=input_hbm.dtype,
+            buffer=nl.sbuf,
+            name=f"cont_load_transpose_buff_{bxs_tile.index}",
         )
         input_hbm_tile = input_hbm.slice(
             dim=0, start=bxs_tile.start_offset, end=bxs_tile.end_offset
@@ -144,11 +147,15 @@ def contiguous_load_transpose(
         nisa.dma_copy(src=input_hbm_tile.get_view(), dst=input_sbuf_temp, dge_mode=_DGE_MODE_NONE)
 
         # Reshape [bxs_tile.size, H] -> [bxs_tile.size, num_H_shards, H0, H2]
-        input_temp_view = TensorView(input_sbuf_temp).reshape_dim(dim=1, shape=[num_H_shards, H0, H2])
+        input_temp_view = TensorView(input_sbuf_temp).reshape_dim(
+            dim=1, shape=[num_H_shards, H0, H2]
+        )
 
         # Compute padded tile size for PSUM alignment
         padded_tile_size = (
-            div_ceil(bxs_tile.size * dtype_size, _PSUM_ALIGNMENT_BYTES) * _PSUM_ALIGNMENT_BYTES // dtype_size
+            div_ceil(bxs_tile.size * dtype_size, _PSUM_ALIGNMENT_BYTES)
+            * _PSUM_ALIGNMENT_BYTES
+            // dtype_size
         )
 
         tiles_per_psum = _psum_fmax // padded_tile_size
@@ -179,7 +186,10 @@ def contiguous_load_transpose(
                     .squeeze_dim(dim=2)
                 )
                 # Transpose [bxs_tile.size, H0] -> [H0, bxs_tile.size] in PSUM
-                nisa.nc_transpose(dst=tp_psum[0:H0, col_offset : col_offset + bxs_tile.size], data=src_view.get_view())
+                nisa.nc_transpose(
+                    dst=tp_psum[0:H0, col_offset : col_offset + bxs_tile.size],
+                    data=src_view.get_view(),
+                )
 
             # Copy PSUM -> SBUF
             dst_view = (
@@ -240,7 +250,9 @@ def load_input_to_sbuf(
             .expand_dim(dim=1)
             .expand_dim(dim=1)
         )
-        input_sb_view = input_sb.flatten_dims(start_dim=1, end_dim=2).expand_dim(dim=1).expand_dim(dim=1)
+        input_sb_view = (
+            input_sb.flatten_dims(start_dim=1, end_dim=2).expand_dim(dim=1).expand_dim(dim=1)
+        )
         nisa.dma_transpose(dst=input_sb_view.get_view(), src=input_hbm_view.get_view())
     else:
         # (BxS, H) -> (BxS, num_H_shards, H0, H2) -> (H0, BxS, num_H_shards, H2)
@@ -248,8 +260,12 @@ def load_input_to_sbuf(
             kernel_assert(sbm != None, "sbm required for contiguous load path")
             contiguous_load_transpose(input_hbm, input_sb, num_H_shards, sbm)
         else:
-            input_hbm_view = input_hbm.reshape_dim(dim=1, shape=[num_H_shards, H0, H2]).permute(dims=[2, 0, 1, 3])
-            input_sb_view = input_sb.reshape_dim(dim=2, shape=[num_H_shards, H2])  # (H0, BxS, num_H_shards, H2)
+            input_hbm_view = input_hbm.reshape_dim(dim=1, shape=[num_H_shards, H0, H2]).permute(
+                dims=[2, 0, 1, 3]
+            )
+            input_sb_view = input_sb.reshape_dim(
+                dim=2, shape=[num_H_shards, H2]
+            )  # (H0, BxS, num_H_shards, H2)
             nisa.dma_copy(
                 dst=input_sb_view.get_view(),
                 src=input_hbm_view.get_view(),
@@ -289,12 +305,16 @@ def load_gamma_to_sbuf(
     gamma_hbm = gamma_hbm.flatten_dims(start_dim=0, end_dim=1)
     if hidden_dim_tp:
         # Transpose load: (H) -> (H1, H0) -> (H0, H1)
-        gamma_hbm_view = gamma_hbm.reshape_dim(dim=0, shape=[H1, H0]).expand_dim(dim=1).expand_dim(dim=1)
+        gamma_hbm_view = (
+            gamma_hbm.reshape_dim(dim=0, shape=[H1, H0]).expand_dim(dim=1).expand_dim(dim=1)
+        )
         gamma_sb_dst_view = gamma_sb.expand_dim(dim=1).expand_dim(dim=1)
         nisa.dma_transpose(dst=gamma_sb_dst_view.get_view(), src=gamma_hbm_view.get_view())
     else:
         # Standard layout: (H) -> (num_H_shards, H0, H2) -> (H0, num_H_shards, H2)
-        gamma_hbm_view = gamma_hbm.reshape_dim(dim=0, shape=[num_H_shards, H0, H2]).permute(dims=[1, 0, 2])
+        gamma_hbm_view = gamma_hbm.reshape_dim(dim=0, shape=[num_H_shards, H0, H2]).permute(
+            dims=[1, 0, 2]
+        )
         gamma_sb_view_reshaped = gamma_sb.reshape_dim(dim=1, shape=[num_H_shards, H2])
         nisa.dma_copy(
             dst=gamma_sb_view_reshaped.get_view(),
@@ -375,12 +395,18 @@ def validate_shapes_quantize_mx(
     kernel_assert(output_shape == (H0, BxS, H1), f"Expected output.shape = {(H0, BxS, H1)}")
 
     SUPPORTED_QMX_INPUT_DTYPES = [nl.float16, nl.bfloat16]
-    kernel_assert(output_dtype in SUPPORTED_QMX_INPUT_DTYPES, "output.dtype must be float16 or bfloat16")
+    kernel_assert(
+        output_dtype in SUPPORTED_QMX_INPUT_DTYPES, "output.dtype must be float16 or bfloat16"
+    )
 
     if is_residual_add:
         kernel_assert(input_shape == residual_shape, "input and residual shapes must match")
-        kernel_assert(output_residual_shape is not None, "output_residual required when residual provided")
-        kernel_assert(output_residual_shape == (BxS, H), f"expected output_residual shape (B*S, H)={(BxS, H)}")
+        kernel_assert(
+            output_residual_shape is not None, "output_residual required when residual provided"
+        )
+        kernel_assert(
+            output_residual_shape == (BxS, H), f"expected output_residual shape (B*S, H)={(BxS, H)}"
+        )
         kernel_assert(H1 % 8 == 0, f"Expected H1 divisible by 8 with fused residual add")
         # Residual transpose requires shard_size >= 128 (with LNC=2, BxS >= 256)
         kernel_assert(BxS >= 256, f"Residual add requires BxS >= 256 (got {BxS})")

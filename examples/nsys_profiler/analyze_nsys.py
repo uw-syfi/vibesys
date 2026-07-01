@@ -26,7 +26,6 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -44,16 +43,18 @@ def _open_db(path: str) -> tuple[sqlite3.Connection, dict[int, str]]:
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
-    ).fetchone() is not None
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()
+        is not None
+    )
 
 
 def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
     try:
         return any(
-            row[1] == column
-            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+            row[1] == column for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
         )
     except sqlite3.OperationalError:
         return False
@@ -100,7 +101,9 @@ def _ensure_sqlite(path: str) -> str:
             sqlite_path.unlink()
         subprocess.run(
             ["nsys", "export", "--type=sqlite", f"--output={sqlite_path}", str(p)],
-            check=True, capture_output=True, text=True,
+            check=True,
+            capture_output=True,
+            text=True,
         )
         return str(sqlite_path)
     return path
@@ -169,9 +172,9 @@ def cmd_kernels(args):
     for name_id, cnt, tot, avg in rows:
         name = _resolve_name(name_id, strings)
         pct = tot / total_ns * 100 if total_ns else 0
-        print(f"{name:<55s} {cnt:>7d} {tot/1000:>11.1f} {avg/1000:>9.1f} {pct:>5.1f}%")
+        print(f"{name:<55s} {cnt:>7d} {tot / 1000:>11.1f} {avg / 1000:>9.1f} {pct:>5.1f}%")
     total_launches = sum(r[1] for r in rows)
-    print(f"\nTotal GPU kernel time: {total_ns/1e6:.2f} ms")
+    print(f"\nTotal GPU kernel time: {total_ns / 1e6:.2f} ms")
     print(f"Total kernel launches: {total_launches}")
 
 
@@ -193,7 +196,7 @@ def cmd_cpu_overhead(args):
     total_calls, total_ns = row if row else (0, 0)
     total_ns = total_ns or 0
     print(f"Total CUDA runtime API calls: {total_calls}")
-    print(f"Total CPU time in CUDA APIs:  {total_ns/1e6:.2f} ms")
+    print(f"Total CPU time in CUDA APIs:  {total_ns / 1e6:.2f} ms")
 
     has_cbid = _column_exists(conn, "CUPTI_ACTIVITY_KIND_RUNTIME", "cbid")
     has_nameId = _column_exists(conn, "CUPTI_ACTIVITY_KIND_RUNTIME", "nameId")
@@ -209,7 +212,7 @@ def cmd_cpu_overhead(args):
             print(f"\n{'API Function':<40s} {'Count':>8s} {'Total(us)':>11s} {'Avg(us)':>9s}")
             print("-" * 72)
             for name, cnt, tot, avg in api_rows:
-                print(f"{(name or '?'):<40s} {cnt:>8d} {tot/1000:>11.1f} {avg/1000:>9.1f}")
+                print(f"{(name or '?'):<40s} {cnt:>8d} {tot / 1000:>11.1f} {avg / 1000:>9.1f}")
 
         # Sync stalls
         sync_rows = conn.execute(
@@ -223,7 +226,7 @@ def cmd_cpu_overhead(args):
         ).fetchall()
         sync_total = sum(r[2] for r in sync_rows) if sync_rows else 0
         sync_count = sum(r[1] for r in sync_rows) if sync_rows else 0
-        print(f"\nSynchronization stalls: {sync_count} calls, {sync_total/1e6:.2f} ms")
+        print(f"\nSynchronization stalls: {sync_count} calls, {sync_total / 1e6:.2f} ms")
 
         # Launch overhead ratio
         launch_filter = (
@@ -232,9 +235,14 @@ def cmd_cpu_overhead(args):
         )
     elif has_cbid:
         cbid_names = {
-            33: "cudaLaunchKernel", 49: "cudaMemcpyAsync", 59: "cudaMalloc",
-            60: "cudaFree", 162: "cudaStreamSynchronize", 163: "cudaDeviceSynchronize",
-            164: "cudaEventSynchronize", 211: "cudaLaunchKernelExC",
+            33: "cudaLaunchKernel",
+            49: "cudaMemcpyAsync",
+            59: "cudaMalloc",
+            60: "cudaFree",
+            162: "cudaStreamSynchronize",
+            163: "cudaDeviceSynchronize",
+            164: "cudaEventSynchronize",
+            211: "cudaLaunchKernelExC",
         }
         api_rows = conn.execute(
             "SELECT cbid, COUNT(*), SUM(end-start), AVG(end-start) "
@@ -244,7 +252,9 @@ def cmd_cpu_overhead(args):
             print(f"\n{'API Function':<40s} {'Count':>8s} {'Total(us)':>11s} {'Avg(us)':>9s}")
             print("-" * 72)
             for cbid, cnt, tot, avg in api_rows:
-                print(f"{cbid_names.get(cbid, f'cbid_{cbid}'):<40s} {cnt:>8d} {tot/1000:>11.1f} {avg/1000:>9.1f}")
+                print(
+                    f"{cbid_names.get(cbid, f'cbid_{cbid}'):<40s} {cnt:>8d} {tot / 1000:>11.1f} {avg / 1000:>9.1f}"
+                )
         sync_cbids = {162, 163, 164}
         sync_rows = conn.execute(
             f"SELECT cbid, COUNT(*), SUM(end-start) FROM CUPTI_ACTIVITY_KIND_RUNTIME "
@@ -252,7 +262,7 @@ def cmd_cpu_overhead(args):
         ).fetchall()
         sync_total = sum(r[2] for r in sync_rows) if sync_rows else 0
         sync_count = sum(r[1] for r in sync_rows) if sync_rows else 0
-        print(f"\nSynchronization stalls: {sync_count} calls, {sync_total/1e6:.2f} ms")
+        print(f"\nSynchronization stalls: {sync_count} calls, {sync_total / 1e6:.2f} ms")
         launch_filter = "r.cbid IN (33, 211)"
     else:
         return
@@ -318,7 +328,7 @@ def cmd_idle_gaps(args):
             gap = merged[i][0] - merged[i - 1][1]
             if gap > 1000:
                 total_idle += gap
-                prev = end_map.get(merged[i-1][1])
+                prev = end_map.get(merged[i - 1][1])
                 nxt = start_map.get(merged[i][0])
                 pn = _resolve_name(prev[0], strings) if prev else "?"
                 nn = _resolve_name(nxt[0], strings) if nxt else "?"
@@ -327,15 +337,15 @@ def cmd_idle_gaps(args):
     gaps.sort(key=lambda x: -x[2])
     total = total_busy + total_idle
     pct = total_idle / total * 100 if total else 0
-    print(f"GPU busy: {total_busy/1e6:.2f} ms")
-    print(f"GPU idle: {total_idle/1e6:.2f} ms ({pct:.1f}%)")
+    print(f"GPU busy: {total_busy / 1e6:.2f} ms")
+    print(f"GPU idle: {total_idle / 1e6:.2f} ms ({pct:.1f}%)")
     print(f"Idle gaps (>1us): {len(gaps)}")
-    if gaps[:args.top]:
+    if gaps[: args.top]:
         print(f"\nTop {min(args.top, len(gaps))} gaps:")
         print(f"  {'Gap(us)':>10s}  {'After':<40s} → {'Before':<40s}")
         print("  " + "-" * 95)
-        for pn, nn, g in gaps[:args.top]:
-            print(f"  {g/1000:>10.1f}  {pn:<40s} → {nn:<40s}")
+        for pn, nn, g in gaps[: args.top]:
+            print(f"  {g / 1000:>10.1f}  {pn:<40s} → {nn:<40s}")
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +367,9 @@ def cmd_memory(args):
             print(f"{'Dir':<8s} {'Count':>8s} {'Total(us)':>11s} {'Bytes':>14s}")
             print("-" * 45)
             for kind, cnt, tot, byt in rows:
-                print(f"{kinds.get(kind, f'k{kind}'):<8s} {cnt:>8d} {tot/1000:>11.1f} {byt:>14,d}")
+                print(
+                    f"{kinds.get(kind, f'k{kind}'):<8s} {cnt:>8d} {tot / 1000:>11.1f} {byt:>14,d}"
+                )
     else:
         print("(No memcpy data.)")
 
@@ -375,7 +387,7 @@ def cmd_memory(args):
                 print(f"\n{'Alloc API':<25s} {'Count':>8s} {'Total(us)':>11s}")
                 print("-" * 48)
                 for name, cnt, tot in rows:
-                    print(f"{name:<25s} {cnt:>8d} {tot/1000:>11.1f}")
+                    print(f"{name:<25s} {cnt:>8d} {tot / 1000:>11.1f}")
 
 
 # ---------------------------------------------------------------------------
@@ -405,7 +417,9 @@ def cmd_graph_replays(args):
     for s, e, gid, geid in traces:
         by_exec[geid].append(e - s)
 
-    print(f"\n{'GraphExec':>10s} {'Replays':>8s} {'Avg(us)':>10s} {'Min(us)':>10s} {'Max(us)':>10s}")
+    print(
+        f"\n{'GraphExec':>10s} {'Replays':>8s} {'Avg(us)':>10s} {'Min(us)':>10s} {'Max(us)':>10s}"
+    )
     print("-" * 52)
     for geid, durs in sorted(by_exec.items()):
         avg = sum(durs) / len(durs) / 1000
@@ -414,7 +428,9 @@ def cmd_graph_replays(args):
         print(f"{geid:>10d} {len(durs):>8d} {avg:>10.1f} {mn:>10.1f} {mx:>10.1f}")
 
     # Match with CPU-side cudaGraphLaunch
-    if _table_exists(conn, "CUPTI_ACTIVITY_KIND_RUNTIME") and _column_exists(conn, "CUPTI_ACTIVITY_KIND_RUNTIME", "nameId"):
+    if _table_exists(conn, "CUPTI_ACTIVITY_KIND_RUNTIME") and _column_exists(
+        conn, "CUPTI_ACTIVITY_KIND_RUNTIME", "nameId"
+    ):
         launch_rows = conn.execute(
             """SELECT r.start, r.end, r.correlationId
                FROM CUPTI_ACTIVITY_KIND_RUNTIME r
@@ -425,22 +441,22 @@ def cmd_graph_replays(args):
         if launch_rows:
             cpu_durs = [(r[1] - r[0]) / 1000 for r in launch_rows]
             print(f"\ncudaGraphLaunch calls: {len(cpu_durs)}")
-            print(f"  CPU launch avg: {sum(cpu_durs)/len(cpu_durs):.1f} us")
+            print(f"  CPU launch avg: {sum(cpu_durs) / len(cpu_durs):.1f} us")
             print(f"  CPU launch min: {min(cpu_durs):.1f} us")
             print(f"  CPU launch max: {max(cpu_durs):.1f} us")
 
     # Gap between consecutive replays (scheduling overhead)
     if len(traces) >= 2:
-        replay_gaps = [traces[i][0] - traces[i-1][1] for i in range(1, len(traces))]
+        replay_gaps = [traces[i][0] - traces[i - 1][1] for i in range(1, len(traces))]
         replay_gaps = [g for g in replay_gaps if g > 0]
         if replay_gaps:
             avg_gap = sum(replay_gaps) / len(replay_gaps) / 1000
-            med_gap = sorted(replay_gaps)[len(replay_gaps)//2] / 1000
+            med_gap = sorted(replay_gaps)[len(replay_gaps) // 2] / 1000
             print(f"\nGap between replays (scheduling overhead):")
             print(f"  Avg: {avg_gap:.1f} us")
             print(f"  Median: {med_gap:.1f} us")
-            print(f"  Min: {min(replay_gaps)/1000:.1f} us")
-            print(f"  Max: {max(replay_gaps)/1000:.1f} us")
+            print(f"  Min: {min(replay_gaps) / 1000:.1f} us")
+            print(f"  Max: {max(replay_gaps) / 1000:.1f} us")
 
 
 # ---------------------------------------------------------------------------
@@ -478,7 +494,10 @@ def cmd_step_timeline(args):
 
     # Find decode step boundaries: gaps > threshold
     # Adaptive threshold: find the gap that separates intra-step from inter-step
-    all_gaps = sorted([rows[i][1] - rows[i-1][2] for i in range(1, len(rows)) if rows[i][1] > rows[i-1][2]], reverse=True)
+    all_gaps = sorted(
+        [rows[i][1] - rows[i - 1][2] for i in range(1, len(rows)) if rows[i][1] > rows[i - 1][2]],
+        reverse=True,
+    )
     if not all_gaps:
         print("(No gaps between kernels.)")
         return
@@ -488,9 +507,9 @@ def cmd_step_timeline(args):
     best_thresh = None
     for pct in [0.01, 0.02, 0.05, 0.1]:
         thresh = all_gaps[max(0, int(len(all_gaps) * pct))]
-        boundaries = [i for i in range(1, len(rows)) if rows[i][1] - rows[i-1][2] > thresh]
+        boundaries = [i for i in range(1, len(rows)) if rows[i][1] - rows[i - 1][2] > thresh]
         if len(boundaries) >= 3:
-            sizes = [boundaries[j+1] - boundaries[j] for j in range(len(boundaries)-1)]
+            sizes = [boundaries[j + 1] - boundaries[j] for j in range(len(boundaries) - 1)]
             # Check consistency: most steps should be similar size
             if sizes and max(sizes) < 3 * min(sizes):
                 best_thresh = thresh
@@ -498,11 +517,13 @@ def cmd_step_timeline(args):
 
     if best_thresh is None:
         # Fallback: use a fixed threshold
-        best_thresh = all_gaps[min(5, len(all_gaps)-1)] if len(all_gaps) > 5 else 100000
+        best_thresh = all_gaps[min(5, len(all_gaps) - 1)] if len(all_gaps) > 5 else 100000
 
-    boundaries = [i for i in range(1, len(rows)) if rows[i][1] - rows[i-1][2] > best_thresh]
+    boundaries = [i for i in range(1, len(rows)) if rows[i][1] - rows[i - 1][2] > best_thresh]
     if len(boundaries) < 2:
-        print(f"(Could not detect decode step boundaries. Try graph-replays if CUDA graphs are active.)")
+        print(
+            f"(Could not detect decode step boundaries. Try graph-replays if CUDA graphs are active.)"
+        )
         return
 
     # Analyze the Nth step (default: 2nd, to skip any warmup artifact)
@@ -514,16 +535,16 @@ def cmd_step_timeline(args):
     n_kernels = len(step_rows)
     gpu_time = sum(r[2] - r[1] for r in step_rows)
     wall_time = step_rows[-1][2] - step_rows[0][1] if step_rows else 0
-    gap_time = sum(max(0, step_rows[i][1] - step_rows[i-1][2]) for i in range(1, len(step_rows)))
+    gap_time = sum(max(0, step_rows[i][1] - step_rows[i - 1][2]) for i in range(1, len(step_rows)))
 
-    sizes = [boundaries[j+1] - boundaries[j] for j in range(min(5, len(boundaries)-1))]
-    print(f"Detected {len(boundaries)} decode steps (threshold: {best_thresh/1000:.0f} us)")
+    sizes = [boundaries[j + 1] - boundaries[j] for j in range(min(5, len(boundaries) - 1))]
+    print(f"Detected {len(boundaries)} decode steps (threshold: {best_thresh / 1000:.0f} us)")
     print(f"Kernels per step: {sizes}")
     print(f"\n=== Decode step {step_idx} ({n_kernels} kernels) ===")
-    print(f"GPU time:  {gpu_time/1000:.0f} us")
-    print(f"Gap time:  {gap_time/1000:.0f} us")
-    print(f"Wall time: {wall_time/1000:.0f} us")
-    print(f"GPU util:  {gpu_time/wall_time*100:.0f}%" if wall_time else "")
+    print(f"GPU time:  {gpu_time / 1000:.0f} us")
+    print(f"Gap time:  {gap_time / 1000:.0f} us")
+    print(f"Wall time: {wall_time / 1000:.0f} us")
+    print(f"GPU util:  {gpu_time / wall_time * 100:.0f}%" if wall_time else "")
 
     # Kernel breakdown
     kstats = defaultdict(lambda: {"count": 0, "total": 0})
@@ -536,14 +557,16 @@ def cmd_step_timeline(args):
     print("-" * 83)
     for name, s in sorted(kstats.items(), key=lambda x: -x[1]["total"]):
         pct = s["total"] / gpu_time * 100 if gpu_time else 0
-        print(f"{name:<50s} {s['count']:>5d} {s['total']/1000:>10.1f} {s['total']/s['count']/1000:>8.1f} {pct:>5.1f}%")
+        print(
+            f"{name:<50s} {s['count']:>5d} {s['total'] / 1000:>10.1f} {s['total'] / s['count'] / 1000:>8.1f} {pct:>5.1f}%"
+        )
 
     # Top gap transitions
     gstats = defaultdict(lambda: {"count": 0, "total": 0})
     for i in range(1, len(step_rows)):
-        g = step_rows[i][1] - step_rows[i-1][2]
+        g = step_rows[i][1] - step_rows[i - 1][2]
         if g > 0:
-            pn = _resolve_name(step_rows[i-1][0], strings)[:20]
+            pn = _resolve_name(step_rows[i - 1][0], strings)[:20]
             nn = _resolve_name(step_rows[i][0], strings)[:20]
             gstats[f"{pn:20s} → {nn}"]["count"] += 1
             gstats[f"{pn:20s} → {nn}"]["total"] += g
@@ -551,8 +574,10 @@ def cmd_step_timeline(args):
     print(f"\n{'Gap transition':<45s} {'Cnt':>5s} {'Total(us)':>10s} {'Avg(us)':>8s}")
     print("-" * 72)
     for key, s in sorted(gstats.items(), key=lambda x: -x[1]["total"])[:10]:
-        print(f"{key:<45s} {s['count']:>5d} {s['total']/1000:>10.1f} {s['total']/s['count']/1000:>8.1f}")
-    print(f"\nTotal intra-step gap: {gap_time/1000:.0f} us")
+        print(
+            f"{key:<45s} {s['count']:>5d} {s['total'] / 1000:>10.1f} {s['total'] / s['count'] / 1000:>8.1f}"
+        )
+    print(f"\nTotal intra-step gap: {gap_time / 1000:.0f} us")
 
 
 # ---------------------------------------------------------------------------
@@ -570,7 +595,9 @@ def _build_string_map(conn: sqlite3.Connection) -> dict[int, str]:
 
 def _capture_stdout(fn, *a, **kw) -> str:
     """Run fn() and capture its stdout as a string."""
-    import io, contextlib
+    import contextlib
+    import io
+
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         fn(*a, **kw)
@@ -579,9 +606,11 @@ def _capture_stdout(fn, *a, **kw) -> str:
 
 def analyze_kernels(conn, strings, top_n=15):
     """Legacy API — returns analysis as a string."""
+
     class _A:
         report = ":memory:"
         top = top_n
+
     # Monkey-patch _open_db for this call
     saved = globals().get("_open_db")
     globals()["_open_db"] = lambda p: (conn, strings)
@@ -594,6 +623,7 @@ def analyze_kernels(conn, strings, top_n=15):
 def analyze_cpu_overhead(conn, strings):
     class _A:
         report = ":memory:"
+
     saved = globals().get("_open_db")
     globals()["_open_db"] = lambda p: (conn, strings)
     try:
@@ -606,6 +636,7 @@ def analyze_gpu_idle_gaps(conn, strings, top_n=10):
     class _A:
         report = ":memory:"
         top = top_n
+
     saved = globals().get("_open_db")
     globals()["_open_db"] = lambda p: (conn, strings)
     try:
@@ -617,6 +648,7 @@ def analyze_gpu_idle_gaps(conn, strings, top_n=10):
 def analyze_memory_ops(conn):
     class _A:
         report = ":memory:"
+
     saved = globals().get("_open_db")
     globals()["_open_db"] = lambda p: (conn, {})
     try:
@@ -711,7 +743,9 @@ def main():
 
     p = sub.add_parser("step-timeline", help="Per-decode-step kernel breakdown")
     p.add_argument("report")
-    p.add_argument("--step", type=int, default=1, help="Which decode step to analyze (0-indexed, default: 1)")
+    p.add_argument(
+        "--step", type=int, default=1, help="Which decode step to analyze (0-indexed, default: 1)"
+    )
 
     p = sub.add_parser("query", help="Run arbitrary SQL")
     p.add_argument("report")

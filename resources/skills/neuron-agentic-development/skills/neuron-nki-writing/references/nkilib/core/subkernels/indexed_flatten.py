@@ -90,8 +90,14 @@ def indexed_flatten(
     N = row_offsets.shape[0]
 
     # Input validation
-    kernel_assert(output_len % P_MAX == 0, f"output_len must be divisible by P_MAX ({P_MAX}), got {output_len}")
-    kernel_assert(output_len % f_len == 0, f"output_len must be divisible by f_len, got {output_len=}, {f_len=}")
+    kernel_assert(
+        output_len % P_MAX == 0,
+        f"output_len must be divisible by P_MAX ({P_MAX}), got {output_len}",
+    )
+    kernel_assert(
+        output_len % f_len == 0,
+        f"output_len must be divisible by f_len, got {output_len=}, {f_len=}",
+    )
     kernel_assert(T % f_len == 0, f"T must be divisible by f_len, got {T=}, {f_len=}")
     kernel_assert((T // f_len) % 16 == 0, f"(T // f_len) must be divisible by 16, got {T // f_len}")
 
@@ -120,7 +126,9 @@ def indexed_flatten(
     partition_tile_count = div_ceil(partitions_per_row, P_MAX)
 
     # Each NC has its own private HBM buffer for partial results
-    flattened_array_partial = nl.ndarray((num_output_blocks, f_len), dtype=index_dtype, buffer=nl.private_hbm)
+    flattened_array_partial = nl.ndarray(
+        (num_output_blocks, f_len), dtype=index_dtype, buffer=nl.private_hbm
+    )
 
     """
     Tiling Strategy:
@@ -169,7 +177,9 @@ def indexed_flatten(
 
     for row_idx_local in nl.sequential_range(max_E_per_shard):
         row_offset_sb = nl.ndarray((1, 1), dtype=nl.int32, buffer=nl.sbuf)
-        nisa.dma_copy(dst=row_offset_sb, src=row_offsets_local[0:1, row_idx_local : row_idx_local + 1])
+        nisa.dma_copy(
+            dst=row_offset_sb, src=row_offsets_local[0:1, row_idx_local : row_idx_local + 1]
+        )
 
         # Clamp row_idx to valid range
         row_idx = min(row_idx_local + E_offset, E - 1)
@@ -182,7 +192,9 @@ def indexed_flatten(
                 input_tile = nl.ndarray((partition_count, f_len), dtype=index_dtype, buffer=nl.sbuf)
                 nisa.dma_copy(
                     dst=input_tile,
-                    src=input_tensor_reshape[row_idx, partition_start : partition_start + partition_count, 0:f_len],
+                    src=input_tensor_reshape[
+                        row_idx, partition_start : partition_start + partition_count, 0:f_len
+                    ],
                 )
 
                 # Use nisa.oob_mode.skip to skip writes for out-of-bounds offsets
@@ -199,10 +211,14 @@ def indexed_flatten(
 
     # All-reduce max between the two NCs
     reshaped_reload = flattened_array_partial.reshape((P_MAX, output_len // P_MAX))
-    reshaped_reload_local = nl.ndarray((P_MAX, output_len // P_MAX), dtype=index_dtype, buffer=nl.sbuf)
+    reshaped_reload_local = nl.ndarray(
+        (P_MAX, output_len // P_MAX), dtype=index_dtype, buffer=nl.sbuf
+    )
     nisa.dma_copy(dst=reshaped_reload_local, src=reshaped_reload)
 
-    reshaped_reload_remote = nl.ndarray((P_MAX, output_len // P_MAX), dtype=index_dtype, buffer=nl.sbuf)
+    reshaped_reload_remote = nl.ndarray(
+        (P_MAX, output_len // P_MAX), dtype=index_dtype, buffer=nl.sbuf
+    )
     nisa.sendrecv(
         src=reshaped_reload_local,
         dst=reshaped_reload_remote,
@@ -212,7 +228,9 @@ def indexed_flatten(
     )
 
     result_sb = nl.ndarray((P_MAX, output_len // P_MAX), dtype=index_dtype, buffer=nl.sbuf)
-    nisa.tensor_tensor(dst=result_sb, data1=reshaped_reload_local, data2=reshaped_reload_remote, op=nl.maximum)
+    nisa.tensor_tensor(
+        dst=result_sb, data1=reshaped_reload_local, data2=reshaped_reload_remote, op=nl.maximum
+    )
 
     flattened_array = nl.ndarray((output_len,), dtype=index_dtype, buffer=nl.shared_hbm)
     if shard_id == 0:

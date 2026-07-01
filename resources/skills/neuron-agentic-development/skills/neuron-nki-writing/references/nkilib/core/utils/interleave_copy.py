@@ -64,7 +64,8 @@ def interleave_copy(
         )
     if bias is not None:
         kernel_assert(
-            dst.shape[0] == src.shape[0] == bias.shape[0], f"Partition dimension must match across dst, src, and bias."
+            dst.shape[0] == src.shape[0] == bias.shape[0],
+            f"Partition dimension must match across dst, src, and bias.",
         )
 
     # Pure copy operation
@@ -78,7 +79,9 @@ def interleave_copy(
     # Both scale and bias present with vector shapes - use activation engine when possible
     if use_activation_scale and use_activation_bias:
         if use_even_engine:
-            nisa.activation(dst=dst, data=src, scale=scale.get_view(), bias=bias.get_view(), op=nl.copy)
+            nisa.activation(
+                dst=dst, data=src, scale=scale.get_view(), bias=bias.get_view(), op=nl.copy
+            )
         else:
             # Vector engine: broadcast and apply operations sequentially
             scale = scale.broadcast(dim=1, size=src.shape[-1])

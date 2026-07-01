@@ -111,9 +111,13 @@ def cmd_capture(ns) -> None:
     # inspect takes the user script as trailing args; run it via bash -lc so
     # the agent can pass a full pipeline / env-prefixed command as one string.
     cmd = [
-        _explorer(), "inspect",
-        "-o", str(out_dir),
-        "bash", "-lc", workload,
+        _explorer(),
+        "inspect",
+        "-o",
+        str(out_dir),
+        "bash",
+        "-lc",
+        workload,
     ]
     # Run with cwd=out_dir: neuron-explorer drops stray artifacts
     # (system_profile.json, ntrace.pb) into the *current directory* regardless

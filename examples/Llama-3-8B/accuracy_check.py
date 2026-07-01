@@ -17,14 +17,13 @@ import time
 from pathlib import Path
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
 from step_1_fastapi import load_llama_model
-
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # ---------------------------------------------------------------------------
 # Load .env
 # ---------------------------------------------------------------------------
+
 
 def _load_env():
     env_path = Path(__file__).resolve().parent / ".env"
@@ -46,7 +45,7 @@ _load_env()
 RAW_COMPLETION_SAMPLES: list[tuple[str, int, str]] = [
     ("The capital of France is", 15, "short factual completion"),
     ("Once upon a time, in a land far away,", 50, "story continuation"),
-    ("def fibonacci(n):\n    \"\"\"Return the n-th Fibonacci number.\"\"\"\n", 40, "code completion"),
+    ('def fibonacci(n):\n    """Return the n-th Fibonacci number."""\n', 40, "code completion"),
     ("1 + 1 =", 5, "arithmetic"),
     ("A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A B C D E F G", 20, "alphabet pattern"),
     (
@@ -97,6 +96,7 @@ CHAT_SAMPLES: list[tuple[list[dict[str, str]], int, str]] = [
 # Reference: HuggingFace model.generate()
 # ---------------------------------------------------------------------------
 
+
 @torch.inference_mode()
 def generate_reference(model, tokenizer, prompt_text, max_new_tokens, device):
     inputs = tokenizer(prompt_text, return_tensors="pt").to(device)
@@ -108,6 +108,7 @@ def generate_reference(model, tokenizer, prompt_text, max_new_tokens, device):
 # ---------------------------------------------------------------------------
 # Our implementation: custom model with manual token-by-token loop
 # ---------------------------------------------------------------------------
+
 
 @torch.inference_mode()
 def generate_custom(model, tokenizer, prompt_text, max_new_tokens, device):
@@ -141,6 +142,7 @@ def generate_custom(model, tokenizer, prompt_text, max_new_tokens, device):
 # Comparison logic
 # ---------------------------------------------------------------------------
 
+
 def compare_outputs(ref_ids, custom_ids, tokenizer):
     ref_text = tokenizer.decode(ref_ids, skip_special_tokens=True)
     custom_text = tokenizer.decode(custom_ids, skip_special_tokens=True)
@@ -159,8 +161,8 @@ def compare_outputs(ref_ids, custom_ids, tokenizer):
         f"MISMATCH at token {first_diff}.\n"
         f"  Reference ({len(ref_ids):3d} tokens): {ref_text!r}\n"
         f"  Custom    ({len(custom_ids):3d} tokens): {custom_text!r}\n"
-        f"  Ref  ids[{first_diff}:]: {ref_ids[first_diff:first_diff+10]}\n"
-        f"  Cust ids[{first_diff}:]: {custom_ids[first_diff:first_diff+10]}"
+        f"  Ref  ids[{first_diff}:]: {ref_ids[first_diff : first_diff + 10]}\n"
+        f"  Cust ids[{first_diff}:]: {custom_ids[first_diff : first_diff + 10]}"
     )
     return False, detail
 
@@ -168,6 +170,7 @@ def compare_outputs(ref_ids, custom_ids, tokenizer):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main():
     parser = argparse.ArgumentParser(description="Accuracy checker: custom model vs HF reference")
@@ -188,7 +191,10 @@ def main():
     print(f"Loading HF reference model on {args.device} ...")
     t0 = time.perf_counter()
     ref_model = AutoModelForCausalLM.from_pretrained(
-        args.model, torch_dtype=dtype, device_map=args.device, token=hf_token,
+        args.model,
+        torch_dtype=dtype,
+        device_map=args.device,
+        token=hf_token,
         attn_implementation="eager",
     )
     ref_model.eval()
@@ -206,7 +212,9 @@ def main():
     has_chat_template = hasattr(tokenizer, "apply_chat_template") and tokenizer.chat_template
     for messages, max_tokens, desc in CHAT_SAMPLES:
         if has_chat_template:
-            prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            prompt = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
         else:
             prompt = "\n".join(f"{m['role']}: {m['content']}" for m in messages) + "\nassistant:"
         test_cases.append((prompt, max_tokens, f"[chat] {desc}"))

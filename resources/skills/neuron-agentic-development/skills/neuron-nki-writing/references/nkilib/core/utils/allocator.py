@@ -120,12 +120,14 @@ class SbufManager(nl.NKIObject):
 
         # Log initialization
         total_size = sb_upper_bound - sb_lower_bound
-        self.logger.info(f"SBM initialized: range=[{sb_lower_bound}, {sb_upper_bound}), size={total_size} B")
+        self.logger.info(
+            f"SBM initialized: range=[{sb_lower_bound}, {sb_upper_bound}), size={total_size} B"
+        )
         self.logger.debug(
             f"SBM config: auto_alloc={use_auto_alloc}, default_stack={default_stack_alloc}, "
             f"stack_start={sb_lower_bound}, heap_start={sb_upper_bound}"
         )
-        self.prefix = ''
+        self.prefix = ""
 
     def _get_prefixed_name(self, name):
         """Apply prefix to tensor name."""
@@ -207,7 +209,9 @@ class SbufManager(nl.NKIObject):
         if top_scope.cur_section_id == top_scope.num_sections:
             top_scope.cur_section_id = 0
             self.stack_curr_addr = top_scope.starting_addr
-            self.tree_logger.log(f"↻ section: 0/{top_scope.num_sections} @ {self.stack_curr_addr}", len(self.scopes))
+            self.tree_logger.log(
+                f"↻ section: 0/{top_scope.num_sections} @ {self.stack_curr_addr}", len(self.scopes)
+            )
         else:
             self.tree_logger.log(
                 f"↳ section: {top_scope.cur_section_id}/{top_scope.num_sections} @ {self.stack_curr_addr}",
@@ -223,7 +227,9 @@ class SbufManager(nl.NKIObject):
         self.stack_curr_addr = closing_scope.starting_addr
         self.scopes.pop()
         scope_name = f"'{closing_scope.name}'" if closing_scope.name else "(unnamed)"
-        self.tree_logger.log(f"◀ END {scope_name} freed={freed_bytes} B", len(self.scopes), is_scope_boundary=True)
+        self.tree_logger.log(
+            f"◀ END {scope_name} freed={freed_bytes} B", len(self.scopes), is_scope_boundary=True
+        )
         # Auto-flush when last scope is closed
         if not self.scopes:
             self.tree_logger.flush()
@@ -279,9 +285,14 @@ class SbufManager(nl.NKIObject):
         N = num_elts(shape[1:])
         bytes_per_partition = N * sizeinbytes(dtype)
 
-        if not self.is_auto_alloc() and self.stack_curr_addr + bytes_per_partition > self.heap_curr_addr:
+        if (
+            not self.is_auto_alloc()
+            and self.stack_curr_addr + bytes_per_partition > self.heap_curr_addr
+        ):
             available = self.heap_curr_addr - self.stack_curr_addr
-            self.logger.error(f"Stack OOM: requested={bytes_per_partition} B, available={available} B")
+            self.logger.error(
+                f"Stack OOM: requested={bytes_per_partition} B, available={available} B"
+            )
             self.logger.debug(
                 f"Allocation failure: name={name}, shape={shape}, dtype={dtype}, size={bytes_per_partition} B, "
                 f"stack_addr={self.stack_curr_addr}, heap_addr={self.heap_curr_addr}, "
@@ -315,7 +326,8 @@ class SbufManager(nl.NKIObject):
         self.total_stack_allocs = self.total_stack_allocs + 1
         self._update_stats()
         self.tree_logger.log(
-            f"{tensor_name or '(unnamed)'}: {bytes_per_partition} B @ {addr_start} {shape} {dtype}", len(self.scopes)
+            f"{tensor_name or '(unnamed)'}: {bytes_per_partition} B @ {addr_start} {shape} {dtype}",
+            len(self.scopes),
         )
         self.logger.debug(
             f"Stack allocation: name={name}, shape={shape}, dtype={dtype}, size={bytes_per_partition} B, "
@@ -343,9 +355,14 @@ class SbufManager(nl.NKIObject):
         N = num_elts(shape[1:])
         bytes_per_partition = N * sizeinbytes(dtype)
 
-        if not self.is_auto_alloc() and self.stack_curr_addr + bytes_per_partition > self.heap_curr_addr:
+        if (
+            not self.is_auto_alloc()
+            and self.stack_curr_addr + bytes_per_partition > self.heap_curr_addr
+        ):
             available = self.heap_curr_addr - self.stack_curr_addr
-            self.logger.error(f"Heap OOM: requested={bytes_per_partition} B, available={available} B")
+            self.logger.error(
+                f"Heap OOM: requested={bytes_per_partition} B, available={available} B"
+            )
             self.logger.debug(
                 f"Allocation failure: name={name}, shape={shape}, dtype={dtype}, size={bytes_per_partition} B, "
                 f"stack_addr={self.stack_curr_addr}, heap_addr={self.heap_curr_addr}, "
@@ -359,7 +376,9 @@ class SbufManager(nl.NKIObject):
             self.heap_curr_addr = align_to(self.heap_curr_addr, align)
         base_addr = self.heap_curr_addr - bytes_per_partition
         self.heap_curr_addr -= bytes_per_partition
-        self.heap_curr_addr = align_to(self.heap_curr_addr - 3, 4)  # heap grows down, so should the align
+        self.heap_curr_addr = align_to(
+            self.heap_curr_addr - 3, 4
+        )  # heap grows down, so should the align
 
         tensor_name = self._get_prefixed_name(name)
         if self.use_auto_alloc:
@@ -403,7 +422,8 @@ class SbufManager(nl.NKIObject):
         self.heap.pop()
         self.heap_names.pop()
         self.tree_logger.log(
-            f"[HEAP-] FREE {heap_name}: {bytes_per_partition} B, remaining={len(self.heap)}", len(self.scopes)
+            f"[HEAP-] FREE {heap_name}: {bytes_per_partition} B, remaining={len(self.heap)}",
+            len(self.scopes),
         )
 
     def get_total_space(self):

@@ -237,7 +237,10 @@ class TensorView(nl.NKIObject):
 
         # Validate strides are non-negative (required for valid memory access)
         for i in range(len(view.strides)):
-            kernel_assert(view.strides[i] >= 0, f"Stride at dimension {i} must be non-negative, got {view.strides[i]}")
+            kernel_assert(
+                view.strides[i] >= 0,
+                f"Stride at dimension {i} must be non-negative, got {view.strides[i]}",
+            )
         # Ensure all dimension metadata is consistent
         kernel_assert(len(view.shape) == len(view.strides), "Dimension count mismatch")
         kernel_assert(view.offset >= 0, "Offset must be non-negative")
@@ -304,7 +307,9 @@ class TensorView(nl.NKIObject):
         Raises:
             AssertionError: If slice parameters are invalid
         """
-        kernel_assert(dim < self.get_dim(), f"Dimension {dim} out of range for {self.get_dim()}D tensor")
+        kernel_assert(
+            dim < self.get_dim(), f"Dimension {dim} out of range for {self.get_dim()}D tensor"
+        )
         if self.vector_offset is not None:
             kernel_assert(dim != 0, "Cannot slice vector_select dim (dim 0)")
         kernel_assert(start >= 0, "Start index must be non-negative")
@@ -332,13 +337,23 @@ class TensorView(nl.NKIObject):
 
     @staticmethod
     def validate_permutation(permutation: Tuple[int, ...], dim: int, is_sbuf: bool) -> None:
-        kernel_assert(len(permutation) == dim, f"Permutation length {len(permutation)} != dimension count {dim}")
+        kernel_assert(
+            len(permutation) == dim,
+            f"Permutation length {len(permutation)} != dimension count {dim}",
+        )
         for i in range(dim):
-            kernel_assert(permutation[i] < dim, f"Permutation index {permutation[i]} >= dimension count {dim}")
-            kernel_assert(permutation[i] >= 0, f"Permutation index {permutation[i]} must be non-negative")
+            kernel_assert(
+                permutation[i] < dim, f"Permutation index {permutation[i]} >= dimension count {dim}"
+            )
+            kernel_assert(
+                permutation[i] >= 0, f"Permutation index {permutation[i]} must be non-negative"
+            )
             # Check for duplicates
             for j in range(i):
-                kernel_assert(permutation[i] != permutation[j], f"Duplicate dimension {permutation[i]} in permutation")
+                kernel_assert(
+                    permutation[i] != permutation[j],
+                    f"Duplicate dimension {permutation[i]} in permutation",
+                )
         if is_sbuf:
             kernel_assert(permutation[0] == 0, "Partition dimension stay the outermost dimension")
 
@@ -360,7 +375,9 @@ class TensorView(nl.NKIObject):
         # Reorder shape and strides according to permutation
         for i in range(len(dims)):
             d = dims[i]
-            kernel_assert(d < self.get_dim(), "Dimension index out of range")  # Additional safety check
+            kernel_assert(
+                d < self.get_dim(), "Dimension index out of range"
+            )  # Additional safety check
             new_shape.append(self.shape[d])
             new_strides.append(self.strides[d])
 
@@ -379,11 +396,16 @@ class TensorView(nl.NKIObject):
             Broadcasting sets stride to 0, so the same element is repeated
         """
         kernel_assert(dim < self.get_dim(), f"Dimension {dim} out of range")
-        kernel_assert(self.shape[dim] == 1, f"Can only broadcast size-1 dimensions, got size {self.shape[dim]}")
+        kernel_assert(
+            self.shape[dim] == 1,
+            f"Can only broadcast size-1 dimensions, got size {self.shape[dim]}",
+        )
         if self.vector_offset is not None:
             kernel_assert(dim != 0, "Cannot broadcast vector_select dim (dim 0)")
         if self.is_sbuf():
-            kernel_assert(dim != 0, "Cannot broadcast on partition dimension (dim=0) for SBUF tensors")
+            kernel_assert(
+                dim != 0, "Cannot broadcast on partition dimension (dim=0) for SBUF tensors"
+            )
         new_shape = []
         new_strides = []
         for i in range(self.get_dim()):
@@ -454,7 +476,9 @@ class TensorView(nl.NKIObject):
         size_prod = 1
         for i in range(len(shape)):
             size_prod *= shape[i]
-        kernel_assert(self.shape[dim] == size_prod, f"Size mismatch: {self.shape[dim]} != {size_prod}")
+        kernel_assert(
+            self.shape[dim] == size_prod, f"Size mismatch: {self.shape[dim]} != {size_prod}"
+        )
 
         # Build new shape by replacing the target dimension
         if self.get_dim() > 1:
@@ -464,7 +488,9 @@ class TensorView(nl.NKIObject):
 
         # Compute strides for the reshaped dimensions
         reshaped_strides = TensorView.get_trivial_strides(shape, base_stride=self.strides[dim])
-        new_strides = tuple(list(self.strides[:dim]) + list(reshaped_strides) + list(self.strides[dim + 1 :]))
+        new_strides = tuple(
+            list(self.strides[:dim]) + list(reshaped_strides) + list(self.strides[dim + 1 :])
+        )
 
         return self._copy(shape=new_shape, strides=new_strides)
 
@@ -492,7 +518,7 @@ class TensorView(nl.NKIObject):
         for i in range(start_dim, end_dim):
             kernel_assert(
                 self.strides[i] == self.shape[i + 1] * self.strides[i + 1],
-                f"Dimensions {i} and {i+1} are not contiguous in memory",
+                f"Dimensions {i} and {i + 1} are not contiguous in memory",
             )
 
         # Calculate total size of flattened dimension
@@ -501,9 +527,13 @@ class TensorView(nl.NKIObject):
             flattened_size *= self.shape[i]
 
         # Build new shape and strides
-        new_shape = tuple(list(self.shape[:start_dim]) + [flattened_size] + list(self.shape[end_dim + 1 :]))
+        new_shape = tuple(
+            list(self.shape[:start_dim]) + [flattened_size] + list(self.shape[end_dim + 1 :])
+        )
         new_strides = tuple(
-            list(self.strides[:start_dim]) + [self.strides[end_dim]] + list(self.strides[end_dim + 1 :])
+            list(self.strides[:start_dim])
+            + [self.strides[end_dim]]
+            + list(self.strides[end_dim + 1 :])
         )
 
         return self._copy(shape=new_shape, strides=new_strides)
@@ -544,7 +574,9 @@ class TensorView(nl.NKIObject):
             for shape [X,1,Y,Z] and parameters (dim=1) we will get a shape of [X,Y,Z]
         """
         kernel_assert(dim < self.get_dim(), f"Dimension {dim} out of range")
-        kernel_assert(self.shape[dim] == 1, f"Can only squeeze size-1 dimensions, got size {self.shape[dim]}")
+        kernel_assert(
+            self.shape[dim] == 1, f"Can only squeeze size-1 dimensions, got size {self.shape[dim]}"
+        )
         if self.vector_offset is not None:
             kernel_assert(dim != 0, "Cannot squeeze vector_select dim (dim 0)")
         if self.is_sbuf():
@@ -572,7 +604,9 @@ class TensorView(nl.NKIObject):
             New TensorView with dynamic indexing configured
         """
         kernel_assert(self.indirect_dim is None, "Cannot have multiple dynamic selects")
-        kernel_assert(self.strides[dim] != 0, "Cannot dynamic select on broadcast dimension (stride=0)")
+        kernel_assert(
+            self.strides[dim] != 0, "Cannot dynamic select on broadcast dimension (stride=0)"
+        )
 
         view_stride = self.strides[dim]
         base_tensor, base_dim = self._find_or_create_base_dim_for_stride(view_stride)
@@ -582,7 +616,11 @@ class TensorView(nl.NKIObject):
         new_strides = self.strides[:dim] + self.strides[dim + 1 :]
 
         return self._copy(
-            shape=new_shape, strides=new_strides, scalar_offset=index, indirect_dim=base_dim, base_tensor=base_tensor
+            shape=new_shape,
+            strides=new_strides,
+            scalar_offset=index,
+            indirect_dim=base_dim,
+            base_tensor=base_tensor,
         )
 
     def vector_select(self, dim: int, vector_offset: nl.ndarray) -> "TensorView":
@@ -603,7 +641,9 @@ class TensorView(nl.NKIObject):
         kernel_assert(dim == 0, "vector_select currently only supports dim=0")
         kernel_assert(self.indirect_dim is None, "Cannot have multiple dynamic selects")
         kernel_assert(self.scalar_offset is None, "Cannot combine vector_select with scalar_offset")
-        kernel_assert(self.strides[dim] != 0, "Cannot vector_select on broadcast dimension (stride=0)")
+        kernel_assert(
+            self.strides[dim] != 0, "Cannot vector_select on broadcast dimension (stride=0)"
+        )
         for i in range(len(self.strides)):
             kernel_assert(
                 self.strides[dim] >= self.strides[i],
@@ -658,7 +698,9 @@ class TensorView(nl.NKIObject):
                 can_split = base_shape[i] >= split_factor and base_shape[i] % split_factor == 0
                 if can_split:
                     outer_size = base_shape[i] // split_factor
-                    new_base_shape = tuple(base_shape[:i] + [outer_size, split_factor] + base_shape[i + 1 :])
+                    new_base_shape = tuple(
+                        base_shape[:i] + [outer_size, split_factor] + base_shape[i + 1 :]
+                    )
                     return self.base_tensor.reshape(new_base_shape), i
 
         kernel_assert(False, f"Cannot create base dim with stride {view_stride}")
@@ -711,7 +753,7 @@ class TensorView(nl.NKIObject):
                         shape.append(fixed_sizes[src_pattern[i][j]])
                     else:
                         shape.append(-1)
-                src_reshapes.append({'dim': i + dim_offset, 'shape': tuple(shape)})
+                src_reshapes.append({"dim": i + dim_offset, "shape": tuple(shape)})
                 dim_offset += len(shape) - 1
         return src_reshapes
 
@@ -729,7 +771,12 @@ class TensorView(nl.NKIObject):
         dim_offset = 0
         for i in range(len(dst_pattern)):
             if isinstance(dst_pattern[i], tuple):
-                dst_flattens.append({'start_dim': i + dim_offset, 'end_dim': i + dim_offset + len(dst_pattern[i]) - 1})
+                dst_flattens.append(
+                    {
+                        "start_dim": i + dim_offset,
+                        "end_dim": i + dim_offset + len(dst_pattern[i]) - 1,
+                    }
+                )
                 dim_offset += len(dst_pattern[i]) - 1
         return dst_flattens
 
@@ -753,7 +800,9 @@ class TensorView(nl.NKIObject):
         return tuple(ret)
 
     @staticmethod
-    def _rearrange_get_permutation(src_pattern: Tuple[str], dst_pattern: Tuple[str]) -> Tuple[int, ...]:
+    def _rearrange_get_permutation(
+        src_pattern: Tuple[str], dst_pattern: Tuple[str]
+    ) -> Tuple[int, ...]:
         """Calculate permutation indices to reorder dimensions from source to destination pattern.
 
         Args:
@@ -803,10 +852,10 @@ class TensorView(nl.NKIObject):
 
         t = self._copy()
         for reshape in src_reshapes:
-            t = t.reshape_dim(reshape['dim'], reshape['shape'])
+            t = t.reshape_dim(reshape["dim"], reshape["shape"])
         t = t.permute(permutation)
         for flatten in dst_flattens:
-            t = t.flatten_dims(flatten['start_dim'], flatten['end_dim'])
+            t = t.flatten_dims(flatten["start_dim"], flatten["end_dim"])
         return t
 
     @staticmethod
@@ -872,7 +921,8 @@ class TensorView(nl.NKIObject):
             size = filtered_shape[i]
             j = i
             while (
-                j + 1 < len(filtered_shape) and filtered_strides[j] == filtered_strides[j + 1] * filtered_shape[j + 1]
+                j + 1 < len(filtered_shape)
+                and filtered_strides[j] == filtered_strides[j + 1] * filtered_shape[j + 1]
             ):
                 j += 1
                 size *= filtered_shape[j]
@@ -938,9 +988,15 @@ class TensorView(nl.NKIObject):
         #   1. Remove unit dims — strip size-1 dims whose strides are irrelevant
         #   2. Collapse contiguous — merge adjacent dims with contiguous strides into blocks
         #   3. Repartition — assign new strides by splitting/merging blocks to match new_shape
-        filtered_shape, filtered_strides = TensorView._reshape_remove_unit_dims(self.shape, self.strides, is_hbm)
-        blocks = TensorView._reshape_collapse_contiguous_blocks(filtered_shape, filtered_strides, is_hbm)
-        new_strides = TensorView._reshape_repartition_blocks(blocks, self.shape, self.strides, new_shape)
+        filtered_shape, filtered_strides = TensorView._reshape_remove_unit_dims(
+            self.shape, self.strides, is_hbm
+        )
+        blocks = TensorView._reshape_collapse_contiguous_blocks(
+            filtered_shape, filtered_strides, is_hbm
+        )
+        new_strides = TensorView._reshape_repartition_blocks(
+            blocks, self.shape, self.strides, new_shape
+        )
         return self._copy(shape=new_shape, strides=new_strides)
 
     def has_dynamic_access(self) -> bool:

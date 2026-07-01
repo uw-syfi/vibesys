@@ -17,7 +17,6 @@ import argparse
 import json
 from pathlib import Path
 
-
 REFERENCE_DIR = Path(__file__).resolve().parent
 DEFAULT_MODEL_DIR = REFERENCE_DIR / "model"
 

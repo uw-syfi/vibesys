@@ -41,7 +41,7 @@ def _load_custom_model_class():
 RAW_COMPLETION_SAMPLES: list[tuple[str, int, str]] = [
     ("The capital of France is", 15, "short factual completion"),
     ("Once upon a time, in a land far away,", 50, "story continuation"),
-    ("def fibonacci(n):\n    \"\"\"Return the n-th Fibonacci number.\"\"\"\n", 40, "code completion"),
+    ('def fibonacci(n):\n    """Return the n-th Fibonacci number."""\n', 40, "code completion"),
     ("1 + 1 =", 5, "arithmetic"),
     ("A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A B C D E F G", 20, "alphabet pattern"),
     (
@@ -92,6 +92,7 @@ CHAT_SAMPLES: list[tuple[list[dict[str, str]], int, str]] = [
 # Reference: HuggingFace model.generate()
 # ---------------------------------------------------------------------------
 
+
 @torch.inference_mode()
 def generate_reference(model, tokenizer, prompt_text, max_new_tokens, device):
     inputs = tokenizer(prompt_text, return_tensors="pt").to(device)
@@ -103,6 +104,7 @@ def generate_reference(model, tokenizer, prompt_text, max_new_tokens, device):
 # ---------------------------------------------------------------------------
 # Custom model: uses VibeServeModel.generate()
 # ---------------------------------------------------------------------------
+
 
 @torch.inference_mode()
 def generate_custom(model, tokenizer, prompt_text, max_new_tokens, device):
@@ -116,6 +118,7 @@ def generate_custom(model, tokenizer, prompt_text, max_new_tokens, device):
 # ---------------------------------------------------------------------------
 # Comparison logic
 # ---------------------------------------------------------------------------
+
 
 def compare_outputs(ref_ids, custom_ids, tokenizer):
     ref_text = tokenizer.decode(ref_ids, skip_special_tokens=True)
@@ -135,8 +138,8 @@ def compare_outputs(ref_ids, custom_ids, tokenizer):
         f"MISMATCH at token {first_diff}.\n"
         f"  Reference ({len(ref_ids):3d} tokens): {ref_text!r}\n"
         f"  Custom    ({len(custom_ids):3d} tokens): {custom_text!r}\n"
-        f"  Ref  ids[{first_diff}:]: {ref_ids[first_diff:first_diff+10]}\n"
-        f"  Cust ids[{first_diff}:]: {custom_ids[first_diff:first_diff+10]}"
+        f"  Ref  ids[{first_diff}:]: {ref_ids[first_diff : first_diff + 10]}\n"
+        f"  Cust ids[{first_diff}:]: {custom_ids[first_diff : first_diff + 10]}"
     )
     return False, detail
 
@@ -145,10 +148,13 @@ def compare_outputs(ref_ids, custom_ids, tokenizer):
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(description="Accuracy checker: custom model vs HF reference")
     parser.add_argument(
-        "--model-dir", type=str, default="../model",
+        "--model-dir",
+        type=str,
+        default="../model",
         help="Local path to model weights directory (default: ../model)",
     )
     parser.add_argument("--device", type=str, default="cuda:0")
@@ -169,7 +175,9 @@ def main():
     has_chat_template = hasattr(tokenizer, "apply_chat_template") and tokenizer.chat_template
     for messages, max_tokens, desc in CHAT_SAMPLES:
         if has_chat_template:
-            prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            prompt = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
         else:
             prompt = "\n".join(f"{m['role']}: {m['content']}" for m in messages) + "\nassistant:"
         test_cases.append((prompt, max_tokens, f"[chat] {desc}"))
@@ -178,7 +186,9 @@ def main():
     print(f"\nLoading HF reference model on {args.device} ...")
     t0 = time.perf_counter()
     ref_model = AutoModelForCausalLM.from_pretrained(
-        model_dir, torch_dtype=dtype, device_map=args.device,
+        model_dir,
+        torch_dtype=dtype,
+        device_map=args.device,
         attn_implementation="eager",
     )
     ref_model.eval()
@@ -187,7 +197,9 @@ def main():
     print("Generating reference outputs ...")
     ref_outputs: list[list[int]] = []
     for prompt, max_tokens, desc in test_cases:
-        ref_outputs.append(generate_reference(ref_model, tokenizer, prompt, max_tokens, args.device))
+        ref_outputs.append(
+            generate_reference(ref_model, tokenizer, prompt, max_tokens, args.device)
+        )
 
     # Unload HF model to free GPU memory
     del ref_model
