@@ -10,6 +10,10 @@ def mock_modal(monkeypatch):
     """Patch modal.Sandbox.create, Image.from_registry, App.lookup, Volume.from_name/delete."""
     import modal
 
+    from vibe_serve.sandbox.modal_sandbox import _live_sandboxes
+
+    _live_sandboxes.clear()
+
     fake_sandbox = MagicMock()
     fake_sandbox.object_id = "sb-abc123"
     # exec returns a process with stdout/stderr .read() and .wait()
@@ -36,12 +40,16 @@ def mock_modal(monkeypatch):
     monkeypatch.setattr(modal.Sandbox, "create", MagicMock(return_value=fake_sandbox))
     monkeypatch.setattr(modal.Volume, "from_name", MagicMock(return_value=fake_volume))
     monkeypatch.setattr(modal.Volume, "objects", fake_objects)
-    return {
+    yield {
         "sandbox": fake_sandbox,
         "proc": fake_proc,
         "volume": fake_volume,
         "objects": fake_objects,
     }
+
+    leaked = list(_live_sandboxes)
+    _live_sandboxes.clear()
+    assert not leaked, f"ModalSandbox tests leaked live sandboxes: {leaked}"
 
 
 @pytest.fixture()
@@ -50,11 +58,15 @@ def sandbox(tmp_path, mock_modal):
 
     ws = tmp_path / "workspace"
     ws.mkdir()
-    return ModalSandbox(
+    sb = ModalSandbox(
         host_workspace=str(ws),
         image="nvcr.io/nvidia/pytorch:25.04-py3",
         gpu="H100",
     )
+    try:
+        yield sb
+    finally:
+        sb.stop()
 
 
 class TestVpath:
@@ -91,18 +103,17 @@ class TestStart:
         assert "/workspace" in kwargs["volumes"]
 
     def test_start_mounts_model_volume_when_name_given(self, tmp_path, mock_modal):
+        import modal
+
         from vibe_serve.sandbox.modal_sandbox import ModalSandbox
 
-        sb = ModalSandbox(
+        with ModalSandbox(
             host_workspace=str(tmp_path),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
             model_volume_name="vibeserve-models",
-        )
-        sb.start()
-        import modal
-
-        kwargs = modal.Sandbox.create.call_args.kwargs
-        assert "/model" in kwargs["volumes"]
+        ):
+            kwargs = modal.Sandbox.create.call_args.kwargs
+            assert "/model" in kwargs["volumes"]
 
     def test_start_uploads_bind_mounts_into_workspace_volume(
         self,
@@ -116,15 +127,14 @@ class TestStart:
         bench = tmp_path / "bench"
         bench.mkdir()
         (bench / "a.py").write_text("x")
-        sb = ModalSandbox(
+        with ModalSandbox(
             host_workspace=str(ws),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
             bind_mounts=[(str(bench), "/workspace/bench", True)],
-        )
-        sb.start()
-        upload_cm = mock_modal["volume"].batch_upload.return_value
-        calls = upload_cm.put_directory.call_args_list
-        assert any("bench" in str(c) and "'/bench'" in str(c) for c in calls)
+        ):
+            upload_cm = mock_modal["volume"].batch_upload.return_value
+            calls = upload_cm.put_directory.call_args_list
+            assert any("bench" in str(c) and "'/bench'" in str(c) for c in calls)
 
     def test_start_skips_model_bind_mount_from_workspace_volume(
         self,
@@ -135,15 +145,14 @@ class TestStart:
 
         ws = tmp_path / "ws"
         ws.mkdir()
-        sb = ModalSandbox(
+        with ModalSandbox(
             host_workspace=str(ws),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
             bind_mounts=[("/host/model", "/model", True)],
-        )
-        sb.start()
-        upload_cm = mock_modal["volume"].batch_upload.return_value
-        for c in upload_cm.put_directory.call_args_list:
-            assert "/host/model" not in str(c)
+        ):
+            upload_cm = mock_modal["volume"].batch_upload.return_value
+            for c in upload_cm.put_directory.call_args_list:
+                assert "/host/model" not in str(c)
 
     def test_start_skips_hf_cache_bind_mount_from_workspace_volume(
         self,
@@ -159,16 +168,14 @@ class TestStart:
         model_cache = cache / "models--example"
         model_cache.mkdir()
         (model_cache / "weights.bin").write_text("large")
-        sb = ModalSandbox(
+        with ModalSandbox(
             host_workspace=str(ws),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
             bind_mounts=[(str(model_cache), "/workspace/.cache/models--example", True)],
-        )
-        sb.start()
-
-        upload_cm = mock_modal["volume"].batch_upload.return_value
-        for c in upload_cm.put_directory.call_args_list:
-            assert ".hf_cache" not in str(c)
+        ):
+            upload_cm = mock_modal["volume"].batch_upload.return_value
+            for c in upload_cm.put_directory.call_args_list:
+                assert ".hf_cache" not in str(c)
 
     def test_start_excludes_local_runtime_dirs_from_workspace_upload(
         self,
@@ -189,18 +196,16 @@ class TestStart:
             d.mkdir()
             (d / filename).write_text("local-only")
 
-        sb = ModalSandbox(
+        with ModalSandbox(
             host_workspace=str(ws),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
-        )
-        sb.start()
-
-        upload_cm = mock_modal["volume"].batch_upload.return_value
-        uploaded = [str(c) for c in upload_cm.put_file.call_args_list]
-        assert any("server.py" in c for c in uploaded)
-        assert not any("exp_env" in c for c in uploaded)
-        assert not any(".venv" in c for c in uploaded)
-        assert not any(".git" in c for c in uploaded)
+        ):
+            upload_cm = mock_modal["volume"].batch_upload.return_value
+            uploaded = [str(c) for c in upload_cm.put_file.call_args_list]
+            assert any("server.py" in c for c in uploaded)
+            assert not any("exp_env" in c for c in uploaded)
+            assert not any(".venv" in c for c in uploaded)
+            assert not any(".git" in c for c in uploaded)
 
     def test_start_uploads_minimal_codex_auth_snapshot(
         self,
@@ -548,25 +553,24 @@ class TestSandboxFallbackRestart:
         """enable_fallback_restart=False disables the recovery path entirely."""
         from vibe_serve.sandbox.modal_sandbox import ModalSandbox
 
-        sb = ModalSandbox(
+        with ModalSandbox(
             host_workspace=str(tmp_path),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
             enable_fallback_restart=False,
-        )
-        monkeypatch.setattr("vibe_serve.sandbox.modal_sandbox.time.sleep", lambda _: None)
-        sb.start()
+        ) as sb:
+            monkeypatch.setattr("vibe_serve.sandbox.modal_sandbox.time.sleep", lambda _: None)
 
-        call = {"n": 0}
+            call = {"n": 0}
 
-        def dies(*args, **kwargs):
-            call["n"] += 1
-            raise RuntimeError("Sandbox has already shut down")
+            def dies(*args, **kwargs):
+                call["n"] += 1
+                raise RuntimeError("Sandbox has already shut down")
 
-        mock_modal["sandbox"].exec.side_effect = dies
+            mock_modal["sandbox"].exec.side_effect = dies
 
-        resp = sb.execute("echo hi")
-        assert resp.exit_code == -1
-        assert "already shut down" in resp.output.lower()
+            resp = sb.execute("echo hi")
+            assert resp.exit_code == -1
+            assert "already shut down" in resp.output.lower()
 
     def test_extra_readonly_volumes_are_mounted(self, tmp_path, mock_modal):
         """Auxiliary volumes like /draft_model should be added to volumes dict."""
@@ -574,14 +578,13 @@ class TestSandboxFallbackRestart:
 
         from vibe_serve.sandbox.modal_sandbox import ModalSandbox
 
-        sb = ModalSandbox(
+        with ModalSandbox(
             host_workspace=str(tmp_path),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
             extra_readonly_volumes={"/draft_model": "vibeserve-model-eagle3"},
-        )
-        sb.start()
-        kwargs = modal.Sandbox.create.call_args.kwargs
-        assert "/draft_model" in kwargs["volumes"]
+        ):
+            kwargs = modal.Sandbox.create.call_args.kwargs
+            assert "/draft_model" in kwargs["volumes"]
 
 
 class TestPathOverrides:
