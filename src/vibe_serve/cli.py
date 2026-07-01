@@ -24,9 +24,9 @@ from pathlib import Path
 
 from vibe_serve.config import _load_config
 from vibe_serve.constants import (
-    ComputeBackend,
     KNOWN_COMPUTE_BACKENDS,
     PROJECT_ROOT,
+    ComputeBackend,
 )
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
@@ -659,7 +659,7 @@ def _run_plain(args: argparse.Namespace) -> None:
             resume_state = _load_state(log_dir)
             if resume_state is not None:
                 print(
-                    f"Auto-detected state: iteration {resume_state.round_idx + 1}, "
+                    f"Auto-detected state: round {resume_state.round_idx + 1}, "
                     f"phase '{resume_state.phase}'"
                     + (
                         f", current issue #{resume_state.current_issue_id}"

@@ -28,17 +28,21 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
-from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND
+from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
-from vibe_serve.loops.plain.render import render_all
-from vibe_serve.loops.plain.runner_ext import PlainLoopAgentRunner
 from vibe_serve.loops.plain.issue_board import (
     Issue,
-    IssueStatus,
     IssueBoard,
+    IssueStatus,
     IssueType,
 )
+from vibe_serve.loops.plain.render import render_all
+from vibe_serve.loops.plain.runner_ext import PlainLoopAgentRunner
 from vibe_serve.prompts import Prompt
+from vibe_serve.sandbox.run_environment import (
+    RunEnvironmentSpec,
+    make_run_environment_spec,
+)
 from vibe_serve.schemas import (
     IssueImplementerResponse,
     IssueJudgeResponse,
@@ -46,10 +50,6 @@ from vibe_serve.schemas import (
     PerfMetrics,
     PerfTrend,
     Verdict,
-)
-from vibe_serve.sandbox.run_environment import (
-    RunEnvironmentSpec,
-    make_run_environment_spec,
 )
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
@@ -458,7 +458,7 @@ def run_plain_loop(
 
         if resume_state is not None:
             ctx.lprint(
-                f"Resuming at iteration {i + 1} phase '{next_phase}'"
+                f"Resuming at round {i + 1} phase '{next_phase}'"
                 + (f" issue #{pending_issue_id}" if pending_issue_id else "")
                 + f", running up to {max_rounds} more rounds"
             )
@@ -469,8 +469,9 @@ def run_plain_loop(
 
         while i < end_iteration:
             iter_label = i + 1
+            progress_label = f"Round {iter_label}/{end_iteration}"
             ctx.lprint(f"\n{'='*60}")
-            ctx.lprint(f"  Iteration {iter_label}/{end_iteration}")
+            ctx.lprint(f"  Round {iter_label}/{end_iteration}")
             ctx.lprint(f"{'='*60}\n")
 
             # ---------------------------------------------------------------
@@ -546,13 +547,14 @@ def run_plain_loop(
                         system_prompt=impl_system_prompt,
                         user_prompt=impl_prompt,
                         response_cls=IssueImplementerResponse,
-                        fallback_factory=lambda: IssueImplementerResponse(
-                            issue_id=issue_id_for_fallback,
+                        fallback_factory=lambda issue_id=issue_id_for_fallback: IssueImplementerResponse(
+                            issue_id=issue_id,
                             summary="Implementer did not produce a structured response.",
                             files_touched=[],
                             self_check="No structured response received.",
                         ),
                         round_label=f"impl issue #{issue.id} att{issue.attempts + 1}",
+                        progress_label=progress_label,
                     )
 
                     issue = store.increment_attempts(
@@ -610,14 +612,15 @@ def run_plain_loop(
                     system_prompt=judge_system_prompt,
                     user_prompt=judge_prompt,
                     response_cls=IssueJudgeResponse,
-                    fallback_factory=lambda: IssueJudgeResponse(
-                        issue_id=judge_issue_id,
+                    fallback_factory=lambda issue_id=judge_issue_id: IssueJudgeResponse(
+                        issue_id=issue_id,
                         analysis="No structured response received from judge.",
                         feedback="Judge did not produce a structured response.",
                         verdict=Verdict.FAIL,
                         new_issues_filed=[],
                     ),
                     round_label=f"judge issue #{issue.id} att{issue.attempts}",
+                    progress_label=progress_label,
                 )
 
                 # Under cli the MCP server writes via a separate IssueBoard
@@ -728,6 +731,7 @@ def run_plain_loop(
                     latency_trend=PerfTrend.MIXED,
                 ),
                 round_label=f"perf_eval iter {iter_label}",
+                progress_label=progress_label,
             )
 
             store.reload()
@@ -758,5 +762,5 @@ def run_plain_loop(
             state.current_issue_id = None
             _save_state(ctx.log_dir, state)
 
-        ctx.lprint("Run completed — iteration budget exhausted.")
+        ctx.lprint("Run completed — round budget exhausted.")
         return False

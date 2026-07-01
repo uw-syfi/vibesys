@@ -2,12 +2,12 @@ import json
 import sys
 import time
 import traceback
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
 
-from vibe_serve.constants import _DIM, _BOLD, _CYAN, _GREEN, _RED, _YELLOW, _RESET
-
+from vibe_serve.constants import _BOLD, _CYAN, _DIM, _GREEN, _RED, _RESET, _YELLOW
 
 ContextWindowLookup = Callable[[str | None], int | None]
 """Resolves a model name to its context window size in tokens.
@@ -127,6 +127,7 @@ class AgentLogger(BaseCallbackHandler):
         log_file=None,
         model_name: str | None = None,
         agent_label: str | None = None,
+        progress_label: str | None = None,
         context_window_lookup: ContextWindowLookup | None = None,
     ):
         self._streaming = False
@@ -136,6 +137,7 @@ class AgentLogger(BaseCallbackHandler):
         self._call_count = 0
         self._model_name = model_name
         self._agent_label = agent_label
+        self._progress_label = progress_label
         self._start_time = time.monotonic()
         self._input_tokens = 0
         # Most recent usage dict from the cli backend (see ``update_usage``).
@@ -146,12 +148,12 @@ class AgentLogger(BaseCallbackHandler):
         self._context_window = self._context_window_lookup(model_name)
 
     def _format_prefix(self) -> str:
-        """Build the dynamic ``[label | elapsed | tokens/max]`` prefix.
+        """Build the dynamic ``[progress | label | elapsed | tokens/max]`` prefix.
 
         Computed lazily on each use so the elapsed-time and token-count
         readings reflect the latest state when the prefix is printed.
         """
-        if not self._agent_label:
+        if not self._agent_label and not self._progress_label:
             return ""
         elapsed = time.monotonic() - self._start_time
         used = _format_token_count(self._input_tokens)
@@ -159,7 +161,13 @@ class AgentLogger(BaseCallbackHandler):
             tokens_str = f"{used}/{_format_token_count(self._context_window)}"
         else:
             tokens_str = used
-        return f"{_BOLD}[{self._agent_label} | {elapsed:.1f}s | {tokens_str}]{_RESET} "
+        parts = []
+        if self._progress_label:
+            parts.append(self._progress_label)
+        if self._agent_label:
+            parts.append(self._agent_label)
+        parts.extend([f"{elapsed:.1f}s", tokens_str])
+        return f"{_BOLD}[{' | '.join(parts)}]{_RESET} "
 
     # --- LLM call context (log-file only) ---
 

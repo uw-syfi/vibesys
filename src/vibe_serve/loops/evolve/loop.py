@@ -32,22 +32,19 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
-from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND
+from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
 from vibe_serve.loops.evolve.population import (
     Individual,
     Objective,
     Population,
 )
-from vibe_serve.schemas import MutatorResponse
-from vibe_serve.schemas import ProfilerSummary
 from vibe_serve.loops.profiler import invoke_profiler
-from vibe_serve.schemas import JudgeResponse, Verdict
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
 )
-
+from vibe_serve.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 _AGENT_TEMPLATE_DIR = (
@@ -136,6 +133,7 @@ def _run_mutator(
     modality: str,
     is_cold_start: bool,
     objectives: list[Objective] | None = None,
+    progress_label: str | None = None,
 ) -> MutatorResponse:
     system_prompt = _render(
         "mutator_prompt.j2",
@@ -162,7 +160,8 @@ def _run_mutator(
             hypothesis="unknown",
             expected_behavior="unknown",
         ),
-        round_label=f"gen-{generation}-child-{child_idx}-mutator",
+        round_label=f"gen-{generation}-cand-{child_idx}-mutator",
+        progress_label=progress_label,
     )
 
 
@@ -174,6 +173,7 @@ def _run_judge(
     modality: str,
     objective: str,
     pass_criteria: str,
+    progress_label: str | None = None,
 ) -> JudgeResponse:
     system_prompt = _render(
         "judge_prompt.j2",
@@ -198,7 +198,8 @@ def _run_judge(
             feedback="No structured response received.",
             verdict=Verdict.FAIL,
         ),
-        round_label=f"gen-{generation}-child-{child_idx}-judge",
+        round_label=f"gen-{generation}-cand-{child_idx}-judge",
+        progress_label=progress_label,
     )
 
 
@@ -231,6 +232,7 @@ def _run_profiler(
     modality: str,
     objective: str,
     objectives: list[Objective] | None = None,
+    progress_label: str | None = None,
 ) -> ProfilerSummary | None:
     template = (
         "profiler_prompt_torch.j2" if ctx.profiler_kind == "torch"
@@ -255,7 +257,8 @@ def _run_profiler(
     return invoke_profiler(
         ctx,
         system_prompt=system_prompt,
-        round_label=f"gen-{generation}-child-{child_idx}-profiler",
+        round_label=f"gen-{generation}-cand-{child_idx}-profiler",
+        progress_label=progress_label,
         fallback_suggestions="n/a",
     )
 
@@ -354,7 +357,11 @@ def run_evolve_loop(
             )
 
             for child_idx in range(1, children_per_generation + 1):
-                ctx.lprint(f"\n--- gen {generation} child {child_idx}/{children_per_generation} ---\n")
+                progress_label = (
+                    f"Round {generation}/{max_generations} "
+                    f"Cand {child_idx}/{children_per_generation}"
+                )
+                ctx.lprint(f"\n--- Gen {generation} Cand {child_idx}/{children_per_generation} ---\n")
 
                 # 1. Pick parent + inspirations.
                 parent = population.select_parent(
@@ -378,7 +385,7 @@ def run_evolve_loop(
                     if not _checkout_commit_tree(ctx, parent.commit):
                         ctx.lprint(
                             f"[warn] could not check out parent {parent.id} "
-                            f"(commit {parent.commit[:8]}); skipping child"
+                            f"(commit {parent.commit[:8]}); skipping cand"
                         )
                         continue
 
@@ -399,6 +406,7 @@ def run_evolve_loop(
                     modality=modality,
                     is_cold_start=is_cold_start,
                     objectives=objectives,
+                    progress_label=progress_label,
                 )
 
                 # 4. Judge.
@@ -410,6 +418,7 @@ def run_evolve_loop(
                     modality=modality,
                     objective=objective,
                     pass_criteria=pass_criteria,
+                    progress_label=progress_label,
                 )
 
                 if verdict.verdict != Verdict.PASS:
@@ -431,7 +440,7 @@ def run_evolve_loop(
                     population.save(population_path)
                     _discard_working_tree(ctx)
                     ctx.lprint(
-                        f"[gen {generation}] child {failed.id} FAILED — "
+                        f"[Gen {generation}] Cand {failed.id} FAILED — "
                         f"feedback: {(verdict.feedback or '').splitlines()[0][:120]}"
                     )
                     continue
@@ -445,6 +454,7 @@ def run_evolve_loop(
                     modality=modality,
                     objective=objective,
                     objectives=objectives,
+                    progress_label=progress_label,
                 )
 
                 # 6. Commit + record.
@@ -473,7 +483,7 @@ def run_evolve_loop(
                     else f"{child.perf_metric} {child.perf_unit or ''}"
                 )
                 ctx.lprint(
-                    f"[gen {generation}] child {child.id} PASSED — "
+                    f"[Gen {generation}] Cand {child.id} PASSED — "
                     f"{metrics_repr} (parent={parent.id if parent else 'cold'})"
                 )
 

@@ -9,32 +9,26 @@ collect kernel-level data first.
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND
+from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
 from vibe_serve.loops.agent import issue_board
-from vibe_serve.schemas import (
-    OrchestratorPlan,
-    PreRoundDecision,
-    ProfilerSummary,
-)
 from vibe_serve.loops.profiler import invoke_profiler
 from vibe_serve.prompts import render_template
-from vibe_serve.schemas import (
-    ImplementerResponse,
-    JudgeResponse,
-    Verdict,
-)
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
 )
-
+from vibe_serve.schemas import (
+    ImplementerResponse,
+    JudgeResponse,
+    OrchestratorPlan,
+    PreRoundDecision,
+    ProfilerSummary,
+    Verdict,
+)
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -69,7 +63,7 @@ class _RoundRecord:
         }
 
     @classmethod
-    def from_json(cls, data: dict) -> "_RoundRecord":
+    def from_json(cls, data: dict) -> _RoundRecord:
         return cls(
             round_number=int(data["round"]),
             commit=data.get("commit"),
@@ -223,6 +217,7 @@ def _run_pre_round_decision(
     objective: str,
     carry: _CarryOver,
     progress_path: Path,
+    progress_label: str | None = None,
 ) -> PreRoundDecision:
     system_prompt = render_template(
         "orchestrator_pre_round_prompt.j2",
@@ -243,6 +238,7 @@ def _run_pre_round_decision(
             need_profile=False, profile_focus="", reasoning="fallback: default to skip",
         ),
         round_label=f"round-{round_number}-pre",
+        progress_label=progress_label,
     )
     issue_board.append_pre_round_decision(progress_path, round_number, decision)
     return decision
@@ -256,6 +252,7 @@ def _run_profiler(
     modality: str,
     progress_path: Path,
     objective: str,
+    progress_label: str | None = None,
 ) -> ProfilerSummary | None:
     template = (
         "profiler_prompt_torch.j2" if ctx.profiler_kind == "torch"
@@ -275,6 +272,7 @@ def _run_profiler(
         ctx,
         system_prompt=system_prompt,
         round_label=f"round-{round_number}-profiler",
+        progress_label=progress_label,
     )
     if summary is None:
         return None
@@ -293,6 +291,7 @@ def _run_orchestrator_plan(
     progress_path: Path,
     roadmap_text: str,
     plateau_warning: str | None,
+    progress_label: str | None = None,
 ) -> OrchestratorPlan:
     system_prompt = render_template(
         "orchestrator_plan_prompt.j2",
@@ -317,6 +316,7 @@ def _run_orchestrator_plan(
             reasoning="fallback: orchestrator produced no structured response",
         ),
         round_label=f"round-{round_number}-plan",
+        progress_label=progress_label,
     )
     issue_board.append_orchestrator_plan(progress_path, round_number, plan)
     return plan
@@ -331,6 +331,7 @@ def _run_implementer(
     modality: str,
     feedback: str | None,
     progress_path: Path,
+    progress_label: str | None = None,
 ) -> ImplementerResponse:
     system_prompt = render_template(
         "implementer_prompt.j2",
@@ -357,6 +358,7 @@ def _run_implementer(
             expected_behavior="unknown",
         ),
         round_label=f"round-{round_number}-retry-{retry}-implementer",
+        progress_label=progress_label,
     )
     issue_board.append_implementer(progress_path, round_number, retry, response)
     ctx.snapshot_workspace(f"round-{round_number}-retry-{retry}-implementer")
@@ -372,6 +374,7 @@ def _run_judge(
     modality: str,
     progress_path: Path,
     objective: str,
+    progress_label: str | None = None,
 ) -> JudgeResponse:
     system_prompt = render_template(
         "judge_prompt.j2",
@@ -399,6 +402,7 @@ def _run_judge(
             verdict=Verdict.FAIL,
         ),
         round_label=f"round-{round_number}-retry-{retry}-judge",
+        progress_label=progress_label,
     )
     issue_board.append_judge(progress_path, round_number, retry, response)
     ctx.snapshot_workspace(f"round-{round_number}-retry-{retry}-judge")
@@ -476,6 +480,7 @@ def run_agent_loop(
     try:
         while round_number <= max_rounds:
             ctx.switch_log_file(f"round{round_number:03d}")
+            progress_label = f"Round {round_number}/{max_rounds}"
             ctx.lprint(f"\n{'='*60}\n  Round {round_number}/{max_rounds}\n{'='*60}\n")
 
             # --- Pre-round decision (skip on fresh cold start) ---
@@ -487,6 +492,7 @@ def run_agent_loop(
                     objective=objective,
                     carry=carry,
                     progress_path=progress_path,
+                    progress_label=progress_label,
                 )
                 # FORCE-PROFILE override: every non-cold-start round profiles,
                 # ignoring orchestrator's need_profile decision. Revert this
@@ -498,6 +504,7 @@ def run_agent_loop(
                     modality=modality,
                     progress_path=progress_path,
                     objective=objective,
+                    progress_label=progress_label,
                 )
 
             # --- Orchestrator plan ---
@@ -512,6 +519,7 @@ def run_agent_loop(
                 progress_path=progress_path,
                 roadmap_text=roadmap_text,
                 plateau_warning=plateau_warning,
+                progress_label=progress_label,
             )
 
             # No early stop: the loop always consumes the full max_rounds
@@ -552,6 +560,7 @@ def run_agent_loop(
                     modality=modality,
                     feedback=feedback,
                     progress_path=progress_path,
+                    progress_label=progress_label,
                 )
                 ctx.reselect_gpu()
                 verdict = _run_judge(
@@ -562,6 +571,7 @@ def run_agent_loop(
                     modality=modality,
                     progress_path=progress_path,
                     objective=objective,
+                    progress_label=progress_label,
                 )
                 if verdict.verdict == Verdict.PASS:
                     passed = True

@@ -8,16 +8,17 @@ change vs. what the simple loop did before this abstraction landed.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 from deepagents import create_deep_agent
 from langchain.agents.structured_output import AutoStrategy
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import MemorySaver
-from vibe_serve._agent_cli.base import MCPServerSpec
 from pydantic import BaseModel
 
+from vibe_serve._agent_cli.base import MCPServerSpec
 from vibe_serve.agent_runner import (
     _DEFAULT_MAX_TEXT_LEN,
     _log_agent_config,
@@ -64,6 +65,7 @@ class DeepAgentsRunner:
         response_cls: type[T],
         fallback_factory: Callable[[], T],
         round_label: str,
+        progress_label: str | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,  # noqa: ARG002 — cli-only injection point; deepagents uses tools=
         tools: list[BaseTool] | None = None,
     ) -> T:
@@ -92,6 +94,7 @@ class DeepAgentsRunner:
                 log_file=self._run_log_file,
                 model_name=self._model_name,
                 agent_label=label,
+                progress_label=progress_label,
             )
         ]
 

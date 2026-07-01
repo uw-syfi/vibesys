@@ -12,7 +12,7 @@ from pathlib import Path
 from vibe_serve import backends
 from vibe_serve.agent_runner import _log_and_print
 from vibe_serve.agents import build_agent_runner
-from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT
+from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
 from vibe_serve.llm_client import _build_model
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentRequest,
@@ -411,6 +411,7 @@ class _RunContext:
         response_cls,
         fallback_factory=None,
         round_label: str = "",
+        progress_label: str | None = None,
         **extra,
     ):
         """Invoke an agent through ``self.agent_runner`` with workspace+env defaults.
@@ -430,6 +431,7 @@ class _RunContext:
             response_cls=response_cls,
             fallback_factory=fallback_factory,
             round_label=round_label,
+            progress_label=progress_label,
             **extra,
         )
 
