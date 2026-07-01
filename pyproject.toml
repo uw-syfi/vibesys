@@ -39,12 +39,16 @@ vibe_serve = ["templates/*.j2", "templates/_backend/*/*.j2", "loops/agent/templa
 
 [dependency-groups]
 dev = [
+    "chardet<6",
+    "diff-cover",
     "matplotlib>=3.10.8",
     "pytest",
+    "pytest-cov",
     "ruff>=0.6",
 ]
 test = [
     "pytest",
+    "pytest-cov",
 ]
 
 [tool.pytest.ini_options]
