@@ -1,0 +1,38 @@
+A Neuron profiling toolkit ships at `neuron_profiler/analyze_neuron.py`, wrapping AWS `neuron-explorer` (the successor to `neuron-profile`). Profiling a NeuronCore workload is a two-step process — capture a hardware profile, then analyze it — and capture only works once the model is actually compiled and running on the device (a NEFF exists). It takes minutes, so it is gated by the diagnosis step above.
+
+1. Pre-warm so `neuronx-cc` compilation is already cached (first compile of each graph shape takes minutes and would otherwise dominate the capture):
+   ```
+   pkill -f "python main.py" 2>/dev/null || true; sleep 2
+   PORT=8077 uv run python main.py > /tmp/prewarm.log 2>&1 &
+   PID=$!
+   for i in $(seq 1 180); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
+   curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
+     -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 600
+   kill $PID 2>/dev/null; wait $PID 2>/dev/null; sleep 2
+   ```
+
+2. Capture a system + device profile while the server is under a representative load. `neuron-explorer inspect` runs a command and captures both profiles around it:
+   ```
+   PORT=8077 uv run python main.py > /tmp/server.log 2>&1 &
+   PID=$!
+   for i in $(seq 1 180); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
+   python neuron_profiler/analyze_neuron.py capture \
+     --out-dir /tmp/neuronprof \
+     --workload "uv run python bench/benchmark.py --url http://localhost:8077 --lengths 256 --concurrency 4 --duration 10 --warmup-requests 1"
+   kill $PID 2>/dev/null; wait $PID 2>/dev/null; sleep 2
+   ```
+   (If your server cannot be driven this way, capture directly around a single compiled forward — see `analyze_neuron.py --help`.)
+
+3. Analyze the captured NTFF/NEFF:
+   ```
+   python neuron_profiler/analyze_neuron.py summary /tmp/neuronprof
+   ```
+   Useful subcommands: `summary` (engine utilization + top operators + DMA), `operators`, `dma`, `view` (raw `neuron-explorer view` passthrough).
+
+4. Classify the **primary bottleneck** into exactly one of:
+   `cpu_launch_bound`, `python_overhead_bound`, `input_pipeline_bound`,
+   `sync_bound`, `memcpy_bound`, `comm_bound`, `kernel_bound`, `mixed_or_unclear`.
+
+   On Trainium, map the evidence: low PE/compute-engine utilization with large host gaps → `cpu_launch_bound` or `python_overhead_bound`; DMA-dominated timelines → `memcpy_bound`; collective ops dominating (multi-core) → `comm_bound`; compute engines saturated → `kernel_bound`. Cite concrete numbers from the analysis output.
+
+If profiling fails (server won't start, no NEFF was produced because the model never compiled onto the device, capture is empty), file a `bug` issue describing what you tried and proceed to opportunities without profiler evidence — and call out explicitly that the model may not be running on the NeuronCore.

@@ -21,7 +21,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # Data types
 # ---------------------------------------------------------------------------
@@ -83,14 +82,16 @@ def query_gpu_info() -> list[GpuInfo]:
         if len(parts) < 6:
             continue
         try:
-            gpus.append(GpuInfo(
-                index=int(parts[0]),
-                uuid=parts[1],
-                name=parts[2],
-                memory_used_mib=int(parts[3]),
-                memory_total_mib=int(parts[4]),
-                utilization_pct=int(parts[5]),
-            ))
+            gpus.append(
+                GpuInfo(
+                    index=int(parts[0]),
+                    uuid=parts[1],
+                    name=parts[2],
+                    memory_used_mib=int(parts[3]),
+                    memory_total_mib=int(parts[4]),
+                    utilization_pct=int(parts[5]),
+                )
+            )
         except (ValueError, IndexError):
             continue
     return gpus
@@ -145,12 +146,14 @@ def _parse_proc_output(raw: str) -> list[dict]:
             mem = int(mem_str)
         except ValueError:
             mem = 0
-        procs.append({
-            "pid": pid,
-            "process_name": parts[1],
-            "gpu_mem_mib": mem,
-            "gpu_uuid": parts[3],
-        })
+        procs.append(
+            {
+                "pid": pid,
+                "process_name": parts[1],
+                "gpu_mem_mib": mem,
+                "gpu_uuid": parts[3],
+            }
+        )
     return procs
 
 
@@ -199,7 +202,9 @@ class GpuContentionMonitor:
         self._baseline_pids = self._current_pids_on_gpu()
         self._stop_event.clear()
         self._thread = threading.Thread(
-            target=self._run, name="gpu-contention-monitor", daemon=True,
+            target=self._run,
+            name="gpu-contention-monitor",
+            daemon=True,
         )
         self._thread.start()
 
@@ -235,14 +240,13 @@ class GpuContentionMonitor:
                 procs = _parse_proc_output(raw)
                 gpu_procs = [p for p in procs if p["gpu_uuid"] == self._gpu_uuid]
 
-                new_procs = [
-                    p for p in gpu_procs if p["pid"] not in self._baseline_pids
-                ]
+                new_procs = [p for p in gpu_procs if p["pid"] not in self._baseline_pids]
 
                 # Also grab current GPU-level stats
                 gpus = query_gpu_info()
                 gpu_info = next(
-                    (g for g in gpus if g.uuid == self._gpu_uuid), None,
+                    (g for g in gpus if g.uuid == self._gpu_uuid),
+                    None,
                 )
 
                 contention = ContentionStatus(
@@ -264,13 +268,18 @@ class GpuContentionMonitor:
                             "utilization_pct": gpu_info.utilization_pct,
                         }
                     with open(log_path, "a") as f:
-                        f.write(json.dumps({
-                            "timestamp": contention.timestamp,
-                            "is_contended": True,
-                            "gpu_uuid": self._gpu_uuid,
-                            "gpu": gpu_dict,
-                            "new_procs": new_procs,
-                        }) + "\n")
+                        f.write(
+                            json.dumps(
+                                {
+                                    "timestamp": contention.timestamp,
+                                    "is_contended": True,
+                                    "gpu_uuid": self._gpu_uuid,
+                                    "gpu": gpu_dict,
+                                    "new_procs": new_procs,
+                                }
+                            )
+                            + "\n"
+                        )
             except Exception:
                 pass
             self._stop_event.wait(self._interval)

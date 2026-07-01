@@ -60,12 +60,12 @@ _TRANSIENT_FRAGMENTS = (
     "connection refused",
     "connection aborted",
     "broken pipe",
-    "unavailable",           # grpc StatusCode.UNAVAILABLE
-    "deadline_exceeded",     # grpc StatusCode.DEADLINE_EXCEEDED (network, not app timeout)
+    "unavailable",  # grpc StatusCode.UNAVAILABLE
+    "deadline_exceeded",  # grpc StatusCode.DEADLINE_EXCEEDED (network, not app timeout)
     "502 bad gateway",
     "503 service unavailable",
     "504 gateway timeout",
-    "eof occurred",          # TLS handshake failures
+    "eof occurred",  # TLS handshake failures
     "handshake",
 )
 
@@ -296,15 +296,13 @@ class ModalSandbox(BaseSandbox):
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> str:
         return super().read(self._vpath(file_path), offset, limit)
 
-    def edit(self, file_path: str, old_string: str, new_string: str,
-             replace_all: bool = False):
+    def edit(self, file_path: str, old_string: str, new_string: str, replace_all: bool = False):
         return super().edit(self._vpath(file_path), old_string, new_string, replace_all)
 
     def glob_info(self, pattern: str, path: str = "/"):
         return super().glob_info(pattern, self._vpath(path))
 
-    def grep_raw(self, pattern: str, path: str | None = None,
-                 glob: str | None = None):
+    def grep_raw(self, pattern: str, path: str | None = None, glob: str | None = None):
         return super().grep_raw(
             pattern,
             self._vpath(path) if path is not None else self._CONTAINER_ROOT,
@@ -319,7 +317,8 @@ class ModalSandbox(BaseSandbox):
         # restart so in-progress agent state survives a sandbox crash.
         self._workspace_volume_name = f"vibeserve-ws-{uuid.uuid4().hex[:12]}"
         self._workspace_volume = modal.Volume.from_name(
-            self._workspace_volume_name, create_if_missing=True,
+            self._workspace_volume_name,
+            create_if_missing=True,
         )
         self._log(f"created workspace volume {self._workspace_volume_name}")
 
@@ -335,7 +334,8 @@ class ModalSandbox(BaseSandbox):
         # the nvcr.io pytorch image ships with a populated /workspace that
         # triggers init_failure when a Volume is mounted on top.
         image = modal.Image.from_registry(
-            self._image_tag, add_python=None,
+            self._image_tag,
+            add_python=None,
         ).run_commands(f"rm -rf {self._CONTAINER_ROOT} && mkdir {self._CONTAINER_ROOT}")
 
         volumes: dict[str, modal.Volume] = {self._CONTAINER_ROOT: self._workspace_volume}
@@ -361,7 +361,8 @@ class ModalSandbox(BaseSandbox):
         # runs and exits, and subsequent execs hit "Sandbox has already
         # shut down". Mirrors DockerSandbox's `sleep infinity` trick.
         self._sandbox = modal.Sandbox.create(
-            "sleep", "infinity",
+            "sleep",
+            "infinity",
             app=app,
             image=image,
             gpu=self._gpu,
@@ -378,8 +379,11 @@ class ModalSandbox(BaseSandbox):
         # Install uv (non-fatal; mirrors DockerSandbox).
         try:
             proc = self._sandbox.exec(
-                "bash", "-c", "pip install uv",
-                workdir=self._CONTAINER_ROOT, timeout=180,
+                "bash",
+                "-c",
+                "pip install uv",
+                workdir=self._CONTAINER_ROOT,
+                timeout=180,
             )
             proc.wait()
         except Exception as exc:
@@ -389,8 +393,11 @@ class ModalSandbox(BaseSandbox):
         for cmd in self._extra_init_commands:
             self._log(f"init command: {cmd}")
             proc = self._sandbox.exec(
-                "bash", "-c", cmd,
-                workdir=self._CONTAINER_ROOT, timeout=600,
+                "bash",
+                "-c",
+                cmd,
+                workdir=self._CONTAINER_ROOT,
+                timeout=600,
             )
             code = proc.wait()
             if code != 0:
@@ -453,9 +460,7 @@ class ModalSandbox(BaseSandbox):
 
         try:
             self._create_container()
-            self._log(
-                f"[fallback] restart succeeded (new id={self._sandbox_id})"
-            )
+            self._log(f"[fallback] restart succeeded (new id={self._sandbox_id})")
             return True
         except Exception as exc:
             self._log(f"[fallback] restart failed: {exc}")
@@ -481,7 +486,7 @@ class ModalSandbox(BaseSandbox):
                             f"skip bind mount outside {self._CONTAINER_ROOT}: {container_path}"
                         )
                         continue
-                    rel = container_path[len(self._CONTAINER_ROOT):].lstrip("/") or "/"
+                    rel = container_path[len(self._CONTAINER_ROOT) :].lstrip("/") or "/"
                     host_p = Path(host_path)
                     remote = "/" + rel if rel != "/" else "/"
                     if ".hf_cache" in host_p.parts:
@@ -582,7 +587,9 @@ class ModalSandbox(BaseSandbox):
         except Exception as exc:
             if _is_sandbox_dead(exc) and self._restart_sandbox():
                 return _retry_transient(
-                    fn, log=self._log, label=f"{label}-after-restart",
+                    fn,
+                    log=self._log,
+                    label=f"{label}-after-restart",
                 )
             raise
 
@@ -602,7 +609,9 @@ class ModalSandbox(BaseSandbox):
 
         def _do_exec() -> tuple[str, str, int]:
             proc = self._sandbox.exec(
-                "bash", "-c", command,
+                "bash",
+                "-c",
+                command,
                 workdir=self._CONTAINER_ROOT,
                 timeout=effective_timeout,
             )
@@ -613,7 +622,8 @@ class ModalSandbox(BaseSandbox):
 
         try:
             stdout, stderr, exit_code = self._run_with_fallback(
-                _do_exec, label="exec",
+                _do_exec,
+                label="exec",
             )
         except TimeoutError:
             self._log(f"exec timeout after {effective_timeout}s")
@@ -661,7 +671,9 @@ class ModalSandbox(BaseSandbox):
             except TypeError:
                 # Older Modal SDKs: make_directory may not accept parents=
                 self._sandbox.exec(
-                    "bash", "-c", f"mkdir -p {parent}",
+                    "bash",
+                    "-c",
+                    f"mkdir -p {parent}",
                     workdir=self._CONTAINER_ROOT,
                 ).wait()
             fs.write_text(content, container_path)
@@ -693,7 +705,9 @@ class ModalSandbox(BaseSandbox):
                 # sandbox's filesystem handle, not a stale reference.
                 fs = self._sandbox.filesystem
                 self._sandbox.exec(
-                    "bash", "-c", f"mkdir -p {_parent}",
+                    "bash",
+                    "-c",
+                    f"mkdir -p {_parent}",
                     workdir=self._CONTAINER_ROOT,
                 ).wait()
                 fs.write_bytes(_content, _path)
@@ -761,7 +775,8 @@ class ModalSandbox(BaseSandbox):
         if self._workspace_volume_name:
             try:
                 modal.Volume.objects.delete(
-                    self._workspace_volume_name, allow_missing=True,
+                    self._workspace_volume_name,
+                    allow_missing=True,
                 )
                 self._log(f"deleted workspace volume {self._workspace_volume_name}")
             except Exception as exc:
@@ -777,8 +792,8 @@ class ModalSandbox(BaseSandbox):
         "__pycache__",
         ".pytest_cache",
         "_mounts",
-        "_auth",            # host CLI auth uploaded from ~/.codex etc.
-        "_opt_vibeserve",   # vibe_serve pkg uploaded for MCP
+        "_auth",  # host CLI auth uploaded from ~/.codex etc.
+        "_opt_vibeserve",  # vibe_serve pkg uploaded for MCP
         "acc_checker",
         "bench",
         "skills",
@@ -803,9 +818,7 @@ class ModalSandbox(BaseSandbox):
         import tarfile
         import tempfile
 
-        exclude_args = " ".join(
-            f"--exclude='{e}'" for e in self._DOWNLOAD_EXCLUDES
-        )
+        exclude_args = " ".join(f"--exclude='{e}'" for e in self._DOWNLOAD_EXCLUDES)
         tar_remote = "/tmp/_vibeserve_ws.tar.gz"
         tar_cmd = (
             f"cd {self._CONTAINER_ROOT} && "
@@ -814,7 +827,9 @@ class ModalSandbox(BaseSandbox):
         )
         try:
             proc = self._sandbox.exec(
-                "bash", "-c", tar_cmd,
+                "bash",
+                "-c",
+                tar_cmd,
                 workdir=self._CONTAINER_ROOT,
                 timeout=300,
             )
@@ -826,7 +841,8 @@ class ModalSandbox(BaseSandbox):
 
             data = _retry_transient(
                 lambda: self._sandbox.filesystem.read_bytes(tar_remote),
-                log=self._log, label="workspace tar download",
+                log=self._log,
+                label="workspace tar download",
             )
         except Exception as exc:
             self._log(f"workspace tar download failed: {exc}")

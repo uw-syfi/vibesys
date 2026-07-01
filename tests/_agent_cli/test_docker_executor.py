@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 
 from agentshim.executor import CallbackCommandStreamSink, CommandRequest
+
 from vibe_serve.agents.docker_executor import DockerCommandExecutor, DockerCommandHandle
 
 

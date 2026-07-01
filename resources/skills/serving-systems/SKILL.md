@@ -5,8 +5,9 @@ description: >-
   touches inference servers, latency / throughput / TTFT / TPOT, KV-cache,
   batching, attention kernels, CUDA graphs, speculative decoding, structured
   / grammar-constrained output, quantization, MoE serving, prefix caching,
-  multi-modal (vision/speech/image/video) serving, or porting a model to
-  vLLM / SGLang / TensorRT-LLM.
+  multi-modal (vision/speech/image/video) serving, porting a model to
+  vLLM / SGLang / TensorRT-LLM, or serving on AWS Trainium (Neuron,
+  torch-neuronx, NKI kernels).
 ---
 
 # serving-systems
@@ -27,6 +28,10 @@ Three techniques every production serving system on NVIDIA ships with — confir
 1. **Continuous batching** — see [`references/algorithms/continuous-batching.md`](references/algorithms/continuous-batching.md). Skip only when the workload is single-batch by contract.
 2. **Fused attention kernel** — FlashInfer, FlashAttention, or SDPA. For the picker (workload → backend, plus the per-feature matrix), open [`references/backends/attention-backend-comparison.md`](references/backends/attention-backend-comparison.md); for deep usage, [`references/backends/flashinfer.md`](references/backends/flashinfer.md), [`references/backends/flashattention.md`](references/backends/flashattention.md), or [`references/backends/sdpa.md`](references/backends/sdpa.md). On NVIDIA, never skip a fused kernel.
 3. **CUDA graphs** — see [`references/backends/cuda-graph.md`](references/backends/cuda-graph.md). Required for low-latency single-batch and high-throughput batched serving.
+
+### On AWS Trainium (Neuron) instead
+
+Trainium is not a GPU — the floor is different. Start from [`references/frameworks/neuron-pytorch.md`](references/frameworks/neuron-pytorch.md) and [`references/hardware/aws-trainium.md`](references/hardware/aws-trainium.md). The defaults there: **static-shape graphs** (bucket prompt/decode lengths; `neuronx-cc` recompiles on new shapes), a **persistent compile cache**, **BF16**, on-device sampling, and continuous batching over static buffers. The decisive decode optimization is a **device-resident, in-place KV cache** — use NxD's `KVCacheManager` + `ModelBuilder` aliasing ([`references/frameworks/nxd-kv-cache.md`](references/frameworks/nxd-kv-cache.md)); a from-scratch `torch_neuronx.trace` decode that passes the KV cache through the graph boundary every token is host-bound and slow. **Flash attention is available here too** — via the NKI kernel `nki_flash_attn_func` ([`references/frameworks/neuron-flash-attention.md`](references/frameworks/neuron-flash-attention.md)); the `FlashAttention`/`FlashInfer` *libraries* are NVIDIA-only but the *algorithm* ships on Neuron, and it cuts the attention activation peak that drives the HBM OOM. For custom NeuronCore kernels use the bundled **`neuron-nki-*`** skills (the Trainium analog of FlashInfer/Triton kernels).
 
 ## Reference index
 
@@ -99,11 +104,19 @@ Each entry below is one file under [`references/`](references/). The bracketed p
 - [`references/backends/triton-kernels.md`](references/backends/triton-kernels.md) — Consuming existing Triton kernels in serving engines — invocation patterns, autotune caching, compile-time constants, warmup, and interaction with CUDA graphs and torch.compile.
 
 
-### Frameworks (PyTorch / Triton / MLX)
+### Frameworks (PyTorch / Triton / MLX / Neuron)
 
 - [`references/frameworks/mlx.md`](references/frameworks/mlx.md) — MLX framework for LLM serving on Apple Silicon — unified-memory array model, lazy evaluation and `mx.eval`, `mx.compile`, `mx.fast` kernels, mlx-lm reference serving path, native INT4/INT8 quantization via `mx.quantize`, custom Metal kernels via `mx.fast.metal_kernel`.
 
 - [`references/frameworks/pytorch.md`](references/frameworks/pytorch.md) — PyTorch idioms for LLM serving — nn.Module + weight loading, torch.compile (Dynamo / inductor / dynamic shapes / reduce-overhead), state_dict remapping, custom op registration with torch.library, NCCL setup, HF transformers integration, inference_mode.
+
+- [`references/frameworks/neuron-pytorch.md`](references/frameworks/neuron-pytorch.md) — PyTorch on AWS Trainium (Neuron) — torch-neuronx vs TorchNeuron Native, `neuronx-cc` compilation, static-shape bucketing, persistent compile cache, BF16, static KV cache, host-sync pitfalls, when to drop to NKI.
+
+- [`references/frameworks/nxd-inference.md`](references/frameworks/nxd-inference.md) — NxD Inference (NeuronX Distributed Inference) — AWS's Trainium inference library (NeuronConfig / ModelBuilder / generate); full-turnkey or as building blocks inside a bespoke server.
+
+- [`references/frameworks/nxd-kv-cache.md`](references/frameworks/nxd-kv-cache.md) — NxD `KVCacheManager` — the device-resident, in-place KV cache for Trainium (resident `nn.Parameter` buffers + `ModelBuilder` input/output aliasing). The key decode optimization; what raw `torch_neuronx.trace` can't do.
+
+- [`references/frameworks/neuron-flash-attention.md`](references/frameworks/neuron-flash-attention.md) — flash attention on Trainium via the NKI kernel `nki_flash_attn_func`. **Flash attention is NOT NVIDIA-only** — the algorithm ships on Neuron; use it instead of naive `softmax(QKᵀ)V` to cut the activation peak (and the HBM OOM that caps batch size).
 
 - [`references/frameworks/triton.md`](references/frameworks/triton.md) — Triton as a framework-level decision — when a custom Triton kernel pays off in serving vs reusing FlashInfer / FlashAttention / CUTLASS / liger / sgl-kernel.
 
@@ -113,6 +126,8 @@ Each entry below is one file under [`references/`](references/). The bracketed p
 - [`references/hardware/amd-mi300.md`](references/hardware/amd-mi300.md) — AMD Instinct MI300-family hardware specs for serving — MI300X, MI325X, MI350X.
 
 - [`references/hardware/apple-silicon.md`](references/hardware/apple-silicon.md) — Apple Silicon (M-series SoC) hardware specs for serving — M1 / M2 / M3 / M4 (and Pro / Max / Ultra variants).
+
+- [`references/hardware/aws-trainium.md`](references/hardware/aws-trainium.md) — AWS Trainium2 (Trn2) specs for serving — NeuronCore-v3, SBUF/PSUM/HBM hierarchy, compute engines, logical-NeuronCore (LNC) config, what trn2.3xlarge exposes.
 
 - [`references/hardware/nvidia.md`](references/hardware/nvidia.md) — NVIDIA data-center / workstation GPU specs across 5 generations: Blackwell (B200, RTX PRO 6000), Hopper (H200, H100), Ada (L40S, L4), Ampere (A100 40/80, A10), Turing (T4).
 
@@ -145,7 +160,7 @@ Each entry below is one file under [`references/`](references/). The bracketed p
 
 ## Out of scope
 
-Kernel implementation (writing CUDA / Triton / CUTLASS). For that, use the separate `agent-gpu-skills` collection.
+Kernel implementation (writing CUDA / Triton / CUTLASS). For that, use the separate `agent-gpu-skills` collection. **Exception — NKI:** writing NeuronCore kernels for AWS Trainium *is* in scope here, via the bundled **`neuron-nki-*`** skills (`neuron-nki-writing`, `-docs`, `-debugging`, `-profiling`, `-profile-querying`); there is no separate Trainium kernel collection.
 
 ## Reference repos
 

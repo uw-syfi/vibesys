@@ -140,9 +140,7 @@ class TestClaudeGenerationSession:
         session.tool_start_times["t1"] = 1000.0
         session.tool_args["t1"] = {"cmd": "ls"}
 
-        line = (
-            '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"file1.txt"}]}}\n'
-        )
+        line = '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"file1.txt"}]}}\n'
         session._process_stdout(line)
         # Tool result was processed without raising.
 
@@ -196,20 +194,19 @@ class TestClaudeGenerationSession:
             '"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}\n'
         )
         session._process_stdout(line)
-        handler.on_usage.assert_called_once_with({
-            "input_tokens": 14000,
-            "output_tokens": 50,
-            "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 0,
-        })
+        handler.on_usage.assert_called_once_with(
+            {
+                "input_tokens": 14000,
+                "output_tokens": 50,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+            }
+        )
 
     def test_assistant_without_usage_does_not_call_on_usage(self):
         handler = MagicMock()
         session = self._make_session(event_handler=handler)
-        line = (
-            '{"type":"assistant","message":{"content":'
-            '[{"type":"text","text":"ok"}]}}\n'
-        )
+        line = '{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}\n'
         session._process_stdout(line)
         handler.on_usage.assert_not_called()
 
@@ -232,6 +229,7 @@ class TestClaudeGenerationSession:
         The plan calls out that Protocol is structural, so we guard the
         call site with ``getattr`` for back-compat with older handlers.
         """
+
         # A handler object that only implements the original three hooks.
         class LegacyHandler:
             def __init__(self):

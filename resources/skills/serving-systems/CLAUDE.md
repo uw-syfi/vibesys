@@ -82,7 +82,7 @@ The body's job is *only* to route. All technical content lives in `references/`.
 
 ### Cross-references
 
-When a `references/<topic>.md` benefits from a compatibility matrix or a "where's X" table, include it in-file. Cross-link to other reference files freely with relative paths from the skill root, e.g. `[backends/cuda-graph](references/cuda-graph.md)`.
+When a `references/<topic>.md` benefits from a compatibility matrix or a "where's X" table, include it in-file. Cross-link to other reference files freely with relative paths from the skill root, e.g. `[backends/cuda-graph](references/backends/cuda-graph.md)`.
 
 ### Engine source-map references
 

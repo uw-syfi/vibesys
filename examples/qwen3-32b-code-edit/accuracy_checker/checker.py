@@ -37,7 +37,6 @@ from typing import Any
 
 import httpx
 
-
 # ---------------------------------------------------------------------------
 # Dataset loading (mirrors bench/benchmark.py)
 # ---------------------------------------------------------------------------
@@ -52,9 +51,7 @@ def _load_codeeditorbench(
     try:
         from datasets import load_dataset
     except ImportError as exc:
-        raise SystemExit(
-            "The `datasets` library is required — pip install datasets."
-        ) from exc
+        raise SystemExit("The `datasets` library is required — pip install datasets.") from exc
 
     # Pin to the code_debug shards — the only ones with both
     # `incorrect_solutions` and `solutions` columns. The other task
@@ -85,13 +82,15 @@ def _load_codeeditorbench(
         if key in seen:
             continue
         seen.add(key)
-        buffer.append({
-            "unique_id": str(row.get("idx") or i),
-            "language": lang,
-            "incorrect_code": inc,
-            "gold_code": sol,
-            "bug_type": row.get("type") or "",
-        })
+        buffer.append(
+            {
+                "unique_id": str(row.get("idx") or i),
+                "language": lang,
+                "incorrect_code": inc,
+                "gold_code": sol,
+                "bug_type": row.get("type") or "",
+            }
+        )
         if len(buffer) >= max(num_samples * 5, 500):
             break
 
@@ -133,15 +132,15 @@ def _build_prompt(tokenizer, sample: dict) -> str:
         {
             "role": "user",
             "content": _build_user_message(
-                sample["language"], sample["incorrect_code"], sample["bug_type"],
+                sample["language"],
+                sample["incorrect_code"],
+                sample["bug_type"],
             ),
         },
     ]
     kwargs = dict(tokenize=False, add_generation_prompt=True)
     try:
-        return tokenizer.apply_chat_template(
-            messages, enable_thinking=False, **kwargs
-        )
+        return tokenizer.apply_chat_template(messages, enable_thinking=False, **kwargs)
     except TypeError:
         return tokenizer.apply_chat_template(messages, **kwargs)
 
@@ -156,7 +155,7 @@ def _strip_code_fence(text: str) -> str:
     if s.startswith("```"):
         nl = s.find("\n")
         if nl != -1:
-            s = s[nl + 1:]
+            s = s[nl + 1 :]
     if s.endswith("```"):
         s = s[: s.rfind("```")].rstrip()
     return s
@@ -210,13 +209,16 @@ async def _send(
     error: str | None = None
     try:
         async with client.stream(
-            "POST", url, json=body, timeout=request_timeout,
+            "POST",
+            url,
+            json=body,
+            timeout=request_timeout,
         ) as resp:
             resp.raise_for_status()
             async for raw in resp.aiter_lines():
                 if not raw.startswith("data: "):
                     continue
-                payload = raw[len("data: "):]
+                payload = raw[len("data: ") :]
                 if payload.strip() == "[DONE]":
                     break
                 try:
@@ -245,7 +247,10 @@ async def run(args: argparse.Namespace) -> int:
     url = args.url.rstrip("/") + args.endpoint
     languages = [s.strip() for s in args.languages.split(",") if s.strip()]
     samples = _load_codeeditorbench(
-        languages, args.max_input_chars, args.num_samples, args.seed,
+        languages,
+        args.max_input_chars,
+        args.num_samples,
+        args.seed,
     )
     if not samples:
         print("ERROR: no samples loaded from CodeEditorBench.", file=sys.stderr)
@@ -266,7 +271,9 @@ async def run(args: argparse.Namespace) -> int:
         for idx, sample in enumerate(samples):
             prompt = _build_prompt(tokenizer, sample)
             r = await _send(
-                client, url, prompt,
+                client,
+                url,
+                prompt,
                 prediction_content=sample["incorrect_code"],
                 max_tokens=args.max_tokens,
                 temperature=args.temperature,
@@ -277,7 +284,9 @@ async def run(args: argparse.Namespace) -> int:
             r["is_warmup"] = idx < warmup_n
             if r["error"] is None:
                 eval_ = _evaluate(
-                    r["output_text"], sample["gold_code"], args.min_gold_similarity,
+                    r["output_text"],
+                    sample["gold_code"],
+                    args.min_gold_similarity,
                 )
             else:
                 eval_ = {
@@ -311,8 +320,10 @@ async def run(args: argparse.Namespace) -> int:
     print("=" * 60)
     print(f"Samples (steady):    {len(steady)} (warmup discarded: {warmup_n})")
     print(f"Request errors:      {len(errored)}/{len(steady)}")
-    print(f"Gold-similar:        {len(gold_ok)}/{len(steady)} ({gold_rate:.1%})   "
-          f"[min {args.min_gold_rate:.1%} at threshold {args.min_gold_similarity:.2f}]")
+    print(
+        f"Gold-similar:        {len(gold_ok)}/{len(steady)} ({gold_rate:.1%})   "
+        f"[min {args.min_gold_rate:.1%} at threshold {args.min_gold_similarity:.2f}]"
+    )
 
     passed = not errored and gold_rate >= args.min_gold_rate
 
@@ -347,6 +358,7 @@ async def run(args: argparse.Namespace) -> int:
             "results": results,
         }
         from pathlib import Path
+
         Path(args.output_json).write_text(json.dumps(summary, indent=2))
         print(f"\nWrote detailed results to {args.output_json}")
 

@@ -1,0 +1,1 @@
+Is the model actually executing on a NeuronCore in `bfloat16` (compiled graphs running on-device) — not silently running the hot path on CPU or in `float32`? A server that loads but falls back to CPU is incorrect for this target.

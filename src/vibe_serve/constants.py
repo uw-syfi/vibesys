@@ -18,6 +18,7 @@ _ANTHROPIC_PREFIXES = ("claude-",)
 _GOOGLE_PREFIXES = ("gemini-", "gemma-")
 _OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4")
 
+
 class ComputeBackend(StrEnum):
     """Compute backends the agent can target.
 
@@ -33,11 +34,23 @@ class ComputeBackend(StrEnum):
       nsys) so ``vibeserve-curriculum --backend metal`` is not a
       supported workflow yet; the simple loop is the intended entry
       point.
+    - ``TRAINIUM`` (AWS Trn1/Trn2) targets NeuronCores via an AWS Neuron
+      DLC container.  The host's ``/dev/neuron*`` devices are passed
+      through to the container (``--device``, *not* ``--gpus``);
+      profiling uses ``neuron-explorer`` instead of nsys.  Modal offers
+      no Trainium, so ``TrainiumBackend.make_sandbox`` raises on
+      ``SandboxKind.MODAL``.
     """
 
     CUDA = "cuda"
     METAL = "metal"
+    TRAINIUM = "trainium"
 
 
 DEFAULT_COMPUTE_BACKEND = ComputeBackend.CUDA
 KNOWN_COMPUTE_BACKENDS: tuple[str, ...] = tuple(b.value for b in ComputeBackend)
+
+# Agent backend used when neither the ``--agent-backend`` flag nor an
+# ``[agent].backend`` config key is set. Resolved in a single place so
+# build_agent_runner and ComputeContext cannot drift.
+DEFAULT_AGENT_BACKEND = "cli"

@@ -38,6 +38,7 @@ class TestStart:
     def test_start_runs_docker_run_with_correct_args(self, mock_run, sandbox):
         # Remove CUDA_VISIBLE_DEVICES so fallback to "all" is tested
         import os
+
         os.environ.pop("CUDA_VISIBLE_DEVICES", None)
 
         mock_run.return_value = subprocess.CompletedProcess(
@@ -70,7 +71,8 @@ class TestStart:
     @patch("subprocess.run")
     def test_start_docker_run_timeout_raises_clear_error(self, mock_run, sandbox):
         mock_run.side_effect = subprocess.TimeoutExpired(
-            cmd=["docker", "run"], timeout=120,
+            cmd=["docker", "run"],
+            timeout=120,
         )
 
         with pytest.raises(RuntimeError, match="Timed out starting Docker container"):
@@ -80,7 +82,10 @@ class TestStart:
     def test_start_failure_removes_created_container(self, mock_run, sandbox):
         mock_run.side_effect = [
             subprocess.CompletedProcess(
-                args=[], returncode=125, stdout="abc123container\n", stderr="gpu error",
+                args=[],
+                returncode=125,
+                stdout="abc123container\n",
+                stderr="gpu error",
             ),
             subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
         ]
@@ -240,7 +245,10 @@ class TestSetupFns:
     def test_setup_fns_run_after_start(self, mock_run, tmp_path):
         """setup_fns receive the sandbox and run at the end of start()."""
         mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123container\n", stderr="",
+            args=[],
+            returncode=0,
+            stdout="abc123container\n",
+            stderr="",
         )
         invocations: list[DockerSandbox] = []
 
@@ -259,7 +267,10 @@ class TestSetupFns:
     def test_setup_fns_re_run_on_restart(self, mock_run, tmp_path):
         """A second start() (e.g. after stop() from reselect_device) re-runs."""
         mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123container\n", stderr="",
+            args=[],
+            returncode=0,
+            stdout="abc123container\n",
+            stderr="",
         )
         calls = 0
 
@@ -438,9 +449,7 @@ class TestPathTranslation:
             type(sandbox).__bases__[0], "read", return_value="content"
         ) as mock_super_read:
             sandbox.read("/reference/reference.py")
-            mock_super_read.assert_called_once_with(
-                "/workspace/reference/reference.py", 0, 2000
-            )
+            mock_super_read.assert_called_once_with("/workspace/reference/reference.py", 0, 2000)
 
     @patch("subprocess.run")
     def test_ls_translates_path(self, mock_run, sandbox):
@@ -450,9 +459,7 @@ class TestPathTranslation:
         )
         sandbox.start()
 
-        with patch.object(
-            type(sandbox).__bases__[0], "ls_info", return_value=[]
-        ) as mock_super_ls:
+        with patch.object(type(sandbox).__bases__[0], "ls_info", return_value=[]) as mock_super_ls:
             sandbox.ls_info("/")
             mock_super_ls.assert_called_once_with("/workspace/")
 
@@ -462,6 +469,7 @@ class TestCleanupOnExit:
     def _clear_live_containers(self):
         """Isolate the global _live_containers registry between tests."""
         from vibe_serve.sandbox.docker_sandbox import _live_containers
+
         _live_containers.clear()
         yield
         _live_containers.clear()
@@ -527,10 +535,7 @@ class TestWrite:
         assert any("mkdir" in cmd for cmd in cmds)
         assert any("cp" in cmd for cmd in cmds)
         # Should NOT have used docker exec bash -c (which would inline content)
-        exec_bash_calls = [
-            c for c in cmds
-            if "exec" in c and "bash" in c and "-c" in c
-        ]
+        exec_bash_calls = [c for c in cmds if "exec" in c and "bash" in c and "-c" in c]
         assert len(exec_bash_calls) == 0
 
     @patch("subprocess.run")
@@ -577,3 +582,127 @@ class TestEnvVars:
         assert "-e" in cmd
         assert "MY_KEY=my_value" in cmd_str
         assert "OTHER=thing" in cmd_str
+
+
+class TestDevicePassthrough:
+    @patch("subprocess.run")
+    def test_devices_emit_device_flags_and_no_gpus(self, mock_run, tmp_path):
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="public.ecr.aws/neuron/pytorch-inference-neuronx:latest",
+            gpus=None,  # Neuron uses --device, not --gpus
+            devices=["/dev/neuron0", "/dev/neuron1"],
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+
+        sandbox.start()
+
+        cmd = mock_run.call_args_list[0][0][0]
+        assert "--gpus" not in cmd
+        # Each device forwarded with its own --device flag.
+        assert cmd.count("--device") == 2
+        for dev in ("/dev/neuron0", "/dev/neuron1"):
+            i = cmd.index(dev)
+            assert cmd[i - 1] == "--device"
+        assert sandbox._metadata["devices"] == ["/dev/neuron0", "/dev/neuron1"]
+
+    @patch("subprocess.run")
+    def test_no_devices_by_default(self, mock_run, tmp_path):
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+        cmd = mock_run.call_args_list[0][0][0]
+        assert "--device" not in cmd
+
+
+class TestEntrypointOverride:
+    @patch("subprocess.run")
+    def test_entrypoint_override_emitted_before_image(self, mock_run, tmp_path):
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="public.ecr.aws/neuron/pytorch-inference-neuronx:latest",
+            gpus=None,
+            entrypoint="",  # clear the DLC's baked-in model-server entrypoint
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+        cmd = mock_run.call_args_list[0][0][0]
+        assert "--entrypoint" in cmd
+        ep_idx = cmd.index("--entrypoint")
+        assert cmd[ep_idx + 1] == ""
+        # Override must precede the image positional, which precedes the command.
+        img_idx = cmd.index(sandbox._image)
+        assert ep_idx < img_idx
+        assert cmd[-2:] == ["sleep", "infinity"]
+        assert sandbox._metadata["entrypoint"] == ""
+
+    @patch("subprocess.run")
+    def test_no_entrypoint_flag_by_default(self, mock_run, tmp_path):
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+        cmd = mock_run.call_args_list[0][0][0]
+        assert "--entrypoint" not in cmd
+
+
+class TestShmSize:
+    @patch("subprocess.run")
+    def test_shm_size_emitted(self, mock_run, tmp_path):
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            shm_size="16g",
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+        cmd = mock_run.call_args_list[0][0][0]
+        assert "--shm-size" in cmd
+        assert cmd[cmd.index("--shm-size") + 1] == "16g"
+        assert sandbox._metadata["shm_size"] == "16g"
+
+    @patch("subprocess.run")
+    def test_no_shm_size_by_default(self, mock_run, tmp_path):
+        sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc\n", stderr=""
+        )
+        sandbox.start()
+        assert "--shm-size" not in mock_run.call_args_list[0][0][0]
+
+
+class TestAutoRemove:
+    @patch("subprocess.run")
+    def test_auto_remove_emits_rm_flag(self, mock_run, tmp_path):
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"), image="img", auto_remove=True
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc\n", stderr=""
+        )
+        sandbox.start()
+        assert "--rm" in mock_run.call_args_list[0][0][0]
+
+    @patch("subprocess.run")
+    def test_no_rm_by_default(self, mock_run, tmp_path):
+        sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc\n", stderr=""
+        )
+        sandbox.start()
+        assert "--rm" not in mock_run.call_args_list[0][0][0]

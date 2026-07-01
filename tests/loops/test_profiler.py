@@ -12,17 +12,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from vibe_serve.agent_runner import (
+    _parse_profiler_response_text,
+    run_profiler_agent,
+)
 from vibe_serve.schemas import (
     ImplementerResponse,
     JudgeResponse,
     ProfilerResponse,
     Verdict,
 )
-from vibe_serve.agent_runner import (
-    _parse_profiler_response_text,
-    run_profiler_agent,
-)
-
 
 # ---------------------------------------------------------------------------
 # ProfilerResponse model tests
@@ -119,14 +118,16 @@ def test_run_profiler_agent_structured_response():
         bottlenecks="Attention dominates.",
         suggestions="No action needed.",
     )
-    agent.stream.return_value = iter([
-        {
-            "agent": {
-                "messages": [MagicMock(content="Profiled.", type="ai")],
-                "structured_response": resp_data,
+    agent.stream.return_value = iter(
+        [
+            {
+                "agent": {
+                    "messages": [MagicMock(content="Profiled.", type="ai")],
+                    "structured_response": resp_data,
+                }
             }
-        }
-    ])
+        ]
+    )
     result = run_profiler_agent(agent, "Profile the server.")
     assert result.analysis == "Good profile data."
     assert result.bottlenecks == "Attention dominates."
@@ -136,13 +137,15 @@ def test_run_profiler_agent_fallback_json_parsing():
     """Agent returns JSON text instead of structured response."""
     agent = MagicMock()
     json_text = _profiler_json(analysis="Fallback parsing.")
-    agent.stream.return_value = iter([
-        {
-            "agent": {
-                "messages": [MagicMock(content=json_text, type="ai")],
+    agent.stream.return_value = iter(
+        [
+            {
+                "agent": {
+                    "messages": [MagicMock(content=json_text, type="ai")],
+                }
             }
-        }
-    ])
+        ]
+    )
     result = run_profiler_agent(agent, "Profile the server.")
     assert result.analysis == "Fallback parsing."
 
@@ -150,13 +153,15 @@ def test_run_profiler_agent_fallback_json_parsing():
 def test_run_profiler_agent_no_response():
     """Agent returns no parseable response."""
     agent = MagicMock()
-    agent.stream.return_value = iter([
-        {
-            "agent": {
-                "messages": [MagicMock(content="I couldn't profile.", type="ai")],
+    agent.stream.return_value = iter(
+        [
+            {
+                "agent": {
+                    "messages": [MagicMock(content="I couldn't profile.", type="ai")],
+                }
             }
-        }
-    ])
+        ]
+    )
     result = run_profiler_agent(agent, "Profile the server.")
     assert "No structured response" in result.analysis
 
@@ -188,9 +193,9 @@ def nsys_db(tmp_path):
     """)
     # 3 kernels: flash_fwd (10us), rmsnorm (2us), silu (1us), with gaps
     kernels = [
-        (1, 1000, 11000, 0, 7, 100),   # flash_fwd: 10us
-        (2, 15000, 17000, 0, 7, 101),   # rmsnorm: 2us, gap=4us after flash
-        (3, 20000, 21000, 0, 7, 102),   # silu: 1us, gap=3us after rmsnorm
+        (1, 1000, 11000, 0, 7, 100),  # flash_fwd: 10us
+        (2, 15000, 17000, 0, 7, 101),  # rmsnorm: 2us, gap=4us after flash
+        (3, 20000, 21000, 0, 7, 102),  # silu: 1us, gap=3us after rmsnorm
     ]
     conn.executemany(
         "INSERT INTO CUPTI_ACTIVITY_KIND_KERNEL VALUES (?, ?, ?, ?, ?, ?)",
@@ -205,9 +210,9 @@ def nsys_db(tmp_path):
         )
     """)
     runtime_calls = [
-        (500, 1200, 33, 100, 1, 1),     # cudaLaunchKernel for flash_fwd
-        (14500, 15100, 33, 101, 1, 1),   # cudaLaunchKernel for rmsnorm
-        (19500, 20100, 33, 102, 1, 1),   # cudaLaunchKernel for silu
+        (500, 1200, 33, 100, 1, 1),  # cudaLaunchKernel for flash_fwd
+        (14500, 15100, 33, 101, 1, 1),  # cudaLaunchKernel for rmsnorm
+        (19500, 20100, 33, 102, 1, 1),  # cudaLaunchKernel for silu
         (25000, 25500, 163, 200, 1, 1),  # cudaDeviceSynchronize
     ]
     conn.executemany(
@@ -232,7 +237,7 @@ def nsys_db(tmp_path):
 
 
 def test_analyze_kernels(nsys_db):
-    from examples.nsys_profiler.analyze_nsys import analyze_kernels, _build_string_map
+    from examples.nsys_profiler.analyze_nsys import _build_string_map, analyze_kernels
 
     conn = sqlite3.connect(nsys_db)
     strings = _build_string_map(conn)
@@ -246,7 +251,7 @@ def test_analyze_kernels(nsys_db):
 
 
 def test_analyze_cpu_overhead(nsys_db):
-    from examples.nsys_profiler.analyze_nsys import analyze_cpu_overhead, _build_string_map
+    from examples.nsys_profiler.analyze_nsys import _build_string_map, analyze_cpu_overhead
 
     conn = sqlite3.connect(nsys_db)
     strings = _build_string_map(conn)
@@ -260,7 +265,7 @@ def test_analyze_cpu_overhead(nsys_db):
 
 
 def test_analyze_gpu_idle_gaps(nsys_db):
-    from examples.nsys_profiler.analyze_nsys import analyze_gpu_idle_gaps, _build_string_map
+    from examples.nsys_profiler.analyze_nsys import _build_string_map, analyze_gpu_idle_gaps
 
     conn = sqlite3.connect(nsys_db)
     strings = _build_string_map(conn)
@@ -285,8 +290,9 @@ def test_analyze_memory_ops(nsys_db):
 def test_short_kernel_name():
     from examples.nsys_profiler.analyze_nsys import _short_kernel_name
 
-    assert _short_kernel_name("void at::native::vectorized_elementwise_kernel<4, float>") == "native::vectorized_elementwise_kernel"
+    assert (
+        _short_kernel_name("void at::native::vectorized_elementwise_kernel<4, float>")
+        == "native::vectorized_elementwise_kernel"
+    )
     assert _short_kernel_name("simple_kernel") == "simple_kernel"
     assert _short_kernel_name("a::b::c::func") == "c::func"
-
-

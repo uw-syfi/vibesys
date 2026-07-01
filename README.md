@@ -1,10 +1,17 @@
 # VibeServe: Can AI Agents Build Bespoke LLM Serving Systems?
 
+[![arXiv](https://img.shields.io/badge/arXiv-2605.06068-b31b1b.svg)](https://arxiv.org/abs/2605.06068)
+
 **An agentic loop that synthesizes bespoke LLM serving systems — one per (model, hardware, workload) target — instead of forcing every deployment through a single general-purpose runtime.**
 
 <p align="center">
   <img src="docs/figures/idea.png" width="85%" alt="Generic serving today vs. VibeServe's per-target bespoke systems">
 </p>
+
+## Updates
+
+- **2026-05** — Blog post: [Let AI Agents Write Your Serving Stack with VibeServe](https://syfi.cs.washington.edu/blog/2026-05-12-introducing-vibeserve/).
+- **2026-05** — Paper released on arXiv: [2605.06068](https://arxiv.org/abs/2605.06068).
 
 ## Introduction
 
@@ -65,6 +72,31 @@ A separate entry point exposes the issue MCP server used by the plain loop:
 vibe-serve-issue-mcp                         # serves issues.json over MCP
 ```
 
+## Domains — pointing vibeserve at your problem space
+
+A **domain** is the bundle of cross-cutting context the agents need for whatever
+you're building: the background knowledge the implementer must read, and the
+correctness/performance/integrity gates the judge enforces. It answers *"what
+kind of system is this, and what does 'good' mean here?"* — kept separate from
+the neutral prompt skeleton and from the per-task I/O contract (`--modality`).
+
+Select one with `--domain` (agent loop):
+
+```bash
+vibe-serve --outer-loop agent --domain llm-serving ...      # default
+vibe-serve --outer-loop agent --domain generic ...          # no domain context
+vibe-serve --outer-loop agent --domain ./my-domain.md ...   # your own (a path)
+```
+
+`--domain` takes a **built-in name** (`llm-serving`, `generic`) **or a path** to
+your own `.md` file anywhere on disk. A domain is just a single Markdown file:
+free-form description prose, then `## implementer`, `## judge`, and (optionally)
+`## single_agent` sections that drop into the prompts at one labelled point each.
+Omit `## single_agent` and it's derived from the other two. Author your own by
+copying `generic.md` — no code change required.
+
+Full authoring guide: [`src/vibe_serve/loops/agent/templates/_domain/README.md`](src/vibe_serve/loops/agent/templates/_domain/README.md).
+
 ## Per-target inputs
 
 Each evaluation target lives under `examples/<name>/`:
@@ -81,7 +113,7 @@ examples/<name>/
 └── README.md             # human-readable description
 ```
 
-`OBJECTIVE.md` is read at the start of every run and must live next to `--ref` (sibling, not inside). See `examples/Llama-3-8B/`, `examples/moonshine-streaming/`, `examples/qwen3-32b-code-edit/`, `examples/olmo-hybrid-prefix-caching/`, `examples/Llama-3.1-8B-Instruct-MLX-8bit/`, and `examples/show-o2-1.5B-HQ/` for the six paper scenarios.
+`OBJECTIVE.md` is read at the start of every run and must live next to `--ref` (sibling, not inside). See `examples/Llama-3-8B/`, `examples/moonshine-streaming/`, `examples/qwen3-32b-code-edit/`, `examples/olmo-hybrid-prefix-caching/`, `examples/Llama-3.1-8B-Instruct-MLX-8bit/`, `examples/show-o2-1.5B-HQ-h100/`, and `examples/show-o2-1.5B-HQ-macbook/` for the paper scenarios.
 
 For multi-objective evolutionary runs, drop an `objectives.toml` next to `OBJECTIVE.md` (or pass `--objective name:max|min` flags) — see `vibe-serve --outer-loop evolve --help`.
 
@@ -98,9 +130,19 @@ name = "cuda"                 # or "metal" for Apple Silicon (local exec only)
 [agent]
 backend = "cli"               # "cli" (codex/claude/gemini/opencode) or "deepagents"
 cli_provider = "codex"        # which coding-agent harness to drive
+# cli_model = "gpt-5-codex"   # override the model the CLI tool uses
+# cli_timeout = 1800          # per-invocation timeout (seconds)
+
+# Optional: benchmark load levels handed to the perf evaluator.
+# [[perf_eval.load_levels]]
+# rate = 1
+# duration = 20
+# max_tokens = 128
 ```
 
 Provider credentials live in `.env` — see `.env.example`. The CLI flags `--agent-backend` / `--cli-provider` / `--backend` override these.
+
+The config is validated against a typed schema on load (`vibe_serve/config.py`): unknown sections or keys, unknown providers/backends, and missing required fields are rejected with an error rather than silently ignored.
 
 ## Skills library
 
@@ -178,7 +220,25 @@ resources/skills/serving-systems/ # Agent Skills library
 ## Development
 
 ```bash
+./scripts/format.sh                                # format checked Python dirs
+./scripts/check_format.sh                          # check formatting for CI
 uv run pytest                                       # full suite
 uv run pytest tests/loops/plain/test_plain_loop.py  # one file
 uv run pytest -k orchestrator                       # by keyword
+```
+
+## Citation
+
+If you use VibeServe in your research, please cite:
+
+```bibtex
+@misc{kamahori2026vibeserveaiagentsbuild,
+      title={VibeServe: Can AI Agents Build Bespoke LLM Serving Systems?},
+      author={Keisuke Kamahori and Shihang Li and Simon Peter and Baris Kasikci},
+      year={2026},
+      eprint={2605.06068},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2605.06068},
+}
 ```

@@ -43,7 +43,9 @@ def get(
     if backend not in _REGISTRY:
         raise ValueError(f"No backend impl registered for {backend!r}")
     return _REGISTRY[backend](
-        log_dir=log_dir, log=log, image=image,
+        log_dir=log_dir,
+        log=log,
+        image=image,
     )
 
 
@@ -52,9 +54,11 @@ def get(
 def _register_defaults() -> None:
     from vibe_serve.backends.cuda import CudaBackend
     from vibe_serve.backends.metal import MetalBackend
+    from vibe_serve.backends.trainium import TrainiumBackend
 
     register(ComputeBackend.CUDA, CudaBackend)
     register(ComputeBackend.METAL, MetalBackend)
+    register(ComputeBackend.TRAINIUM, TrainiumBackend)
 
 
 _register_defaults()

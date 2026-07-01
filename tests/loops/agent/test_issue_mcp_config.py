@@ -9,9 +9,8 @@ are encoded correctly into the spec's command-line args list.
 from __future__ import annotations
 
 from vibe_serve._agent_cli.base import MCPServerSpec
-
-from vibe_serve.loops.plain.mcp_config import build_issue_mcp_spec
 from vibe_serve.loops.plain.issue_board import IssueType
+from vibe_serve.loops.plain.mcp_config import build_issue_mcp_spec
 
 
 def test_build_judge_spec_has_correct_shape():
@@ -81,4 +80,7 @@ def test_build_spec_uses_provided_store_relpath():
         allowed_types={IssueType.BUG},
     )
     assert "custom/path/issues.json" in spec.args
-    assert spec.args[spec.args.index("custom/path/issues.json") - 1] == "vibe_serve.loops.plain.mcp_server"
+    assert (
+        spec.args[spec.args.index("custom/path/issues.json") - 1]
+        == "vibe_serve.loops.plain.mcp_server"
+    )

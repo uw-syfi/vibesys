@@ -1,0 +1,48 @@
+Error:
+  description: Information about hardware generated error events such as Out Of Bounds (OOB) or Not A Number (NAN).
+  properties:
+    description:
+      type: string
+      description: Short description of the error condition.
+      example: ["EMBD OOB", "PDMAC OOB", "DMA2D OOB", "DMAI OOB", "Debug", "Tensor Completion"]
+
+    error_type_id: # previously named "id"
+      type: integer
+      format: int32
+      description: Numerical value of error type. Distinguishes between different error conditions.
+      example: 1
+      minimum: 0
+
+    metadata:
+      type: string
+      description: Error metadata as string.
+      example: sem 5 overflow
+
+    metadata_hex:
+      type: string
+      description: Hexadecimal representation of error metadata.
+      example: 0x00000000050c
+
+    pcore_idx: # previously named "subgraph"
+      type: integer
+      format: int64
+      description: Index of the physical NeuronCore within a Logical NeuronCore (LNC). A Logical NeuronCore is a group of physical NeuronCores. For LNC2 this field can have a value of either 0 or 1.
+      minimum: 0
+
+    timestamp:
+      type: integer
+      format: int64
+      description: Timestamp when the error occurred.
+      x-unit: nanoseconds
+      minimum: 0
+
+    type:
+      type: string
+      description: Category or type of error.
+      example: Custom Notification
+
+  required:
+    - description
+    - error_type_id
+    - timestamp
+    - type

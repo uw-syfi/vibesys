@@ -26,23 +26,23 @@ queries against the OpenAI/Anthropic models API, or values loaded from
 # Values verified against vendor docs as of 2026-04-08.
 _MODEL_CONTEXT_WINDOWS: tuple[tuple[str, int], ...] = (
     # OpenAI — https://developers.openai.com/api/docs/models/
-    ("gpt-5.4",            1_050_000),  # gpt-5.4, gpt-5.4-pro
-    ("gpt-5",                400_000),  # gpt-5, gpt-5-mini, gpt-5-nano, gpt-5.2
-    ("gpt-4o",               128_000),
-    ("gpt-4-turbo",          128_000),
-    ("o1",                   200_000),
-    ("o3",                   200_000),
-    ("o4",                   200_000),
+    ("gpt-5.4", 1_050_000),  # gpt-5.4, gpt-5.4-pro
+    ("gpt-5", 400_000),  # gpt-5, gpt-5-mini, gpt-5-nano, gpt-5.2
+    ("gpt-4o", 128_000),
+    ("gpt-4-turbo", 128_000),
+    ("o1", 200_000),
+    ("o3", 200_000),
+    ("o4", 200_000),
     # Anthropic — https://platform.claude.com/docs/en/docs/about-claude/models/overview
     # Opus 4.6 and Sonnet 4.6 default to 1M; older 4.x and Haiku 4.5 are 200k.
     # (Pre-4.6 models had a context-1m-2025-08-07 beta header that swapped them
     # to 1M per request, but that's enabled at request time, not by model ID.)
-    ("claude-opus-4-6",    1_000_000),
-    ("claude-sonnet-4-6",  1_000_000),
-    ("claude-",              200_000),
+    ("claude-opus-4-6", 1_000_000),
+    ("claude-sonnet-4-6", 1_000_000),
+    ("claude-", 200_000),
     # Google
-    ("gemini-",            1_048_576),  # Gemini 2.5 / 3.x families default to 1M
-    ("gemma-",                 8_192),
+    ("gemini-", 1_048_576),  # Gemini 2.5 / 3.x families default to 1M
+    ("gemma-", 8_192),
 )
 
 
@@ -111,6 +111,7 @@ class TodoDisplay:
     @staticmethod
     def _strip_ansi(s: str) -> str:
         import re
+
         return re.sub(r"\033\[[0-9;]*m", "", s)
 
 
@@ -178,9 +179,9 @@ class AgentLogger(BaseCallbackHandler):
         flat = messages[0] if messages else []
 
         # Separator with call number
-        self._print_log(f"\n{'─'*60}")
+        self._print_log(f"\n{'─' * 60}")
         self._print_log(f"  LLM call #{self._call_count}")
-        self._print_log(f"{'─'*60}")
+        self._print_log(f"{'─' * 60}")
 
         # First call: log model info and system prompt
         if self._call_count == 1:
@@ -197,6 +198,7 @@ class AgentLogger(BaseCallbackHandler):
 
         # Message type summary
         from collections import Counter
+
         type_counts = Counter(getattr(m, "type", "unknown") for m in flat)
         summary = ", ".join(f"{count} {typ}" for typ, count in sorted(type_counts.items()))
         self._print_log(f"  Messages: {len(flat)} ({summary})")
@@ -289,15 +291,24 @@ class AgentLogger(BaseCallbackHandler):
 
     # Tool names whose args contain code content that is already tracked in
     # git — no need to duplicate it in the run log.
-    _CODE_CHANGE_TOOLS = frozenset({
-        "Write", "Edit",              # Claude Code tools
-        "write_file", "edit_file",    # deepagents tools
-    })
+    _CODE_CHANGE_TOOLS = frozenset(
+        {
+            "Write",
+            "Edit",  # Claude Code tools
+            "write_file",
+            "edit_file",  # deepagents tools
+        }
+    )
     # Args that carry bulk code content and should be omitted from the log.
-    _CODE_CONTENT_ARGS = frozenset({
-        "content", "old_string", "new_string",  # Write/Edit
-        "old_text", "new_text",                  # deepagents edit variants
-    })
+    _CODE_CONTENT_ARGS = frozenset(
+        {
+            "content",
+            "old_string",
+            "new_string",  # Write/Edit
+            "old_text",
+            "new_text",  # deepagents edit variants
+        }
+    )
 
     def _print_tool_call(self, name: str, args: dict):
         is_code_tool = name in self._CODE_CHANGE_TOOLS
@@ -320,7 +331,9 @@ class AgentLogger(BaseCallbackHandler):
             if len(s) > 80:
                 s = s[:80] + "..."
             parts.append(f'{k}="{s}"' if isinstance(v, str) else f"{k}={s}")
-        self._print_stdout(f"\n{self._format_prefix()}{_CYAN}{_BOLD}→ {name}({', '.join(parts)}){_RESET}")
+        self._print_stdout(
+            f"\n{self._format_prefix()}{_CYAN}{_BOLD}→ {name}({', '.join(parts)}){_RESET}"
+        )
 
     def _print_thinking(self, text: str):
         self._print(f"\n{_DIM}[thinking]{_RESET}")
@@ -338,14 +351,17 @@ class AgentLogger(BaseCallbackHandler):
         if self._log_file:
             log_preview = full_text
             if len(log_preview) > self._LOG_MAX_RESULT_LEN:
-                log_preview = log_preview[:self._LOG_MAX_RESULT_LEN] + f"... [{len(full_text) - self._LOG_MAX_RESULT_LEN} more chars]"
+                log_preview = (
+                    log_preview[: self._LOG_MAX_RESULT_LEN]
+                    + f"... [{len(full_text) - self._LOG_MAX_RESULT_LEN} more chars]"
+                )
             for line in log_preview.split("\n"):
                 self._print_log(f"  {color}{line}{_RESET}")
 
         # Truncated to stdout
         preview = full_text
         if self._max_result_len is not None and len(preview) > self._max_result_len:
-            preview = preview[:self._max_result_len] + "..."
+            preview = preview[: self._max_result_len] + "..."
         for line in preview.split("\n"):
             self._print_stdout(f"  {color}{line}{_RESET}")
 

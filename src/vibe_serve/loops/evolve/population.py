@@ -34,7 +34,6 @@ import random
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # Objective spec + dominance
 # ---------------------------------------------------------------------------
@@ -55,9 +54,7 @@ class Objective:
 
     def __post_init__(self) -> None:
         if self.direction not in ("max", "min"):
-            raise ValueError(
-                f"Objective.direction must be 'max' or 'min', got {self.direction!r}"
-            )
+            raise ValueError(f"Objective.direction must be 'max' or 'min', got {self.direction!r}")
 
     def signed(self, value: float) -> float:
         """Return *value* flipped to "higher is better" semantics.
@@ -128,6 +125,12 @@ class Individual:
     passed: bool = False
     summary: str = ""
     feedback: str = ""
+    # Behavioral feature descriptor used by the openevolve loop's
+    # MAP-Elites archive. Empty for runs that don't use that loop.
+    # Keys are feature names (e.g. "code_size_bucket"), values are the
+    # discrete bin index. Persisted to population.json so the archive
+    # can be rebuilt on resume.
+    features: dict[str, int] = field(default_factory=dict)
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -146,6 +149,7 @@ class Individual:
             passed=bool(data.get("passed", False)),
             summary=data.get("summary", ""),
             feedback=data.get("feedback", ""),
+            features={k: int(v) for k, v in (data.get("features") or {}).items()},
         )
 
 
@@ -200,8 +204,10 @@ class Population:
         for ind in self.passed:
             if ind.perf_metric is None:
                 continue
-            if best is None or ind.perf_metric > best.perf_metric or (
-                ind.perf_metric == best.perf_metric and ind.id > best.id
+            if (
+                best is None
+                or ind.perf_metric > best.perf_metric
+                or (ind.perf_metric == best.perf_metric and ind.id > best.id)
             ):
                 best = ind
         return best
@@ -217,13 +223,12 @@ class Population:
         """
         if not objectives:
             return []
-        eligible = [
-            i for i in self.passed
-            if all(o.name in i.metrics for o in objectives)
-        ]
+        eligible = [i for i in self.passed if all(o.name in i.metrics for o in objectives)]
         non_dominated: list[Individual] = []
         for cand in eligible:
-            if not any(_dominates(other, cand, objectives) for other in eligible if other.id != cand.id):
+            if not any(
+                _dominates(other, cand, objectives) for other in eligible if other.id != cand.id
+            ):
                 non_dominated.append(cand)
         return non_dominated
 

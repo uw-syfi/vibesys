@@ -1,0 +1,714 @@
+Summary:
+  description: Profile performance metrics which summarize execution. For profile metadata and system information see the Metadata table.
+  properties:
+    total_time:
+      type: number
+      format: float
+      description: Total duration of on device time for the run. This doesn't include any host<->device data movement overhead or host runtime/framework overhead. Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    neuroncore_cycle_count:
+      type: integer
+      format: int64
+      description: Number of NeuronCore cycles over the duration of the profile i.e. the duration in seconds multiplied by the NeuronCore base clock rate The NeuronCore base clock rate for Inferentia1 is 1.0 GHz, Trainium1 is 1.4 GHz, and Trainium2 is 1.2 GHz.
+      x-unit: cycles
+      minimum: 0
+
+    model_flops:
+      type: integer
+      format: int64
+      description: Model FLOPs is the FLOP count of useful compute on the Tensor Engine i.e. the matrix multiplications from the HLO model definition, and excludes other instructions for data movement (i.e. transposes and partition broadcasts) inserted by the compiler to resolve memory layout conflicts. Note, each floating point multiply-add is counted as two FLOPs. Calculated as 2 * MAC_count from the HLO stats.
+      x-unit: flops
+      minimum: 0
+
+    hardware_flops:
+      type: integer
+      format: int64
+      description: Hardware FLOPs is the FLOP count calculated from all Tensor Engine instructions that Neuron Compiler emits for execution. This metric is typically higher than model_flops because it includes matmul instructions for data movement (i.e. transposes and partition broadcasts) inserted by the compiler to resolve memory layout conflicts. Note, each floating point multiply-add is counted as two FLOPs. Calculated as the sum of (2 * tensor_matrix_active_rows * tensor_matrix_active_cols * elements) for each matrix multiplication.
+      x-unit: flops
+      minimum: 0
+
+    transpose_flops:
+      type: integer
+      format: int64
+      description: 2x the number of MATMUL operations from transposes. A MATMUL operation is counted as a transpose if the instruction type in its debug info is "TRANSPOSE". This is a subset of hardware_flops.
+      x-unit: flops
+      minimum: 0
+
+    adjusted_hardware_flops:
+      type: integer
+      format: int64
+      description: >
+        BF16-equivalent hardware FLOPs. Scales FLOPs to the BF16 throughput equivalent so the result can be used with BF16 peak throughput as the denominator for PE utilization calculations. BF16, FP16, and TF32 use a 1.0x multiplier. FP32 uses 4.0x. FP8 uses 1.0x on Trn1/Inf2 and 0.5x on Trn2/Trn3. UINT8 uses 0.5x. MXFP8 and MXFP4 use 0.25x on Trn3.
+      x-unit: flops
+      minimum: 0
+
+    adjusted_transpose_flops:
+      type: integer
+      format: int64
+      description: >
+        BF16-equivalent transpose FLOPs. Scales transpose FLOPs to the BF16 throughput equivalent so the result can be used with BF16 peak throughput as the denominator for PE utilization calculations. BF16, FP16, and TF32 use a 1.0x multiplier. FP32 uses 4.0x. FP8 uses 1.0x on Trn1/Inf2 and 0.5x on Trn2/Trn3. UINT8 uses 0.5x. MXFP8 and MXFP4 use 0.25x on Trn3.
+      x-unit: flops
+      minimum: 0
+
+    mm_arithmetic_intensity:
+      type: number
+      format: float
+      description: The ratio of regular MATMUL flops to total DRAM transfer size. If peak_flops_bandwidth_ratio is greater than this value, the workload is memory bound. If it is less than this value, the workload is compute bound. It is calculated as (hardware_flops - transpose_flops) / (hbm_write_bytes + hbm_read_bytes).
+      minimum: 0.0
+
+    peak_flops_bandwidth_ratio:
+      type: number
+      format: float
+      description: The ratio of theoretical max Tensor Engine FLOPS to peak DRAM bandwidth. If mm_arithmetic_intensity is less than this value, the workload is memory bound. If it is greater than this value, the workload is compute bound.
+      minimum: 0.0
+
+    trace_count:
+      type: integer
+      format: int64
+      description: Total number of trace events in the NTFF including instructions, events/semaphores, and DMAs.
+      minimum: 0
+
+    event_count:
+      type: integer
+      format: int64
+      description: Total number of event notifications, such as for semaphore updates. This count is less than trace_count because it does not count instructions.
+      minimum: 0
+
+    total_row_count: # previously named "total_point_count" in Metadata table
+      type: integer
+      format: int64
+      description: Total number of data points written to the database.
+      minimum: 0
+
+    dma_active_cycles:
+      type: integer
+      format: int64
+      description: dma_active_time multiplied by TPB clock speed.
+      x-unit: cycles
+      minimum: 0
+
+    dma_active_time:
+      type: number
+      format: float
+      description: Duration of time when at least one DMA packet is transfering.
+      x-unit: seconds
+      minimum: 0.0
+
+    dma_active_time_percent:
+      type: number
+      format: float
+      description: Percentage of time when at least one DMA packet is transfering.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    static_dma_active_time:
+      type: number
+      format: float
+      description: Duration of time when at least one statically generated DMA packet is transfering.
+      x-unit: seconds
+      minimum: 0.0
+
+    dynamic_dma_active_time_percent:
+      type: number
+      format: float
+      description: Percentage of time when at least one dynamically generated DMA packet is transfering.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    static_dma_active_time_percent:
+      type: number
+      format: float
+      description: Percentage of time when at least one statically generated DMA packet is transfering.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    dma_transfer_average_bytes:
+      type: number
+      format: float
+      description: Total transfer size of all DMA packets divided by the total number of DMA transfers. A DMA transfer is a high level compiler construct representing the movement of one or more tensors, while DMA packets are standard DMA terminology and are the smallest unit of DMA data movement displayed in the Neuron Explorer timeline. A single DMA transfer is fulfilled by multiple DMA packets. The Neuron Explorer timeline displays DMA Packets when "Show expanded DMA" is ON, otherwise it aggregates them into DMA transfers.
+      x-unit: bytes
+      minimum: 0.0
+
+    dma_packet_time:
+      type: number
+      format: float
+      description: Total duration of all DMA engine packets. Overlapping DMA packets across all DMA engines are added together.
+      x-unit: seconds
+      minimum: 0.0
+
+    dma_transfer_time:
+      type: number
+      format: float
+      description: Total duration of all DMA transfers. A DMA transfer is a high level compiler construct representing the movement of one or more tensors, while DMA packets are standard DMA terminology and are the smallest unit of DMA data movement displayed in the Neuron Explorer timeline. A single DMA transfer is fulfilled by multiple DMA packets. The Neuron Explorer timeline displays DMA Packets when "Show expanded DMA" is ON, otherwise it aggregates them into DMA transfers.
+      x-unit: seconds
+      minimum: 0.0
+
+    dma_transfer_count:
+      type: integer
+      format: int64
+      description: Number of DMA transfers. A DMA transfer is a high level compiler construct representing the movement of one or more tensors, while DMA packets are standard DMA terminology and are the smallest unit of DMA data movement displayed in the Neuron Explorer timeline. A single DMA transfer is fulfilled by multiple DMA packets. The Neuron Explorer timeline displays DMA Packets when "Show expanded DMA" is ON, otherwise it aggregates them into DMA transfers.
+      minimum: 0
+
+    dma_transfer_total_bytes:
+      type: integer
+      format: int64
+      description: Total transfer size of all DMA transfers. A DMA transfer is a high level compiler construct representing the movement of one or more tensors.
+      x-unit: bytes
+      minimum: 0
+
+    dma_queue_count:
+      type: integer
+      format: int64
+      description: Total number of DMA queues specified in the NEFF including all input, output, and weight DMA queues for different DMA engines.
+      minimum: 0
+
+    inputs_and_weights_size_bytes:
+      type: integer
+      format: int64
+      description: Size of input tensors and weight tensors.
+      x-unit: bytes
+      minimum: 0
+
+    inputs_outputs_weights_size_bytes:
+      type: integer
+      format: int64
+      description: Size of input tensors, output tensors, and weight tensors. Used to support perf bounds, specifically MemoryBoundIdealNoReloads
+      x-unit: bytes
+      minimum: 0
+
+    weight_size_bytes:
+      type: integer
+      format: int64
+      description: Total size of all weights defined in the NEFF.
+      x-unit: bytes
+      minimum: 0
+
+    static_dma_packet_count:
+      type: integer
+      format: int64
+      description: Number of DMA packets that are statically generated.
+      minimum: 0
+
+    static_dma_size:
+      type: integer
+      format: int64
+      description: Total transfer size of DMA packets that are statically generated.
+      x-unit: bytes
+      minimum: 0
+
+    dynamic_dma_packet_percent:
+      type: number
+      format: float
+      description: Percentage of DMA packets that are dynamically generated during execution (generally higher means better performance).
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    static_dma_packet_percent:
+      type: number
+      format: float
+      description: Percentage of DMA packets that are statically generated.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    dynamic_dma_size_percent:
+      type: number
+      format: float
+      description: Percentage of total transfer size for DMA packets that are dynamically generated during execution.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    static_dma_size_percent:
+      type: number
+      format: float
+      description: Percentage of total transfer size for DMA packets that are statically generated.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    mbu_estimated_percent:
+      type: number
+      format: float
+      description: Memory Bandwidth Utilization (MBU) is the achieved HBM bandwidth utilization. It is estimated as a ratio of achieved_hbm_bandwidth over hbm_max_bandwidth, where achieved_hbm_bandwidth is total bytes read/written from/to HBM divided by total_time and hbm_max_bandwidth. Calculated as (hbm_write_bytes + hbm_read_bytes) / total_time / hbm_max_bandwidth. The hbm_max_bandwidth is the maximum HBM bandwidth of a HBM stack. For LNC1 and LNC2, the hbm_max_bandwidth is the same.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    mbu_min_read_util_percent:
+      type: number
+      format: float
+      description: Estimated minimum possible Memory Bandwidth Utilization (MBU) utilization assuming inputs and weights are read from HBM a single time (no repeat loads). Calculated as inputs_and_weights_size_bytes / total_time / hbm_max_bandwidth.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    hbm_write_bytes:
+      type: integer
+      format: int64
+      description: Total bytes of data written to HBM using the DMA engines. This does not include data movement from host DRAM to HBM because this happens before the execution profiling session begins.
+      x-unit: bytes
+      minimum: 0
+
+    hbm_read_bytes:
+      type: integer
+      format: int64
+      description: Total bytes of data read from HBM using the DMA engines. This does not include data movement from HBM to host DRAM because this happens after the execution profiling session.
+      x-unit: bytes
+      minimum: 0
+
+    sbuf_write_bytes:
+      type: integer
+      format: int64
+      description: Total size of all writes to the State Buffer. This includes DMAs writing to and instructions with output to the State Buffer.
+      x-unit: bytes
+      minimum: 0
+
+    sbuf_read_bytes:
+      type: integer
+      format: int64
+      description: Total size of all reads from the State Buffer. This includes DMAs reading from and instructions with input from the State Buffer.
+      x-unit: bytes
+      minimum: 0
+
+    spill_save_bytes:
+      type: integer
+      format: int64
+      description: Total bytes of spilled data that was saved to HBM. Spilled data is the intermediate tensors computed by the engines that cannot fit in the SBUF during execution and must be spilled into HBM.
+      x-unit: bytes
+      minimum: 0
+
+    spill_reload_bytes:
+      type: integer
+      format: int64
+      description: Total bytes of spilled data that was reloaded back to SBUF. Spilled data is the intermediate tensors computed by the engines that cannot fit in the SBUF during execution and must be spilled into HBM. If a spilled tensor is reloaded multiple times into SBUF, this metric will include the spilled tensor size multiplied by the reload count.
+      x-unit: bytes
+      minimum: 0
+
+    psum_write_bytes:
+      type: integer
+      format: int64
+      description: Total bytes of data that are written to PSUM by compute engine instructions.
+      x-unit: bytes
+      minimum: 0
+
+    psum_read_bytes:
+      type: integer
+      format: int64
+      description: Total bytes of data that are read from PSUM by compute engine instructions.
+      x-unit: bytes
+      minimum: 0
+
+    psum_read_sbuf_write_count:
+      type: integer
+      format: int64
+      description: Number of compute engine instructions that moved data from PSUM to SBUF.
+      minimum: 0
+
+    psum_read_sbuf_write_bytes:
+      type: integer
+      format: int64
+      description: Total bytes of data moved from PSUM to SBUF by compute engine instructions.
+      x-unit: bytes
+      minimum: 0
+
+    input_queue_bytes:
+      type: integer
+      format: int64
+      description: Total transfer size of DMA blocks in "input" queues. The "input" queues are primarily for loading input data from HBM to the State Buffer.
+      x-unit: bytes
+      minimum: 0
+
+    output_queue_bytes:
+      type: integer
+      format: int64
+      description: Total transfer size of DMA blocks in "output" queues. The "output" queues are primarily for writing output data from the State Buffer to HBM.
+      x-unit: bytes
+      minimum: 0
+
+    weight_queue_bytes:
+      type: integer
+      format: int64
+      description: Total transfer size of DMA blocks in "data" queues. The "data" queues are primarily for loading weights from HBM to the State Buffer. This size may be larger than weight_size_bytes if weights are loaded multiple times or spilled and reloaded.
+      x-unit: bytes
+      minimum: 0
+
+    software_dynamic_dma_active_time:
+      type: number
+      format: float
+      description: Duration of time when at least one software generated DMA packet is transfering.
+      x-unit: seconds
+      minimum: 0.0
+
+    software_dynamic_dma_active_time_percent:
+      type: number
+      format: float
+      description: Percentage of time when at least one software generated DMA packet is transfering.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    software_dynamic_dma_packet_count:
+      type: integer
+      format: int64
+      description: Number of DMA packets that are dynamically generated during execution via software backend.
+      minimum: 0
+
+    software_dynamic_dma_size:
+      type: integer
+      format: int64
+      description: Total transfer size of DMA packets that are dynamically generated during execution via software backend.
+      x-unit: bytes
+      minimum: 0
+
+    software_dynamic_dma_packet_percent:
+      type: number
+      format: float
+      description: Percentage of DMA packets that are dynamically generated during execution via software backend.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    software_dynamic_dma_size_percent:
+      type: number
+      format: float
+      description: Percentage of total transfer size for DMA packets that are dynamically generated via software backend.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    hardware_dynamic_dma_active_time:
+      type: number
+      format: float
+      description: Duration of time when at least one hardware generated DMA packet is transfering.
+      x-unit: seconds
+      minimum: 0.0
+
+    hardware_dynamic_dma_active_time_percent:
+      type: number
+      format: float
+      description: Percentage of time when at least one hardware generated DMA packet is transfering.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    hardware_dynamic_dma_packet_count:
+      type: integer
+      format: int64
+      description: Number of DMA packets that are dynamically generated during execution via dedicated hardware.
+      minimum: 0
+
+    hardware_dynamic_dma_size:
+      type: integer
+      format: int64
+      description: Total transfer size of DMA packets that are dynamically generated during execution via dedicated hardware.
+      x-unit: bytes
+      minimum: 0
+
+    hardware_dynamic_dma_packet_percent:
+      type: number
+      format: float
+      description: Percentage of DMA packets that are dynamically generated during execution via dedicated hardware.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    hardware_dynamic_dma_size_percent:
+      type: number
+      format: float
+      description: Percentage of total transfer size for DMA packets that are dynamically generated via dedicated hardware.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    tensor_engine_instruction_time:
+      type: number
+      format: float
+      description: Total duration of all Tensor engine instructions. Overlapping instructions on the engine are added together. Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    tensor_engine_active_time:
+      type: number
+      format: float
+      description: Duration of time when Tensor engine is processing at least one instruction (excluding semaphore waits). Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    tensor_engine_active_time_percent:
+      type: number
+      format: float
+      description: Percentage of time when Tensor engine is processing at least one instruction (excluding semaphore waits).
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    tensor_engine_instruction_count:
+      type: integer
+      format: int64
+      description: Number of Tensor Engine instructions.
+      minimum: 0
+
+    matmul_instruction_count:
+      type: integer
+      format: int64
+      description: Total number of MATMUL instructions.
+      minimum: 0
+
+    mfu_estimated_percent:
+      type: number
+      format: float
+      description: MFU is Model FLOPs Utilization. This reflects the Tensor Engine utilization for useful compute i.e. the matrix multiplications from the HLO model definition, and excludes other instructions for data movement (i.e. transposes and partition broadcasts) inserted by the compiler to resolve memory layout conflicts. Note, each floating point multiply-add is counted as two FLOPs. Calculated as 2 * MAC_count / (tensor_engine_max_ops_per_sec * total_time) where tensor_engine_max_ops_per_sec is 2 times the number of Tensor Engine elements times the clock speed.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    mfu_max_achievable_estimated_percent:
+      type: number
+      format: float
+      description: The best Tensor Engine Utilization you can achieve for this workload. Calculated as (model_flops / (hbm_write_bytes + hbm_read_bytes)) / (max_ops_per_sec / max_hbm_bandwidth). If mfu_estimated_percent is much smaller than this value, then this likely indicates a major data movement inefficiency introduced by compilation or kernel implementation for NKI. If mfu_estimated_percent is close to this value and the mfu_estimated_percent value is also very high, then there's no point reducing HBM traffic. But if the values are close and mfu_estimated_percent is lower than you want, consider improving the arithmetic intensity of your workload by performing more computation on every data access.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    mfu_hlo_estimated_percent:
+      type: number
+      format: float
+      description: MFU (HLO) is Model FLOPs Utilization based on HLO stats. This reflects the Tensor Engine utilization for useful compute i.e. the matrix multiplications from the HLO model definition, and excludes other instructions for data movement (i.e. transposes and partition broadcasts) inserted by the compiler to resolve memory layout conflicts. Note, each floating point multiply-add is counted as two FLOPs. Calculated as model_flops / (tensor_engine_max_ops_per_sec * total_time) where model_flops is 2 * MAC_count from HLO stats and tensor_engine_max_ops_per_sec is 2 times the number of Tensor Engine elements times the clock speed. Note this will be 0 if HLO stats are missing, which is the case for NKI kernels.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    mfu_hlo_max_achievable_estimated_percent:
+      type: number
+      format: float
+      description: The best Tensor Engine Utilization you can achieve for this workload based on HLO model FLOPs. Calculated as (model_flops / (hbm_write_bytes + hbm_read_bytes)) / (max_ops_per_sec / max_hbm_bandwidth). If mfu_hlo_estimated_percent is much smaller than this value, then this likely indicates a major data movement inefficiency introduced by compilation or kernel implementation for NKI. If mfu_hlo_estimated_percent is close to this value and the mfu_hlo_estimated_percent value is also very high, then there's no point reducing HBM traffic. But if the values are close and mfu_hlo_estimated_percent is lower than you want, consider improving the arithmetic intensity of your workload by performing more computation on every data access. Note this will be 0 if HLO stats are missing, which is the case for NKI kernels.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    mfu_inst_estimated_percent:
+      type: number
+      format: float
+      description: MFU (Instruction) is Model FLOPs Utilization based on instruction trace. This reflects the Tensor Engine utilization for useful compute calculated from executed instructions, excluding transposes. Unlike mfu_hlo_estimated_percent which uses HLO model stats, this metric uses (hardware_flops - transpose_flops) from the actual instruction trace. Note, each floating point multiply-add is counted as two FLOPs. Calculated as (hardware_flops - transpose_flops) / (tensor_engine_max_ops_per_sec * total_time) where tensor_engine_max_ops_per_sec is 2 times the number of Tensor Engine elements times the clock speed.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    mfu_inst_max_achievable_estimated_percent:
+      type: number
+      format: float
+      description: The best Tensor Engine Utilization you can achieve for this workload based on instruction trace FLOPs (excluding transposes). Calculated as ((hardware_flops - transpose_flops) / (hbm_write_bytes + hbm_read_bytes)) / (max_ops_per_sec / max_hbm_bandwidth). If mfu_inst_estimated_percent is much smaller than this value, then this likely indicates a major data movement inefficiency. If mfu_inst_estimated_percent is close to this value and the mfu_inst_estimated_percent value is also very high, then there's no point reducing HBM traffic. But if the values are close and mfu_inst_estimated_percent is lower than you want, consider improving the arithmetic intensity of your workload by performing more computation on every data access.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    hfu_estimated_percent:
+      type: number
+      format: float
+      description: HFU is Hardware FLOPs Utilization. This reflects the Tensor Engine utilization calculated from all Tensor Engine instructions that Neuron Compiler emits for execution. This metric is typically higher than mfu_estimated_percent because it includes matmul instructions for data movement (i.e. transposes and partition broadcasts) inserted by the compiler to resolve memory layout conflicts. Note, each floating point multiply-add is counted as two FLOPs. Calculated as hardware_flops / (tensor_engine_max_ops_per_sec * total_time) where tensor_engine_max_ops_per_sec is 2 times the number of Tensor Engine elements times the clock speed.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    vector_engine_instruction_time:
+      type: number
+      format: float
+      description: Total duration of all Vector engine instructions. Overlapping instructions on the engine are added together. Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    vector_engine_active_time:
+      type: number
+      format: float
+      description: Duration of time when Vector engine is processing at least one instruction (excluding semaphore waits). Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    vector_engine_active_time_percent:
+      type: number
+      format: float
+      description: Percentage of time when Vector engine is processing at least one instruction (excluding semaphore waits).
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    vector_engine_instruction_count:
+      type: integer
+      format: int64
+      description: Number of Vector Engine instructions.
+      minimum: 0
+
+    scalar_engine_instruction_time:
+      type: number
+      format: float
+      description: Total duration of all Scalar engine instructions. Overlapping instructions on the engine are added together. Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    scalar_engine_active_time:
+      type: number
+      format: float
+      description: Duration of time when Scalar engine is processing at least one instruction (excluding semaphore waits). Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    scalar_engine_active_time_percent:
+      type: number
+      format: float
+      description: Percentage of time when Scalar engine is processing at least one instruction (excluding semaphore waits).
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    scalar_engine_instruction_count:
+      type: integer
+      format: int64
+      description: Number of Scalar Engine instructions.
+      minimum: 0
+
+    activate_instruction_time:
+      type: number
+      format: float
+      description: Total duration of all ACTIVATE/ACTIVATE_QUANTIZE instructions. Overlapping instructions are added up. Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    activate_instruction_count:
+      type: integer
+      format: int64
+      description: Number of ACTIVATE/ACTIVATE_QUANTIZE instructions.
+      minimum: 0
+
+    sync_engine_instruction_time:
+      type: number
+      format: float
+      description: Total duration of all Sync engine instructions. Overlapping instructions on the engine are added together. Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    sync_engine_active_time:
+      type: number
+      format: float
+      description: Duration of time when Sync engine is processing at least one instruction (excluding semaphore waits). Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    sync_engine_active_time_percent:
+      type: number
+      format: float
+      description: Percentage of time when Sync engine is processing at least one instruction (excluding semaphore waits).
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    sync_engine_instruction_count:
+      type: integer
+      format: int64
+      description: Number of Sync Engine instructions.
+      minimum: 0
+
+    gpsimd_engine_instruction_time:
+      type: number
+      format: float
+      description: Total duration of all GpSimd engine instructions. Overlapping instructions on the engine are added together. Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    gpsimd_engine_active_time:
+      type: number
+      format: float
+      description: Duration of time when GpSimd engine is processing at least one instruction (excluding semaphore waits). Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    gpsimd_engine_active_time_percent:
+      type: number
+      format: float
+      description: Percentage of time when GpSimd engine is processing at least one instruction (excluding semaphore waits).
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    gpsimd_engine_instruction_count:
+      type: integer
+      format: int64
+      description: Number of GpSimd Engine instructions.
+      minimum: 0
+
+    cc_op_time:
+      type: number
+      format: float
+      description: Total duration of all Collective Communication (CC) operations. Overlapping operations are added together. Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    cc_op_active_time:
+      type: number
+      format: float
+      description: Duration of time when at least one Collective Communication (CC) operation is active. Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    cc_op_active_time_percent:
+      type: number
+      format: float
+      description: Percentage of time when at least one Collective Communication (CC) operation is active.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    cc_op_count:
+      type: integer
+      format: int64
+      description: Number of Collective Communication (CC) operations.
+      minimum: 0
+
+    cc_cores_instruction_time:
+      type: number
+      format: float
+      description: Total duration of instructions on all Collective Communication (CC) cores. Overlapping instructions on the cores are added together.
+      x-unit: seconds
+      minimum: 0.0
+
+    cc_cores_instruction_active_time:
+      type: number
+      format: float
+      description: Duration of time when at least one Collective Communication (CC) core is processing an instruction (excluding semaphore waits).
+      x-unit: seconds
+      minimum: 0.0
+
+    cc_cores_instruction_active_time_percent:
+      type: number
+      format: float
+      description: Percentage of time when at least one Collective Communication (CC) core is processing an instruction (excluding semaphore waits).
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    cc_cores_instruction_count:
+      type: integer
+      format: int64
+      description: Number of instructions on all Collective Communication (CC) cores.
+      minimum: 0
+
+    total_active_time:
+      type: number
+      format: float
+      description: Total duration of time when at least one engine, DMA, or CC operation is active. Computed as the union of all active intervals. Units are in seconds.
+      x-unit: seconds
+      minimum: 0.0
+
+    total_active_time_percent:
+      type: number
+      format: float
+      description: Percentage of total execution time when at least one engine, DMA, or CC operation is active.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0

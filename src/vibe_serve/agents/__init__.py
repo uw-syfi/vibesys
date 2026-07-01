@@ -11,15 +11,34 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .base import AgentRunner
-from .cli_runner import CliAgentRunner
-from .deepagents_runner import DeepAgentsRunner
+from vibe_serve.config import Config
+from vibe_serve.constants import DEFAULT_AGENT_BACKEND
 
+from .base import AgentRunner
+
+# ``CliAgentRunner`` and ``DeepAgentsRunner`` are imported lazily to break a
+# circular import: ``vibe_serve.agent_runner`` imports
+# ``vibe_serve.agents.callbacks`` (which triggers this ``__init__``), and both
+# concrete runners import back from ``vibe_serve.agent_runner``. Importing
+# them eagerly here turned the cycle into an ImportError on the first entry
+# point that hits ``agent_runner`` first (e.g. the ``vibe-serve`` script).
 __all__ = ["AgentRunner", "DeepAgentsRunner", "CliAgentRunner", "build_agent_runner"]
 
 
+def __getattr__(name: str):
+    if name == "CliAgentRunner":
+        from .cli_runner import CliAgentRunner
+
+        return CliAgentRunner
+    if name == "DeepAgentsRunner":
+        from .deepagents_runner import DeepAgentsRunner
+
+        return DeepAgentsRunner
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 def build_agent_runner(
-    config: dict,
+    config: Config,
     *,
     agent_backend: str | None,
     cli_provider: str | None,
@@ -36,10 +55,12 @@ def build_agent_runner(
     """Construct the right :class:`AgentRunner` for the requested backend.
 
     Args:
-        config: Parsed ``agent.toml`` dict (may contain an ``[agent]`` section).
+        config: Parsed :class:`~vibe_serve.config.Config`; the ``[agent]``
+            section drives backend/provider/model/timeout selection.
         agent_backend: CLI override; if set, takes precedence over
-            ``config["agent"]["backend"]``. Falls back to ``"deepagents"``.
-        cli_provider: CLI override for ``config["agent"]["cli_provider"]``.
+            ``config.agent.backend``. Falls back to
+            :data:`vibe_serve.constants.DEFAULT_AGENT_BACKEND` (``"cli"``).
+        cli_provider: CLI override for ``config.agent.cli_provider``.
         backends: Mapping ``{"implementer": BaseSandbox, "judge": ..., "perf_eval": ...}``.
             Required for the deepagents path; ignored for the cli path.
         skills: Skill directory names already materialized in the workspace,
@@ -65,11 +86,8 @@ def build_agent_runner(
             combined with ``--docker``, or the cli backend was selected
             without a provider.
     """
-    backend = (
-        agent_backend
-        or (config.get("agent") or {}).get("backend")
-        or "cli"
-    )
+    agent_cfg = config.agent
+    backend = agent_backend or agent_cfg.backend or DEFAULT_AGENT_BACKEND
 
     if backend == "deepagents":
         if backends is None:
@@ -77,6 +95,8 @@ def build_agent_runner(
                 "internal error: build_agent_runner called with backend='deepagents' "
                 "but no backends dict was provided"
             )
+        from .deepagents_runner import DeepAgentsRunner
+
         return DeepAgentsRunner(
             model=model,
             backends=backends,
@@ -86,7 +106,7 @@ def build_agent_runner(
         )
 
     if backend == "cli":
-        provider = cli_provider or (config.get("agent") or {}).get("cli_provider") or "codex"
+        provider = cli_provider or agent_cfg.cli_provider or "codex"
         docker_sandboxes = None
         modal_sandboxes = None
         if use_docker or use_modal:
@@ -105,10 +125,12 @@ def build_agent_runner(
                 modal_sandboxes = backends
             else:
                 docker_sandboxes = backends
-        timeout = (config.get("agent") or {}).get("cli_timeout")
+        timeout = agent_cfg.cli_timeout
         # cli_model overrides model.name for the CLI tool. If not set,
         # pass None so the CLI tool uses its own default.
-        cli_model = (config.get("agent") or {}).get("cli_model")
+        cli_model = agent_cfg.cli_model
+        from .cli_runner import CliAgentRunner
+
         return CliAgentRunner(
             provider=provider,
             model=cli_model,

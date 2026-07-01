@@ -1,0 +1,40 @@
+ThrottleSummary:
+  description: Summary statistics for hardware throttling on each by NeuronCore and for each type of throttling.
+  properties:
+    nc_idx:
+      type: integer
+      format: int32
+      description: Index of the NeuronCore within a Neuron Device.
+      minimum: 0
+
+    throttle_type:
+      type: string
+      description: Type of throttling (e.g., "activity_0", "activity_1", "unknown"). The value "all" means the metric aggregates across all throttle types.
+      example: activity_0
+
+    throttle_active_time_ns:
+      type: integer
+      format: int64
+      description: Total time in nanoseconds when throttling was active.
+      x-unit: nanoseconds
+      minimum: 0
+
+    throttle_active_time_percent:
+      type: number
+      format: float
+      description: Percent of total time when throttling was active.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+    max_achievable_util_with_throttling_percent:
+      type: number
+      format: float
+      description: Time-weighted average of the maximum achievable utilization with throttling, representing what fraction of compute capacity was permitted during throttled periods. A value of 1.0 means no throttling occurred, while 0.5 means the hardware was limited to 50% utilization. Calculated as the average of K/N ratios from HAM notifications weighted by the duration each limit was active.
+      x-unit: percent
+      minimum: 0.0
+      maximum: 1.0
+
+  required:
+    - nc_idx
+    - throttler_type

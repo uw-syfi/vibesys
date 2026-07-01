@@ -22,10 +22,7 @@ from vibe_serve.loops.evolve.population import (
     Objective,
     Population,
 )
-from vibe_serve.schemas import MutatorResponse
-from vibe_serve.schemas import ProfilerSummary
-from vibe_serve.schemas import JudgeResponse, Verdict
-
+from vibe_serve.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -152,8 +149,11 @@ def test_cold_start_records_first_individual_with_no_parent(tmp_path, ref_file):
     from the profiler."""
     runner = _make_runner()
     result = _invoke_loop(
-        tmp_path, ref_file, runner,
-        max_generations=1, children_per_generation=1,
+        tmp_path,
+        ref_file,
+        runner,
+        max_generations=1,
+        children_per_generation=1,
     )
     assert result is True
 
@@ -173,8 +173,11 @@ def test_cold_start_skips_profiler_when_judge_fails(tmp_path, ref_file):
     is recorded with passed=False and no commit."""
     runner = _make_runner(judge_verdicts=["fail"])
     result = _invoke_loop(
-        tmp_path, ref_file, runner,
-        max_generations=1, children_per_generation=1,
+        tmp_path,
+        ref_file,
+        runner,
+        max_generations=1,
+        children_per_generation=1,
     )
     assert result is True
     assert runner.counters["mutator"] == 1
@@ -200,8 +203,11 @@ def test_second_generation_uses_first_passing_child_as_parent(tmp_path, ref_file
     with parent_id pointing at that seed."""
     runner = _make_runner()
     result = _invoke_loop(
-        tmp_path, ref_file, runner,
-        max_generations=2, children_per_generation=1,
+        tmp_path,
+        ref_file,
+        runner,
+        max_generations=2,
+        children_per_generation=1,
     )
     assert result is True
 
@@ -222,8 +228,11 @@ def test_failed_child_excluded_from_future_parent_pool(tmp_path, ref_file):
     # 3 mutators, 3 judges (pass, fail, pass), 2 profilers (pass children only).
     runner = _make_runner(judge_verdicts=["pass", "fail", "pass"])
     result = _invoke_loop(
-        tmp_path, ref_file, runner,
-        max_generations=3, children_per_generation=1,
+        tmp_path,
+        ref_file,
+        runner,
+        max_generations=3,
+        children_per_generation=1,
     )
     assert result is True
     assert runner.counters["mutator"] == 3
@@ -251,8 +260,11 @@ def test_cold_start_prompt_uses_cold_start_section(tmp_path, ref_file):
     captured: list[str] = []
     runner = _make_runner(capture_mutator_prompts=captured)
     _invoke_loop(
-        tmp_path, ref_file, runner,
-        max_generations=1, children_per_generation=1,
+        tmp_path,
+        ref_file,
+        runner,
+        max_generations=1,
+        children_per_generation=1,
     )
     assert len(captured) == 1
     prompt = captured[0]
@@ -294,9 +306,13 @@ def test_pareto_mode_records_metrics_dict_on_individuals(tmp_path, ref_file):
     ]
     runner = _make_runner(profiler_responses=profiler_responses)
     result = _invoke_loop(
-        tmp_path, ref_file, runner,
-        max_generations=2, children_per_generation=1,
-        objectives=objectives, frontier_bias=1.0,
+        tmp_path,
+        ref_file,
+        runner,
+        max_generations=2,
+        children_per_generation=1,
+        objectives=objectives,
+        frontier_bias=1.0,
     )
     assert result is True
 
@@ -335,8 +351,10 @@ def test_pareto_addendum_appears_in_profiler_prompt(tmp_path, ref_file):
             if kind == "profiler":
                 captured_profiler_prompts.append(system_prompt)
             return original(
-                kind=kind, response_cls=response_cls,
-                system_prompt=system_prompt, **kwargs,
+                kind=kind,
+                response_cls=response_cls,
+                system_prompt=system_prompt,
+                **kwargs,
             )
 
         runner.invoke.side_effect = spy
@@ -345,9 +363,13 @@ def test_pareto_addendum_appears_in_profiler_prompt(tmp_path, ref_file):
     runner = _make_runner_with_profiler_capture()
     objectives = [Objective("tput", "max"), Objective("lat_ms", "min")]
     _invoke_loop(
-        tmp_path, ref_file, runner,
-        max_generations=1, children_per_generation=1,
-        objectives=objectives, frontier_bias=1.0,
+        tmp_path,
+        ref_file,
+        runner,
+        max_generations=1,
+        children_per_generation=1,
+        objectives=objectives,
+        frontier_bias=1.0,
     )
     assert len(captured_profiler_prompts) == 1
     prompt = captured_profiler_prompts[0]
@@ -362,8 +384,11 @@ def test_no_objectives_keeps_metrics_empty_and_legacy_behavior(tmp_path, ref_fil
     pre-Pareto behavior."""
     runner = _make_runner()
     result = _invoke_loop(
-        tmp_path, ref_file, runner,
-        max_generations=1, children_per_generation=1,
+        tmp_path,
+        ref_file,
+        runner,
+        max_generations=1,
+        children_per_generation=1,
         # Note: no `objectives` kwarg → single-objective mode.
     )
     assert result is True
@@ -378,8 +403,11 @@ def test_second_child_prompt_includes_parent_block(tmp_path, ref_file):
     captured: list[str] = []
     runner = _make_runner(capture_mutator_prompts=captured)
     _invoke_loop(
-        tmp_path, ref_file, runner,
-        max_generations=2, children_per_generation=1,
+        tmp_path,
+        ref_file,
+        runner,
+        max_generations=2,
+        children_per_generation=1,
     )
     assert len(captured) == 2
     gen2_prompt = captured[1]

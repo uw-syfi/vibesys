@@ -166,8 +166,7 @@ class CliAgentRunner:
     ):
         if provider not in _PROVIDER_CLASSES:
             raise SystemExit(
-                f"unknown cli provider {provider!r}; "
-                f"expected one of: {sorted(_PROVIDER_CLASSES)}"
+                f"unknown cli provider {provider!r}; expected one of: {sorted(_PROVIDER_CLASSES)}"
             )
         if docker_sandboxes is not None and modal_sandboxes is not None:
             raise SystemExit(
@@ -330,9 +329,7 @@ class CliAgentRunner:
         finally:
             if mcp_servers:
                 agent.uninstall_mcp_servers(workspace, mcp_servers)
-            self._write_usage_record(
-                kind=kind, round_label=round_label, agent=agent
-            )
+            self._write_usage_record(kind=kind, round_label=round_label, agent=agent)
 
         # 8. Parse the structured response, falling back if the CLI tool
         #    didn't produce parseable JSON.
@@ -351,9 +348,7 @@ class CliAgentRunner:
                     f"\n=== {label} ROUND OUTPUT (raw output) ===",
                     self._run_log_file,
                 )
-                _log_and_print(
-                    text, self._run_log_file, max_len=_DEFAULT_MAX_TEXT_LEN
-                )
+                _log_and_print(text, self._run_log_file, max_len=_DEFAULT_MAX_TEXT_LEN)
             return fallback_factory()
 
         _log_and_print(
@@ -367,9 +362,7 @@ class CliAgentRunner:
         )
         return parsed
 
-    def _write_usage_record(
-        self, *, kind: str, round_label: str, agent: Any
-    ) -> None:
+    def _write_usage_record(self, *, kind: str, round_label: str, agent: Any) -> None:
         """Append one JSONL record to ``<log_dir>/usage.jsonl`` for this call.
 
         Reads ``agent._last_session`` (stashed by
@@ -393,21 +386,13 @@ class CliAgentRunner:
             "provider": self._provider,
             "model": self._model_name,
             "input_tokens": usage.get("input_tokens", 0),
-            "cache_creation_input_tokens": usage.get(
-                "cache_creation_input_tokens", 0
-            ),
+            "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0),
             "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0),
             "output_tokens": usage.get("output_tokens", 0),
             "total_cost_usd": (
-                getattr(session, "total_cost_usd", None)
-                if session is not None
-                else None
+                getattr(session, "total_cost_usd", None) if session is not None else None
             ),
-            "duration_ms": (
-                getattr(session, "duration_ms", None)
-                if session is not None
-                else None
-            ),
+            "duration_ms": (getattr(session, "duration_ms", None) if session is not None else None),
         }
         target = self._log_dir / "usage.jsonl"
         try:

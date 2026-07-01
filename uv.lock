@@ -4364,6 +4364,7 @@ dependencies = [
     { name = "mcp" },
     { name = "modal" },
     { name = "openai" },
+    { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "soundfile" },
 ]
@@ -4392,6 +4393,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.0" },
     { name = "modal", specifier = ">=1.4.2" },
     { name = "openai", specifier = ">=1.28.0" },
+    { name = "pydantic", specifier = ">=2" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "soundfile", specifier = ">=0.13.1" },
 ]

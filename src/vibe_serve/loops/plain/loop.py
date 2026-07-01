@@ -28,6 +28,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
+from vibe_serve.config import Config, as_config
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
 from vibe_serve.loops.plain.issue_board import (
@@ -335,7 +336,7 @@ def _ensure_bootstrap_issue(
 
 
 def run_plain_loop(
-    config: dict,
+    config: Config,
     exp_name: str,
     reference_path: str,
     *,
@@ -361,6 +362,7 @@ def run_plain_loop(
     exhausted with open work remaining, or if the run gets stuck (every
     remaining issue is BLOCKED).
     """
+    config = as_config(config)
     # Issue loop always uses git tracking so judge test scripts and the
     # issue tracker mirror persist across iterations.
     git_tracking = True
@@ -431,7 +433,11 @@ def run_plain_loop(
 
         state = resume_state if resume_state is not None else PlainLoopState()
         _ensure_bootstrap_issue(
-            store, state=state, log_dir=ctx.log_dir, ctx=ctx, prompt=prompt,
+            store,
+            state=state,
+            log_dir=ctx.log_dir,
+            ctx=ctx,
+            prompt=prompt,
         )
 
         # On resume, give every previously BLOCKED issue a fresh attempt
@@ -463,16 +469,15 @@ def run_plain_loop(
                 + f", running up to {max_rounds} more rounds"
             )
 
-        perf_eval_config = config.get("perf_eval", {})
-        load_levels = perf_eval_config.get("load_levels")
+        load_levels = config.perf_eval.load_levels
         previous_evaluator_feedback: list[str] | None = None
 
         while i < end_iteration:
             iter_label = i + 1
             progress_label = f"Round {iter_label}/{end_iteration}"
-            ctx.lprint(f"\n{'='*60}")
+            ctx.lprint(f"\n{'=' * 60}")
             ctx.lprint(f"  Round {iter_label}/{end_iteration}")
-            ctx.lprint(f"{'='*60}\n")
+            ctx.lprint(f"{'=' * 60}\n")
 
             # ---------------------------------------------------------------
             # DRAIN open issues
@@ -496,9 +501,7 @@ def run_plain_loop(
                         iteration=iter_label,
                         note=f"exhausted {max_attempts_per_issue} attempts",
                     )
-                    ctx.lprint(
-                        f"[block] issue #{issue.id} blocked after {issue.attempts} attempts"
-                    )
+                    ctx.lprint(f"[block] issue #{issue.id} blocked after {issue.attempts} attempts")
                     continue
 
                 # Claim the issue
@@ -519,8 +522,10 @@ def run_plain_loop(
                     _save_state(ctx.log_dir, state)
 
                     _sync_workspace_files(
-                        progress_path, perf_metrics_path,
-                        issues_dir, ctx.workspace,
+                        progress_path,
+                        perf_metrics_path,
+                        issues_dir,
+                        ctx.workspace,
                     )
                     ctx.reselect_gpu()
 
@@ -547,11 +552,13 @@ def run_plain_loop(
                         system_prompt=impl_system_prompt,
                         user_prompt=impl_prompt,
                         response_cls=IssueImplementerResponse,
-                        fallback_factory=lambda issue_id=issue_id_for_fallback: IssueImplementerResponse(
-                            issue_id=issue_id,
-                            summary="Implementer did not produce a structured response.",
-                            files_touched=[],
-                            self_check="No structured response received.",
+                        fallback_factory=lambda issue_id=issue_id_for_fallback: (
+                            IssueImplementerResponse(
+                                issue_id=issue_id,
+                                summary="Implementer did not produce a structured response.",
+                                files_touched=[],
+                                self_check="No structured response received.",
+                            )
                         ),
                         round_label=f"impl issue #{issue.id} att{issue.attempts + 1}",
                         progress_label=progress_label,
@@ -567,12 +574,8 @@ def run_plain_loop(
                     _update_progress_from_implementer(
                         progress_path, iter_label, issue, impl_response
                     )
-                    ctx.snapshot_workspace(
-                        f"iter-{iter_label}-impl-{issue.id}-att{issue.attempts}"
-                    )
-                    ctx.lprint(
-                        f"[snapshot] iter-{iter_label}-impl-{issue.id}-att{issue.attempts}"
-                    )
+                    ctx.snapshot_workspace(f"iter-{iter_label}-impl-{issue.id}-att{issue.attempts}")
+                    ctx.lprint(f"[snapshot] iter-{iter_label}-impl-{issue.id}-att{issue.attempts}")
 
                 # next_phase only kicks in for the first issue we resume on
                 next_phase = ""
@@ -584,8 +587,10 @@ def run_plain_loop(
                 _save_state(ctx.log_dir, state)
 
                 _sync_workspace_files(
-                    progress_path, perf_metrics_path,
-                    issues_dir, ctx.workspace,
+                    progress_path,
+                    perf_metrics_path,
+                    issues_dir,
+                    ctx.workspace,
                 )
                 ctx.reselect_gpu()
 
@@ -632,12 +637,8 @@ def run_plain_loop(
                 store.reload()
                 render_all(issues_dir, store)
 
-                _update_progress_from_judge(
-                    progress_path, iter_label, issue, judge_response
-                )
-                ctx.snapshot_workspace(
-                    f"iter-{iter_label}-judge-{issue.id}-att{issue.attempts}"
-                )
+                _update_progress_from_judge(progress_path, iter_label, issue, judge_response)
+                ctx.snapshot_workspace(f"iter-{iter_label}-judge-{issue.id}-att{issue.attempts}")
                 ctx.lprint(
                     f">>> Judge verdict on #{issue.id}: {judge_response.verdict.value.upper()}"
                 )
@@ -670,13 +671,8 @@ def run_plain_loop(
             # PERF_EVAL phase (after drain complete)
             # ---------------------------------------------------------------
             # Bail-out check: if every remaining issue is BLOCKED, we're stuck.
-            remaining = [
-                iss for iss in store.list()
-                if iss.status not in (IssueStatus.CLOSED,)
-            ]
-            blocked_only = remaining and all(
-                iss.status == IssueStatus.BLOCKED for iss in remaining
-            )
+            remaining = [iss for iss in store.list() if iss.status not in (IssueStatus.CLOSED,)]
+            blocked_only = remaining and all(iss.status == IssueStatus.BLOCKED for iss in remaining)
             if blocked_only:
                 ctx.lprint(
                     f"[stop] all remaining issues are blocked "
@@ -694,8 +690,10 @@ def run_plain_loop(
             _save_state(ctx.log_dir, state)
 
             _sync_workspace_files(
-                progress_path, perf_metrics_path,
-                issues_dir, ctx.workspace,
+                progress_path,
+                perf_metrics_path,
+                issues_dir,
+                ctx.workspace,
             )
             ctx.reselect_gpu()
 
