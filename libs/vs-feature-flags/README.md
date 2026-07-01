@@ -25,19 +25,19 @@ from vs_feature_flags import FeatureDefinition, FeatureRegistry
 
 
 class FeatureFlag(StrEnum):
-    NEW_AGENT_LOOP = "new_agent_loop"
-    STRICT_JUDGE_PROMPTS = "strict_judge_prompts"
+    NEW_DASHBOARD = "new_dashboard"
+    STRICT_VALIDATION = "strict_validation"
 
 
 FEATURES = FeatureRegistry(
     FeatureFlag,
     {
-        FeatureFlag.NEW_AGENT_LOOP: FeatureDefinition(
-            description="Use the new agent loop implementation.",
+        FeatureFlag.NEW_DASHBOARD: FeatureDefinition(
+            description="Use the redesigned dashboard.",
             default=False,
         ),
-        FeatureFlag.STRICT_JUDGE_PROMPTS: FeatureDefinition(
-            description="Use stricter judge prompts.",
+        FeatureFlag.STRICT_VALIDATION: FeatureDefinition(
+            description="Reject invalid input earlier.",
             default=True,
         ),
     },
@@ -52,19 +52,19 @@ the manifest documented by construction.
 Use typed enum members at call sites:
 
 ```python
-if FEATURES.is_enabled(FeatureFlag.NEW_AGENT_LOOP):
-    run_new_loop()
+if FEATURES.is_enabled(FeatureFlag.NEW_DASHBOARD):
+    show_new_dashboard()
 else:
-    run_current_loop()
+    show_current_dashboard()
 ```
 
 Pass typed overrides when user config or tests need to change behavior:
 
 ```python
-overrides = {FeatureFlag.NEW_AGENT_LOOP: True}
+overrides = {FeatureFlag.NEW_DASHBOARD: True}
 
-if FEATURES.is_enabled(FeatureFlag.NEW_AGENT_LOOP, overrides):
-    run_new_loop()
+if FEATURES.is_enabled(FeatureFlag.NEW_DASHBOARD, overrides):
+    show_new_dashboard()
 ```
 
 ## Parse Config
@@ -82,8 +82,8 @@ For TOML, expose config like:
 
 ```toml
 [feature_flags]
-new_agent_loop = true
-strict_judge_prompts = false
+new_dashboard = true
+strict_validation = false
 ```
 
 The parser rejects unknown flag names and non-boolean values. It does not coerce
@@ -91,11 +91,8 @@ strings like `"true"` into booleans.
 
 ## Testing
 
-Package tests live next to the package:
+Package tests live next to the package. From this directory:
 
 ```bash
-uv run pytest libs/vs-feature-flags/tests
+pytest tests
 ```
-
-The root project includes these tests in its pytest configuration, so
-`uv run pytest` runs them too.
