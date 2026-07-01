@@ -12,8 +12,8 @@ returns ``None``, and ``reselect_device`` is a no-op.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from deepagents.backends import LocalShellBackend
 from deepagents.backends.sandbox import BaseSandbox

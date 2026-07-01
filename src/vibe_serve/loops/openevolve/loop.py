@@ -13,7 +13,6 @@ State persistence reuses ``population.json`` (extended in
 from __future__ import annotations
 
 import random
-from pathlib import Path
 
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext

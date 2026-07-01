@@ -551,11 +551,13 @@ def run_plain_loop(
                         system_prompt=impl_system_prompt,
                         user_prompt=impl_prompt,
                         response_cls=IssueImplementerResponse,
-                        fallback_factory=lambda: IssueImplementerResponse(
-                            issue_id=issue_id_for_fallback,
-                            summary="Implementer did not produce a structured response.",
-                            files_touched=[],
-                            self_check="No structured response received.",
+                        fallback_factory=lambda issue_id=issue_id_for_fallback: (
+                            IssueImplementerResponse(
+                                issue_id=issue_id,
+                                summary="Implementer did not produce a structured response.",
+                                files_touched=[],
+                                self_check="No structured response received.",
+                            )
                         ),
                         round_label=f"impl issue #{issue.id} att{issue.attempts + 1}",
                     )
@@ -613,8 +615,8 @@ def run_plain_loop(
                     system_prompt=judge_system_prompt,
                     user_prompt=judge_prompt,
                     response_cls=IssueJudgeResponse,
-                    fallback_factory=lambda: IssueJudgeResponse(
-                        issue_id=judge_issue_id,
+                    fallback_factory=lambda issue_id=judge_issue_id: IssueJudgeResponse(
+                        issue_id=issue_id,
                         analysis="No structured response received from judge.",
                         feedback="Judge did not produce a structured response.",
                         verdict=Verdict.FAIL,

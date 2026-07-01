@@ -1,12 +1,9 @@
 import io
-import json
 import re
 from unittest.mock import MagicMock
 
-import pytest
-
 from vibe_serve.agents.callbacks import AgentLogger
-from vibe_serve.constants import _BOLD, _CYAN, _DIM, _GREEN, _RED, _RESET, _YELLOW
+from vibe_serve.constants import _DIM, _GREEN, _RED, _RESET
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 

@@ -312,7 +312,7 @@ def cmd_idle_gaps(args):
         by_device[r[3]].append(r)
 
     gaps, total_idle, total_busy = [], 0, 0
-    for device_id, kernels in by_device.items():
+    for _device_id, kernels in by_device.items():
         intervals = sorted((k[1], k[2]) for k in kernels)
         merged = []
         for s, e in intervals:
@@ -414,7 +414,7 @@ def cmd_graph_replays(args):
 
     # Per-graphExecId stats
     by_exec: dict[int, list[int]] = defaultdict(list)
-    for s, e, gid, geid in traces:
+    for s, e, _gid, geid in traces:
         by_exec[geid].append(e - s)
 
     print(
@@ -452,7 +452,7 @@ def cmd_graph_replays(args):
         if replay_gaps:
             avg_gap = sum(replay_gaps) / len(replay_gaps) / 1000
             med_gap = sorted(replay_gaps)[len(replay_gaps) // 2] / 1000
-            print(f"\nGap between replays (scheduling overhead):")
+            print("\nGap between replays (scheduling overhead):")
             print(f"  Avg: {avg_gap:.1f} us")
             print(f"  Median: {med_gap:.1f} us")
             print(f"  Min: {min(replay_gaps) / 1000:.1f} us")
@@ -522,7 +522,7 @@ def cmd_step_timeline(args):
     boundaries = [i for i in range(1, len(rows)) if rows[i][1] - rows[i - 1][2] > best_thresh]
     if len(boundaries) < 2:
         print(
-            f"(Could not detect decode step boundaries. Try graph-replays if CUDA graphs are active.)"
+            "(Could not detect decode step boundaries. Try graph-replays if CUDA graphs are active.)"
         )
         return
 

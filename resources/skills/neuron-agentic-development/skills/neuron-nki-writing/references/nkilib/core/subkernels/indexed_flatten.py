@@ -14,8 +14,6 @@
 
 """Indexed flatten kernel for MoE blockwise matmul operations."""
 
-from typing import Optional
-
 import nki
 import nki.isa as nisa
 import nki.language as nl
@@ -30,7 +28,7 @@ def indexed_flatten(
     f_len: int,
     output_len: int,
     row_offsets: nl.ndarray,
-    row_offsets_start: Optional[nl.ndarray] = None,
+    row_offsets_start: nl.ndarray | None = None,
     padding_val: int = -1,
 ) -> nl.ndarray:
     """

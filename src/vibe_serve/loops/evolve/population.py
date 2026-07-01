@@ -65,7 +65,7 @@ class Objective:
         return value if self.direction == "max" else -value
 
 
-def _dominates(a: "Individual", b: "Individual", objectives: list[Objective]) -> bool:
+def _dominates(a: Individual, b: Individual, objectives: list[Objective]) -> bool:
     """True if ``a`` Pareto-dominates ``b`` under *objectives*.
 
     Convention: a dominates b iff for every objective, a is at-least-as
@@ -136,7 +136,7 @@ class Individual:
         return asdict(self)
 
     @classmethod
-    def from_json(cls, data: dict) -> "Individual":
+    def from_json(cls, data: dict) -> Individual:
         return cls(
             id=int(data["id"]),
             generation=int(data["generation"]),
@@ -285,7 +285,7 @@ class Population:
         total = sum(exps)
         r = rng.random() * total
         acc = 0.0
-        for ind, w in zip(ranked, exps):
+        for ind, w in zip(ranked, exps, strict=True):
             acc += w
             if r <= acc:
                 return ind
@@ -351,7 +351,7 @@ class Population:
         path.write_text(json.dumps([i.to_json() for i in self._individuals], indent=2))
 
     @classmethod
-    def load(cls, path: Path) -> "Population":
+    def load(cls, path: Path) -> Population:
         if not path.exists():
             return cls()
         data = json.loads(path.read_text())

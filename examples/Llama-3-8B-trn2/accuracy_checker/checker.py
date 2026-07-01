@@ -231,7 +231,7 @@ def main():
 
     print("Generating reference outputs ...")
     ref_outputs: list[list[int]] = []
-    for prompt, max_tokens, desc in test_cases:
+    for prompt, max_tokens, _desc in test_cases:
         ref_outputs.append(generate_reference(ref_model, tokenizer, prompt, max_tokens, device))
 
     # Unload reference model to free memory.

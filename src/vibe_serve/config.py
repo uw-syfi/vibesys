@@ -14,8 +14,9 @@ allowlist loader suffered from.
 
 import os
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal, Mapping
+from typing import Literal
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field

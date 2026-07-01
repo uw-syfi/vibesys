@@ -14,8 +14,6 @@
 
 """Utility functions for normalization kernels in token generation mode."""
 
-from typing import Optional, Tuple
-
 import nki.isa as nisa
 import nki.language as nl
 
@@ -42,7 +40,7 @@ def validate_shapes(
     input_view: TensorView,
     gamma_view: TensorView,
     output_view: TensorView,
-) -> Tuple[int, int, int, int]:
+) -> tuple[int, int, int, int]:
     """
     Validate tensor shapes for normalization operations.
 
@@ -215,7 +213,7 @@ def load_input_to_sbuf(
     input_sb: TensorView,
     num_H_shards: int,
     hidden_dim_tp: bool = False,
-    sbm: Optional[SbufManager] = None,
+    sbm: SbufManager | None = None,
 ) -> TensorView:
     """
     Load input data from HBM to SBUF with appropriate layout transformation.
@@ -257,7 +255,7 @@ def load_input_to_sbuf(
     else:
         # (BxS, H) -> (BxS, num_H_shards, H0, H2) -> (H0, BxS, num_H_shards, H2)
         if use_contiguous_load:
-            kernel_assert(sbm != None, "sbm required for contiguous load path")
+            kernel_assert(sbm is not None, "sbm required for contiguous load path")
             contiguous_load_transpose(input_hbm, input_sb, num_H_shards, sbm)
         else:
             input_hbm_view = input_hbm.reshape_dim(dim=1, shape=[num_H_shards, H0, H2]).permute(
@@ -407,10 +405,10 @@ def validate_shapes_quantize_mx(
         kernel_assert(
             output_residual_shape == (BxS, H), f"expected output_residual shape (B*S, H)={(BxS, H)}"
         )
-        kernel_assert(H1 % 8 == 0, f"Expected H1 divisible by 8 with fused residual add")
+        kernel_assert(H1 % 8 == 0, "Expected H1 divisible by 8 with fused residual add")
         # Residual transpose requires shard_size >= 128 (with LNC=2, BxS >= 256)
         kernel_assert(BxS >= 256, f"Residual add requires BxS >= 256 (got {BxS})")
     else:
-        kernel_assert(H1 % 4 == 0, f"Expected H1 divisible by 4")
+        kernel_assert(H1 % 4 == 0, "Expected H1 divisible by 4")
 
     return B, S, H, H0, H1, BxS, n_H512_tiles

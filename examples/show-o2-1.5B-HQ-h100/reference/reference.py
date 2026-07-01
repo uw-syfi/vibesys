@@ -325,7 +325,7 @@ class ShowO2Model:
         postprocess_mode: str = "upstream",
         resolution: int = DEFAULT_RESOLUTION,
         load_vae: bool = False,
-    ) -> "ShowO2Model":
+    ) -> ShowO2Model:
         if postprocess_mode not in {"upstream", "cpu", "native"}:
             raise ValueError(f"Unsupported postprocess mode: {postprocess_mode}")
         if vae_output_dtype not in {"float32", "native", "deferred"}:

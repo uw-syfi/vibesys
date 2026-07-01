@@ -18,8 +18,9 @@ struct or would lie about reuse semantics on one of the backends.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Protocol, TypeVar
+from typing import Protocol, TypeVar
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel

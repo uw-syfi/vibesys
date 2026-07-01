@@ -60,12 +60,12 @@ def interleave_copy(
     if scale is not None:
         kernel_assert(
             dst.shape[0] == src.shape[0] == scale.shape[0],
-            f"Partition dimension must match across dst, src, and scale.",
+            "Partition dimension must match across dst, src, and scale.",
         )
     if bias is not None:
         kernel_assert(
             dst.shape[0] == src.shape[0] == bias.shape[0],
-            f"Partition dimension must match across dst, src, and bias.",
+            "Partition dimension must match across dst, src, and bias.",
         )
 
     # Pure copy operation

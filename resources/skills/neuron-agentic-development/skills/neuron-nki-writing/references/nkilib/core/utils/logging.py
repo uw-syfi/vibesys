@@ -58,7 +58,6 @@ Usage Examples:
 import os
 import sys
 from enum import Enum
-from typing import Optional
 
 import nki.language as nl
 
@@ -125,7 +124,7 @@ _ENV_VAR_NAME = "NKILIB_LOG_LEVEL"
 _ENV_VAR_PREFIX = _ENV_VAR_NAME + "_"
 
 
-def _init_from_env_py() -> tuple[Optional[LogLevel], dict[str, LogLevel]]:
+def _init_from_env_py() -> tuple[LogLevel | None, dict[str, LogLevel]]:
     """Initialize global and specific logger levels from environment variables.
     Checking environment variables here works because this is not part of kernel code.
     """
@@ -177,10 +176,10 @@ def get_logger(name: str, level: LogLevel = _DEFAULT_LOG_LEVEL) -> Logger:
     """
 
     env_log_level = _ENV_LOG_LEVELS.get(name)
-    if env_log_level != None:
+    if env_log_level is not None:
         return Logger(name, env_log_level)
 
-    if _ENV_GLOBAL_LOG_LEVEL != None:
+    if _ENV_GLOBAL_LOG_LEVEL is not None:
         return Logger(name, _ENV_GLOBAL_LOG_LEVEL)
 
     return Logger(name, level)

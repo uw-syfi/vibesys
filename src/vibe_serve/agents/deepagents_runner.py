@@ -8,8 +8,9 @@ change vs. what the simple loop did before this abstraction landed.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 from deepagents import create_deep_agent
 from langchain.agents.structured_output import AutoStrategy

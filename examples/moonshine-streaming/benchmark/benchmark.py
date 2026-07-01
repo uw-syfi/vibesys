@@ -25,15 +25,14 @@ import asyncio
 import json
 import math
 import random
-import struct
 import time
 import wave
 from pathlib import Path
 
 try:
     import httpx
-except ImportError:
-    raise ImportError("httpx is required: pip install httpx")
+except ImportError as exc:
+    raise ImportError("httpx is required: pip install httpx") from exc
 try:
     import websockets
 except ImportError:
@@ -150,7 +149,7 @@ async def streaming_client(
 
     # latencies
     chunk_latencies: list[float] = []
-    for i, ts in enumerate(sent_times):
+    for _i, ts in enumerate(sent_times):
         future = [pt for pt in partial_times if pt >= ts]
         if future:
             chunk_latencies.append(future[0] - ts)
@@ -311,7 +310,6 @@ async def run_offline(args, audio_pool):
     seconds.  Each worker picks an audio sample, fires the request, and
     immediately starts the next one when it returns — i.e. measures the
     server's saturation throughput at the chosen concurrency level."""
-    rng = random.Random(args.seed)
     url = args.url.rstrip("/") + args.endpoint
     print(f"Offline benchmark: concurrency={args.concurrency} duration={args.duration}s url={url}")
 

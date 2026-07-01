@@ -9,8 +9,6 @@ are patched out — same pattern as ``tests/test_orchestrate.py``.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,7 +16,6 @@ import pytest
 from vibe_serve.agents import AgentRunner
 from vibe_serve.loops.evolve.loop import run_evolve_loop
 from vibe_serve.loops.evolve.population import (
-    Individual,
     Objective,
     Population,
 )

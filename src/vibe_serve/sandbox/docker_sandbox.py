@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import atexit
-import datetime
 import json
 import logging
 import os
@@ -11,8 +10,8 @@ import signal
 import subprocess
 import tempfile
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from deepagents.backends.protocol import (
     EditResult,
@@ -29,7 +28,7 @@ _live_containers: dict[str, str] = {}  # container_id -> container_name
 
 def _cleanup_containers() -> None:
     """Stop and remove all tracked containers."""
-    for container_id, name in list(_live_containers.items()):
+    for container_id, _name in list(_live_containers.items()):
         try:
             subprocess.run(
                 ["docker", "stop", container_id],
@@ -103,7 +102,7 @@ class DockerSandbox(BaseSandbox):
         passthrough_paths: list[str] | None = None,
         log_path: str | Path | None = None,
         extra_init_commands: list[str] | None = None,
-        setup_fns: list[Callable[["DockerSandbox"], None]] | None = None,
+        setup_fns: list[Callable[[DockerSandbox], None]] | None = None,
     ) -> None:
         """Initialize Docker sandbox configuration.
 
@@ -158,7 +157,7 @@ class DockerSandbox(BaseSandbox):
         self._container_id: str | None = None
         self._logger = self._setup_logger(log_path)
         self._extra_init_commands: list[str] = list(extra_init_commands or [])
-        self._setup_fns: list[Callable[["DockerSandbox"], None]] = list(setup_fns or [])
+        self._setup_fns: list[Callable[[DockerSandbox], None]] = list(setup_fns or [])
 
         # Container paths outside /workspace that _vpath must not rewrite.
         self._passthrough_prefixes: list[str] = list(passthrough_paths or [])
@@ -443,9 +442,11 @@ class DockerSandbox(BaseSandbox):
                         f"  stdout: {init_result.stdout.strip()[:500]}\n"
                         f"  stderr: {init_result.stderr.strip()[:500]}"
                     )
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as exc:
                 self._log_cmd(init_cmd, error=f"init command timed out after 600s: {init_cmd_str}")
-                raise RuntimeError(f"Container init command timed out after 600s: {init_cmd_str}")
+                raise RuntimeError(
+                    f"Container init command timed out after 600s: {init_cmd_str}"
+                ) from exc
 
         # Run caller-supplied setup functions.  These re-execute on every
         # restart (so e.g. docker symlinks survive ``reselect_device``).
@@ -582,7 +583,7 @@ class DockerSandbox(BaseSandbox):
                 # Ensure parent dir exists
                 parent = str(Path(container_path).parent)
                 mkdir_cmd = ["docker", "exec", self._container_id, "mkdir", "-p", parent]
-                mkdir_result = subprocess.run(
+                subprocess.run(
                     mkdir_cmd,
                     capture_output=True,
                     check=False,

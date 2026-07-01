@@ -18,7 +18,7 @@ import json
 import subprocess
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -253,7 +253,7 @@ class GpuContentionMonitor:
                     is_contended=len(new_procs) > 0,
                     new_procs=new_procs,
                     gpu=gpu_info,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    timestamp=datetime.now(UTC).isoformat(),
                 )
                 with self._lock:
                     self._status = contention

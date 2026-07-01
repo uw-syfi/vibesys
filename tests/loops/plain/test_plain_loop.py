@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vibe_serve.agents import AgentRunner
-from vibe_serve.loops.plain.issue_board import IssueBoard, IssueStatus, IssueType
+from vibe_serve.loops.plain.issue_board import IssueBoard, IssueStatus
 from vibe_serve.loops.plain.loop import PlainLoopState, run_plain_loop
 from vibe_serve.schemas import (
     IssueImplementerResponse,

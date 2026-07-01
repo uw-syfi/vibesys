@@ -1,9 +1,5 @@
 """Tests for the per-issue markdown renderer (vibe_serve/plain/render.py)."""
 
-from datetime import datetime
-
-import pytest
-
 from vibe_serve.loops.plain.issue_board import (
     Issue,
     IssueBoard,
@@ -15,7 +11,6 @@ from vibe_serve.loops.plain.render import (
     issue_md_filename,
     issue_md_path,
     render_all,
-    render_index_file,
     render_index_markdown,
     render_issue_file,
     render_issue_markdown,
@@ -383,7 +378,7 @@ class TestRenderAll:
             created_by="loop:bootstrap",
             iteration=1,
         )
-        b = store.create(
+        store.create(
             type=IssueType.BUG,
             title="Crash on startup",
             description="d",

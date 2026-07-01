@@ -13,8 +13,8 @@ Add a new backend by:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from vibe_serve.backends.base import (
     ComputeBackendImpl,

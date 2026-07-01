@@ -3,8 +3,6 @@
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from vibe_serve.agents.callbacks import TodoDisplay
 
 # --- TodoDisplay rendering ---
@@ -54,7 +52,6 @@ def test_todo_display_clears_previous_lines():
     todos2 = [_make_todo("task one", "completed"), _make_todo("task two", "pending")]
 
     td.update(todos1)
-    first_output = buf.getvalue()
     buf.truncate(0)
     buf.seek(0)
 

@@ -1,6 +1,5 @@
 """Tests for vibe_serve.loops.agent — orchestrator-driven build loop."""
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest

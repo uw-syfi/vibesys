@@ -80,7 +80,7 @@ class TreeLogger(nl.NKIObject):
     def _print_tree(self, logs):
         # First pass: mark which entries are last at their depth
         is_last = []
-        for i in range(len(logs)):
+        for _i in range(len(logs)):
             is_last.append(True)
 
         for i in range(len(logs)):
@@ -98,7 +98,7 @@ class TreeLogger(nl.NKIObject):
             entry = logs[i]
             prefix = ""
             if entry.depth > 0:
-                for d in range(entry.depth - 1):
+                for _d in range(entry.depth - 1):
                     prefix = prefix + "│   "
                 if is_last[i]:
                     prefix = prefix + "└── "

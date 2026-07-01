@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel

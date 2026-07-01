@@ -16,27 +16,26 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import traceback
+from collections.abc import Callable
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from threading import RLock
-from typing import Callable
 
 from pydantic import BaseModel, Field
 
 _STORE_VERSION = 1
 
 
-class IssueType(str, Enum):
+class IssueType(StrEnum):
     BUG = "bug"
     FEATURE = "feature"
     PERF = "perf"
 
 
-class IssueStatus(str, Enum):
+class IssueStatus(StrEnum):
     OPEN = "open"
     IN_PROGRESS = "in_progress"
     CLOSED = "closed"

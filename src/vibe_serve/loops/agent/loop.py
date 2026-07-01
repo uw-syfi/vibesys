@@ -9,11 +9,8 @@ collect kernel-level data first.
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from vibe_serve.config import Config
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
@@ -26,6 +23,10 @@ from vibe_serve.loops.agent.domain import (
 )
 from vibe_serve.loops.profiler import invoke_profiler
 from vibe_serve.prompts import render_template
+from vibe_serve.sandbox.run_environment import (
+    RunEnvironmentSpec,
+    make_run_environment_spec,
+)
 from vibe_serve.schemas import (
     ImplementerResponse,
     JudgeResponse,
@@ -37,10 +38,6 @@ from vibe_serve.schemas import (
 )
 
 _INNER_LOOPS = ("multi-agent", "single-agent")
-from vibe_serve.sandbox.run_environment import (
-    RunEnvironmentSpec,
-    make_run_environment_spec,
-)
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -75,7 +72,7 @@ class _RoundRecord:
         }
 
     @classmethod
-    def from_json(cls, data: dict) -> "_RoundRecord":
+    def from_json(cls, data: dict) -> _RoundRecord:
         return cls(
             round_number=int(data["round"]),
             commit=data.get("commit"),

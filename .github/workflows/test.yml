@@ -28,5 +28,8 @@ jobs:
       - name: Check Python formatting
         run: ./scripts/check_format.sh
 
+      - name: Check Python lint
+        run: ./scripts/check_lint.sh
+
       - name: Run tests
         run: uv run python -m pytest -v
