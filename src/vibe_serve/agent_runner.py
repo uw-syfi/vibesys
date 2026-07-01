@@ -20,7 +20,6 @@ from vibe_serve.schemas import (
     Verdict,
 )
 
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -32,7 +31,7 @@ _JUDGE_REVIEW_PROMPT = (
     "and reflect on the results before giving your verdict. "
     "Return exactly one raw JSON object with keys "
     '"analysis", "feedback", and "verdict". '
-    'Do not use markdown fences or any extra text.'
+    "Do not use markdown fences or any extra text."
 )
 
 
@@ -113,9 +112,9 @@ def _log_agent_config(agent, label: str, log_file) -> None:
     """Write agent configuration (tools list) to log file."""
     if not log_file:
         return
-    log_file.write(f"\n{'='*60}\n")
+    log_file.write(f"\n{'=' * 60}\n")
     log_file.write(f"  Agent Configuration: {label}\n")
-    log_file.write(f"{'='*60}\n")
+    log_file.write(f"{'=' * 60}\n")
 
     # Extract tools
     try:
@@ -529,7 +528,9 @@ def run_profiler_agent(
             todos = _extract_todos(update)
             if todos is not None:
                 todo_display.update(todos)
-            structured_response = _extract_profiler_structured_response(update) or structured_response
+            structured_response = (
+                _extract_profiler_structured_response(update) or structured_response
+            )
             extracted_text = _extract_last_ai_message_text(update)
             if extracted_text:
                 last_ai_message = extracted_text
@@ -541,7 +542,7 @@ def run_profiler_agent(
     if structured_response is None:
         structured_response = _parse_profiler_response_text(last_ai_message)
     if structured_response is None:
-        _log_and_print(f"\n=== PROFILER ROUND OUTPUT (missing response) ===", log_file)
+        _log_and_print("\n=== PROFILER ROUND OUTPUT (missing response) ===", log_file)
         _log_and_print("No structured response received from profiler.", log_file)
         if last_ai_message:
             _log_and_print("\n=== PROFILER ROUND OUTPUT (raw ai message) ===", log_file)

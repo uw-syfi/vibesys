@@ -1,0 +1,19 @@
+{
+  "_class_name": "Showo2Qwen2_5",
+  "_diffusers_version": "0.31.0",
+  "add_qk_norm": true,
+  "add_time_embeds": true,
+  "clip_latent_dim": 1152,
+  "clip_pretrained_model_path": "google/siglip-so400m-patch14-384",
+  "hidden_size": 1536,
+  "image_latent_dim": 16,
+  "image_latent_height": 27,
+  "image_latent_width": 27,
+  "llm_model_path": "Qwen/Qwen2.5-1.5B-Instruct",
+  "llm_vocab_size": 151669,
+  "load_from_showo": true,
+  "num_diffusion_layers": 10,
+  "patch_size": 2,
+  "video_latent_height": 27,
+  "video_latent_width": 27
+}

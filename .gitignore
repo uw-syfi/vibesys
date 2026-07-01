@@ -1,3 +1,24 @@
+# macOS metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100/
+.TemporaryItems/
+.Trashes/
+.fseventsd/
+
+# Windows metadata
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Editor backup/swap files
+*.swp
+*.swo
+*~
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -218,6 +239,9 @@ exp_env/
 artifacts/
 eval_results/
 inputs/**/model
+# Model weight dirs/symlinks under examples are materialized locally, never committed
+examples/**/model
+examples/**/draft_model
 
 # Agent instructions (kept local)
 AGENTS.md

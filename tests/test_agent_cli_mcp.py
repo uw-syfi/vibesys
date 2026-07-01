@@ -20,8 +20,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from vibe_serve._agent_cli.base import MCPServerSpec
 from vibe_serve._agent_cli.claude import ClaudeCodeCodingAgent
 from vibe_serve._agent_cli.codex import CodexCodingAgent
@@ -235,7 +233,7 @@ class TestCodexMCP:
         # We expect pairs of "--config" + "key=value" entries.
         flags = agent.extra_config_args
         # Strip the "--config" sentinels and inspect the value strings.
-        values = [v for f, v in zip(flags[0::2], flags[1::2]) if f == "--config"]
+        values = [v for f, v in zip(flags[0::2], flags[1::2], strict=True) if f == "--config"]
         assert all(f == "--config" for f in flags[0::2])
 
         # name "vibeserve-issues" should snake-case to "vibeserve_issues".
@@ -265,7 +263,7 @@ class TestCodexMCP:
         spec = MCPServerSpec(
             name="weird",
             command='py"thon',
-            args=['back\\slash', 'quoted"value'],
+            args=["back\\slash", 'quoted"value'],
         )
         agent.install_mcp_servers(tmp_path, [spec])
         joined = "\n".join(agent.extra_config_args)

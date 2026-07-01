@@ -17,6 +17,7 @@ Usage:
     python benchmark.py --mode streaming --concurrency 4 --chunk-s 2 --duration 30
     python benchmark.py --mode offline   --rate 2 --duration 30
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,15 +25,14 @@ import asyncio
 import json
 import math
 import random
-import struct
 import time
 import wave
 from pathlib import Path
 
 try:
     import httpx
-except ImportError:
-    raise ImportError("httpx is required: pip install httpx")
+except ImportError as exc:
+    raise ImportError("httpx is required: pip install httpx") from exc
 try:
     import websockets
 except ImportError:
@@ -67,14 +67,16 @@ def load_audio_pool(audio_dir: Path):
             pcm = wf.readframes(n)
         wav_bytes = p.read_bytes()
         meta = manifest_entries.get(p.name, {})
-        pool.append((
-            wav_bytes,
-            pcm,
-            sr,
-            meta.get("duration_s", n / sr),
-            p.name,
-            meta.get("text", ""),
-        ))
+        pool.append(
+            (
+                wav_bytes,
+                pcm,
+                sr,
+                meta.get("duration_s", n / sr),
+                p.name,
+                meta.get("text", ""),
+            )
+        )
     if not pool:
         raise FileNotFoundError(f"No audio files in {audio_dir}")
     return pool
@@ -110,6 +112,7 @@ async def streaming_client(
     t_start = time.perf_counter()
     try:
         async with websockets.connect(url, max_size=None) as ws:
+
             async def reader():
                 nonlocal finalized_at, final_text
                 async for msg in ws:
@@ -126,6 +129,7 @@ async def streaming_client(
                         finalized_at = now
                         final_text = data.get("text", "")
                         return
+
             rd = asyncio.create_task(reader())
 
             for i in range(total_chunks):
@@ -145,13 +149,16 @@ async def streaming_client(
 
     # latencies
     chunk_latencies: list[float] = []
-    for i, ts in enumerate(sent_times):
+    for _i, ts in enumerate(sent_times):
         future = [pt for pt in partial_times if pt >= ts]
         if future:
             chunk_latencies.append(future[0] - ts)
     ttft = chunk_latencies[0] if chunk_latencies else None
-    tpot = (sum(chunk_latencies[1:]) / max(1, len(chunk_latencies) - 1)
-            if len(chunk_latencies) > 1 else None)
+    tpot = (
+        sum(chunk_latencies[1:]) / max(1, len(chunk_latencies) - 1)
+        if len(chunk_latencies) > 1
+        else None
+    )
     return {
         "name": name,
         "error": error,
@@ -168,8 +175,10 @@ async def streaming_client(
 async def run_streaming(args, audio_pool):
     rng = random.Random(args.seed)
     url = args.ws_url
-    print(f"Streaming benchmark: concurrency={args.concurrency} chunk_s={args.chunk_s}s "
-          f"duration_budget={args.duration}s url={url}")
+    print(
+        f"Streaming benchmark: concurrency={args.concurrency} chunk_s={args.chunk_s}s "
+        f"duration_budget={args.duration}s url={url}"
+    )
 
     log: list[dict] = []
     tasks: list[asyncio.Task] = []
@@ -180,8 +189,9 @@ async def run_streaming(args, audio_pool):
             n_keep = int(args.duration * sr) * 2
             pcm = pcm[:n_keep]
             dur = args.duration
-        tasks.append(asyncio.create_task(streaming_client(
-            f"C{i}", url, pcm, sr, dur, args.chunk_s, log)))
+        tasks.append(
+            asyncio.create_task(streaming_client(f"C{i}", url, pcm, sr, dur, args.chunk_s, log))
+        )
     t0 = time.perf_counter()
     results = await asyncio.gather(*tasks)
     wall = time.perf_counter() - t0
@@ -205,7 +215,7 @@ async def run_streaming(args, audio_pool):
     print(_format_stats(ttfts))
     sorted_ttfts = sorted(ttfts) if ttfts else []
     if sorted_ttfts:
-        print(f"Primary metric: ttft_p50_ms={_percentile(sorted_ttfts, 50)*1000:.1f}")
+        print(f"Primary metric: ttft_p50_ms={_percentile(sorted_ttfts, 50) * 1000:.1f}")
     print()
     print("Secondary:")
     print(f"  audio_s_per_s:   {aud_per_s:.2f}")
@@ -255,7 +265,7 @@ async def offline_request(client: httpx.AsyncClient, url: str, wav_bytes: bytes,
                 async for line in resp.aiter_lines():
                     if not line.startswith("data: "):
                         continue
-                    payload = line[len("data: "):]
+                    payload = line[len("data: ") :]
                     if payload.strip() == "[DONE]":
                         t_done = time.perf_counter()
                         break
@@ -300,7 +310,6 @@ async def run_offline(args, audio_pool):
     seconds.  Each worker picks an audio sample, fires the request, and
     immediately starts the next one when it returns — i.e. measures the
     server's saturation throughput at the chosen concurrency level."""
-    rng = random.Random(args.seed)
     url = args.url.rstrip("/") + args.endpoint
     print(f"Offline benchmark: concurrency={args.concurrency} duration={args.duration}s url={url}")
 
@@ -339,7 +348,7 @@ async def run_offline(args, audio_pool):
     print(f"Completed:         {len(succ)}/{len(results)} ({len(fail)} errors)")
     print(f"Streaming SSE:     {args.stream}")
     print()
-    print(f"Throughput: {len(succ)/wall:.2f} req/s, {n_tokens/wall:.1f} tok/s")
+    print(f"Throughput: {len(succ) / wall:.2f} req/s, {n_tokens / wall:.1f} tok/s")
     print()
     print("TTFT:")
     print(_format_stats(ttfts))
@@ -370,7 +379,8 @@ def _percentile(s, p):
     if not s:
         return float("nan")
     k = (len(s) - 1) * p / 100
-    f = math.floor(k); c = math.ceil(k)
+    f = math.floor(k)
+    c = math.ceil(k)
     return s[int(k)] if f == c else s[f] * (c - k) + s[c] * (k - f)
 
 
@@ -379,10 +389,10 @@ def _format_stats(values):
         return "    (no data)\n"
     s = sorted(values)
     return (
-        f"  Mean:    {sum(s)/len(s)*1000:.1f} ms\n"
-        f"  Median:  {_percentile(s, 50)*1000:.1f} ms\n"
-        f"  P90:     {_percentile(s, 90)*1000:.1f} ms\n"
-        f"  P99:     {_percentile(s, 99)*1000:.1f} ms\n"
+        f"  Mean:    {sum(s) / len(s) * 1000:.1f} ms\n"
+        f"  Median:  {_percentile(s, 50) * 1000:.1f} ms\n"
+        f"  P90:     {_percentile(s, 90) * 1000:.1f} ms\n"
+        f"  P99:     {_percentile(s, 99) * 1000:.1f} ms\n"
     )
 
 
@@ -407,21 +417,31 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--mode", choices=["streaming", "offline"], default="streaming")
     # streaming
-    p.add_argument("--ws-url", default="ws://localhost:8000/v1/audio/stream",
-                   help="WebSocket URL (streaming mode)")
+    p.add_argument(
+        "--ws-url",
+        default="ws://localhost:8000/v1/audio/stream",
+        help="WebSocket URL (streaming mode)",
+    )
     p.add_argument("--chunk-s", type=float, default=2.0, help="Audio chunk seconds")
     # offline
-    p.add_argument("--url", default="http://localhost:8000",
-                   help="Server base URL (offline mode)")
+    p.add_argument("--url", default="http://localhost:8000", help="Server base URL (offline mode)")
     p.add_argument("--endpoint", default="/v1/audio/transcriptions")
-    p.add_argument("--num-requests", type=int, default=None,
-                   help="Optional cap on total requests (offline mode)")
+    p.add_argument(
+        "--num-requests",
+        type=int,
+        default=None,
+        help="Optional cap on total requests (offline mode)",
+    )
     p.add_argument("--stream", action="store_true", help="SSE streaming for offline mode")
     # shared
-    p.add_argument("--concurrency", type=int, default=32,
-                   help="Concurrent in-flight requests (streaming: number of "
-                        "live clients; offline: number of workers each looping "
-                        "request→request for the duration)")
+    p.add_argument(
+        "--concurrency",
+        type=int,
+        default=32,
+        help="Concurrent in-flight requests (streaming: number of "
+        "live clients; offline: number of workers each looping "
+        "request→request for the duration)",
+    )
     p.add_argument("--duration", type=float, default=30.0)
     p.add_argument("--audio-dir", type=str, default=None)
     p.add_argument("--seed", type=int, default=42)

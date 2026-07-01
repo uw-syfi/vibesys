@@ -106,9 +106,7 @@ def test_modal_environment_uses_local_docker_for_editing(tmp_path):
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    session = env.open(
-        _request(tmp_path, backend, agent_backend="cli", cli_provider="codex")
-    )
+    session = env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     # The sandbox is local Docker, not a Modal Sandbox.
     assert backend.calls[0][0] is SandboxKind.DOCKER
@@ -140,9 +138,7 @@ def test_modal_environment_prompt_notes_describe_modal_dispatch(tmp_path):
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    session = env.open(
-        _request(tmp_path, backend, agent_backend="cli", cli_provider="codex")
-    )
+    session = env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     notes = session.view.prompt_notes
     assert "modal run" in notes
@@ -181,12 +177,20 @@ def test_modal_environment_per_run_namespace_prefix_unique(tmp_path):
     log_b.mkdir(exist_ok=True)
 
     req_a = RunEnvironmentRequest(
-        log_dir=log_a, workspace=ws_a, ref_dir=None, backend=backend_a,
-        agent_backend="cli", cli_provider="codex",
+        log_dir=log_a,
+        workspace=ws_a,
+        ref_dir=None,
+        backend=backend_a,
+        agent_backend="cli",
+        cli_provider="codex",
     )
     req_b = RunEnvironmentRequest(
-        log_dir=log_b, workspace=ws_b, ref_dir=None, backend=backend_b,
-        agent_backend="cli", cli_provider="codex",
+        log_dir=log_b,
+        workspace=ws_b,
+        ref_dir=None,
+        backend=backend_b,
+        agent_backend="cli",
+        cli_provider="codex",
     )
     notes_a = env.open(req_a).view.prompt_notes
     notes_b = env.open(req_b).view.prompt_notes
@@ -205,9 +209,7 @@ def test_modal_environment_runtime_notes_describe_profile_contract(tmp_path):
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    session = env.open(
-        _request(tmp_path, backend, agent_backend="cli", cli_provider="codex")
-    )
+    session = env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
     notes = session.view.prompt_notes
 
     assert "modal_profile" in notes

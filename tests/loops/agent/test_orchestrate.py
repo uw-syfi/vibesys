@@ -1,24 +1,20 @@
 """Tests for vibe_serve.loops.agent — orchestrator-driven build loop."""
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from vibe_serve.agents import AgentRunner
-from vibe_serve.loops.agent.loop import run_agent_loop
-from vibe_serve.schemas import (
-    OrchestratorPlan,
-    PreRoundDecision,
-    ProfilerSummary,
-)
 from vibe_serve.loops.agent import issue_board
+from vibe_serve.loops.agent.loop import run_agent_loop
 from vibe_serve.schemas import (
     ImplementerResponse,
     JudgeResponse,
+    OrchestratorPlan,
+    PreRoundDecision,
+    ProfilerSummary,
     Verdict,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures & helpers
@@ -69,9 +65,7 @@ def _make_orchestrate_runner(
             counters["orch_pre"] += 1
             if pre_q:
                 return pre_q.pop(0)
-            return PreRoundDecision(
-                need_profile=False, profile_focus="", reasoning="default skip"
-            )
+            return PreRoundDecision(need_profile=False, profile_focus="", reasoning="default skip")
         if kind == "orchestrator" and response_cls is OrchestratorPlan:
             counters["orch_plan"] += 1
             if plan_q:
@@ -154,8 +148,11 @@ def test_profiler_summary_perf_metric_optional():
     p = ProfilerSummary(analysis="a", bottlenecks="b", suggestions="s")
     assert p.perf_metric is None
     p2 = ProfilerSummary(
-        analysis="a", bottlenecks="b", suggestions="s",
-        perf_metric=12.5, perf_unit="tok/s",
+        analysis="a",
+        bottlenecks="b",
+        suggestions="s",
+        perf_metric=12.5,
+        perf_unit="tok/s",
     )
     assert p2.perf_metric == 12.5
     assert p2.perf_unit == "tok/s"
@@ -199,11 +196,15 @@ def test_progress_writes_profiler_summary_with_perf(tmp_path):
 def test_progress_append_implementer_and_judge(tmp_path):
     progress = tmp_path / "progress.md"
     issue_board.append_implementer(
-        progress, 3, 1,
+        progress,
+        3,
+        1,
         ImplementerResponse(summary="added cuda graph", expected_behavior="replay works"),
     )
     issue_board.append_judge(
-        progress, 3, 1,
+        progress,
+        3,
+        1,
         JudgeResponse(analysis="good", feedback="", verdict=Verdict.PASS),
     )
     text = progress.read_text()
@@ -287,7 +288,11 @@ def test_loop_exhaustion_carries_to_next_round(tmp_path, ref_file):
     original_runner.invoke.side_effect = spy_invoke
 
     result = _invoke_orchestrate(
-        tmp_path, ref_file, original_runner, max_rounds=2, max_retries_per_round=2,
+        tmp_path,
+        ref_file,
+        original_runner,
+        max_rounds=2,
+        max_retries_per_round=2,
     )
     assert result is True
     # 2 attempts on round 1 (both fail) + 1 attempt on round 2 (pass).
@@ -307,11 +312,14 @@ def test_loop_orchestrator_requests_profile_before_plan(tmp_path, ref_file):
         plans=[
             # Round 1 cold-start plan (no pre-decision invoked on round 1).
             OrchestratorPlan(
-                task="Build server", pass_criteria="ok", reasoning="start",
+                task="Build server",
+                pass_criteria="ok",
+                reasoning="start",
             ),
             # Round 2 plan — uses profiler summary.
             OrchestratorPlan(
-                task="Optimize decode", pass_criteria="graph replay",
+                task="Optimize decode",
+                pass_criteria="graph replay",
                 reasoning="profile showed launch overhead",
             ),
         ],
@@ -355,9 +363,13 @@ def test_loop_runs_full_max_rounds_budget(tmp_path, ref_file):
     """With the ``done`` field removed, the loop always exhausts max_rounds.
     A single-round budget yields one implementer + judge call, no more."""
     runner = _make_orchestrate_runner(
-        plans=[OrchestratorPlan(
-            task="Build server", pass_criteria="ok", reasoning="round 1",
-        )],
+        plans=[
+            OrchestratorPlan(
+                task="Build server",
+                pass_criteria="ok",
+                reasoning="round 1",
+            )
+        ],
     )
     result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1)
     assert result is True
@@ -368,10 +380,7 @@ def test_loop_runs_full_max_rounds_budget(tmp_path, ref_file):
 def test_loop_max_rounds_terminates(tmp_path, ref_file):
     """Loop exits after max_rounds and reports success (the loop always runs
     to budget; there is no early-stop signal)."""
-    plans = [
-        OrchestratorPlan(task=f"t{i}", pass_criteria="p", reasoning="r")
-        for i in range(10)
-    ]
+    plans = [OrchestratorPlan(task=f"t{i}", pass_criteria="p", reasoning="r") for i in range(10)]
     runner = _make_orchestrate_runner(plans=plans)
     result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=3)
     assert result is True
@@ -413,12 +422,17 @@ def test_cli_rejects_modal_with_nsys_profiler(tmp_path, ref_file):
 
     parser = _build_agent_parser()
     validate_args = _validate_agent
-    args = parser.parse_args([
-        "--ref", ref_file,
-        "--exp-name", "test",
-        "--modal",
-        "--profiler", "nsys",
-    ])
+    args = parser.parse_args(
+        [
+            "--ref",
+            ref_file,
+            "--exp-name",
+            "test",
+            "--modal",
+            "--profiler",
+            "nsys",
+        ]
+    )
     with pytest.raises(SystemExit):
         validate_args(args)
 
@@ -520,7 +534,7 @@ def test_detect_plateau_ignores_rounds_without_perf():
 
     records = [
         _record(1, 41.0),
-        _record(2, None),   # profiler skipped or failed round
+        _record(2, None),  # profiler skipped or failed round
         _record(3, 41.3),
         _record(4, 41.1),
     ]
@@ -538,7 +552,7 @@ def test_detect_plateau_streak_must_be_recent():
         _record(1, 41.0),  # plateau
         _record(2, 41.2),  # plateau
         _record(3, 41.1),  # plateau (would fire here)
-        _record(4, 116.0), # break
+        _record(4, 116.0),  # break
     ]
     # By round 4, the recent streak (rounds 2,3,4) spans 41.2-116.0 → no plateau.
     assert _detect_plateau(records) is None
@@ -599,30 +613,42 @@ def test_loop_threads_plateau_warning_into_prompt(tmp_path, ref_file):
     # flat perf metrics, and round 5 is the round under test (its plan call
     # should see the plateau warning).
     plans = [
-        OrchestratorPlan(task=f"r{i}", pass_criteria="p", reasoning=f"r{i}")
-        for i in range(1, 6)
+        OrchestratorPlan(task=f"r{i}", pass_criteria="p", reasoning=f"r{i}") for i in range(1, 6)
     ]
     runner = _make_orchestrate_runner(
         pre_decisions=[
             PreRoundDecision(need_profile=True, profile_focus="x", reasoning="ok"),
-        ] * 4,  # rounds 2-5
+        ]
+        * 4,  # rounds 2-5
         plans=plans,
         profiler_responses=[
             ProfilerSummary(
-                analysis="a", bottlenecks="b", suggestions="s",
-                perf_metric=42.0, perf_unit="tok/s",
+                analysis="a",
+                bottlenecks="b",
+                suggestions="s",
+                perf_metric=42.0,
+                perf_unit="tok/s",
             ),
             ProfilerSummary(
-                analysis="a", bottlenecks="b", suggestions="s",
-                perf_metric=42.1, perf_unit="tok/s",
+                analysis="a",
+                bottlenecks="b",
+                suggestions="s",
+                perf_metric=42.1,
+                perf_unit="tok/s",
             ),
             ProfilerSummary(
-                analysis="a", bottlenecks="b", suggestions="s",
-                perf_metric=41.9, perf_unit="tok/s",
+                analysis="a",
+                bottlenecks="b",
+                suggestions="s",
+                perf_metric=41.9,
+                perf_unit="tok/s",
             ),
             ProfilerSummary(
-                analysis="a", bottlenecks="b", suggestions="s",
-                perf_metric=42.05, perf_unit="tok/s",
+                analysis="a",
+                bottlenecks="b",
+                suggestions="s",
+                perf_metric=42.05,
+                perf_unit="tok/s",
             ),
         ],
     )
@@ -641,7 +667,7 @@ def test_loop_threads_plateau_warning_into_prompt(tmp_path, ref_file):
     # warning yet (round 1: 0 perf; round 2: 0 perf; round 3: 1 perf; round 4: 2 perf).
     for i in range(4):
         assert "Plateau detected" not in seen_prompts[i], (
-            f"round {i+1} should not yet have plateau warning"
+            f"round {i + 1} should not yet have plateau warning"
         )
     # Round 5 plan call sees rounds 1-4 in records (3 valid perf measurements
     # from rounds 2,3,4 — flat at 41.9-42.1) → warning fires.
@@ -663,21 +689,32 @@ def test_loop_resume_with_round_number_starts_there(tmp_path, ref_file):
     (exp_env / "20260422-000000-test-orch").mkdir(parents=True)
     # Minimal git setup so the context validation accepts the repo.
     import subprocess
+
     subprocess.run(
-        ["git", "init"], cwd=exp_env / "20260422-000000-test-orch",
-        capture_output=True, check=True,
+        ["git", "init"],
+        cwd=exp_env / "20260422-000000-test-orch",
+        capture_output=True,
+        check=True,
     )
     ws = exp_env / "20260422-000000-test-orch" / "workspace"
     ws.mkdir()
     subprocess.run(["git", "init"], cwd=ws, capture_output=True, check=True)
     (ws / "dummy.txt").write_text("x")
-    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    env = {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
     subprocess.run(["git", "add", "-A"], cwd=ws, env={**env}, capture_output=True, check=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=ws, env={**env}, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "seed"], cwd=ws, env={**env}, capture_output=True, check=True
+    )
 
     result = _invoke_orchestrate(
-        tmp_path, ref_file, runner,
+        tmp_path,
+        ref_file,
+        runner,
         exp_name="20260422-000000-test-orch",
         existing=True,
         start_round=4,

@@ -2,7 +2,6 @@ import ast
 import json
 from pathlib import Path
 
-
 BUNDLE = Path("examples/Llama-3.1-8B-Instruct-MLX-8bit")
 
 

@@ -1,0 +1,34 @@
+DmaUsage:
+  description: DMA time-series usage metrics such as throughput over time.
+  properties:
+    timestamp:
+      type: integer
+      format: int64 # previously uint64
+      description: Timestamp for this measurement.
+      x-unit: nanoseconds
+      minimum: 0
+
+    current_throughput: # previously named "transfer_rate"
+      type: number
+      format: float
+      description: Rate of data transfer over DMA in bytes per second at this timestamp.
+      x-unit: bytes_per_second
+      minimum: 0.0
+
+    total_transfer_bytes:
+      type: integer
+      format: int64 # previously uint64
+      description: Total bytes transferred over DMA including transfers to/from HBM and State Buffer. This total is cumulative from the start of profiling to this timestamp.
+      x-unit: bytes
+      minimum: 0
+
+    pcore_idx:
+      type: integer
+      format: int64
+      description: Index of the physical NeuronCore within a Logical NeuronCore (LNC). A Logical NeuronCore is a group of physical NeuronCores. For LNC2 this field can have a value of either 0 or 1.
+      minimum: 0
+
+  required:
+    - timestamp
+    - current_throughput
+    - total_transfer_bytes

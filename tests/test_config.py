@@ -36,30 +36,32 @@ region = "us-east5"
 [providers.google-genai]
 """)
         config = _load_config(cfg_file)
-        assert config["model"]["name"] == "claude-sonnet-4-6"
-        assert config["model"]["provider"] == "vertex-ai"
-        assert config["thinking"]["level"] == "medium"
-        assert config["thinking"]["budget"] == 1024
-        assert config["providers"]["vertex-ai"]["json"] == "~/keys/vertex.json"
-        assert config["providers"]["vertex-ai"]["project"] == "my-project"
-        assert config["providers"]["vertex-ai"]["region"] == "us-east5"
+        assert config.model.name == "claude-sonnet-4-6"
+        assert config.model.provider == "vertex-ai"
+        assert config.thinking.level == "medium"
+        assert config.thinking.budget == 1024
+        assert config.providers.vertex_ai.json_path == "~/keys/vertex.json"
+        assert config.providers.vertex_ai.project == "my-project"
+        assert config.providers.vertex_ai.region == "us-east5"
 
     def test_minimal_config(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
         config = _load_config(cfg_file)
-        assert config["model"]["name"] == "claude-sonnet-4-6"
-        assert config["model"].get("provider") is None
-        assert config.get("thinking") == {}
-        assert config.get("providers") == {}
-        assert config.get("feature_flags") == {}
+        assert config.model.name == "claude-sonnet-4-6"
+        assert config.model.provider is None
+        assert config.thinking.level is None
+        assert config.thinking.budget is None
+        assert config.providers.vertex_ai is None
+        assert config.providers.openai_compatible is None
+        assert config.feature_flags == {}
 
 
 class TestLoadConfigErrors:
     def test_missing_model_name(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text("[model]\nprovider = 'vertex-ai'\n")
-        with pytest.raises(ValueError, match="model.name"):
+        with pytest.raises(ValueError, match="name"):
             _load_config(cfg_file)
 
     def test_missing_file(self):
@@ -95,12 +97,34 @@ new_loop = true
             _load_config(cfg_file)
 
 
+class TestLoadConfigStrict:
+    """Unknown sections/keys are rejected (fail-fast), not silently dropped."""
+
+    def test_unknown_top_level_section_rejected(self, tmp_path):
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n\n[bogus]\nx = 1\n')
+        with pytest.raises(ValueError, match="bogus"):
+            _load_config(cfg_file)
+
+    def test_unknown_key_in_known_section_rejected(self, tmp_path):
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n\n[agent]\ncli_modle = "x"\n')
+        with pytest.raises(ValueError, match="cli_modle"):
+            _load_config(cfg_file)
+
+    def test_unknown_backend_rejected(self, tmp_path):
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n\n[backend]\nname = "tpu"\n')
+        with pytest.raises(ValueError, match="tpu"):
+            _load_config(cfg_file)
+
+
 class TestLoadConfigProviderDefault:
     def test_missing_provider_defaults_to_none(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
         config = _load_config(cfg_file)
-        assert config["model"].get("provider") is None
+        assert config.model.provider is None
 
 
 class TestLoadConfigEnvVars:
@@ -120,10 +144,10 @@ provider = "vertex-ai"
         }
         with patch.dict("os.environ", env, clear=False):
             config = _load_config(cfg_file)
-        vx = config["providers"]["vertex-ai"]
-        assert vx["json"] == "/env/key.json"
-        assert vx["project"] == "env-project"
-        assert vx["region"] == "us-central1"
+        vx = config.providers.vertex_ai
+        assert vx.json_path == "/env/key.json"
+        assert vx.project == "env-project"
+        assert vx.region == "us-central1"
 
     def test_env_vars_override_toml(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
@@ -144,10 +168,10 @@ region = "us-east5"
         }
         with patch.dict("os.environ", env, clear=False):
             config = _load_config(cfg_file)
-        vx = config["providers"]["vertex-ai"]
-        assert vx["json"] == "/env/key.json"
-        assert vx["project"] == "env-project"
-        assert vx["region"] == "us-central1"
+        vx = config.providers.vertex_ai
+        assert vx.json_path == "/env/key.json"
+        assert vx.project == "env-project"
+        assert vx.region == "us-central1"
 
 
 class TestLoadDotenvFile:
@@ -174,6 +198,20 @@ EMPTY=
             _load_dotenv_file(env_file)
             assert os.environ["OPENAI_API_KEY"] == "existing"
 
+    def test_load_dotenv_file_strips_inline_comments(self, tmp_path):
+        # python-dotenv strips trailing inline comments on unquoted values, but
+        # preserves a '#' inside quotes (the prior hand-rolled parser did neither).
+        env_file = tmp_path / ".env"
+        env_file.write_text('PLAIN=value # trailing comment\nQUOTED="val # hash"\n')
+        with patch.dict("os.environ", {}, clear=True):
+            _load_dotenv_file(env_file)
+            assert os.environ["PLAIN"] == "value"
+            assert os.environ["QUOTED"] == "val # hash"
+
+    def test_load_dotenv_file_missing_file_is_noop(self, tmp_path):
+        with patch.dict("os.environ", {}, clear=True):
+            _load_dotenv_file(tmp_path / "does-not-exist.env")  # no error
+
 
 class TestLoadConfigThinking:
     def test_thinking_parsed(self, tmp_path):
@@ -187,5 +225,69 @@ level = "high"
 budget = 2048
 """)
         config = _load_config(cfg_file)
-        assert config["thinking"]["level"] == "high"
-        assert config["thinking"]["budget"] == 2048
+        assert config.thinking.level == "high"
+        assert config.thinking.budget == 2048
+
+
+class TestLoadConfigAgentSection:
+    def test_agent_section_preserved(self, tmp_path):
+        # The [agent] table drives build_agent_runner (cli_model, cli_timeout,
+        # backend, cli_provider). _load_config must carry it through; the
+        # previous allowlist loader silently dropped it.
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text("""\
+[model]
+name = "claude-sonnet-4-6"
+
+[agent]
+backend = "cli"
+cli_provider = "claude"
+cli_model = "claude-opus-4-8[1m]"
+cli_timeout = 1800
+""")
+        config = _load_config(cfg_file)
+        assert config.agent.cli_model == "claude-opus-4-8[1m]"
+        assert config.agent.cli_timeout == 1800
+        assert config.agent.backend == "cli"
+        assert config.agent.cli_provider == "claude"
+
+    def test_agent_section_defaults_to_empty(self, tmp_path):
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
+        config = _load_config(cfg_file)
+        assert config.agent.backend is None
+        assert config.agent.cli_provider is None
+        assert config.agent.cli_model is None
+        assert config.agent.cli_timeout is None
+
+
+class TestLoadConfigPerfEval:
+    def test_load_levels_preserved(self, tmp_path):
+        # [perf_eval].load_levels feeds the perf_eval prompt template; the
+        # allowlist loader dropped this section entirely.
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text("""\
+[model]
+name = "claude-sonnet-4-6"
+
+[[perf_eval.load_levels]]
+rate = 1
+duration = 20
+max_tokens = 128
+
+[[perf_eval.load_levels]]
+rate = 8
+duration = 20
+max_tokens = 256
+""")
+        config = _load_config(cfg_file)
+        levels = config.perf_eval.load_levels
+        assert levels is not None
+        assert [lvl.rate for lvl in levels] == [1, 8]
+        assert levels[1].max_tokens == 256
+
+    def test_perf_eval_defaults_to_none(self, tmp_path):
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
+        config = _load_config(cfg_file)
+        assert config.perf_eval.load_levels is None

@@ -15,6 +15,7 @@ importable from `main.py` on `sys.path`.
 Usage:
     .venv/bin/python checker.py --model-dir <local model dir>
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,6 +46,7 @@ def _load_custom_model_class():
 
 # ---------- audio loading ----------
 
+
 def load_test_samples(audio_dir: Path):
     manifest_path = audio_dir / "manifest.json"
     if not manifest_path.exists():
@@ -64,11 +66,12 @@ def load_test_samples(audio_dir: Path):
 
 # ---------- HF reference ----------
 
+
 @torch.inference_mode()
 def transcribe_reference(model, proj_out, tokenizer, audio: np.ndarray, sr: int) -> str:
     """Greedy decode with HF MoonshineStreamingModel + a separately-loaded
     proj_out (lm_head) projection.  Matches the offline-transcribe contract."""
-    from transformers.cache_utils import DynamicCache, EncoderDecoderCache
+
     device = next(model.parameters()).device
     dtype = next(model.parameters()).dtype
     audio_t = torch.from_numpy(audio).to(device).to(dtype).unsqueeze(0)
@@ -79,8 +82,9 @@ def transcribe_reference(model, proj_out, tokenizer, audio: np.ndarray, sr: int)
     out: list[int] = []
     pkv = None
     for _ in range(256):
-        d = model.decoder(input_ids=cur, encoder_hidden_states=enc_h,
-                          past_key_values=pkv, use_cache=True)
+        d = model.decoder(
+            input_ids=cur, encoder_hidden_states=enc_h, past_key_values=pkv, use_cache=True
+        )
         nxt = int(proj_out(d.last_hidden_state)[0, -1].argmax().item())
         if nxt == model.config.eos_token_id:
             break
@@ -91,6 +95,7 @@ def transcribe_reference(model, proj_out, tokenizer, audio: np.ndarray, sr: int)
 
 
 # ---------- text comparison ----------
+
 
 def normalize_text(s: str) -> str:
     s = s.lower().strip()
@@ -113,10 +118,7 @@ def compare_outputs(ref_text: str, custom_text: str, threshold: float):
     if normalize_text(ref_text) == normalize_text(custom_text):
         return True, f"EXACT match: {ref_text[:80]!r}"
     overlap = word_overlap_ratio(ref_text, custom_text)
-    detail = (
-        f"  Reference: {ref_text[:100]!r}\n"
-        f"  Custom:    {custom_text[:100]!r}"
-    )
+    detail = f"  Reference: {ref_text[:100]!r}\n  Custom:    {custom_text[:100]!r}"
     if overlap >= threshold:
         return True, f"PASS (word overlap {overlap:.1%} >= {threshold:.0%}):\n{detail}"
     return False, f"MISMATCH (word overlap {overlap:.1%} < {threshold:.0%}):\n{detail}"
@@ -124,15 +126,22 @@ def compare_outputs(ref_text: str, custom_text: str, threshold: float):
 
 # ---------- main ----------
 
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-dir", type=str, default="../model",
-                        help="Local path to model weights directory")
-    parser.add_argument("--audio-dir", type=str, default=None,
-                        help="Directory with test audio + manifest.json (default: ../test_audio)")
+    parser.add_argument(
+        "--model-dir", type=str, default="../model", help="Local path to model weights directory"
+    )
+    parser.add_argument(
+        "--audio-dir",
+        type=str,
+        default=None,
+        help="Directory with test audio + manifest.json (default: ../test_audio)",
+    )
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--threshold", type=float, default=0.7,
-                        help="Minimum word overlap ratio to pass")
+    parser.add_argument(
+        "--threshold", type=float, default=0.7, help="Minimum word overlap ratio to pass"
+    )
     args = parser.parse_args()
 
     model_dir = str(Path(args.model_dir).resolve())
@@ -149,11 +158,14 @@ def main():
 
     # ---- HF reference ----
     print(f"Loading HF reference (MoonshineStreamingModel) on {args.device} ...")
-    from transformers import AutoModel
     from safetensors.torch import load_file
     from tokenizers import Tokenizer
+    from transformers import AutoModel
+
     t0 = time.perf_counter()
-    ref_model = AutoModel.from_pretrained(model_dir, torch_dtype=dtype, device_map=args.device).eval()
+    ref_model = AutoModel.from_pretrained(
+        model_dir, torch_dtype=dtype, device_map=args.device
+    ).eval()
     # proj_out (lm_head) is part of MoonshineStreamingForConditionalGeneration; AutoModel
     # loads the base MoonshineStreamingModel without it.  Load the weight separately.
     try:
@@ -161,7 +173,9 @@ def main():
     except FileNotFoundError:
         # fall back to .bin
         sd = torch.load(str(Path(model_dir) / "pytorch_model.bin"), map_location="cpu")
-    proj_out = torch.nn.Linear(ref_model.config.hidden_size, ref_model.config.vocab_size, bias=False)
+    proj_out = torch.nn.Linear(
+        ref_model.config.hidden_size, ref_model.config.vocab_size, bias=False
+    )
     proj_out.weight.data = sd["proj_out.weight"]
     proj_out = proj_out.to(args.device).to(dtype)
     tokenizer = Tokenizer.from_file(str(Path(model_dir) / "tokenizer.json"))
@@ -169,7 +183,7 @@ def main():
 
     print("Generating reference outputs ...")
     ref_outputs: list[str] = []
-    for desc, audio, sr, _ in test_samples:
+    for _desc, audio, sr, _ in test_samples:
         ref_outputs.append(transcribe_reference(ref_model, proj_out, tokenizer, audio, sr))
 
     del ref_model, proj_out, sd

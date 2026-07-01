@@ -1,25 +1,20 @@
 """Tests for the per-issue markdown renderer (vibe_serve/plain/render.py)."""
 
-from datetime import datetime
-
-import pytest
-
+from vibe_serve.loops.plain.issue_board import (
+    Issue,
+    IssueBoard,
+    IssueEvent,
+    IssueStatus,
+    IssueType,
+)
 from vibe_serve.loops.plain.render import (
     issue_md_filename,
     issue_md_path,
     render_all,
-    render_index_file,
     render_index_markdown,
     render_issue_file,
     render_issue_markdown,
     slugify,
-)
-from vibe_serve.loops.plain.issue_board import (
-    Issue,
-    IssueEvent,
-    IssueStatus,
-    IssueBoard,
-    IssueType,
 )
 
 
@@ -46,9 +41,13 @@ def _make_issue(
         created_at=now,
         updated_at=now,
         attempts=attempts,
-        history=history or [
+        history=history
+        or [
             IssueEvent(
-                timestamp=now, actor=created_by, action="create", iteration=1,
+                timestamp=now,
+                actor=created_by,
+                action="create",
+                iteration=1,
             )
         ],
     )
@@ -146,7 +145,9 @@ class TestIssueMdFilename:
 class TestRenderIssueMarkdown:
     def test_writes_header_with_id_title_type_status(self):
         issue = _make_issue(
-            id=42, title="Build server", type=IssueType.FEATURE,
+            id=42,
+            title="Build server",
+            type=IssueType.FEATURE,
             status=IssueStatus.OPEN,
         )
         md = render_issue_markdown(issue)
@@ -165,11 +166,13 @@ class TestRenderIssueMarkdown:
         issue = _make_issue(
             history=[
                 _make_event(
-                    actor="loop:bootstrap", action="create",
+                    actor="loop:bootstrap",
+                    action="create",
                     timestamp="2026-04-08T12:00:00",
                 ),
                 _make_event(
-                    actor="loop", action="open->in_progress",
+                    actor="loop",
+                    action="open->in_progress",
                     note="claimed",
                     timestamp="2026-04-08T12:01:00",
                 ),
@@ -240,7 +243,9 @@ class TestRenderIssueMarkdown:
                 _make_event(actor="loop:bootstrap", action="create"),
                 # loop's claim — same arrow format but actor='loop'
                 _make_event(
-                    actor="loop", action="open->in_progress", note="claimed",
+                    actor="loop",
+                    action="open->in_progress",
+                    note="claimed",
                 ),
             ],
         )
@@ -367,16 +372,24 @@ class TestRenderAll:
     def test_render_all_writes_index_and_per_issue_files(self, tmp_path):
         store = IssueBoard(tmp_path / "issues.json")
         a = store.create(
-            type=IssueType.FEATURE, title="Build server",
-            description="d", created_by="loop:bootstrap", iteration=1,
+            type=IssueType.FEATURE,
+            title="Build server",
+            description="d",
+            created_by="loop:bootstrap",
+            iteration=1,
         )
-        b = store.create(
-            type=IssueType.BUG, title="Crash on startup",
-            description="d", created_by="judge", iteration=1,
+        store.create(
+            type=IssueType.BUG,
+            title="Crash on startup",
+            description="d",
+            created_by="judge",
+            iteration=1,
         )
         store.update_status(a.id, IssueStatus.IN_PROGRESS, actor="loop", iteration=1)
         store.increment_attempts(
-            a.id, actor="implementer", iteration=1,
+            a.id,
+            actor="implementer",
+            iteration=1,
             payload={"summary": "did stuff", "files_touched": ["s.py"], "self_check": "ok"},
         )
 
@@ -398,8 +411,11 @@ class TestRenderAll:
     def test_render_all_creates_issues_dir(self, tmp_path):
         store = IssueBoard(tmp_path / "issues.json")
         store.create(
-            type=IssueType.BUG, title="t", description="d",
-            created_by="judge", iteration=1,
+            type=IssueType.BUG,
+            title="t",
+            description="d",
+            created_by="judge",
+            iteration=1,
         )
         issues_dir = tmp_path / "nested" / "issues"
         assert not issues_dir.exists()
@@ -410,8 +426,11 @@ class TestRenderAll:
     def test_render_all_idempotent(self, tmp_path):
         store = IssueBoard(tmp_path / "issues.json")
         store.create(
-            type=IssueType.BUG, title="repeat", description="d",
-            created_by="judge", iteration=1,
+            type=IssueType.BUG,
+            title="repeat",
+            description="d",
+            created_by="judge",
+            iteration=1,
         )
         issues_dir = tmp_path / "issues"
         render_all(issues_dir, store)

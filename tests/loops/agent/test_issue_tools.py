@@ -1,8 +1,6 @@
 """Tests for the issue-tracker tools (list/get/search/create)."""
 
-import pytest
-
-from vibe_serve.loops.plain.issue_board import IssueStatus, IssueBoard, IssueType
+from vibe_serve.loops.plain.issue_board import IssueBoard, IssueStatus, IssueType
 from vibe_serve.loops.plain.tools import build_issue_tools
 
 
@@ -35,8 +33,9 @@ class TestReadTools:
 
     def test_list_issues_renders_short_format(self, tmp_path):
         store = _make_store(tmp_path)
-        store.create(type=IssueType.BUG, title="hello",
-                     description="d", created_by="x", iteration=1)
+        store.create(
+            type=IssueType.BUG, title="hello", description="d", created_by="x", iteration=1
+        )
         tools = build_issue_tools(store, iteration=1)
         out = _invoke(_tool_by_name(tools, "list_issues"))
         assert "#1" in out
@@ -46,10 +45,12 @@ class TestReadTools:
 
     def test_list_issues_filters_by_status(self, tmp_path):
         store = _make_store(tmp_path)
-        a = store.create(type=IssueType.BUG, title="open one",
-                         description="d", created_by="x", iteration=1)
-        b = store.create(type=IssueType.BUG, title="closed one",
-                         description="d", created_by="x", iteration=1)
+        store.create(
+            type=IssueType.BUG, title="open one", description="d", created_by="x", iteration=1
+        )
+        b = store.create(
+            type=IssueType.BUG, title="closed one", description="d", created_by="x", iteration=1
+        )
         store.update_status(b.id, IssueStatus.CLOSED, actor="x", iteration=1)
         tools = build_issue_tools(store, iteration=1)
         list_tool = _tool_by_name(tools, "list_issues")
@@ -65,9 +66,13 @@ class TestReadTools:
 
     def test_get_issue_by_id(self, tmp_path):
         store = _make_store(tmp_path)
-        store.create(type=IssueType.PERF, title="paged kv",
-                     description="reduce frag", created_by="perf_eval",
-                     iteration=1)
+        store.create(
+            type=IssueType.PERF,
+            title="paged kv",
+            description="reduce frag",
+            created_by="perf_eval",
+            iteration=1,
+        )
         tools = build_issue_tools(store, iteration=1)
         out = _invoke(_tool_by_name(tools, "get_issue"), issue_id=1)
         assert "## Issue #1" in out
@@ -83,10 +88,12 @@ class TestReadTools:
 
     def test_search_issues_returns_matches(self, tmp_path):
         store = _make_store(tmp_path)
-        store.create(type=IssueType.PERF, title="Add paged KV",
-                     description="d", created_by="x", iteration=1)
-        store.create(type=IssueType.BUG, title="unrelated",
-                     description="d", created_by="x", iteration=1)
+        store.create(
+            type=IssueType.PERF, title="Add paged KV", description="d", created_by="x", iteration=1
+        )
+        store.create(
+            type=IssueType.BUG, title="unrelated", description="d", created_by="x", iteration=1
+        )
         tools = build_issue_tools(store, iteration=1)
         out = _invoke(_tool_by_name(tools, "search_issues"), query="paged")
         assert "Add paged KV" in out
@@ -94,8 +101,7 @@ class TestReadTools:
 
     def test_search_issues_no_matches(self, tmp_path):
         store = _make_store(tmp_path)
-        store.create(type=IssueType.BUG, title="hi", description="d",
-                     created_by="x", iteration=1)
+        store.create(type=IssueType.BUG, title="hi", description="d", created_by="x", iteration=1)
         tools = build_issue_tools(store, iteration=1)
         out = _invoke(_tool_by_name(tools, "search_issues"), query="xyzzy")
         assert out == "(no matches)"
@@ -116,8 +122,12 @@ class TestSubsetRouting:
     def test_judge_subset_includes_create(self, tmp_path):
         store = _make_store(tmp_path)
         tools = build_issue_tools(
-            store, iteration=1, can_create=True, creator="judge",
-            create_cap=1, allowed_create_types={IssueType.BUG},
+            store,
+            iteration=1,
+            can_create=True,
+            creator="judge",
+            create_cap=1,
+            allowed_create_types={IssueType.BUG},
         )
         names = {t.name for t in tools}
         assert "create_issue" in names
@@ -125,7 +135,10 @@ class TestSubsetRouting:
     def test_perf_eval_subset_includes_create(self, tmp_path):
         store = _make_store(tmp_path)
         tools = build_issue_tools(
-            store, iteration=1, can_create=True, creator="perf_eval",
+            store,
+            iteration=1,
+            can_create=True,
+            creator="perf_eval",
             create_cap=3,
         )
         names = {t.name for t in tools}
@@ -141,12 +154,17 @@ class TestCreateIssue:
     def test_create_issue_happy_path_returns_id(self, tmp_path):
         store = _make_store(tmp_path)
         tools = build_issue_tools(
-            store, iteration=1, can_create=True, creator="perf_eval",
+            store,
+            iteration=1,
+            can_create=True,
+            creator="perf_eval",
             create_cap=3,
         )
         out = _invoke(
             _tool_by_name(tools, "create_issue"),
-            type="perf", title="t", description="d",
+            type="perf",
+            title="t",
+            description="d",
         )
         assert out == "created issue #1"
         assert store.get(1) is not None
@@ -156,12 +174,17 @@ class TestCreateIssue:
     def test_create_issue_invalid_type_returns_error_string(self, tmp_path):
         store = _make_store(tmp_path)
         tools = build_issue_tools(
-            store, iteration=1, can_create=True, creator="perf_eval",
+            store,
+            iteration=1,
+            can_create=True,
+            creator="perf_eval",
             create_cap=3,
         )
         out = _invoke(
             _tool_by_name(tools, "create_issue"),
-            type="enhancement", title="t", description="d",
+            type="enhancement",
+            title="t",
+            description="d",
         )
         assert out.startswith("error:")
         assert "must be one of" in out
@@ -171,7 +194,10 @@ class TestCreateIssue:
     def test_create_issue_caps_at_three_per_iteration(self, tmp_path):
         store = _make_store(tmp_path)
         tools = build_issue_tools(
-            store, iteration=1, can_create=True, creator="perf_eval",
+            store,
+            iteration=1,
+            can_create=True,
+            creator="perf_eval",
             create_cap=3,
         )
         create = _tool_by_name(tools, "create_issue")
@@ -189,7 +215,10 @@ class TestCreateIssue:
         store = _make_store(tmp_path)
         # iteration 1 — fill cap
         iter1_tools = build_issue_tools(
-            store, iteration=1, can_create=True, creator="perf_eval",
+            store,
+            iteration=1,
+            can_create=True,
+            creator="perf_eval",
             create_cap=3,
         )
         create_iter1 = _tool_by_name(iter1_tools, "create_issue")
@@ -197,7 +226,10 @@ class TestCreateIssue:
             _invoke(create_iter1, type="perf", title=f"i1-{i}", description="d")
         # iteration 2 — fresh cap
         iter2_tools = build_issue_tools(
-            store, iteration=2, can_create=True, creator="perf_eval",
+            store,
+            iteration=2,
+            can_create=True,
+            creator="perf_eval",
             create_cap=3,
         )
         create_iter2 = _tool_by_name(iter2_tools, "create_issue")
@@ -209,8 +241,12 @@ class TestCreateIssue:
         # Judge subset: only bug type allowed.
         store = _make_store(tmp_path)
         tools = build_issue_tools(
-            store, iteration=1, can_create=True, creator="judge",
-            create_cap=1, allowed_create_types={IssueType.BUG},
+            store,
+            iteration=1,
+            can_create=True,
+            creator="judge",
+            create_cap=1,
+            allowed_create_types={IssueType.BUG},
         )
         create = _tool_by_name(tools, "create_issue")
         rejected_perf = _invoke(create, type="perf", title="p", description="d")
@@ -224,8 +260,12 @@ class TestCreateIssue:
     def test_judge_create_cap_is_one(self, tmp_path):
         store = _make_store(tmp_path)
         tools = build_issue_tools(
-            store, iteration=1, can_create=True, creator="judge",
-            create_cap=1, allowed_create_types={IssueType.BUG},
+            store,
+            iteration=1,
+            can_create=True,
+            creator="judge",
+            create_cap=1,
+            allowed_create_types={IssueType.BUG},
         )
         create = _tool_by_name(tools, "create_issue")
         ok = _invoke(create, type="bug", title="first", description="d")
@@ -237,7 +277,10 @@ class TestCreateIssue:
     def test_create_issue_unlimited_cap_when_none(self, tmp_path):
         store = _make_store(tmp_path)
         tools = build_issue_tools(
-            store, iteration=1, can_create=True, creator="x",
+            store,
+            iteration=1,
+            can_create=True,
+            creator="x",
             create_cap=None,
         )
         create = _tool_by_name(tools, "create_issue")

@@ -8,9 +8,8 @@ import pytest
 
 from vibe_serve.loops.plain.issue_board import (
     Issue,
-    IssueEvent,
-    IssueStatus,
     IssueBoard,
+    IssueStatus,
     IssueType,
 )
 
@@ -19,11 +18,15 @@ def _make_store(tmp_path) -> IssueBoard:
     return IssueBoard(tmp_path / "issues.json")
 
 
-def _create(store, *, type=IssueType.BUG, title="t", description="d",
-            created_by="perf_eval", iteration=1) -> Issue:
+def _create(
+    store, *, type=IssueType.BUG, title="t", description="d", created_by="perf_eval", iteration=1
+) -> Issue:
     return store.create(
-        type=type, title=title, description=description,
-        created_by=created_by, iteration=iteration,
+        type=type,
+        title=title,
+        description=description,
+        created_by=created_by,
+        iteration=iteration,
     )
 
 
@@ -63,8 +66,11 @@ class TestCreate:
     def test_create_accepts_string_type(self, tmp_path):
         store = _make_store(tmp_path)
         issue = store.create(
-            type="perf", title="p", description="d",
-            created_by="perf_eval", iteration=1,
+            type="perf",
+            title="p",
+            description="d",
+            created_by="perf_eval",
+            iteration=1,
         )
         assert issue.type == IssueType.PERF
 
@@ -78,8 +84,7 @@ class TestLoadCorrupt:
 
     def test_load_wrong_version_starts_empty(self, tmp_path):
         path = tmp_path / "issues.json"
-        path.write_text(json.dumps({"version": 999, "next_id": 1, "issues": []}),
-                        encoding="utf-8")
+        path.write_text(json.dumps({"version": 999, "next_id": 1, "issues": []}), encoding="utf-8")
         store = IssueBoard(path)
         assert store.list() == []
 
@@ -173,8 +178,9 @@ class TestStateTransitions:
     def test_update_status_records_history_event(self, tmp_path):
         store = _make_store(tmp_path)
         issue = _create(store)
-        store.update_status(issue.id, IssueStatus.IN_PROGRESS,
-                             actor="loop", iteration=1, note="claimed")
+        store.update_status(
+            issue.id, IssueStatus.IN_PROGRESS, actor="loop", iteration=1, note="claimed"
+        )
         reloaded = store.get(issue.id)
         assert reloaded.status == IssueStatus.IN_PROGRESS
         assert len(reloaded.history) == 2
@@ -184,10 +190,8 @@ class TestStateTransitions:
     def test_update_status_to_closed_records_closed_iter(self, tmp_path):
         store = _make_store(tmp_path)
         issue = _create(store, iteration=1)
-        store.update_status(issue.id, IssueStatus.IN_PROGRESS,
-                             actor="loop", iteration=2)
-        store.update_status(issue.id, IssueStatus.CLOSED,
-                             actor="judge", iteration=2, note="passed")
+        store.update_status(issue.id, IssueStatus.IN_PROGRESS, actor="loop", iteration=2)
+        store.update_status(issue.id, IssueStatus.CLOSED, actor="judge", iteration=2, note="passed")
         reloaded = store.get(issue.id)
         assert reloaded.status == IssueStatus.CLOSED
         assert reloaded.closed_iter == 2
@@ -195,8 +199,9 @@ class TestStateTransitions:
     def test_update_status_blocked_records_closed_iter(self, tmp_path):
         store = _make_store(tmp_path)
         issue = _create(store, iteration=1)
-        store.update_status(issue.id, IssueStatus.BLOCKED,
-                             actor="loop", iteration=3, note="exhausted retries")
+        store.update_status(
+            issue.id, IssueStatus.BLOCKED, actor="loop", iteration=3, note="exhausted retries"
+        )
         reloaded = store.get(issue.id)
         assert reloaded.status == IssueStatus.BLOCKED
         assert reloaded.closed_iter == 3
@@ -205,10 +210,8 @@ class TestStateTransitions:
         store = _make_store(tmp_path)
         issue = _create(store)
         assert issue.attempts == 0
-        store.increment_attempts(issue.id, actor="implementer",
-                                  iteration=1, note="first try")
-        store.increment_attempts(issue.id, actor="implementer",
-                                  iteration=1, note="retry")
+        store.increment_attempts(issue.id, actor="implementer", iteration=1, note="first try")
+        store.increment_attempts(issue.id, actor="implementer", iteration=1, note="retry")
         reloaded = store.get(issue.id)
         assert reloaded.attempts == 2
         assert sum(1 for e in reloaded.history if e.action == "attempt") == 2
@@ -242,8 +245,7 @@ class TestCapHelper:
         # Closing an issue mid-iteration must NOT free up cap budget.
         store = _make_store(tmp_path)
         a = _create(store, created_by="perf_eval", iteration=1)
-        store.update_status(a.id, IssueStatus.CLOSED,
-                             actor="judge", iteration=1)
+        store.update_status(a.id, IssueStatus.CLOSED, actor="judge", iteration=1)
         assert store.open_count_by_creator_in_iter("perf_eval", 1) == 1
 
 
@@ -260,8 +262,7 @@ class TestNextOpen:
     def test_next_open_returns_none_when_all_closed(self, tmp_path):
         store = _make_store(tmp_path)
         a = _create(store)
-        store.update_status(a.id, IssueStatus.CLOSED,
-                             actor="judge", iteration=1)
+        store.update_status(a.id, IssueStatus.CLOSED, actor="judge", iteration=1)
         assert store.next_open() is None
 
     def test_next_open_orders_bug_before_feature_before_perf(self, tmp_path):
@@ -297,8 +298,7 @@ class TestNextOpen:
         store = _make_store(tmp_path)
         a = _create(store, type=IssueType.BUG, title="claimed")
         b = _create(store, type=IssueType.BUG, title="open")
-        store.update_status(a.id, IssueStatus.IN_PROGRESS,
-                             actor="loop", iteration=1)
+        store.update_status(a.id, IssueStatus.IN_PROGRESS, actor="loop", iteration=1)
         first = store.next_open()
         assert first.id == b.id
 
@@ -318,8 +318,11 @@ class TestEventPayload:
             "self_check": "ok",
         }
         store.increment_attempts(
-            issue.id, actor="implementer", iteration=1,
-            note="first try", payload=payload,
+            issue.id,
+            actor="implementer",
+            iteration=1,
+            note="first try",
+            payload=payload,
         )
         # Reload from disk via a fresh store
         fresh = _make_store(tmp_path)
@@ -333,11 +336,17 @@ class TestEventPayload:
         store = _make_store(tmp_path)
         issue = _create(store)
         store.update_status(
-            issue.id, IssueStatus.IN_PROGRESS,
-            actor="loop", iteration=1, note="claimed",
+            issue.id,
+            IssueStatus.IN_PROGRESS,
+            actor="loop",
+            iteration=1,
+            note="claimed",
         )
         store.increment_attempts(
-            issue.id, actor="implementer", iteration=1, note="ran",
+            issue.id,
+            actor="implementer",
+            iteration=1,
+            note="ran",
         )
         reloaded = store.get(issue.id)
         # create + update_status + increment_attempts = 3 events
@@ -397,8 +406,11 @@ class TestReopenBlocked:
         store.increment_attempts(a.id, actor="implementer", iteration=1)
         store.increment_attempts(a.id, actor="implementer", iteration=1)
         store.update_status(
-            a.id, IssueStatus.BLOCKED,
-            actor="loop", iteration=1, note="exhausted",
+            a.id,
+            IssueStatus.BLOCKED,
+            actor="loop",
+            iteration=1,
+            note="exhausted",
         )
         before = store.get(a.id)
         assert before.status == IssueStatus.BLOCKED
@@ -406,7 +418,9 @@ class TestReopenBlocked:
         assert before.closed_iter == 1
 
         reopened = store.reopen_blocked(
-            actor="loop:resume", iteration=2, note="retried on resume",
+            actor="loop:resume",
+            iteration=2,
+            note="retried on resume",
         )
         assert reopened == [a.id]
 
@@ -426,12 +440,16 @@ class TestReopenBlocked:
         open_issue = _create(store, title="open")
         closed = _create(store, title="closed")
         store.update_status(
-            blocked.id, IssueStatus.BLOCKED,
-            actor="loop", iteration=1,
+            blocked.id,
+            IssueStatus.BLOCKED,
+            actor="loop",
+            iteration=1,
         )
         store.update_status(
-            closed.id, IssueStatus.CLOSED,
-            actor="judge", iteration=1,
+            closed.id,
+            IssueStatus.CLOSED,
+            actor="judge",
+            iteration=1,
         )
 
         reopened = store.reopen_blocked(actor="loop:resume", iteration=2)
@@ -485,13 +503,17 @@ class TestOnChangeCallback:
         assert cb.call_count == 1
 
         store.update_status(
-            issue.id, IssueStatus.IN_PROGRESS,
-            actor="loop", iteration=1,
+            issue.id,
+            IssueStatus.IN_PROGRESS,
+            actor="loop",
+            iteration=1,
         )
         assert cb.call_count == 2
 
         store.increment_attempts(
-            issue.id, actor="implementer", iteration=1,
+            issue.id,
+            actor="implementer",
+            iteration=1,
         )
         assert cb.call_count == 3
 

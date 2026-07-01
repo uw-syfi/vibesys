@@ -1,0 +1,65 @@
+TensorInfo: # previously named "neff_node"
+  description: Information about tensors used in the NEFF.
+  properties:
+    variable_name:
+      type: string
+      description: The name of the tensor.
+      example: input0
+
+    type:
+      type: string
+      description: What the tensor is used for. For example input tensor, output tensor, or weight tensor.
+      example: ["IN", "OUT", "WEIGHT"]
+
+    format:
+      type: string
+      description: Layout of the tensor in memory. For example, "NHWC" indicates a specific arrangement of dimensions. Letters you may see include N (batch size), H (height), W (width), C (channel).
+      example: NHWC
+
+    shape:
+      type: string
+      description: The multi-dimensional shape of the tensor.
+      example: [128 128 1 1]
+
+    size:
+      type: integer
+      format: int64
+      description: The total size of the tensor in bytes.
+      x-unit: bytes
+      minimum: 0
+
+    node:
+      type: integer
+      format: int64
+      description: Neff node.
+      example: 50
+
+    pcore_idx: # previously named "sg_name"
+      type: integer
+      format: int64
+      description: Index of the physical NeuronCore within a Logical NeuronCore (LNC). A Logical NeuronCore is a group of physical NeuronCores. For LNC2 this field can have a value of either 0 or 1.
+      minimum: 0
+
+    load_to_sbuf_avg_size_bytes:
+      type: integer
+      format: int64
+      description: The average size in bytes of each DMA transfer when loading this tensor into the State Buffer.
+      minimum: 0
+
+    load_to_sbuf_total_size_bytes:
+      type: integer
+      format: int64
+      description: The total size in bytes of all DMA transfers when loading this tensor into the State Buffer.
+      minimum: 0
+
+    load_to_sbuf_dma_count:
+      type: integer
+      format: int64
+      description: The total number of DMAs that loaded this tensor into the State Buffer.
+      minimum: 0
+
+    load_to_sbuf_repeat_factor:
+      type: number
+      format: float
+      description: The number of times this tensor was loaded into the State Buffer. A value of 1 means it was loaded once, 2 means it was loaded twice, and so on.
+      minimum: 0.0

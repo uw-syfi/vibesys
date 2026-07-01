@@ -125,6 +125,7 @@ def ensure_model_volume(
     def _download(mid: str, rev: str | None, sentinel: str) -> None:
         import os as _os
         from pathlib import Path
+
         from huggingface_hub import snapshot_download
 
         snapshot_download(

@@ -16,6 +16,7 @@ dependencies = [
     "langchain-openai",
     "huggingface_hub",
     "openai>=1.28.0",
+    "pydantic>=2",
     "python-dotenv>=1.0.1",
     "loguru>=0.7.2",
     "mcp>=1.0",
@@ -35,16 +36,20 @@ where = ["src"]
 include = ["vibe_serve*"]
 
 [tool.setuptools.package-data]
-vibe_serve = ["templates/*.j2", "loops/agent/templates/*.j2", "loops/agent/templates/_modality/*/*.j2", "loops/evolve/templates/*.j2", "loops/plain/templates/*.j2", "loops/plain/templates/*/*.j2"]
+vibe_serve = ["templates/*.j2", "templates/_backend/*/*.j2", "loops/agent/templates/*.j2", "loops/agent/templates/_domain/*.md", "loops/agent/templates/_modality/*/*.j2", "loops/evolve/templates/*.j2", "loops/plain/templates/*.j2", "loops/plain/templates/*/*.j2"]
 
 [dependency-groups]
 dev = [
+    "chardet<6",
+    "diff-cover",
     "matplotlib>=3.10.8",
     "pytest",
+    "pytest-cov",
     "ruff>=0.6",
 ]
 test = [
     "pytest",
+    "pytest-cov",
 ]
 
 [tool.pytest.ini_options]

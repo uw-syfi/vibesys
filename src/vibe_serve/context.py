@@ -2,17 +2,26 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
-from contextlib import ExitStack
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from datetime import datetime
 from pathlib import Path
 
 from vibe_serve import backends
 from vibe_serve.agent_runner import _log_and_print
 from vibe_serve.agents import build_agent_runner
-from vibe_serve.constants import ComputeBackend, DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT
+from vibe_serve.agents.progress import AgentProgress
+from vibe_serve.config import Config, as_config
+from vibe_serve.constants import (
+    DEFAULT_AGENT_BACKEND,
+    DEFAULT_COMPUTE_BACKEND,
+    PROJECT_ROOT,
+    ComputeBackend,
+)
 from vibe_serve.llm_client import _build_model
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentRequest,
@@ -119,7 +128,7 @@ class _RunContext:
 
     def __init__(
         self,
-        config: dict,
+        config: Config,
         exp_name: str,
         reference_path: str,
         existing: bool = False,
@@ -128,6 +137,7 @@ class _RunContext:
         bench: str | None = None,
         nsys_profiler: str | None = None,
         torch_profiler: str | None = None,
+        neuron_profiler: str | None = None,
         profiler_kind: str = "auto",
         skills_dirs: list[str] | None = None,
         run_environment: RunEnvironmentSpec | None = None,
@@ -136,6 +146,7 @@ class _RunContext:
         cli_provider: str | None = None,
         backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
     ):
+        config = as_config(config)
         self.backend: ComputeBackend = backend
         run_environment = run_environment or make_run_environment_spec()
         self.run_environment = build_run_environment(run_environment)
@@ -152,6 +163,7 @@ class _RunContext:
         sys.stderr = _TeeWriter(self._original_stderr, self.run_log_file)
         self._closed = False
         self._run_environment_stack = ExitStack()
+        self._progress_stack: list[AgentProgress] = []
 
         # Dirs excluded from workspace copy, git tracking, and the
         # Modal-side tar download. ``_auth`` and ``_opt_vibeserve`` are
@@ -162,8 +174,14 @@ class _RunContext:
         # the Docker ancestor-mount redirect dir for the same reason.
         # ``.cache`` holds any HF-download fallback (drafter, etc.).
         self.EXCLUDED_WORKSPACE_DIRS = {
-            ".claude", "__pycache__", ".git", "repos",
-            "_auth", "_opt_vibeserve", "_mounts", ".cache",
+            ".claude",
+            "__pycache__",
+            ".git",
+            "repos",
+            "_auth",
+            "_opt_vibeserve",
+            "_mounts",
+            ".cache",
         }
         self.debug = debug
         self.git_tracking = git_tracking
@@ -177,29 +195,29 @@ class _RunContext:
         )
         # Resolve agent backend + cli provider early so Docker setup can
         # add provider-specific bind mounts and init commands.
-        self._resolved_backend = (
-            agent_backend
-            or (config.get("agent") or {}).get("backend")
-            or "cli"
-        )
-        self._cli_provider = (
-            cli_provider or (config.get("agent") or {}).get("cli_provider")
-            or "codex"
-        )
+        self._resolved_backend = agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND
+        self._cli_provider = cli_provider or config.agent.cli_provider or "codex"
 
         self.model = _build_model(config)
-        self.model_name = config.get("model", {}).get("name", "unknown")
+        self.model_name = config.model.name
 
         self.acc_checker_path = self._coerce_dir_path(acc_checker, "--acc-checker")
         self.bench_path = self._coerce_dir_path(bench, "--bench")
         self.nsys_profiler_path = self._coerce_dir_path(nsys_profiler, "--nsys-profiler")
         self.torch_profiler_path = self._coerce_dir_path(torch_profiler, "--torch-profiler")
+        self.neuron_profiler_path = self._coerce_dir_path(neuron_profiler, "--neuron-profiler")
 
-        # Resolve profiler kind: 'auto' → the run environment's default.
+        # Resolve profiler kind: 'auto' → the compute backend's own profiler
+        # when it dictates one (e.g. Trainium → neuron-explorer), else the run
+        # environment's default (modal → torch, otherwise nsys).
         resolved_profiler = profiler_kind
         if resolved_profiler == "auto":
-            resolved_profiler = self.run_environment.default_profiler_kind
-        if resolved_profiler not in ("nsys", "torch"):
+            backend_profiler = getattr(self.backend_impl, "profiler_kind", None)
+            if backend_profiler == "neuron":
+                resolved_profiler = "neuron"
+            else:
+                resolved_profiler = self.run_environment.default_profiler_kind
+        if resolved_profiler not in ("nsys", "torch", "neuron"):
             raise ValueError(f"Unknown profiler kind: {profiler_kind!r}")
         self.profiler_kind = resolved_profiler
 
@@ -209,6 +227,12 @@ class _RunContext:
             default_tp = PROJECT_ROOT / "examples" / "torch_profiler"
             if default_tp.is_dir():
                 self.torch_profiler_path = str(default_tp)
+
+        # Likewise default neuron_profiler_path to examples/neuron_profiler/.
+        if self.profiler_kind == "neuron" and self.neuron_profiler_path is None:
+            default_np = PROJECT_ROOT / "examples" / "neuron_profiler"
+            if default_np.is_dir():
+                self.neuron_profiler_path = str(default_np)
 
         skill_source_paths = self._coerce_skills_dirs(skills_dirs)
         self._skill_source_paths: list[Path] = skill_source_paths
@@ -259,7 +283,13 @@ class _RunContext:
         # fresh sandbox volume at start, and codex-cli fails to load them
         # (e.g. skill description exceeds a newer CLI's length limit).
         # Mirrors _materialize_skills destinations inside cli_runner.
-        _cli_skill_dirs = (".agents/skills", ".claude/skills", ".gemini/skills", ".cursor/skills", ".opencode/skills")
+        _cli_skill_dirs = (
+            ".agents/skills",
+            ".claude/skills",
+            ".gemini/skills",
+            ".cursor/skills",
+            ".opencode/skills",
+        )
         for src in skill_source_paths:
             rel = src.name
             if (self.workspace / rel).exists():
@@ -309,6 +339,9 @@ class _RunContext:
             if self.torch_profiler_path:
                 src = Path(self.torch_profiler_path)
                 self._copy_excluding_extras(src, self.workspace / "torch_profiler")
+            if self.neuron_profiler_path:
+                src = Path(self.neuron_profiler_path)
+                self._copy_excluding_extras(src, self.workspace / "neuron_profiler")
 
         # Always ensure profiler harnesses are present in the workspace, even
         # when resuming — the original run may not have had them.
@@ -320,6 +353,10 @@ class _RunContext:
             src = Path(self.torch_profiler_path)
             if not (self.workspace / "torch_profiler").exists():
                 self._copy_excluding_extras(src, self.workspace / "torch_profiler")
+        if existing and self.neuron_profiler_path:
+            src = Path(self.neuron_profiler_path)
+            if not (self.workspace / "neuron_profiler").exists():
+                self._copy_excluding_extras(src, self.workspace / "neuron_profiler")
 
         if git_tracking:
             self._init_git_tracking(existing)
@@ -337,6 +374,7 @@ class _RunContext:
                     bench_path=self.bench_path,
                     nsys_profiler_path=self.nsys_profiler_path,
                     torch_profiler_path=self.torch_profiler_path,
+                    neuron_profiler_path=self.neuron_profiler_path,
                     log=self.lprint,
                     project_root=PROJECT_ROOT,
                 )
@@ -402,6 +440,21 @@ class _RunContext:
             return {}
         return {"CUDA_VISIBLE_DEVICES": str(dev.index)}
 
+    @contextmanager
+    def progress(self, progress: AgentProgress) -> Iterator[None]:
+        """Temporarily attach loop progress to agent invocations in this context."""
+        self._progress_stack.append(progress)
+        try:
+            yield
+        finally:
+            self._progress_stack.pop()
+
+    def current_progress(self) -> AgentProgress | None:
+        """Return the active loop progress, if a loop has scoped one."""
+        if not self._progress_stack:
+            return None
+        return self._progress_stack[-1]
+
     def invoke(
         self,
         *,
@@ -411,6 +464,7 @@ class _RunContext:
         response_cls,
         fallback_factory=None,
         round_label: str = "",
+        progress: AgentProgress | None = None,
         **extra,
     ):
         """Invoke an agent through ``self.agent_runner`` with workspace+env defaults.
@@ -430,6 +484,7 @@ class _RunContext:
             response_cls=response_cls,
             fallback_factory=fallback_factory,
             round_label=round_label,
+            progress=progress if progress is not None else self.current_progress(),
             **extra,
         )
 
@@ -539,10 +594,7 @@ class _RunContext:
                 else:
                     shutil.copy2(child, child_dst)
             except PermissionError:
-                self.lprint(
-                    f"[warn] _copy_excluding_extras: could not copy "
-                    f"{child.name} to {dst}"
-                )
+                self.lprint(f"[warn] _copy_excluding_extras: could not copy {child.name} to {dst}")
         if self.run_environment.isolated:
             # In containerized mode, external symlinks become bind mounts
             # (Docker) or volume uploads (Modal). Remove the broken symlinks
@@ -604,7 +656,9 @@ class _RunContext:
             "GIT_CONFIG_VALUE_0": str(self.workspace),
         }
 
-    def _git_run(self, cmd: list[str], *, check: bool = True, env: dict | None = None) -> subprocess.CompletedProcess:
+    def _git_run(
+        self, cmd: list[str], *, check: bool = True, env: dict | None = None
+    ) -> subprocess.CompletedProcess:
         """Run a git command in workspace, logging stderr on failure."""
         if env is None:
             env = {**os.environ, **self._GIT_ENV}
@@ -615,6 +669,24 @@ class _RunContext:
             self.lprint(f"[git-tracking] exit code {result.returncode}: {stderr}")
             result.check_returncode()
         return result
+
+    # Compiled-accelerator artifacts an agent may emit into the workspace.
+    # Large and never wanted in a per-round checkpoint. The Neuron compile cache
+    # is bind-mounted *outside* the workspace, but a stray trace/compile call
+    # pointed at the workspace (or a torch.compile dump) would otherwise be
+    # committed and bloat history across rounds.
+    _ARTIFACT_GITIGNORE_PATTERNS: tuple[str, ...] = (
+        "*.neff",
+        "*.ntff",
+        "*.neuron",
+        "neuroncc_compile_workdir/",
+        "neuron-compile-cache/",
+    )
+
+    def _workspace_gitignore(self) -> str:
+        """Contents of the workspace ``.gitignore`` (excluded dirs + artifacts)."""
+        lines = sorted(self.EXCLUDED_WORKSPACE_DIRS) + list(self._ARTIFACT_GITIGNORE_PATTERNS)
+        return "\n".join(lines) + "\n"
 
     def _init_git_tracking(self, existing: bool) -> None:
         """Initialize or validate the git repo in the unified workspace."""
@@ -628,18 +700,107 @@ class _RunContext:
         self._git_run(["git", "init"])
 
         gitignore = self.workspace / ".gitignore"
-        gitignore.write_text("\n".join(sorted(self.EXCLUDED_WORKSPACE_DIRS)) + "\n")
+        gitignore.write_text(self._workspace_gitignore())
 
-        self._git_run(["git", "add", "-A"])
+        self._git_add_all()
         self._git_run(["git", "commit", "-m", "initial: workspace setup"])
+
+    # -- snapshot resilience --------------------------------------------------
+    #
+    # On the Docker/Modal paths the sandbox runs as root and writes files into
+    # the bind-mounted workspace.  Most land mode-644 (host-readable), but a
+    # tool may emit a restrictive file the *host* user running `git add` cannot
+    # read (e.g. neuron-explorer's mode-600 ``system_profile.json``).  A single
+    # such file makes ``git add -A`` exit 128 and would otherwise abort the whole
+    # run.  These are always transient scratch artifacts we never want in a
+    # checkpoint, so we exclude them (local-only, via ``.git/info/exclude``)
+    # rather than fail.
+
+    def _collect_unreadable(self) -> list[str]:
+        """Workspace-relative paths the snapshotting user cannot read.
+
+        Walks the worktree (skipping ``.git``, never following symlinks) and
+        records files lacking ``R_OK`` and directories lacking ``R_OK|X_OK``
+        (an unsearchable dir hides its whole subtree from ``git add`` too).
+        """
+        unreadable: list[str] = []
+        root = str(self.workspace)
+        for dirpath, dirnames, filenames in os.walk(root):
+            if ".git" in dirnames:
+                dirnames.remove(".git")
+            kept = []
+            for d in dirnames:
+                full = os.path.join(dirpath, d)
+                if os.access(full, os.R_OK | os.X_OK):
+                    kept.append(d)
+                else:
+                    unreadable.append(os.path.relpath(full, root))
+            dirnames[:] = kept  # prune unsearchable dirs from the walk
+            for f in filenames:
+                full = os.path.join(dirpath, f)
+                if not os.access(full, os.R_OK):
+                    unreadable.append(os.path.relpath(full, root))
+        return unreadable
+
+    @staticmethod
+    def _unreadable_from_stderr(stderr: str) -> list[str]:
+        """Parse paths git reported it could not index from *stderr*.
+
+        Git prints e.g. ``error: open("foo"): Permission denied`` and
+        ``error: unable to index file 'foo'``.
+        """
+        paths: list[str] = []
+        for m in re.finditer(r'(?:open\("|unable to index file \')([^"\']+)', stderr):
+            paths.append(m.group(1))
+        return paths
+
+    def _exclude_paths(self, rel_paths: list[str]) -> None:
+        """Append *rel_paths* to ``.git/info/exclude`` (local, untracked)."""
+        rel_paths = [p for p in dict.fromkeys(rel_paths) if p]
+        if not rel_paths:
+            return
+        exclude_file = self.workspace / ".git" / "info" / "exclude"
+        exclude_file.parent.mkdir(parents=True, exist_ok=True)
+        existing = exclude_file.read_text() if exclude_file.exists() else ""
+        have = set(existing.splitlines())
+        new = [p for p in rel_paths if p not in have]
+        if not new:
+            return
+        prefix = "" if (not existing or existing.endswith("\n")) else "\n"
+        exclude_file.write_text(existing + prefix + "\n".join(new) + "\n")
+        shown = ", ".join(new[:5]) + ("…" if len(new) > 5 else "")
+        self.lprint(f"[git-tracking] excluded {len(new)} unreadable path(s) from snapshot: {shown}")
+
+    def _git_add_all(self) -> None:
+        """``git add -A``, resilient to files the host user cannot read.
+
+        Excludes unreadable paths up front, then retries on any residual
+        permission failure (a file may appear between the scan and the add).
+        """
+        self._exclude_paths(self._collect_unreadable())
+        for _ in range(3):
+            result = self._git_run(["git", "add", "-A"], check=False)
+            if result.returncode == 0:
+                return
+            stderr = result.stderr.decode(errors="replace")
+            offenders = self._unreadable_from_stderr(stderr)
+            if not offenders:
+                break  # failure unrelated to unreadable files — surface it
+            self._exclude_paths(offenders)
+        # Final attempt: let _git_run raise with full diagnostics if it still fails.
+        self._git_run(["git", "add", "-A"])
 
     def _git_snapshot(self, label: str) -> None:
         """Commit current workspace state with *label* as the commit message."""
-        self._git_run(["git", "add", "-A"])
+        self._git_add_all()
         # git diff --cached --quiet exits 1 when there are staged changes
-        has_changes = self._git_run(
-            ["git", "diff", "--cached", "--quiet"], check=False,
-        ).returncode != 0
+        has_changes = (
+            self._git_run(
+                ["git", "diff", "--cached", "--quiet"],
+                check=False,
+            ).returncode
+            != 0
+        )
         if has_changes:
             self._git_run(["git", "commit", "-m", label])
         else:

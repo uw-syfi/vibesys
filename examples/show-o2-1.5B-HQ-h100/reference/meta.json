@@ -1,0 +1,16 @@
+{
+  "model_id": "showlab/show-o2-1.5B-HQ",
+  "revision": "d3a220ec55feaacbdfcb053847edee14edd4e69a",
+  "model_file": "pytorch_model.bin",
+  "official_source": {
+    "repo": "https://github.com/showlab/Show-o",
+    "subdir": "show-o2",
+    "revision": "45a5a2de01d1ebd10cd5864d29310a76476cdf23"
+  },
+  "wan_vae": {
+    "model_id": "Wan-AI/Wan2.1-T2V-14B",
+    "revision": "a064a6c71f5be440641209c07bf2a5ce7a2ff5e4",
+    "filename": "Wan2.1_VAE.pth",
+    "sha256": "38071ab59bd94681c686fa51d75a1968f64e470262043be31f7a094e442fd981"
+  }
+}

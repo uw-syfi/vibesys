@@ -37,6 +37,12 @@ def mcp_spec(profiler_kind: str):
             command="python",
             args=["torch_profiler/server.py"],
         )
+    if profiler_kind == "neuron":
+        return MCPServerSpec(
+            name="vibeserve-neuron-profiler",
+            command="python",
+            args=["neuron_profiler/server.py"],
+        )
     return MCPServerSpec(
         name="vibeserve-nsys-profiler",
         command="python",
@@ -63,8 +69,7 @@ def invoke_profiler(
             kind="profiler",
             system_prompt=system_prompt,
             user_prompt=(
-                "Profile the server and return exactly one JSON object "
-                "matching the schema above."
+                "Profile the server and return exactly one JSON object matching the schema above."
             ),
             response_cls=ProfilerSummary,
             fallback_factory=lambda: ProfilerSummary(

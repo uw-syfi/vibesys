@@ -1,0 +1,14 @@
+{
+  "model_id": "showlab/show-o2-1.5B-HQ",
+  "revision": "d3a220ec55feaacbdfcb053847edee14edd4e69a",
+  "task": "text-to-image",
+  "reference": "reference",
+  "benchmark": "benchmark",
+  "accuracy_checker": "accuracy_checker",
+  "served_endpoints": [
+    "/health",
+    "/v1/images/generations",
+    "/v1/completions"
+  ],
+  "default_endpoint": "/v1/images/generations"
+}

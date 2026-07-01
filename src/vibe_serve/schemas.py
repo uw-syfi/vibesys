@@ -21,22 +21,21 @@ This module has no local imports, so templates and tests can pull
 schemas in without dragging in the rest of the agent runtime.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
-
 
 # ===========================================================================
 # Enums
 # ===========================================================================
 
 
-class Verdict(str, Enum):
+class Verdict(StrEnum):
     PASS = "pass"
     FAIL = "fail"
 
 
-class PerfTrend(str, Enum):
+class PerfTrend(StrEnum):
     IMPROVED = "improved"
     REGRESSED = "regressed"
     MIXED = "mixed"
@@ -51,14 +50,20 @@ class ImplementerResponse(BaseModel):
     """Structured response from the implementer agent."""
 
     summary: str = Field(description="What was implemented or changed this iteration.")
-    expected_behavior: str = Field(description="What behavior is expected (e.g. 'server starts on port 8000, /health returns 200').")
+    expected_behavior: str = Field(
+        description="What behavior is expected (e.g. 'server starts on port 8000, /health returns 200')."
+    )
 
 
 class JudgeResponse(BaseModel):
     """Structured response from the judge agent."""
 
-    analysis: str = Field(description="Detailed analysis of the implementation covering correctness, completeness, dependencies, tests, and code quality.")
-    feedback: str = Field(description="Specific actionable feedback for the implementer. Empty string if passing.")
+    analysis: str = Field(
+        description="Detailed analysis of the implementation covering correctness, completeness, dependencies, tests, and code quality."
+    )
+    feedback: str = Field(
+        description="Specific actionable feedback for the implementer. Empty string if passing."
+    )
     verdict: Verdict = Field(description="PASS if all criteria are met, FAIL otherwise.")
 
 
@@ -96,7 +101,9 @@ class LoadLevelMetrics(BaseModel):
     throughput: ThroughputStats
     ttft: LatencyStats | None = Field(default=None, description="Time to first token stats.")
     tpot: LatencyStats | None = Field(default=None, description="Time per output token stats.")
-    total_latency: LatencyStats | None = Field(default=None, description="End-to-end latency stats.")
+    total_latency: LatencyStats | None = Field(
+        default=None, description="End-to-end latency stats."
+    )
 
 
 class PerfMetrics(BaseModel):
@@ -109,12 +116,24 @@ class PerfMetrics(BaseModel):
 class PerfEvalResponse(BaseModel):
     """Structured response from the performance evaluator agent."""
 
-    analysis: str = Field(description="What the evaluator observed — trends, bottlenecks, saturation points.")
-    metrics: PerfMetrics = Field(description="Structured performance data collected from benchmark runs.")
-    implementer_feedback: list[str] = Field(description="Bullet-point list of concrete optimization ideas for the implementer to try next iteration.")
-    evaluator_feedback: list[str] = Field(description="Bullet-point list of notes for the next performance evaluator (e.g. benchmarking strategy, load levels to try, metrics to watch).")
-    throughput_trend: PerfTrend = Field(description="Whether throughput (req/s, tok/s) improved, regressed, or is mixed compared to the previous iteration.")
-    latency_trend: PerfTrend = Field(description="Whether latency (TTFT, TPOT, total) improved, regressed, or is mixed compared to the previous iteration.")
+    analysis: str = Field(
+        description="What the evaluator observed — trends, bottlenecks, saturation points."
+    )
+    metrics: PerfMetrics = Field(
+        description="Structured performance data collected from benchmark runs."
+    )
+    implementer_feedback: list[str] = Field(
+        description="Bullet-point list of concrete optimization ideas for the implementer to try next iteration."
+    )
+    evaluator_feedback: list[str] = Field(
+        description="Bullet-point list of notes for the next performance evaluator (e.g. benchmarking strategy, load levels to try, metrics to watch)."
+    )
+    throughput_trend: PerfTrend = Field(
+        description="Whether throughput (req/s, tok/s) improved, regressed, or is mixed compared to the previous iteration."
+    )
+    latency_trend: PerfTrend = Field(
+        description="Whether latency (TTFT, TPOT, total) improved, regressed, or is mixed compared to the previous iteration."
+    )
 
 
 # ===========================================================================
@@ -125,9 +144,15 @@ class PerfEvalResponse(BaseModel):
 class ProfilerResponse(BaseModel):
     """Structured response from the nsys profiler agent."""
 
-    analysis: str = Field(description="Detailed interpretation of the nsys profiling data — what the kernel breakdown, CPU overhead, and GPU idle gaps reveal about the implementation.")
-    bottlenecks: str = Field(description="Top bottlenecks identified, ordered by impact. Each bottleneck should name the specific kernel or operation and its contribution to total time.")
-    suggestions: str = Field(description="Actionable optimization suggestions for the implementer, tied to specific bottlenecks. E.g. 'Fuse the 12 RMSNorm kernel launches into a single FlashInfer call' or 'Enable CUDA graphs to eliminate 6ms of CPU launch overhead'.")
+    analysis: str = Field(
+        description="Detailed interpretation of the nsys profiling data — what the kernel breakdown, CPU overhead, and GPU idle gaps reveal about the implementation."
+    )
+    bottlenecks: str = Field(
+        description="Top bottlenecks identified, ordered by impact. Each bottleneck should name the specific kernel or operation and its contribution to total time."
+    )
+    suggestions: str = Field(
+        description="Actionable optimization suggestions for the implementer, tied to specific bottlenecks. E.g. 'Fuse the 12 RMSNorm kernel launches into a single FlashInfer call' or 'Enable CUDA graphs to eliminate 6ms of CPU launch overhead'."
+    )
 
 
 class ProfilerSummary(BaseModel):
@@ -173,8 +198,12 @@ class IssueImplementerResponse(BaseModel):
 
     issue_id: int = Field(description="ID of the issue this implementer worked on.")
     summary: str = Field(description="What was implemented or changed for this specific issue.")
-    files_touched: list[str] = Field(default_factory=list, description="List of files created or modified.")
-    self_check: str = Field(description="Brief note on how the implementer self-validated the change before declaring done.")
+    files_touched: list[str] = Field(
+        default_factory=list, description="List of files created or modified."
+    )
+    self_check: str = Field(
+        description="Brief note on how the implementer self-validated the change before declaring done."
+    )
 
 
 class IssueJudgeResponse(BaseModel):
@@ -186,10 +215,19 @@ class IssueJudgeResponse(BaseModel):
     """
 
     issue_id: int = Field(description="ID of the issue under review.")
-    analysis: str = Field(description="Detailed analysis covering whether the issue is resolved AND general correctness checks.")
-    feedback: str = Field(description="Specific actionable feedback for the implementer if not resolved. Empty if PASS.")
-    verdict: Verdict = Field(description="PASS if the issue is resolved AND general checks pass, FAIL otherwise.")
-    new_issues_filed: list[int] = Field(default_factory=list, description="IDs of new bug-type issues the judge filed via create_issue for unrelated discoveries.")
+    analysis: str = Field(
+        description="Detailed analysis covering whether the issue is resolved AND general correctness checks."
+    )
+    feedback: str = Field(
+        description="Specific actionable feedback for the implementer if not resolved. Empty if PASS."
+    )
+    verdict: Verdict = Field(
+        description="PASS if the issue is resolved AND general checks pass, FAIL otherwise."
+    )
+    new_issues_filed: list[int] = Field(
+        default_factory=list,
+        description="IDs of new bug-type issues the judge filed via create_issue for unrelated discoveries.",
+    )
 
 
 class IssuePerfEvalResponse(BaseModel):
@@ -199,12 +237,24 @@ class IssuePerfEvalResponse(BaseModel):
     returned in this payload (cf. ``PerfEvalResponse.implementer_feedback``).
     """
 
-    analysis: str = Field(description="What the evaluator observed — trends, bottlenecks, saturation points.")
-    metrics: PerfMetrics = Field(description="Structured performance data collected from benchmark runs.")
-    evaluator_feedback: list[str] = Field(description="Bullet-point list of notes for the next performance evaluator (e.g. benchmarking strategy, load levels to try, metrics to watch).")
-    new_issue_ids: list[int] = Field(default_factory=list, description="IDs of issues filed via create_issue this round.")
-    throughput_trend: PerfTrend = Field(description="Whether throughput (req/s, tok/s) improved, regressed, or is mixed compared to the previous iteration.")
-    latency_trend: PerfTrend = Field(description="Whether latency (TTFT, TPOT, total) improved, regressed, or is mixed compared to the previous iteration.")
+    analysis: str = Field(
+        description="What the evaluator observed — trends, bottlenecks, saturation points."
+    )
+    metrics: PerfMetrics = Field(
+        description="Structured performance data collected from benchmark runs."
+    )
+    evaluator_feedback: list[str] = Field(
+        description="Bullet-point list of notes for the next performance evaluator (e.g. benchmarking strategy, load levels to try, metrics to watch)."
+    )
+    new_issue_ids: list[int] = Field(
+        default_factory=list, description="IDs of issues filed via create_issue this round."
+    )
+    throughput_trend: PerfTrend = Field(
+        description="Whether throughput (req/s, tok/s) improved, regressed, or is mixed compared to the previous iteration."
+    )
+    latency_trend: PerfTrend = Field(
+        description="Whether latency (TTFT, TPOT, total) improved, regressed, or is mixed compared to the previous iteration."
+    )
 
 
 # ===========================================================================
@@ -222,9 +272,7 @@ class PreRoundDecision(BaseModel):
         default="",
         description="Guidance for the profiler (e.g. 'focus on decode-path kernels'). Empty when need_profile is False.",
     )
-    reasoning: str = Field(
-        description="Short explanation of the decision. One or two sentences."
-    )
+    reasoning: str = Field(description="Short explanation of the decision. One or two sentences.")
 
 
 class OrchestratorPlan(BaseModel):
@@ -237,9 +285,7 @@ class OrchestratorPlan(BaseModel):
     orchestrator.
     """
 
-    task: str = Field(
-        description="Well-scoped task description handed to the implementer."
-    )
+    task: str = Field(description="Well-scoped task description handed to the implementer.")
     pass_criteria: str = Field(
         description="Feature-level pass criteria for the judge. The framework always runs the accuracy checker and benchmark sanity in addition."
     )
@@ -249,6 +295,49 @@ class OrchestratorPlan(BaseModel):
     )
     reasoning: str = Field(
         description="Short explanation of the orchestrator's reasoning for this round."
+    )
+
+
+# ===========================================================================
+# Agent loop — single-agent inner loop (ablation)
+# ===========================================================================
+
+
+class SingleAgentRoundResponse(BaseModel):
+    """One agent performs implementer + judge + profiler in a single shot.
+
+    Used by the agent outer-loop's ``--inner-loop=single-agent`` ablation:
+    instead of three specialist agents handing off through the framework,
+    the same agent implements the round's task, runs the always-on
+    correctness checks, and captures a profile, then returns the combined
+    verdict.
+    """
+
+    summary: str = Field(description="What was implemented or changed this round.")
+    expected_behavior: str = Field(
+        description="What behavior the implementation should exhibit (server contract, etc.)."
+    )
+    self_review: str = Field(
+        description="Self-review of correctness, accuracy, benchmark sanity, and reward-hack risk — same gates the judge would enforce."
+    )
+    feedback: str = Field(
+        description="Concrete issues to fix on retry; empty when verdict is PASS."
+    )
+    verdict: Verdict = Field(
+        description="PASS if all gates (orchestrator pass criteria + always-on checks) hold; FAIL otherwise."
+    )
+    bottlenecks: str = Field(description="Ranked profile bottlenecks with concrete numbers.")
+    suggestions: str = Field(
+        description="Actionable optimization suggestions for the next round, tied to bottlenecks."
+    )
+    profile_analysis: str = Field(description="Detailed interpretation of the captured profile.")
+    perf_metric: float | None = Field(
+        default=None,
+        description="Headline perf metric from the benchmark (per OBJECTIVE.md). None if not measured.",
+    )
+    perf_unit: str | None = Field(
+        default=None,
+        description="Unit/field name for perf_metric (e.g. 'median_tok_per_sec'). None when perf_metric is None.",
     )
 
 
@@ -267,9 +356,7 @@ class MutatorResponse(BaseModel):
     population history.
     """
 
-    summary: str = Field(
-        description="Short description of the change made to the parent."
-    )
+    summary: str = Field(description="Short description of the change made to the parent.")
     hypothesis: str = Field(
         description="Why this change is expected to improve the headline metric.",
     )

@@ -3,10 +3,7 @@
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from vibe_serve.agents.callbacks import TodoDisplay
-
 
 # --- TodoDisplay rendering ---
 
@@ -55,7 +52,6 @@ def test_todo_display_clears_previous_lines():
     todos2 = [_make_todo("task one", "completed"), _make_todo("task two", "pending")]
 
     td.update(todos1)
-    first_output = buf.getvalue()
     buf.truncate(0)
     buf.seek(0)
 
@@ -92,9 +88,11 @@ def test_run_agent_passes_thread_id():
     from vibe_serve.agent_runner import run_agent
 
     agent = MagicMock()
-    agent.stream.return_value = iter([
-        {"agent": {"messages": [MagicMock(type="ai", content="Done")]}},
-    ])
+    agent.stream.return_value = iter(
+        [
+            {"agent": {"messages": [MagicMock(type="ai", content="Done")]}},
+        ]
+    )
 
     with patch("vibe_serve.agent_runner.TodoDisplay"):
         run_agent(agent, "do stuff")
@@ -110,14 +108,20 @@ def test_run_judge_agent_passes_thread_id():
     from vibe_serve.schemas import JudgeResponse, Verdict
 
     agent = MagicMock()
-    agent.stream.return_value = iter([
-        {"agent": {
-            "messages": [],
-            "structured_response": JudgeResponse(
-                analysis="Good", feedback="", verdict=Verdict.PASS,
-            ),
-        }},
-    ])
+    agent.stream.return_value = iter(
+        [
+            {
+                "agent": {
+                    "messages": [],
+                    "structured_response": JudgeResponse(
+                        analysis="Good",
+                        feedback="",
+                        verdict=Verdict.PASS,
+                    ),
+                }
+            },
+        ]
+    )
 
     with patch("vibe_serve.agent_runner.TodoDisplay"):
         run_judge_agent(agent, "review")
@@ -137,23 +141,31 @@ def test_run_agent_extracts_todos_from_tools_node():
     todos_seen = []
 
     agent = MagicMock()
-    agent.stream.return_value = iter([
-        # Todos arrive via the tools node (Command update from write_todos)
-        {"tools": {
-            "todos": [{"content": "Setup", "status": "in_progress"}],
-            "messages": [],
-        }},
-        {"tools": {
-            "todos": [
-                {"content": "Setup", "status": "completed"},
-                {"content": "Code", "status": "in_progress"},
-            ],
-            "messages": [],
-        }},
-        {"agent": {
-            "messages": [MagicMock(type="ai", content="Done")],
-        }},
-    ])
+    agent.stream.return_value = iter(
+        [
+            # Todos arrive via the tools node (Command update from write_todos)
+            {
+                "tools": {
+                    "todos": [{"content": "Setup", "status": "in_progress"}],
+                    "messages": [],
+                }
+            },
+            {
+                "tools": {
+                    "todos": [
+                        {"content": "Setup", "status": "completed"},
+                        {"content": "Code", "status": "in_progress"},
+                    ],
+                    "messages": [],
+                }
+            },
+            {
+                "agent": {
+                    "messages": [MagicMock(type="ai", content="Done")],
+                }
+            },
+        ]
+    )
 
     with patch("vibe_serve.agent_runner.TodoDisplay") as MockTD:
         instance = MockTD.return_value
@@ -172,11 +184,15 @@ def test_run_agent_extracts_todos_from_any_node():
     todos_seen = []
 
     agent = MagicMock()
-    agent.stream.return_value = iter([
-        {"some_other_node": {
-            "todos": [{"content": "Task A", "status": "pending"}],
-        }},
-    ])
+    agent.stream.return_value = iter(
+        [
+            {
+                "some_other_node": {
+                    "todos": [{"content": "Task A", "status": "pending"}],
+                }
+            },
+        ]
+    )
 
     with patch("vibe_serve.agent_runner.TodoDisplay") as MockTD:
         instance = MockTD.return_value
@@ -195,18 +211,26 @@ def test_run_judge_agent_extracts_todos():
     todos_seen = []
 
     agent = MagicMock()
-    agent.stream.return_value = iter([
-        {"tools": {
-            "todos": [{"content": "Review code", "status": "in_progress"}],
-            "messages": [],
-        }},
-        {"agent": {
-            "messages": [],
-            "structured_response": JudgeResponse(
-                analysis="Good", feedback="", verdict=Verdict.PASS,
-            ),
-        }},
-    ])
+    agent.stream.return_value = iter(
+        [
+            {
+                "tools": {
+                    "todos": [{"content": "Review code", "status": "in_progress"}],
+                    "messages": [],
+                }
+            },
+            {
+                "agent": {
+                    "messages": [],
+                    "structured_response": JudgeResponse(
+                        analysis="Good",
+                        feedback="",
+                        verdict=Verdict.PASS,
+                    ),
+                }
+            },
+        ]
+    )
 
     with patch("vibe_serve.agent_runner.TodoDisplay") as MockTD:
         instance = MockTD.return_value

@@ -22,18 +22,19 @@ import sys
 import tomllib
 from pathlib import Path
 
-from vibe_serve.config import _load_config
+from vibe_serve.config import Config, _load_config
 from vibe_serve.constants import (
-    ComputeBackend,
     KNOWN_COMPUTE_BACKENDS,
     PROJECT_ROOT,
+    ComputeBackend,
 )
+from vibe_serve.loops.agent.domain import DEFAULT_DOMAIN, builtin_domains
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
 )
 
-_OUTER_LOOPS = ("agent", "plain", "evolve")
+_OUTER_LOOPS = ("agent", "plain", "evolve", "openevolve")
 _MODALITIES = (
     "text_generation",
     "image_generation",
@@ -68,7 +69,7 @@ def _extract_flag(argv: list[str], flag: str) -> tuple[str | None, list[str]]:
             i += 2
             continue
         if tok.startswith(eq_form):
-            value = tok[len(eq_form):]
+            value = tok[len(eq_form) :]
             i += 1
             continue
         out.append(tok)
@@ -152,14 +153,22 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Path to directory containing torch.profiler analysis script (analyze_torch_profile.py). Used when --profiler=torch.",
     )
     parser.add_argument(
+        "--neuron-profiler",
+        type=Path,
+        default=None,
+        help="Path to directory containing the neuron-explorer analysis script (analyze_neuron.py). Used when --profiler=neuron (default for --backend trainium).",
+    )
+    parser.add_argument(
         "--profiler",
-        choices=["nsys", "torch", "auto"],
+        choices=["nsys", "torch", "neuron", "auto"],
         default="auto",
         help=(
             "Which profiler to use between rounds. "
             "'nsys' for NVIDIA Nsight Systems (needs /proc/driver/nvidia), "
             "'torch' for torch.profiler (works in Modal sandboxes), "
-            "'auto' picks torch when --modal is set, else nsys. Default: auto."
+            "'neuron' for AWS neuron-explorer (Trainium/NeuronCores), "
+            "'auto' picks the compute backend's profiler (trainium → neuron), "
+            "else torch when --modal is set, else nsys. Default: auto."
         ),
     )
     parser.add_argument(
@@ -172,6 +181,16 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
             "either a single skill directory (containing a top-level "
             "`SKILL.md`) or a parent directory of multiple skill directories. "
             "Default: `resources/skills/serving-systems/`."
+        ),
+    )
+    parser.add_argument(
+        "--no-skills",
+        action="store_true",
+        help=(
+            "Disable skills entirely: no skill directories are copied into "
+            "the workspace and no per-CLI skill-discovery paths are populated. "
+            "Used for ablations measuring the skill library's contribution. "
+            "Overrides --skills-dir."
         ),
     )
     parser.add_argument(
@@ -264,7 +283,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 def load_config_and_skills(
     args: argparse.Namespace,
-) -> tuple[dict, list[str] | None, ComputeBackend]:
+) -> tuple[Config, list[str] | None, ComputeBackend]:
     """Load config from args.config, process skills_dir, and resolve the backend."""
     try:
         config = _load_config(args.config)
@@ -272,12 +291,27 @@ def load_config_and_skills(
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    skills = (
-        [str(s) for s in args.skills_dir]
-        if isinstance(args.skills_dir, list)
-        else ([str(args.skills_dir)] if args.skills_dir else None)
-    )
-    backend: ComputeBackend = args.backend or config["backend"]["name"]
+    backend: ComputeBackend = args.backend or config.backend.name
+
+    if getattr(args, "no_skills", False):
+        skills = None
+    else:
+        skills = (
+            [str(s) for s in args.skills_dir]
+            if isinstance(args.skills_dir, list)
+            else ([str(args.skills_dir)] if args.skills_dir else None)
+        )
+        # Trainium targets get the vendored AWS NKI skills automatically so the
+        # implementer can write NeuronCore kernels. Other backends are
+        # unaffected; --no-skills still disables everything.
+        if backend == ComputeBackend.TRAINIUM:
+            nki_skills = (
+                PROJECT_ROOT / "resources" / "skills" / "neuron-agentic-development" / "skills"
+            )
+            if nki_skills.is_dir():
+                skills = skills or []
+                if str(nki_skills) not in skills:
+                    skills.append(str(nki_skills))
     return config, skills, backend
 
 
@@ -386,8 +420,27 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-rounds", type=int, default=24)
     parser.add_argument("--max-retries-per-round", type=int, default=3)
     parser.add_argument("--start-round", type=int, default=None, metavar="N")
+    parser.add_argument("--modality", default="text_generation", choices=_MODALITIES)
     parser.add_argument(
-        "--modality", default="text_generation", choices=_MODALITIES
+        "--domain",
+        default=DEFAULT_DOMAIN,
+        metavar="NAME_OR_PATH",
+        help=(
+            "Domain pack supplying the implementer/judge context for your "
+            f"problem space. A built-in name ({', '.join(builtin_domains())}) "
+            "or a path to your own domain directory. Default: "
+            f"{DEFAULT_DOMAIN}. See loops/agent/templates/_domain/README.md."
+        ),
+    )
+    parser.add_argument(
+        "--inner-loop",
+        choices=["multi-agent", "single-agent"],
+        default="multi-agent",
+        help=(
+            "How to dispatch implement/judge/profile work each round. "
+            "'multi-agent' (default) uses three specialist agents. "
+            "'single-agent' (ablation) uses one agent for all three roles."
+        ),
     )
     return parser
 
@@ -435,6 +488,7 @@ def _run_agent(args: argparse.Namespace) -> None:
         bench=str(args.bench) if args.bench else None,
         nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
         torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
+        neuron_profiler=str(args.neuron_profiler) if args.neuron_profiler else None,
         profiler_kind=args.profiler,
         skills_dirs=skills,
         run_environment=run_environment_spec_from_args(args),
@@ -442,6 +496,8 @@ def _run_agent(args: argparse.Namespace) -> None:
         cli_provider=args.cli_provider,
         backend=backend,
         modality=args.modality,
+        domain=args.domain,
+        inner_loop=args.inner_loop,
     )
 
     if success:
@@ -461,9 +517,7 @@ def _parse_cli_objective(spec: str):
     from vibe_serve.loops.evolve.population import Objective
 
     if ":" not in spec:
-        raise argparse.ArgumentTypeError(
-            f"--objective {spec!r} must be 'name:max' or 'name:min'"
-        )
+        raise argparse.ArgumentTypeError(f"--objective {spec!r} must be 'name:max' or 'name:min'")
     name, _, direction = spec.partition(":")
     name = name.strip()
     direction = direction.strip().lower()
@@ -524,9 +578,7 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
         metavar="NAME:DIRECTION",
     )
     parser.add_argument("--frontier-bias", type=float, default=0.7)
-    parser.add_argument(
-        "--modality", default="text_generation", choices=_MODALITIES
-    )
+    parser.add_argument("--modality", default="text_generation", choices=_MODALITIES)
     return parser
 
 
@@ -597,10 +649,86 @@ def _run_evolve(args: argparse.Namespace) -> None:
     if success:
         print(
             f"\nEvolve loop completed {args.max_generations} generations "
-            f"× {args.children_per_generation} children."
+            f"× {args.children_per_generation} cands."
         )
     else:
         print("\nEvolve loop stopped early (exception or KeyboardInterrupt).")
+        sys.exit(1)
+
+
+# ===========================================================================
+# openevolve loop  (--outer-loop openevolve)
+# ===========================================================================
+
+
+def _build_openevolve_parser() -> argparse.ArgumentParser:
+    parser = _make_parser(
+        prog="vibe-serve --outer-loop openevolve",
+        description=(
+            "Run the OpenEvolve-style MAP-Elites search loop: behavioral "
+            "feature binning + cell-uniform parent selection."
+        ),
+    )
+    parser.add_argument("--max-iterations", type=int, default=16)
+    parser.add_argument("--k-inspirations", type=int, default=3)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--modality", default="text_generation", choices=_MODALITIES)
+    return parser
+
+
+def _validate_openevolve(args: argparse.Namespace) -> None:
+    if args.modal and args.profiler == "nsys":
+        print("Error: --modal only supports --profiler=torch.", file=sys.stderr)
+        sys.exit(2)
+    if args.max_iterations < 1:
+        print("Error: --max-iterations must be >= 1.", file=sys.stderr)
+        sys.exit(2)
+    if args.k_inspirations < 0:
+        print("Error: --k-inspirations must be >= 0.", file=sys.stderr)
+        sys.exit(2)
+
+
+def _run_openevolve(args: argparse.Namespace) -> None:
+    config, skills, backend = load_config_and_skills(args)
+    from vibe_serve.loops.openevolve.loop import run_openevolve_loop
+
+    objective = _load_objective(args.ref)
+
+    existing = False
+    exp_name = args.exp_name
+    if args.resume is not None:
+        run_dir_name = _resolve_run_dir(args.resume)
+        exp_name = run_dir_name
+        existing = True
+        print(f"Resuming openevolve run: exp_env/{run_dir_name}/")
+
+    success = run_openevolve_loop(
+        config=config,
+        exp_name=exp_name,
+        reference_path=args.ref,
+        objective=objective,
+        max_iterations=args.max_iterations,
+        k_inspirations=args.k_inspirations,
+        seed=args.seed,
+        existing=existing,
+        debug=args.debug,
+        acc_checker=str(args.acc_checker) if args.acc_checker else None,
+        bench=str(args.bench) if args.bench else None,
+        nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
+        torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
+        profiler_kind=args.profiler,
+        skills_dirs=skills,
+        run_environment=run_environment_spec_from_args(args),
+        agent_backend=args.agent_backend,
+        cli_provider=args.cli_provider,
+        backend=backend,
+        modality=args.modality,
+    )
+
+    if success:
+        print(f"\nOpenEvolve loop completed {args.max_iterations} rounds.")
+    else:
+        print("\nOpenEvolve loop stopped early (exception or KeyboardInterrupt).")
         sys.exit(1)
 
 
@@ -653,13 +781,14 @@ def _run_plain(args: argparse.Namespace) -> None:
 
         if args.start_round is not None:
             resume_state = PlainLoopState(
-                round_idx=args.start_round - 1, bootstrap_done=True,
+                round_idx=args.start_round - 1,
+                bootstrap_done=True,
             )
         else:
             resume_state = _load_state(log_dir)
             if resume_state is not None:
                 print(
-                    f"Auto-detected state: iteration {resume_state.round_idx + 1}, "
+                    f"Auto-detected state: round {resume_state.round_idx + 1}, "
                     f"phase '{resume_state.phase}'"
                     + (
                         f", current issue #{resume_state.current_issue_id}"
@@ -710,18 +839,21 @@ _PARSER_BUILDERS = {
     "agent": _build_agent_parser,
     "plain": _build_plain_parser,
     "evolve": _build_evolve_parser,
+    "openevolve": _build_openevolve_parser,
 }
 
 _VALIDATORS = {
     "agent": "_validate_agent",
     "plain": "_validate_plain",
     "evolve": "_validate_evolve",
+    "openevolve": "_validate_openevolve",
 }
 
 _RUNNERS = {
     "agent": "_run_agent",
     "plain": "_run_plain",
     "evolve": "_run_evolve",
+    "openevolve": "_run_openevolve",
 }
 
 

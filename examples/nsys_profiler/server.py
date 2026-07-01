@@ -23,7 +23,6 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-
 _HERE = Path(__file__).resolve().parent
 
 # Import the analysis module by path so this file is usable both from inside
@@ -134,7 +133,10 @@ def build_server() -> FastMCP:
     def summary(report: str, top: int = 15, step: int = 1) -> str:
         """All-in-one analysis: kernels + cpu_overhead + idle_gaps + memory + graph_replays + step_timeline."""
         return _capture(
-            analyze_nsys.cmd_summary, report=report, top=top, step=step,
+            analyze_nsys.cmd_summary,
+            report=report,
+            top=top,
+            step=step,
         )
 
     return mcp

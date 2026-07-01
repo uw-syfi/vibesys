@@ -23,7 +23,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from vibe_serve.loops.plain.issue_board import IssueStatus, IssueBoard, IssueType
+from vibe_serve.loops.plain.issue_board import IssueBoard, IssueStatus, IssueType
 from vibe_serve.loops.plain.tool_impl import (
     CreateIssuePolicy,
     create_issue_under_policy,
@@ -31,9 +31,7 @@ from vibe_serve.loops.plain.tool_impl import (
     format_issue_short,
 )
 
-_ALL_TYPES: frozenset[IssueType] = frozenset(
-    {IssueType.BUG, IssueType.FEATURE, IssueType.PERF}
-)
+_ALL_TYPES: frozenset[IssueType] = frozenset({IssueType.BUG, IssueType.FEATURE, IssueType.PERF})
 
 
 def _parse_allowed_types(value: str) -> frozenset[IssueType]:
@@ -41,8 +39,7 @@ def _parse_allowed_types(value: str) -> frozenset[IssueType]:
     parts = [p.strip() for p in value.split(",") if p.strip()]
     if not parts:
         raise argparse.ArgumentTypeError(
-            "--allowed-types may not be empty; pass a comma-separated subset "
-            "of {bug,feature,perf}"
+            "--allowed-types may not be empty; pass a comma-separated subset of {bug,feature,perf}"
         )
     try:
         return frozenset(IssueType(p) for p in parts)
@@ -69,22 +66,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--creator",
         default="agent",
-        help="Identity recorded on issues created via this server "
-             "(default: 'agent').",
+        help="Identity recorded on issues created via this server (default: 'agent').",
     )
     parser.add_argument(
         "--iteration",
         type=int,
         default=1,
-        help="1-based iteration number used for per-iteration cap "
-             "accounting (default: 1).",
+        help="1-based iteration number used for per-iteration cap accounting (default: 1).",
     )
     parser.add_argument(
         "--cap",
         type=int,
         default=None,
-        help="Max issues this creator may file in this iteration. "
-             "Omit for no cap.",
+        help="Max issues this creator may file in this iteration. Omit for no cap.",
     )
     parser.add_argument(
         "--allowed-types",
@@ -95,8 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--read-only",
         action="store_true",
-        help="Do not register create_issue. Server exposes only "
-             "list/get/search.",
+        help="Do not register create_issue. Server exposes only list/get/search.",
     )
     return parser
 
@@ -157,6 +150,7 @@ def build_server(args: argparse.Namespace) -> FastMCP:
         return "\n".join(format_issue_short(i) for i in hits)
 
     if not args.read_only:
+
         @mcp.tool()
         def create_issue(type: str, title: str, description: str) -> str:
             """Create a new issue.

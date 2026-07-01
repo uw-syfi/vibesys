@@ -2,15 +2,13 @@
 
 import json
 
-import pytest
-
+from vibe_serve.loops.plain.issue_board import IssueBoard, IssueStatus, IssueType
 from vibe_serve.loops.plain.loop import (
     PlainLoopState,
     _determine_resume_point,
     _load_state,
     _save_state,
 )
-from vibe_serve.loops.plain.issue_board import IssueStatus, IssueBoard, IssueType
 
 
 def _make_store(tmp_path) -> IssueBoard:
@@ -88,13 +86,16 @@ class TestDetermineResumePoint:
     def test_mid_implementer_re_runs_implementer(self, tmp_path):
         store = _make_store(tmp_path)
         issue = store.create(
-            type=IssueType.BUG, title="t", description="d",
-            created_by="x", iteration=1,
+            type=IssueType.BUG,
+            title="t",
+            description="d",
+            created_by="x",
+            iteration=1,
         )
-        store.update_status(issue.id, IssueStatus.IN_PROGRESS,
-                             actor="loop", iteration=1)
-        state = PlainLoopState(round_idx=0, phase="implementer",
-                               current_issue_id=issue.id, bootstrap_done=True)
+        store.update_status(issue.id, IssueStatus.IN_PROGRESS, actor="loop", iteration=1)
+        state = PlainLoopState(
+            round_idx=0, phase="implementer", current_issue_id=issue.id, bootstrap_done=True
+        )
         i, phase, issue_id = _determine_resume_point(state, store)
         assert i == 0
         assert phase == "implementer"
@@ -103,13 +104,16 @@ class TestDetermineResumePoint:
     def test_mid_judge_re_runs_judge(self, tmp_path):
         store = _make_store(tmp_path)
         issue = store.create(
-            type=IssueType.BUG, title="t", description="d",
-            created_by="x", iteration=1,
+            type=IssueType.BUG,
+            title="t",
+            description="d",
+            created_by="x",
+            iteration=1,
         )
-        store.update_status(issue.id, IssueStatus.IN_PROGRESS,
-                             actor="loop", iteration=1)
-        state = PlainLoopState(round_idx=0, phase="judge",
-                               current_issue_id=issue.id, bootstrap_done=True)
+        store.update_status(issue.id, IssueStatus.IN_PROGRESS, actor="loop", iteration=1)
+        state = PlainLoopState(
+            round_idx=0, phase="judge", current_issue_id=issue.id, bootstrap_done=True
+        )
         i, phase, issue_id = _determine_resume_point(state, store)
         assert i == 0
         assert phase == "judge"
@@ -117,11 +121,11 @@ class TestDetermineResumePoint:
 
     def test_resume_picks_drain_when_open_issues_remain(self, tmp_path):
         store = _make_store(tmp_path)
-        store.create(type=IssueType.BUG, title="t", description="d",
-                     created_by="x", iteration=1)
+        store.create(type=IssueType.BUG, title="t", description="d", created_by="x", iteration=1)
         # Loop was past judge, no current_issue_id
-        state = PlainLoopState(round_idx=1, phase="implementer",
-                               current_issue_id=None, bootstrap_done=True)
+        state = PlainLoopState(
+            round_idx=1, phase="implementer", current_issue_id=None, bootstrap_done=True
+        )
         i, phase, issue_id = _determine_resume_point(state, store)
         assert i == 1
         assert phase == "implementer"
@@ -134,12 +138,13 @@ class TestDetermineResumePoint:
         # perf_eval naturally, so the function never needs to "request"
         # perf_eval explicitly.
         store = _make_store(tmp_path)
-        issue = store.create(type=IssueType.BUG, title="t", description="d",
-                             created_by="x", iteration=1)
-        store.update_status(issue.id, IssueStatus.CLOSED,
-                             actor="judge", iteration=1)
-        state = PlainLoopState(round_idx=1, phase="implementer",
-                               current_issue_id=None, bootstrap_done=True)
+        issue = store.create(
+            type=IssueType.BUG, title="t", description="d", created_by="x", iteration=1
+        )
+        store.update_status(issue.id, IssueStatus.CLOSED, actor="judge", iteration=1)
+        state = PlainLoopState(
+            round_idx=1, phase="implementer", current_issue_id=None, bootstrap_done=True
+        )
         i, phase, issue_id = _determine_resume_point(state, store)
         assert phase == "implementer"
         assert issue_id is None
@@ -150,12 +155,13 @@ class TestDetermineResumePoint:
         drain loop will then immediately exit (next_open() is None) and
         fall through to a fresh perf_eval naturally."""
         store = _make_store(tmp_path)
-        closed = store.create(type=IssueType.BUG, title="t", description="d",
-                               created_by="x", iteration=1)
-        store.update_status(closed.id, IssueStatus.CLOSED,
-                             actor="judge", iteration=1)
-        state = PlainLoopState(round_idx=2, phase="perf_eval",
-                               current_issue_id=None, bootstrap_done=True)
+        closed = store.create(
+            type=IssueType.BUG, title="t", description="d", created_by="x", iteration=1
+        )
+        store.update_status(closed.id, IssueStatus.CLOSED, actor="judge", iteration=1)
+        state = PlainLoopState(
+            round_idx=2, phase="perf_eval", current_issue_id=None, bootstrap_done=True
+        )
         i, phase, issue_id = _determine_resume_point(state, store)
         assert i == 2
         assert phase == "implementer"
@@ -166,14 +172,14 @@ class TestDetermineResumePoint:
         # already CLOSED (race after a crash), we should NOT try to re-run
         # that phase. Instead, drain remaining open issues.
         store = _make_store(tmp_path)
-        closed = store.create(type=IssueType.BUG, title="closed", description="d",
-                              created_by="x", iteration=1)
-        store.update_status(closed.id, IssueStatus.CLOSED,
-                             actor="judge", iteration=1)
-        store.create(type=IssueType.BUG, title="open", description="d",
-                     created_by="x", iteration=1)
-        state = PlainLoopState(round_idx=0, phase="judge",
-                               current_issue_id=closed.id, bootstrap_done=True)
+        closed = store.create(
+            type=IssueType.BUG, title="closed", description="d", created_by="x", iteration=1
+        )
+        store.update_status(closed.id, IssueStatus.CLOSED, actor="judge", iteration=1)
+        store.create(type=IssueType.BUG, title="open", description="d", created_by="x", iteration=1)
+        state = PlainLoopState(
+            round_idx=0, phase="judge", current_issue_id=closed.id, bootstrap_done=True
+        )
         i, phase, issue_id = _determine_resume_point(state, store)
         # Should NOT try to re-run judge on the closed issue
         assert not (phase == "judge" and issue_id == closed.id)

@@ -21,18 +21,22 @@ FEATURES = FeatureRegistry(FeatureFlag, {})
 
 def is_feature_enabled(
     flag: FeatureFlag,
-    config: Mapping[str, object] | None = None,
+    config: object | None = None,
 ) -> bool:
     overrides = _feature_flag_overrides(config)
     return FEATURES.is_enabled(flag, overrides)
 
 
-def _feature_flag_overrides(config: Mapping[str, object] | None) -> Mapping[FeatureFlag, bool]:
+def _feature_flag_overrides(config: object | None) -> Mapping[FeatureFlag, bool]:
     if config is None:
         return {}
 
-    raw_overrides = config.get("feature_flags", {})
+    raw_overrides = getattr(config, "feature_flags", None)
+    if raw_overrides is None and isinstance(config, Mapping):
+        raw_overrides = config.get("feature_flags", {})
+    if raw_overrides is None:
+        raw_overrides = {}
     if not isinstance(raw_overrides, Mapping):
-        raise ValueError("config['feature_flags'] must be a mapping")
+        raise ValueError("config.feature_flags must be a mapping")
 
     return raw_overrides

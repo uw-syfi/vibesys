@@ -49,7 +49,6 @@ from typing import Any
 
 import httpx
 
-
 # ---------------------------------------------------------------------------
 # Dataset loading
 # ---------------------------------------------------------------------------
@@ -74,9 +73,7 @@ def _load_codeeditorbench(
     try:
         from datasets import load_dataset
     except ImportError as exc:
-        raise SystemExit(
-            "The ``datasets`` library is required — pip install datasets."
-        ) from exc
+        raise SystemExit("The ``datasets`` library is required — pip install datasets.") from exc
 
     # The dataset on the hub has four task files at the repo root; their
     # schemas don't unify, so the default loader fails. Pin to the
@@ -111,14 +108,16 @@ def _load_codeeditorbench(
         if key in seen_keys:
             continue
         seen_keys.add(key)
-        buffer.append({
-            "unique_id": str(row.get("idx") or i),
-            "language": lang,
-            "incorrect_code": inc,
-            "gold_code": sol,
-            "bug_type": row.get("type") or "",
-            "difficulty": str(row.get("difficulty") or ""),
-        })
+        buffer.append(
+            {
+                "unique_id": str(row.get("idx") or i),
+                "language": lang,
+                "incorrect_code": inc,
+                "gold_code": sol,
+                "bug_type": row.get("type") or "",
+                "difficulty": str(row.get("difficulty") or ""),
+            }
+        )
         if len(buffer) >= max(num_samples * 5, 500):
             break
 
@@ -181,9 +180,7 @@ def _build_prompt(tokenizer, sample: dict) -> str:
     ]
     kwargs = dict(tokenize=False, add_generation_prompt=True)
     try:
-        return tokenizer.apply_chat_template(
-            messages, enable_thinking=False, **kwargs
-        )
+        return tokenizer.apply_chat_template(messages, enable_thinking=False, **kwargs)
     except TypeError:
         return tokenizer.apply_chat_template(messages, **kwargs)
 
@@ -241,7 +238,9 @@ async def send_request(
     if print_stream:
         header = f"sample={sample_id}" if sample_id else ""
         sys.stderr.write(f"\n===== >>> PROMPT {header} =====\n{prompt}\n")
-        sys.stderr.write(f"===== >>> PREDICTION ({len(prediction_content)} chars) =====\n{prediction_content}\n")
+        sys.stderr.write(
+            f"===== >>> PREDICTION ({len(prediction_content)} chars) =====\n{prediction_content}\n"
+        )
         sys.stderr.write("===== <<< STREAM =====\n")
         sys.stderr.flush()
 
@@ -251,7 +250,7 @@ async def send_request(
             async for raw_line in resp.aiter_lines():
                 if not raw_line.startswith("data: "):
                     continue
-                payload = raw_line[len("data: "):]
+                payload = raw_line[len("data: ") :]
                 if payload.strip() == "[DONE]":
                     t_done = time.perf_counter()
                     break
@@ -288,8 +287,7 @@ async def send_request(
 
     output_text = "".join(text_parts)
     output_tokens = (
-        len(tokenizer.encode(output_text, add_special_tokens=False))
-        if output_text else 0
+        len(tokenizer.encode(output_text, add_special_tokens=False)) if output_text else 0
     )
     result: dict = {
         "error": error,
@@ -328,7 +326,7 @@ def _strip_code_fence(text: str) -> str:
         # drop first line
         nl = s.find("\n")
         if nl != -1:
-            s = s[nl + 1:]
+            s = s[nl + 1 :]
     if s.endswith("```"):
         s = s[: s.rfind("```")].rstrip()
     return s
@@ -384,9 +382,7 @@ def _quality_score(
     """
     out = _strip_code_fence(output_text)
     return {
-        "ratio_to_gold": difflib.SequenceMatcher(
-            None, out, gold_text, autojunk=False
-        ).ratio(),
+        "ratio_to_gold": difflib.SequenceMatcher(None, out, gold_text, autojunk=False).ratio(),
         "ratio_to_input": difflib.SequenceMatcher(
             None, out, incorrect_text, autojunk=False
         ).ratio(),
@@ -448,7 +444,10 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         file=sys.stderr,
     )
     samples = _load_codeeditorbench(
-        languages, args.max_input_chars, args.num_samples, args.seed,
+        languages,
+        args.max_input_chars,
+        args.num_samples,
+        args.seed,
     )
     if not samples:
         raise SystemExit("No samples could be loaded from CodeEditorBench.")
@@ -467,7 +466,9 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         for idx, sample in enumerate(samples):
             prompt = _build_prompt(tokenizer, sample)
             result = await send_request(
-                client, url, prompt,
+                client,
+                url,
+                prompt,
                 prediction_content=sample["incorrect_code"],
                 max_tokens=args.max_tokens,
                 temperature=args.temperature,
@@ -484,7 +485,9 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
                 # Token-level alignment vs the prediction (the buggy code)
                 # — this is the input the headroom estimator needs.
                 align = _token_align(
-                    tokenizer, sample["incorrect_code"], result["output_text"],
+                    tokenizer,
+                    sample["incorrect_code"],
+                    result["output_text"],
                 )
                 quality = _quality_score(
                     result["output_text"],
@@ -511,7 +514,8 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
                     f"matched={align['num_matched_tokens']}/{align['num_output_tokens']} "
                     f"longest_run={align['longest_matched_run']} "
                     f"r2gold={qual['ratio_to_gold']:.3f} "
-                    if align is not None else ""
+                    if align is not None
+                    else ""
                 )
                 + (f"err={result['error'][:80]}" if result["error"] else ""),
                 file=sys.stderr,
@@ -541,8 +545,8 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         all_matched_runs.extend(a["matched_run_lengths"])
         matched_tokens_total += a["num_matched_tokens"]
         diverged_tokens_total += a["num_diverged_tokens"]
-    aggregated_match_rate = (
-        matched_tokens_total / max(1, matched_tokens_total + diverged_tokens_total)
+    aggregated_match_rate = matched_tokens_total / max(
+        1, matched_tokens_total + diverged_tokens_total
     )
     sorted_runs = sorted(all_matched_runs)
     matched_run_pct = {
@@ -554,13 +558,13 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     }
 
     qual_improved = [
-        r for r in successes
+        r
+        for r in successes
         if r["quality"] is not None
         and r["quality"]["ratio_to_gold"] > r["quality"]["ratio_to_input"]
     ]
     qual_echo = [
-        r for r in successes
-        if r["quality"] is not None and r["quality"]["equals_input_verbatim"]
+        r for r in successes if r["quality"] is not None and r["quality"]["equals_input_verbatim"]
     ]
 
     print()
@@ -569,8 +573,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     print("=" * 60)
     print(f"Backend URL:       {url}")
     print(f"Samples (sent):    {len(results)} (warmup discarded: {args.warmup})")
-    print(f"Completed:         {len(successes)}/{len(steady)} requests "
-          f"({len(errors)} errors)")
+    print(f"Completed:         {len(successes)}/{len(steady)} requests ({len(errors)} errors)")
     print(f"Improved-over-input: {len(qual_improved)}/{len(successes)}")
     print(f"Echoed-input verbatim: {len(qual_echo)}/{len(successes)}  (anti-bypass red flag)")
     print(f"Wall clock:        {wall_clock:.1f}s")
@@ -591,9 +594,11 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     print()
     print("Token-level diff vs prediction (drives headroom estimator):")
     print(f"  Aggregated match rate:  {aggregated_match_rate:.1%}")
-    print(f"  Matched-run lengths (tokens): "
-          f"p50={matched_run_pct['p50']} p75={matched_run_pct['p75']} "
-          f"p90={matched_run_pct['p90']} p95={matched_run_pct['p95']}")
+    print(
+        f"  Matched-run lengths (tokens): "
+        f"p50={matched_run_pct['p50']} p75={matched_run_pct['p75']} "
+        f"p90={matched_run_pct['p90']} p95={matched_run_pct['p95']}"
+    )
 
     p50_latency_ms = _percentile(sorted(latencies), 50) * 1000 if latencies else float("nan")
     median_tok_per_sec = (
@@ -689,8 +694,8 @@ def main() -> None:
         "--model",
         default="",
         help="Model name to send in the request body (required by vLLM's "
-             "OpenAI-compat endpoint). Leave empty for custom single-model "
-             "servers that ignore the field.",
+        "OpenAI-compat endpoint). Leave empty for custom single-model "
+        "servers that ignore the field.",
     )
     parser.add_argument(
         "--tokenizer-path",
@@ -701,8 +706,8 @@ def main() -> None:
         "--languages",
         default="python3",
         help="Comma-separated list of CodeEditorBench language tags to keep "
-             "(python3, cpp, java). Default: python3 only — token alignment "
-             "is the cleanest there.",
+        "(python3, cpp, java). Default: python3 only — token alignment "
+        "is the cleanest there.",
     )
     parser.add_argument(
         "--max-input-chars",
@@ -710,30 +715,42 @@ def main() -> None:
         default=4000,
         help="Skip rows whose buggy program is longer than this (default: 4000).",
     )
-    parser.add_argument("--num-samples", type=int, default=50,
-                        help="Total samples to send (default: 50).")
-    parser.add_argument("--warmup", type=int, default=3,
-                        help="Number of leading samples to discard from stats (default: 3).")
-    parser.add_argument("--max-tokens", type=int, default=512,
-                        help="Max tokens per response (default: 512).")
-    parser.add_argument("--temperature", type=float, default=0,
-                        help="Sampling temperature (default: 0 — greedy).")
+    parser.add_argument(
+        "--num-samples", type=int, default=50, help="Total samples to send (default: 50)."
+    )
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=3,
+        help="Number of leading samples to discard from stats (default: 3).",
+    )
+    parser.add_argument(
+        "--max-tokens", type=int, default=512, help="Max tokens per response (default: 512)."
+    )
+    parser.add_argument(
+        "--temperature", type=float, default=0, help="Sampling temperature (default: 0 — greedy)."
+    )
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--print-stream", action="store_true",
-                        help="Print prompt/prediction and stream output deltas live to stderr.")
-    parser.add_argument("--output-json", type=str, default=None,
-                        help="Optional path to write structured results.")
+    parser.add_argument(
+        "--print-stream",
+        action="store_true",
+        help="Print prompt/prediction and stream output deltas live to stderr.",
+    )
+    parser.add_argument(
+        "--output-json", type=str, default=None, help="Optional path to write structured results."
+    )
     # Back-compat no-ops so the orchestrator's sanity invocation accepts these.
-    parser.add_argument("--rate", type=float, default=None,
-                        help="Ignored — single-batch only.")
-    parser.add_argument("--num-requests", type=int, default=None,
-                        help="Alias for --num-samples.")
-    parser.add_argument("--duration", type=float, default=None,
-                        help="Ignored — runs to --num-samples.")
-    parser.add_argument("--prompt-len", type=int, default=None,
-                        help="Ignored — prompts come from the dataset.")
-    parser.add_argument("--audio-dir", type=str, default=None,
-                        help="Ignored — text-only benchmark.")
+    parser.add_argument("--rate", type=float, default=None, help="Ignored — single-batch only.")
+    parser.add_argument("--num-requests", type=int, default=None, help="Alias for --num-samples.")
+    parser.add_argument(
+        "--duration", type=float, default=None, help="Ignored — runs to --num-samples."
+    )
+    parser.add_argument(
+        "--prompt-len", type=int, default=None, help="Ignored — prompts come from the dataset."
+    )
+    parser.add_argument(
+        "--audio-dir", type=str, default=None, help="Ignored — text-only benchmark."
+    )
 
     args = parser.parse_args()
     if args.num_requests is not None:

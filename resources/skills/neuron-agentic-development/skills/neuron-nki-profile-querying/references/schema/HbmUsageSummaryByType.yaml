@@ -1,0 +1,32 @@
+HbmUsageSummaryByType: # previously named "nc_mem_usage"
+  description: HBM memory usage information summarized by type.
+  properties:
+    neuron_device_idx: # previously named "nd"
+      type: integer
+      format: int64
+      description: The Neuron Device index.
+      minimum: 0
+
+    neuroncore_idx: # previously named "nc".
+      type: integer
+      format: int64
+      description: The NeuronCore index.
+      minimum: 0
+
+    usage_type:
+      type: string
+      description: The type of memory usage.
+      example: Weights
+
+    usage_bytes: # previously named "amount_bytes"
+      type: integer
+      format: int64
+      description: The amount of HBM used by this type of usage.
+      x-unit: bytes
+      minimum: 0
+
+  required:
+    - neuron_device_idx
+    - neuroncore_idx
+    - usage_type
+    - usage_bytes

@@ -54,12 +54,10 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
 
 # ---------------------------------------------------------------------------
 # Capture: in-process (loads VibeServeModel from main.py)
@@ -108,9 +106,11 @@ def cmd_capture(args: argparse.Namespace) -> None:
     model_dir = args.model_dir
     weights_dir = args.weights_dir or "/model"
 
-    print(f"[capture] loading VibeServeModel from {model_dir}/main.py "
-          f"(weights: {weights_dir}, device={args.device}, dtype={args.dtype})",
-          file=sys.stderr)
+    print(
+        f"[capture] loading VibeServeModel from {model_dir}/main.py "
+        f"(weights: {weights_dir}, device={args.device}, dtype={args.dtype})",
+        file=sys.stderr,
+    )
 
     module = _load_main_module(model_dir)
     model = module.VibeServeModel.from_pretrained(
@@ -124,6 +124,7 @@ def cmd_capture(args: argparse.Namespace) -> None:
     tokenizer = getattr(model, "tokenizer", None)
     if tokenizer is None:
         from transformers import AutoTokenizer
+
         tokenizer = AutoTokenizer.from_pretrained(weights_dir)
 
     input_ids = tokenizer(args.prompt, return_tensors="pt").input_ids.to(args.device)
@@ -135,8 +136,10 @@ def cmd_capture(args: argparse.Namespace) -> None:
             model.generate(input_ids=input_ids, max_new_tokens=args.max_tokens)
     torch.cuda.synchronize()
 
-    print(f"[capture] profiling ({args.num_iters} iters, max_new_tokens={args.max_tokens})...",
-          file=sys.stderr)
+    print(
+        f"[capture] profiling ({args.num_iters} iters, max_new_tokens={args.max_tokens})...",
+        file=sys.stderr,
+    )
     t0 = time.time()
     with profile(
         activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -152,21 +155,26 @@ def cmd_capture(args: argparse.Namespace) -> None:
     print(f"[capture] elapsed {wall:.2f}s", file=sys.stderr)
 
     events_json = _summarize_prof(prof, num_iters=args.num_iters)
-    events_json.update({
-        "captured_at": datetime.now(timezone.utc).isoformat(),
-        "mode": "model",
-        "device": args.device,
-        "dtype": args.dtype,
-        "num_iters": args.num_iters,
-        "max_new_tokens": args.max_tokens,
-        "prompt": args.prompt,
-        "wall_time_sec": wall,
-    })
+    events_json.update(
+        {
+            "captured_at": datetime.now(UTC).isoformat(),
+            "mode": "model",
+            "device": args.device,
+            "dtype": args.dtype,
+            "num_iters": args.num_iters,
+            "max_new_tokens": args.max_tokens,
+            "prompt": args.prompt,
+            "wall_time_sec": wall,
+        }
+    )
     Path(args.output).write_text(json.dumps(events_json, indent=2))
-    print(f"[capture] wrote {args.output} "
-          f"({events_json['total_cuda_time_us']:.0f} us CUDA, "
-          f"{events_json['total_cpu_time_us']:.0f} us CPU, "
-          f"{len(events_json['events'])} events)", file=sys.stderr)
+    print(
+        f"[capture] wrote {args.output} "
+        f"({events_json['total_cuda_time_us']:.0f} us CUDA, "
+        f"{events_json['total_cpu_time_us']:.0f} us CPU, "
+        f"{len(events_json['events'])} events)",
+        file=sys.stderr,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -201,9 +209,11 @@ def cmd_capture_server(args: argparse.Namespace) -> None:
     print(f"[capture-server] POST {args.url}/admin/profile/start", file=sys.stderr)
     _post("/admin/profile/start")
 
-    print(f"[capture-server] sending {args.requests} requests "
-          f"(max_tokens={args.max_tokens})...", file=sys.stderr)
-    for i in range(args.requests):
+    print(
+        f"[capture-server] sending {args.requests} requests (max_tokens={args.max_tokens})...",
+        file=sys.stderr,
+    )
+    for _i in range(args.requests):
         _post(
             "/v1/completions",
             {
@@ -222,7 +232,7 @@ def cmd_capture_server(args: argparse.Namespace) -> None:
             "is the server implementing the expected contract?"
         )
 
-    result.setdefault("captured_at", datetime.now(timezone.utc).isoformat())
+    result.setdefault("captured_at", datetime.now(UTC).isoformat())
     result.setdefault("mode", "server")
     result.setdefault("num_iters", args.requests)
     Path(args.output).write_text(json.dumps(result, indent=2))
@@ -250,23 +260,35 @@ def _summarize_prof(prof, num_iters: int) -> dict:
         self_cpu_us = float(getattr(ev, "self_cpu_time_total", 0.0) or 0.0)
         name = ev.key
         # Classify
-        if ev.device_type == torch.autograd.DeviceType.CUDA or "cuda" in name.lower() or cuda_us > 0 and cpu_us < cuda_us / 4:
+        if (
+            ev.device_type == torch.autograd.DeviceType.CUDA
+            or "cuda" in name.lower()
+            or cuda_us > 0
+            and cpu_us < cuda_us / 4
+        ):
             category = "kernel"
         elif name.startswith("aten::") or name.startswith("torch::"):
             category = "operator"
-        elif "memcpy" in name.lower() or "memset" in name.lower() or "malloc" in name.lower() or "free" in name.lower():
+        elif (
+            "memcpy" in name.lower()
+            or "memset" in name.lower()
+            or "malloc" in name.lower()
+            or "free" in name.lower()
+        ):
             category = "memory"
         else:
             category = "cpu"
-        events.append({
-            "name": name,
-            "category": category,
-            "cpu_time_us": cpu_us,
-            "cuda_time_us": cuda_us,
-            "self_cpu_time_us": self_cpu_us,
-            "self_cuda_time_us": self_cuda_us,
-            "count": int(ev.count),
-        })
+        events.append(
+            {
+                "name": name,
+                "category": category,
+                "cpu_time_us": cpu_us,
+                "cuda_time_us": cuda_us,
+                "self_cpu_time_us": self_cpu_us,
+                "self_cuda_time_us": self_cuda_us,
+                "count": int(ev.count),
+            }
+        )
         total_cuda += self_cuda_us
         total_cpu += self_cpu_us
     return {
@@ -335,8 +357,10 @@ def cmd_operators(args: argparse.Namespace) -> None:
         name = ev["name"]
         if len(name) > 48:
             name = name[:45] + "..."
-        print(f"{name:<50}{_fmt_us(ev['self_cpu_time_us']):>14}"
-              f"{_fmt_us(ev['cuda_time_us']):>14}{pct:>9.1f}%{ev['count']:>10}")
+        print(
+            f"{name:<50}{_fmt_us(ev['self_cpu_time_us']):>14}"
+            f"{_fmt_us(ev['cuda_time_us']):>14}{pct:>9.1f}%{ev['count']:>10}"
+        )
 
 
 def cmd_cpu_overhead(args: argparse.Namespace) -> None:
@@ -350,16 +374,21 @@ def cmd_cpu_overhead(args: argparse.Namespace) -> None:
     print(f"CPU/CUDA ratio:       {ratio:.2f}x")
     if ratio > 2.0:
         print()
-        print("Interpretation: CPU time dominates (>2x GPU). Likely launch-bound"
-              " — consider CUDA graphs, fewer kernels, or larger batches.")
+        print(
+            "Interpretation: CPU time dominates (>2x GPU). Likely launch-bound"
+            " — consider CUDA graphs, fewer kernels, or larger batches."
+        )
     elif ratio < 0.5:
         print()
-        print("Interpretation: GPU time dominates (<0.5x CPU). Compute-bound —"
-              " focus on kernel fusion, flash attention, better algorithms.")
+        print(
+            "Interpretation: GPU time dominates (<0.5x CPU). Compute-bound —"
+            " focus on kernel fusion, flash attention, better algorithms."
+        )
     else:
         print()
-        print("Interpretation: CPU and GPU roughly balanced. Both axes may"
-              " benefit from optimization.")
+        print(
+            "Interpretation: CPU and GPU roughly balanced. Both axes may benefit from optimization."
+        )
 
 
 def cmd_memory(args: argparse.Namespace) -> None:
@@ -376,8 +405,10 @@ def cmd_memory(args: argparse.Namespace) -> None:
         name = ev["name"]
         if len(name) > 38:
             name = name[:35] + "..."
-        print(f"{name:<40}{_fmt_us(ev['cuda_time_us']):>14}"
-              f"{_fmt_us(ev['cpu_time_us']):>14}{ev['count']:>10}")
+        print(
+            f"{name:<40}{_fmt_us(ev['cuda_time_us']):>14}"
+            f"{_fmt_us(ev['cpu_time_us']):>14}{ev['count']:>10}"
+        )
 
 
 def cmd_summary(args: argparse.Namespace) -> None:
@@ -441,11 +472,11 @@ def main() -> None:
     cap.add_argument("--prompt", default="The capital of France is")
     cap.add_argument("--max-tokens", type=int, default=32)
     cap.add_argument("--device", default="cuda")
-    cap.add_argument("--dtype", default="bfloat16",
-                     choices=["bfloat16", "float16", "float32"])
+    cap.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float16", "float32"])
 
-    srv = sub.add_parser("capture-server",
-                         help="Capture a profile against a server with /admin/profile endpoints")
+    srv = sub.add_parser(
+        "capture-server", help="Capture a profile against a server with /admin/profile endpoints"
+    )
     srv.add_argument("--url", required=True, help="Server base URL, e.g. http://localhost:8000")
     srv.add_argument("--output", required=True)
     srv.add_argument("--requests", type=int, default=10)

@@ -6,13 +6,13 @@ Serving an LLM well is almost entirely a performance-engineering problem. The mo
 
 Skills are layered by abstraction — [`README.md`](README.md) has the full tree. In one line per tier:
 
-- [`models/`](models/) — what does each model look like; what serving features it needs
-- [`algorithms/`](algorithms/) — serving concepts (attention variants, async scheduling, continuous batching, paged attention, speculative decoding, ...)
-- [`frameworks/`](frameworks/) — PyTorch / MLX idioms
-- [`backends/`](backends/) — how to call SDPA / FlashInfer / FlashAttention / Triton / CUDA graph
-- [`hardware/`](hardware/) — Hopper / Blackwell / MI300 / Apple Silicon specifics
-- [`engines/`](engines/) — source-code lookup into vLLM / SGLang / TensorRT-LLM
-- [`tooling/`](tooling/) — FastAPI serving, accuracy checking, benchmarking, profiling, I/O
+- [`models/`](references/models/) — what does each model look like; what serving features it needs
+- [`algorithms/`](references/algorithms/) — serving concepts (attention variants, async scheduling, continuous batching, paged attention, speculative decoding, ...)
+- [`frameworks/`](references/frameworks/) — PyTorch / MLX / Neuron (Trainium) idioms
+- [`backends/`](references/backends/) — how to call SDPA / FlashInfer / FlashAttention / Triton / CUDA graph
+- [`hardware/`](references/hardware/) — Hopper / Blackwell / MI300 / Apple Silicon / AWS Trainium specifics
+- [`engines/`](references/engines/) — source-code lookup into vLLM / SGLang / TensorRT-LLM
+- [`tooling/`](references/tooling/) — FastAPI serving, accuracy checking, benchmarking, profiling, I/O
 - [`agent-gpu-skills`](https://github.com/slowlyC/agent-gpu-skills) (separate repo) — kernel implementation; out of scope here
 
 ## Scope: what this collection centers on
@@ -42,7 +42,7 @@ When a skill doesn't quite fit your situation:
 - Re-read the **fundamentals in Part 1** and re-derive which bottleneck you're actually solving for.
 - Check the **compatibility tables** in each `algorithms/*` skill for how the axes combine.
 - Look at the **engine pointers** in `engines/*` for how production systems actually implemented it — that's often the clearest source of truth.
-- Use the **profiler** ([`tooling/profiler/`](tooling/profiler/)) before and after every change to confirm the technique is helping the bottleneck you think it's helping.
+- Use the **profiler** ([`tooling/profiler/`](references/tooling/profiler.md)) before and after every change to confirm the technique is helping the bottleneck you think it's helping.
 
 ## Part 1 — Performance foundations
 
@@ -90,7 +90,7 @@ On H100 with `I* ≈ 295`: decode is memory-bound until batch `B ≳ 300` — fa
 
 ## Part 2 — Navigating by bottleneck
 
-Diagnose first with [`tooling/profiler/`](tooling/profiler/); then read the relevant skills below.
+Diagnose first with [`tooling/profiler/`](references/tooling/profiler.md); then read the relevant skills below.
 
 ### "Decode TPOT (per-token latency) is too slow"
 
@@ -98,24 +98,24 @@ The usual suspects, in order:
 
 | Symptom | Skill | Why |
 |:--------|:------|:----|
-| Many small kernels, CPU-GPU gaps | [`backends/cuda-graph/`](backends/cuda-graph/) | capture the decode pass; eliminate launch overhead |
-| Python scheduler / postproc gap between steps | [`algorithms/async-scheduling/`](algorithms/async-scheduling/) | run scheduler + postproc on CPU concurrently with GPU forward |
-| Per-request Python sampling loop | [`algorithms/batched-sampling/`](algorithms/batched-sampling/) | one `.tolist()` instead of one `.item()` per request |
-| Unfused op sequences | [`backends/flashinfer/`](backends/flashinfer/) | fused RMSNorm / RoPE / SiLU reduce intermediate writes |
-| HBM bandwidth saturated, low arithmetic intensity | [`algorithms/quantization-schemes/`](algorithms/quantization-schemes/) | FP8 / INT4 weights halve / quarter byte traffic |
-| KV cache larger than necessary | [`algorithms/paged-attention/`](algorithms/paged-attention/) + KV quant | smaller KV = less per-step HBM traffic |
-| Decode limited by single GPU bandwidth | [`algorithms/parallelism/`](algorithms/parallelism/) | TP aggregates HBM bandwidth (cost: collectives) |
-| Steps could be avoided | [`algorithms/speculative-decoding/`](algorithms/speculative-decoding/) | multiple accepted tokens per target step |
+| Many small kernels, CPU-GPU gaps | [`backends/cuda-graph/`](references/backends/cuda-graph.md) | capture the decode pass; eliminate launch overhead |
+| Python scheduler / postproc gap between steps | [`algorithms/async-scheduling/`](references/algorithms/async-scheduling.md) | run scheduler + postproc on CPU concurrently with GPU forward |
+| Per-request Python sampling loop | [`algorithms/batched-sampling/`](references/algorithms/batched-sampling.md) | one `.tolist()` instead of one `.item()` per request |
+| Unfused op sequences | [`backends/flashinfer/`](references/backends/flashinfer.md) | fused RMSNorm / RoPE / SiLU reduce intermediate writes |
+| HBM bandwidth saturated, low arithmetic intensity | [`algorithms/quantization-schemes/`](references/algorithms/quantization-schemes.md) | FP8 / INT4 weights halve / quarter byte traffic |
+| KV cache larger than necessary | [`algorithms/paged-attention/`](references/algorithms/paged-attention.md) + KV quant | smaller KV = less per-step HBM traffic |
+| Decode limited by single GPU bandwidth | [`algorithms/parallelism/`](references/algorithms/parallelism.md) | TP aggregates HBM bandwidth (cost: collectives) |
+| Steps could be avoided | [`algorithms/speculative-decoding/`](references/algorithms/speculative-decoding.md) | multiple accepted tokens per target step |
 
 ### "TTFT (time to first token) is too slow"
 
 | Symptom | Skill | Why |
 |:--------|:------|:----|
-| Long prompts stalling decode | [`algorithms/chunked-prefill/`](algorithms/chunked-prefill/) | interleave prefill chunks with decode |
-| Repeated prompts / branching | [`algorithms/radix-prefix-caching/`](algorithms/radix-prefix-caching/) | skip KV compute on shared prefix |
-| Prefill compute-bound | [`algorithms/quantization-schemes/`](algorithms/quantization-schemes/) (FP8/FP4) + [`hardware/nvidia/`](hardware/nvidia/) | low-precision tensor cores accelerate matmul |
-| Prefill too big for one GPU | [`algorithms/parallelism/`](algorithms/parallelism/) (TP) | shard weights and activations |
-| Prefill competing with decode | [`algorithms/disaggregated-serving/`](algorithms/disaggregated-serving/) | dedicated prefill pool |
+| Long prompts stalling decode | [`algorithms/chunked-prefill/`](references/algorithms/chunked-prefill.md) | interleave prefill chunks with decode |
+| Repeated prompts / branching | [`algorithms/radix-prefix-caching/`](references/algorithms/radix-prefix-caching.md) | skip KV compute on shared prefix |
+| Prefill compute-bound | [`algorithms/quantization-schemes/`](references/algorithms/quantization-schemes.md) (FP8/FP4) + [`hardware/nvidia/`](references/hardware/nvidia.md) | low-precision tensor cores accelerate matmul |
+| Prefill too big for one GPU | [`algorithms/parallelism/`](references/algorithms/parallelism.md) (TP) | shard weights and activations |
+| Prefill competing with decode | [`algorithms/disaggregated-serving/`](references/algorithms/disaggregated-serving.md) | dedicated prefill pool |
 
 ### "Running out of memory"
 
@@ -125,122 +125,122 @@ Separate the KV-capacity problem from the weight-capacity problem.
 
 | Mitigation | Skill |
 |:-----------|:------|
-| Paged blocks eliminate fragmentation | [`algorithms/paged-attention/`](algorithms/paged-attention/) |
-| Share KV across prefix-duplicate requests | [`algorithms/radix-prefix-caching/`](algorithms/radix-prefix-caching/) |
-| Quantize KV to FP8 / INT4 | [`algorithms/quantization-schemes/`](algorithms/quantization-schemes/) |
-| Tier KV to CPU / disk | [`algorithms/radix-prefix-caching/`](algorithms/radix-prefix-caching/) (HiCache section) |
-| SSM / hybrid model (fixed state) | [`models/ssm-hybrid/`](models/ssm-hybrid/) |
-| Mixed layer types (attn + SWA / SSM / vision) need unified allocation | [`algorithms/heterogeneous-kv-cache/`](algorithms/heterogeneous-kv-cache/) |
+| Paged blocks eliminate fragmentation | [`algorithms/paged-attention/`](references/algorithms/paged-attention.md) |
+| Share KV across prefix-duplicate requests | [`algorithms/radix-prefix-caching/`](references/algorithms/radix-prefix-caching.md) |
+| Quantize KV to FP8 / INT4 | [`algorithms/quantization-schemes/`](references/algorithms/quantization-schemes.md) |
+| Tier KV to CPU / disk | [`algorithms/radix-prefix-caching/`](references/algorithms/radix-prefix-caching.md) (HiCache section) |
+| SSM / hybrid model (fixed state) | [`models/ssm-hybrid/`](references/models/ssm-hybrid.md) |
+| Mixed layer types (attn + SWA / SSM / vision) need unified allocation | [`algorithms/heterogeneous-kv-cache/`](references/algorithms/heterogeneous-kv-cache.md) |
 
 **Weight OOM** (model doesn't fit):
 
 | Mitigation | Skill |
 |:-----------|:------|
-| Weight-only INT4 (AWQ / GPTQ / Marlin) | [`algorithms/quantization-schemes/`](algorithms/quantization-schemes/) |
+| Weight-only INT4 (AWQ / GPTQ / Marlin) | [`algorithms/quantization-schemes/`](references/algorithms/quantization-schemes.md) |
 | Weight + activation FP8 / FP4 | same |
-| Shard across GPUs | [`algorithms/parallelism/`](algorithms/parallelism/) |
-| MoE sparsely activates weights | [`models/text-moe/`](models/text-moe/), [`algorithms/moe-routing-dispatch/`](algorithms/moe-routing-dispatch/) |
+| Shard across GPUs | [`algorithms/parallelism/`](references/algorithms/parallelism.md) |
+| MoE sparsely activates weights | [`models/text-moe/`](references/models/text-moe.md), [`algorithms/moe-routing-dispatch/`](references/algorithms/moe-routing-dispatch.md) |
 
 ### "Scaling across GPUs / nodes"
 
 | Question | Skill |
 |:---------|:------|
-| Which parallelism strategy? | [`algorithms/parallelism/`](algorithms/parallelism/) |
-| MoE-specific dispatch | [`algorithms/moe-routing-dispatch/`](algorithms/moe-routing-dispatch/) |
-| Separate prefill from decode workers | [`algorithms/disaggregated-serving/`](algorithms/disaggregated-serving/) |
-| NVLink domain sizing | [`hardware/nvidia/`](hardware/nvidia/) |
+| Which parallelism strategy? | [`algorithms/parallelism/`](references/algorithms/parallelism.md) |
+| MoE-specific dispatch | [`algorithms/moe-routing-dispatch/`](references/algorithms/moe-routing-dispatch.md) |
+| Separate prefill from decode workers | [`algorithms/disaggregated-serving/`](references/algorithms/disaggregated-serving.md) |
+| NVLink domain sizing | [`hardware/nvidia/`](references/hardware/nvidia.md) |
 
 Rule of thumb: stay within one NVLink domain for TP and EP; use PP or DP to cross domains.
 
 ### "Need to support a new model"
 
-1. Read [`models/`](models/) for the closest-architecture skill to see the serving-relevant features (GQA vs MLA, dense vs MoE, RoPE variant, multimodal pipeline).
-2. Find a similar model in [`engines/{vllm,sglang,trtllm}/`](engines/) — its implementation file is the template.
-3. If the model has MoE / MLA / hybrid-SSM: read the corresponding [`algorithms/`](algorithms/) skill; these change the engine integration, not just the forward pass.
+1. Read [`models/`](references/models/) for the closest-architecture skill to see the serving-relevant features (GQA vs MLA, dense vs MoE, RoPE variant, multimodal pipeline).
+2. Find a similar model in [`engines/{vllm,sglang,trtllm}/`](references/engines/) — its implementation file is the template.
+3. If the model has MoE / MLA / hybrid-SSM: read the corresponding [`algorithms/`](references/algorithms/) skill; these change the engine integration, not just the forward pass.
 
 ### "Multimodal"
 
 | Modality | Skill |
 |:---------|:------|
-| Vision-language (fixed tile, dynamic tile, variable-res, cross-attn) | [`models/vision-language/`](models/vision-language/) |
-| Speech in → text out (ASR, audio-LLM) | [`models/speech-language/`](models/speech-language/) |
-| Text-to-speech (TTS) | [`models/speech-generation/`](models/speech-generation/) |
-| Image generation (diffusion) | [`models/image-generation/`](models/image-generation/) |
-| Video generation (diffusion) | [`models/video-generation/`](models/video-generation/) |
-| Preprocessing (any modality) | [`tooling/io-handling/`](tooling/io-handling/) |
+| Vision-language (fixed tile, dynamic tile, variable-res, cross-attn) | [`models/vision-language/`](references/models/vision-language.md) |
+| Speech in → text out (ASR, audio-LLM) | [`models/speech-language/`](references/models/speech-language.md) |
+| Text-to-speech (TTS) | [`models/speech-generation/`](references/models/speech-generation.md) |
+| Image generation (diffusion) | [`models/image-generation/`](references/models/image-generation.md) |
+| Video generation (diffusion) | [`models/video-generation/`](references/models/video-generation.md) |
+| Preprocessing (any modality) | [`tooling/io-handling/`](references/tooling/io-handling.md) |
 
 ### "Verify correctness / benchmark"
 
 | Goal | Skill |
 |:-----|:------|
-| Compare custom implementation to HF reference | [`tooling/accuracy-checker/`](tooling/accuracy-checker/) |
-| Measure TTFT / TPOT / p99 correctly | [`tooling/serving-benchmark/`](tooling/serving-benchmark/) |
-| Diagnose timeline / kernel bottlenecks | [`tooling/profiler/`](tooling/profiler/) |
-| Serve over HTTP with OpenAI-compatible API | [`tooling/fastapi-serving/`](tooling/fastapi-serving/) |
+| Compare custom implementation to HF reference | [`tooling/accuracy-checker/`](references/tooling/accuracy-checker.md) |
+| Measure TTFT / TPOT / p99 correctly | [`tooling/serving-benchmark/`](references/tooling/serving-benchmark.md) |
+| Diagnose timeline / kernel bottlenecks | [`tooling/profiler/`](references/tooling/profiler.md) |
+| Serve over HTTP with OpenAI-compatible API | [`tooling/fastapi-serving/`](references/tooling/fastapi-serving.md) |
 
 ## Part 3 — Reading orders
 
 ### (A) Build a serving engine from scratch — phased workflow
 
-The canonical phase ordering. Each phase produces something that works; each adds a capability. Use [`tooling/profiler/`](tooling/profiler/) throughout to check that the bottleneck you're about to address is actually the current bottleneck — skip phases that aren't limiting you.
+The canonical phase ordering. Each phase produces something that works; each adds a capability. Use [`tooling/profiler/`](references/tooling/profiler.md) throughout to check that the bottleneck you're about to address is actually the current bottleneck — skip phases that aren't limiting you.
 
 **Phase 1 — Understand the target.** Before writing anything:
 
-- **Model architecture**: read the relevant [`models/<type>/`](models/) skill (text-dense / text-moe / ssm-hybrid / vision-language / speech-language / image-gen / video-gen / speech-gen) and [`algorithms/attention-variants/`](algorithms/attention-variants/) for the specific attention flavor (MHA / GQA / MLA / SSM / cross-attn) your model uses.
+- **Model architecture**: read the relevant [`models/<type>/`](references/models/) skill (text-dense / text-moe / ssm-hybrid / vision-language / speech-language / image-gen / video-gen / speech-gen) and [`algorithms/attention-variants/`](references/algorithms/attention-variants.md) for the specific attention flavor (MHA / GQA / MLA / SSM / cross-attn) your model uses.
 - **Workload**: chat vs RAG (long prompts, shared prefixes) vs agent (branching) vs TTS vs image-gen — these push different levers. See Part 2 above.
-- **Target interface**: OpenAI-compatible API? WebSocket realtime? See [`tooling/openai-api/`](tooling/openai-api/) for the per-modality contracts.
+- **Target interface**: OpenAI-compatible API? WebSocket realtime? See [`tooling/openai-api/`](references/tooling/openai-api.md) for the per-modality contracts.
 
 **Phase 2 — Make it run in the target interface.** Single request, correct, exposed.
 
-- [`tooling/fastapi-serving/`](tooling/fastapi-serving/) — wrap the model in a FastAPI endpoint conforming to the chosen API contract.
-- [`tooling/accuracy-checker/`](tooling/accuracy-checker/) — verify token-level correctness against a reference (HF `model.generate()`, or the original checkpoint's sample outputs).
+- [`tooling/fastapi-serving/`](references/tooling/fastapi-serving.md) — wrap the model in a FastAPI endpoint conforming to the chosen API contract.
+- [`tooling/accuracy-checker/`](references/tooling/accuracy-checker.md) — verify token-level correctness against a reference (HF `model.generate()`, or the original checkpoint's sample outputs).
 
 At the end of Phase 2 the server handles one request at a time, correctly. That's the floor.
 
 **Phase 3 — Enable batching.** Stop wasting the GPU on single requests.
 
-- [`algorithms/continuous-batching/`](algorithms/continuous-batching/) — requests join and leave the batch mid-step.
-- [`algorithms/paged-attention/`](algorithms/paged-attention/) — block-based KV cache that makes variable-length batching efficient without padding waste.
+- [`algorithms/continuous-batching/`](references/algorithms/continuous-batching.md) — requests join and leave the batch mid-step.
+- [`algorithms/paged-attention/`](references/algorithms/paged-attention.md) — block-based KV cache that makes variable-length batching efficient without padding waste.
 
 **Phase 4 — Visit each component.** Replace naive implementations with production kernels, one component at a time.
 
-- **Attention**: [`backends/sdpa/`](backends/sdpa/) (dependency-light baseline and single-batch fixed-shape CUDA graphs), [`backends/flashinfer/`](backends/flashinfer/) (plan/run wrappers, MLA variants, cascade for shared prefixes), or [`backends/flashattention/`](backends/flashattention/) (varlen + paged `flash_attn_with_kvcache`).
-- **Non-attention fused ops** (RMSNorm, RoPE, SiLU, layer norm, fused residual): [`backends/flashinfer/`](backends/flashinfer/) fused-op section.
-- **Sampling**: [`algorithms/batched-sampling/`](algorithms/batched-sampling/) — one `.tolist()` per step instead of one `.item()` per request.
-- **Quantization** (if relevant): [`algorithms/quantization-schemes/`](algorithms/quantization-schemes/) — FP8 / INT4 / FP4 as the hardware allows.
-- **Model-family-specific components**: MoE dispatch ([`algorithms/moe-routing-dispatch/`](algorithms/moe-routing-dispatch/)), speculative decoding ([`algorithms/speculative-decoding/`](algorithms/speculative-decoding/)), structured output ([`algorithms/structured-output/`](algorithms/structured-output/)).
+- **Attention**: [`backends/sdpa/`](references/backends/sdpa.md) (dependency-light baseline and single-batch fixed-shape CUDA graphs), [`backends/flashinfer/`](references/backends/flashinfer.md) (plan/run wrappers, MLA variants, cascade for shared prefixes), or [`backends/flashattention/`](references/backends/flashattention.md) (varlen + paged `flash_attn_with_kvcache`).
+- **Non-attention fused ops** (RMSNorm, RoPE, SiLU, layer norm, fused residual): [`backends/flashinfer/`](references/backends/flashinfer.md) fused-op section.
+- **Sampling**: [`algorithms/batched-sampling/`](references/algorithms/batched-sampling.md) — one `.tolist()` per step instead of one `.item()` per request.
+- **Quantization** (if relevant): [`algorithms/quantization-schemes/`](references/algorithms/quantization-schemes.md) — FP8 / INT4 / FP4 as the hardware allows.
+- **Model-family-specific components**: MoE dispatch ([`algorithms/moe-routing-dispatch/`](references/algorithms/moe-routing-dispatch.md)), speculative decoding ([`algorithms/speculative-decoding/`](references/algorithms/speculative-decoding.md)), structured output ([`algorithms/structured-output/`](references/algorithms/structured-output.md)).
 
 **Phase 5 — Reduce CPU overhead.** Stop the GPU from waiting for the CPU.
 
-- [`backends/cuda-graph/`](backends/cuda-graph/) — capture the decode pass; eliminate per-kernel launch overhead. Full-graph or piecewise.
-- [`algorithms/async-scheduling/`](algorithms/async-scheduling/) — pipeline scheduler prep and result postproc with the GPU forward (SGLang overlap scheduler, vLLM AsyncScheduler + MRV2 patterns).
-- [`frameworks/pytorch/`](frameworks/pytorch/) — sync-point catalogue, multi-stream + CUDA-event patterns, warmup discipline, static preallocation, gather-based input prep.
+- [`backends/cuda-graph/`](references/backends/cuda-graph.md) — capture the decode pass; eliminate per-kernel launch overhead. Full-graph or piecewise.
+- [`algorithms/async-scheduling/`](references/algorithms/async-scheduling.md) — pipeline scheduler prep and result postproc with the GPU forward (SGLang overlap scheduler, vLLM AsyncScheduler + MRV2 patterns).
+- [`frameworks/pytorch/`](references/frameworks/pytorch.md) — sync-point catalogue, multi-stream + CUDA-event patterns, warmup discipline, static preallocation, gather-based input prep.
 
 **Phase 6 — Benchmark and iterate.** Measure against a realistic workload.
 
-- [`tooling/serving-benchmark/`](tooling/serving-benchmark/) — TTFT / TPOT / p99, open-loop vs closed-loop, ISL/OSL sweeps. Most benchmarks are wrong; this skill is about not reproducing that.
+- [`tooling/serving-benchmark/`](references/tooling/serving-benchmark.md) — TTFT / TPOT / p99, open-loop vs closed-loop, ISL/OSL sweeps. Most benchmarks are wrong; this skill is about not reproducing that.
 
-**Throughout — profile to decide what to do next.** [`tooling/profiler/`](tooling/profiler/) — torch profiler for Python-side, `nsys` for timeline classification, `ncu` for kernel-local metrics. Before moving to the next phase, confirm with a profile that your current bottleneck matches what the phase addresses. If kernel launches already look tight but the scheduler gaps dominate, skip Phase 5's cuda-graph step and go straight to async-scheduling. If the GPU is already saturated inside kernels, no amount of scheduler work will help — escalate to kernel-level.
+**Throughout — profile to decide what to do next.** [`tooling/profiler/`](references/tooling/profiler.md) — torch profiler for Python-side, `nsys` for timeline classification, `ncu` for kernel-local metrics. Before moving to the next phase, confirm with a profile that your current bottleneck matches what the phase addresses. If kernel launches already look tight but the scheduler gaps dominate, skip Phase 5's cuda-graph step and go straight to async-scheduling. If the GPU is already saturated inside kernels, no amount of scheduler work will help — escalate to kernel-level.
 
 ### (B) Extend vLLM / SGLang / TensorRT-LLM
 
-1. [`engines/<engine>/`](engines/) — find where the thing lives
-2. [`algorithms/<topic>/`](algorithms/) — understand the concept cross-engine
-3. [`models/<model>/`](models/) — if it's a model-specific change, read existing impls first
+1. [`engines/<engine>/`](references/engines/) — find where the thing lives
+2. [`algorithms/<topic>/`](references/algorithms/) — understand the concept cross-engine
+3. [`models/<model>/`](references/models/) — if it's a model-specific change, read existing impls first
 4. Read the actual source; engines move fast — skills are navigation, not replacements
 
 ### (C) Deploy at production scale
 
-1. [`algorithms/parallelism/`](algorithms/parallelism/) — pick the scheme
-2. [`algorithms/disaggregated-serving/`](algorithms/disaggregated-serving/) — if workload warrants
-3. [`algorithms/quantization-schemes/`](algorithms/quantization-schemes/) — what precision makes sense for your hardware
-4. [`hardware/`](hardware/) — actual capabilities of your SKU
-5. [`tooling/serving-benchmark/`](tooling/serving-benchmark/) — measure at real concurrency
-6. [`tooling/profiler/`](tooling/profiler/) — close the loop on regressions
+1. [`algorithms/parallelism/`](references/algorithms/parallelism.md) — pick the scheme
+2. [`algorithms/disaggregated-serving/`](references/algorithms/disaggregated-serving.md) — if workload warrants
+3. [`algorithms/quantization-schemes/`](references/algorithms/quantization-schemes.md) — what precision makes sense for your hardware
+4. [`hardware/`](references/hardware/) — actual capabilities of your SKU
+5. [`tooling/serving-benchmark/`](references/tooling/serving-benchmark.md) — measure at real concurrency
+6. [`tooling/profiler/`](references/tooling/profiler.md) — close the loop on regressions
 
 ### (D) Debug a slow deployment
 
-1. [`tooling/profiler/`](tooling/profiler/) — nsys first, ncu only if kernel-bound
+1. [`tooling/profiler/`](references/tooling/profiler.md) — nsys first, ncu only if kernel-bound
 2. Classify bottleneck (see taxonomy in that skill)
 3. Follow the bottleneck table above to the right mitigation skill
 4. Verify with a repeatable benchmark
@@ -272,4 +272,4 @@ Split of concerns:
 | KV cache per token per layer | `2 × num_kv_heads × head_dim × bytes_per_elt` | exact |
 | KV for Llama-3-70B, BF16, 1 token | ~40 KB (8 KV heads × 128 dim × 2B × 80 layers × 2 for K/V) | formula above |
 
-These are starting points; [`hardware/`](hardware/) has generation-specific deltas.
+These are starting points; [`hardware/`](references/hardware/) has generation-specific deltas.

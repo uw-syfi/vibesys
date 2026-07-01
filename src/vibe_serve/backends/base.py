@@ -15,9 +15,10 @@ compute backend supplies the right values for its platform inside
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
-from typing import Callable, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from deepagents.backends.sandbox import BaseSandbox
 
@@ -73,7 +74,7 @@ class ComputeBackendImpl(Protocol):
         extra_env: dict[str, str],
         extra_init_commands: list[str],
         setup_fns: list[SetupFn] | None = None,
-        modal_options: "ModalOptions | None" = None,
+        modal_options: ModalOptions | None = None,
     ) -> BaseSandbox:
         """Construct (do not start) a sandbox configured for this backend.
 

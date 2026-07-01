@@ -1,0 +1,85 @@
+SbufAllocation:
+      description: State Buffer memory occupancy periods showing which specific address ranges are occupied over time. Uses memory lifetime analysis to track actual occupancy rather than individual operations.
+      properties:
+        start_ts:
+          type: integer
+          format: int64
+          description: Timestamp when the memory address range becomes occupied (allocated).
+          x-unit: nanoseconds
+          minimum: 0
+
+        end_ts:
+          type: integer
+          format: int64
+          description: Timestamp when the memory address range becomes free (deallocated).
+          x-unit: nanoseconds
+          minimum: 0
+
+        start_address:
+          type: integer
+          format: int64
+          description: Starting memory address of the occupied region (inclusive - first byte of allocation).
+          x-unit: bytes
+          minimum: 0
+
+        end_address:
+          type: integer
+          format: int64
+          description: Ending memory address of the occupied region (inclusive - last byte of allocation).
+          x-unit: bytes
+          minimum: 0
+
+        partition:
+          type: integer
+          format: int64
+          description: State Buffer partition number that this address range belongs to (0, 32, 64, or 96).
+          minimum: 0
+
+        op_source_type:
+          type: string
+          description: Source of memory operation. Distinguishes whether the memory allocation originated from a compute engine instruction or a DMA operation.
+          example: "instruction"
+
+        opcode:
+          type: string
+          description: Instruction opcode name (only for instruction source type). Examples include MATMUL, TENSOR_TENSOR, etc.
+          example: "MATMUL"
+
+        operands:
+          type: string
+          description: Instruction operands string (only for instruction source type). Contains source/destination addresses and other instruction parameters.
+          example: "src=0x2120 dst=0x2312 rows=64 cols=64"
+
+        queue_name:
+          type: string
+          description: DMA queue name (only for DMA source type). Identifies which DMA queue performed the operation.
+          example: "qGpSimdSpillReload0"
+
+        block_id:
+          type: integer
+          format: int64
+          description: DMA block ID (only for DMA source type). Identifies which block within the DMA queue this operation corresponds to.
+          minimum: 0
+
+        tensor_name:
+          type: string
+          description: Name of the tensor or variable associated with this memory allocation (if available).
+          example: intermediate_result_0
+
+        hlo_name:
+          type: string
+          description: High-Level Optimizer (HLO) operation name associated with this memory allocation (if available).
+          example: dot.1
+
+        pcore_idx:
+          type: integer
+          format: int64
+          description: Index of the physical NeuronCore within a Logical NeuronCore (LNC). A Logical NeuronCore is a group of physical NeuronCores. For LNC2 this field can have a value of either 0 or 1.
+          minimum: 0
+
+      required:
+        - start_ts
+        - end_ts
+        - start_address
+        - end_address
+        - partition

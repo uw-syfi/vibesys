@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
 from deepagents.backends import LocalShellBackend
 from deepagents.backends.sandbox import BaseSandbox
@@ -30,6 +30,8 @@ from vibe_serve.sandbox.modal_sandbox import ModalSandbox
 
 # Default container image for the cuda backend.  Carries CUDA toolkit + PyTorch.
 _DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"
+
+
 class CudaBackend:
     """CUDA / NVIDIA backend.
 
@@ -140,7 +142,8 @@ class CudaBackend:
         if self.selected_device is None:
             return None
         self._monitor = GpuContentionMonitor(
-            log_dir=log_dir, gpu_uuid=self.selected_device.uuid,
+            log_dir=log_dir,
+            gpu_uuid=self.selected_device.uuid,
         )
         return self._monitor
 
@@ -184,7 +187,8 @@ class CudaBackend:
         if self._monitor is not None:
             self._monitor.stop()
         self._monitor = GpuContentionMonitor(
-            log_dir=self.log_dir, gpu_uuid=new_gpu.uuid,
+            log_dir=self.log_dir,
+            gpu_uuid=new_gpu.uuid,
         )
         self._monitor.start()
 
@@ -193,10 +197,7 @@ class CudaBackend:
     def _pick_device(self) -> GpuInfo | None:
         cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
         if cuda_visible:
-            self._lprint(
-                f"[gpu] CUDA_VISIBLE_DEVICES={cuda_visible} set — "
-                f"skipping auto-selection"
-            )
+            self._lprint(f"[gpu] CUDA_VISIBLE_DEVICES={cuda_visible} set — skipping auto-selection")
             return None
         gpu = pick_gpu()
         if gpu is None:
@@ -249,7 +250,9 @@ class CudaBackend:
         try:
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if result.returncode != 0:
                 return {}

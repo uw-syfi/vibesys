@@ -2,12 +2,13 @@ import json
 import sys
 import time
 import traceback
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
 
-from vibe_serve.constants import _DIM, _BOLD, _CYAN, _GREEN, _RED, _YELLOW, _RESET
-
+from vibe_serve.agents.progress import AgentProgress
+from vibe_serve.constants import _BOLD, _CYAN, _DIM, _GREEN, _RED, _RESET, _YELLOW
 
 ContextWindowLookup = Callable[[str | None], int | None]
 """Resolves a model name to its context window size in tokens.
@@ -26,23 +27,23 @@ queries against the OpenAI/Anthropic models API, or values loaded from
 # Values verified against vendor docs as of 2026-04-08.
 _MODEL_CONTEXT_WINDOWS: tuple[tuple[str, int], ...] = (
     # OpenAI — https://developers.openai.com/api/docs/models/
-    ("gpt-5.4",            1_050_000),  # gpt-5.4, gpt-5.4-pro
-    ("gpt-5",                400_000),  # gpt-5, gpt-5-mini, gpt-5-nano, gpt-5.2
-    ("gpt-4o",               128_000),
-    ("gpt-4-turbo",          128_000),
-    ("o1",                   200_000),
-    ("o3",                   200_000),
-    ("o4",                   200_000),
+    ("gpt-5.4", 1_050_000),  # gpt-5.4, gpt-5.4-pro
+    ("gpt-5", 400_000),  # gpt-5, gpt-5-mini, gpt-5-nano, gpt-5.2
+    ("gpt-4o", 128_000),
+    ("gpt-4-turbo", 128_000),
+    ("o1", 200_000),
+    ("o3", 200_000),
+    ("o4", 200_000),
     # Anthropic — https://platform.claude.com/docs/en/docs/about-claude/models/overview
     # Opus 4.6 and Sonnet 4.6 default to 1M; older 4.x and Haiku 4.5 are 200k.
     # (Pre-4.6 models had a context-1m-2025-08-07 beta header that swapped them
     # to 1M per request, but that's enabled at request time, not by model ID.)
-    ("claude-opus-4-6",    1_000_000),
-    ("claude-sonnet-4-6",  1_000_000),
-    ("claude-",              200_000),
+    ("claude-opus-4-6", 1_000_000),
+    ("claude-sonnet-4-6", 1_000_000),
+    ("claude-", 200_000),
     # Google
-    ("gemini-",            1_048_576),  # Gemini 2.5 / 3.x families default to 1M
-    ("gemma-",                 8_192),
+    ("gemini-", 1_048_576),  # Gemini 2.5 / 3.x families default to 1M
+    ("gemma-", 8_192),
 )
 
 
@@ -111,6 +112,7 @@ class TodoDisplay:
     @staticmethod
     def _strip_ansi(s: str) -> str:
         import re
+
         return re.sub(r"\033\[[0-9;]*m", "", s)
 
 
@@ -127,6 +129,7 @@ class AgentLogger(BaseCallbackHandler):
         log_file=None,
         model_name: str | None = None,
         agent_label: str | None = None,
+        progress: AgentProgress | None = None,
         context_window_lookup: ContextWindowLookup | None = None,
     ):
         self._streaming = False
@@ -136,6 +139,7 @@ class AgentLogger(BaseCallbackHandler):
         self._call_count = 0
         self._model_name = model_name
         self._agent_label = agent_label
+        self._progress = progress
         self._start_time = time.monotonic()
         self._input_tokens = 0
         # Most recent usage dict from the cli backend (see ``update_usage``).
@@ -146,12 +150,13 @@ class AgentLogger(BaseCallbackHandler):
         self._context_window = self._context_window_lookup(model_name)
 
     def _format_prefix(self) -> str:
-        """Build the dynamic ``[label | elapsed | tokens/max]`` prefix.
+        """Build the dynamic ``[progress | label | elapsed | tokens/max]`` prefix.
 
         Computed lazily on each use so the elapsed-time and token-count
         readings reflect the latest state when the prefix is printed.
         """
-        if not self._agent_label:
+        progress_text = self._progress.label() if self._progress is not None else None
+        if not self._agent_label and not progress_text:
             return ""
         elapsed = time.monotonic() - self._start_time
         used = _format_token_count(self._input_tokens)
@@ -159,7 +164,13 @@ class AgentLogger(BaseCallbackHandler):
             tokens_str = f"{used}/{_format_token_count(self._context_window)}"
         else:
             tokens_str = used
-        return f"{_BOLD}[{self._agent_label} | {elapsed:.1f}s | {tokens_str}]{_RESET} "
+        parts = []
+        if progress_text:
+            parts.append(progress_text)
+        if self._agent_label:
+            parts.append(self._agent_label)
+        parts.extend([f"{elapsed:.1f}s", tokens_str])
+        return f"{_BOLD}[{' | '.join(parts)}]{_RESET} "
 
     # --- LLM call context (log-file only) ---
 
@@ -170,9 +181,9 @@ class AgentLogger(BaseCallbackHandler):
         flat = messages[0] if messages else []
 
         # Separator with call number
-        self._print_log(f"\n{'─'*60}")
+        self._print_log(f"\n{'─' * 60}")
         self._print_log(f"  LLM call #{self._call_count}")
-        self._print_log(f"{'─'*60}")
+        self._print_log(f"{'─' * 60}")
 
         # First call: log model info and system prompt
         if self._call_count == 1:
@@ -189,6 +200,7 @@ class AgentLogger(BaseCallbackHandler):
 
         # Message type summary
         from collections import Counter
+
         type_counts = Counter(getattr(m, "type", "unknown") for m in flat)
         summary = ", ".join(f"{count} {typ}" for typ, count in sorted(type_counts.items()))
         self._print_log(f"  Messages: {len(flat)} ({summary})")
@@ -281,15 +293,24 @@ class AgentLogger(BaseCallbackHandler):
 
     # Tool names whose args contain code content that is already tracked in
     # git — no need to duplicate it in the run log.
-    _CODE_CHANGE_TOOLS = frozenset({
-        "Write", "Edit",              # Claude Code tools
-        "write_file", "edit_file",    # deepagents tools
-    })
+    _CODE_CHANGE_TOOLS = frozenset(
+        {
+            "Write",
+            "Edit",  # Claude Code tools
+            "write_file",
+            "edit_file",  # deepagents tools
+        }
+    )
     # Args that carry bulk code content and should be omitted from the log.
-    _CODE_CONTENT_ARGS = frozenset({
-        "content", "old_string", "new_string",  # Write/Edit
-        "old_text", "new_text",                  # deepagents edit variants
-    })
+    _CODE_CONTENT_ARGS = frozenset(
+        {
+            "content",
+            "old_string",
+            "new_string",  # Write/Edit
+            "old_text",
+            "new_text",  # deepagents edit variants
+        }
+    )
 
     def _print_tool_call(self, name: str, args: dict):
         is_code_tool = name in self._CODE_CHANGE_TOOLS
@@ -312,7 +333,9 @@ class AgentLogger(BaseCallbackHandler):
             if len(s) > 80:
                 s = s[:80] + "..."
             parts.append(f'{k}="{s}"' if isinstance(v, str) else f"{k}={s}")
-        self._print_stdout(f"\n{self._format_prefix()}{_CYAN}{_BOLD}→ {name}({', '.join(parts)}){_RESET}")
+        self._print_stdout(
+            f"\n{self._format_prefix()}{_CYAN}{_BOLD}→ {name}({', '.join(parts)}){_RESET}"
+        )
 
     def _print_thinking(self, text: str):
         self._print(f"\n{_DIM}[thinking]{_RESET}")
@@ -330,14 +353,17 @@ class AgentLogger(BaseCallbackHandler):
         if self._log_file:
             log_preview = full_text
             if len(log_preview) > self._LOG_MAX_RESULT_LEN:
-                log_preview = log_preview[:self._LOG_MAX_RESULT_LEN] + f"... [{len(full_text) - self._LOG_MAX_RESULT_LEN} more chars]"
+                log_preview = (
+                    log_preview[: self._LOG_MAX_RESULT_LEN]
+                    + f"... [{len(full_text) - self._LOG_MAX_RESULT_LEN} more chars]"
+                )
             for line in log_preview.split("\n"):
                 self._print_log(f"  {color}{line}{_RESET}")
 
         # Truncated to stdout
         preview = full_text
         if self._max_result_len is not None and len(preview) > self._max_result_len:
-            preview = preview[:self._max_result_len] + "..."
+            preview = preview[: self._max_result_len] + "..."
         for line in preview.split("\n"):
             self._print_stdout(f"  {color}{line}{_RESET}")
 

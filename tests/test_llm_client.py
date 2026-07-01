@@ -1,8 +1,9 @@
 import json
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from vibe_serve.config import Config
 from vibe_serve.llm_client import _build_model
 
 
@@ -12,12 +13,14 @@ def _make_config(
     thinking=None,
     providers=None,
 ):
-    """Helper to build a config dict matching _load_config output."""
-    return {
-        "model": {"name": name, "provider": provider},
-        "thinking": thinking or {},
-        "providers": providers or {},
-    }
+    """Helper to build a validated :class:`Config` matching _load_config output."""
+    return Config.model_validate(
+        {
+            "model": {"name": name, "provider": provider},
+            "thinking": thinking or {},
+            "providers": providers or {},
+        }
+    )
 
 
 FAKE_CREDS_DICT = {
@@ -89,10 +92,11 @@ class TestGoogleGenaiProvider:
 
 
 class TestUnknownProvider:
-    def test_unknown_provider_raises(self):
-        config = _make_config("claude-sonnet-4-6", provider="bedrock")
-        with pytest.raises(NotImplementedError, match="bedrock"):
-            _build_model(config)
+    def test_unknown_provider_rejected_by_schema(self):
+        # Provider validation now happens at the Config boundary (fail-fast),
+        # not inside _build_model.
+        with pytest.raises(ValueError, match="bedrock"):
+            _make_config("claude-sonnet-4-6", provider="bedrock")
 
 
 # --- Vertex AI provider ---
@@ -179,7 +183,9 @@ class TestVertexAIProvider:
 
     @patch("google.oauth2.service_account.Credentials.from_service_account_info")
     @patch("langchain_google_genai.ChatGoogleGenerativeAI")
-    def test_vertex_gemini_thinking_level_takes_precedence(self, mock_chat_cls, mock_from_sa, key_file):
+    def test_vertex_gemini_thinking_level_takes_precedence(
+        self, mock_chat_cls, mock_from_sa, key_file
+    ):
         mock_creds = MagicMock()
         mock_from_sa.return_value = mock_creds
         config = _make_config(
@@ -198,7 +204,13 @@ class TestVertexAIProvider:
         config = _make_config(
             "claude-sonnet-4-6",
             provider="vertex-ai",
-            providers={"vertex-ai": {"json": "/nonexistent/key.json", "project": None, "region": "us-east5"}},
+            providers={
+                "vertex-ai": {
+                    "json": "/nonexistent/key.json",
+                    "project": None,
+                    "region": "us-east5",
+                }
+            },
         )
         with pytest.raises(ValueError, match="service account key not found"):
             _build_model(config)
@@ -211,7 +223,13 @@ class TestVertexAIProvider:
         config = _make_config(
             "claude-sonnet-4-6",
             provider="vertex-ai",
-            providers={"vertex-ai": {"json": str(key_file), "project": "override-project", "region": "us-east5"}},
+            providers={
+                "vertex-ai": {
+                    "json": str(key_file),
+                    "project": "override-project",
+                    "region": "us-east5",
+                }
+            },
         )
         _build_model(config)
         mock_chat_cls.assert_called_once_with(
@@ -227,27 +245,15 @@ class TestVertexAIProvider:
 
 class TestConfigToModel:
     def test_full_pipeline_anthropic(self):
-        config = {
-            "model": {"name": "claude-sonnet-4-6", "provider": "anthropic"},
-            "thinking": {},
-            "providers": {},
-        }
+        config = _make_config("claude-sonnet-4-6", provider="anthropic")
         assert _build_model(config) == "anthropic:claude-sonnet-4-6"
 
     def test_full_pipeline_google_genai(self):
-        config = {
-            "model": {"name": "gemini-2.5-pro", "provider": "google-genai"},
-            "thinking": {},
-            "providers": {},
-        }
+        config = _make_config("gemini-2.5-pro", provider="google-genai")
         assert _build_model(config) == "google_genai:gemini-2.5-pro"
 
     def test_full_pipeline_openai(self):
-        config = {
-            "model": {"name": "gpt-4o", "provider": "openai"},
-            "thinking": {},
-            "providers": {},
-        }
+        config = _make_config("gpt-4o", provider="openai")
         assert _build_model(config) == "openai:gpt-4o"
 
 
@@ -294,7 +300,9 @@ class TestOpenAIProvider:
 
 class TestThinkingNotSupported:
     def test_anthropic_with_thinking_raises(self):
-        config = _make_config("claude-sonnet-4-6", provider="anthropic", thinking={"level": "medium"})
+        config = _make_config(
+            "claude-sonnet-4-6", provider="anthropic", thinking={"level": "medium"}
+        )
         with pytest.raises(ValueError, match="[Tt]hinking.*not supported"):
             _build_model(config)
 

@@ -2,8 +2,13 @@ import sys
 from abc import abstractmethod
 from typing import Any
 
-from agentshim.executor import CallbackCommandStreamSink, CommandExecutor, CommandRequest, HostCommandExecutor
 from agentshim.events import AgentEventHandler
+from agentshim.executor import (
+    CallbackCommandStreamSink,
+    CommandExecutor,
+    CommandRequest,
+    HostCommandExecutor,
+)
 from agentshim.utils import get_interactive_env
 from loguru import logger
 
@@ -121,8 +126,7 @@ class CLIGenerationSession:
 
         if result.returncode != 0:
             raise RuntimeError(
-                f"{self.binary_name} exited with code {result.returncode}: "
-                f"{result.stderr}"
+                f"{self.binary_name} exited with code {result.returncode}: {result.stderr}"
             )
 
         return "".join(self.stdout_lines).strip()

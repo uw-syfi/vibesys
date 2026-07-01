@@ -12,13 +12,13 @@ Skills are organized by **abstraction layer** with explicit extensibility axes.
 
 | Tier | Axis | Purpose |
 |:-----|:-----|:--------|
-| [`models/`](models/) | model architecture | What does each model look like? Weight layout, attention type, tokenization, modalities. |
-| [`algorithms/`](algorithms/) | idea / algorithm | Cross-cutting serving concepts: continuous batching, paged attention, speculative decoding, MoE routing, parallelism, quantization schemes. |
-| [`frameworks/`](frameworks/) | programming framework | PyTorch / MLX / (future JAX) idioms for serving. |
-| [`backends/`](backends/) | software backend library | How to **use** existing kernel libraries — FlashInfer, FlashAttention, Triton kernels, CUDA graph. Kernel *implementation* is out of scope; see agent-gpu-skills. |
-| [`hardware/`](hardware/) | hardware platform | Hopper / Blackwell / MI300 / Apple Silicon specifics — precision, collectives, tuning. |
-| [`engines/`](engines/) | reference system | Source-code lookup into vLLM, SGLang, TensorRT-LLM. Short SKILL.md + "where's X" grep tables. |
-| [`tooling/`](tooling/) | orthogonal workflow | FastAPI serving, accuracy checking, serving benchmarks, profiling, I/O handling. |
+| [`models/`](references/models/) | model architecture | What does each model look like? Weight layout, attention type, tokenization, modalities. |
+| [`algorithms/`](references/algorithms/) | idea / algorithm | Cross-cutting serving concepts: continuous batching, paged attention, speculative decoding, MoE routing, parallelism, quantization schemes. |
+| [`frameworks/`](references/frameworks/) | programming framework | PyTorch / MLX / (future JAX) idioms for serving. |
+| [`backends/`](references/backends/) | software backend library | How to **use** existing kernel libraries — FlashInfer, FlashAttention, Triton kernels, CUDA graph. Kernel *implementation* is out of scope; see agent-gpu-skills. |
+| [`hardware/`](references/hardware/) | hardware platform | Hopper / Blackwell / MI300 / Apple Silicon specifics — precision, collectives, tuning. |
+| [`engines/`](references/engines/) | reference system | Source-code lookup into vLLM, SGLang, TensorRT-LLM. Short SKILL.md + "where's X" grep tables. |
+| [`tooling/`](references/tooling/) | orthogonal workflow | FastAPI serving, accuracy checking, serving benchmarks, profiling, I/O handling. |
 
 ## Extensibility
 

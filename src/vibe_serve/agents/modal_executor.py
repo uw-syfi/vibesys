@@ -77,9 +77,7 @@ class ModalCommandExecutor:
     ) -> CommandResult:
         modal_sb = getattr(self._modal_sandbox, "_sandbox", None)
         if modal_sb is None:
-            raise RuntimeError(
-                "Modal sandbox not started — call ModalSandbox.start() first"
-            )
+            raise RuntimeError("Modal sandbox not started — call ModalSandbox.start() first")
 
         cwd = request.cwd or self._workdir
 
@@ -107,13 +105,9 @@ class ModalCommandExecutor:
                 "HUGGING_FACE_HUB_TOKEN",
                 "PYTHONUNBUFFERED",
             }
-            forwarded = {
-                k: v for k, v in request.env.items() if k in _SAFE_ENV_KEYS
-            }
+            forwarded = {k: v for k, v in request.env.items() if k in _SAFE_ENV_KEYS}
             if forwarded:
-                env_prefix = ["env"] + [
-                    f"{k}={shlex.quote(v)}" for k, v in forwarded.items()
-                ]
+                env_prefix = ["env"] + [f"{k}={shlex.quote(v)}" for k, v in forwarded.items()]
                 argv = env_prefix + argv
 
         container_proc = modal_sb.exec(

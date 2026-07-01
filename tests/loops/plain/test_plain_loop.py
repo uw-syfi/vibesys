@@ -15,8 +15,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vibe_serve.agents import AgentRunner
+from vibe_serve.loops.plain.issue_board import IssueBoard, IssueStatus
 from vibe_serve.loops.plain.loop import PlainLoopState, run_plain_loop
-from vibe_serve.loops.plain.issue_board import IssueStatus, IssueBoard, IssueType
 from vibe_serve.schemas import (
     IssueImplementerResponse,
     IssueJudgeResponse,
@@ -25,7 +25,6 @@ from vibe_serve.schemas import (
     PerfTrend,
     Verdict,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers — factories and fixtures shared across tests
@@ -67,9 +66,7 @@ def _make_perf_resp(new_issue_ids: list[int] | None = None) -> IssuePerfEvalResp
     )
 
 
-def _make_issue_runner(
-    responses: list, *, backend_name: str = "deepagents"
-) -> MagicMock:
+def _make_issue_runner(responses: list, *, backend_name: str = "deepagents") -> MagicMock:
     """Mock AgentRunner.invoke that yields scripted responses in order.
 
     The script is consumed left-to-right regardless of ``kind``, so the test
@@ -88,9 +85,7 @@ def _make_issue_runner(
         try:
             return next(it)
         except StopIteration as exc:
-            raise AssertionError(
-                f"invoke called beyond scripted responses (kind={kind})"
-            ) from exc
+            raise AssertionError(f"invoke called beyond scripted responses (kind={kind})") from exc
 
     runner.invoke.side_effect = _invoke
     return runner
@@ -219,9 +214,7 @@ def test_bootstrap_idempotent_on_resume(
 @patch("vibe_serve.context._build_model")
 @patch("vibe_serve.backends.cuda.LocalShellBackend")
 @patch("vibe_serve.context.build_agent_runner")
-def test_judge_pass_closes_issue(
-    mock_build_runner, mock_backend, mock_build, ref_file, tmp_path
-):
+def test_judge_pass_closes_issue(mock_build_runner, mock_backend, mock_build, ref_file, tmp_path):
     mock_build.return_value = "anthropic:claude-sonnet-4-6"
     mock_build_runner.return_value = _make_issue_runner(
         [
@@ -388,9 +381,7 @@ def test_judge_invoke_receives_tracker_kwargs(
             max_issues_per_perf_eval=3,
         )
 
-    judge_calls = [
-        c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "judge"
-    ]
+    judge_calls = [c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "judge"]
     assert len(judge_calls) == 1
     kwargs = judge_calls[0].kwargs
 
@@ -447,9 +438,7 @@ def test_perf_eval_invoke_receives_tracker_kwargs(
             max_issues_per_perf_eval=2,
         )
 
-    perf_calls = [
-        c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "perf_eval"
-    ]
+    perf_calls = [c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "perf_eval"]
     assert len(perf_calls) == 1
     kwargs = perf_calls[0].kwargs
 
@@ -512,8 +501,13 @@ def test_judge_phase_calls_store_reload_after_invoke(
     runner.invoke.side_effect = tracking_invoke
     mock_build_runner.return_value = runner
 
-    with patch("vibe_serve.context.PROJECT_ROOT", tmp_path), patch.object(
-        IssueBoard, "reload", tracking_reload,
+    with (
+        patch("vibe_serve.context.PROJECT_ROOT", tmp_path),
+        patch.object(
+            IssueBoard,
+            "reload",
+            tracking_reload,
+        ),
     ):
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
@@ -561,9 +555,7 @@ def test_implementer_invoke_has_no_tracker_kwargs(
             max_rounds=1,
         )
 
-    impl_calls = [
-        c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "implementer"
-    ]
+    impl_calls = [c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "implementer"]
     assert impl_calls, "expected at least one implementer invoke"
     for c in impl_calls:
         # Both injection-point kwargs may be omitted entirely or explicit None.
@@ -572,12 +564,8 @@ def test_implementer_invoke_has_no_tracker_kwargs(
 
     # The judge and perf_eval invokes both DO receive a tracker kwarg.
     # Which one depends on the backend (see PlainLoopAgentRunner).
-    judge_calls = [
-        c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "judge"
-    ]
-    perf_calls = [
-        c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "perf_eval"
-    ]
+    judge_calls = [c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "judge"]
+    perf_calls = [c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "perf_eval"]
     assert len(judge_calls) == 1
     assert len(perf_calls) == 1
     if backend_name == "cli":
@@ -622,9 +610,7 @@ def test_perf_eval_runs_after_drain_complete(
     assert kinds == ["implementer", "judge", "perf_eval"]
 
     # Check the response_cls keyword for each phase
-    response_classes = [
-        call.kwargs["response_cls"] for call in runner.invoke.call_args_list
-    ]
+    response_classes = [call.kwargs["response_cls"] for call in runner.invoke.call_args_list]
     assert response_classes == [
         IssueImplementerResponse,
         IssueJudgeResponse,
@@ -916,7 +902,8 @@ def test_implementer_retry_user_prompt_includes_prior_judge_feedback(
         [
             _make_impl_resp(1, summary="First attempt."),
             _make_judge_resp(
-                1, verdict="fail",
+                1,
+                verdict="fail",
                 feedback="Add streaming support to the /v1/completions endpoint.",
             ),
             _make_impl_resp(1, summary="Second attempt."),

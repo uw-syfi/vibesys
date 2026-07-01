@@ -36,7 +36,7 @@ There are currently no declared VibeServe feature flags.
 
 `src/vibe_serve/config.py` parses `[feature_flags]` from `agent.toml` with
 `parse_feature_flag_overrides` and stores typed overrides in
-`config["feature_flags"]`.
+`config.feature_flags`.
 
 Example:
 
@@ -67,7 +67,7 @@ from vibe_serve.features import FEATURES, FeatureFlag
 
 enabled = FEATURES.is_enabled(
     FeatureFlag.EXAMPLE_FEATURE,
-    config["feature_flags"],
+    config.feature_flags,
 )
 ```
 
