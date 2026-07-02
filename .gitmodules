@@ -19,3 +19,6 @@
 [submodule "inputs/show-o2-1.5B-HQ/reference/Show-o"]
 	path = examples/show-o2-1.5B-HQ/reference/Show-o
 	url = https://github.com/showlab/Show-o.git
+[submodule "examples/social-network-read-timeline/3rd_party/deathstarbench"]
+	path = examples/social-network-read-timeline/3rd_party/deathstarbench
+	url = https://github.com/delimitrou/DeathStarBench.git
