@@ -160,13 +160,6 @@ class AgentCfg(_Strict):
             "The --cli-provider flag overrides; defaults to 'codex'."
         ),
     )
-    cli_model: str | None = Field(
-        default=None,
-        description=(
-            "Model the CLI tool should use; overrides model.name for the CLI agent. "
-            "None → the CLI tool's own default (no --model flag passed)."
-        ),
-    )
     cli_timeout: int | None = Field(
         default=None,
         description=(

@@ -1098,6 +1098,46 @@ class TestBuildAgentRunner:
                 use_docker=False,
             )
 
+    # --- model resolution for the cli backend ---------------------------------
+    #
+    # Regression coverage for the config API where [model].name did not reach
+    # the CLI tool. [model].name is the single source of truth: it must be the
+    # model handed to the CLI tool, and the displayed model_name must equal it
+    # so the run-log header can't report a model that isn't running.
+
+    @staticmethod
+    def _cli_runner(config, *, model_name):
+        return build_agent_runner(
+            config,
+            agent_backend=None,
+            cli_provider=None,
+            backends=None,
+            skills=[],
+            skill_source_dirs=[],
+            model=None,
+            model_name=model_name,
+            run_log_file=None,
+            use_docker=False,
+        )
+
+    @pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
+    def test_cli_backend_uses_model_name(self, provider):
+        runner = self._cli_runner(
+            _agent_config(backend="cli", cli_provider=provider),
+            model_name="gpt-5.4",
+        )
+        assert runner._model == "gpt-5.4"
+
+    def test_displayed_model_name_matches_model_passed(self):
+        # The run-log header prints _model_name; it must equal the model
+        # actually handed to the CLI tool so the log never reports a model
+        # that isn't running.
+        runner = self._cli_runner(
+            _agent_config(backend="cli", cli_provider="codex"),
+            model_name="gpt-5.4",
+        )
+        assert runner._model_name == runner._model == "gpt-5.4"
+
 
 class TestAgentLoggerEventHandler:
     """Tests for :class:`AgentLogger` as a CLI event handler."""
