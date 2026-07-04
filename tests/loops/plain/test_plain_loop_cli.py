@@ -8,7 +8,6 @@ from vibe_serve.cli import _build_plain_parser as build_parser
 from vibe_serve.cli import main
 from vibe_serve.loops.plain.loop import PlainLoopState
 
-
 TARGET_ARGS = [
     "--ref",
     "examples/Llama-3-8B/reference",

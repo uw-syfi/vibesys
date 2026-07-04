@@ -9,7 +9,6 @@ import pytest
 
 from vibe_serve.cli import _extract_flag, _extract_loop_selection, _validate_target_inputs, main
 
-
 TARGET_ARGS = [
     "--ref",
     "examples/Llama-3-8B/reference",
