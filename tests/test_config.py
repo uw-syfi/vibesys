@@ -134,6 +134,17 @@ class TestLoadConfigStrict:
         with pytest.raises(ValueError, match="tpu"):
             _load_config(cfg_file)
 
+    def test_removed_cli_model_key_rejected(self, tmp_path):
+        # [agent].cli_model was removed in favour of [model].name driving the
+        # CLI tool directly; stale configs that still set it must error rather
+        # than be silently ignored.
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text(
+            '[model]\nname = "gpt-5.4"\n\n[agent]\ncli_provider = "codex"\ncli_model = "gpt-5-codex"\n'
+        )
+        with pytest.raises(ValueError, match="cli_model"):
+            _load_config(cfg_file)
+
 
 class TestLoadConfigProviderDefault:
     def test_missing_provider_defaults_to_none(self, tmp_path):
@@ -247,9 +258,9 @@ budget = 2048
 
 class TestLoadConfigAgentSection:
     def test_agent_section_preserved(self, tmp_path):
-        # The [agent] table drives build_agent_runner (cli_model, cli_timeout,
-        # backend, cli_provider). _load_config must carry it through; the
-        # previous allowlist loader silently dropped it.
+        # The [agent] table drives build_agent_runner (cli_timeout, backend,
+        # cli_provider). _load_config must carry it through; the previous
+        # allowlist loader silently dropped it.
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text("""\
 [model]
@@ -258,11 +269,9 @@ name = "claude-sonnet-4-6"
 [agent]
 backend = "cli"
 cli_provider = "claude"
-cli_model = "claude-opus-4-8[1m]"
 cli_timeout = 1800
 """)
         config = _load_config(cfg_file)
-        assert config.agent.cli_model == "claude-opus-4-8[1m]"
         assert config.agent.cli_timeout == 1800
         assert config.agent.backend == "cli"
         assert config.agent.cli_provider == "claude"
@@ -273,7 +282,6 @@ cli_timeout = 1800
         config = _load_config(cfg_file)
         assert config.agent.backend is None
         assert config.agent.cli_provider is None
-        assert config.agent.cli_model is None
         assert config.agent.cli_timeout is None
 
 

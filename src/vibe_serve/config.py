@@ -160,14 +160,6 @@ class AgentCfg(_Strict):
             "The --cli-provider flag overrides; defaults to 'codex'."
         ),
     )
-    cli_model: str | None = Field(
-        default=None,
-        description=(
-            "Optional override for the model the CLI tool runs. None → the CLI "
-            "agent uses model.name (same as the deepagents backend). Set this "
-            "only when the CLI tool needs a different model id than the API name."
-        ),
-    )
     cli_timeout: int | None = Field(
         default=None,
         description=(
