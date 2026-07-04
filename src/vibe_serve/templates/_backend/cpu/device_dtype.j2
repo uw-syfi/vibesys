@@ -1,0 +1,1 @@
+Run entirely on the CPU (`device="cpu"`) — there is no GPU on this target. These are CPU-bound serving workloads (KV stores, networking servers) where the win is in the code (algorithms, data structures, concurrency, syscalls, memory layout), not in kernels or dtype tricks. Do not add GPU/`cuda`/`mps` code paths or GPU-only dependencies.

@@ -187,10 +187,17 @@ class TrainiumComputeBackendFragment(ComputeBackendFragment):
     backend = ComputeBackend.TRAINIUM
 
 
+class CpuComputeBackendFragment(ComputeBackendFragment):
+    """Fragments for the CPU backend (no GPU — CPU-bound targets)."""
+
+    backend = ComputeBackend.CPU
+
+
 _FRAGMENT_IMPLS: dict[ComputeBackend, type[ComputeBackendFragment]] = {
     ComputeBackend.CUDA: CudaComputeBackendFragment,
     ComputeBackend.METAL: MetalComputeBackendFragment,
     ComputeBackend.TRAINIUM: TrainiumComputeBackendFragment,
+    ComputeBackend.CPU: CpuComputeBackendFragment,
 }
 
 
