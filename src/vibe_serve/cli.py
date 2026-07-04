@@ -433,6 +433,20 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--interface",
+        choices=["inprocess", "service"],
+        default="inprocess",
+        help=(
+            "Evaluation contract for the built artifact, which also fixes the "
+            "implementation language (you never pick a language directly). "
+            "'inprocess' (default): the accuracy checker imports main.py in "
+            "process, so the implementation is Python (uv toolchain + "
+            "VibeServeModel contract). 'service': the artifact is exercised "
+            "only over its network interface, so the agent chooses the "
+            "language; supply a checker/benchmark that probes it over the wire."
+        ),
+    )
+    parser.add_argument(
         "--inner-loop",
         choices=["multi-agent", "single-agent"],
         default="multi-agent",
@@ -497,6 +511,7 @@ def _run_agent(args: argparse.Namespace) -> None:
         backend=backend,
         modality=args.modality,
         domain=args.domain,
+        interface=args.interface,
         inner_loop=args.inner_loop,
     )
 

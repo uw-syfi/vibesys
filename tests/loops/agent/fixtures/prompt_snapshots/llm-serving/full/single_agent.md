@@ -43,7 +43,9 @@ Do not introduce a code path that satisfies the schema or accuracy checker witho
 
 ## Workspace
 
-The shared experiment workspace is your working directory. Reference implementation: `/workspace/reference/main.py`. Use `uv` for Python packaging — `uv init` if needed, `uv add` for deps, `uv run` for execution.
+The shared experiment workspace is your working directory. Reference implementation: `/workspace/reference/main.py`.
+
+Use `uv` for Python package management. Run `uv init` if `pyproject.toml` doesn't exist yet, and `uv add` for new dependencies. Always execute scripts via `uv run`.
 
 ## Profiling step
 

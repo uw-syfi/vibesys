@@ -1,7 +1,9 @@
 ## Modality: text generation (causal LM)
 
+{% if interface != "service" %}
 **Accuracy-checker interface** (always required): `main.py` must export a `VibeServeModel` class with `from_pretrained(model_dir, device, dtype)` and `generate(input_ids, max_new_tokens=N)`.
 
+{% endif %}
 **Decode invariants** (verify on whichever endpoint the orchestrator scoped in): EOS must not appear in emitted text; stop-string truncation must run before emission; `completion_tokens` must count only emitted text, not raw sampled tokens.
 
 **API contract**: the specific endpoints and request/response shapes to verify are whatever the orchestrator's `pass_criteria` for this round specifies. Do NOT flag "missing" endpoints that the orchestrator did not scope in. If a round only scopes `/v1/completions`, do not fail it for lacking `/v1/chat/completions` or `/predict`. When you need contract details for a scoped endpoint, consult `skills/serving-systems/tooling/openai-api/SKILL.md`.

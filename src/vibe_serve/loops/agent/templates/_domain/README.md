@@ -75,6 +75,7 @@ use any of these in any section without tracking which role you're in:
 | Variable | Meaning |
 |----------|---------|
 | `modality` | The `--modality` value (e.g. `text_generation`). |
+| `interface` | The `--interface` value: `inprocess` (checker imports the code; Python) or `service` (exercised over the wire; any language). Gate in-process/Python-only requirements with `{% if interface != "service" %}`. |
 | `reference_path` | Path to the reference implementation. |
 | `bench_path` | Benchmark harness dir, or falsy if no benchmark is attached. |
 | `accuracy_checker_path` | Accuracy checker dir, or falsy if not attached. |
@@ -113,8 +114,10 @@ a private domain is just a path you pass.
 Domains cover **implementer + judge (+ single-agent + orchestrator) context**. Two adjacent
 concerns are deliberately *not* part of a domain file:
 
-- **Language/tooling** (e.g. "use `uv`/`pytest`") lives in the base prompt and is
-  the job of the (separate) language-selection work, not the domain.
+- **Language/tooling** (e.g. "use `uv`/`pytest`") is decided by the run's
+  `--interface` mode, not the domain: `inprocess` pins Python (uv toolchain +
+  in-process `VibeServeModel` contract); `service` leaves the language to the
+  agent. It is not a user-facing pack.
 - **Profiling** (nsys/torch GPU capture) is selected by `--profiler` and rendered
   by the profiler prompts, not the domain. Domain-specific profiling is future
   work tied to pluggable profilers.

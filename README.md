@@ -97,6 +97,26 @@ copying `generic.md` — no code change required.
 
 Full authoring guide: [`src/vibe_serve/loops/agent/templates/_domain/README.md`](src/vibe_serve/loops/agent/templates/_domain/README.md).
 
+## Interface — how the artifact is evaluated (and which language)
+
+The implementation language is **not** a user choice. It falls out of `--interface`,
+which sets the contract by which the accuracy checker and benchmark reach the
+built artifact:
+
+```bash
+vibe-serve --outer-loop agent --interface inprocess ...   # default: in-process Python
+vibe-serve --outer-loop agent --interface service ...     # over-the-wire, any language
+```
+
+- **`inprocess`** (default): the accuracy checker imports `main.py` directly, so
+  the implementation is Python. The prompts carry the `uv` toolchain and the
+  `VibeServeModel` import contract — vibeserve's original behaviour, unchanged.
+- **`service`**: the artifact is exercised only through its network interface, so
+  the agent picks whatever language and toolchain fit. The in-process contract and
+  the Python/torch tooling drop out of the prompts; supply an accuracy checker and
+  benchmark that probe the running service over the wire (e.g. HTTP, or the YCSB
+  harness for a key-value store).
+
 ## Per-target inputs
 
 Each evaluation target lives under `examples/<name>/`:

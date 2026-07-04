@@ -1,5 +1,7 @@
 ## Modality: speech-to-text (ASR)
 
+{% if interface != "service" %}
 **Accuracy-checker interface** (always required): `main.py` must export a `VibeServeModel` class with `from_pretrained(model_dir, device, dtype)` and `transcribe(audio_path)`.
 
+{% endif %}
 **API contract**: verify whichever endpoints and response shapes the orchestrator's `pass_criteria` for this round specifies. Do NOT flag "missing" endpoints that the orchestrator did not scope in. When you need contract details for a scoped endpoint, consult `skills/serving-systems/tooling/openai-api/SKILL.md`.

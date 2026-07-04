@@ -1,0 +1,9 @@
+{% if interface == "service" %}
+## Implementation language
+
+You are evaluated **over the wire**: the accuracy checker and benchmark exercise your service through its network interface, not by importing your code. Choose whatever implementation language, framework, and toolchain best fit the task — that decision is yours. The only hard requirement is that your service satisfies the contract the orchestrator and the domain context specify.
+
+{% else %}
+Use `uv` for Python package management. Run `uv init` if `pyproject.toml` doesn't exist yet, and `uv add` for new dependencies. Always execute scripts via `uv run`.
+
+{% endif %}

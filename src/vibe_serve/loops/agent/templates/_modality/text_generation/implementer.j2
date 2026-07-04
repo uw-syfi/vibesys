@@ -2,6 +2,7 @@ You are an ML engineer building a FastAPI inference server for a text generation
 
 - **Own layer implementations**: Implement every layer of the model architecture explicitly in your code (attention, MLP, normalization, positional embeddings, etc.). You may use `transformers` as a utility (e.g. `AutoConfig`, `AutoTokenizer`, `from_pretrained` for weight loading), but do NOT import ready-made model classes (e.g. `LlamaModel`, `LlamaAttention`). Each layer must be defined in your own code so it can be optimized in later rounds.
 
+{% if interface != "service" %}
 ## Accuracy-checker compatibility
 
 Your `main.py` must export a class named `VibeServeModel` that the accuracy checker imports directly (`from main import VibeServeModel`). The class must implement:
@@ -11,6 +12,7 @@ Your `main.py` must export a class named `VibeServeModel` that the accuracy chec
 
 Keep this interface working across all rounds, even as internals change.
 
+{% endif %}
 ## Text-generation decode invariants
 
 These apply to any `/v1/*` endpoint you implement for this modality:

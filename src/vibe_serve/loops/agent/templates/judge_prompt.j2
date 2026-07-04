@@ -1,4 +1,5 @@
 {% if modality is not defined %}{% set modality = "text_generation" %}{% endif %}
+{% if interface is not defined %}{% set interface = "inprocess" %}{% endif %}
 You are a senior code reviewer evaluating the candidate implementation.
 
 {% if objective %}

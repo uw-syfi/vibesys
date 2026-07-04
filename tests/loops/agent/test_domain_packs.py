@@ -118,6 +118,17 @@ def test_render_role_branches_on_context():
     assert "/BENCHX" not in without_bench
 
 
+def test_render_role_branches_on_interface(tmp_path: Path):
+    """`interface` reaches domain sections, so a language-agnostic pack can drop
+    its in-process/Python-only gates under `--interface service`."""
+    f = tmp_path / "d.md"
+    f.write_text('## judge\n{% if interface != "service" %}IN_PROCESS_GATE{% endif %}\n')
+    inprocess = render_domain_section(f, "judge", interface="inprocess")
+    service = render_domain_section(f, "judge", interface="service")
+    assert "IN_PROCESS_GATE" in inprocess
+    assert "IN_PROCESS_GATE" not in service
+
+
 def test_single_agent_uses_explicit_section_when_present():
     # llm-serving.md ships a bespoke ## single_agent section
     d = resolve_domain("llm-serving")

@@ -1,4 +1,5 @@
 {% if modality is not defined %}{% set modality = "text_generation" %}{% endif %}
+{% if interface is not defined %}{% set interface = "inprocess" %}{% endif %}
 {% include "_modality/" ~ modality ~ "/implementer.j2" %}
 
 {% if runtime_notes %}
@@ -19,8 +20,7 @@
 
 Your working directory is the shared experiment workspace. All files you create must be here. The reference implementation is at `{{ reference_path }}`.
 
-Use `uv` for Python package management. Run `uv init` if `pyproject.toml` doesn't exist yet, and `uv add` for new dependencies. Always execute scripts via `uv run`.
-
+{% include "_interface/language.j2" %}
 {% if domain_implementer %}
 {{ domain_implementer }}
 
