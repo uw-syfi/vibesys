@@ -27,12 +27,24 @@ class Check:
 
 CHECKS = [
     Check("config welcome", "GET", "/api/v1/configservice/welcome", expect_text="Config Service"),
-    Check("station welcome", "GET", "/api/v1/stationservice/welcome", expect_text="Station Service"),
-    Check("train welcome", "GET", "/api/v1/trainservice/trains/welcome", expect_text="Train Service"),
+    Check(
+        "station welcome", "GET", "/api/v1/stationservice/welcome", expect_text="Station Service"
+    ),
+    Check(
+        "train welcome", "GET", "/api/v1/trainservice/trains/welcome", expect_text="Train Service"
+    ),
     Check("travel welcome", "GET", "/api/v1/travelservice/welcome", expect_text="Travel Service"),
     Check("route welcome", "GET", "/api/v1/routeservice/welcome", expect_text="Route Service"),
-    Check("price welcome", "GET", "/api/v1/priceservice/prices/welcome", expect_text="Price Service"),
-    Check("stations list", "GET", "/api/v1/stationservice/stations", expect_json=True, expect_items=True),
+    Check(
+        "price welcome", "GET", "/api/v1/priceservice/prices/welcome", expect_text="Price Service"
+    ),
+    Check(
+        "stations list",
+        "GET",
+        "/api/v1/stationservice/stations",
+        expect_json=True,
+        expect_items=True,
+    ),
     Check("trains list", "GET", "/api/v1/trainservice/trains", expect_json=True, expect_items=True),
     Check("trips list", "GET", "/api/v1/travelservice/trips", expect_json=True, expect_items=True),
     Check("routes list", "GET", "/api/v1/routeservice/routes", expect_json=True, expect_items=True),
@@ -126,7 +138,9 @@ def run_check(
     allow_empty: bool,
     direct_services: bool,
 ) -> dict[str, Any]:
-    status, raw, parsed, elapsed_ms = request_json_or_text(base_url, check, timeout, direct_services)
+    status, raw, parsed, elapsed_ms = request_json_or_text(
+        base_url, check, timeout, direct_services
+    )
     if not (200 <= status < 300):
         raise RuntimeError(f"{check.name}: HTTP {status}: {raw[:300]!r}")
     if check.expect_text and check.expect_text not in raw:
@@ -147,9 +161,13 @@ def run_check(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check a running Train Ticket deployment.")
-    parser.add_argument("--base-url", default="http://localhost:8080", help="UI proxy or gateway base URL")
+    parser.add_argument(
+        "--base-url", default="http://localhost:8080", help="UI proxy or gateway base URL"
+    )
     parser.add_argument("--timeout", type=float, default=5.0, help="per-request timeout in seconds")
-    parser.add_argument("--allow-empty", action="store_true", help="allow list endpoints to return no seeded data")
+    parser.add_argument(
+        "--allow-empty", action="store_true", help="allow list endpoints to return no seeded data"
+    )
     parser.add_argument(
         "--direct-services",
         action="store_true",
@@ -163,7 +181,9 @@ def main() -> int:
     failures = []
     for check in CHECKS:
         try:
-            result = run_check(base_url, check, args.timeout, args.allow_empty, args.direct_services)
+            result = run_check(
+                base_url, check, args.timeout, args.allow_empty, args.direct_services
+            )
             results.append(result)
             print(f"PASS {check.name} ({result['latency_ms']:.1f} ms)")
         except Exception as exc:

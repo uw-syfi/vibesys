@@ -66,7 +66,9 @@ def endpoint_url(base_url: str, endpoint: Endpoint, direct_services: bool) -> st
         return urljoin(base_url, endpoint.path.lstrip("/"))
     parts = endpoint.path.strip("/").split("/")
     if len(parts) < 3 or parts[0] != "api" or parts[1] != "v1":
-        raise RuntimeError(f"{endpoint.name}: cannot map path to direct service URL: {endpoint.path}")
+        raise RuntimeError(
+            f"{endpoint.name}: cannot map path to direct service URL: {endpoint.path}"
+        )
     service = parts[2]
     port = DIRECT_SERVICE_PORTS.get(service)
     if port is None:
@@ -84,7 +86,9 @@ def percentile(values: list[float], pct: float) -> float | None:
     return ordered[idx]
 
 
-def request_once(base_url: str, endpoint: Endpoint, timeout: float, direct_services: bool) -> dict[str, Any]:
+def request_once(
+    base_url: str, endpoint: Endpoint, timeout: float, direct_services: bool
+) -> dict[str, Any]:
     url = endpoint_url(base_url, endpoint, direct_services)
     headers = {"Accept": "application/json,text/plain,*/*"}
     data = None
@@ -142,7 +146,11 @@ def validate_response_shape(endpoint: Endpoint, text: str) -> str | None:
         return None
     if isinstance(payload, dict):
         # Some Train Ticket services wrap lists in edu.fudan.common.util.Response.
-        if "data" in payload or ("status" in payload and "msg" in payload) or ("status" in payload and "message" in payload):
+        if (
+            "data" in payload
+            or ("status" in payload and "msg" in payload)
+            or ("status" in payload and "message" in payload)
+        ):
             return None
         return f"unexpected JSON object for {endpoint.name}: keys={sorted(payload)[:8]}"
     return f"unexpected JSON type for {endpoint.name}: {type(payload).__name__}"
@@ -154,7 +162,9 @@ def summarize(results: list[dict[str, Any]], elapsed_s: float) -> dict[str, Any]
     latencies = [r["latency_ms"] for r in successes]
     by_endpoint: dict[str, dict[str, Any]] = {}
     for r in results:
-        bucket = by_endpoint.setdefault(r["endpoint"], {"requests": 0, "successes": 0, "failures": 0})
+        bucket = by_endpoint.setdefault(
+            r["endpoint"], {"requests": 0, "successes": 0, "failures": 0}
+        )
         bucket["requests"] += 1
         if r["ok"]:
             bucket["successes"] += 1
@@ -183,10 +193,16 @@ def summarize(results: list[dict[str, Any]], elapsed_s: float) -> dict[str, Any]
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Benchmark a running Train Ticket deployment.")
-    parser.add_argument("--base-url", default="http://localhost:8080", help="UI proxy or gateway base URL")
+    parser.add_argument(
+        "--base-url", default="http://localhost:8080", help="UI proxy or gateway base URL"
+    )
     parser.add_argument("--rate", type=float, default=10.0, help="target request rate per second")
-    parser.add_argument("--duration", type=float, default=30.0, help="benchmark duration in seconds")
-    parser.add_argument("--concurrency", type=int, default=32, help="maximum concurrent in-flight requests")
+    parser.add_argument(
+        "--duration", type=float, default=30.0, help="benchmark duration in seconds"
+    )
+    parser.add_argument(
+        "--concurrency", type=int, default=32, help="maximum concurrent in-flight requests"
+    )
     parser.add_argument("--timeout", type=float, default=5.0, help="per-request timeout in seconds")
     parser.add_argument("--seed", type=int, default=1, help="random seed for endpoint selection")
     parser.add_argument(
@@ -220,7 +236,9 @@ def main() -> int:
             if sleep_s > 0:
                 time.sleep(sleep_s)
             endpoint = random.choice(population)
-            futures.append(pool.submit(request_once, base_url, endpoint, args.timeout, args.direct_services))
+            futures.append(
+                pool.submit(request_once, base_url, endpoint, args.timeout, args.direct_services)
+            )
         for fut in concurrent.futures.as_completed(futures):
             results.append(fut.result())
 
