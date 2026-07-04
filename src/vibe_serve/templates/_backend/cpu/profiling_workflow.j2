@@ -1,0 +1,3 @@
+Profiler-guided analysis is not yet wired up for the `cpu` backend. Skip the profile-capture step and proceed to the Optimization opportunities section using diagnosis evidence (source reading + benchmark metrics) only. (TODO: a `torch.profiler` workflow with `ProfilerActivity.CPU`, or a general CPU sampler like `py-spy`/`perf`, should live here.)
+
+Still classify the **primary bottleneck** in your analysis into exactly one of: `cpu_launch_bound`, `python_overhead_bound`, `input_pipeline_bound`, `sync_bound`, `memcpy_bound`, `comm_bound`, `kernel_bound`, `mixed_or_unclear` — using the diagnosis evidence above. State explicitly that the classification is profile-free.

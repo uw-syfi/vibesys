@@ -17,7 +17,7 @@ of ``/dev/neuron*`` devices and the Neuron runtime picks cores via
 ``NEURON_RT_VISIBLE_CORES`` if the implementer wants to pin them.  We
 forward every device the host exposes and leave core selection to the
 workload, so ``selected_device`` stays ``None`` and ``reselect_device``
-is a no-op (parity with :class:`MetalBackend`).
+is a no-op (parity with :class:`LocalBackend`).
 """
 
 from __future__ import annotations
