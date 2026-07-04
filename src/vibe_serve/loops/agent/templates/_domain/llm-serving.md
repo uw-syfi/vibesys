@@ -13,6 +13,12 @@ output correctness.
   sanity, the accuracy checker's schema + sentinel rates), headline-metric
   performance judging, reward-hack / model-bypass detection, and scope /
   static-inspection discipline.
+- *Orchestrator:* the serving optimization floor (continuous batching → fused
+  attention kernel → CUDA graphs) plus the LLM-serving task examples, skill map,
+  interface (OpenAI-API) contract, and pass-criteria examples the neutral base
+  planner deliberately omits.
+- *Roadmap seed:* seeds a fresh run's `roadmap.md` with the three optimization-
+  floor Major items so the planner starts from the serving arc, not a blank page.
 
 This is the default domain (`--domain llm-serving`); it reproduces vibeserve's
 original serving-oriented prompts. The `single_agent` ablation reuses a bespoke
@@ -157,3 +163,29 @@ The three exceptions that let you skip a floor item:
 - **CUDA graphs**: skip when the decode shapes are genuinely unbucketable (very rare — even speculative-decoding tree depths and chunked-prefill chunk sizes are ≤ 16 buckets).
 
 If you skip a floor item, cite the specific incompatibility in your `reasoning`. Do NOT skip because "the current profile shows something else is the dominant cost" — the floor items *become* the dominant cost in turn once other work lands, and cycling between "revert this, try that" over exotic optimizations without the floor in place is a common failure mode of this loop.
+
+## Task examples
+
+Tasks should be comparable in scope to, e.g.:
+- "Build a self-contained FastAPI server for the reference model."
+- "Add continuous batching to the decode loop."
+- "Replace manual attention with FlashInfer batched decode."
+- "Add CUDA graph capture/replay for the decode path."
+- "Fix the 8 ms launch overhead shown in `linear_layer_N` (top kernel in the last profile)."
+
+## Skill map
+
+Typical roadmap items map to one or two of the installed `serving-systems` skills — e.g. "Add CUDA graphs to verifier decode" → `cuda-graph` and possibly `flashattention` / `flashinfer`; "EAGLE3 wiring" → `speculative-decoding`; "xgrammar fast path" → `structured-output`. Point the implementer at the matching skill in the task.
+
+## Interface contract
+
+The implementer and judge templates do NOT hardcode the full API surface. When your task touches any HTTP endpoint or message-schema work, name the specific endpoint(s) and point the implementer at the authoritative skill file — typically `skills/serving-systems/tooling/openai-api/SKILL.md` (per-modality OpenAI-compatible contracts). Start with a single endpoint (e.g. "`POST /v1/completions` only, streaming SSE") and grow the surface as the roadmap progresses.
+
+## Pass-criteria examples
+
+Feature-level: "CUDA graph replay visible in profile", "`POST /v1/completions` streams SSE frames matching `skills/serving-systems/tooling/openai-api/SKILL.md` and terminates with `[DONE]`". Static-inspection (scope to authored files): "no `torch.profiler.profile(...)` invocations in `main.py` or any module the implementer added", "no per-token `torch.cat` against the KV cache in `main.py`'s decode path". Headline-vs-per-call trap: gate on the objective's headline metric (tok/s), never on "verify_replay_ms < decode_replay_ms" or "graph replay ≤ X ms".
+
+## roadmap_seed
+- **M1 Optimization floor: continuous batching** — `todo`. Why: raises arithmetic intensity under concurrent load; the dominant throughput lever for a batched server (skip only if the objective is single-batch by contract).
+- **M2 Optimization floor: fused attention kernel (FlashInfer / FlashAttention)** — `todo`. Why: removes the naive-attention memory-bandwidth bottleneck on NVIDIA hardware.
+- **M3 Optimization floor: CUDA graphs on the decode path** — `todo`. Why: eliminates per-step kernel-launch overhead in the steady-state decode loop.
