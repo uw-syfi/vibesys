@@ -135,16 +135,19 @@ def build_agent_runner(
             else:
                 docker_sandboxes = backends
         timeout = agent_cfg.cli_timeout
-        # cli_model overrides model.name for the CLI tool. If not set,
-        # pass None so the CLI tool uses its own default.
-        cli_model = agent_cfg.cli_model
+        # The CLI tool runs [model].name by default, same as the deepagents
+        # backend. [agent].cli_model is an optional override for the rare case
+        # where the CLI tool needs a different model identifier than the
+        # LangChain/API name. model.name is a required field (and always
+        # validated by _build_model), so cli_model is never None here.
+        cli_model = agent_cfg.cli_model or model_name
         from .cli_runner import CliAgentRunner
 
         return CliAgentRunner(
             provider=provider,
             model=cli_model,
             skills=skill_source_dirs,
-            model_name=model_name or cli_model or provider,
+            model_name=cli_model or provider,
             timeout=timeout,
             run_log_file=run_log_file,
             docker_sandboxes=docker_sandboxes,

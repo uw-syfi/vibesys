@@ -130,7 +130,7 @@ name = "cuda"                 # or "metal" for Apple Silicon (local exec only)
 [agent]
 backend = "cli"               # "cli" (codex/claude/gemini/opencode) or "deepagents"
 cli_provider = "codex"        # which coding-agent harness to drive
-# cli_model = "gpt-5-codex"   # override the model the CLI tool uses
+# cli_model = "gpt-5-codex"   # optional override; defaults to model.name
 # cli_timeout = 1800          # per-invocation timeout (seconds)
 
 # Optional: benchmark load levels handed to the perf evaluator.

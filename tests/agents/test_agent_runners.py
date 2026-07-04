@@ -1098,6 +1098,69 @@ class TestBuildAgentRunner:
                 use_docker=False,
             )
 
+    # --- model resolution for the cli backend ---------------------------------
+    #
+    # Regression coverage for the config API where [model].name did not reach
+    # the CLI tool: with cli_model unset the runner must fall back to
+    # model.name (not None, which made codex use its own built-in default),
+    # cli_model must override it, and the displayed model_name must equal the
+    # model actually passed so the run-log header can't lie.
+
+    @staticmethod
+    def _cli_runner(config, *, model_name):
+        return build_agent_runner(
+            config,
+            agent_backend=None,
+            cli_provider=None,
+            backends=None,
+            skills=[],
+            skill_source_dirs=[],
+            model=None,
+            model_name=model_name,
+            run_log_file=None,
+            use_docker=False,
+        )
+
+    @pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
+    def test_cli_model_falls_back_to_model_name(self, provider):
+        runner = self._cli_runner(
+            _agent_config(backend="cli", cli_provider=provider),
+            model_name="gpt-5.4",
+        )
+        assert runner._model == "gpt-5.4"
+
+    def test_cli_model_overrides_model_name(self):
+        runner = self._cli_runner(
+            _agent_config(backend="cli", cli_provider="codex", cli_model="gpt-5.5"),
+            model_name="gpt-5.4",
+        )
+        assert runner._model == "gpt-5.5"
+
+    def test_displayed_model_name_matches_model_passed(self):
+        # The run-log header prints _model_name; it must equal the model
+        # actually handed to the CLI tool in both the fallback and override
+        # cases so the log never reports a model that isn't running.
+        fallback = self._cli_runner(
+            _agent_config(backend="cli", cli_provider="codex"),
+            model_name="gpt-5.4",
+        )
+        assert fallback._model_name == fallback._model == "gpt-5.4"
+
+        override = self._cli_runner(
+            _agent_config(backend="cli", cli_provider="codex", cli_model="gpt-5.5"),
+            model_name="gpt-5.4",
+        )
+        assert override._model_name == override._model == "gpt-5.5"
+
+    def test_empty_cli_model_falls_back_to_model_name(self):
+        # An empty-string override must resolve to model.name, not an empty
+        # --model value handed to the CLI tool.
+        runner = self._cli_runner(
+            _agent_config(backend="cli", cli_provider="codex", cli_model=""),
+            model_name="gpt-5.4",
+        )
+        assert runner._model == "gpt-5.4"
+
 
 class TestAgentLoggerEventHandler:
     """Tests for :class:`AgentLogger` as a CLI event handler."""

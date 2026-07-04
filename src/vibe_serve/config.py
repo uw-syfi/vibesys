@@ -163,8 +163,9 @@ class AgentCfg(_Strict):
     cli_model: str | None = Field(
         default=None,
         description=(
-            "Model the CLI tool should use; overrides model.name for the CLI agent. "
-            "None → the CLI tool's own default (no --model flag passed)."
+            "Optional override for the model the CLI tool runs. None → the CLI "
+            "agent uses model.name (same as the deepagents backend). Set this "
+            "only when the CLI tool needs a different model id than the API name."
         ),
     )
     cli_timeout: int | None = Field(
