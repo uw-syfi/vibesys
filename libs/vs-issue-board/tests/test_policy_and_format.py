@@ -1,21 +1,17 @@
-"""Tests for the shared tool implementation in vibe_serve.loops.plain.tool_impl.
+"""Tests for issue creation policies and formatting helpers.
 
 These tests cover the validators, the create-issue policy enforcement, and
-the formatting helpers that both the LangChain ``@tool`` wrappers and the
-FastMCP server delegate into. The byte-for-byte format assertions act as a
-contract gate against accidental wording drift, since the issue-loop's
-prompt templates document these exact strings.
+the formatting helpers that higher-level tool adapters delegate into.
 """
 
 import pytest
 
-from vibe_serve.loops.plain.issue_board import IssueBoard, IssueType
-from vibe_serve.loops.plain.tool_impl import (
+from vs_issue_board import IssueBoard, IssueType
+from vs_issue_board.format import format_issue_full, format_issue_short
+from vs_issue_board.policy import (
     CreateIssuePolicy,
     check_create_allowed,
     create_issue_under_policy,
-    format_issue_full,
-    format_issue_short,
     parse_type,
 )
 

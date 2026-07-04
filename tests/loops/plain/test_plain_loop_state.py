@@ -2,13 +2,13 @@
 
 import json
 
-from vibe_serve.loops.plain.issue_board import IssueBoard, IssueStatus, IssueType
 from vibe_serve.loops.plain.loop import (
     PlainLoopState,
     _determine_resume_point,
     _load_state,
     _save_state,
 )
+from vs_issue_board import IssueBoard, IssueStatus, IssueType
 
 
 def _make_store(tmp_path) -> IssueBoard:

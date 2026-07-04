@@ -13,23 +13,20 @@ Subset routing (chosen by the loop):
 - Perf_eval: read tools + ``create_issue`` with creator='perf_eval', cap=N,
   all three types allowed.
 
-The actual logic for parsing, validation, store mutation, and formatting
-lives in :mod:`vibe_serve.loops.plain.tool_impl` and is shared with the
-standalone MCP server in :mod:`vibe_serve.loops.plain.mcp_server`. The
-``@tool`` callables here are thin shells that delegate.
+The actual logic for parsing, validation, store mutation, and formatting lives
+in :mod:`vs_issue_board`. The ``@tool`` callables here are thin shells that
+adapt those generic helpers to LangChain.
 """
 
 from __future__ import annotations
 
 from langchain_core.tools import BaseTool, tool
 
-from vibe_serve.loops.plain.issue_board import (
+from vs_issue_board import (
+    CreateIssuePolicy,
     IssueBoard,
     IssueStatus,
     IssueType,
-)
-from vibe_serve.loops.plain.tool_impl import (
-    CreateIssuePolicy,
     create_issue_under_policy,
     format_issue_full,
     format_issue_short,

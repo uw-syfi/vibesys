@@ -1,4 +1,4 @@
-"""Tests for the standalone issue-tracker MCP server.
+"""Tests for the standalone issue-board MCP server.
 
 We test argparse parsing and tool registration directly via ``build_parser``
 and ``build_server``, plus an end-to-end smoke that calls registered tools
@@ -10,8 +10,8 @@ import asyncio
 
 import pytest
 
-from vibe_serve.loops.plain.issue_board import IssueType
-from vibe_serve.loops.plain.mcp_server import build_parser, build_server
+from vs_issue_board import IssueType
+from vs_issue_board.mcp import build_parser, build_server
 
 
 def _ns(tmp_path, *extra: str):

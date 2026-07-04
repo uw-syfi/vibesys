@@ -34,7 +34,7 @@ jobs:
         run: ./scripts/check_lint.sh
 
       - name: Run tests
-        run: uv run python -m pytest -v --cov=vibe_serve --cov-report=term-missing --cov-report=xml --cov-fail-under=75
+        run: uv run python -m pytest -v --cov=vibe_serve --cov=vs_issue_board --cov-report=term-missing --cov-report=xml --cov-fail-under=75
 
       - name: Check patch coverage
         if: github.event_name == 'pull_request'

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vs-issue-board"
+version = "0.1.0"
+description = "Reusable JSON-backed issue board utilities"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0",
+    "pydantic>=2",
+]
+
+[project.scripts]
+vs-issue-board-mcp = "vs_issue_board.mcp:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["vs_issue_board*"]
+
+[tool.setuptools.package-data]
+vs_issue_board = ["py.typed"]

@@ -1,4 +1,4 @@
-"""Tests for the issue-loop persistent issue tracker (issues.json)."""
+"""Tests for the reusable JSON-backed issue board."""
 
 import json
 import time
@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from vibe_serve.loops.plain.issue_board import (
+from vs_issue_board import (
     Issue,
     IssueBoard,
     IssueStatus,

@@ -27,9 +27,9 @@ from pydantic import BaseModel
 
 from vibe_serve._agent_cli.base import MCPServerSpec
 from vibe_serve.agents.base import AgentRunner
-from vibe_serve.loops.plain.issue_board import IssueBoard, IssueType
 from vibe_serve.loops.plain.mcp_config import build_issue_mcp_spec
 from vibe_serve.loops.plain.tools import build_issue_tools
+from vs_issue_board import IssueBoard, IssueType
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -123,7 +123,7 @@ class PlainLoopAgentRunner:
         them straight to ``create_deep_agent(tools=...)``).
 
         Both factories share the policy semantics in
-        :mod:`vibe_serve.loops.plain.tool_impl`, so cap and type-allowlist
+        :mod:`vs_issue_board.policy`, so cap and type-allowlist
         enforcement is byte-identical between backends.
         """
         if self._inner.backend_name == "cli":

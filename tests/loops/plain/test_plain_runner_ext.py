@@ -12,8 +12,8 @@ import pytest
 
 from vibe_serve._agent_cli.base import MCPServerSpec
 from vibe_serve.agents.base import AgentRunner
-from vibe_serve.loops.plain.issue_board import IssueBoard
 from vibe_serve.loops.plain.runner_ext import PlainLoopAgentRunner
+from vs_issue_board import IssueBoard
 
 _EXPECTED_TOOL_NAMES = {"list_issues", "get_issue", "search_issues", "create_issue"}
 

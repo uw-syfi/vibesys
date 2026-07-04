@@ -14,7 +14,7 @@ MCP path; everything else is provider-agnostic and lives in
 from __future__ import annotations
 
 from vibe_serve._agent_cli.base import MCPServerSpec
-from vibe_serve.loops.plain.issue_board import IssueType
+from vs_issue_board import IssueType
 
 
 def build_issue_mcp_spec(
@@ -27,15 +27,12 @@ def build_issue_mcp_spec(
 ) -> MCPServerSpec:
     """Build the per-phase :class:`MCPServerSpec` for the issue tracker.
 
-    The args list is consumed by ``vibe_serve.loops.plain.mcp_server``'s
-    argparse-based CLI (positional ``store_path`` plus the policy flags).
-    Both host and Docker modes use ``python -m vibe_serve.loops.plain.mcp_server``
-    so the same module-form invocation works inside the container with
-    ``PYTHONPATH=/opt/vibeserve``, without needing the package pip-installed.
+    The args list is consumed by ``vs_issue_board.mcp``'s argparse-based CLI
+    (positional ``store_path`` plus the policy flags).
     """
     args = [
         "-m",
-        "vibe_serve.loops.plain.mcp_server",
+        "vs_issue_board.mcp",
         store_relpath,
         "--creator",
         creator,

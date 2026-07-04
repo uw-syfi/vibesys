@@ -9,8 +9,8 @@ are encoded correctly into the spec's command-line args list.
 from __future__ import annotations
 
 from vibe_serve._agent_cli.base import MCPServerSpec
-from vibe_serve.loops.plain.issue_board import IssueType
 from vibe_serve.loops.plain.mcp_config import build_issue_mcp_spec
+from vs_issue_board import IssueType
 
 
 def test_build_judge_spec_has_correct_shape():
@@ -27,7 +27,7 @@ def test_build_judge_spec_has_correct_shape():
     # Args are forwarded to the standalone server's argparse CLI.
     assert spec.args == [
         "-m",
-        "vibe_serve.loops.plain.mcp_server",
+        "vs_issue_board.mcp",
         "issues.json",
         "--creator",
         "judge",
@@ -50,7 +50,7 @@ def test_build_perf_eval_spec_sorts_allowed_types_alphabetically():
         allowed_types={IssueType.BUG, IssueType.FEATURE, IssueType.PERF},
     )
     args = spec.args
-    assert args[0:2] == ["-m", "vibe_serve.loops.plain.mcp_server"]
+    assert args[0:2] == ["-m", "vs_issue_board.mcp"]
     assert args[2] == "issues.json"
     assert args[args.index("--creator") + 1] == "perf_eval"
     assert args[args.index("--iteration") + 1] == "2"
@@ -80,7 +80,4 @@ def test_build_spec_uses_provided_store_relpath():
         allowed_types={IssueType.BUG},
     )
     assert "custom/path/issues.json" in spec.args
-    assert (
-        spec.args[spec.args.index("custom/path/issues.json") - 1]
-        == "vibe_serve.loops.plain.mcp_server"
-    )
+    assert spec.args[spec.args.index("custom/path/issues.json") - 1] == "vs_issue_board.mcp"

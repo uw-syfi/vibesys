@@ -13,7 +13,7 @@ from pathlib import Path
 # as root inside the container (the default) to avoid uv/pip permission
 # errors when the agent installs packages.
 # Every provider also gets ``PYTHONPATH=/opt/vibeserve`` so the in-container
-# CLI can spawn ``python -m vibe_serve.loops.plain.mcp_server`` against the
+# CLI can spawn ``python -m vs_issue_board.mcp`` against the
 # bind-mounted project root (added in ``DockerSandbox.start`` for all four
 # CLI providers). Without this the MCP server module wouldn't be importable
 # inside the container.
@@ -29,7 +29,7 @@ DOCKER_PROVIDER_ENV: dict[str, dict[str, str]] = {
 # Each list runs sequentially; a non-zero exit at any step raises RuntimeError.
 #
 # Every provider gets the python3 + ``mcp`` install at the end so that the
-# in-container CLI can spawn ``python -m vibe_serve.loops.plain.mcp_server``
+# in-container CLI can spawn ``python -m vs_issue_board.mcp``
 # as a stdio MCP child (via the per-provider config installed by the
 # active ``CodingAgent.install_mcp_servers`` hook). The default base image
 # ``nvcr.io/nvidia/pytorch:25.04-py3`` already ships python3 + pip + a

@@ -1,12 +1,5 @@
 """Tests for the per-issue markdown renderer (vibe_serve/plain/render.py)."""
 
-from vibe_serve.loops.plain.issue_board import (
-    Issue,
-    IssueBoard,
-    IssueEvent,
-    IssueStatus,
-    IssueType,
-)
 from vibe_serve.loops.plain.render import (
     issue_md_filename,
     issue_md_path,
@@ -15,6 +8,13 @@ from vibe_serve.loops.plain.render import (
     render_issue_file,
     render_issue_markdown,
     slugify,
+)
+from vs_issue_board import (
+    Issue,
+    IssueBoard,
+    IssueEvent,
+    IssueStatus,
+    IssueType,
 )
 
 

@@ -11,8 +11,8 @@ markdown files mirrored next to ``logs/issues.json``:
         0002-add-streaming-completions.md
         ...
 
-The renderer is invoked by ``IssueBoard``'s ``on_change`` callback (see
-``vibe_serve/plain/issue_board.py``) so the markdown view is always
+The renderer is invoked by ``IssueBoard``'s ``on_change`` callback so the
+markdown view is always
 re-generated after every successful save. Writes are atomic via the same
 tmp+rename pattern the store uses.
 
@@ -28,7 +28,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from vibe_serve.loops.plain.issue_board import (
+from vs_issue_board import (
     Issue,
     IssueBoard,
     IssueEvent,

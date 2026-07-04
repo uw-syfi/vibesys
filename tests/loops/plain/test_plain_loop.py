@@ -15,7 +15,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vibe_serve.agents import AgentRunner
-from vibe_serve.loops.plain.issue_board import IssueBoard, IssueStatus
 from vibe_serve.loops.plain.loop import PlainLoopState, run_plain_loop
 from vibe_serve.schemas import (
     IssueImplementerResponse,
@@ -25,6 +24,7 @@ from vibe_serve.schemas import (
     PerfTrend,
     Verdict,
 )
+from vs_issue_board import IssueBoard, IssueStatus
 
 # ---------------------------------------------------------------------------
 # Helpers — factories and fixtures shared across tests
@@ -321,7 +321,7 @@ def _spec_args_to_dict(args: list[str]) -> dict[str, str]:
 
     The args list is shaped like::
 
-        ["-m", "vibe_serve.loops.plain.mcp_server", "issues.json",
+        ["-m", "vs_issue_board.mcp", "issues.json",
          "--creator", "judge", "--iteration", "1",
          "--allowed-types", "bug", "--cap", "1"]
 

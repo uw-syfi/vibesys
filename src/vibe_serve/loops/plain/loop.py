@@ -32,12 +32,6 @@ from vibe_serve.agents.progress import RoundProgress
 from vibe_serve.config import Config, as_config
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
-from vibe_serve.loops.plain.issue_board import (
-    Issue,
-    IssueBoard,
-    IssueStatus,
-    IssueType,
-)
 from vibe_serve.loops.plain.render import render_all
 from vibe_serve.loops.plain.runner_ext import PlainLoopAgentRunner
 from vibe_serve.prompts import Prompt
@@ -52,6 +46,12 @@ from vibe_serve.schemas import (
     PerfMetrics,
     PerfTrend,
     Verdict,
+)
+from vs_issue_board import (
+    Issue,
+    IssueBoard,
+    IssueStatus,
+    IssueType,
 )
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
