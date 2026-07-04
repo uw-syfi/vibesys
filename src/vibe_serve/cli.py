@@ -113,8 +113,8 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     """Add CLI arguments shared across every outer-loop parser."""
     parser.add_argument(
         "--ref",
-        default="examples/Llama-3-8B/reference",
-        help="Path to reference implementation file, or directory containing at least one reference.py (default: examples/Llama-3-8B/reference)",
+        default=None,
+        help="Path to reference implementation file, or directory containing at least one reference.py.",
     )
     parser.add_argument(
         "--exp-name",
@@ -131,14 +131,14 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--acc-checker",
         type=Path,
-        default=Path("examples/Llama-3-8B/accuracy_checker"),
-        help="Path to a directory containing accuracy checker code/documents (default: examples/Llama-3-8B/accuracy_checker).",
+        default=None,
+        help="Path to a directory containing accuracy checker code/documents.",
     )
     parser.add_argument(
         "--bench",
         type=Path,
-        default=Path("examples/Llama-3-8B/benchmark"),
-        help="Path to a directory containing benchmark code/documents (default: examples/Llama-3-8B/benchmark).",
+        default=None,
+        help="Path to a directory containing benchmark code/documents.",
     )
     parser.add_argument(
         "--nsys-profiler",
@@ -445,10 +445,31 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _validate_target_inputs(args: argparse.Namespace) -> None:
+    missing = [
+        flag
+        for flag, value in (
+            ("--ref", args.ref),
+            ("--acc-checker", args.acc_checker),
+            ("--bench", args.bench),
+        )
+        if value is None
+    ]
+    if missing:
+        print(
+            "Error: missing required target input(s): "
+            + ", ".join(missing)
+            + ". Pass all three paths from the same example bundle.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
 def _validate_agent(args: argparse.Namespace) -> None:
     if args.modal and args.profiler == "nsys":
         print("Error: --modal only supports --profiler=torch.", file=sys.stderr)
         sys.exit(2)
+    _validate_target_inputs(args)
 
 
 def _run_agent(args: argparse.Namespace) -> None:
@@ -586,6 +607,7 @@ def _validate_evolve(args: argparse.Namespace) -> None:
     if args.modal and args.profiler == "nsys":
         print("Error: --modal only supports --profiler=torch.", file=sys.stderr)
         sys.exit(2)
+    _validate_target_inputs(args)
     if args.children_per_generation < 1:
         print("Error: --children-per-generation must be >= 1.", file=sys.stderr)
         sys.exit(2)
@@ -680,6 +702,7 @@ def _validate_openevolve(args: argparse.Namespace) -> None:
     if args.modal and args.profiler == "nsys":
         print("Error: --modal only supports --profiler=torch.", file=sys.stderr)
         sys.exit(2)
+    _validate_target_inputs(args)
     if args.max_iterations < 1:
         print("Error: --max-iterations must be >= 1.", file=sys.stderr)
         sys.exit(2)
@@ -756,6 +779,7 @@ def _validate_plain(args: argparse.Namespace) -> None:
     if args.modal and args.profiler == "nsys":
         print("Error: --modal only supports --profiler=torch.", file=sys.stderr)
         sys.exit(2)
+    _validate_target_inputs(args)
 
 
 def _run_plain(args: argparse.Namespace) -> None:

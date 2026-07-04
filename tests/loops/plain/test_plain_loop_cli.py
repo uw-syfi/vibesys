@@ -8,6 +8,15 @@ from vibe_serve.cli import _build_plain_parser as build_parser
 from vibe_serve.cli import main
 from vibe_serve.loops.plain.loop import PlainLoopState
 
+TARGET_ARGS = [
+    "--ref",
+    "examples/Llama-3-8B/reference",
+    "--acc-checker",
+    "examples/Llama-3-8B/accuracy_checker",
+    "--bench",
+    "examples/Llama-3-8B/benchmark",
+]
+
 
 class TestBuildParser:
     def test_default_max_rounds(self):
@@ -60,14 +69,15 @@ class TestBuildParser:
         parser = build_parser()
         args = parser.parse_args(["--exp-name", "myexp"])
         assert args.exp_name == "myexp"
-        # _add_common_args provides --ref with a default
-        assert hasattr(args, "ref")
+        assert args.ref is None
+        assert args.acc_checker is None
+        assert args.bench is None
         assert hasattr(args, "docker")
         assert hasattr(args, "debug")
 
 
 class TestMain:
-    _BASE_ARGV = ["vibe-serve", "--outer-loop", "plain"]
+    _BASE_ARGV = ["vibe-serve", "--outer-loop", "plain", *TARGET_ARGS]
 
     def _patch_run(self, return_value: bool):
         return patch(
