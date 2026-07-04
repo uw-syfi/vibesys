@@ -646,7 +646,10 @@ def run_agent_loop(
     issue_board.ensure_progress_file(progress_path)
 
     roadmap_path = ctx.workspace / "roadmap.md"
-    issue_board.ensure_roadmap_file(roadmap_path)
+    roadmap_seed = render_domain_section(
+        domain_path, "roadmap_seed", **_domain_render_context(ctx, modality, interface)
+    )
+    issue_board.ensure_roadmap_file(roadmap_path, seed_major=roadmap_seed)
 
     rounds_state_path = ctx.log_dir / "rounds.json"
     records = _load_rounds_state(rounds_state_path)

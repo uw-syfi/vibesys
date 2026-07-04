@@ -43,15 +43,20 @@ Combined builder+reviewer context for the single-agent ablation.
 
 ## orchestrator       ← injected as {{ domain_orchestrator }} (optional)
 Planning guidance for the round orchestrator — e.g. the optimization floor it
-should establish before chasing workload-specific wins.
+should establish before chasing workload-specific wins, plus your problem
+space's task examples, skill map, and pass-criteria examples.
+
+## roadmap_seed       ← seeds a fresh run's roadmap.md ## Major list (optional)
+Starter Major items the orchestrator inherits on round 1, one bullet each.
 ```
 
 Rules:
 
 - **The heading is the address.** A line that is exactly `## implementer`,
-  `## judge`, `## single_agent`, or `## orchestrator` starts that role's section;
-  it runs until the next role heading. Your section body can use its own `##`
-  sub-headings — only those four exact names delimit a section.
+  `## judge`, `## single_agent`, `## orchestrator`, or `## roadmap_seed` starts
+  that role's section; it runs until the next role heading. Your section body can
+  use its own `##`/`###` sub-headings — only those exact role names delimit a
+  section.
 - **A missing section injects nothing** for that role.
 - **`## single_agent` is optional.** Omit it and it's derived automatically by
   concatenating your `## implementer` and `## judge` sections — no third copy to
@@ -59,8 +64,18 @@ Rules:
   framing.
 - **`## orchestrator` is optional.** Omit it to inject nothing into the planner
   prompt (its neutral skeleton still applies). Add it to give the planner
-  domain-specific strategy — `llm-serving` uses it for the
-  continuous-batching/attention-kernel/CUDA-graph optimization floor.
+  domain-specific strategy. The base planner prompt is deliberately neutral — it
+  owns only universal loop discipline (roadmap upkeep, task granularity, pass
+  criteria) and delegates every problem-space *example* here. Organize the
+  section with `###` sub-headings (`### Optimization floor`, `### Task examples`,
+  `### Skill map`, `### Pass-criteria examples`, …); `llm-serving` uses them for
+  the continuous-batching/attention-kernel/CUDA-graph playbook, and a domain
+  author "adjusts a section" by editing those `###` blocks — no code change.
+- **`## roadmap_seed` is optional.** Its rendered body is dropped into the fresh
+  run's `roadmap.md` under `## Major` (round 1 only), so the planner starts from
+  a domain-appropriate arc instead of re-deriving one. Omit it and the roadmap
+  seeds a neutral "populate on round 1 based on the objective" placeholder. One
+  bullet per starter Major item.
 - Write normal Markdown prose. The base template owns the surrounding structure
   (task, pass criteria, workspace, output contract); your section owns the
   domain content.
@@ -111,8 +126,8 @@ a private domain is just a path you pass.
 
 ## Scope
 
-Domains cover **implementer + judge (+ single-agent + orchestrator) context**. Two adjacent
-concerns are deliberately *not* part of a domain file:
+Domains cover **implementer + judge (+ single-agent + orchestrator + roadmap seed)
+context**. Two adjacent concerns are deliberately *not* part of a domain file:
 
 - **Language/tooling** (e.g. "use `uv`/`pytest`") is decided by the run's
   `--interface` mode, not the domain: `inprocess` pins Python (uv toolchain +

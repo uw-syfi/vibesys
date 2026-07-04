@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from vibe_serve.loops.agent import issue_board
 from vibe_serve.loops.agent.domain import (
     DEFAULT_DOMAIN,
     DOMAIN_ROLES,
@@ -239,4 +240,89 @@ def test_generic_orchestrator_has_no_llm_floor():
     assert "Optimization priority" not in out
     assert "Continuous batching" not in out
     assert "the optimization-floor section below" not in out
-    assert "## Task granularity" in out  # base skeleton intact
+    assert "## Task granularity" in out  # neutral base skeleton intact
+    assert "## Output" in out  # base skeleton intact
+
+
+def test_generic_orchestrator_has_no_llm_tokens():
+    """The neutral base carries no LLM/PyTorch specifics — all such examples now
+    live in the llm-serving pack, so the generic render must be domain-free."""
+    out = _render_orchestrator("generic").lower()
+    for token in (
+        "fastapi",
+        "cuda",
+        "flashinfer",
+        "flashattention",
+        "eagle",
+        "torch",
+        "inference-server",
+        "inference server",
+        "speculative",
+        "tok/s",
+        "openai",
+    ):
+        assert token not in out, f"leaked LLM token into neutral base: {token!r}"
+
+
+def test_llm_serving_orchestrator_carries_moved_examples():
+    """The examples removed from the base must resurface via the pack (behaviour
+    preserved for the default domain)."""
+    out = _render_orchestrator("llm-serving")
+    assert "## Task examples" in out
+    assert "FastAPI" in out
+    assert "continuous batching" in out.lower()
+    assert "## Skill map" in out
+    assert "openai-api" in out  # interface contract reference
+    assert "## Pass-criteria examples" in out
+
+
+# --------------------------------------------------------------------------- #
+# roadmap_seed role — de-biases the fresh-run roadmap
+# --------------------------------------------------------------------------- #
+def test_roadmap_seed_is_a_domain_role():
+    assert "roadmap_seed" in DOMAIN_ROLES
+
+
+def test_llm_serving_roadmap_seed_non_empty():
+    seed = render_domain_section(
+        resolve_domain("llm-serving"), "roadmap_seed", modality="text_generation"
+    )
+    assert seed
+    assert "continuous batching" in seed.lower()
+
+
+def test_generic_roadmap_seed_is_empty():
+    seed = render_domain_section(
+        resolve_domain("generic"), "roadmap_seed", modality="text_generation"
+    )
+    assert seed == ""
+
+
+def test_ensure_roadmap_injects_seed_major(tmp_path: Path):
+    roadmap = tmp_path / "roadmap.md"
+    issue_board.ensure_roadmap_file(roadmap, seed_major="- **M1 native RESP server** — todo")
+    text = roadmap.read_text()
+    assert "- **M1 native RESP server** — todo" in text
+    # the seed lands under the ## Major section, not the placeholder
+    major = text.split("## Major", 1)[1]
+    assert "M1 native RESP server" in major
+    assert "(populate on round 1" not in major
+
+
+def test_ensure_roadmap_without_seed_uses_neutral_placeholder(tmp_path: Path):
+    roadmap = tmp_path / "roadmap.md"
+    issue_board.ensure_roadmap_file(roadmap)
+    text = roadmap.read_text()
+    assert "(populate on round 1 based on the objective)" in text
+    # the neutral header must not carry LLM-specific starter items
+    for token in ("EAGLE", "CUDA", "FlashAttention", "FlashInfer"):
+        assert token not in text, f"neutral roadmap header leaked LLM token: {token!r}"
+
+
+def test_ensure_roadmap_is_idempotent(tmp_path: Path):
+    roadmap = tmp_path / "roadmap.md"
+    issue_board.ensure_roadmap_file(roadmap, seed_major="- **M1** — todo")
+    first = roadmap.read_text()
+    # a second call (e.g. a later round) must not clobber orchestrator edits
+    issue_board.ensure_roadmap_file(roadmap, seed_major="- **DIFFERENT** — todo")
+    assert roadmap.read_text() == first

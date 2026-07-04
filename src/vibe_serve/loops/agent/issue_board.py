@@ -32,6 +32,11 @@ from vibe_serve.schemas import (
 # ---------------------------------------------------------------------------
 
 
+# Domain packs may supply starter Major items via a ``## roadmap_seed`` section;
+# this sentinel marks where they land (or the neutral placeholder when none).
+_MAJOR_SEED_SENTINEL = "__MAJOR_SEED__"
+_MAJOR_SEED_PLACEHOLDER = "(populate on round 1 based on the objective)"
+
 _ROADMAP_HEADER = """# Roadmap
 
 You (the Orchestrator) own this file end-to-end. Update it every round
@@ -40,20 +45,20 @@ your next prompt — it does not parse it, so format it however you find
 useful, but follow these conventions so the structure stays legible:
 
 - **Major** items: structural changes expected to move the headline
-  performance metric meaningfully (e.g. "Implement EAGLE3 speculative
-  decoding", "Add CUDA graphs to verifier decode", "Replace manual
-  attention with FlashAttention"). Usually 1-3 rounds each.
+  performance metric meaningfully (e.g. a rewrite of a hot path, a new
+  algorithm or data structure, a different concurrency model). Usually
+  1-3 rounds each.
 - **Minor** items: bug fixes, polish, gates (correctness recoveries,
-  tiny kernel swaps, accuracy bumps). Usually 1 round each.
+  small swaps, accuracy bumps). Usually 1 round each.
 - Use one of these four statuses, and note rounds spent on each
   in-progress item:
   - `todo` — not started.
   - `in_progress` — actively being worked on this round (or recent rounds).
-  - `done` — implemented, profiler-verified, hitting (close to) predicted impact.
+  - `done` — implemented, verified, hitting (close to) predicted impact.
   - `parked` — implementation is buggy or incomplete, but you believe the
     *direction* is sound. Returnable to `in_progress` later. Use this when
-    the metric isn't moving for an *implementation* reason (zero acceptance
-    on EAGLE3, capture failures on CUDA graphs, …) rather than a workload
+    the metric isn't moving for an *implementation* reason (a new path that
+    never activates, a cache that never hits, …) rather than a workload
     reason.
   - `abandoned` — the *direction* itself doesn't fit this workload. Strict
     requirement (see below) before flipping to this state.
@@ -73,36 +78,32 @@ treat them as one bucket:
 - **`parked`** is the right call when (a) you predicted the technique
   would help, (b) the implementation passes the judge / pytest / accuracy
   gate, but (c) the headline metric didn't move *because the implementation
-  appears to have a bug or is incomplete*. Symptoms: zero acceptance on a
-  speculative decoder, all-fallback paths on what should be the fast path,
-  a CUDA graph capturing but never replaying, etc. The direction itself is
-  still believable; you just couldn't make the implementation good enough
-  in the rounds you spent. Mark `parked` and move to a different Major;
-  return to it when (i) you have a hypothesis for the bug, or (ii) other
-  levers are exhausted.
+  appears to have a bug or is incomplete*. Symptoms: a new fast path that
+  never activates, an always-fallback path, a precomputed step that is
+  captured but never reused, etc. The direction itself is still believable;
+  you just couldn't make the implementation good enough in the rounds you
+  spent. Mark `parked` and move to a different Major; return to it when
+  (i) you have a hypothesis for the bug, or (ii) other levers are exhausted.
 
 - **`abandoned`** is the right call only when the *direction itself* is
-  the wrong fit for this workload. Examples: continuous batching on a
-  workload contractually limited to single-batch, MTP on a model that
-  doesn't ship MTP heads, paged attention when the engine's fixed-shape
-  KV path is already optimal at this batch size. Each requires a
-  *mechanism-level* autopsy explaining why the technique cannot help
-  *here* (not "it didn't pay off in 3 rounds"). If you can't write that
+  the wrong fit for this workload. Each requires a *mechanism-level*
+  autopsy explaining why the technique cannot help *here* (not "it didn't
+  pay off in 3 rounds") — e.g. "the workload's contract fixes the very
+  quantity this technique would improve". If you can't write that
   mechanism, the right status is `parked`, not `abandoned`.
 
 **Hard rule for `abandoned` autopsies:** you must name a code-level or
 hardware-level mechanism — not a behavioral observation. A perf number
-("+0% TPOT") is not a mechanism; "the workload is single-batch by
-contract so continuous batching cannot raise arithmetic intensity" is.
-If acceptance on a speculative decoder is zero, that is *not* a reason
-to abandon — it's a debugging task, and the right status is `parked`
-with a hypothesis. Spec decode acceptance debugging has a checklist in
-`references/algorithms/speculative-decoding.md` ("Debugging 0
-acceptance"); read it before parking or abandoning.
+("+0% change") is not a mechanism; "the workload's contract fixes the
+very quantity this technique would improve, so it cannot help here" is.
+If a new path "isn't doing anything" (never activates, always falls back),
+that is *not* a reason to abandon — it's a debugging task, and the right
+status is `parked` with a hypothesis. Open the technique's reference
+material and fix the wiring before parking or abandoning.
 
 ## Major
 
-(populate on round 1 based on the objective)
+__MAJOR_SEED__
 
 ## Minor
 
@@ -122,14 +123,19 @@ acceptance"); read it before parking or abandoning.
 """
 
 
-def ensure_roadmap_file(roadmap_path: Path) -> None:
+def ensure_roadmap_file(roadmap_path: Path, *, seed_major: str = "") -> None:
     """Create the roadmap with the seed header if it doesn't exist.
+
+    ``seed_major`` is domain-supplied starter content for the ``## Major``
+    section (rendered from a domain pack's ``## roadmap_seed`` section); when
+    empty the neutral "populate on round 1" placeholder is used instead.
 
     Idempotent; safe to call every round.
     """
     if not roadmap_path.exists():
         roadmap_path.parent.mkdir(parents=True, exist_ok=True)
-        roadmap_path.write_text(_ROADMAP_HEADER)
+        major = seed_major.strip() or _MAJOR_SEED_PLACEHOLDER
+        roadmap_path.write_text(_ROADMAP_HEADER.replace(_MAJOR_SEED_SENTINEL, major))
 
 
 def read_roadmap(roadmap_path: Path) -> str:

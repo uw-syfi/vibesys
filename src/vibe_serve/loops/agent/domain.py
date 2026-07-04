@@ -10,7 +10,9 @@ sections are injected into the neutral base prompts:
     ├── (free-form prose / description — ignored by the loop)
     ├── ## implementer    ← injected as {{ domain_implementer }}
     ├── ## judge          ← injected as {{ domain_judge }}
-    └── ## single_agent   ← injected as {{ domain_single_agent }}
+    ├── ## single_agent   ← injected as {{ domain_single_agent }}
+    ├── ## orchestrator   ← injected as {{ domain_orchestrator }}
+    └── ## roadmap_seed   ← seeds the fresh run's roadmap.md ## Major list
 
 The section heading *is* the address: a line that is exactly ``## <role>`` (for a
 role in :data:`DOMAIN_ROLES`) starts that role's section, which runs until the
@@ -39,9 +41,16 @@ from vibe_serve.prompts import render_string
 DEFAULT_DOMAIN = "llm-serving"
 
 # The roles a domain pack can contribute to. Each maps to a ``## <role>`` section
-# in the domain file and a ``{{ domain_<role> }}`` injection point in the
-# corresponding base prompt.
-DOMAIN_ROLES: tuple[str, ...] = ("implementer", "judge", "single_agent", "orchestrator")
+# in the domain file. Most map to a ``{{ domain_<role> }}`` injection point in the
+# corresponding base prompt; ``roadmap_seed`` instead seeds the fresh-run
+# ``roadmap.md`` (see ``issue_board.ensure_roadmap_file``).
+DOMAIN_ROLES: tuple[str, ...] = (
+    "implementer",
+    "judge",
+    "single_agent",
+    "orchestrator",
+    "roadmap_seed",
+)
 
 _BUILTIN_DOMAINS_DIR = Path(__file__).resolve().parent / "templates" / "_domain"
 
