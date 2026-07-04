@@ -12,8 +12,8 @@ Expected target for a gateway/proxy deployment:
 The scripts call `/api/v1/...` endpoints through whichever base URL you pass.
 
 ```bash
-python inputs/train-ticket/accuracy_checker/checker.py --base-url http://localhost:8080
-python inputs/train-ticket/benchmark/benchmark.py --base-url http://localhost:8080 --rate 20 --duration 30 --output-json /tmp/train_ticket_bench.json
+python examples/train-ticket/accuracy_checker/checker.py --base-url http://localhost:8080
+python examples/train-ticket/benchmark/benchmark.py --base-url http://localhost:8080 --rate 20 --duration 30 --output-json /tmp/train_ticket_bench.json
 ```
 
 Both scripts use only the Python standard library.
@@ -30,10 +30,10 @@ Use the helper script to start a minimal local Docker Compose cluster with
 prebuilt images:
 
 ```bash
-inputs/train-ticket/scripts/start-local-cluster.sh start
-inputs/train-ticket/scripts/start-local-cluster.sh check
-inputs/train-ticket/scripts/start-local-cluster.sh bench
-inputs/train-ticket/scripts/start-local-cluster.sh stop
+examples/train-ticket/scripts/start-local-cluster.sh start
+examples/train-ticket/scripts/start-local-cluster.sh check
+examples/train-ticket/scripts/start-local-cluster.sh bench
+examples/train-ticket/scripts/start-local-cluster.sh stop
 ```
 
 Defaults:
@@ -63,7 +63,7 @@ and `ts-station-food-service`, and the gateway is not published under the same
 Build all Train Ticket service images locally:
 
 ```bash
-inputs/train-ticket/scripts/start-local-cluster.sh build-source
+examples/train-ticket/scripts/start-local-cluster.sh build-source
 ```
 
 That command packages the Java services with a Dockerized Maven/JDK 8 build and
@@ -89,7 +89,7 @@ TT_NAMESPACE=localtrain \
 TT_TAG=source \
 TT_GATEWAY_TAG=source \
 TT_SKIP_PULL=1 \
-inputs/train-ticket/scripts/start-local-cluster.sh start
+examples/train-ticket/scripts/start-local-cluster.sh start
 ```
 
 `TT_SKIP_PULL=1` is required for local source-built images; otherwise Docker
@@ -107,12 +107,12 @@ Compose tries to pull `localtrain/...` from Docker Hub.
 Manual direct-service runs:
 
 ```bash
-python inputs/train-ticket/accuracy_checker/checker.py \
+python examples/train-ticket/accuracy_checker/checker.py \
   --base-url http://localhost:18888 \
   --direct-services \
   --allow-empty
 
-python inputs/train-ticket/benchmark/benchmark.py \
+python examples/train-ticket/benchmark/benchmark.py \
   --base-url http://localhost:18888 \
   --direct-services \
   --rate 10 \
@@ -123,11 +123,11 @@ python inputs/train-ticket/benchmark/benchmark.py \
 Manual gateway runs after source-built deployment:
 
 ```bash
-python inputs/train-ticket/accuracy_checker/checker.py \
+python examples/train-ticket/accuracy_checker/checker.py \
   --base-url http://localhost:18888 \
   --allow-empty
 
-python inputs/train-ticket/benchmark/benchmark.py \
+python examples/train-ticket/benchmark/benchmark.py \
   --base-url http://localhost:18888 \
   --rate 10 \
   --duration 30 \

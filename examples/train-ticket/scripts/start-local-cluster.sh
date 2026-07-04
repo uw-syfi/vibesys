@@ -8,10 +8,10 @@ set -euo pipefail
 #   Direct services on their Train Ticket ports
 #
 # Override examples:
-#   TT_TAG=0.0.4 inputs/train-ticket/scripts/start-local-cluster.sh start
-#   TT_GATEWAY_PORT=28888 inputs/train-ticket/scripts/start-local-cluster.sh start
-#   inputs/train-ticket/scripts/start-local-cluster.sh build-source
-#   TT_NAMESPACE=localtrain TT_TAG=source TT_GATEWAY_TAG=source TT_SKIP_PULL=1 inputs/train-ticket/scripts/start-local-cluster.sh start
+#   TT_TAG=0.0.4 examples/train-ticket/scripts/start-local-cluster.sh start
+#   TT_GATEWAY_PORT=28888 examples/train-ticket/scripts/start-local-cluster.sh start
+#   examples/train-ticket/scripts/start-local-cluster.sh build-source
+#   TT_NAMESPACE=localtrain TT_TAG=source TT_GATEWAY_TAG=source TT_SKIP_PULL=1 examples/train-ticket/scripts/start-local-cluster.sh start
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 INPUT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
@@ -111,7 +111,7 @@ gateway_tag = sys.argv[6]
 # optional images that are no longer published, omits Nacos, and leaves MySQL
 # without initialization env. The dashboard image also expects many services
 # that are outside this minimal read-only cluster. This compose is enough for
-# the checker and benchmark workloads in inputs/train-ticket.
+# the checker and benchmark workloads in examples/train-ticket.
 service_ports = {
     "ts-config-service": 15679,
     "ts-station-service": 12345,
