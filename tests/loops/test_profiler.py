@@ -233,7 +233,7 @@ def nsys_db(tmp_path):
 
 
 def test_analyze_kernels(nsys_db):
-    from examples.nsys_profiler.analyze_nsys import _build_string_map, analyze_kernels
+    from examples.support.nsys_profiler.analyze_nsys import _build_string_map, analyze_kernels
 
     conn = sqlite3.connect(nsys_db)
     strings = _build_string_map(conn)
@@ -247,7 +247,7 @@ def test_analyze_kernels(nsys_db):
 
 
 def test_analyze_cpu_overhead(nsys_db):
-    from examples.nsys_profiler.analyze_nsys import _build_string_map, analyze_cpu_overhead
+    from examples.support.nsys_profiler.analyze_nsys import _build_string_map, analyze_cpu_overhead
 
     conn = sqlite3.connect(nsys_db)
     strings = _build_string_map(conn)
@@ -261,7 +261,7 @@ def test_analyze_cpu_overhead(nsys_db):
 
 
 def test_analyze_gpu_idle_gaps(nsys_db):
-    from examples.nsys_profiler.analyze_nsys import _build_string_map, analyze_gpu_idle_gaps
+    from examples.support.nsys_profiler.analyze_nsys import _build_string_map, analyze_gpu_idle_gaps
 
     conn = sqlite3.connect(nsys_db)
     strings = _build_string_map(conn)
@@ -274,7 +274,7 @@ def test_analyze_gpu_idle_gaps(nsys_db):
 
 
 def test_analyze_memory_ops(nsys_db):
-    from examples.nsys_profiler.analyze_nsys import analyze_memory_ops
+    from examples.support.nsys_profiler.analyze_nsys import analyze_memory_ops
 
     conn = sqlite3.connect(nsys_db)
     result = analyze_memory_ops(conn)
@@ -284,7 +284,7 @@ def test_analyze_memory_ops(nsys_db):
 
 
 def test_short_kernel_name():
-    from examples.nsys_profiler.analyze_nsys import _short_kernel_name
+    from examples.support.nsys_profiler.analyze_nsys import _short_kernel_name
 
     assert (
         _short_kernel_name("void at::native::vectorized_elementwise_kernel<4, float>")

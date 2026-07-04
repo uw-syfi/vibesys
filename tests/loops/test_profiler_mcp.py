@@ -43,7 +43,7 @@ _REPO = Path(__file__).resolve().parent.parent.parent
 def nsys_server_mod():
     return _load_module(
         "_nsys_server",
-        _REPO / "examples" / "nsys_profiler" / "server.py",
+        _REPO / "examples" / "support" / "nsys_profiler" / "server.py",
     )
 
 
@@ -51,7 +51,7 @@ def nsys_server_mod():
 def torch_server_mod():
     return _load_module(
         "_torch_server",
-        _REPO / "examples" / "torch_profiler" / "server.py",
+        _REPO / "examples" / "support" / "torch_profiler" / "server.py",
     )
 
 

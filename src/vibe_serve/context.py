@@ -221,16 +221,16 @@ class _RunContext:
             raise ValueError(f"Unknown profiler kind: {profiler_kind!r}")
         self.profiler_kind = resolved_profiler
 
-        # Default torch_profiler_path to examples/torch_profiler/ if --profiler=torch
+        # Default torch_profiler_path to examples/support/torch_profiler/ if --profiler=torch
         # and the user didn't explicitly set --torch-profiler.
         if self.profiler_kind == "torch" and self.torch_profiler_path is None:
-            default_tp = PROJECT_ROOT / "examples" / "torch_profiler"
+            default_tp = PROJECT_ROOT / "examples" / "support" / "torch_profiler"
             if default_tp.is_dir():
                 self.torch_profiler_path = str(default_tp)
 
-        # Likewise default neuron_profiler_path to examples/neuron_profiler/.
+        # Likewise default neuron_profiler_path to examples/support/neuron_profiler/.
         if self.profiler_kind == "neuron" and self.neuron_profiler_path is None:
-            default_np = PROJECT_ROOT / "examples" / "neuron_profiler"
+            default_np = PROJECT_ROOT / "examples" / "support" / "neuron_profiler"
             if default_np.is_dir():
                 self.neuron_profiler_path = str(default_np)
 

@@ -17,10 +17,10 @@
 	branch = main
 	shallow = true
 [submodule "inputs/show-o2-1.5B-HQ/reference/Show-o"]
-	path = examples/show-o2-1.5B-HQ/reference/Show-o
+	path = examples/model-serving/show-o2-1.5B-HQ/reference/Show-o
 	url = https://github.com/showlab/Show-o.git
-[submodule "examples/social-network-read-timeline/3rd_party/deathstarbench"]
-	path = examples/social-network-read-timeline/3rd_party/deathstarbench
+[submodule "examples/microservices/social-network-read-timeline/3rd_party/deathstarbench"]
+	path = examples/microservices/social-network-read-timeline/3rd_party/deathstarbench
 	url = https://github.com/delimitrou/DeathStarBench.git
 [submodule "3rd_party/train-ticket"]
 	path = 3rd_party/train-ticket

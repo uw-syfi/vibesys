@@ -839,7 +839,7 @@ def _run_plain(args: argparse.Namespace) -> None:
         debug=args.debug,
         acc_checker=str(args.acc_checker) if args.acc_checker else None,
         bench=str(args.bench) if args.bench else None,
-        nsys_profiler=str(PROJECT_ROOT / "examples" / "nsys_profiler"),
+        nsys_profiler=str(PROJECT_ROOT / "examples" / "support" / "nsys_profiler"),
         skills_dirs=skills,
         run_environment=run_environment_spec_from_args(args),
         agent_backend=args.agent_backend,
