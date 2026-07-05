@@ -99,6 +99,25 @@ def test_loop_constants_and_rejects_unknown_interface():
 
 
 # --------------------------------------------------------------------------- #
+# standalone (multi-agent) profiler selection
+# --------------------------------------------------------------------------- #
+def test_standalone_profiler_drops_torch_under_service():
+    """The multi-agent standalone profiler must treat the torch profiler the
+    same way the single-agent prompt does: torch is a white-box, in-process
+    PyTorch tool, so ``--interface service`` (exercised only over the wire, any
+    language) falls back to the black-box nsys profiler."""
+    from vibe_serve.loops.agent.loop import _profiler_prompt_template
+
+    # inprocess keeps the white-box torch profiler
+    assert _profiler_prompt_template("torch", "inprocess") == "profiler_prompt_torch.j2"
+    # service swaps torch -> nsys (torch imports the implementation)
+    assert _profiler_prompt_template("torch", "service") == "profiler_prompt_nsys.j2"
+    # non-torch kinds are unaffected by the interface
+    assert _profiler_prompt_template("neuron", "service") == "profiler_prompt_neuron.j2"
+    assert _profiler_prompt_template("nsys", "service") == "profiler_prompt_nsys.j2"
+
+
+# --------------------------------------------------------------------------- #
 # prompt rendering: implementer
 # --------------------------------------------------------------------------- #
 def _render_implementer(interface: str) -> str:

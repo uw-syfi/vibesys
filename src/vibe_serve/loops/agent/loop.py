@@ -257,19 +257,35 @@ def _run_pre_round_decision(
     return decision
 
 
+def _profiler_prompt_template(profiler_kind: str, interface: str) -> str:
+    """Pick the standalone-profiler prompt for the run's profiler + interface.
+
+    ``torch`` is a white-box, in-process PyTorch profiler that imports the
+    implementation; under ``--interface service`` the artifact is exercised only
+    over the wire (and may not even be Python), so it falls back to the black-box
+    ``nsys`` profiler. This mirrors the single-agent prompt's
+    ``profiler_kind == "torch" and interface != "service"`` guard so both inner
+    loops treat the torch profiler the same way.
+    """
+    if interface == "service" and profiler_kind == "torch":
+        profiler_kind = "nsys"
+    return {
+        "torch": "profiler_prompt_torch.j2",
+        "neuron": "profiler_prompt_neuron.j2",
+    }.get(profiler_kind, "profiler_prompt_nsys.j2")
+
+
 def _run_profiler(
     ctx: _RunContext,
     *,
     round_number: int,
     profile_focus: str,
     modality: str,
+    interface: str,
     progress_path: Path,
     objective: str,
 ) -> ProfilerSummary | None:
-    template = {
-        "torch": "profiler_prompt_torch.j2",
-        "neuron": "profiler_prompt_neuron.j2",
-    }.get(ctx.profiler_kind, "profiler_prompt_nsys.j2")
+    template = _profiler_prompt_template(ctx.profiler_kind, interface)
     system_prompt = render_template(
         template,
         template_dir=_TEMPLATE_DIR,
@@ -674,6 +690,7 @@ def run_agent_loop(
                             profile_focus=pre_decision.profile_focus
                             or "general latency hotspots on /v1/completions",
                             modality=modality,
+                            interface=interface,
                             progress_path=progress_path,
                             objective=objective,
                         )
