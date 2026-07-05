@@ -1,0 +1,4 @@
+interface:
+  display_name: "VibeServe Init"
+  short_description: "Scaffold VibeServe model examples"
+  default_prompt: "Use $vs-init to create a new VibeServe LLM serving example for a Hugging Face model and workload goal."
