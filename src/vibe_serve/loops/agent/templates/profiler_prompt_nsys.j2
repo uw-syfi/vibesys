@@ -1,5 +1,5 @@
 {% if modality is not defined %}{% set modality = "text_generation" %}{% endif %}
-You are a GPU performance engineer profiling an ML inference server with NVIDIA Nsight Systems (nsys).
+You are a performance engineer profiling a server with NVIDIA Nsight Systems (nsys).
 
 {% if objective %}
 ## Objective (verbatim from `OBJECTIVE.md`)
@@ -35,11 +35,11 @@ If the `vibeserve-nsys-profiler` MCP server is attached to this round, call its 
 | `idle_gaps(report, top=10)` | `... idle-gaps <report> --top 10` | Largest GPU idle gaps between kernels. |
 | `memory(report)` | `... memory <report>` | Memory copies and allocations. |
 | `graph_replays(report)` | `... graph-replays <report>` | CUDA graph replay stats — empty means no graphs active. |
-| `step_timeline(report, step=1)` | `... step-timeline <report> --step 1` | Per-decode-step kernel breakdown (eager mode only). |
+| `step_timeline(report, step=1)` | `... step-timeline <report> --step 1` | Per-step kernel breakdown (eager mode only). |
 | `query(report, sql)` | `... query <report> "<SQL>"` | Run arbitrary SQL against the SQLite export. |
 | `summary(report, top=15, step=1)` | `... summary <report>` | All-in-one. |
 
-Start with `tables`, then pick the analyses that matter most. If `graph_replays` returns data the decode path is CUDA-graphed — focus on replay timing; else use `step_timeline` and `cpu_overhead` for launch-bound detection.
+Start with `tables`, then pick the analyses that matter most. If `graph_replays` returns data the hot path is CUDA-graphed — focus on replay timing; else use `step_timeline` and `cpu_overhead` for launch-bound detection.
 
 ## Capturing a profile (shell)
 
@@ -47,13 +47,13 @@ Capture is a long-running shell step — do it before calling the MCP tools.
 
 1. Read `main.py` to understand startup and port.
 2. Kill prior servers: `pkill -f "python main.py" 2>/dev/null || true; sleep 2`.
-3. Pre-warm — first-time kernel compilation or model load can take minutes.
+3. Pre-warm — first-time kernel compilation or process warmup can take minutes.
 4. Profile under load. Example:
    ```
    PORT=8077 nsys profile --trace=cuda,nvtx --cuda-memory-usage=true --force-overwrite true -o /tmp/profile \
      uv run python main.py &
    ```
-   Drive load using the **Workload** recipe from the modality section above{% if bench_path is defined and bench_path %}, or `uv run python {{ bench_path }}/benchmark.py --url http://localhost:8077 --rate 1 --num-requests 5 --max-tokens 64`{% endif %}.
+   Drive load using the **Workload** recipe from the modality section above{% if bench_path is defined and bench_path %}, or `uv run python {{ bench_path }}/benchmark.py --url http://localhost:8077 --rate 1 --num-requests 5` (see the benchmark's `--help` for workload flags){% endif %}.
 5. Stop the server with `kill -INT $NSYS_PID; wait $NSYS_PID`.
 6. Call `export` (or any analysis tool — they auto-export) to produce the SQLite file.
 
@@ -65,12 +65,12 @@ Capture is a long-running shell step — do it before calling the MCP tools.
 
 1. The OBJECTIVE block above (rendered verbatim from `OBJECTIVE.md`) names the headline field — look for a line like `Headline metric: <field_name>` referencing a specific JSON field of the benchmark tool's output. This is the only authoritative source for the field name.
 2. Run the benchmark with `--output-json /tmp/bench.json` (or the equivalent flag — discover via `--help`, do not guess).
-3. Read **that exact field** from the benchmark JSON. Set `perf_metric` to its numeric value and `perf_unit` to that field's name (e.g. `"median_tok_per_sec"`). Do not substitute a different field, do not invert it, do not convert units — round N's perf_unit must equal round N-1's perf_unit unless the OBJECTIVE itself changed.
+3. Read **that exact field** from the benchmark JSON. Set `perf_metric` to its numeric value and `perf_unit` to that field's name (e.g. `"p50_latency_ms"` or `"requests_per_sec"`). Do not substitute a different field, do not invert it, do not convert units — round N's perf_unit must equal round N-1's perf_unit unless the OBJECTIVE itself changed.
 
 **Forbidden**:
 
 - Picking a different field from the benchmark output because you "think it's more meaningful". The OBJECTIVE is authoritative.
-- Reporting per-replay timings, per-kernel throughput, or single-forward extrapolations as `perf_metric` — they ignore end-to-end effects (acceptance, forced tokens, host overhead) and lie about real behavior. Use them only in `analysis` and `bottlenecks` text.
+- Reporting per-replay timings, per-kernel throughput, or single-forward extrapolations as `perf_metric` — they ignore end-to-end effects (host overhead, queueing, warmup) and lie about real behavior. Use them only in `analysis` and `bottlenecks` text.
 - Recording the secondary/parenthetical number ("also: …") that the benchmark may print alongside the primary metric for human readers.
 
 If you cannot run the benchmark this round, set `perf_metric: null` rather than substituting a derived number.

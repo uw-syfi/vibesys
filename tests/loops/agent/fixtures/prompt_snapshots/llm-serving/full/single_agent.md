@@ -49,9 +49,34 @@ Use `uv` for Python package management. Run `uv init` if `pyproject.toml` doesn'
 
 ## Profiling step
 
-After (and only after) the implementation passes your self-judge gates, capture a profile so the orchestrator has a bottleneck signal for the next round.
+After (and only after) the implementation passes your self-judge gates, capture a profile so the orchestrator has a bottleneck signal for the next round. The workload to drive and the exact capture command are in the modality section below.
 
-Use `nsys` via `nsys_profiler/analyze_nsys.py` (or the `vibeserve-nsys-profiler` MCP tools when attached). The capture script starts the server, runs the benchmark under `nsys profile`, and writes a report you can analyze with the MCP tools. Focus: kernel breakdown, CPU launch overhead, GPU idle gaps.
+## Server Type: Text Generation (Causal LM)
+
+The server exposes OpenAI-compatible text generation endpoints:
+- `POST /v1/completions` — `{prompt, max_tokens, temperature, stream}`
+- `POST /v1/chat/completions` — `{messages, max_tokens, temperature, stream}`
+- `GET /health` — health check
+
+Key performance axes: **time-to-first-token (TTFT)**, **time-per-output-token (TPOT)**, **throughput** (tokens/s under concurrent requests). Prefill and decode are distinct phases with different bottlenecks.
+
+## Profiling Commands
+
+**Warmup** (run after server health check, before and during profiling):
+```
+curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 300
+```
+
+**Workload** (run during profiling when no benchmark tool is available):
+```
+for i in 1 2 3 4 5; do
+  curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
+    -d '{"prompt":"The capital of France is","max_tokens":32,"temperature":0}'
+done
+```
+
+
+Analyze with `nsys` via `nsys_profiler/analyze_nsys.py` (or the `vibeserve-nsys-profiler` MCP tools when attached), unless the modality section above specifies a different (e.g. CPU) profiler — in that case follow it. The nsys capture script starts the server, runs the benchmark under `nsys profile`, and writes a report you analyze with the MCP tools. Focus: kernel breakdown, CPU launch overhead, GPU idle gaps.
 
 Profiler focus this round: general bottleneck analysis on the steady-state benchmark path.
 
@@ -61,7 +86,7 @@ The plateau detector compares this raw float across rounds, so the **unit must n
 
 1. The OBJECTIVE block above names the headline field — look for `Headline metric: <field_name>`.
 2. Run the benchmark with `--output-json /tmp/bench.json` (discover the exact flag with `--help`).
-3. Read **that exact field**. Set `perf_metric` to its numeric value and `perf_unit` to that field's name (e.g. `"median_tok_per_sec"`). Do not substitute a different field, do not invert it, do not convert units.
+3. Read **that exact field**. Set `perf_metric` to its numeric value and `perf_unit` to that field's name (e.g. `"p50_latency_ms"` or `"requests_per_sec"`). Do not substitute a different field, do not invert it, do not convert units.
 
 If you could not run the benchmark this round, set `perf_metric: null` rather than fabricating a value.
 

@@ -48,18 +48,14 @@ The shared experiment workspace is your working directory. Reference implementat
 {% include "_interface/language.j2" %}
 ## Profiling step
 
-After (and only after) the implementation passes your self-judge gates, capture a profile so the orchestrator has a bottleneck signal for the next round.
+After (and only after) the implementation passes your self-judge gates, capture a profile so the orchestrator has a bottleneck signal for the next round. The workload to drive and the exact capture command are in the modality section below.
+
+{% include "_modality/" ~ modality ~ "/profiler.j2" %}
 
 {% if profiler_kind == "torch" and interface != "service" %}
-Use `torch.profiler` via `torch_profiler/analyze_torch_profile.py` (or the `vibeserve-torch-profiler` MCP tools when attached). Start with `tables`, then `kernels` / `operators` / `cpu_overhead` / `memory` / `summary` as relevant.
-
-{% if env_kind == "modal" %}
-**Modal mode**: the editor container has no GPU. Dispatch profiling via `modal run main.py::modal_profile -- --output /workspace/prof.json --num-iters 20 --max-tokens 32 --prompt "The capital of France is"`. Do NOT fall back to synthetic-weight in-process profiling.
+Analyze with `torch.profiler` via `torch_profiler/analyze_torch_profile.py` (or the `vibeserve-torch-profiler` MCP tools when attached). Start with `tables`, then `kernels` / `operators` / `cpu_overhead` / `memory` / `summary` as relevant. Use the capture command from the modality section above{% if env_kind == "modal" %} (Modal mode: dispatch via the implementer's `modal_profile` entry point; do NOT fall back to synthetic in-process profiling){% endif %}.
 {% else %}
-Capture in-process: `python torch_profiler/analyze_torch_profile.py capture --model-dir /workspace --weights-dir /model --output /tmp/prof.json --warmup 3 --num-iters 20 --max-tokens 32 --prompt "The capital of France is"`.
-{% endif %}
-{% else %}
-Use `nsys` via `nsys_profiler/analyze_nsys.py` (or the `vibeserve-nsys-profiler` MCP tools when attached). The capture script starts the server, runs the benchmark under `nsys profile`, and writes a report you can analyze with the MCP tools. Focus: kernel breakdown, CPU launch overhead, GPU idle gaps.
+Analyze with `nsys` via `nsys_profiler/analyze_nsys.py` (or the `vibeserve-nsys-profiler` MCP tools when attached), unless the modality section above specifies a different (e.g. CPU) profiler — in that case follow it. The nsys capture script starts the server, runs the benchmark under `nsys profile`, and writes a report you analyze with the MCP tools. Focus: kernel breakdown, CPU launch overhead, GPU idle gaps.
 {% endif %}
 
 Profiler focus this round: {{ profile_focus or "general bottleneck analysis on the steady-state benchmark path" }}.
@@ -70,7 +66,7 @@ The plateau detector compares this raw float across rounds, so the **unit must n
 
 1. The OBJECTIVE block above names the headline field — look for `Headline metric: <field_name>`.
 2. Run the benchmark with `--output-json /tmp/bench.json` (discover the exact flag with `--help`).
-3. Read **that exact field**. Set `perf_metric` to its numeric value and `perf_unit` to that field's name (e.g. `"median_tok_per_sec"`). Do not substitute a different field, do not invert it, do not convert units.
+3. Read **that exact field**. Set `perf_metric` to its numeric value and `perf_unit` to that field's name (e.g. `"p50_latency_ms"` or `"requests_per_sec"`). Do not substitute a different field, do not invert it, do not convert units.
 
 If you could not run the benchmark this round, set `perf_metric: null` rather than fabricating a value.
 

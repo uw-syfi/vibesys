@@ -11,9 +11,20 @@ Key performance axes: **time-to-first-token (TTFT)**, **time-per-output-token (T
 {% if env_kind == "modal" %}
 ## Profiling workload (Modal mode)
 
-You do **not** start a server in this editor container — there is no GPU here and the deployed server runs on Modal. The representative workload runs *inside* the Modal `profile_remote` function the implementer is required to expose. That function should drive a steady-state mix matching the benchmark (multiple `Server().<inference-method>.local(...)` calls or equivalent direct generate calls).
+You do **not** start a server in this editor container — there is no GPU here and the deployed server runs on Modal. The representative workload runs *inside* the Modal `profile_remote` function the implementer is required to expose (signature `modal_profile(output, num_iters, max_tokens, prompt)`). That function should drive a steady-state mix matching the benchmark (multiple `Server().<inference-method>.local(...)` calls or equivalent direct generate calls).
 
-After `modal run main.py::modal_profile -- --output /workspace/prof.json` completes, run the analyze subcommands locally on the resulting JSON. Per-token throughput, if computed, should come from the function's `wall_time_sec` field and `num_iters * max_tokens`, not from any local timing in this container.
+{% if profiler_kind == "torch" %}
+**Capture command** (torch base, Modal mode):
+```
+modal run main.py::modal_profile -- \
+  --output /workspace/prof.json \
+  --num-iters 20 \
+  --max-tokens 32 \
+  --prompt "The capital of France is"
+```
+
+This dispatches to a `@app.function profile_remote(...)` on the Modal GPU, which wraps the benchmark workload in `torch.profiler` and returns the analyzer-compatible JSON to `/workspace/prof.json`. After it completes, run the analyze subcommands locally on that JSON. Per-token throughput, if computed, should come from the function's `wall_time_sec` field and `num_iters * max_tokens`, not from any local timing in this container.
+{% endif %}
 {% else %}
 ## Profiling Commands
 
@@ -29,4 +40,15 @@ for i in 1 2 3 4 5; do
     -d '{"prompt":"The capital of France is","max_tokens":32,"temperature":0}'
 done
 ```
+
+{% if profiler_kind == "torch" %}
+**In-process capture command** (torch base, Mode A): loads `VibeServeModel.from_pretrained(...)` and profiles `.generate(...)` in a loop:
+```
+python torch_profiler/analyze_torch_profile.py capture \
+  --model-dir /workspace --weights-dir /model \
+  --output /tmp/prof.json \
+  --warmup 3 --num-iters 20 --max-tokens 32 \
+  --prompt "The capital of France is"
+```
+{% endif %}
 {% endif %}
