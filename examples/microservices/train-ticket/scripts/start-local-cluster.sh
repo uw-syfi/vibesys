@@ -15,15 +15,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 INPUT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
-REPO_ROOT="$(cd -- "${INPUT_DIR}/../.." && pwd)"
-SOURCE_COMPOSE="${REPO_ROOT}/3rd_party/train-ticket/deployment/docker-compose-manifests/quickstart-docker-compose.yml"
+REPO_ROOT="$(cd -- "${INPUT_DIR}/../../.." && pwd)"
 
 TT_NAMESPACE="${TT_NAMESPACE:-codewisdom}"
 TT_TAG="${TT_TAG:-0.2.0}"
 TT_GATEWAY_TAG="${TT_GATEWAY_TAG:-latest}"
 TT_PROJECT="${TT_PROJECT:-train-ticket-local}"
 TT_GATEWAY_PORT="${TT_GATEWAY_PORT:-18888}"
-TT_COMPOSE_FILE="${TT_COMPOSE_FILE:-/tmp/${TT_PROJECT}-quickstart-docker-compose.yml}"
+TT_COMPOSE_FILE="${TT_COMPOSE_FILE:-/tmp/${TT_PROJECT}-${UID}-quickstart-docker-compose.yml}"
 TT_SKIP_PULL="${TT_SKIP_PULL:-0}"
 TT_SOURCE_DIR="${TT_SOURCE_DIR:-${REPO_ROOT}/3rd_party/train-ticket}"
 TT_BUILD_REPO="${TT_BUILD_REPO:-localtrain}"
@@ -35,7 +34,7 @@ Usage: $0 <command>
 
 Commands:
   start      Generate compose file, pull images, start the cluster, wait for core services
-  stop       Stop and remove the cluster containers/network
+  stop       Stop and remove the cluster containers/network and data volumes
   status     Show compose service status
   logs       Follow compose logs
   check      Run the Train Ticket checker against local direct service ports
@@ -70,8 +69,21 @@ require_tools() {
 }
 
 port_in_use() {
-  local port="$1"
-  ss -ltn | awk '{print $4}' | grep -Eq "(:|\\])${port}$"
+  # Bind test instead of parsing `ss` output: portable and catches listeners
+  # on any local interface.
+  ! python3 -c '
+import socket, sys
+s = socket.socket()
+# SO_REUSEADDR so lingering TIME_WAIT sockets from a recent stop do not
+# report a false conflict; a real listener still fails the bind.
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+try:
+    s.bind(("0.0.0.0", int(sys.argv[1])))
+except OSError:
+    sys.exit(1)
+finally:
+    s.close()
+' "$1"
 }
 
 check_ports() {
@@ -91,21 +103,17 @@ check_ports() {
 }
 
 generate_compose() {
-  [[ -f "${SOURCE_COMPOSE}" ]] || {
-    echo "Missing source compose file: ${SOURCE_COMPOSE}" >&2
-    exit 1
-  }
   mkdir -p "$(dirname -- "${TT_COMPOSE_FILE}")"
-  python3 - "${SOURCE_COMPOSE}" "${TT_COMPOSE_FILE}" "${TT_GATEWAY_PORT}" "${TT_NAMESPACE}" "${TT_TAG}" "${TT_GATEWAY_TAG}" <<'PY'
-from pathlib import Path
+  python3 - "${TT_COMPOSE_FILE}" "${TT_GATEWAY_PORT}" "${TT_NAMESPACE}" "${TT_TAG}" "${TT_GATEWAY_TAG}" <<'PY'
+import json
 import sys
+from pathlib import Path
 
-src = Path(sys.argv[1])
-dst = Path(sys.argv[2])
-gateway_port = sys.argv[3]
-namespace = sys.argv[4]
-tag = sys.argv[5]
-gateway_tag = sys.argv[6]
+dst = Path(sys.argv[1])
+gateway_port = sys.argv[2]
+namespace = sys.argv[3]
+tag = sys.argv[4]
+gateway_tag = sys.argv[5]
 
 # Keep this explicit. The upstream quickstart compose references several
 # optional images that are no longer published, omits Nacos, and leaves MySQL
@@ -209,8 +217,8 @@ for name, (password, database) in mysql.items():
         "    image: mysql:5.7",
         "    restart: always",
         "    environment:",
-        f"      MYSQL_ROOT_PASSWORD: {password!r}",
-        f"      MYSQL_DATABASE: {database!r}",
+        f"      MYSQL_ROOT_PASSWORD: {json.dumps(password)}",
+        f"      MYSQL_DATABASE: {json.dumps(database)}",
         "    networks:",
         "      - my-network",
         "",
@@ -234,7 +242,7 @@ for name, port in service_ports.items():
         "    environment:",
     ])
     for key, value in service_env[name].items():
-        lines.append(f"      {key}: {value!r}")
+        lines.append(f"      {key}: {json.dumps(value)}")
     lines.extend([
         "    ports:",
         f"      - {port}:{port}",
@@ -332,15 +340,21 @@ case "${cmd}" in
       compose pull
     fi
     compose up -d --remove-orphans
-    wait_for_core_services || true
+    wait_for_core_services
     echo "Gateway: http://localhost:${TT_GATEWAY_PORT}"
+    if [[ "${TT_NAMESPACE}" == "codewisdom" ]]; then
+      echo "Note: the prebuilt codewisdom service images do not register with Nacos, so the"
+      echo "gateway returns 503 for all routes; use '$0 check' / '$0 bench' (direct services)."
+    fi
     echo "Checker: $0 check"
     echo "Benchmark: TT_BENCH_RATE=10 TT_BENCH_DURATION=30 TT_BENCH_CONCURRENCY=32 $0 bench"
     ;;
   stop)
     require_tools
     generate_compose >/dev/null
-    compose down --remove-orphans
+    # -v: the anonymous mysql/mongo volumes hold only auto-reseeded data and
+    # would otherwise accumulate ~3GB per stop/start cycle.
+    compose down --remove-orphans -v
     ;;
   status)
     require_tools
@@ -360,10 +374,11 @@ case "${cmd}" in
     echo "  TT_NAMESPACE=${TT_BUILD_REPO} TT_TAG=${TT_BUILD_TAG} TT_GATEWAY_TAG=${TT_BUILD_TAG} TT_SKIP_PULL=1 $0 start"
     ;;
   check)
+    # No --allow-empty: the prebuilt and source-built images both self-seed
+    # reference data on startup, so empty lists indicate a real failure.
     python3 "${INPUT_DIR}/accuracy_checker/checker.py" \
       --base-url "http://localhost:${TT_GATEWAY_PORT}" \
-      --direct-services \
-      --allow-empty
+      --direct-services
     ;;
   bench)
     python3 "${INPUT_DIR}/benchmark/benchmark.py" \
