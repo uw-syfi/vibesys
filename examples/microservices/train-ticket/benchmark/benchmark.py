@@ -345,9 +345,7 @@ def main() -> int:
             file=sys.stderr,
         )
         pool.shutdown(wait=False, cancel_futures=True)
-        concurrent.futures.wait(
-            [f for f in futures if not f.done()], timeout=args.timeout
-        )
+        concurrent.futures.wait([f for f in futures if not f.done()], timeout=args.timeout)
         results.clear()
         for fut in futures:
             if fut.done() and not fut.cancelled():

@@ -325,7 +325,9 @@ def run_consistency_checks(
                 }
             )
         else:
-            results.append({"name": name, "status": None, "latency_ms": None, "item_count": len(refs)})
+            results.append(
+                {"name": name, "status": None, "latency_ms": None, "item_count": len(refs)}
+            )
     return results, failures
 
 
