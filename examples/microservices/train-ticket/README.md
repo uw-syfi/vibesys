@@ -19,10 +19,12 @@ python examples/microservices/train-ticket/benchmark/benchmark.py --base-url htt
 Both scripts use only the Python standard library.
 
 For the prebuilt-image local Docker Compose helper below, use
-`--direct-services` or the helper `check`/`bench` commands. The currently
-published gateway image starts, but in the minimal local compose it can return
-`503` while the individual service ports are healthy. With source-built
-`localtrain:source` images, the gateway path was verified successfully too.
+`--direct-services` or the helper `check`/`bench` commands. The prebuilt
+`codewisdom` 0.2.0 service images predate Nacos support and never register
+with the discovery server, so the published gateway image starts but returns
+`503` for every route — deterministically, not transiently. The gateway path
+only works with source-built `localtrain:source` images (verified), which do
+register with Nacos.
 
 ## Local Cluster
 
@@ -39,18 +41,27 @@ examples/microservices/train-ticket/scripts/start-local-cluster.sh stop
 Defaults:
 
 - Gateway: `http://localhost:18888`
-- Images: `codewisdom/<service>:0.2.0`
+- Images: `codewisdom/<service>:0.2.0` (gateway: `codewisdom/ts-gateway-service:latest`,
+  the only tag published for it)
 
 The script generates a temporary compose file under `/tmp` that exposes the
 gateway and the core read-only service ports used by the checker. Override
-with `TT_GATEWAY_PORT`, `TT_NAMESPACE`, or `TT_TAG` if needed.
+with `TT_GATEWAY_PORT`, `TT_NAMESPACE`, `TT_TAG`, or `TT_GATEWAY_TAG` if
+needed.
 
 The local helper starts a minimal API cluster: Nacos, Redis, the gateway, and
 the config/station/train/travel/route/price services with their local MongoDB
-and MySQL dependencies. Auth-protected services such as contacts are excluded
-from the default no-auth checker and benchmark. The published dashboard image
-is intentionally not started because its nginx config references additional
-services outside this minimal read-only cluster.
+and MySQL dependencies. The 0.2.0 prebuilt images store data in MongoDB (the
+MySQL containers and `*_MYSQL_*` env are used by source-built v1.0.0 images
+instead; both datastores are started so either image set works). All services
+self-seed reference data on startup, so `check` runs the checker in strict
+mode (no `--allow-empty`). Auth-protected services such as contacts are
+excluded from the default no-auth checker and benchmark. The published
+dashboard image is intentionally not started because its nginx config
+references additional services outside this minimal read-only cluster.
+
+`stop` removes the containers together with their anonymous data volumes;
+each `start` reseeds from scratch.
 
 ## Build From Source
 
@@ -109,8 +120,7 @@ Manual direct-service runs:
 ```bash
 python examples/microservices/train-ticket/accuracy_checker/checker.py \
   --base-url http://localhost:18888 \
-  --direct-services \
-  --allow-empty
+  --direct-services
 
 python examples/microservices/train-ticket/benchmark/benchmark.py \
   --base-url http://localhost:18888 \
@@ -124,8 +134,7 @@ Manual gateway runs after source-built deployment:
 
 ```bash
 python examples/microservices/train-ticket/accuracy_checker/checker.py \
-  --base-url http://localhost:18888 \
-  --allow-empty
+  --base-url http://localhost:18888
 
 python examples/microservices/train-ticket/benchmark/benchmark.py \
   --base-url http://localhost:18888 \
@@ -133,3 +142,7 @@ python examples/microservices/train-ticket/benchmark/benchmark.py \
   --duration 30 \
   --concurrency 32
 ```
+
+The images self-seed reference data, so the checker runs in strict mode by
+default; pass `--allow-empty` only for deployments known to have no seeded
+data.
