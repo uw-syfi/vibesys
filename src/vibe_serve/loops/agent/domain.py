@@ -11,6 +11,7 @@ sections are injected into the neutral base prompts:
     ├── ## implementer    ← injected as {{ domain_implementer }}
     ├── ## judge          ← injected as {{ domain_judge }}
     ├── ## single_agent   ← injected as {{ domain_single_agent }}
+    ├── ## orchestrator   ← injected as {{ domain_orchestrator }}
     └── ## profiler       ← injected as {{ domain_profiler }}
 
 The section heading *is* the address: a line that is exactly ``## <role>`` (for a
