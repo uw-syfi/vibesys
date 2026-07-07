@@ -292,6 +292,7 @@ def _run_profiler(
         profile_focus=profile_focus,
         bench_path=ctx.profiler_bench_path,
         modality=modality,
+        interface=interface,
         runtime_notes=ctx.run_environment_view.prompt_notes,
         env_kind=ctx.run_environment_view.env_kind,
         objective=objective,

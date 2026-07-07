@@ -117,6 +117,34 @@ def test_standalone_profiler_drops_torch_under_service():
     assert _profiler_prompt_template("nsys", "service") == "profiler_prompt_nsys.j2"
 
 
+def _render_nsys_profiler(interface: str) -> str:
+    return render_template(
+        "profiler_prompt_nsys.j2",
+        template_dir=_TEMPLATE_DIR,
+        modality="text_generation",
+        interface=interface,
+        profile_focus="focus",
+        bench_path="/bench",
+        runtime_notes="",
+        env_kind="local",
+        objective="OBJ",
+    )
+
+
+def test_service_nsys_profiler_does_not_assume_python_startup():
+    out = _render_nsys_profiler("service")
+    assert "uv run python main.py" not in out
+    assert 'pkill -f "python main.py"' not in out
+    assert "<service startup command>" in out
+    assert "Do not assume the implementation is Python" in out
+
+
+def test_inprocess_nsys_profiler_keeps_python_startup_recipe():
+    out = _render_nsys_profiler("inprocess")
+    assert "uv run python main.py" in out
+    assert 'pkill -f "python main.py"' in out
+
+
 # --------------------------------------------------------------------------- #
 # prompt rendering: implementer
 # --------------------------------------------------------------------------- #
