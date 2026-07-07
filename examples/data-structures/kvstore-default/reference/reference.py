@@ -25,6 +25,5 @@ class ReferenceKVStore:
         return existed
 
 
-
 def KVStoreFactory():
     return ReferenceKVStore()

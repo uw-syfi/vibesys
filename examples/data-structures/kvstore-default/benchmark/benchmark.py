@@ -83,12 +83,7 @@ def _run(store, clients, duration, warmup, key_space, read_ratio, seed):
 
     total = counters["put"] + counters["get"] + counters["delete"]
     print(f"Duration: {elapsed:.1f}s  Clients: {clients}")
-    print(
-        "  Ops: "
-        f"put={counters['put']:,} "
-        f"get={counters['get']:,} "
-        f"delete={counters['delete']:,}"
-    )
+    print(f"  Ops: put={counters['put']:,} get={counters['get']:,} delete={counters['delete']:,}")
     print(f"  Total: {total:,} ({total / elapsed:,.0f} ops/s)")
 
     return {

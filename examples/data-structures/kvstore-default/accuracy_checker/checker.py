@@ -10,7 +10,6 @@ import threading
 import time
 from pathlib import Path
 
-
 sys.path.insert(0, str(Path(__file__).parent.parent / "reference"))
 from reference import KVStoreFactory
 
