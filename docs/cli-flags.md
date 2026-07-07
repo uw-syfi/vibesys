@@ -17,7 +17,7 @@ Several flags look independent, but they combine into one execution contract:
 | Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, or `auto`. |
 | Domain | `--domain` | Agent-loop problem-space prompt pack, such as `llm-serving` or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
-| Target inputs | `--ref`, `--acc-checker`, `--bench` | Reference implementation, correctness checker, and benchmark harness for the target. |
+| Target inputs | `--input`, `--ref`, `--acc-checker`, `--bench` | Target bundle directory, reference implementation, correctness checker, and benchmark harness. |
 
 Do not treat these as simple toggles. Some combinations imply a language,
 startup contract, profiler, or sandbox capability.
@@ -99,6 +99,37 @@ Built-ins include:
 speech-to-text. Domains should avoid hardcoding modality or interface
 requirements that are already expressed by `--modality` or `--interface`.
 
+## Target Inputs
+
+Most examples use the standard bundle layout:
+
+```text
+examples/<target>/
+├── OBJECTIVE.md
+├── reference/
+├── accuracy_checker/
+└── benchmark/
+```
+
+For those bundles, pass the root once:
+
+```bash
+vibe-serve --input examples/<target> ...
+```
+
+This derives any missing target path flags as:
+
+- `--ref <input>/reference`
+- `--acc-checker <input>/accuracy_checker`
+- `--bench <input>/benchmark`
+
+Explicit flags override derived values, so a custom benchmark can be mixed in
+without repeating every path:
+
+```bash
+vibe-serve --input examples/<target> --bench /tmp/custom-benchmark ...
+```
+
 ## Common Commands
 
 Default agent loop on local CUDA-compatible host:
@@ -108,9 +139,7 @@ vibe-serve \
   --outer-loop agent \
   --backend cuda \
   --interface inprocess \
-  --ref examples/model-serving/Llama-3-8B/reference \
-  --acc-checker examples/model-serving/Llama-3-8B/accuracy_checker \
-  --bench examples/model-serving/Llama-3-8B/benchmark
+  --input examples/model-serving/Llama-3-8B
 ```
 
 Docker CUDA run:
@@ -138,9 +167,7 @@ vibe-serve \
   --outer-loop agent \
   --interface service \
   --domain generic \
-  --ref examples/<target>/reference \
-  --acc-checker examples/<target>/accuracy_checker \
-  --bench examples/<target>/benchmark
+  --input examples/<target>
 ```
 
 CPU-only target in the current merged code:

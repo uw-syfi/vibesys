@@ -52,9 +52,7 @@ cp agent.toml.example agent.toml
 ```bash
 # Issue-tracker outer loop, Codex CLI, Docker on local CUDA, 4 rounds
 vibe-serve \
-  --ref examples/model-serving/moonshine-streaming/reference \
-  --acc-checker examples/model-serving/moonshine-streaming/accuracy_checker \
-  --bench examples/model-serving/moonshine-streaming/benchmark \
+  --input examples/model-serving/moonshine-streaming \
   --exp-name my-experiment \
   --docker \
   --agent-backend cli --cli-provider codex \
@@ -133,7 +131,13 @@ examples/<name>/
 └── README.md             # human-readable description
 ```
 
-`OBJECTIVE.md` is read at the start of every run and must live next to `--ref` (sibling, not inside). See `examples/model-serving/Llama-3-8B/`, `examples/model-serving/moonshine-streaming/`, `examples/model-serving/qwen3-32b-code-edit/`, `examples/model-serving/olmo-hybrid-prefix-caching/`, `examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit/`, `examples/model-serving/show-o2-1.5B-HQ-h100/`, and `examples/model-serving/show-o2-1.5B-HQ-macbook/` for the paper scenarios.
+Pass the bundle root with `--input examples/<name>/` to derive `--ref`,
+`--acc-checker`, and `--bench` from the standard subdirectory names. You can
+still pass those three flags explicitly; explicit paths override `--input`
+defaults when you need a custom checker or benchmark.
+
+`OBJECTIVE.md` is read at the start of every run and must live next to the
+`reference/` directory (sibling, not inside). See `examples/model-serving/Llama-3-8B/`, `examples/model-serving/moonshine-streaming/`, `examples/model-serving/qwen3-32b-code-edit/`, `examples/model-serving/olmo-hybrid-prefix-caching/`, `examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit/`, `examples/model-serving/show-o2-1.5B-HQ-h100/`, and `examples/model-serving/show-o2-1.5B-HQ-macbook/` for the paper scenarios.
 
 For multi-objective evolutionary runs, drop an `objectives.toml` next to `OBJECTIVE.md` (or pass `--objective name:max|min` flags) — see `vibe-serve --outer-loop evolve --help`.
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -83,9 +84,93 @@ def test_target_inputs_default_to_none():
 
     args = _build_agent_parser().parse_args([])
 
+    assert args.input is None
     assert args.ref is None
     assert args.acc_checker is None
     assert args.bench is None
+
+
+@pytest.mark.parametrize(
+    "builder_name",
+    [
+        "_build_agent_parser",
+        "_build_evolve_parser",
+        "_build_openevolve_parser",
+        "_build_plain_parser",
+    ],
+)
+def test_input_arg_is_available_on_all_loop_parsers(builder_name):
+    import vibe_serve.cli as cli
+
+    parser = getattr(cli, builder_name)()
+    args = parser.parse_args(["--input", "examples/data-structures/queue-default"])
+
+    assert args.input == Path("examples/data-structures/queue-default")
+
+
+def test_validate_target_inputs_derives_bundle_paths_from_input(tmp_path):
+    from vibe_serve.cli import _build_agent_parser
+
+    bundle = tmp_path / "queue-default"
+    (bundle / "reference").mkdir(parents=True)
+    (bundle / "accuracy_checker").mkdir()
+    (bundle / "benchmark").mkdir()
+
+    args = _build_agent_parser().parse_args(["--input", str(bundle)])
+
+    _validate_target_inputs(args)
+
+    assert args.ref == str(bundle / "reference")
+    assert args.acc_checker == bundle / "accuracy_checker"
+    assert args.bench == bundle / "benchmark"
+
+
+def test_validate_target_inputs_keeps_explicit_overrides(tmp_path):
+    from vibe_serve.cli import _build_agent_parser
+
+    bundle = tmp_path / "queue-default"
+    (bundle / "reference").mkdir(parents=True)
+    (bundle / "accuracy_checker").mkdir()
+    custom_bench = tmp_path / "custom-benchmark"
+    custom_bench.mkdir()
+
+    args = _build_agent_parser().parse_args(["--input", str(bundle), "--bench", str(custom_bench)])
+
+    _validate_target_inputs(args)
+
+    assert args.ref == str(bundle / "reference")
+    assert args.acc_checker == bundle / "accuracy_checker"
+    assert args.bench == custom_bench
+
+
+def test_validate_target_inputs_rejects_missing_input_dir(tmp_path, capsys):
+    from vibe_serve.cli import _build_agent_parser
+
+    missing = tmp_path / "missing"
+    args = _build_agent_parser().parse_args(["--input", str(missing)])
+
+    with pytest.raises(SystemExit) as exc:
+        _validate_target_inputs(args)
+
+    assert exc.value.code == 2
+    assert "--input path does not exist" in capsys.readouterr().err
+
+
+def test_validate_target_inputs_reports_missing_input_subdirs(tmp_path, capsys):
+    from vibe_serve.cli import _build_agent_parser
+
+    bundle = tmp_path / "incomplete"
+    (bundle / "reference").mkdir(parents=True)
+
+    args = _build_agent_parser().parse_args(["--input", str(bundle)])
+
+    with pytest.raises(SystemExit) as exc:
+        _validate_target_inputs(args)
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "accuracy_checker/ for --acc-checker" in err
+    assert "benchmark/ for --bench" in err
 
 
 def test_validate_target_inputs_requires_bundle_paths(capsys):

@@ -112,6 +112,17 @@ def _fail(msg: str) -> None:
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     """Add CLI arguments shared across every outer-loop parser."""
     parser.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help=(
+            "Path to a target input bundle containing reference/, "
+            "accuracy_checker/, and benchmark/. Missing --ref, "
+            "--acc-checker, and --bench values are derived from this layout; "
+            "explicit path flags override the derived defaults."
+        ),
+    )
+    parser.add_argument(
         "--ref",
         default=None,
         help="Path to reference implementation file, or directory containing at least one reference.py.",
@@ -459,7 +470,50 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     return parser
 
 
+_INPUT_TARGETS = (
+    ("ref", "--ref", "reference"),
+    ("acc_checker", "--acc-checker", "accuracy_checker"),
+    ("bench", "--bench", "benchmark"),
+)
+
+
+def _apply_input_defaults(args: argparse.Namespace) -> None:
+    input_arg = getattr(args, "input", None)
+    if input_arg is None:
+        return
+
+    input_dir = Path(input_arg).expanduser().resolve()
+    if not input_dir.exists():
+        print(f"Error: --input path does not exist: {input_arg}", file=sys.stderr)
+        sys.exit(2)
+    if not input_dir.is_dir():
+        print(f"Error: --input path is not a directory: {input_arg}", file=sys.stderr)
+        sys.exit(2)
+
+    missing = []
+    for attr, flag, dirname in _INPUT_TARGETS:
+        if getattr(args, attr) is not None:
+            continue
+        candidate = input_dir / dirname
+        if not candidate.is_dir():
+            missing.append(f"{dirname}/ for {flag}")
+            continue
+        # Keep the historical argparse shape: --ref is a string, while
+        # --acc-checker and --bench are pathlib.Path values.
+        setattr(args, attr, str(candidate) if attr == "ref" else candidate)
+
+    if missing:
+        print(
+            "Error: --input bundle is missing required target subdir(s): "
+            + ", ".join(missing)
+            + f" under {input_dir}.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
 def _validate_target_inputs(args: argparse.Namespace) -> None:
+    _apply_input_defaults(args)
     missing = [
         flag
         for flag, value in (
