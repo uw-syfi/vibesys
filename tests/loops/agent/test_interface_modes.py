@@ -202,6 +202,40 @@ def test_service_judge_drops_vibeservemodel():
     assert "Decode invariants" in out
 
 
+def test_service_default_domain_drops_inprocess_python_gates():
+    """The real default domain must honor service mode too, not only the base
+    modality snippets isolated with ``domain_judge=""`` above."""
+    from vibe_serve.loops.agent.domain import render_domain_section, resolve_domain
+
+    domain_judge = render_domain_section(
+        resolve_domain("llm-serving"),
+        "judge",
+        modality="text_generation",
+        interface="service",
+        reference_path="/ref",
+        bench_path="/bench",
+        accuracy_checker_path="/acc",
+        runtime_notes="",
+    )
+    out = render_template(
+        "judge_prompt.j2",
+        template_dir=_TEMPLATE_DIR,
+        modality="text_generation",
+        interface="service",
+        domain_judge=domain_judge,
+        accuracy_checker_path="/acc",
+        bench_path="/bench",
+        pass_criteria="PC",
+        retry=1,
+        runtime_notes="",
+        env_kind="local",
+        objective="OBJ",
+    )
+    assert "VibeServeModel" not in out
+    assert "uv run pytest" not in out
+    assert "over-the-wire service contract" in out
+
+
 # --------------------------------------------------------------------------- #
 # prompt rendering: single-agent
 # --------------------------------------------------------------------------- #

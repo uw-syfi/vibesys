@@ -61,7 +61,11 @@ You are reviewing an **ML inference server** implementation.
 
 In addition to the orchestrator's criteria, the following must all hold for a **pass** verdict:
 
+{% if interface != "service" %}
 1. **Unit tests** — run `uv run pytest -v`. All tests must pass.
+{% else %}
+1. **Unit tests** — run the implementation's own documented test command when one exists (README, Makefile, package manifest, or run script). Do not require a Python-specific test runner unless the implementation uses Python.
+{% endif %}
 {% if bench_path %}
 2. **Benchmark sanity** — start the server, wait for `/health`, run the benchmark tool at `{{ bench_path }}/benchmark.py` with 2 requests, confirm at least one request succeeds. Discover flags via `--help`; do NOT guess. Kill the server after. If /health never returns 200, read `/tmp/server.log` for the error.
 {% endif %}
@@ -100,7 +104,7 @@ Note: not every "fast path" is a reward hack. Legitimate optimizations include: 
 
 ## Scope discipline
 
-The orchestrator is deliberately narrow with each round's scope. Do **NOT** invent additional API-contract requirements that the orchestrator did not ask for. If a round only scopes one endpoint (e.g. `/v1/completions`), do not fail the round because the server lacks other endpoints (e.g. `/v1/chat/completions`, `/predict`, `/v1/models`). The only invariants you enforce unconditionally are (a) the modality's accuracy-checker interface (e.g. `VibeServeModel.from_pretrained` + the modality's generate/transcribe method), (b) the `/health` endpoint used by the benchmark sanity step, and (c) the modality's decode invariants (e.g. EOS handling for text generation). Everything else flows from `pass_criteria`. When contract details are needed for whatever the orchestrator scoped, consult `skills/serving-systems/tooling/openai-api/SKILL.md`.
+The orchestrator is deliberately narrow with each round's scope. Do **NOT** invent additional API-contract requirements that the orchestrator did not ask for. If a round only scopes one endpoint (e.g. `/v1/completions`), do not fail the round because the server lacks other endpoints (e.g. `/v1/chat/completions`, `/predict`, `/v1/models`). {% if interface != "service" %}The only invariants you enforce unconditionally are (a) the modality's accuracy-checker interface (e.g. `VibeServeModel.from_pretrained` + the modality's generate/transcribe method), (b) the `/health` endpoint used by the benchmark sanity step, and (c) the modality's decode invariants (e.g. EOS handling for text generation).{% else %}The only invariants you enforce unconditionally are (a) the over-the-wire service contract exercised by the attached checker/benchmark, (b) the `/health` endpoint used by the benchmark sanity step when that benchmark requires it, and (c) the modality's decode invariants (e.g. EOS handling for text generation). Do not require an in-process Python import surface in service mode unless the orchestrator explicitly scopes it for a Python implementation.{% endif %} Everything else flows from `pass_criteria`. When contract details are needed for whatever the orchestrator scoped, consult `skills/serving-systems/tooling/openai-api/SKILL.md`.
 
 ## Static-inspection scope (read this before applying any "no X in the code" gate)
 
@@ -121,7 +125,11 @@ You are a senior **ML serving engineer** owning this combined round.
 
 The framework's always-on gates (pytest, benchmark sanity, accuracy checker) apply on top of the orchestrator's criteria — your verdict must reflect all of them:
 
+{% if interface != "service" %}
 1. `uv run pytest -v` passes.
+{% else %}
+1. The implementation's own documented test command passes when one exists; do not require a Python-specific test runner unless the implementation uses Python.
+{% endif %}
 {% if bench_path %}
 2. **Benchmark sanity** — start the server, wait for `/health`, run `{{ bench_path }}/benchmark.py` with 2 requests, confirm at least one succeeds. Discover flags with `--help`. Kill the server when done.
 {% endif %}
