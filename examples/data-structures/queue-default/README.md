@@ -10,6 +10,12 @@ drivers for the five initial VibeServe queue scenarios.
     python accuracy_checker/checker.py --scenario all
     python accuracy_checker/checker.py --scenario mpmc --producers 4 --consumers 4
 
+Notes:
+- `spsc`, `mpsc`, and `mpmc` scenarios collect concurrent operation histories and
+  validate linearizability with [Porcupine](https://github.com/anishathalye/porcupine).
+- `lossy` and `batch` scenarios use scenario-specific property checks.
+- Go must be installed locally for the Porcupine-backed scenarios.
+
 ## Running the benchmark
 
     python benchmark/benchmark.py --scenario spsc --duration 10
