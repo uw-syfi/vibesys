@@ -1,4 +1,4 @@
-"""Local-only compute backend, shared by Metal and CPU.
+"""No-device compute backend, shared by Metal and CPU.
 
 Some targets run on the host with no accelerator the sandbox layer can reach:
 
@@ -6,11 +6,9 @@ Some targets run on the host with no accelerator the sandbox layer can reach:
   Modal offers no Apple GPUs.
 - ``CPU`` — no GPU at all (CPU-bound targets: KV stores, networking servers).
 
-Both execute identically — a ``LocalShellBackend`` via ``SandboxKind.LOCAL``,
-with no device to select, no contention monitor, and no device migration.
-They differ only in identity (``name``) and the message shown when
-``DOCKER`` / ``MODAL`` is requested, so both are instances of this one class,
-bound to their platform at registration in :mod:`backends`. Per-platform
+Both have no device to select, no contention monitor, and no device migration.
+Metal remains local-only because Docker/Modal cannot expose MPS. CPU can also
+run inside Docker because it needs no accelerator passthrough. Per-platform
 *prompt* guidance (MPS vs pure-CPU) lives in the backend fragments under
 ``templates/_backend/<name>/`` — not here.
 """
@@ -30,10 +28,13 @@ from vibe_serve.backends.base import (
     SetupFn,
 )
 from vibe_serve.constants import ComputeBackend
+from vibe_serve.sandbox.docker_sandbox import DockerSandbox
+
+_DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 
 
 class LocalBackend:
-    """Local-only backend (Metal / CPU) — all hardware hooks are no-ops."""
+    """No-device backend (Metal / CPU) — hardware hooks are no-ops."""
 
     profiler_kind = "torch"
 
@@ -45,11 +46,14 @@ class LocalBackend:
         log: Callable[[str], None] | None = None,
         image: str | None = None,
         unavailable_reason: str,
+        supports_docker: bool = False,
     ) -> None:
         self.name = name
         self.log_dir = Path(log_dir)
         self._lprint = log or print
+        self.image = image
         self._unavailable_reason = unavailable_reason
+        self._supports_docker = supports_docker
         # No accelerator to pick — kept for protocol parity with other backends
         # (e.g. _RunContext reads ``selected_device``).
         self.selected_device = None
@@ -69,17 +73,39 @@ class LocalBackend:
         setup_fns: list[SetupFn] | None = None,
         modal_options: ModalOptions | None = None,
     ) -> BaseSandbox:
-        if kind is not SandboxKind.LOCAL:
+        bind_mounts = list(bind_mounts or [])
+        passthrough_paths = list(passthrough_paths or [])
+        extra_env = dict(extra_env or {})
+        extra_init_commands = list(extra_init_commands or [])
+        setup_fns = setup_fns or []
+
+        if kind is SandboxKind.LOCAL:
+            return LocalShellBackend(
+                root_dir=host_workspace,
+                virtual_mode=True,
+                inherit_env=True,
+                env=extra_env,
+            )
+        if kind is SandboxKind.DOCKER and self._supports_docker:
+            if self.image is None:
+                raise ValueError(f"{self.name.value} backend requires a Docker image")
+            return DockerSandbox(
+                host_workspace=host_workspace,
+                image=self.image,
+                gpus=None,
+                bind_mounts=bind_mounts,
+                passthrough_paths=passthrough_paths,
+                env=extra_env,
+                log_path=log_path,
+                extra_init_commands=extra_init_commands,
+                setup_fns=setup_fns,
+            )
+        if kind in (SandboxKind.DOCKER, SandboxKind.MODAL):
             raise ValueError(
                 f"{self.name.value} backend only supports local execution; "
                 f"SandboxKind.{kind.name} is unavailable ({self._unavailable_reason})."
             )
-        return LocalShellBackend(
-            root_dir=host_workspace,
-            virtual_mode=True,
-            inherit_env=True,
-            env=dict(extra_env or {}),
-        )
+        raise ValueError(f"Unknown sandbox kind: {kind!r}")
 
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
         return None
@@ -124,6 +150,7 @@ def cpu_backend(
         ComputeBackend.CPU,
         log_dir,
         log=log,
-        image=image,
-        unavailable_reason="there is no GPU to pass through to a Docker/Modal container",
+        image=image or _DEFAULT_CPU_IMAGE,
+        unavailable_reason="Modal CPU execution is not wired up for this backend",
+        supports_docker=True,
     )

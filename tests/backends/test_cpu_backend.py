@@ -12,6 +12,7 @@ from vibe_serve.backends import SandboxKind
 from vibe_serve.backends.local import LocalBackend
 from vibe_serve.cli import _add_common_args
 from vibe_serve.constants import ComputeBackend
+from vibe_serve.sandbox.docker_sandbox import DockerSandbox
 
 
 def _make_backend(tmp_path) -> LocalBackend:
@@ -39,19 +40,22 @@ class TestCpuSandbox:
         )
         assert isinstance(sb, LocalShellBackend)
 
-    def test_docker_raises(self, tmp_path):
+    def test_docker_returns_docker_sandbox_without_gpus(self, tmp_path):
         impl = _make_backend(tmp_path)
-        # CPU-specific identity: message names cpu + the no-GPU reason.
-        with pytest.raises(ValueError, match="cpu backend only supports local execution"):
-            impl.make_sandbox(
-                SandboxKind.DOCKER,
-                host_workspace=str(tmp_path),
-                log_path=None,
-            )
+        sb = impl.make_sandbox(
+            SandboxKind.DOCKER,
+            host_workspace=str(tmp_path),
+            log_path=None,
+            extra_env={"FOO": "bar"},
+        )
+        assert isinstance(sb, DockerSandbox)
+        assert sb._gpus is None
+        assert sb._image == impl.image
+        assert sb._env["FOO"] == "bar"
 
     def test_modal_raises(self, tmp_path):
         impl = _make_backend(tmp_path)
-        with pytest.raises(ValueError, match="local execution"):
+        with pytest.raises(ValueError, match="Modal CPU execution is not wired up"):
             impl.make_sandbox(
                 SandboxKind.MODAL,
                 host_workspace=str(tmp_path),
