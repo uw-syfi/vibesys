@@ -7,10 +7,13 @@ drivers for the five initial VibeServe queue scenarios.
 
 ## Running the correctness checker
 
-    python accuracy_checker/checker.py --scenario all
-    python accuracy_checker/checker.py --scenario mpmc --producers 4 --consumers 4
+    uv run python accuracy_checker/checker.py --use-reference --scenario all
+    uv run python accuracy_checker/checker.py --scenario all
+    uv run python accuracy_checker/checker.py --scenario mpmc --producers 4 --consumers 4
 
 Notes:
+- Use `--use-reference` to validate the bundled reference implementations.
+- Omit `--use-reference` to check a candidate `main.py` exposing `VibeServeQueue`.
 - `spsc`, `mpsc`, and `mpmc` scenarios collect concurrent operation histories and
   validate linearizability with [Porcupine](https://github.com/anishathalye/porcupine).
 - `lossy` and `batch` scenarios use scenario-specific property checks.
@@ -18,9 +21,9 @@ Notes:
 
 ## Running the benchmark
 
-    python benchmark/benchmark.py --scenario spsc --duration 10
-    python benchmark/benchmark.py --scenario all --output-json results.json
-    python benchmark/benchmark.py --scenario spsc --use-reference
+    uv run python benchmark/benchmark.py --scenario spsc --duration 10
+    uv run python benchmark/benchmark.py --scenario all --output-json results.json
+    uv run python benchmark/benchmark.py --scenario spsc --use-reference
 
 ## Acceptance criteria (from #43)
 

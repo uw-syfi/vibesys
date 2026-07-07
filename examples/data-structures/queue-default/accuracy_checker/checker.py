@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "reference"))
-from reference import SCENARIOS
+from reference import SCENARIOS, QueueFactory
 
 
 def _load_candidate():
@@ -224,10 +224,15 @@ def main():
     parser.add_argument("--producers", type=int, default=4)
     parser.add_argument("--consumers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--use-reference", action="store_true")
     args = parser.parse_args()
 
-    print("Loading VibeServeQueue from main.py ...")
-    cls = _load_candidate()
+    if args.use_reference:
+        print("Loading reference QueueFactory ...")
+        cls = QueueFactory
+    else:
+        print("Loading VibeServeQueue from main.py ...")
+        cls = _load_candidate()
     print("  Loaded.")
 
     targets = SCENARIOS if args.scenario == "all" else [args.scenario]
