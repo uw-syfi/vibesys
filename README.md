@@ -62,9 +62,7 @@ vibe-serve \
   --modality speech_to_text
 ```
 
-`--outer-loop` defaults to `agent`.  Pass `--outer-loop plain` or `--outer-loop evolve` to switch.  See `vibe-serve --outer-loop <kind> --help` for loop-specific flags.
-
-See `vibe-serve --outer-loop <kind> --help` for loop-specific flags.
+`--outer-loop` defaults to `agent`. Pass `--outer-loop plain` or `--outer-loop evolve` to switch. See `vibe-serve --outer-loop <kind> --help` for loop-specific flags, and [`docs/cli-flags.md`](docs/cli-flags.md) for the supported flag combinations.
 
 A separate entry point exposes the issue MCP server used by the plain loop:
 
@@ -98,6 +96,8 @@ copying `generic.md` — no code change required.
 Full authoring guide: [`src/vibe_serve/loops/agent/templates/_domain/README.md`](src/vibe_serve/loops/agent/templates/_domain/README.md).
 
 ## Interface — how the artifact is evaluated (and which language)
+
+See the full flag-composition guide in [`docs/cli-flags.md`](docs/cli-flags.md).
 
 The implementation language is **not** a user choice. It falls out of `--interface`,
 which sets the contract by which the accuracy checker and benchmark reach the
