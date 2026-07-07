@@ -23,7 +23,7 @@ class TestCpuRegistry:
         impl = backends.get(ComputeBackend.CPU, log_dir=tmp_path)
         assert isinstance(impl, LocalBackend)
         assert impl.name is ComputeBackend.CPU
-        assert impl.profiler_kind == "torch"
+        assert impl.profiler_kind == "cpu"
 
 
 class TestCpuSandbox:

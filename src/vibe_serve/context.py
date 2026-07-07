@@ -208,16 +208,17 @@ class _RunContext:
         self.neuron_profiler_path = self._coerce_dir_path(neuron_profiler, "--neuron-profiler")
 
         # Resolve profiler kind: 'auto' → the compute backend's own profiler
-        # when it dictates one (e.g. Trainium → neuron-explorer), else the run
-        # environment's default (modal → torch, otherwise nsys).
+        # when it dictates a non-GPU workflow (e.g. Trainium → neuron-explorer,
+        # CPU → benchmark/source diagnosis), else the run environment's default
+        # (modal → torch, otherwise nsys).
         resolved_profiler = profiler_kind
         if resolved_profiler == "auto":
             backend_profiler = getattr(self.backend_impl, "profiler_kind", None)
-            if backend_profiler == "neuron":
-                resolved_profiler = "neuron"
+            if backend_profiler in ("neuron", "cpu"):
+                resolved_profiler = backend_profiler
             else:
                 resolved_profiler = self.run_environment.default_profiler_kind
-        if resolved_profiler not in ("nsys", "torch", "neuron"):
+        if resolved_profiler not in ("nsys", "torch", "neuron", "cpu"):
             raise ValueError(f"Unknown profiler kind: {profiler_kind!r}")
         self.profiler_kind = resolved_profiler
 

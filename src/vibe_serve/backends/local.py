@@ -35,8 +35,6 @@ from vibe_serve.constants import ComputeBackend
 class LocalBackend:
     """Local-only backend (Metal / CPU) — all hardware hooks are no-ops."""
 
-    profiler_kind = "torch"
-
     def __init__(
         self,
         name: ComputeBackend,
@@ -45,8 +43,10 @@ class LocalBackend:
         log: Callable[[str], None] | None = None,
         image: str | None = None,
         unavailable_reason: str,
+        profiler_kind: str = "torch",
     ) -> None:
         self.name = name
+        self.profiler_kind = profiler_kind
         self.log_dir = Path(log_dir)
         self._lprint = log or print
         self._unavailable_reason = unavailable_reason
@@ -110,6 +110,7 @@ def metal_backend(
         unavailable_reason=(
             "Docker on macOS can't access Metal/MPS, and Modal does not offer Apple GPUs"
         ),
+        profiler_kind="torch",
     )
 
 
@@ -126,4 +127,5 @@ def cpu_backend(
         log=log,
         image=image,
         unavailable_reason="there is no GPU to pass through to a Docker/Modal container",
+        profiler_kind="cpu",
     )

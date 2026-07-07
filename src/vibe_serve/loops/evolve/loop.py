@@ -41,7 +41,7 @@ from vibe_serve.loops.evolve.population import (
     Objective,
     Population,
 )
-from vibe_serve.loops.profiler import invoke_profiler
+from vibe_serve.loops.profiler import invoke_profiler, prompt_template
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -223,9 +223,7 @@ def _run_profiler(
     objective: str,
     objectives: list[Objective] | None = None,
 ) -> ProfilerSummary | None:
-    template = (
-        "profiler_prompt_torch.j2" if ctx.profiler_kind == "torch" else "profiler_prompt_nsys.j2"
-    )
+    template = prompt_template(ctx.profiler_kind)
     base_prompt = _render(
         template,
         bench_path=ctx.profiler_bench_path,

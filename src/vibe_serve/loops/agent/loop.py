@@ -22,7 +22,7 @@ from vibe_serve.loops.agent.domain import (
     render_domain_section,
     resolve_domain,
 )
-from vibe_serve.loops.profiler import invoke_profiler
+from vibe_serve.loops.profiler import invoke_profiler, prompt_template
 from vibe_serve.prompts import render_template
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
@@ -269,10 +269,7 @@ def _profiler_prompt_template(profiler_kind: str, interface: str) -> str:
     """
     if interface == "service" and profiler_kind == "torch":
         profiler_kind = "nsys"
-    return {
-        "torch": "profiler_prompt_torch.j2",
-        "neuron": "profiler_prompt_neuron.j2",
-    }.get(profiler_kind, "profiler_prompt_nsys.j2")
+    return prompt_template(profiler_kind)
 
 
 def _run_profiler(

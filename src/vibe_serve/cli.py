@@ -160,14 +160,15 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--profiler",
-        choices=["nsys", "torch", "neuron", "auto"],
+        choices=["nsys", "torch", "neuron", "cpu", "auto"],
         default="auto",
         help=(
             "Which profiler to use between rounds. "
             "'nsys' for NVIDIA Nsight Systems (needs /proc/driver/nvidia), "
             "'torch' for torch.profiler (works in Modal sandboxes), "
             "'neuron' for AWS neuron-explorer (Trainium/NeuronCores), "
-            "'auto' picks the compute backend's profiler (trainium → neuron), "
+            "'cpu' for CPU-bound benchmark/source diagnosis without a GPU profiler, "
+            "'auto' picks the compute backend's profiler (trainium → neuron, cpu → cpu), "
             "else torch when --modal is set, else nsys. Default: auto."
         ),
     )

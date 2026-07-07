@@ -43,11 +43,22 @@ def mcp_spec(profiler_kind: str):
             command="python",
             args=["neuron_profiler/server.py"],
         )
+    if profiler_kind == "cpu":
+        return None
     return MCPServerSpec(
         name="vibeserve-nsys-profiler",
         command="python",
         args=["nsys_profiler/server.py"],
     )
+
+
+def prompt_template(profiler_kind: str) -> str:
+    """Return the profiler prompt template for a resolved profiler kind."""
+    return {
+        "torch": "profiler_prompt_torch.j2",
+        "neuron": "profiler_prompt_neuron.j2",
+        "cpu": "profiler_prompt_cpu.j2",
+    }.get(profiler_kind, "profiler_prompt_nsys.j2")
 
 
 def invoke_profiler(

@@ -24,6 +24,13 @@ from vibe_serve.schemas import (
 # ---------------------------------------------------------------------------
 
 
+def test_cpu_profiler_kind_has_no_mcp_and_cpu_prompt():
+    from vibe_serve.loops.profiler import mcp_spec, prompt_template
+
+    assert mcp_spec("cpu") is None
+    assert prompt_template("cpu") == "profiler_prompt_cpu.j2"
+
+
 def test_profiler_response_creation():
     resp = ProfilerResponse(
         analysis="GPU is 85% busy, attention kernels dominate.",

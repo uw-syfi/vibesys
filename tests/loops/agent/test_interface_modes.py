@@ -114,7 +114,26 @@ def test_standalone_profiler_drops_torch_under_service():
     assert _profiler_prompt_template("torch", "service") == "profiler_prompt_nsys.j2"
     # non-torch kinds are unaffected by the interface
     assert _profiler_prompt_template("neuron", "service") == "profiler_prompt_neuron.j2"
+    assert _profiler_prompt_template("cpu", "service") == "profiler_prompt_cpu.j2"
     assert _profiler_prompt_template("nsys", "service") == "profiler_prompt_nsys.j2"
+
+
+def test_cpu_profiler_prompt_is_profile_free():
+    out = render_template(
+        "profiler_prompt_cpu.j2",
+        template_dir=_TEMPLATE_DIR,
+        modality="text_generation",
+        profile_focus="focus",
+        bench_path="/bench",
+        runtime_notes="",
+        env_kind="local",
+        objective="OBJ",
+    )
+    assert "Profiler-guided analysis is not yet wired up for the `cpu` backend" in out
+    assert "Do not use NVIDIA Nsight Systems" in out
+    assert "nsys profile" not in out
+    assert "torch_profiler" not in out
+    assert "profile-free" in out
 
 
 # --------------------------------------------------------------------------- #
