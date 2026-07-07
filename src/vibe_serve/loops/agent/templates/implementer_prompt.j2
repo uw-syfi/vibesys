@@ -1,6 +1,7 @@
-{% if modality is not defined %}{% set modality = "text_generation" %}{% endif %}
 {% if interface is not defined %}{% set interface = "inprocess" %}{% endif %}
+{% if modality %}
 {% include "_modality/" ~ modality ~ "/implementer.j2" %}
+{% endif %}
 
 {% if runtime_notes %}
 ## Runtime environment

@@ -431,7 +431,7 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-rounds", type=int, default=24)
     parser.add_argument("--max-retries-per-round", type=int, default=3)
     parser.add_argument("--start-round", type=int, default=None, metavar="N")
-    parser.add_argument("--modality", default="text_generation", choices=_MODALITIES)
+    parser.add_argument("--modality", default=None, choices=_MODALITIES)
     parser.add_argument(
         "--domain",
         default=DEFAULT_DOMAIN,

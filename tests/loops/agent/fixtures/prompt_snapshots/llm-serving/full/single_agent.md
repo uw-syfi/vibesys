@@ -51,7 +51,7 @@ Use `uv` for Python package management. Run `uv init` if `pyproject.toml` doesn'
 
 After (and only after) the implementation passes your self-judge gates, capture a profile so the orchestrator has a bottleneck signal for the next round.
 
-Use `nsys` via `nsys_profiler/analyze_nsys.py` (or the `vibeserve-nsys-profiler` MCP tools when attached). The capture script starts the server, runs the benchmark under `nsys profile`, and writes a report you can analyze with the MCP tools. Focus: kernel breakdown, CPU launch overhead, GPU idle gaps.
+Use `nsys` via `nsys_profiler/analyze_nsys.py` (or the `vibeserve-nsys-profiler` MCP tools when attached) when it matches the domain and backend. Capture the benchmark path and analyze the report with the MCP tools. Focus on the bottlenecks relevant to the objective.
 
 Profiler focus this round: general bottleneck analysis on the steady-state benchmark path.
 
