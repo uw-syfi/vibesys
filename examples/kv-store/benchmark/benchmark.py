@@ -1,6 +1,6 @@
 """YCSB throughput benchmark against an already-running candidate server.
 
-Requires: Java 8+. Uses the bundled YCSB 0.17.0 Redis binding at ./ycsb/.
+Requires: Java 8+, YCSB at ./ycsb/ relative to this script.
 
 Reports steady-state throughput so the number reflects the server, not JVM/JIT
 warmup: one discarded warmup run primes the JVM/JIT/connections, then several
