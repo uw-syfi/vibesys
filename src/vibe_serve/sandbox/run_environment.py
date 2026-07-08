@@ -39,6 +39,7 @@ from deepagents.backends.sandbox import BaseSandbox
 from vibe_serve.backends import SandboxKind
 from vibe_serve.backends.base import ComputeBackendImpl, SetupFn
 from vibe_serve.constants import DEFAULT_AGENT_BACKEND, PROJECT_ROOT
+from vibe_serve.domains.environment import EnvironmentBindMount
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,7 @@ class RunEnvironmentRequest:
     nsys_profiler_path: str | None = None
     torch_profiler_path: str | None = None
     neuron_profiler_path: str | None = None
+    environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
     log: Callable[[str], None] | None = None
     project_root: Path = PROJECT_ROOT
 
@@ -208,10 +210,9 @@ class DockerEnvironment:
         return cls(DockerEnvironmentConfig(image=str(image) if image else None))
 
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
-        bind_mounts, docker_symlinks, model_path = _container_mount_plan(request)
+        bind_mounts, docker_symlinks, passthrough = _container_mount_plan(request)
         extra_init_commands, cli_provider_env = _cli_container_setup(request)
         bind_mounts = _dedupe_mounts(bind_mounts)
-        passthrough = ["/model"] if model_path is not None else []
         setup_fns = _symlink_setup_fns(docker_symlinks)
 
         sandbox = request.backend.make_sandbox(
@@ -338,7 +339,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         self._ensure_model_volume(request)
         self._ensure_draft_volume(request)
 
-        bind_mounts, docker_symlinks, _model_path = _container_mount_plan(request)
+        bind_mounts, docker_symlinks, passthrough = _container_mount_plan(request)
         extra_init_commands, cli_provider_env = _cli_container_setup(request)
 
         # Mount host Modal auth so `modal run` inside the container
@@ -363,7 +364,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             host_workspace=str(request.workspace),
             log_path=request.log_dir / "docker.log",
             bind_mounts=bind_mounts,
-            passthrough_paths=[],  # weights live in Modal Volumes, not on host
+            passthrough_paths=passthrough,
             extra_env=cli_provider_env,
             extra_init_commands=extra_init_commands,
             setup_fns=setup_fns,
@@ -693,7 +694,7 @@ def _container_mount_plan(
     request: RunEnvironmentRequest,
     *,
     include_cli_provider_mounts: bool = True,
-) -> tuple[list[tuple[str, str, bool]], list[tuple[str, str]], Path | None]:
+) -> tuple[list[tuple[str, str, bool]], list[tuple[str, str]], list[str]]:
     """Build the bind mounts + setup symlinks for a sandbox.
 
     ``include_cli_provider_mounts`` controls whether CLI auth dirs and the
@@ -705,7 +706,9 @@ def _container_mount_plan(
     symlinks: list[tuple[str, str]] = []
     ref_dir = request.ref_dir
 
-    skip_model_symlinks = {"model", "draft_model"}
+    skip_environment_mount_symlinks = {
+        mount.host_path.name for mount in request.environment_bind_mounts
+    }
 
     if ref_dir is not None:
         _collect_symlink_mounts(
@@ -713,7 +716,7 @@ def _container_mount_plan(
             "/workspace/reference",
             bind_mounts=bind_mounts,
             symlinks=symlinks,
-            skip=skip_model_symlinks,
+            skip=skip_environment_mount_symlinks,
         )
         if ref_dir.parent != ref_dir:
             _collect_symlink_mounts(
@@ -721,39 +724,23 @@ def _container_mount_plan(
                 "/workspace",
                 bind_mounts=bind_mounts,
                 symlinks=symlinks,
-                skip=skip_model_symlinks,
+                skip=skip_environment_mount_symlinks,
             )
 
-    model_path: Path | None = None
-    if ref_dir is not None:
-        for candidate in (ref_dir / "model", ref_dir.parent / "model"):
-            if candidate.is_symlink() or candidate.is_dir():
-                model_path = candidate
-                break
-    if model_path is not None:
-        resolved = model_path.resolve()
+    passthrough_paths: list[str] = []
+    for mount in request.environment_bind_mounts:
+        resolved = mount.host_path.resolve()
         host_path = _find_mount_root(resolved)
         if host_path == resolved:
-            bind_mounts.append((str(host_path), "/model", True))
+            bind_mounts.append((str(host_path), mount.container_path, mount.read_only))
         else:
             rel = resolved.relative_to(host_path)
-            ancestor_mount = "/workspace/_mounts/model"
-            bind_mounts.append((str(host_path), ancestor_mount, True))
-            symlinks.append(("/model", f"{ancestor_mount}/{rel}"))
-
-    if ref_dir is not None:
-        for candidate in (ref_dir / "draft_model", ref_dir.parent / "draft_model"):
-            if candidate.is_symlink() or candidate.is_dir():
-                resolved = candidate.resolve()
-                host_path = _find_mount_root(resolved)
-                if host_path == resolved:
-                    bind_mounts.append((str(host_path), "/draft_model", True))
-                else:
-                    rel = resolved.relative_to(host_path)
-                    ancestor_mount = "/workspace/_mounts/draft_model"
-                    bind_mounts.append((str(host_path), ancestor_mount, True))
-                    symlinks.append(("/draft_model", f"{ancestor_mount}/{rel}"))
-                break
+            mount_name = mount.container_path.strip("/").replace("/", "_") or "environment_mount"
+            ancestor_mount = f"/workspace/_mounts/{mount_name}"
+            bind_mounts.append((str(host_path), ancestor_mount, mount.read_only))
+            symlinks.append((mount.container_path, f"{ancestor_mount}/{rel}"))
+        if mount.container_path.startswith("/"):
+            passthrough_paths.append(mount.container_path)
 
     if request.acc_checker_path:
         bind_mounts.append((request.acc_checker_path, "/workspace/acc_checker", True))
@@ -776,7 +763,7 @@ def _container_mount_plan(
         bind_mounts.extend(auth_bind_mounts(request.cli_provider))
         bind_mounts.append((str(request.project_root), "/opt/vibeserve", True))
 
-    return bind_mounts, symlinks, model_path
+    return bind_mounts, symlinks, passthrough_paths
 
 
 def _cli_container_setup(

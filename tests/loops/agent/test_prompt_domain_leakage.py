@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from vibe_serve.loops.agent.domain import render_domain_section, resolve_domain
+from vibe_serve.domains.registry import resolve_domain
+from vibe_serve.domains.rendering import render_domain_section
 from vibe_serve.prompts import render_template
 
 _TEMPLATE_DIR = (

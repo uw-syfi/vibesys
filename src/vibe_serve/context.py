@@ -1,4 +1,4 @@
-"""Shared run context: _RunContext, setup_exp_dir, _TeeWriter, _ensure_model_weights."""
+"""Shared run context: _RunContext, setup_exp_dir, and _TeeWriter."""
 
 import json
 import os
@@ -21,6 +21,11 @@ from vibe_serve.constants import (
     DEFAULT_COMPUTE_BACKEND,
     PROJECT_ROOT,
     ComputeBackend,
+)
+from vibe_serve.domains.environment import (
+    EnvironmentContext,
+    EnvironmentHooks,
+    NoopEnvironmentHooks,
 )
 from vibe_serve.llm_client import _build_model
 from vibe_serve.sandbox.run_environment import (
@@ -55,43 +60,6 @@ def setup_exp_dir(
             check=True,
         )
     return exp_dir
-
-
-def _ensure_model_weights(ref_dir: Path) -> None:
-    """Ensure model weights exist in ref_dir/model, downloading if needed."""
-    model_path = ref_dir / "model"
-
-    # Remove broken symlink if present
-    if model_path.is_symlink() and not model_path.exists():
-        model_path.unlink()
-
-    # Already exists (real dir or valid symlink)
-    if model_path.exists():
-        return
-
-    # Read meta.json for download info
-    meta_path = ref_dir / "meta.json"
-    if not meta_path.exists():
-        raise FileNotFoundError(
-            f"Model weights not found at {model_path} and no meta.json to download from. "
-            f"Either create a model/ directory/symlink or add a meta.json with model_id."
-        )
-
-    meta = json.loads(meta_path.read_text())
-    model_id = meta.get("model_id")
-    if not model_id:
-        raise ValueError(f"meta.json at {meta_path} missing required 'model_id' field")
-
-    revision = meta.get("revision")
-
-    cache_dir = PROJECT_ROOT / ".hf_cache"
-    print(f"[model] Weights not found at {model_path}. Downloading {model_id} to {cache_dir}...")
-    from huggingface_hub import snapshot_download
-
-    downloaded_path = snapshot_download(model_id, revision=revision, cache_dir=str(cache_dir))
-
-    model_path.symlink_to(downloaded_path)
-    print(f"[model] Created symlink {model_path} -> {downloaded_path}")
 
 
 class _TeeWriter:
@@ -145,6 +113,7 @@ class _RunContext:
         agent_backend: str | None = None,
         cli_provider: str | None = None,
         backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
+        environment_hooks: EnvironmentHooks | None = None,
     ):
         config = as_config(config)
         self.backend: ComputeBackend = backend
@@ -276,6 +245,16 @@ class _RunContext:
                 log=self.lprint,
             )
 
+        self.environment_hooks = environment_hooks or NoopEnvironmentHooks()
+        self.environment_context = EnvironmentContext(
+            reference_path=ref_path,
+            workspace=self.workspace,
+            run_environment=self.run_environment,
+            project_root=PROJECT_ROOT,
+            log=self.lprint,
+        )
+        self.environment_patch = self.environment_hooks.prepare(self.environment_context)
+
         # Always refresh skills into the workspace (even on --resume). Skill
         # source is tiny (MB) and copying is cheap; without this, an
         # interrupted run leaves stale skills from the previous CLI version
@@ -306,15 +285,11 @@ class _RunContext:
                     shutil.rmtree(d)
 
             if ref_dir is not None:
-                # Modal handles model weights via a remote Volume, so we
-                # skip the local HF download (saves ~30 GB of local cache).
-                # We still fall back to the local path if meta.json is absent.
-                if (
-                    self.run_environment.materialize_local_model_weights
-                    or (ref_dir / "meta.json").exists() is False
-                ):
-                    _ensure_model_weights(ref_dir)
-                self._copy_excluding_extras(ref_dir, self.workspace / "reference")
+                self._copy_excluding_extras(
+                    ref_dir,
+                    self.workspace / "reference",
+                    extra_excludes=self.environment_patch.copy_excludes,
+                )
             else:
                 if (self.workspace / ref_script.name).exists():
                     (self.workspace / ref_script.name).unlink()
@@ -375,6 +350,7 @@ class _RunContext:
                     nsys_profiler_path=self.nsys_profiler_path,
                     torch_profiler_path=self.torch_profiler_path,
                     neuron_profiler_path=self.neuron_profiler_path,
+                    environment_bind_mounts=self.environment_patch.bind_mounts,
                     log=self.lprint,
                     project_root=PROJECT_ROOT,
                 )
@@ -541,8 +517,14 @@ class _RunContext:
                     path.unlink()
                     marker.write_text(str(target))
 
-    def _copy_excluding_extras(self, src: Path, dst: Path) -> None:
-        skip = self.EXCLUDED_WORKSPACE_DIRS | {"_mounts"}
+    def _copy_excluding_extras(
+        self,
+        src: Path,
+        dst: Path,
+        *,
+        extra_excludes: frozenset[str] = frozenset(),
+    ) -> None:
+        skip = self.EXCLUDED_WORKSPACE_DIRS | {"_mounts"} | set(extra_excludes)
 
         def _ignore(_: str, names: list[str]) -> list[str]:
             return [name for name in names if name in skip]
@@ -901,6 +883,11 @@ class _RunContext:
         if self.gpu_monitor is not None:
             self.gpu_monitor.stop()
         self._finalize_gpu_metadata()
+        if hasattr(self, "environment_hooks") and hasattr(self, "environment_context"):
+            try:
+                self.environment_hooks.teardown(self.environment_context)
+            except Exception as exc:
+                self.lprint(f"[warn] environment hook teardown failed: {exc}")
         self._run_environment_stack.close()
         sys.stderr = self._original_stderr
         self.run_log_file.close()

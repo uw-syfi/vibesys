@@ -15,7 +15,7 @@ Several flags look independent, but they combine into one execution contract:
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, or `cpu`. |
 | Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, Docker container, or Modal-backed workflow. |
 | Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, or `auto`. |
-| Domain | `--domain` | Agent-loop problem-space prompt pack, such as `llm-serving` or `generic`. |
+| Domain | `--domain` | Agent-loop problem-space package, such as `llm-serving` or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--no-skills` | Candidate skill roots and the ablation switch that disables skill loading. |
 | Target inputs | `--input`, `--ref`, `--acc-checker`, `--bench` | Target bundle directory, reference implementation, correctness checker, and benchmark harness. |
@@ -88,13 +88,15 @@ actually Python, and a CPU backend must not receive a GPU-kernel workflow.
 ## Domain and Modality
 
 `--domain` supplies cross-cutting problem-space context for the agent loop.
-Built-ins include:
+Registered domains include:
 
 | Domain | Meaning |
 | --- | --- |
 | `llm-serving` | Default LLM-serving guidance, including serving-system skills and judge gates. |
 | `generic` | No extra domain guidance. Useful for custom/non-LLM targets. |
-| path to `.md` | Custom domain pack. |
+
+New domains are added in source by registering a domain package with optional
+environment setup/teardown hooks.
 
 `--modality` supplies the task I/O contract, such as text generation or
 speech-to-text. Domains should avoid hardcoding modality or interface

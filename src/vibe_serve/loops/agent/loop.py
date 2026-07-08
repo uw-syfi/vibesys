@@ -16,12 +16,10 @@ from vibe_serve.agents.progress import RoundProgress
 from vibe_serve.config import Config
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
+from vibe_serve.domains.base import DEFAULT_DOMAIN, DomainDefinition, DomainName, DomainRole
+from vibe_serve.domains.registry import resolve_domain
+from vibe_serve.domains.rendering import render_domain_section
 from vibe_serve.loops.agent import issue_board
-from vibe_serve.loops.agent.domain import (
-    DEFAULT_DOMAIN,
-    render_domain_section,
-    resolve_domain,
-)
 from vibe_serve.loops.profiler import invoke_profiler
 from vibe_serve.prompts import render_template
 from vibe_serve.sandbox.run_environment import (
@@ -282,13 +280,15 @@ def _run_profiler(
     profile_focus: str,
     modality: str | None,
     interface: str,
-    domain_path: Path,
+    domain_definition: DomainDefinition,
     progress_path: Path,
     objective: str,
 ) -> ProfilerSummary | None:
     template = _profiler_prompt_template(ctx.profiler_kind, interface)
     domain_profiler = render_domain_section(
-        domain_path, "profiler", **_domain_render_context(ctx, modality, interface)
+        domain_definition,
+        DomainRole.PROFILER,
+        **_domain_render_context(ctx, modality, interface),
     )
     system_prompt = render_template(
         template,
@@ -316,15 +316,15 @@ def _run_profiler(
 def _domain_render_context(
     ctx: _RunContext, modality: str | None, interface: str
 ) -> dict[str, object]:
-    """The uniform variable set every domain ``## <role>`` section is rendered with.
+    """The uniform variable set every domain role file is rendered with.
 
     One context contract for all roles: a pack author can branch (``{% if … %}``)
-    on any of these in any role section without memorizing which the loop happens
+    on any of these in any role file without memorizing which the loop happens
     to pass to which role. Variables that don't apply to the current run are
     falsy (``bench_path`` / ``accuracy_checker_path`` when nothing is attached),
     so ``{% if bench_path %}`` works everywhere. ``interface`` lets a
     language-agnostic pack drop its in-process/Python-specific gates under
-    ``--interface service``. See ``templates/_domain/README.md``.
+    ``--interface service``. See ``vibe_serve/domains/README.md``.
     """
     return {
         "modality": modality,
@@ -348,10 +348,12 @@ def _run_orchestrator_plan(
     plateau_warning: str | None,
     modality: str | None,
     interface: str,
-    domain_path: Path,
+    domain_definition: DomainDefinition,
 ) -> OrchestratorPlan:
     domain_orchestrator = render_domain_section(
-        domain_path, "orchestrator", **_domain_render_context(ctx, modality, interface)
+        domain_definition,
+        DomainRole.ORCHESTRATOR,
+        **_domain_render_context(ctx, modality, interface),
     )
     system_prompt = render_template(
         "orchestrator_plan_prompt.j2",
@@ -390,12 +392,14 @@ def _run_implementer(
     plan: OrchestratorPlan,
     modality: str | None,
     interface: str,
-    domain_path: Path,
+    domain_definition: DomainDefinition,
     feedback: str | None,
     progress_path: Path,
 ) -> ImplementerResponse:
     domain_implementer = render_domain_section(
-        domain_path, "implementer", **_domain_render_context(ctx, modality, interface)
+        domain_definition,
+        DomainRole.IMPLEMENTER,
+        **_domain_render_context(ctx, modality, interface),
     )
     system_prompt = render_template(
         "implementer_prompt.j2",
@@ -437,12 +441,14 @@ def _run_judge(
     plan: OrchestratorPlan,
     modality: str | None,
     interface: str,
-    domain_path: Path,
+    domain_definition: DomainDefinition,
     progress_path: Path,
     objective: str,
 ) -> JudgeResponse:
     domain_judge = render_domain_section(
-        domain_path, "judge", **_domain_render_context(ctx, modality, interface)
+        domain_definition,
+        DomainRole.JUDGE,
+        **_domain_render_context(ctx, modality, interface),
     )
     system_prompt = render_template(
         "judge_prompt.j2",
@@ -485,7 +491,7 @@ def _run_single_agent_round(
     plan: OrchestratorPlan,
     modality: str | None,
     interface: str,
-    domain_path: Path,
+    domain_definition: DomainDefinition,
     feedback: str | None,
     progress_path: Path,
     objective: str,
@@ -498,10 +504,14 @@ def _run_single_agent_round(
     workspace write access plus shell access for benchmarks/profiling.
     """
     domain_single_agent = render_domain_section(
-        domain_path, "single_agent", **_domain_render_context(ctx, modality, interface)
+        domain_definition,
+        DomainRole.SINGLE_AGENT,
+        **_domain_render_context(ctx, modality, interface),
     )
     domain_profiler = render_domain_section(
-        domain_path, "profiler", **_domain_render_context(ctx, modality, interface)
+        domain_definition,
+        DomainRole.PROFILER,
+        **_domain_render_context(ctx, modality, interface),
     )
     system_prompt = render_template(
         "single_agent_round_prompt.j2",
@@ -590,7 +600,7 @@ def run_agent_loop(
     backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
     modality: str | None = None,
     inner_loop: str = "multi-agent",
-    domain: str = DEFAULT_DOMAIN,
+    domain: str | DomainName = DEFAULT_DOMAIN,
     interface: str = DEFAULT_INTERFACE,
 ) -> bool:
     """Run the orchestrator-driven build loop.
@@ -624,12 +634,12 @@ def run_agent_loop(
         )
     if interface not in _INTERFACES:
         raise ValueError(f"Unknown interface {interface!r}; choose from {', '.join(_INTERFACES)}")
-    # Resolve the domain pack once (fail fast on an unknown name/path). The
-    # per-role sections are parsed and rendered into the prompts at each call
-    # site. The implementation language is not a pack — ``interface`` carries it
+    # Resolve the registered domain once (fail fast on an unknown name). The
+    # per-role files are rendered into the prompts at each call site. The
+    # implementation language is not a pack — ``interface`` carries it
     # (``inprocess`` pins Python; ``service`` leaves it to the agent).
-    domain_path = resolve_domain(domain)
-    if modality is None and domain_path.stem == DEFAULT_DOMAIN:
+    domain_definition = resolve_domain(domain)
+    if modality is None and domain_definition.name is DomainName.LLM_SERVING:
         modality = "text_generation"
     run_environment = run_environment or make_run_environment_spec()
     ctx = _RunContext(
@@ -650,6 +660,7 @@ def run_agent_loop(
         agent_backend=agent_backend,
         cli_provider=cli_provider,
         backend=backend,
+        environment_hooks=domain_definition.environment_hooks,
     )
     ctx.lprint(f"[log] orchestrate run: {ctx.run_log_path}")
     ctx.lprint(f"[log] experiment root: {ctx.exp_dir}")
@@ -704,7 +715,7 @@ def run_agent_loop(
                             or "general steady-state benchmark hotspots",
                             modality=modality,
                             interface=interface,
-                            domain_path=domain_path,
+                            domain_definition=domain_definition,
                             progress_path=progress_path,
                             objective=objective,
                         )
@@ -730,7 +741,7 @@ def run_agent_loop(
                     plateau_warning=plateau_warning,
                     modality=modality,
                     interface=interface,
-                    domain_path=domain_path,
+                    domain_definition=domain_definition,
                 )
 
                 # No early stop: the loop always consumes the full max_rounds
@@ -770,7 +781,7 @@ def run_agent_loop(
                             plan=plan,
                             modality=modality,
                             interface=interface,
-                            domain_path=domain_path,
+                            domain_definition=domain_definition,
                             feedback=feedback,
                             progress_path=progress_path,
                         )
@@ -782,7 +793,7 @@ def run_agent_loop(
                             plan=plan,
                             modality=modality,
                             interface=interface,
-                            domain_path=domain_path,
+                            domain_definition=domain_definition,
                             progress_path=progress_path,
                             objective=objective,
                         )
@@ -799,7 +810,7 @@ def run_agent_loop(
                             plan=plan,
                             modality=modality,
                             interface=interface,
-                            domain_path=domain_path,
+                            domain_definition=domain_definition,
                             feedback=feedback,
                             progress_path=progress_path,
                             objective=objective,
