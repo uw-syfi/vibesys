@@ -32,6 +32,7 @@ from vibe_serve.agents.progress import RoundProgress
 from vibe_serve.config import Config, as_config
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
+from vibe_serve.domain_runtime import runtime_for_domain_name
 from vibe_serve.loops.plain.render import render_all
 from vibe_serve.loops.plain.runner_ext import PlainLoopAgentRunner
 from vibe_serve.prompts import Prompt
@@ -384,6 +385,7 @@ def run_plain_loop(
         agent_backend=agent_backend,
         cli_provider=cli_provider,
         backend=backend,
+        domain_runtime=runtime_for_domain_name("llm-serving"),
     ) as ctx:
         ctx.lprint(f"[log] experiment log: {ctx.run_log_path}")
         ctx.lprint(f"[log] experiment root: {ctx.exp_dir}")

@@ -17,6 +17,7 @@ import random
 from vibe_serve.agents.progress import CandidateProgress
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
+from vibe_serve.domain_runtime import runtime_for_domain_name
 from vibe_serve.loops.evolve.loop import (
     _checkout_commit_tree,
     _current_commit_sha,
@@ -89,6 +90,7 @@ def run_openevolve_loop(
         agent_backend=agent_backend,
         cli_provider=cli_provider,
         backend=backend,
+        domain_runtime=runtime_for_domain_name("llm-serving"),
     )
     ctx.lprint(f"[log] openevolve run: {ctx.run_log_path}")
     ctx.lprint(f"[log] experiment root: {ctx.exp_dir}")

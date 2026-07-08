@@ -16,6 +16,7 @@ from vibe_serve.agents.progress import RoundProgress
 from vibe_serve.config import Config
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
+from vibe_serve.domain_runtime import runtime_for_domain_name
 from vibe_serve.loops.agent import issue_board
 from vibe_serve.loops.agent.domain import (
     DEFAULT_DOMAIN,
@@ -629,6 +630,7 @@ def run_agent_loop(
     # site. The implementation language is not a pack — ``interface`` carries it
     # (``inprocess`` pins Python; ``service`` leaves it to the agent).
     domain_path = resolve_domain(domain)
+    domain_runtime = runtime_for_domain_name(domain_path.stem)
     if modality is None and domain_path.stem == DEFAULT_DOMAIN:
         modality = "text_generation"
     run_environment = run_environment or make_run_environment_spec()
@@ -650,6 +652,7 @@ def run_agent_loop(
         agent_backend=agent_backend,
         cli_provider=cli_provider,
         backend=backend,
+        domain_runtime=domain_runtime,
     )
     ctx.lprint(f"[log] orchestrate run: {ctx.run_log_path}")
     ctx.lprint(f"[log] experiment root: {ctx.exp_dir}")

@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vibe_serve.context import _RunContext
+from vibe_serve.domain_runtime import NoopDomainRuntime
 from vibe_serve.sandbox.run_environment import RunEnvironmentSpec
 
 
@@ -54,3 +55,27 @@ def test_run_context_defaults_profiler_support_paths(tmp_path, profiler_kind, at
     ):
         assert getattr(ctx, attr) == str(source_dir)
         assert (ctx.workspace / workspace_name / "server.py").is_file()
+
+
+def test_run_context_generic_runtime_does_not_require_model_artifacts(tmp_path):
+    project_root = tmp_path / "project"
+    ref_dir = tmp_path / "queue" / "reference"
+    ref_dir.mkdir(parents=True)
+    (ref_dir / "reference.py").write_text("pass\n")
+
+    with (
+        patch("vibe_serve.context.PROJECT_ROOT", project_root),
+        patch("vibe_serve.context._build_model", return_value="mock-model"),
+        patch("vibe_serve.context.build_agent_runner", return_value=MagicMock()),
+        patch("vibe_serve.context.backends.get", return_value=_FakeBackend()),
+        _RunContext(
+            config={"model": {"name": "claude-sonnet-4-6"}},
+            exp_name="generic-reference-dir",
+            reference_path=str(ref_dir),
+            skills_dirs=[],
+            run_environment=RunEnvironmentSpec("local"),
+            domain_runtime=NoopDomainRuntime(),
+        ) as ctx,
+    ):
+        assert (ctx.workspace / "reference" / "reference.py").is_file()
+        assert not (ref_dir / "model").exists()
