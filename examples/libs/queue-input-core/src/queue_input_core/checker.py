@@ -10,8 +10,9 @@ import threading
 import time
 from pathlib import Path
 
-from queue_harness.config import load_config
-from queue_harness.reference import SCENARIOS, QueueFactory
+from queue_input_core.config import load_config
+from queue_input_core.contract import SCENARIOS, get_contract
+from queue_input_core.reference import QueueFactory
 
 
 def _load_candidate():
@@ -79,10 +80,11 @@ def _run_porcupine_checker(history, capacity):
 
 
 def _check_linearizable_queue(cls, scenario, capacity, ops, producers, consumers, seed):
-    if scenario == "spsc":
-        producers, consumers = 1, 1
-    elif scenario == "mpsc":
-        consumers = 1
+    contract = get_contract(scenario)
+    if not contract.configurable_producers:
+        producers = contract.default_producers
+    if not contract.configurable_consumers:
+        consumers = contract.default_consumers
 
     queue = cls(scenario=scenario, capacity=capacity)
     total_clients = producers + consumers
@@ -220,9 +222,16 @@ def _check_batch(cls, capacity, ops, seed):
 def main(default_scenario: str | None = None):
     config = load_config()
     scenario_default = default_scenario or config.scenario or "all"
-    capacity_default = config.capacity or 64
-    producers_default = config.producers or 4
-    consumers_default = config.consumers or 4
+    contract_default = get_contract(scenario_default) if scenario_default != "all" else None
+    capacity_default = config.capacity or (
+        contract_default.default_capacity if contract_default else 64
+    )
+    producers_default = config.producers or (
+        contract_default.default_producers if contract_default else 4
+    )
+    consumers_default = config.consumers or (
+        contract_default.default_consumers if contract_default else 4
+    )
 
     parser = argparse.ArgumentParser(
         description="Correctness checker for VibeServe queue scenarios."
@@ -249,7 +258,8 @@ def main(default_scenario: str | None = None):
     for scenario in targets:
         print(f"[{scenario.upper()}] Checking ...")
         try:
-            if scenario in {"spsc", "mpsc", "mpmc"}:
+            contract = get_contract(scenario)
+            if contract.linearizable_fifo:
                 ok, msg = _check_linearizable_queue(
                     cls,
                     scenario,
@@ -259,9 +269,9 @@ def main(default_scenario: str | None = None):
                     args.consumers,
                     args.seed,
                 )
-            elif scenario == "lossy":
+            elif contract.lossy:
                 ok, msg = _check_lossy(cls, args.capacity, args.ops, args.seed)
-            elif scenario == "batch":
+            elif contract.batched_dequeue:
                 ok, msg = _check_batch(cls, args.capacity, args.ops, args.seed)
             else:
                 ok, msg = False, f"Unknown scenario: {scenario}"

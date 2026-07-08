@@ -7,8 +7,9 @@ import threading
 import time
 from pathlib import Path
 
-from queue_harness.config import load_config
-from queue_harness.reference import SCENARIOS, QueueFactory
+from queue_input_core.config import load_config
+from queue_input_core.contract import SCENARIOS, get_contract
+from queue_input_core.reference import QueueFactory
 
 
 def _load_candidate():
@@ -103,9 +104,16 @@ def _run(queue, scenario, duration, warmup, producers, consumers, item_bytes):
 def main(default_scenario: str | None = None):
     config = load_config()
     scenario_default = default_scenario or config.scenario or "spsc"
-    capacity_default = config.capacity or 1024
-    producers_default = config.producers or 1
-    consumers_default = config.consumers or 1
+    contract_default = get_contract(scenario_default) if scenario_default != "all" else None
+    capacity_default = config.capacity or (
+        contract_default.default_capacity if contract_default else 1024
+    )
+    producers_default = config.producers or (
+        contract_default.default_producers if contract_default else 1
+    )
+    consumers_default = config.consumers or (
+        contract_default.default_consumers if contract_default else 1
+    )
 
     parser = argparse.ArgumentParser(
         description="Throughput benchmark for VibeServe queue scenarios."
@@ -123,8 +131,9 @@ def main(default_scenario: str | None = None):
     targets = SCENARIOS if args.scenario == "all" else [args.scenario]
     results = []
     for s in targets:
-        n_prod = args.producers if s in ("mpmc", "mpsc") else 1
-        n_cons = args.consumers if s == "mpmc" else 1
+        contract = get_contract(s)
+        n_prod = args.producers if contract.configurable_producers else contract.default_producers
+        n_cons = args.consumers if contract.configurable_consumers else contract.default_consumers
         if args.use_reference:
             q = QueueFactory(s, args.capacity)
         else:

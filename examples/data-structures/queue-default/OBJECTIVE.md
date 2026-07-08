@@ -1,4 +1,4 @@
-# Objective - Queue default harness
+# Objective - Queue default input
 
 Maximize throughput (operations/second) of a concurrent queue under the
 workload defined by the active scenario, while satisfying correctness invariants.

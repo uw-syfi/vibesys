@@ -3,6 +3,10 @@ from __future__ import annotations
 import threading
 from collections import deque
 
+from queue_input_core.contract import SCENARIOS
+
+__all__ = ["QueueFactory", "SCENARIOS"]
+
 
 class _BoundedQueue:
     def __init__(self, capacity):
@@ -112,9 +116,11 @@ _SCENARIO_MAP = {
     "lossy": LossyQueue,
     "batch": BatchSPSCQueue,
 }
-SCENARIOS = list(_SCENARIO_MAP)
 
 
 def QueueFactory(scenario, capacity=1024):
-    cls = _SCENARIO_MAP.get(scenario)
+    try:
+        cls = _SCENARIO_MAP[scenario]
+    except KeyError as exc:
+        raise ValueError(f"Unknown queue scenario: {scenario}") from exc
     return cls(capacity=capacity)

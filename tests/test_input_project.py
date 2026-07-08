@@ -29,12 +29,12 @@ def test_discover_input_project_finds_pyproject_next_to_reference(tmp_path):
 
 def test_materialize_input_project_copies_and_rewrites_explicit_lib_path_deps(tmp_path):
     project_root = tmp_path / "project"
-    harness = project_root / "examples" / "libs" / "queue-harness"
-    harness.mkdir(parents=True)
-    (harness / "pyproject.toml").write_text(
-        "[project]\nname = 'queue-harness'\nversion = '0.1.0'\n"
+    input_core = project_root / "examples" / "libs" / "queue-input-core"
+    input_core.mkdir(parents=True)
+    (input_core / "pyproject.toml").write_text(
+        "[project]\nname = 'queue-input-core'\nversion = '0.1.0'\n"
     )
-    (harness / "harness.py").write_text("VALUE = 1\n")
+    (input_core / "core.py").write_text("VALUE = 1\n")
 
     input_dir = project_root / "examples" / "data-structures" / "queue-spsc"
     input_dir.mkdir(parents=True)
@@ -42,10 +42,10 @@ def test_materialize_input_project_copies_and_rewrites_explicit_lib_path_deps(tm
         "[project]\n"
         "name = 'queue-spsc-input'\n"
         "version = '0.1.0'\n"
-        "dependencies = ['queue-harness']\n"
+        "dependencies = ['queue-input-core']\n"
         "\n"
         "[tool.uv.sources]\n"
-        "queue-harness = { path = '../../libs/queue-harness', editable = true }\n"
+        "queue-input-core = { path = '../../libs/queue-input-core', editable = true }\n"
     )
     (input_dir / "pyproject.toml").write_text(source_pyproject)
 
@@ -59,10 +59,10 @@ def test_materialize_input_project_copies_and_rewrites_explicit_lib_path_deps(tm
         copy_dir=_copy_dir,
     )
 
-    assert [dependency.name for dependency in dependencies] == ["queue-harness"]
-    assert (workspace / "_input_libs" / "queue-harness" / "harness.py").read_text() == "VALUE = 1\n"
+    assert [dependency.name for dependency in dependencies] == ["queue-input-core"]
+    assert (workspace / "_input_libs" / "queue-input-core" / "core.py").read_text() == "VALUE = 1\n"
     assert (
-        "queue-harness = { path = '_input_libs/queue-harness', editable = true }\n"
+        "queue-input-core = { path = '_input_libs/queue-input-core', editable = true }\n"
         in (workspace / "pyproject.toml").read_text()
     )
     assert (input_dir / "pyproject.toml").read_text() == source_pyproject
@@ -72,13 +72,13 @@ def test_materialize_input_project_copies_transitive_examples_lib_deps(tmp_path)
     project_root = tmp_path / "project"
     libs = project_root / "examples" / "libs"
     common = libs / "queue-common"
-    harness = libs / "queue-harness"
+    input_core = libs / "queue-input-core"
     common.mkdir(parents=True)
-    harness.mkdir()
+    input_core.mkdir()
     (common / "pyproject.toml").write_text("[project]\nname = 'queue-common'\nversion = '0.1.0'\n")
-    (harness / "pyproject.toml").write_text(
+    (input_core / "pyproject.toml").write_text(
         "[project]\n"
-        "name = 'queue-harness'\n"
+        "name = 'queue-input-core'\n"
         "version = '0.1.0'\n"
         "dependencies = ['queue-common']\n"
         "\n"
@@ -92,10 +92,10 @@ def test_materialize_input_project_copies_transitive_examples_lib_deps(tmp_path)
         "[project]\n"
         "name = 'queue-mpsc-input'\n"
         "version = '0.1.0'\n"
-        "dependencies = ['queue-harness']\n"
+        "dependencies = ['queue-input-core']\n"
         "\n"
         "[tool.uv.sources]\n"
-        "queue-harness = { path = '../../libs/queue-harness', editable = true }\n"
+        "queue-input-core = { path = '../../libs/queue-input-core', editable = true }\n"
     )
 
     workspace = tmp_path / "workspace"
@@ -110,12 +110,12 @@ def test_materialize_input_project_copies_transitive_examples_lib_deps(tmp_path)
 
     assert [dependency.name for dependency in dependencies] == [
         "queue-common",
-        "queue-harness",
+        "queue-input-core",
     ]
     assert (workspace / "_input_libs" / "queue-common" / "pyproject.toml").is_file()
-    harness_pyproject = workspace / "_input_libs" / "queue-harness" / "pyproject.toml"
+    input_core_pyproject = workspace / "_input_libs" / "queue-input-core" / "pyproject.toml"
     assert "queue-common = { path = '../queue-common', editable = true }\n" in (
-        harness_pyproject.read_text()
+        input_core_pyproject.read_text()
     )
 
 

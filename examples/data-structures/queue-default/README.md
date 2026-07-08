@@ -4,7 +4,7 @@ Resolves #43.
 
 Default input for the five initial VibeServe queue scenarios. The reusable
 reference implementations, correctness checker, and benchmark driver live in
-the `queue-harness` package under `examples/libs/queue-harness`; this input
+the `queue-input-core` package under `examples/libs/queue-input-core`; this input
 depends on that package with a uv path dependency.
 
 ## Running the correctness checker
@@ -31,4 +31,4 @@ Notes:
 
 - Each reference implementation passes its scenario correctness checker.
 - The benchmark runs each scenario without changing benchmark code.
-- Scenario issues can reference this harness without restating shared terminology.
+- Scenario issues can reference this input core without restating shared terminology.

@@ -3,15 +3,15 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "queue-harness"
+name = "queue-input-core"
 version = "0.1.0"
-description = "Reusable queue reference, checker, and benchmark harness for VibeServe inputs"
+description = "Shared queue input contracts, references, checkers, and benchmarks for VibeServe examples"
 requires-python = ">=3.11"
 dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["queue_harness*"]
+include = ["queue_input_core*"]
 
 [tool.setuptools.package-data]
-queue_harness = ["porcupine_checker/*"]
+queue_input_core = ["porcupine_checker/*"]
