@@ -17,6 +17,7 @@ from vibe_serve.loops.agent.domain import (
     DEFAULT_DOMAIN,
     DOMAIN_ROLES,
     DOMAINS,
+    DomainDefinition,
     DomainName,
     DomainRole,
     registered_domains,
@@ -28,6 +29,14 @@ from vibe_serve.prompts import render_template
 _TEMPLATE_DIR = (
     Path(__file__).resolve().parents[3] / "src" / "vibe_serve" / "loops" / "agent" / "templates"
 )
+
+
+def _temporary_domain(prompt_dir: Path) -> DomainDefinition:
+    return DomainDefinition(
+        name=DomainName.GENERIC,
+        prompt_dir=prompt_dir,
+        environment_hooks=NoopEnvironmentHooks(),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -76,7 +85,7 @@ def test_render_missing_role_is_empty(tmp_path: Path):
     domain_dir = tmp_path / "domain"
     domain_dir.mkdir()
     (domain_dir / "README.md").write_text("# Just docs, no role files\n")
-    assert render_domain_section(domain_dir, DomainRole.IMPLEMENTER) == ""
+    assert render_domain_section(_temporary_domain(domain_dir), DomainRole.IMPLEMENTER) == ""
 
 
 def test_render_empty_role_is_empty():
@@ -112,8 +121,9 @@ def test_role_file_keeps_markdown_headings(tmp_path: Path):
     )
     (domain_dir / "judge.md").write_text("JUDGE-BODY\n")
 
-    impl = render_domain_section(domain_dir, DomainRole.IMPLEMENTER)
-    judge = render_domain_section(domain_dir, DomainRole.JUDGE)
+    d = _temporary_domain(domain_dir)
+    impl = render_domain_section(d, DomainRole.IMPLEMENTER)
+    judge = render_domain_section(d, DomainRole.JUDGE)
 
     assert "IMPL-BEFORE" in impl
     assert "## Required:" in impl
@@ -143,8 +153,9 @@ def test_render_role_branches_on_interface(tmp_path: Path):
     (domain_dir / "judge.md").write_text(
         '{% if interface != "service" %}IN_PROCESS_GATE{% endif %}\n'
     )
-    inprocess = render_domain_section(domain_dir, DomainRole.JUDGE, interface="inprocess")
-    service = render_domain_section(domain_dir, DomainRole.JUDGE, interface="service")
+    d = _temporary_domain(domain_dir)
+    inprocess = render_domain_section(d, DomainRole.JUDGE, interface="inprocess")
+    service = render_domain_section(d, DomainRole.JUDGE, interface="service")
     assert "IN_PROCESS_GATE" in inprocess
     assert "IN_PROCESS_GATE" not in service
 
@@ -164,7 +175,7 @@ def test_single_agent_derives_from_implementer_and_judge(tmp_path: Path):
     domain_dir.mkdir()
     (domain_dir / "implementer.md").write_text("IMPL-BODY\n")
     (domain_dir / "judge.md").write_text("JUDGE-BODY\n")
-    sa = render_domain_section(domain_dir, DomainRole.SINGLE_AGENT)
+    sa = render_domain_section(_temporary_domain(domain_dir), DomainRole.SINGLE_AGENT)
     assert "IMPL-BODY" in sa
     assert "JUDGE-BODY" in sa
 

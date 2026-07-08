@@ -110,10 +110,6 @@ def _coerce_role(role: DomainRole | str) -> DomainRole:
         ) from exc
 
 
-def _domain_prompt_dir(domain: DomainDefinition | Path) -> Path:
-    return domain.prompt_dir if isinstance(domain, DomainDefinition) else domain
-
-
 def _load_role_file(domain_dir: Path, role: DomainRole) -> str | None:
     role_file = domain_dir / f"{role.value}.md"
     if not role_file.is_file():
@@ -122,7 +118,7 @@ def _load_role_file(domain_dir: Path, role: DomainRole) -> str | None:
 
 
 def render_domain_section(
-    domain: DomainDefinition | Path,
+    domain: DomainDefinition,
     role: DomainRole | str,
     **context: object,
 ) -> str:
@@ -139,7 +135,7 @@ def render_domain_section(
     ``{{ domain_<role> }}`` injection point.
     """
     role_name = _coerce_role(role)
-    domain_dir = _domain_prompt_dir(domain)
+    domain_dir = domain.prompt_dir
     raw = _load_role_file(domain_dir, role_name)
     if raw is None and role_name is DomainRole.SINGLE_AGENT:
         raw = "\n\n".join(
