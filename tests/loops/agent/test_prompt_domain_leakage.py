@@ -132,6 +132,7 @@ def _render_prompt_bundle(domain: str, *, modality: str | None) -> dict[str, str
             profiler_kind="nsys",
             profile_focus="",
             domain_single_agent=_domain_section(domain, "single_agent", context),
+            domain_profiler=_domain_section(domain, "profiler", context),
         ),
         "single_agent_torch": render_template(
             "single_agent_round_prompt.j2",
@@ -151,6 +152,7 @@ def _render_prompt_bundle(domain: str, *, modality: str | None) -> dict[str, str
             profiler_kind="torch",
             profile_focus="",
             domain_single_agent=_domain_section(domain, "single_agent", context),
+            domain_profiler=_domain_section(domain, "profiler", context),
         ),
         "orchestrator_pre_round": render_template(
             "orchestrator_pre_round_prompt.j2",

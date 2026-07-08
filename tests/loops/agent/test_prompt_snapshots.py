@@ -104,6 +104,7 @@ def _render_prompt(domain: str, role: str, context: dict[str, object]) -> str:
             profiler_kind="nsys",
             profile_focus="",
             domain_single_agent=_domain_section(domain, "single_agent", context),
+            domain_profiler=_domain_section(domain, "profiler", context),
         )
     if role == "orchestrator":
         return render_template(

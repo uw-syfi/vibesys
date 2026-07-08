@@ -49,6 +49,10 @@ The shared experiment workspace is your working directory. Reference implementat
 
 After (and only after) the implementation passes your self-judge gates, capture a profile so the orchestrator has a bottleneck signal for the next round.
 
+{% if domain_profiler %}
+{{ domain_profiler }}
+
+{% endif %}
 {% if profiler_kind == "torch" and interface != "service" %}
 Use `torch.profiler` via `torch_profiler/analyze_torch_profile.py` (or the `vibeserve-torch-profiler` MCP tools when attached). Start with `tables`, then `kernels` / `operators` / `cpu_overhead` / `memory` / `summary` as relevant.
 

@@ -500,6 +500,9 @@ def _run_single_agent_round(
     domain_single_agent = render_domain_section(
         domain_path, "single_agent", **_domain_render_context(ctx, modality, interface)
     )
+    domain_profiler = render_domain_section(
+        domain_path, "profiler", **_domain_render_context(ctx, modality, interface)
+    )
     system_prompt = render_template(
         "single_agent_round_prompt.j2",
         template_dir=_TEMPLATE_DIR,
@@ -507,6 +510,7 @@ def _run_single_agent_round(
         modality=modality,
         interface=interface,
         domain_single_agent=domain_single_agent,
+        domain_profiler=domain_profiler,
         task=plan.task,
         pass_criteria=plan.pass_criteria,
         retry=retry,
