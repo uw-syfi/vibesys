@@ -1,6 +1,7 @@
 """YCSB throughput benchmark against an already-running candidate server.
 
-Requires: Java 8+, YCSB at ./ycsb/ relative to this script.
+Requires: Java 8+. Downloads the pinned YCSB 0.17.0 Redis binding to ./ycsb/
+on first run if it is not already present.
 
 Reports steady-state throughput so the number reflects the server, not JVM/JIT
 warmup: one discarded warmup run primes the JVM/JIT/connections, then several
@@ -21,11 +22,20 @@ Usage:
 
 import argparse
 import json
+import shutil
 import statistics
 import subprocess
 import sys
+import tarfile
+import tempfile
+import urllib.request
 from pathlib import Path
 
+YCSB_VERSION = "0.17.0"
+YCSB_URL = (
+    f"https://github.com/brianfrankcooper/YCSB/releases/download/"
+    f"{YCSB_VERSION}/ycsb-redis-binding-{YCSB_VERSION}.tar.gz"
+)
 YCSB_HOME = Path(__file__).resolve().parent / "ycsb"
 
 WORKLOADS = {"a": "workloads/workloada", "b": "workloads/workloadb", "c": "workloads/workloadc"}
@@ -35,6 +45,22 @@ THROUGHPUT_KEY = "OVERALL.Throughput(ops/sec)"
 
 # Huge op-count cap so a run ends on maxexecutiontime, not on ops exhausted.
 _OP_CAP = 1_000_000_000
+
+
+def _ensure_ycsb() -> None:
+    if (YCSB_HOME / "bin" / "ycsb.sh").is_file():
+        return
+    print(f"Downloading YCSB {YCSB_VERSION} Redis binding...", file=sys.stderr)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        tarball = tmp / f"ycsb-redis-binding-{YCSB_VERSION}.tar.gz"
+        urllib.request.urlretrieve(YCSB_URL, tarball)
+        with tarfile.open(tarball, "r:gz") as tar:
+            tar.extractall(tmp)
+        extracted = tmp / f"ycsb-redis-binding-{YCSB_VERSION}"
+        if YCSB_HOME.exists():
+            shutil.rmtree(YCSB_HOME)
+        shutil.move(str(extracted), str(YCSB_HOME))
 
 
 def _run_ycsb(phase, workload, port, num_keys, threads, *, duration=None):
@@ -90,6 +116,8 @@ def main():
     parser.add_argument("--no-warmup", action="store_true", help="Skip the discarded warmup run.")
     parser.add_argument("--output-json", type=Path, default=None, help="Write the headline metrics to this path as JSON.")
     args = parser.parse_args()
+
+    _ensure_ycsb()
 
     workload_path = WORKLOADS[args.workload]
     _run_ycsb("load", workload_path, args.port, args.num_keys, args.threads)
