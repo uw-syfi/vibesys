@@ -213,6 +213,7 @@ def _render_single_agent(interface: str, profiler_kind: str = "torch") -> str:
         interface=interface,
         env_kind="local",
         domain_single_agent="",
+        domain_profiler="",
         task="TASK",
         pass_criteria="PC",
         retry=1,

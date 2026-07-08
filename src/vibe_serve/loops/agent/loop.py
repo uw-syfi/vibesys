@@ -280,18 +280,23 @@ def _run_profiler(
     *,
     round_number: int,
     profile_focus: str,
-    modality: str,
+    modality: str | None,
     interface: str,
+    domain_path: Path,
     progress_path: Path,
     objective: str,
 ) -> ProfilerSummary | None:
     template = _profiler_prompt_template(ctx.profiler_kind, interface)
+    domain_profiler = render_domain_section(
+        domain_path, "profiler", **_domain_render_context(ctx, modality, interface)
+    )
     system_prompt = render_template(
         template,
         template_dir=_TEMPLATE_DIR,
         profile_focus=profile_focus,
         bench_path=ctx.profiler_bench_path,
         modality=modality,
+        domain_profiler=domain_profiler,
         runtime_notes=ctx.run_environment_view.prompt_notes,
         env_kind=ctx.run_environment_view.env_kind,
         objective=objective,
@@ -308,7 +313,9 @@ def _run_profiler(
     return summary
 
 
-def _domain_render_context(ctx: _RunContext, modality: str, interface: str) -> dict[str, object]:
+def _domain_render_context(
+    ctx: _RunContext, modality: str | None, interface: str
+) -> dict[str, object]:
     """The uniform variable set every domain ``## <role>`` section is rendered with.
 
     One context contract for all roles: a pack author can branch (``{% if … %}``)
@@ -339,7 +346,7 @@ def _run_orchestrator_plan(
     progress_path: Path,
     roadmap_text: str,
     plateau_warning: str | None,
-    modality: str,
+    modality: str | None,
     interface: str,
     domain_path: Path,
 ) -> OrchestratorPlan:
@@ -381,7 +388,7 @@ def _run_implementer(
     round_number: int,
     retry: int,
     plan: OrchestratorPlan,
-    modality: str,
+    modality: str | None,
     interface: str,
     domain_path: Path,
     feedback: str | None,
@@ -428,7 +435,7 @@ def _run_judge(
     round_number: int,
     retry: int,
     plan: OrchestratorPlan,
-    modality: str,
+    modality: str | None,
     interface: str,
     domain_path: Path,
     progress_path: Path,
@@ -476,7 +483,7 @@ def _run_single_agent_round(
     round_number: int,
     retry: int,
     plan: OrchestratorPlan,
-    modality: str,
+    modality: str | None,
     interface: str,
     domain_path: Path,
     feedback: str | None,
@@ -493,6 +500,9 @@ def _run_single_agent_round(
     domain_single_agent = render_domain_section(
         domain_path, "single_agent", **_domain_render_context(ctx, modality, interface)
     )
+    domain_profiler = render_domain_section(
+        domain_path, "profiler", **_domain_render_context(ctx, modality, interface)
+    )
     system_prompt = render_template(
         "single_agent_round_prompt.j2",
         template_dir=_TEMPLATE_DIR,
@@ -500,6 +510,7 @@ def _run_single_agent_round(
         modality=modality,
         interface=interface,
         domain_single_agent=domain_single_agent,
+        domain_profiler=domain_profiler,
         task=plan.task,
         pass_criteria=plan.pass_criteria,
         retry=retry,
@@ -577,7 +588,7 @@ def run_agent_loop(
     agent_backend: str | None = None,
     cli_provider: str | None = None,
     backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
-    modality: str = "text_generation",
+    modality: str | None = None,
     inner_loop: str = "multi-agent",
     domain: str = DEFAULT_DOMAIN,
     interface: str = DEFAULT_INTERFACE,
@@ -618,6 +629,8 @@ def run_agent_loop(
     # site. The implementation language is not a pack — ``interface`` carries it
     # (``inprocess`` pins Python; ``service`` leaves it to the agent).
     domain_path = resolve_domain(domain)
+    if modality is None and domain_path.stem == DEFAULT_DOMAIN:
+        modality = "text_generation"
     run_environment = run_environment or make_run_environment_spec()
     ctx = _RunContext(
         config=config,
@@ -688,9 +701,10 @@ def run_agent_loop(
                             ctx,
                             round_number=round_number,
                             profile_focus=pre_decision.profile_focus
-                            or "general latency hotspots on /v1/completions",
+                            or "general steady-state benchmark hotspots",
                             modality=modality,
                             interface=interface,
+                            domain_path=domain_path,
                             progress_path=progress_path,
                             objective=objective,
                         )

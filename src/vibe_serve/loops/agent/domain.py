@@ -10,7 +10,9 @@ sections are injected into the neutral base prompts:
     ├── (free-form prose / description — ignored by the loop)
     ├── ## implementer    ← injected as {{ domain_implementer }}
     ├── ## judge          ← injected as {{ domain_judge }}
-    └── ## single_agent   ← injected as {{ domain_single_agent }}
+    ├── ## single_agent   ← injected as {{ domain_single_agent }}
+    ├── ## orchestrator   ← injected as {{ domain_orchestrator }}
+    └── ## profiler       ← injected as {{ domain_profiler }}
 
 The section heading *is* the address: a line that is exactly ``## <role>`` (for a
 role in :data:`DOMAIN_ROLES`) starts that role's section, which runs until the
@@ -41,7 +43,13 @@ DEFAULT_DOMAIN = "llm-serving"
 # The roles a domain pack can contribute to. Each maps to a ``## <role>`` section
 # in the domain file and a ``{{ domain_<role> }}`` injection point in the
 # corresponding base prompt.
-DOMAIN_ROLES: tuple[str, ...] = ("implementer", "judge", "single_agent", "orchestrator")
+DOMAIN_ROLES: tuple[str, ...] = (
+    "implementer",
+    "judge",
+    "single_agent",
+    "orchestrator",
+    "profiler",
+)
 
 _BUILTIN_DOMAINS_DIR = Path(__file__).resolve().parent / "templates" / "_domain"
 

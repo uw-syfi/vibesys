@@ -2,9 +2,10 @@
 
 A **domain** bundles the cross-cutting context the agents need for whatever
 you're building: the background knowledge the implementer must read, the
-correctness/performance/integrity gates the judge must enforce, and the same for
-the single-agent ablation. It's the answer to *"what kind of system is this, and
-what does 'good' mean here?"* — kept separate from the neutral prompt skeleton.
+correctness/performance/integrity gates the judge must enforce, profiling
+workflow details, and the same for the single-agent ablation. It's the answer to
+*"what kind of system is this, and what does 'good' mean here?"* — kept separate
+from the neutral prompt skeleton.
 
 Pick one with `--domain` (agent loop):
 
@@ -44,14 +45,18 @@ Combined builder+reviewer context for the single-agent ablation.
 ## orchestrator       ← injected as {{ domain_orchestrator }} (optional)
 Planning guidance for the round orchestrator — e.g. the optimization floor it
 should establish before chasing workload-specific wins.
+
+## profiler           ← injected as {{ domain_profiler }} (optional)
+Domain-specific capture workflow details for whichever profiler strategy is
+selected.
 ```
 
 Rules:
 
 - **The heading is the address.** A line that is exactly `## implementer`,
-  `## judge`, `## single_agent`, or `## orchestrator` starts that role's section;
-  it runs until the next role heading. Your section body can use its own `##`
-  sub-headings — only those four exact names delimit a section.
+  `## judge`, `## single_agent`, `## orchestrator`, or `## profiler` starts that
+  role's section; it runs until the next role heading. Your section body can use
+  its own `##` sub-headings — only those exact names delimit a section.
 - **A missing section injects nothing** for that role.
 - **`## single_agent` is optional.** Omit it and it's derived automatically by
   concatenating your `## implementer` and `## judge` sections — no third copy to
@@ -61,6 +66,9 @@ Rules:
   prompt (its neutral skeleton still applies). Add it to give the planner
   domain-specific strategy — `llm-serving` uses it for the
   continuous-batching/attention-kernel/CUDA-graph optimization floor.
+- **`## profiler` is optional.** Omit it to use only the selected profiler's
+  neutral mechanics. Add it when the domain needs a specific capture recipe,
+  server startup contract, benchmark shape, or remote profiling entry point.
 - Write normal Markdown prose. The base template owns the surrounding structure
   (task, pass criteria, workspace, output contract); your section owns the
   domain content.
@@ -104,20 +112,19 @@ Example (inside a `## judge` section):
    (what to check). Leave a section out to inject nothing for that role.
 4. Optionally add `## single_agent` for the `--inner-loop single-agent` ablation;
    omit it to derive it from the other two.
-5. Run `vibe-serve --outer-loop agent --domain <name-or-path> ...`.
+5. Optionally add `## orchestrator` and `## profiler` when the neutral planning
+   or profiling skeleton needs domain-specific examples or capture commands.
+6. Run `vibe-serve --outer-loop agent --domain <name-or-path> ...`.
 
 That's it — no code change. A new built-in domain is just a new `.md` file here;
 a private domain is just a path you pass.
 
 ## Scope
 
-Domains cover **implementer + judge (+ single-agent + orchestrator) context**. Two adjacent
-concerns are deliberately *not* part of a domain file:
+Domains cover **implementer + judge + profiler (+ single-agent + orchestrator) context**.
+One adjacent concern is deliberately *not* part of a domain file:
 
 - **Language/tooling** (e.g. "use `uv`/`pytest`") is decided by the run's
   `--interface` mode, not the domain: `inprocess` pins Python (uv toolchain +
-  in-process `VibeServeModel` contract); `service` leaves the language to the
-  agent. It is not a user-facing pack.
-- **Profiling** (nsys/torch GPU capture) is selected by `--profiler` and rendered
-  by the profiler prompts, not the domain. Domain-specific profiling is future
-  work tied to pluggable profilers.
+  the in-process accuracy-checker contract); `service` leaves the language to
+  the agent. It is not a user-facing pack.

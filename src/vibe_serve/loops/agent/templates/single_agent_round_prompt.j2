@@ -1,4 +1,3 @@
-{% if modality is not defined %}{% set modality = "text_generation" %}{% endif %}
 {% if env_kind is not defined %}{% set env_kind = "local" %}{% endif %}
 {% if interface is not defined %}{% set interface = "inprocess" %}{% endif %}
 You are a senior engineer running ONE complete inner-loop round end-to-end. In this ablation a single agent owns three roles that are normally split across three specialists:
@@ -50,16 +49,20 @@ The shared experiment workspace is your working directory. Reference implementat
 
 After (and only after) the implementation passes your self-judge gates, capture a profile so the orchestrator has a bottleneck signal for the next round.
 
+{% if domain_profiler %}
+{{ domain_profiler }}
+
+{% endif %}
 {% if profiler_kind == "torch" and interface != "service" %}
 Use `torch.profiler` via `torch_profiler/analyze_torch_profile.py` (or the `vibeserve-torch-profiler` MCP tools when attached). Start with `tables`, then `kernels` / `operators` / `cpu_overhead` / `memory` / `summary` as relevant.
 
 {% if env_kind == "modal" %}
-**Modal mode**: the editor container has no GPU. Dispatch profiling via `modal run main.py::modal_profile -- --output /workspace/prof.json --num-iters 20 --max-tokens 32 --prompt "The capital of France is"`. Do NOT fall back to synthetic-weight in-process profiling.
+**Modal mode**: the editor container has no GPU. Use the domain-provided remote profiling workflow if one is specified. Do NOT fall back to synthetic-weight in-process profiling or an unrelated workload.
 {% else %}
-Capture in-process: `python torch_profiler/analyze_torch_profile.py capture --model-dir /workspace --weights-dir /model --output /tmp/prof.json --warmup 3 --num-iters 20 --max-tokens 32 --prompt "The capital of France is"`.
+Capture in-process only if the profiler harness matches the domain's artifact contract. Otherwise run the benchmark and report the objective's headline metric without fabricating profiler data.
 {% endif %}
 {% else %}
-Use `nsys` via `nsys_profiler/analyze_nsys.py` (or the `vibeserve-nsys-profiler` MCP tools when attached). The capture script starts the server, runs the benchmark under `nsys profile`, and writes a report you can analyze with the MCP tools. Focus: kernel breakdown, CPU launch overhead, GPU idle gaps.
+Use `nsys` via `nsys_profiler/analyze_nsys.py` (or the `vibeserve-nsys-profiler` MCP tools when attached) when it matches the domain and backend. Capture the benchmark path and analyze the report with the MCP tools. Focus on the bottlenecks relevant to the objective.
 {% endif %}
 
 Profiler focus this round: {{ profile_focus or "general bottleneck analysis on the steady-state benchmark path" }}.
