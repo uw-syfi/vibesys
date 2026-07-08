@@ -33,6 +33,7 @@ from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
 )
+from vibe_serve.skills import DEFAULT_SKILL_ROOTS, resolve_skill_source_dirs
 
 _OUTER_LOOPS = ("agent", "plain", "evolve", "openevolve")
 _MODALITIES = (
@@ -184,14 +185,15 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--skills-dir",
-        default=[Path("resources/skills/serving-systems")],
+        default=list(DEFAULT_SKILL_ROOTS),
         action="append",
         type=Path,
         help=(
-            "Path to a skill source (can be repeated). Each entry can be "
-            "either a single skill directory (containing a top-level "
-            "`SKILL.md`) or a parent directory of multiple skill directories. "
-            "Default: `resources/skills/serving-systems/`."
+            "Path to a skill source candidate root (can be repeated). Each "
+            "entry can be either a single skill directory (containing a "
+            "top-level `SKILL.md`) or a parent directory of multiple skill "
+            "directories. Skills with `vibeserve.backends` metadata are loaded "
+            "only for matching --backend values. Default: `resources/skills/`."
         ),
     )
     parser.add_argument(
@@ -307,22 +309,12 @@ def load_config_and_skills(
     if getattr(args, "no_skills", False):
         skills = None
     else:
-        skills = (
-            [str(s) for s in args.skills_dir]
+        raw_skills = (
+            args.skills_dir
             if isinstance(args.skills_dir, list)
-            else ([str(args.skills_dir)] if args.skills_dir else None)
+            else ([args.skills_dir] if args.skills_dir else None)
         )
-        # Trainium targets get the vendored AWS NKI skills automatically so the
-        # implementer can write NeuronCore kernels. Other backends are
-        # unaffected; --no-skills still disables everything.
-        if backend == ComputeBackend.TRAINIUM:
-            nki_skills = (
-                PROJECT_ROOT / "resources" / "skills" / "neuron-agentic-development" / "skills"
-            )
-            if nki_skills.is_dir():
-                skills = skills or []
-                if str(nki_skills) not in skills:
-                    skills.append(str(nki_skills))
+        skills = resolve_skill_source_dirs(raw_skills, backend=backend)
     return config, skills, backend
 
 

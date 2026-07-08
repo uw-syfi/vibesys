@@ -17,6 +17,7 @@ Several flags look independent, but they combine into one execution contract:
 | Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, or `auto`. |
 | Domain | `--domain` | Agent-loop problem-space prompt pack, such as `llm-serving` or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
+| Skills | `--skills-dir`, `--no-skills` | Candidate skill roots and the ablation switch that disables skill loading. |
 | Target inputs | `--input`, `--ref`, `--acc-checker`, `--bench` | Target bundle directory, reference implementation, correctness checker, and benchmark harness. |
 
 Do not treat these as simple toggles. Some combinations imply a language,
@@ -98,6 +99,33 @@ Built-ins include:
 `--modality` supplies the task I/O contract, such as text generation or
 speech-to-text. Domains should avoid hardcoding modality or interface
 requirements that are already expressed by `--modality` or `--interface`.
+
+## Skills
+
+`--skills-dir` supplies skill candidate roots. Each value may point at one skill
+directory containing `SKILL.md`, or at a parent tree containing multiple skills.
+The default candidate root is `resources/skills/`.
+
+Before a run starts, VibeServe discovers each `SKILL.md` under the candidate
+roots and validates its frontmatter. Skills may optionally declare
+VibeServe-specific backend applicability:
+
+```yaml
+vibeserve:
+  backends: [trainium]
+```
+
+Effective skill loading is:
+
+- backend-agnostic skills load for every `--backend`;
+- skills with `vibeserve.backends` load only when the selected backend is in
+  that list;
+- `--skills-dir` adds candidate roots, but backend metadata still filters the
+  discovered skills;
+- `--no-skills` disables all skill loading, including backend-scoped skills.
+
+See [Skill Metadata](skill-metadata.md) for the VibeServe-specific metadata
+contract and validation rules.
 
 ## Target Inputs
 

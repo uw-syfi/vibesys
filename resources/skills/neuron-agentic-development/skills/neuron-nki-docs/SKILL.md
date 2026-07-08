@@ -7,6 +7,8 @@ description: |
   "look up <symbol>", or needs any NKI documentation reference.
 argument-hint: "[query or API name]"
 context: fork
+vibeserve:
+  backends: [trainium]
 ---
 
 Research $ARGUMENTS thoroughly:

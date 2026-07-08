@@ -169,7 +169,7 @@ The config is validated against a typed schema on load (`vibe_serve/config.py`):
 
 ## Skills library
 
-`resources/skills/serving-systems/` contains the Agent Skills entries the inner loop's agents read at runtime: model architectures, serving algorithms, programming frameworks, backend libraries, hardware platforms, and reference engines. New optimization techniques and model families enter as new skill entries; the framework itself is target-agnostic.
+`resources/skills/` contains the Agent Skills entries the inner loop's agents read at runtime: model architectures, serving algorithms, programming frameworks, backend libraries, hardware platforms, and reference engines. Skills can optionally declare VibeServe-specific backend applicability in their `SKILL.md` frontmatter; see `docs/skill-metadata.md`. New optimization techniques and model families enter as new skill entries; the framework itself is target-agnostic.
 
 ## Outputs
 
@@ -226,7 +226,7 @@ src/vibe_serve/
 └── backends/                     # cuda / metal compute backends
 
 examples/                         # six paper scenarios + nsys/torch profiler skills
-resources/skills/serving-systems/ # Agent Skills library
+resources/skills/                 # Agent Skills library and metadata docs pointer
 ```
 
 - **agent**: pre-round → profiler → orchestrator plan → implementer/judge
