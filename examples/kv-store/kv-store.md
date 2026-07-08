@@ -1,8 +1,8 @@
 # KV store (Redis RESP2)
 
 **Use for:** a non-persistent, in-memory key-value store that speaks Redis RESP2
-— benchmarked by YCSB for throughput and checked byte-for-byte against a Redis
-oracle. Pair with `--modality kv_store --backend cpu`:
+— benchmarked by YCSB for throughput and checked for **linearizability** under
+concurrent load (Porcupine). Pair with `--modality kv_store --backend cpu`:
 
 ```
 vibe-serve --outer-loop agent --modality kv_store --backend cpu \
@@ -46,7 +46,7 @@ Set `perf_metric` (`perf_unit` = `ops/sec`) from the benchmark's **`PERF_METRIC:
 
 ## Reward-hack detection (do this even when all checks pass)
 
-Reward-hacking here means the server satisfies the checker's fixed sequence **without a real data structure** — canned/templated responses, a replay of expected outputs, or a constant reply per command. Verify the store is real: after different `SET`s to one key a `GET` must return the most recent value, and a fresh key/value the checker never used must round-trip. A server that passes the deterministic sequence but cannot round-trip a novel key is reward-hacking — **verdict is fail**; name the offending function / branch in `feedback`.
+The linearizability checker drives **random** values the server can't precompute, so canned/replay/constant-reply stores fail it outright — a `GET` must return the exact value last `SET` on that key, under concurrency. The residual risk is a server that special-cases the **benchmark's** access pattern (YCSB's key format or field names) instead of implementing a general store. Verify generality: a fresh key/value outside the benchmark's pattern must round-trip, and throughput must not depend on hard-coded knowledge of the workload. If it does — **verdict is fail**; name the offending function / branch in `feedback`.
 
 ## orchestrator
 ## Optimization priority (read before choosing the next task)

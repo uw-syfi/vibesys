@@ -2,7 +2,7 @@
 
 This is a TCP server speaking the Redis RESP2 wire protocol — **not** an HTTP server. There is no `/health` endpoint. To verify the server is up, use `redis-cli -p <port> PING` (expect `PONG`); do NOT curl an HTTP endpoint.
 
-**Accuracy-checker interface** (always required): the candidate server must respond identically to Redis for the same deterministic operation sequence (GET, SET, DEL, HSET, HMSET, HGETALL, FLUSHDB, DBSIZE). The checker runs 5000 operations and diffs every response. Run it as: `python {{ accuracy_checker_path }}/checker.py --port <port>`.
+**Accuracy-checker interface** (always required): the checker drives the server with several concurrent clients, records a timed operation history (GET, SET, DEL, HSET, HGETALL), and verifies it is **linearizable** with Porcupine. This catches concurrency bugs — lost updates, torn reads, races under sharded locks — not just single-threaded correctness. Run it as: `python {{ accuracy_checker_path }}/checker.py --port <port>`. A non-linearizable history is a hard fail, regardless of throughput.
 
 **Benchmark**: Run as `python {{ bench_path }}/benchmark.py --port <port>`. Requires Java 8+ and YCSB at `{{ bench_path }}/ycsb/`.
 

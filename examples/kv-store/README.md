@@ -2,13 +2,13 @@
 
 A non-persistent, in-memory KV store optimized by VibeServe's multi-agent loop.
 The agent starts from a minimal Python RESP2 server (~10k ops/sec), gated by
-correctness (candidate vs a real Redis oracle) and scored by real YCSB.
+concurrent **linearizability** (Porcupine) and scored by real YCSB.
 
 ## Prerequisites
 
 - Python 3.11+ and `uv`
 - Java 8+ — YCSB (`apt install default-jre` / `brew install openjdk`)
-- Redis — the accuracy oracle (`apt install redis-server` / `brew install redis`)
+- Go 1.19+ — the checker's Porcupine model (`apt install golang` / `brew install go`)
 - Claude Code (`claude`) — drives the agent loop
 
 ## Setup
@@ -46,7 +46,7 @@ vibe-serve --outer-loop agent \
 
 `--interface service` judges the store only over its RESP2 socket, so the agent
 may implement it in any language. Each round is a git commit in
-`exp_env/<name>/workspace/`; only rounds that pass the accuracy checker advance.
+`exp_env/<name>/workspace/`; only rounds whose history is linearizable advance.
 
 ## Files
 
@@ -56,6 +56,7 @@ examples/kv-store/
 ├── kv-store.md            # Domain pack: "what good means" (--domain)
 ├── run_test.sh            # Standalone end-to-end test against the seed
 ├── reference/seed_server.py       # Seed baseline / RESP2 reference
-├── accuracy_checker/checker.py    # Correctness: candidate vs Redis oracle
+├── accuracy_checker/checker.py    # Correctness: concurrent linearizability (Porcupine)
+│   └── porcupine_checker/         #   Go model of the RESP2 KV spec
 └── benchmark/benchmark.py         # Performance: YCSB wrapper (ycsb/ gitignored)
 ```
