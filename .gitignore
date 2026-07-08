@@ -36,6 +36,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!examples/kv-store/benchmark/ycsb/lib/
 lib64/
 parts/
 sdist/

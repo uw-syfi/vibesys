@@ -17,12 +17,6 @@ correctness (candidate vs a real Redis oracle) and scored by real YCSB.
 uv sync
 uv pip install -r examples/kv-store/requirements.txt
 cp agent.toml.example agent.toml            # no API key needed for --cli-provider claude
-
-# YCSB Redis binding, unpacked to benchmark/ycsb/ (gitignored)
-cd examples/kv-store/benchmark
-curl -LO https://github.com/brianfrankcooper/YCSB/releases/download/0.17.0/ycsb-redis-binding-0.17.0.tar.gz
-tar -xzf ycsb-redis-binding-0.17.0.tar.gz && mv ycsb-redis-binding-0.17.0 ycsb
-rm ycsb-redis-binding-0.17.0.tar.gz && cd ../../..
 ```
 
 Verify the harness end-to-end against the seed: `examples/kv-store/run_test.sh`.
@@ -57,5 +51,7 @@ examples/kv-store/
 ├── run_test.sh            # Standalone end-to-end test against the seed
 ├── reference/seed_server.py       # Seed baseline / RESP2 reference
 ├── accuracy_checker/checker.py    # Correctness: candidate vs Redis oracle
-└── benchmark/benchmark.py         # Performance: YCSB wrapper (ycsb/ gitignored)
+└── benchmark/
+    ├── benchmark.py               # Performance: YCSB wrapper
+    └── ycsb/                      # Pinned YCSB 0.17.0 Redis binding (bundled)
 ```
