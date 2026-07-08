@@ -1,0 +1,15 @@
+## Modality: KV store (Redis RESP2 compatible)
+
+This is a TCP server speaking the Redis RESP2 wire protocol — **not** an HTTP server. There is no `/health` endpoint. To verify the server is up, use `redis-cli -p <port> PING` (expect `PONG`); do NOT curl an HTTP endpoint.
+
+**Accuracy-checker interface** (always required): the candidate server must respond identically to Redis for the same deterministic operation sequence (GET, SET, DEL, HSET, HMSET, HGETALL, FLUSHDB, DBSIZE). The checker runs 5000 operations and diffs every response. Run it as: `python {{ accuracy_checker_path }}/checker.py --port <port>`.
+
+**Benchmark**: Run as `python {{ bench_path }}/benchmark.py --port <port>`. Requires Java 8+ and YCSB at `{{ bench_path }}/ycsb/`.
+
+**Protocol compliance**: responses must be valid RESP2 encoding. Malformed responses (wrong type prefix, missing CRLF, incorrect bulk string length) are immediate failures.
+
+**Startup requirement**: the server must be listening and responding to `PING` within 5 seconds of being started via {% if interface == "service" %}`./run.sh <port>`, which takes the port as its first argument{% else %}`python main.py <port>`, which takes the port as its first CLI argument{% endif %}.
+
+**No persistence required**: this is an in-memory store. Do not fail implementations for lacking durability.
+
+**Command subset**: GET, SET, DEL, HSET, HMSET, HGETALL, PING, FLUSHDB, DBSIZE, COMMAND, HELLO, CLIENT. Do not fail for missing commands outside this set.

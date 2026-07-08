@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from vibe_serve.loops.agent.domain import render_domain_section
 from vibe_serve.prompts import render_template
 
 _TEMPLATE_DIR = (
@@ -242,3 +243,65 @@ def test_service_single_agent_is_language_free_and_avoids_inprocess_torch():
     # server-driven profiling instead
     assert "torch.profiler" not in out
     assert "nsys" in out
+
+
+# --------------------------------------------------------------------------- #
+# kv_store modality + domain pack: language-agnostic only under `service`
+# --------------------------------------------------------------------------- #
+_KV_PACK = (
+    Path(__file__).resolve().parents[3]
+    / "examples"
+    / "kv-store"
+    / "kv-store.md"
+)
+
+
+def _render_kv_implementer(interface: str) -> str:
+    return render_template(
+        "implementer_prompt.j2",
+        template_dir=_TEMPLATE_DIR,
+        modality="kv_store",
+        interface=interface,
+        domain_implementer="",
+        task="TASK",
+        pass_criteria="PC",
+        reference_path="/ref",
+        runtime_notes="",
+        feedback=None,
+    )
+
+
+def test_kv_store_inprocess_pins_python():
+    out = _render_kv_implementer("inprocess")
+    assert "python main.py" in out
+    assert "uv" in out
+    assert "run.sh" not in out
+
+
+def test_kv_store_service_is_language_agnostic():
+    out = _render_kv_implementer("service")
+    # the Python entry point and uv toolchain drop out...
+    assert "python main.py" not in out
+    assert "uv" not in out
+    # ...replaced by a language-neutral launcher + explicit language freedom
+    assert "run.sh" in out
+    assert "over the wire" in out
+    assert "whatever language" in out.lower()
+
+
+def test_kv_store_domain_pack_defers_language_contract_to_base():
+    """The language *contract* lives once in the base `_interface/language.j2`;
+    the domain pack must not restate it (no per-interface language constraint)."""
+    inproc = render_domain_section(_KV_PACK, "implementer", interface="inprocess")
+    svc = render_domain_section(_KV_PACK, "implementer", interface="service")
+    assert "Implementation language is Python" not in inproc
+    assert "yours to choose" not in svc
+
+
+def test_kv_store_domain_pack_compiled_language_steer_is_service_only():
+    """The pack keeps only the genuinely domain-specific interface branch: the
+    orchestrator's steer toward a compiled language for the CPU-bound wire target."""
+    inproc = render_domain_section(_KV_PACK, "orchestrator", interface="inprocess")
+    svc = render_domain_section(_KV_PACK, "orchestrator", interface="service")
+    assert "compiled" in svc.lower()
+    assert "compiled" not in inproc.lower()
