@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from vibe_serve.backends import SandboxKind
-from vibe_serve.environment_hooks import EnvironmentBindMount
+from vibe_serve.domains.environment import EnvironmentBindMount
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentRequest,
     RunEnvironmentSpec,

@@ -34,7 +34,7 @@ _TEMPLATE_DIR = (
 def test_domain_module_has_no_language_axis():
     """The implementation language is carried by ``--interface``, not a pack.
     The domain module exposes only the domain axis — no language constants."""
-    import vibe_serve.loops.agent.domain as domain
+    import vibe_serve.domains.base as domain
 
     assert not hasattr(domain, "DEFAULT_LANGUAGE")
     assert not hasattr(domain, "LANGUAGE_DIR")

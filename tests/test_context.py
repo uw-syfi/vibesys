@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vibe_serve.context import _RunContext
-from vibe_serve.environment_hooks import NoopEnvironmentHooks
+from vibe_serve.domains.environment import NoopEnvironmentHooks
 from vibe_serve.sandbox.run_environment import RunEnvironmentSpec
 
 

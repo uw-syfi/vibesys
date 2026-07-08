@@ -39,7 +39,7 @@ from deepagents.backends.sandbox import BaseSandbox
 from vibe_serve.backends import SandboxKind
 from vibe_serve.backends.base import ComputeBackendImpl, SetupFn
 from vibe_serve.constants import DEFAULT_AGENT_BACKEND, PROJECT_ROOT
-from vibe_serve.environment_hooks import EnvironmentBindMount
+from vibe_serve.domains.environment import EnvironmentBindMount
 
 
 @dataclass(frozen=True)

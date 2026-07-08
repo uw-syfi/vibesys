@@ -84,13 +84,13 @@ vibe-serve --outer-loop agent --domain generic ...          # no domain context
 ```
 
 `--domain` takes a registered domain name such as `llm-serving` or `generic`.
-A domain is an in-repo definition: a prompt directory plus optional environment
-setup/teardown hooks. The prompt directory contains role files such as
+A domain is an in-repo package: prompt templates plus optional environment
+setup/teardown hooks. The package's `templates/` directory contains role files such as
 `implementer.md`, `judge.md`, and optionally `single_agent.md`; those files drop
 into the prompts at labelled points. Omit `single_agent.md` and it's derived
 from `implementer.md` plus `judge.md`.
 
-Full authoring guide: [`src/vibe_serve/loops/agent/templates/_domain/README.md`](src/vibe_serve/loops/agent/templates/_domain/README.md).
+Full authoring guide: [`src/vibe_serve/domains/README.md`](src/vibe_serve/domains/README.md).
 
 ## Interface — how the artifact is evaluated (and which language)
 

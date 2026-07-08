@@ -22,7 +22,7 @@ from vibe_serve.constants import (
     PROJECT_ROOT,
     ComputeBackend,
 )
-from vibe_serve.environment_hooks import (
+from vibe_serve.domains.environment import (
     EnvironmentContext,
     EnvironmentHooks,
     NoopEnvironmentHooks,

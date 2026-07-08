@@ -2,12 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from vibe_serve.environment_hooks import (
+from vibe_serve.domains.environment import (
     EnvironmentBindMount,
     EnvironmentContext,
-    LLMServingEnvironmentHooks,
     NoopEnvironmentHooks,
 )
+from vibe_serve.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 
 
 class _RunEnvironment:

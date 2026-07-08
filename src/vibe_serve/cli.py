@@ -28,7 +28,8 @@ from vibe_serve.constants import (
     PROJECT_ROOT,
     ComputeBackend,
 )
-from vibe_serve.loops.agent.domain import DEFAULT_DOMAIN, registered_domains
+from vibe_serve.domains.base import DEFAULT_DOMAIN
+from vibe_serve.domains.registry import registered_domains
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -429,9 +430,9 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         default=DEFAULT_DOMAIN,
         metavar="NAME",
         help=(
-            "Domain pack supplying the implementer/judge context for your "
+            "Domain package supplying the implementer/judge context for your "
             f"problem space. Registered domains: {', '.join(registered_domains())}. Default: "
-            f"{DEFAULT_DOMAIN}. See loops/agent/templates/_domain/README.md."
+            f"{DEFAULT_DOMAIN}. See domains/README.md."
         ),
     )
     parser.add_argument(

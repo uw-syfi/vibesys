@@ -16,15 +16,10 @@ from vibe_serve.agents.progress import RoundProgress
 from vibe_serve.config import Config
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
+from vibe_serve.domains.base import DEFAULT_DOMAIN, DomainDefinition, DomainName, DomainRole
+from vibe_serve.domains.registry import resolve_domain
+from vibe_serve.domains.rendering import render_domain_section
 from vibe_serve.loops.agent import issue_board
-from vibe_serve.loops.agent.domain import (
-    DEFAULT_DOMAIN,
-    DomainDefinition,
-    DomainName,
-    DomainRole,
-    render_domain_section,
-    resolve_domain,
-)
 from vibe_serve.loops.profiler import invoke_profiler
 from vibe_serve.prompts import render_template
 from vibe_serve.sandbox.run_environment import (
@@ -329,7 +324,7 @@ def _domain_render_context(
     falsy (``bench_path`` / ``accuracy_checker_path`` when nothing is attached),
     so ``{% if bench_path %}`` works everywhere. ``interface`` lets a
     language-agnostic pack drop its in-process/Python-specific gates under
-    ``--interface service``. See ``templates/_domain/README.md``.
+    ``--interface service``. See ``vibe_serve/domains/README.md``.
     """
     return {
         "modality": modality,

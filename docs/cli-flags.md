@@ -15,7 +15,7 @@ Several flags look independent, but they combine into one execution contract:
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, or `cpu`. |
 | Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, Docker container, or Modal-backed workflow. |
 | Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, or `auto`. |
-| Domain | `--domain` | Agent-loop problem-space prompt pack, such as `llm-serving` or `generic`. |
+| Domain | `--domain` | Agent-loop problem-space package, such as `llm-serving` or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--no-skills` | Candidate skill roots and the ablation switch that disables skill loading. |
 | Target inputs | `--input`, `--ref`, `--acc-checker`, `--bench` | Target bundle directory, reference implementation, correctness checker, and benchmark harness. |
@@ -95,7 +95,7 @@ Registered domains include:
 | `llm-serving` | Default LLM-serving guidance, including serving-system skills and judge gates. |
 | `generic` | No extra domain guidance. Useful for custom/non-LLM targets. |
 
-New domains are added in source by registering a prompt directory and optional
+New domains are added in source by registering a domain package with optional
 environment setup/teardown hooks.
 
 `--modality` supplies the task I/O contract, such as text generation or

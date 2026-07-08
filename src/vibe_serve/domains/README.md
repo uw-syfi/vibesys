@@ -21,25 +21,28 @@ vibe-serve --outer-loop agent --domain generic ...          # no domain context
 | `llm-serving` | The default. LLM inference server context: the `serving-systems` skill/references, `/model` weights, the accuracy + benchmark + reward-hack judge gates. |
 | `generic`     | Empty — no domain prose injected. The neutral baseline; copy it to start your own. |
 
-## Anatomy of a domain directory
+## Anatomy of a domain package
 
-Each domain is a directory. The injected content lives in Markdown files named
-for the agent roles; `README.md` is human documentation and is ignored by the
-loop.
+Each domain owns one package folder. Prompt content lives under `templates/` in
+Markdown files named for the agent roles. Domain-specific environment
+setup/teardown code lives next to the templates when the domain needs it.
 
 ```text
-_domain/my-domain/
-  README.md        # optional human documentation
-  implementer.md   # injected as {{ domain_implementer }}
-  judge.md         # injected as {{ domain_judge }}
-  single_agent.md  # injected as {{ domain_single_agent }} (optional)
-  orchestrator.md  # injected as {{ domain_orchestrator }} (optional)
-  profiler.md      # injected as {{ domain_profiler }} (optional)
+src/vibe_serve/domains/my_domain/
+  __init__.py       # exports DEFINITION
+  hooks.py          # optional domain-specific EnvironmentHooks implementation
+  templates/
+    README.md        # optional human documentation
+    implementer.md   # injected as {{ domain_implementer }}
+    judge.md         # injected as {{ domain_judge }}
+    single_agent.md  # injected as {{ domain_single_agent }} (optional)
+    orchestrator.md  # injected as {{ domain_orchestrator }} (optional)
+    profiler.md      # injected as {{ domain_profiler }} (optional)
 ```
 
 Rules:
 
-- **The filename is the address.** `implementer.md` maps to
+- **Inside `templates/`, the filename is the address.** `implementer.md` maps to
   `{{ domain_implementer }}`, `judge.md` maps to `{{ domain_judge }}`, and so on.
 - **A missing role file injects nothing** for that role.
 - **`single_agent.md` is optional.** Omit it and it's derived automatically by
@@ -88,18 +91,22 @@ Example (inside `judge.md`):
 
 ## How to add a domain
 
-1. Copy `generic/` to a new in-repo `_domain/<name>/` directory.
-2. Edit `README.md` with the title and "use for…" line.
+1. Copy `generic/` to a new in-repo `src/vibe_serve/domains/<module_name>/`
+   package, using underscores for the Python module name when the CLI domain
+   name contains hyphens.
+2. Edit `templates/README.md` with the title and "use for…" line.
 3. Add `implementer.md` (what to read / what "done" means here) and `judge.md`
-   (what to check). Leave a file out to inject nothing for that role.
+   (what to check) under `templates/`. Leave a file out to inject nothing for
+   that role.
 4. Optionally add `single_agent.md` for the `--inner-loop single-agent`
    ablation; omit it to derive it from the other two.
 5. Optionally add `orchestrator.md` and `profiler.md` when the neutral planning
    or profiling skeleton needs domain-specific examples or capture commands.
-6. Register the domain in `vibe_serve.loops.agent.domain.DOMAINS`. If the domain
-   needs setup/teardown behavior such as mounts or copy exclusions, attach an
-   `EnvironmentHooks` implementation there.
-7. Run `vibe-serve --outer-loop agent --domain <name> ...`.
+6. Export a `DEFINITION` from the domain package's `__init__.py`. If the domain
+   needs setup/teardown behavior such as mounts or copy exclusions, implement
+   `EnvironmentHooks` in that package and attach it to the definition.
+7. Register the definition in `vibe_serve.domains.registry.DOMAINS`.
+8. Run `vibe-serve --outer-loop agent --domain <name> ...`.
 
 Domains are registered explicitly so prompt context, environment hooks, and tests
 stay tied to the same domain identity.
@@ -107,7 +114,7 @@ stay tied to the same domain identity.
 ## Scope
 
 Domains cover **implementer + judge + profiler (+ single-agent + orchestrator) context**.
-One adjacent concern is deliberately *not* part of a domain prompt directory:
+One adjacent concern is deliberately *not* part of a domain package:
 
 - **Language/tooling** (e.g. "use `uv`/`pytest`") is decided by the run's
   `--interface` mode, not the domain: `inprocess` pins Python (uv toolchain +

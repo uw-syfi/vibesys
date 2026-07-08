@@ -17,7 +17,7 @@ import random
 from vibe_serve.agents.progress import CandidateProgress
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
-from vibe_serve.environment_hooks import LLMServingEnvironmentHooks
+from vibe_serve.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibe_serve.loops.evolve.loop import (
     _checkout_commit_tree,
     _current_commit_sha,

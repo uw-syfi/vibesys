@@ -12,18 +12,21 @@ from pathlib import Path
 
 import pytest
 
-from vibe_serve.environment_hooks import LLMServingEnvironmentHooks, NoopEnvironmentHooks
-from vibe_serve.loops.agent.domain import (
+from vibe_serve.domains.base import (
     DEFAULT_DOMAIN,
     DOMAIN_ROLES,
-    DOMAINS,
     DomainDefinition,
     DomainName,
     DomainRole,
+)
+from vibe_serve.domains.environment import NoopEnvironmentHooks
+from vibe_serve.domains.llm_serving.hooks import LLMServingEnvironmentHooks
+from vibe_serve.domains.registry import (
+    DOMAINS,
     registered_domains,
-    render_domain_section,
     resolve_domain,
 )
+from vibe_serve.domains.rendering import render_domain_section
 from vibe_serve.prompts import render_template
 
 _TEMPLATE_DIR = (
@@ -54,7 +57,8 @@ def test_resolve_registered_name():
     d = resolve_domain("llm-serving")
     assert d.name is DomainName.LLM_SERVING
     assert d.prompt_dir.is_dir()
-    assert d.prompt_dir.name == "llm-serving"
+    assert d.prompt_dir.name == "templates"
+    assert d.prompt_dir.parent.name == "llm_serving"
 
 
 def test_resolve_path_is_not_supported(tmp_path: Path):
@@ -203,7 +207,7 @@ def _render_implementer(domain: str) -> str:
 
 def test_llm_serving_injects_into_implementer():
     out = _render_implementer("llm-serving")
-    # serving-specific prose from the domain pack is present
+    # serving-specific prose from the domain package is present
     assert "serving" in out.lower()
     assert "## Progress tracking" in out  # base skeleton intact
 

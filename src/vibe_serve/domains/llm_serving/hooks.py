@@ -1,53 +1,16 @@
-"""Environment setup/teardown hooks contributed by registered domains."""
+"""LLM-serving environment setup/teardown hooks."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
 
-
-class RunEnvironmentCapabilities(Protocol):
-    isolated: bool
-    materialize_local_model_weights: bool
-
-
-@dataclass(frozen=True)
-class EnvironmentContext:
-    reference_path: Path
-    workspace: Path
-    run_environment: RunEnvironmentCapabilities
-    project_root: Path
-    log: Callable[[str], None]
-
-
-@dataclass(frozen=True)
-class EnvironmentBindMount:
-    host_path: Path
-    container_path: str
-    read_only: bool = True
-
-
-@dataclass(frozen=True)
-class EnvironmentPatch:
-    copy_excludes: frozenset[str] = frozenset()
-    bind_mounts: tuple[EnvironmentBindMount, ...] = ()
-
-
-class EnvironmentHooks(Protocol):
-    def prepare(self, ctx: EnvironmentContext) -> EnvironmentPatch: ...
-
-    def teardown(self, ctx: EnvironmentContext) -> None: ...
-
-
-class NoopEnvironmentHooks:
-    def prepare(self, ctx: EnvironmentContext) -> EnvironmentPatch:
-        return EnvironmentPatch()
-
-    def teardown(self, ctx: EnvironmentContext) -> None:
-        return None
+from vibe_serve.domains.environment import (
+    EnvironmentBindMount,
+    EnvironmentContext,
+    EnvironmentPatch,
+)
 
 
 def _ensure_model_weights(
