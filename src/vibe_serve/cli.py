@@ -28,7 +28,7 @@ from vibe_serve.constants import (
     PROJECT_ROOT,
     ComputeBackend,
 )
-from vibe_serve.loops.agent.domain import DEFAULT_DOMAIN, builtin_domains
+from vibe_serve.loops.agent.domain import DEFAULT_DOMAIN, registered_domains
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -427,11 +427,10 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--domain",
         default=DEFAULT_DOMAIN,
-        metavar="NAME_OR_PATH",
+        metavar="NAME",
         help=(
             "Domain pack supplying the implementer/judge context for your "
-            f"problem space. A built-in name ({', '.join(builtin_domains())}) "
-            "or a path to your own domain directory. Default: "
+            f"problem space. Registered domains: {', '.join(registered_domains())}. Default: "
             f"{DEFAULT_DOMAIN}. See loops/agent/templates/_domain/README.md."
         ),
     )

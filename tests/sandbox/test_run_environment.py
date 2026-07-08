@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from vibe_serve.backends import SandboxKind
+from vibe_serve.environment_hooks import EnvironmentBindMount
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentRequest,
     RunEnvironmentSpec,
@@ -84,6 +85,37 @@ def test_docker_environment_opens_one_started_sandbox_with_agent_paths(tmp_path)
 
     session.close()
     backend.sandbox.stop.assert_called_once()
+
+
+def test_docker_environment_uses_environment_bind_mounts(tmp_path):
+    backend = FakeBackend()
+    env = build_run_environment(RunEnvironmentSpec("docker"))
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+
+    env.open(
+        _request(
+            tmp_path,
+            backend,
+            environment_bind_mounts=(EnvironmentBindMount(model_dir, "/model", True),),
+        )
+    )
+
+    kwargs = backend.calls[0][1]
+    assert (str(model_dir), "/model", True) in kwargs["bind_mounts"]
+    assert "/model" in kwargs["passthrough_paths"]
+
+
+def test_docker_environment_does_not_infer_model_mount_from_reference_dir(tmp_path):
+    backend = FakeBackend()
+    env = build_run_environment(RunEnvironmentSpec("docker"))
+    ref_dir = tmp_path / "reference"
+    (ref_dir / "model").mkdir(parents=True)
+
+    env.open(_request(tmp_path, backend, ref_dir=ref_dir))
+
+    bind_mounts = backend.calls[0][1]["bind_mounts"]
+    assert all(container_path != "/model" for _, container_path, _ in bind_mounts)
 
 
 def test_environment_session_context_manager_closes(tmp_path):

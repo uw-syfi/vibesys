@@ -36,6 +36,7 @@ from vibe_serve.agents.progress import CandidateProgress
 from vibe_serve.config import Config
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
+from vibe_serve.environment_hooks import LLMServingEnvironmentHooks
 from vibe_serve.loops.evolve.population import (
     Individual,
     Objective,
@@ -319,6 +320,7 @@ def run_evolve_loop(
         agent_backend=agent_backend,
         cli_provider=cli_provider,
         backend=backend,
+        environment_hooks=LLMServingEnvironmentHooks(),
     )
     ctx.lprint(f"[log] evolutionary run: {ctx.run_log_path}")
     ctx.lprint(f"[log] experiment root: {ctx.exp_dir}")

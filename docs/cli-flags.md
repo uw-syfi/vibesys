@@ -88,13 +88,15 @@ actually Python, and a CPU backend must not receive a GPU-kernel workflow.
 ## Domain and Modality
 
 `--domain` supplies cross-cutting problem-space context for the agent loop.
-Built-ins include:
+Registered domains include:
 
 | Domain | Meaning |
 | --- | --- |
 | `llm-serving` | Default LLM-serving guidance, including serving-system skills and judge gates. |
 | `generic` | No extra domain guidance. Useful for custom/non-LLM targets. |
-| path to `.md` | Custom domain pack. |
+
+New domains are added in source by registering a prompt file and optional
+environment setup/teardown hooks.
 
 `--modality` supplies the task I/O contract, such as text generation or
 speech-to-text. Domains should avoid hardcoding modality or interface

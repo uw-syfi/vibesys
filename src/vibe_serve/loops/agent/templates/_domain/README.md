@@ -12,11 +12,9 @@ Pick one with `--domain` (agent loop):
 ```bash
 vibe-serve --outer-loop agent --domain llm-serving ...      # default
 vibe-serve --outer-loop agent --domain generic ...          # no domain context
-vibe-serve --outer-loop agent --domain ./my-domain.md ...   # your own (a path)
 ```
 
-`--domain` accepts either a **built-in name** (a `<name>.md` next to this file)
-or a **path** to your own `.md` file anywhere on disk. Built-ins:
+`--domain` accepts a registered repo domain name:
 
 | Domain        | What it does |
 |---------------|--------------|
@@ -103,10 +101,9 @@ Example (inside a `## judge` section):
 {% endif %}
 ```
 
-## How to author your own
+## How to add a domain
 
-1. Copy `generic.md` to a new file (in-repo `_domain/<name>.md`, or anywhere on
-   disk you'll point `--domain` at).
+1. Copy `generic.md` to a new in-repo `_domain/<name>.md` file.
 2. Edit the title and "use for…" line at the top.
 3. Fill `## implementer` (what to read / what "done" means here) and `## judge`
    (what to check). Leave a section out to inject nothing for that role.
@@ -114,15 +111,18 @@ Example (inside a `## judge` section):
    omit it to derive it from the other two.
 5. Optionally add `## orchestrator` and `## profiler` when the neutral planning
    or profiling skeleton needs domain-specific examples or capture commands.
-6. Run `vibe-serve --outer-loop agent --domain <name-or-path> ...`.
+6. Register the domain in `vibe_serve.loops.agent.domain.DOMAINS`. If the domain
+   needs setup/teardown behavior such as mounts or copy exclusions, attach an
+   `EnvironmentHooks` implementation there.
+7. Run `vibe-serve --outer-loop agent --domain <name> ...`.
 
-That's it — no code change. A new built-in domain is just a new `.md` file here;
-a private domain is just a path you pass.
+Domains are registered explicitly so prompt context, environment hooks, and tests
+stay tied to the same domain identity.
 
 ## Scope
 
 Domains cover **implementer + judge + profiler (+ single-agent + orchestrator) context**.
-One adjacent concern is deliberately *not* part of a domain file:
+One adjacent concern is deliberately *not* part of a domain prompt file:
 
 - **Language/tooling** (e.g. "use `uv`/`pytest`") is decided by the run's
   `--interface` mode, not the domain: `inprocess` pins Python (uv toolchain +

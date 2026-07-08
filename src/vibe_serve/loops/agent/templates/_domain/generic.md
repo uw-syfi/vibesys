@@ -5,6 +5,6 @@ beyond the task statement, the modality contract, and the run's pass criteria.
 
 This domain injects **no** prose into the base prompts — there are no role
 sections below, so the neutral base prompts render unchanged. It is the
-recommended starting point to copy when authoring your own domain: add
-`## implementer`, `## judge`, and optionally `## single_agent` sections. See
-`./README.md`.
+recommended starting point for adding a registered domain: copy it into a new
+in-repo domain prompt, add `## implementer`, `## judge`, and optionally
+`## single_agent` sections, then register the domain in source. See `./README.md`.
