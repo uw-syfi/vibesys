@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from vibe_serve.domains.base import DomainName
+from vibe_serve.profilers import ProfilerKind
 from vibe_serve.prompts import render_template
 
 _TEMPLATE_DIR = (
@@ -39,7 +41,7 @@ def test_domain_module_has_no_language_axis():
     assert not hasattr(domain, "DEFAULT_LANGUAGE")
     assert not hasattr(domain, "LANGUAGE_DIR")
     # the domain axis is untouched
-    assert domain.DEFAULT_DOMAIN == "llm-serving"
+    assert domain.DEFAULT_DOMAIN is DomainName.LLM_SERVING
 
 
 def test_no_language_pack_directory():
@@ -109,12 +111,26 @@ def test_standalone_profiler_drops_torch_under_service():
     from vibe_serve.loops.agent.loop import _profiler_prompt_template
 
     # inprocess keeps the white-box torch profiler
-    assert _profiler_prompt_template("torch", "inprocess") == "profiler_prompt_torch.j2"
+    assert _profiler_prompt_template(ProfilerKind.TORCH, "inprocess") == "profiler_prompt_torch.j2"
     # service swaps torch -> nsys (torch imports the implementation)
-    assert _profiler_prompt_template("torch", "service") == "profiler_prompt_nsys.j2"
+    assert _profiler_prompt_template(ProfilerKind.TORCH, "service") == "profiler_prompt_nsys.j2"
     # non-torch kinds are unaffected by the interface
-    assert _profiler_prompt_template("neuron", "service") == "profiler_prompt_neuron.j2"
-    assert _profiler_prompt_template("nsys", "service") == "profiler_prompt_nsys.j2"
+    assert _profiler_prompt_template(ProfilerKind.NEURON, "service") == "profiler_prompt_neuron.j2"
+    assert _profiler_prompt_template(ProfilerKind.NSYS, "service") == "profiler_prompt_nsys.j2"
+
+
+def test_standalone_profiler_none_has_no_prompt_template():
+    from vibe_serve.loops.agent.loop import _profiler_prompt_template
+
+    with pytest.raises(ValueError, match="disabled"):
+        _profiler_prompt_template(ProfilerKind.NONE, "inprocess")
+
+
+def test_standalone_profiler_rejects_unknown_kind():
+    from vibe_serve.loops.agent.loop import _profiler_prompt_template
+
+    with pytest.raises(TypeError, match="ProfilerKind"):
+        _profiler_prompt_template("bogus", "inprocess")
 
 
 # --------------------------------------------------------------------------- #
@@ -205,7 +221,9 @@ def test_service_judge_drops_vibeservemodel():
 # --------------------------------------------------------------------------- #
 # prompt rendering: single-agent
 # --------------------------------------------------------------------------- #
-def _render_single_agent(interface: str, profiler_kind: str = "torch") -> str:
+def _render_single_agent(
+    interface: str, profiler_kind: ProfilerKind = ProfilerKind.TORCH
+) -> str:
     return render_template(
         "single_agent_round_prompt.j2",
         template_dir=_TEMPLATE_DIR,
@@ -229,17 +247,27 @@ def _render_single_agent(interface: str, profiler_kind: str = "torch") -> str:
 
 
 def test_inprocess_single_agent_keeps_uv_and_torch_capture():
-    out = _render_single_agent("inprocess", profiler_kind="torch")
+    out = _render_single_agent("inprocess", profiler_kind=ProfilerKind.TORCH)
     assert "uv" in out
     # torch in-process capture path is offered for Python implementations
     assert "torch.profiler" in out
 
 
 def test_service_single_agent_is_language_free_and_avoids_inprocess_torch():
-    out = _render_single_agent("service", profiler_kind="torch")
+    out = _render_single_agent("service", profiler_kind=ProfilerKind.TORCH)
     assert "uv" not in out
     assert "over the wire" in out
     # torch in-process capture is Python-only; service falls back to nsys /
     # server-driven profiling instead
     assert "torch.profiler" not in out
     assert "nsys" in out
+
+
+def test_single_agent_profiler_none_avoids_profiler_tools():
+    out = _render_single_agent("inprocess", profiler_kind=ProfilerKind.NONE)
+    assert "Standalone profiling is disabled" in out
+    assert "nsys_profiler" not in out
+    assert "torch_profiler" not in out
+    assert "neuron_profiler" not in out
+    assert "vibeserve-nsys-profiler" not in out
+    assert "vibeserve-torch-profiler" not in out

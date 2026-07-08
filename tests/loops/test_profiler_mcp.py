@@ -14,6 +14,9 @@ from pathlib import Path
 
 import pytest
 
+from vibe_serve.loops.profiler import mcp_spec
+from vibe_serve.profilers import ProfilerKind
+
 
 # The servers live under examples/ (co-located with the analysis scripts) so
 # importing them by file path keeps the tests decoupled from sys.path state.
@@ -37,6 +40,27 @@ def _load_module(name: str, path: Path):
 
 
 _REPO = Path(__file__).resolve().parent.parent.parent
+
+
+def test_profiler_mcp_spec_maps_known_kinds_exactly():
+    assert mcp_spec(ProfilerKind.NONE) is None
+
+    nsys = mcp_spec(ProfilerKind.NSYS)
+    assert nsys.name == "vibeserve-nsys-profiler"
+    assert nsys.args == ["nsys_profiler/server.py"]
+
+    torch = mcp_spec(ProfilerKind.TORCH)
+    assert torch.name == "vibeserve-torch-profiler"
+    assert torch.args == ["torch_profiler/server.py"]
+
+    neuron = mcp_spec(ProfilerKind.NEURON)
+    assert neuron.name == "vibeserve-neuron-profiler"
+    assert neuron.args == ["neuron_profiler/server.py"]
+
+
+def test_profiler_mcp_spec_rejects_unknown_kind():
+    with pytest.raises(TypeError, match="ProfilerKind"):
+        mcp_spec("bogus")
 
 
 @pytest.fixture(scope="module")

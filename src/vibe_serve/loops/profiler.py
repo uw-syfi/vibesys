@@ -16,10 +16,11 @@ and decides what to do with the returned summary.
 
 from __future__ import annotations
 
+from vibe_serve.profilers import ProfilerKind, require_profiler_kind
 from vibe_serve.schemas import ProfilerSummary
 
 
-def mcp_spec(profiler_kind: str):
+def mcp_spec(profiler_kind: ProfilerKind):
     """Build an ``MCPServerSpec`` that spawns the analysis MCP server.
 
     Returns ``None`` when ``vibe_serve._agent_cli`` is not importable in the
@@ -27,27 +28,32 @@ def mcp_spec(profiler_kind: str):
     the cli runner).  Callers treat ``None`` as "skip MCP"; the
     profiler agent still runs, just without tool access.
     """
+    kind = require_profiler_kind(profiler_kind)
+    if kind is ProfilerKind.NONE:
+        return None
     try:
-        from vibe_serve._agent_cli import MCPServerSpec
+        from vibe_serve._agent_cli.base import MCPServerSpec
     except Exception:
         return None
-    if profiler_kind == "torch":
+    if kind is ProfilerKind.TORCH:
         return MCPServerSpec(
             name="vibeserve-torch-profiler",
             command="python",
             args=["torch_profiler/server.py"],
         )
-    if profiler_kind == "neuron":
+    if kind is ProfilerKind.NEURON:
         return MCPServerSpec(
             name="vibeserve-neuron-profiler",
             command="python",
             args=["neuron_profiler/server.py"],
         )
-    return MCPServerSpec(
-        name="vibeserve-nsys-profiler",
-        command="python",
-        args=["nsys_profiler/server.py"],
-    )
+    if kind is ProfilerKind.NSYS:
+        return MCPServerSpec(
+            name="vibeserve-nsys-profiler",
+            command="python",
+            args=["nsys_profiler/server.py"],
+        )
+    raise AssertionError(f"Unhandled profiler kind: {kind!r}")
 
 
 def invoke_profiler(
@@ -63,6 +69,8 @@ def invoke_profiler(
     progress.md, snapshotting the workspace, etc. Returns ``None`` on
     exception (the caller decides whether that's fatal).
     """
+    if ctx.profiler_kind is ProfilerKind.NONE:
+        return None
     spec = mcp_spec(ctx.profiler_kind)
     try:
         return ctx.invoke(

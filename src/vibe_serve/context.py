@@ -22,12 +22,14 @@ from vibe_serve.constants import (
     PROJECT_ROOT,
     ComputeBackend,
 )
+from vibe_serve.domains.base import DEFAULT_DOMAIN, DomainName
 from vibe_serve.domains.environment import (
     EnvironmentContext,
     EnvironmentHooks,
     NoopEnvironmentHooks,
 )
 from vibe_serve.llm_client import _build_model
+from vibe_serve.profilers import ProfilerKind, resolve_profiler_kind
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentRequest,
     RunEnvironmentSpec,
@@ -106,7 +108,8 @@ class _RunContext:
         nsys_profiler: str | None = None,
         torch_profiler: str | None = None,
         neuron_profiler: str | None = None,
-        profiler_kind: str = "auto",
+        profiler_kind: ProfilerKind = ProfilerKind.AUTO,
+        profiler_domain: DomainName = DEFAULT_DOMAIN,
         skills_dirs: list[str] | None = None,
         run_environment: RunEnvironmentSpec | None = None,
         git_tracking: bool = False,
@@ -176,29 +179,32 @@ class _RunContext:
         self.torch_profiler_path = self._coerce_dir_path(torch_profiler, "--torch-profiler")
         self.neuron_profiler_path = self._coerce_dir_path(neuron_profiler, "--neuron-profiler")
 
-        # Resolve profiler kind: 'auto' → the compute backend's own profiler
-        # when it dictates one (e.g. Trainium → neuron-explorer), else the run
-        # environment's default (modal → torch, otherwise nsys).
-        resolved_profiler = profiler_kind
-        if resolved_profiler == "auto":
-            backend_profiler = getattr(self.backend_impl, "profiler_kind", None)
-            if backend_profiler == "neuron":
-                resolved_profiler = "neuron"
-            else:
-                resolved_profiler = self.run_environment.default_profiler_kind
-        if resolved_profiler not in ("nsys", "torch", "neuron"):
-            raise ValueError(f"Unknown profiler kind: {profiler_kind!r}")
-        self.profiler_kind = resolved_profiler
+        self.profiler_kind = resolve_profiler_kind(
+            profiler_kind,
+            domain=profiler_domain,
+            backend_profiler_kind=getattr(self.backend_impl, "profiler_kind", None),
+            environment_default_profiler_kind=self.run_environment.default_profiler_kind,
+        )
 
-        # Default torch_profiler_path to examples/support/torch_profiler/ if --profiler=torch
-        # and the user didn't explicitly set --torch-profiler.
-        if self.profiler_kind == "torch" and self.torch_profiler_path is None:
+        if self.profiler_kind is not ProfilerKind.NSYS:
+            self.nsys_profiler_path = None
+        if self.profiler_kind is not ProfilerKind.TORCH:
+            self.torch_profiler_path = None
+        if self.profiler_kind is not ProfilerKind.NEURON:
+            self.neuron_profiler_path = None
+
+        # Default profiler support paths only for the selected profiler.
+        if self.profiler_kind is ProfilerKind.NSYS and self.nsys_profiler_path is None:
+            default_np = PROJECT_ROOT / "examples" / "support" / "nsys_profiler"
+            if default_np.is_dir():
+                self.nsys_profiler_path = str(default_np)
+
+        if self.profiler_kind is ProfilerKind.TORCH and self.torch_profiler_path is None:
             default_tp = PROJECT_ROOT / "examples" / "support" / "torch_profiler"
             if default_tp.is_dir():
                 self.torch_profiler_path = str(default_tp)
 
-        # Likewise default neuron_profiler_path to examples/support/neuron_profiler/.
-        if self.profiler_kind == "neuron" and self.neuron_profiler_path is None:
+        if self.profiler_kind is ProfilerKind.NEURON and self.neuron_profiler_path is None:
             default_np = PROJECT_ROOT / "examples" / "support" / "neuron_profiler"
             if default_np.is_dir():
                 self.neuron_profiler_path = str(default_np)

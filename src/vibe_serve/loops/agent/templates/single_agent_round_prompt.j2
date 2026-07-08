@@ -53,7 +53,9 @@ After (and only after) the implementation passes your self-judge gates, capture 
 {{ domain_profiler }}
 
 {% endif %}
-{% if profiler_kind == "torch" and interface != "service" %}
+{% if profiler_kind == "none" %}
+Standalone profiling is disabled for this run. Use the benchmark's headline metric and judge-visible evidence for the profile fields; do not invoke profiler helper directories or profiler MCP tools.
+{% elif profiler_kind == "torch" and interface != "service" %}
 Use `torch.profiler` via `torch_profiler/analyze_torch_profile.py` (or the `vibeserve-torch-profiler` MCP tools when attached). Start with `tables`, then `kernels` / `operators` / `cpu_overhead` / `memory` / `summary` as relevant.
 
 {% if env_kind == "modal" %}

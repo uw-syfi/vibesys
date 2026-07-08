@@ -12,8 +12,10 @@ from pathlib import Path
 
 import pytest
 
+from vibe_serve.domains.base import DomainName
 from vibe_serve.domains.registry import resolve_domain
 from vibe_serve.domains.rendering import render_domain_section
+from vibe_serve.profilers import ProfilerKind
 from vibe_serve.prompts import render_template
 
 _TEMPLATE_DIR = (
@@ -25,16 +27,16 @@ _TEMPLATE_DIR = (
 class DomainLeakCheck:
     """Terms from ``source_domain`` that must not appear in ``target_domains``."""
 
-    source_domain: str
-    target_domains: tuple[str, ...]
+    source_domain: DomainName
+    target_domains: tuple[DomainName, ...]
     keywords: tuple[str, ...]
     modality: str | None = None
 
 
 DOMAIN_LEAK_CHECKS = (
     DomainLeakCheck(
-        source_domain="llm-serving",
-        target_domains=("generic",),
+        source_domain=DomainName.LLM_SERVING,
+        target_domains=(DomainName.GENERIC,),
         keywords=(
             "FastAPI",
             "causal LM",
@@ -84,11 +86,11 @@ def _domain_context(context: dict[str, object]) -> dict[str, object]:
     }
 
 
-def _domain_section(domain: str, role: str, context: dict[str, object]) -> str:
+def _domain_section(domain: DomainName, role: str, context: dict[str, object]) -> str:
     return render_domain_section(resolve_domain(domain), role, **_domain_context(context))
 
 
-def _render_prompt_bundle(domain: str, *, modality: str | None) -> dict[str, str]:
+def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[str, str]:
     context = _NEUTRAL_CONTEXT | {"modality": modality}
     return {
         "implementer": render_template(
@@ -130,7 +132,7 @@ def _render_prompt_bundle(domain: str, *, modality: str | None) -> dict[str, str
             retry=1,
             feedback=None,
             reference_path=context["reference_path"],
-            profiler_kind="nsys",
+            profiler_kind=ProfilerKind.NSYS,
             profile_focus="",
             domain_single_agent=_domain_section(domain, "single_agent", context),
             domain_profiler=_domain_section(domain, "profiler", context),
@@ -150,7 +152,7 @@ def _render_prompt_bundle(domain: str, *, modality: str | None) -> dict[str, str
             retry=1,
             feedback=None,
             reference_path=context["reference_path"],
-            profiler_kind="torch",
+            profiler_kind=ProfilerKind.TORCH,
             profile_focus="",
             domain_single_agent=_domain_section(domain, "single_agent", context),
             domain_profiler=_domain_section(domain, "profiler", context),

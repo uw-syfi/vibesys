@@ -21,6 +21,7 @@ from vibe_serve.domains.registry import resolve_domain
 from vibe_serve.domains.rendering import render_domain_section
 from vibe_serve.loops.agent import issue_board
 from vibe_serve.loops.profiler import invoke_profiler
+from vibe_serve.profilers import ProfilerKind, require_profiler_kind
 from vibe_serve.prompts import render_template
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
@@ -255,7 +256,7 @@ def _run_pre_round_decision(
     return decision
 
 
-def _profiler_prompt_template(profiler_kind: str, interface: str) -> str:
+def _profiler_prompt_template(profiler_kind: ProfilerKind, interface: str) -> str:
     """Pick the standalone-profiler prompt for the run's profiler + interface.
 
     ``torch`` is a white-box, in-process PyTorch profiler that imports the
@@ -265,12 +266,16 @@ def _profiler_prompt_template(profiler_kind: str, interface: str) -> str:
     ``profiler_kind == "torch" and interface != "service"`` guard so both inner
     loops treat the torch profiler the same way.
     """
-    if interface == "service" and profiler_kind == "torch":
-        profiler_kind = "nsys"
+    kind = require_profiler_kind(profiler_kind)
+    if kind is ProfilerKind.NONE:
+        raise ValueError("No profiler prompt exists when profiling is disabled.")
+    if interface == "service" and kind is ProfilerKind.TORCH:
+        kind = ProfilerKind.NSYS
     return {
-        "torch": "profiler_prompt_torch.j2",
-        "neuron": "profiler_prompt_neuron.j2",
-    }.get(profiler_kind, "profiler_prompt_nsys.j2")
+        ProfilerKind.NSYS: "profiler_prompt_nsys.j2",
+        ProfilerKind.TORCH: "profiler_prompt_torch.j2",
+        ProfilerKind.NEURON: "profiler_prompt_neuron.j2",
+    }[kind]
 
 
 def _run_profiler(
@@ -592,7 +597,7 @@ def run_agent_loop(
     nsys_profiler: str | None = None,
     torch_profiler: str | None = None,
     neuron_profiler: str | None = None,
-    profiler_kind: str = "auto",
+    profiler_kind: ProfilerKind = ProfilerKind.AUTO,
     skills_dirs: list[str] | None = None,
     run_environment: RunEnvironmentSpec | None = None,
     agent_backend: str | None = None,
@@ -600,7 +605,7 @@ def run_agent_loop(
     backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
     modality: str | None = None,
     inner_loop: str = "multi-agent",
-    domain: str | DomainName = DEFAULT_DOMAIN,
+    domain: DomainName = DEFAULT_DOMAIN,
     interface: str = DEFAULT_INTERFACE,
 ) -> bool:
     """Run the orchestrator-driven build loop.
@@ -654,6 +659,7 @@ def run_agent_loop(
         torch_profiler=torch_profiler,
         neuron_profiler=neuron_profiler,
         profiler_kind=profiler_kind,
+        profiler_domain=domain_definition.name,
         skills_dirs=skills_dirs,
         run_environment=run_environment,
         git_tracking=True,
@@ -705,20 +711,18 @@ def run_agent_loop(
                             carry=carry,
                             progress_path=progress_path,
                         )
-                        # FORCE-PROFILE override: every non-cold-start round profiles,
-                        # ignoring orchestrator's need_profile decision. Revert this
-                        # block to restore orchestrator-decided profiling.
-                        profiler_summary = _run_profiler(
-                            ctx,
-                            round_number=round_number,
-                            profile_focus=pre_decision.profile_focus
-                            or "general steady-state benchmark hotspots",
-                            modality=modality,
-                            interface=interface,
-                            domain_definition=domain_definition,
-                            progress_path=progress_path,
-                            objective=objective,
-                        )
+                        if pre_decision.need_profile and ctx.profiler_kind is not ProfilerKind.NONE:
+                            profiler_summary = _run_profiler(
+                                ctx,
+                                round_number=round_number,
+                                profile_focus=pre_decision.profile_focus
+                                or "general steady-state benchmark hotspots",
+                                modality=modality,
+                                interface=interface,
+                                domain_definition=domain_definition,
+                                progress_path=progress_path,
+                                objective=objective,
+                            )
                 else:
                     # single-agent: feed the previous round's profile into the
                     # orchestrator as ProfilerSummary so it has a bottleneck signal.

@@ -16,14 +16,10 @@ def registered_domains() -> list[str]:
     return sorted(domain.value for domain in DOMAINS)
 
 
-def resolve_domain(spec: str | DomainName) -> DomainDefinition:
-    """Resolve a ``--domain`` value to a registered domain definition."""
-    try:
-        name = spec if isinstance(spec, DomainName) else DomainName(str(spec))
-    except ValueError as exc:
-        raise ValueError(
-            f"Unknown domain {spec!r}. Choose from: {', '.join(registered_domains())}."
-        ) from exc
+def resolve_domain(name: DomainName) -> DomainDefinition:
+    """Resolve a registered domain enum to its definition."""
+    if not isinstance(name, DomainName):
+        raise TypeError(f"domain must be a DomainName, got {type(name).__name__}.")
 
     domain = DOMAINS[name]
     if not domain.prompt_dir.is_dir():

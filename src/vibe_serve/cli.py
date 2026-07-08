@@ -28,8 +28,9 @@ from vibe_serve.constants import (
     PROJECT_ROOT,
     ComputeBackend,
 )
-from vibe_serve.domains.base import DEFAULT_DOMAIN
+from vibe_serve.domains.base import DEFAULT_DOMAIN, DomainName
 from vibe_serve.domains.registry import registered_domains
+from vibe_serve.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -45,6 +46,24 @@ _MODALITIES = (
     "speech_to_text",
     "realtime_audio",
 )
+
+_MODAL_PROFILERS = frozenset({ProfilerKind.AUTO, ProfilerKind.TORCH, ProfilerKind.NONE})
+
+
+def _parse_domain_name(value: str) -> DomainName:
+    try:
+        return DomainName(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Unknown domain {value!r}. Choose from: {', '.join(registered_domains())}."
+        ) from exc
+
+
+def _parse_profiler_kind(value: str) -> ProfilerKind:
+    try:
+        return coerce_profiler_kind(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -173,15 +192,17 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--profiler",
-        choices=["nsys", "torch", "neuron", "auto"],
-        default="auto",
+        type=_parse_profiler_kind,
+        choices=CLI_PROFILER_CHOICES,
+        default=ProfilerKind.AUTO,
         help=(
             "Which profiler to use between rounds. "
+            "'none' to disable standalone profiling, "
             "'nsys' for NVIDIA Nsight Systems (needs /proc/driver/nvidia), "
             "'torch' for torch.profiler (works in Modal sandboxes), "
             "'neuron' for AWS neuron-explorer (Trainium/NeuronCores), "
-            "'auto' picks the compute backend's profiler (trainium → neuron), "
-            "else torch when --modal is set, else nsys. Default: auto."
+            "'auto' picks a domain/backend/environment-appropriate profiler. "
+            "Default: auto."
         ),
     )
     parser.add_argument(
@@ -427,6 +448,8 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     parser.add_argument("--modality", default=None, choices=_MODALITIES)
     parser.add_argument(
         "--domain",
+        type=_parse_domain_name,
+        choices=tuple(DomainName),
         default=DEFAULT_DOMAIN,
         metavar="NAME",
         help=(
@@ -526,8 +549,11 @@ def _validate_target_inputs(args: argparse.Namespace) -> None:
 
 
 def _validate_agent(args: argparse.Namespace) -> None:
-    if args.modal and args.profiler == "nsys":
-        print("Error: --modal only supports --profiler=torch.", file=sys.stderr)
+    if args.modal and args.profiler not in _MODAL_PROFILERS:
+        print(
+            "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
+            file=sys.stderr,
+        )
         sys.exit(2)
     _validate_target_inputs(args)
 
@@ -665,8 +691,11 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
 
 
 def _validate_evolve(args: argparse.Namespace) -> None:
-    if args.modal and args.profiler == "nsys":
-        print("Error: --modal only supports --profiler=torch.", file=sys.stderr)
+    if args.modal and args.profiler not in _MODAL_PROFILERS:
+        print(
+            "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
+            file=sys.stderr,
+        )
         sys.exit(2)
     _validate_target_inputs(args)
     if args.children_per_generation < 1:
@@ -718,6 +747,7 @@ def _run_evolve(args: argparse.Namespace) -> None:
         bench=str(args.bench) if args.bench else None,
         nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
         torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
+        neuron_profiler=str(args.neuron_profiler) if args.neuron_profiler else None,
         profiler_kind=args.profiler,
         skills_dirs=skills,
         run_environment=run_environment_spec_from_args(args),
@@ -760,8 +790,11 @@ def _build_openevolve_parser() -> argparse.ArgumentParser:
 
 
 def _validate_openevolve(args: argparse.Namespace) -> None:
-    if args.modal and args.profiler == "nsys":
-        print("Error: --modal only supports --profiler=torch.", file=sys.stderr)
+    if args.modal and args.profiler not in _MODAL_PROFILERS:
+        print(
+            "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
+            file=sys.stderr,
+        )
         sys.exit(2)
     _validate_target_inputs(args)
     if args.max_iterations < 1:
@@ -800,6 +833,7 @@ def _run_openevolve(args: argparse.Namespace) -> None:
         bench=str(args.bench) if args.bench else None,
         nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
         torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
+        neuron_profiler=str(args.neuron_profiler) if args.neuron_profiler else None,
         profiler_kind=args.profiler,
         skills_dirs=skills,
         run_environment=run_environment_spec_from_args(args),
@@ -837,8 +871,11 @@ def _build_plain_parser() -> argparse.ArgumentParser:
 
 
 def _validate_plain(args: argparse.Namespace) -> None:
-    if args.modal and args.profiler == "nsys":
-        print("Error: --modal only supports --profiler=torch.", file=sys.stderr)
+    if args.modal and args.profiler not in _MODAL_PROFILERS:
+        print(
+            "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
+            file=sys.stderr,
+        )
         sys.exit(2)
     _validate_target_inputs(args)
 
@@ -900,7 +937,10 @@ def _run_plain(args: argparse.Namespace) -> None:
         debug=args.debug,
         acc_checker=str(args.acc_checker) if args.acc_checker else None,
         bench=str(args.bench) if args.bench else None,
-        nsys_profiler=str(PROJECT_ROOT / "examples" / "support" / "nsys_profiler"),
+        nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
+        torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
+        neuron_profiler=str(args.neuron_profiler) if args.neuron_profiler else None,
+        profiler_kind=args.profiler,
         skills_dirs=skills,
         run_environment=run_environment_spec_from_args(args),
         agent_backend=args.agent_backend,

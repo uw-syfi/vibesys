@@ -25,6 +25,7 @@ from vibe_serve.backends.cuda.gpu_monitor import (
     query_gpu_info,
 )
 from vibe_serve.constants import ComputeBackend
+from vibe_serve.profilers import ProfilerKind
 from vibe_serve.sandbox.docker_sandbox import DockerSandbox
 from vibe_serve.sandbox.modal_sandbox import ModalSandbox
 
@@ -41,7 +42,7 @@ class CudaBackend:
     """
 
     name = ComputeBackend.CUDA
-    profiler_kind = "nsys"
+    profiler_kind = ProfilerKind.NSYS
 
     def __init__(
         self,

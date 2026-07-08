@@ -36,6 +36,7 @@ from vibe_serve.backends.base import (
     SetupFn,
 )
 from vibe_serve.constants import ComputeBackend
+from vibe_serve.profilers import ProfilerKind
 from vibe_serve.sandbox.docker_sandbox import DockerSandbox
 
 # AWS Neuron DLC.  Tag chosen to match the host's Neuron tools (2.30):
@@ -76,7 +77,7 @@ class TrainiumBackend:
     """AWS Trainium / NeuronCore backend (local or Docker; no Modal)."""
 
     name = ComputeBackend.TRAINIUM
-    profiler_kind = "neuron"
+    profiler_kind = ProfilerKind.NEURON
 
     def __init__(
         self,

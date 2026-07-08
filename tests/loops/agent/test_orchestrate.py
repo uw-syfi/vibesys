@@ -5,8 +5,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vibe_serve.agents import AgentRunner
+from vibe_serve.domains.base import DomainName
 from vibe_serve.loops.agent import issue_board
 from vibe_serve.loops.agent.loop import run_agent_loop
+from vibe_serve.profilers import ProfilerKind
 from vibe_serve.schemas import (
     ImplementerResponse,
     JudgeResponse,
@@ -357,6 +359,72 @@ def test_loop_orchestrator_requests_profile_before_plan(tmp_path, ref_file):
     prof_idx = call_order.index("profiler")
     # Profiler must come BEFORE the round-2 plan call.
     assert prof_idx < plan_idx[1]
+
+
+def test_loop_skips_profiler_when_pre_round_decision_says_no(tmp_path, ref_file):
+    runner = _make_orchestrate_runner(
+        pre_decisions=[
+            PreRoundDecision(need_profile=False, profile_focus="", reasoning="benchmark is enough"),
+        ],
+        plans=[
+            OrchestratorPlan(task="Build server", pass_criteria="ok", reasoning="start"),
+            OrchestratorPlan(task="Use benchmark evidence", pass_criteria="ok", reasoning="skip"),
+        ],
+    )
+
+    result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=2)
+
+    assert result is True
+    assert runner.counters["orch_pre"] == 1
+    assert runner.counters["prof"] == 0
+
+
+def test_loop_skips_profiler_when_profiler_kind_is_none(tmp_path, ref_file):
+    runner = _make_orchestrate_runner(
+        pre_decisions=[
+            PreRoundDecision(need_profile=True, profile_focus="kernels", reasoning="would help"),
+        ],
+        plans=[
+            OrchestratorPlan(task="Build server", pass_criteria="ok", reasoning="start"),
+            OrchestratorPlan(task="Use benchmark evidence", pass_criteria="ok", reasoning="disabled"),
+        ],
+    )
+
+    result = _invoke_orchestrate(
+        tmp_path,
+        ref_file,
+        runner,
+        max_rounds=2,
+        profiler_kind=ProfilerKind.NONE,
+    )
+
+    assert result is True
+    assert runner.counters["orch_pre"] == 1
+    assert runner.counters["prof"] == 0
+
+
+def test_loop_generic_auto_profiler_resolves_to_none(tmp_path, ref_file):
+    runner = _make_orchestrate_runner(
+        pre_decisions=[
+            PreRoundDecision(need_profile=True, profile_focus="kernels", reasoning="would help"),
+        ],
+        plans=[
+            OrchestratorPlan(task="Build queue", pass_criteria="ok", reasoning="start"),
+            OrchestratorPlan(task="Use benchmark evidence", pass_criteria="ok", reasoning="generic"),
+        ],
+    )
+
+    result = _invoke_orchestrate(
+        tmp_path,
+        ref_file,
+        runner,
+        max_rounds=2,
+        domain=DomainName.GENERIC,
+    )
+
+    assert result is True
+    assert runner.counters["orch_pre"] == 1
+    assert runner.counters["prof"] == 0
 
 
 def test_loop_runs_full_max_rounds_budget(tmp_path, ref_file):

@@ -54,7 +54,7 @@ def test_registered_domains_present():
 
 
 def test_resolve_registered_name():
-    d = resolve_domain("llm-serving")
+    d = resolve_domain(DomainName.LLM_SERVING)
     assert d.name is DomainName.LLM_SERVING
     assert d.prompt_dir.is_dir()
     assert d.prompt_dir.name == "templates"
@@ -65,7 +65,7 @@ def test_resolve_path_is_not_supported(tmp_path: Path):
     f = tmp_path / "mine"
     f.mkdir()
     (f / "implementer.md").write_text("hello\n")
-    with pytest.raises(ValueError, match="Unknown domain"):
+    with pytest.raises(TypeError, match="DomainName"):
         resolve_domain(str(f))
 
 
@@ -75,10 +75,9 @@ def test_registered_domains_carry_environment_hooks():
 
 
 def test_resolve_unknown_raises():
-    with pytest.raises(ValueError) as exc:
+    with pytest.raises(TypeError) as exc:
         resolve_domain("does-not-exist-xyz")
-    # error lists registered domains to guide the user
-    assert "llm-serving" in str(exc.value)
+    assert "DomainName" in str(exc.value)
 
 
 # --------------------------------------------------------------------------- #
@@ -94,13 +93,13 @@ def test_render_missing_role_is_empty(tmp_path: Path):
 
 def test_render_empty_role_is_empty():
     # generic has no role files, so every role injects nothing
-    d = resolve_domain("generic")
+    d = resolve_domain(DomainName.GENERIC)
     for role in (DomainRole.IMPLEMENTER, DomainRole.JUDGE, DomainRole.SINGLE_AGENT):
         assert render_domain_section(d, role) == ""
 
 
 def test_render_llm_serving_has_content():
-    d = resolve_domain("llm-serving")
+    d = resolve_domain(DomainName.LLM_SERVING)
     impl = render_domain_section(
         d, DomainRole.IMPLEMENTER, modality="text_generation", reference_path="/ref"
     )
@@ -138,7 +137,7 @@ def test_role_file_keeps_markdown_headings(tmp_path: Path):
 
 def test_render_role_branches_on_context():
     """A role file rendered with bench_path set should reference it."""
-    d = resolve_domain("llm-serving")
+    d = resolve_domain(DomainName.LLM_SERVING)
     with_bench = render_domain_section(
         d, DomainRole.JUDGE, modality="text_generation", bench_path="/BENCHX"
     )
@@ -166,7 +165,7 @@ def test_render_role_branches_on_interface(tmp_path: Path):
 
 def test_single_agent_uses_explicit_section_when_present():
     # llm-serving ships a bespoke single_agent.md file
-    d = resolve_domain("llm-serving")
+    d = resolve_domain(DomainName.LLM_SERVING)
     sa = render_domain_section(
         d, DomainRole.SINGLE_AGENT, modality="text_generation", reference_path="/ref"
     )
@@ -187,7 +186,7 @@ def test_single_agent_derives_from_implementer_and_judge(tmp_path: Path):
 # --------------------------------------------------------------------------- #
 # end-to-end injection into base prompts
 # --------------------------------------------------------------------------- #
-def _render_implementer(domain: str) -> str:
+def _render_implementer(domain: DomainName) -> str:
     d = resolve_domain(domain)
     section = render_domain_section(
         d, DomainRole.IMPLEMENTER, modality="text_generation", reference_path="/ref"
@@ -206,24 +205,24 @@ def _render_implementer(domain: str) -> str:
 
 
 def test_llm_serving_injects_into_implementer():
-    out = _render_implementer("llm-serving")
+    out = _render_implementer(DomainName.LLM_SERVING)
     # serving-specific prose from the domain package is present
     assert "serving" in out.lower()
     assert "## Progress tracking" in out  # base skeleton intact
 
 
 def test_generic_injects_nothing_extra():
-    generic = _render_implementer("generic")
+    generic = _render_implementer(DomainName.GENERIC)
     # the only serving refs left are from the modality include, not the domain;
     # the generic render must be strictly shorter than llm-serving's.
-    serving = _render_implementer("llm-serving")
+    serving = _render_implementer(DomainName.LLM_SERVING)
     assert len(generic) < len(serving)
     assert "## Progress tracking" in generic  # base skeleton intact
 
 
 def test_no_triple_blank_at_injection_point():
     """Generic (empty injection) must not leave a triple newline gap."""
-    out = _render_implementer("generic")
+    out = _render_implementer(DomainName.GENERIC)
     # The injection point itself ({% if %}...{% endif %}) must collapse cleanly.
     # Locate the workspace->progress transition that brackets the injection.
     idx = out.index("## Progress tracking")
@@ -238,7 +237,7 @@ def test_orchestrator_is_a_domain_role():
     assert DomainRole.ORCHESTRATOR in DOMAIN_ROLES
 
 
-def _render_orchestrator(domain: str) -> str:
+def _render_orchestrator(domain: DomainName) -> str:
     section = render_domain_section(
         resolve_domain(domain), DomainRole.ORCHESTRATOR, modality="text_generation"
     )
@@ -259,21 +258,21 @@ def _render_orchestrator(domain: str) -> str:
 
 def test_llm_serving_provides_orchestrator_optimization_floor():
     section = render_domain_section(
-        resolve_domain("llm-serving"), DomainRole.ORCHESTRATOR, modality="text_generation"
+        resolve_domain(DomainName.LLM_SERVING), DomainRole.ORCHESTRATOR, modality="text_generation"
     )
     assert "Optimization priority" in section
     assert "Continuous batching" in section
 
 
 def test_llm_serving_orchestrator_floor_injected_into_plan():
-    out = _render_orchestrator("llm-serving")
+    out = _render_orchestrator(DomainName.LLM_SERVING)
     assert "Optimization priority" in out
     # the line-39 back-reference resolves when a floor is provided
     assert "the optimization-floor section below" in out
 
 
 def test_generic_orchestrator_has_no_llm_floor():
-    out = _render_orchestrator("generic")
+    out = _render_orchestrator(DomainName.GENERIC)
     # the prescriptive LLM floor is gone, and its back-reference collapses
     assert "Optimization priority" not in out
     assert "Continuous batching" not in out

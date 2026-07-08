@@ -28,6 +28,7 @@ from vibe_serve.loops.evolve.loop import (
 )
 from vibe_serve.loops.evolve.population import Individual, Population
 from vibe_serve.loops.openevolve.archive import MapElitesArchive, compute_features
+from vibe_serve.profilers import ProfilerKind
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -55,7 +56,8 @@ def run_openevolve_loop(
     bench: str | None = None,
     nsys_profiler: str | None = None,
     torch_profiler: str | None = None,
-    profiler_kind: str = "auto",
+    neuron_profiler: str | None = None,
+    profiler_kind: ProfilerKind = ProfilerKind.AUTO,
     skills_dirs: list[str] | None = None,
     run_environment: RunEnvironmentSpec | None = None,
     agent_backend: str | None = None,
@@ -83,6 +85,7 @@ def run_openevolve_loop(
         bench=bench,
         nsys_profiler=nsys_profiler,
         torch_profiler=torch_profiler,
+        neuron_profiler=neuron_profiler,
         profiler_kind=profiler_kind,
         skills_dirs=skills_dirs,
         run_environment=run_environment,

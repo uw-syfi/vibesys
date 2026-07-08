@@ -40,6 +40,7 @@ from vibe_serve.backends import SandboxKind
 from vibe_serve.backends.base import ComputeBackendImpl, SetupFn
 from vibe_serve.constants import DEFAULT_AGENT_BACKEND, PROJECT_ROOT
 from vibe_serve.domains.environment import EnvironmentBindMount
+from vibe_serve.profilers import ProfilerKind
 
 
 @dataclass(frozen=True)
@@ -114,7 +115,7 @@ class RunEnvironmentSession(Protocol):
 class RunEnvironment(Protocol):
     isolated: bool
     materialize_local_model_weights: bool
-    default_profiler_kind: str
+    default_profiler_kind: ProfilerKind
     backend_image: str | None
 
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession: ...
@@ -162,7 +163,7 @@ class _DefaultRunEnvironmentSession:
 class LocalEnvironment(_NoopWorkspaceRecovery):
     isolated = False
     materialize_local_model_weights = True
-    default_profiler_kind = "nsys"
+    default_profiler_kind = ProfilerKind.NSYS
     backend_image = None
 
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
@@ -198,7 +199,7 @@ class DockerEnvironmentConfig:
 class DockerEnvironment:
     isolated = True
     materialize_local_model_weights = True
-    default_profiler_kind = "nsys"
+    default_profiler_kind = ProfilerKind.NSYS
 
     def __init__(self, config: DockerEnvironmentConfig) -> None:
         self.config = config
@@ -296,7 +297,7 @@ class ModalEnvironmentConfig:
 class ModalEnvironment(_NoopWorkspaceRecovery):
     isolated = True
     materialize_local_model_weights = False
-    default_profiler_kind = "torch"
+    default_profiler_kind = ProfilerKind.TORCH
 
     def __init__(self, config: ModalEnvironmentConfig) -> None:
         self.config = config

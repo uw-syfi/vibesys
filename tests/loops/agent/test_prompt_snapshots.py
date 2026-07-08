@@ -12,8 +12,10 @@ from pathlib import Path
 
 import pytest
 
+from vibe_serve.domains.base import DomainName
 from vibe_serve.domains.registry import resolve_domain
 from vibe_serve.domains.rendering import render_domain_section
+from vibe_serve.profilers import ProfilerKind
 from vibe_serve.prompts import render_template
 
 _ROOT = Path(__file__).resolve().parents[3]
@@ -58,11 +60,11 @@ def _domain_context(context: dict[str, object]) -> dict[str, object]:
     }
 
 
-def _domain_section(domain: str, role: str, context: dict[str, object]) -> str:
+def _domain_section(domain: DomainName, role: str, context: dict[str, object]) -> str:
     return render_domain_section(resolve_domain(domain), role, **_domain_context(context))
 
 
-def _render_prompt(domain: str, role: str, context: dict[str, object]) -> str:
+def _render_prompt(domain: DomainName, role: str, context: dict[str, object]) -> str:
     if role == "implementer":
         return render_template(
             "implementer_prompt.j2",
@@ -102,7 +104,7 @@ def _render_prompt(domain: str, role: str, context: dict[str, object]) -> str:
             retry=1,
             feedback=None,
             reference_path=context["reference_path"],
-            profiler_kind="nsys",
+            profiler_kind=ProfilerKind.NSYS,
             profile_focus="",
             domain_single_agent=_domain_section(domain, "single_agent", context),
             domain_profiler=_domain_section(domain, "profiler", context),
@@ -149,13 +151,13 @@ def _assert_matches_snapshot(domain: str, case_name: str, role: str, rendered: s
 @pytest.mark.parametrize("case_name,context", _CONTEXTS.items())
 @pytest.mark.parametrize("role", _ROLES)
 def test_llm_serving_prompt_snapshot(case_name: str, context: dict[str, object], role: str):
-    rendered = _render_prompt("llm-serving", role, context)
-    _assert_matches_snapshot("llm-serving", case_name, role, rendered)
+    rendered = _render_prompt(DomainName.LLM_SERVING, role, context)
+    _assert_matches_snapshot(DomainName.LLM_SERVING.value, case_name, role, rendered)
 
 
 def test_llm_serving_rendered_prompts_keep_required_domain_content():
     context = _CONTEXTS["full"]
-    prompts = {role: _render_prompt("llm-serving", role, context) for role in _ROLES}
+    prompts = {role: _render_prompt(DomainName.LLM_SERVING, role, context) for role in _ROLES}
 
     assert "Model weights are at `/model`" in prompts["implementer"]
     assert "serving-systems" in prompts["implementer"]
@@ -170,8 +172,8 @@ def test_llm_serving_rendered_prompts_keep_required_domain_content():
 
 def test_minimal_llm_serving_prompt_omits_optional_checker_paths():
     context = _CONTEXTS["minimal"]
-    judge = _render_prompt("llm-serving", "judge", context)
-    single_agent = _render_prompt("llm-serving", "single_agent", context)
+    judge = _render_prompt(DomainName.LLM_SERVING, "judge", context)
+    single_agent = _render_prompt(DomainName.LLM_SERVING, "single_agent", context)
 
     assert "/workspace/bench/benchmark.py" not in judge
     assert "/workspace/acc_checker/checker.py" not in judge
@@ -181,7 +183,7 @@ def test_minimal_llm_serving_prompt_omits_optional_checker_paths():
 
 def test_generic_prompts_do_not_receive_llm_serving_domain_content():
     context = _CONTEXTS["full"]
-    prompts = {role: _render_prompt("generic", role, context) for role in _ROLES}
+    prompts = {role: _render_prompt(DomainName.GENERIC, role, context) for role in _ROLES}
 
     assert "Model weights are at `/model`" not in prompts["implementer"]
     assert "Required: read the relevant skill BEFORE writing code" not in prompts["implementer"]

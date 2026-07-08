@@ -43,6 +43,7 @@ from vibe_serve.loops.evolve.population import (
     Population,
 )
 from vibe_serve.loops.profiler import invoke_profiler
+from vibe_serve.profilers import ProfilerKind
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -224,8 +225,12 @@ def _run_profiler(
     objective: str,
     objectives: list[Objective] | None = None,
 ) -> ProfilerSummary | None:
+    if ctx.profiler_kind is ProfilerKind.NONE:
+        return None
     template = (
-        "profiler_prompt_torch.j2" if ctx.profiler_kind == "torch" else "profiler_prompt_nsys.j2"
+        "profiler_prompt_torch.j2"
+        if ctx.profiler_kind is ProfilerKind.TORCH
+        else "profiler_prompt_nsys.j2"
     )
     base_prompt = _render(
         template,
@@ -279,7 +284,8 @@ def run_evolve_loop(
     bench: str | None = None,
     nsys_profiler: str | None = None,
     torch_profiler: str | None = None,
-    profiler_kind: str = "auto",
+    neuron_profiler: str | None = None,
+    profiler_kind: ProfilerKind = ProfilerKind.AUTO,
     skills_dirs: list[str] | None = None,
     run_environment: RunEnvironmentSpec | None = None,
     agent_backend: str | None = None,
@@ -313,6 +319,7 @@ def run_evolve_loop(
         bench=bench,
         nsys_profiler=nsys_profiler,
         torch_profiler=torch_profiler,
+        neuron_profiler=neuron_profiler,
         profiler_kind=profiler_kind,
         skills_dirs=skills_dirs,
         run_environment=run_environment,

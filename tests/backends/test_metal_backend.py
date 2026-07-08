@@ -12,6 +12,7 @@ from vibe_serve.backends import SandboxKind
 from vibe_serve.backends.local import LocalBackend
 from vibe_serve.cli import _add_common_args
 from vibe_serve.constants import ComputeBackend
+from vibe_serve.profilers import ProfilerKind
 
 
 def _make_backend(tmp_path) -> LocalBackend:
@@ -23,7 +24,7 @@ class TestMetalRegistry:
         impl = backends.get(ComputeBackend.METAL, log_dir=tmp_path)
         assert isinstance(impl, LocalBackend)
         assert impl.name is ComputeBackend.METAL
-        assert impl.profiler_kind == "torch"
+        assert impl.profiler_kind is ProfilerKind.TORCH
 
 
 class TestMetalSandbox:

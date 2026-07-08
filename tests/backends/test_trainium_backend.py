@@ -12,6 +12,7 @@ from vibe_serve.backends import SandboxKind
 from vibe_serve.backends.trainium import TrainiumBackend
 from vibe_serve.cli import _add_common_args
 from vibe_serve.constants import ComputeBackend
+from vibe_serve.profilers import ProfilerKind
 
 
 def _make_backend(tmp_path, devices=("/dev/neuron0",)) -> TrainiumBackend:
@@ -26,7 +27,7 @@ class TestTrainiumRegistry:
         impl = backends.get(ComputeBackend.TRAINIUM, log_dir=tmp_path)
         assert isinstance(impl, TrainiumBackend)
         assert impl.name is ComputeBackend.TRAINIUM
-        assert impl.profiler_kind == "neuron"
+        assert impl.profiler_kind is ProfilerKind.NEURON
 
 
 class TestTrainiumSandbox:

@@ -9,6 +9,8 @@ from unittest.mock import patch
 import pytest
 
 from vibe_serve.cli import _extract_flag, _extract_loop_selection, _validate_target_inputs, main
+from vibe_serve.domains.base import DomainName
+from vibe_serve.profilers import ProfilerKind
 
 TARGET_ARGS = [
     "--ref",
@@ -88,6 +90,8 @@ def test_target_inputs_default_to_none():
     assert args.ref is None
     assert args.acc_checker is None
     assert args.bench is None
+    assert args.profiler is ProfilerKind.AUTO
+    assert args.domain is DomainName.LLM_SERVING
 
 
 @pytest.mark.parametrize(
@@ -106,6 +110,50 @@ def test_input_arg_is_available_on_all_loop_parsers(builder_name):
     args = parser.parse_args(["--input", "examples/data-structures/queue-default"])
 
     assert args.input == Path("examples/data-structures/queue-default")
+
+
+@pytest.mark.parametrize(
+    "builder_name,validator_name",
+    [
+        ("_build_agent_parser", "_validate_agent"),
+        ("_build_evolve_parser", "_validate_evolve"),
+        ("_build_openevolve_parser", "_validate_openevolve"),
+        ("_build_plain_parser", "_validate_plain"),
+    ],
+)
+def test_profiler_none_is_valid_with_modal(builder_name, validator_name):
+    import vibe_serve.cli as cli
+
+    parser = getattr(cli, builder_name)()
+    validator = getattr(cli, validator_name)
+    args = parser.parse_args(["--modal", "--profiler", "none", *TARGET_ARGS])
+
+    assert args.profiler is ProfilerKind.NONE
+    validator(args)
+
+
+def test_agent_parser_outputs_domain_enum():
+    from vibe_serve.cli import _build_agent_parser
+
+    args = _build_agent_parser().parse_args(["--domain", "generic"])
+
+    assert args.domain is DomainName.GENERIC
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--profiler", "bogus"],
+        ["--domain", "bogus"],
+    ],
+)
+def test_agent_parser_rejects_invalid_enum_args(argv):
+    from vibe_serve.cli import _build_agent_parser
+
+    with pytest.raises(SystemExit) as exc:
+        _build_agent_parser().parse_args(argv)
+
+    assert exc.value.code == 2
 
 
 def test_validate_target_inputs_derives_bundle_paths_from_input(tmp_path):

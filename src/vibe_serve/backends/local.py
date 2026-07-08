@@ -28,6 +28,7 @@ from vibe_serve.backends.base import (
     SetupFn,
 )
 from vibe_serve.constants import ComputeBackend
+from vibe_serve.profilers import ProfilerKind
 from vibe_serve.sandbox.docker_sandbox import DockerSandbox
 
 _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
@@ -36,7 +37,7 @@ _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 class LocalBackend:
     """No-device backend (Metal / CPU) — hardware hooks are no-ops."""
 
-    profiler_kind = "torch"
+    profiler_kind = ProfilerKind.TORCH
 
     def __init__(
         self,

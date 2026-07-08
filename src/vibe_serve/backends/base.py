@@ -23,6 +23,7 @@ from typing import Protocol, runtime_checkable
 from deepagents.backends.sandbox import BaseSandbox
 
 from vibe_serve.constants import ComputeBackend
+from vibe_serve.profilers import ProfilerKind
 
 
 class SandboxKind(StrEnum):
@@ -61,7 +62,7 @@ class ComputeBackendImpl(Protocol):
     """Per-platform backend.  See module docstring for the contract."""
 
     name: ComputeBackend
-    profiler_kind: str  # "nsys" / "torch" / etc — picks the Jinja template
+    profiler_kind: ProfilerKind  # picks profiler support, MCP, and prompt template
 
     def make_sandbox(
         self,

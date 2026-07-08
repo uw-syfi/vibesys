@@ -44,12 +44,14 @@ vibe_serve = ["templates/*.j2", "templates/_backend/*/*.j2", "domains/README.md"
 dev = [
     "chardet<6",
     "diff-cover",
+    "hypothesis",
     "matplotlib>=3.10.8",
     "pytest",
     "pytest-cov",
     "ruff>=0.6",
 ]
 test = [
+    "hypothesis",
     "pytest",
     "pytest-cov",
 ]
