@@ -3,11 +3,6 @@ You are building an in-memory key-value store server that speaks the Redis RESP2
 ## Required interface
 
 Your server must:
-{% if interface == "service" %}
-- Provide an executable `run.sh` in the workspace root that starts the server on the port given as its first argument: `./run.sh <port>`. The harness only ever starts it this way and talks to it over TCP — never by importing your code, so implement it in whatever language and runtime best fit a CPU-bound network server.
-{% else %}
-- Be a Python program `main.py` that accepts a port number as its first CLI argument: `python main.py <port>`
-{% endif %}
 - Listen on the given TCP port speaking Redis RESP2
 - Support commands: GET, SET, DEL, HSET, HMSET, HGETALL, PING, FLUSHDB, DBSIZE, COMMAND, HELLO, CLIENT
 - The HELLO command should return `+OK\r\n` (signals RESP2-only to clients)

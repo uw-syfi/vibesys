@@ -1,20 +1,15 @@
-{% if interface is not defined %}{% set interface = "inprocess" %}{% endif %}
 ## KV store (Redis RESP2) profiling
 
 A CPU-bound TCP server; key axes are **throughput** (ops/sec), **p99 latency** (ms), and **per-core CPU**.
 
 ## How to profile
 
-1. Start the server: {% if interface == "service" %}`./run.sh 6380 &`{% else %}`uv run python main.py 6380 &`{% endif %}
+1. Start the server: `./run.sh 6380 &`
 2. Find its PID: `PID=$(lsof -ti tcp:6380 -s tcp:LISTEN)`
 3. Drive load in the background: `uv run python {{ bench_path }}/benchmark.py --port 6380 &`
 4. Sample it:
-{% if interface == "service" %}
    - Python: `py-spy record -o /tmp/profile.svg --pid $PID --duration 10`
    - Native (C / Rust / Go): `perf record -p $PID -g -- sleep 10 && perf report`
-{% else %}
-   - `py-spy record -o /tmp/profile.svg --pid $PID --duration 10`
-{% endif %}
    - Syscall breakdown (any language, Linux): `strace -c -p $PID -e trace=read,write,epoll_wait`
 5. Kill the server after.
 

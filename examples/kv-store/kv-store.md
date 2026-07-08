@@ -9,10 +9,9 @@ vibe-serve --outer-loop agent --modality kv_store --backend cpu \
   --interface service --domain examples/kv-store/kv-store.md ...
 ```
 
-Under `--interface service` the store is exercised only over its RESP2 socket
-(the checker and YCSB never import the candidate), so the agent picks the
-language and the harness starts it via `./run.sh <port>`. Drop the flag
-(default `inprocess`) to pin the implementation to a Python `main.py`.
+The store is exercised only over its RESP2 socket (the checker and YCSB never
+import the candidate), so the agent picks the language and the harness starts it
+via `./run.sh <port>`.
 
 This pack carries the cross-cutting "what good means"; the per-task RESP2 I/O
 contract lives in the `kv_store` modality. Author your own by copying this file
@@ -41,9 +40,8 @@ Reward-hacking here means the server satisfies the checker's fixed sequence **wi
 
 ## orchestrator
 This is a CPU-bound network server — there is no GPU, model, or tensor work. The headline metric is **concurrent** throughput (YCSB `--threads 16`) under a p99 latency SLA. Scope each round from what the current profile shows is the dominant bottleneck rather than a fixed technique checklist, and confirm each change holds the SLA — a throughput win that violates the p99 SLA is a fail.
-{% if interface | default("inprocess") == "service" %}
+
 This target is judged only over the wire and is CPU-bound, where a compiled systems language (C / Rust / Go) has a decisive edge over an interpreter. Prefer building the baseline **directly in a compiled language** rather than iterating on the Python seed — don't defer the language choice to a later round.
-{% endif %}
 ## Task examples
 
 Tasks should be comparable in scope to, e.g.:
