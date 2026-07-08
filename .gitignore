@@ -243,10 +243,6 @@ inputs/**/model
 examples/**/model
 examples/**/draft_model
 
-# Agent instructions (kept local)
-AGENTS.md
-CLAUDE.md
-
 # Claude Code session state (kept local)
 .claude/
 
