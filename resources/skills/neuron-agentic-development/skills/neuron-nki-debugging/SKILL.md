@@ -6,8 +6,6 @@ description: |
   "neuronx-cc compilation failed", "validate kernel on hardware", "run kernel on trainium",
   or asking "how to debug NKI compilation errors on device".
 argument-hint: "[kernel file]"
-vibeserve:
-  backends: [trainium]
 ---
 
 # Debugging NKI on Neuron Hardware
@@ -302,3 +300,4 @@ print("Validation passed!")
 |-------|----------|
 | `/neuron-nki-profiling` | Profile kernel performance |
 | `/neuron-nki-docs` | Look up API documentation and error codes |
+

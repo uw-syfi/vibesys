@@ -6,8 +6,6 @@ description: |
   "generate NEFF", "get summary-json",
   or asking "how to profile NKI kernel".
 argument-hint: "[kernel file]"
-vibeserve:
-  backends: [trainium]
 ---
 
 # Profiling NKI Kernels

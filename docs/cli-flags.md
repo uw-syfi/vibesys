@@ -107,19 +107,20 @@ directory containing `SKILL.md`, or at a parent tree containing multiple skills.
 The default candidate root is `resources/skills/`.
 
 Before a run starts, VibeServe discovers each `SKILL.md` under the candidate
-roots and validates its frontmatter. Skills may optionally declare
-VibeServe-specific backend applicability:
+roots and validates its frontmatter. Optional `.vibeserve.toml` sidecars can
+declare backend applicability for a skill subtree:
 
-```yaml
-vibeserve:
-  backends: [trainium]
+```toml
+[[rule]]
+path = "skills"
+backends = ["trainium"]
 ```
 
 Effective skill loading is:
 
 - backend-agnostic skills load for every `--backend`;
-- skills with `vibeserve.backends` load only when the selected backend is in
-  that list;
+- skills matched by a sidecar rule with `backends` load only when the selected
+  backend is in that list;
 - `--skills-dir` adds candidate roots, but backend metadata still filters the
   discovered skills;
 - `--no-skills` disables all skill loading, including backend-scoped skills.

@@ -10,8 +10,6 @@ description: |
   "refactor tiling", "change tile size", "add batch dimension", "support variable length",
   "fix this kernel logic", "update kernel for gen4", or needs NKI API guidance for kernel changes.
 argument-hint: "[operation, PyTorch/Numpy code, or existing kernel file]"
-vibeserve:
-  backends: [trainium]
 ---
 
 # Writing NKI Kernels

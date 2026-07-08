@@ -18,8 +18,6 @@ description: |
   "compute bounds", "why is my kernel slow", or wants profile-guided
   optimization guidance.
 argument-hint: "[neff-path] [ntff-path]"
-vibeserve:
-  backends: [trainium]
 ---
 
 # Profile Querying

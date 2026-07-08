@@ -6,9 +6,9 @@ licensed under **Apache-2.0** (see `LICENSE.txt` / `NOTICE`).
 
 They teach an agent to author, debug, and profile **NKI** (Neuron Kernel
 Interface) kernels for AWS Trainium / Inferentia. VibeServe surfaces them
-automatically when running with `--backend trainium` (see
-`vibe_serve.cli.load_config_and_skills`), so the implementer can write custom
-NeuronCore kernels instead of treating the device as a black box.
+automatically when running with `--backend trainium` (see `.vibeserve.toml` and
+`docs/skill-metadata.md`), so the implementer can write custom NeuronCore
+kernels instead of treating the device as a black box.
 
 ## What's vendored
 
