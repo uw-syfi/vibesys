@@ -1,7 +1,7 @@
-"""Accuracy checker: compare candidate KV server against Redis oracle.
+"""Accuracy checker: compare a candidate KV server against a Redis oracle.
 
-Expects the candidate server to be already running. Starts its own Redis
-oracle internally, runs deterministic ops against both, diffs responses.
+The candidate server must already be running. This starts its own Redis oracle,
+replays a deterministic operation sequence against both, and diffs every reply.
 
 Usage:
     python checker.py --port 6380
@@ -17,17 +17,21 @@ import socket
 import subprocess
 import sys
 import time
+from collections import namedtuple
 
 import redis
 
+# One replayed request: the redis-py method to call and its arguments.
+Operation = namedtuple("Operation", ["label", "method", "args", "kwargs"])
+
 
 def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
 
 
-def _wait(port, timeout=10):
+def _wait_until_listening(port, timeout=10):
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -38,11 +42,41 @@ def _wait(port, timeout=10):
     return False
 
 
-def _find_redis():
-    for p in [shutil.which("redis-server"), "/opt/homebrew/opt/redis/bin/redis-server", "/usr/bin/redis-server"]:
-        if p and os.path.isfile(p):
-            return p
+def _find_redis_server():
+    candidates = [shutil.which("redis-server"), "/opt/homebrew/opt/redis/bin/redis-server", "/usr/bin/redis-server"]
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
     sys.exit("ERROR: redis-server not found")
+
+
+def _next_operation(rng, num_keys):
+    """Draw the next random operation from the workload mix."""
+    kind = rng.choices(["SET", "GET", "DEL", "HSET", "HGETALL"], weights=[30, 35, 5, 20, 10])[0]
+    key = f"key:{rng.randint(0, num_keys - 1):06d}"
+
+    if kind == "SET":
+        return Operation(kind, "set", (key, f"v:{rng.randint(0, 999999)}"), {})
+    if kind == "GET":
+        return Operation(kind, "get", (key,), {})
+    if kind == "DEL":
+        return Operation(kind, "delete", (key,), {})
+    if kind == "HSET":
+        fields = {f"f{i}": f"{rng.randint(0, 9999)}" for i in range(rng.randint(1, 4))}
+        return Operation(kind, "hset", (f"h:{key}",), {"mapping": fields})
+    return Operation(kind, "hgetall", (f"h:{key}",), {})
+
+
+def _start_oracle():
+    """Launch a throwaway Redis oracle and return a connected client."""
+    port = _free_port()
+    process = subprocess.Popen(
+        [_find_redis_server(), "--port", str(port), "--loglevel", "warning", "--appendonly", "no", "--save", ""],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    atexit.register(lambda: (process.terminate(), process.wait()))
+    assert _wait_until_listening(port), f"Redis oracle failed to start on {port}"
+    return redis.Redis(host="127.0.0.1", port=port, decode_responses=True, protocol=2)
 
 
 def main():
@@ -53,17 +87,9 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
-    assert _wait(args.port, timeout=5), f"Candidate not responding on port {args.port}"
+    assert _wait_until_listening(args.port, timeout=5), f"Candidate not responding on port {args.port}"
 
-    redis_port = _free_port()
-    redis_proc = subprocess.Popen(
-        [_find_redis(), "--port", str(redis_port), "--loglevel", "warning", "--appendonly", "no", "--save", ""],
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-    )
-    atexit.register(lambda: (redis_proc.terminate(), redis_proc.wait()))
-    assert _wait(redis_port), f"Redis oracle failed to start on {redis_port}"
-
-    oracle = redis.Redis(host="127.0.0.1", port=redis_port, decode_responses=True, protocol=2)
+    oracle = _start_oracle()
     candidate = redis.Redis(host="127.0.0.1", port=args.port, decode_responses=True, protocol=2)
     oracle.flushdb()
     candidate.flushdb()
@@ -72,44 +98,28 @@ def main():
     mismatches = 0
 
     for i in range(args.num_ops):
-        op = rng.choices(["SET", "GET", "DEL", "HSET", "HGETALL"], weights=[30, 35, 5, 20, 10])[0]
-        key = f"key:{rng.randint(0, args.num_keys - 1):06d}"
+        op = _next_operation(rng, args.num_keys)
 
-        if op == "SET":
-            method, pos, kw = "set", (key, f"v:{rng.randint(0, 999999)}"), {}
-        elif op == "GET":
-            method, pos, kw = "get", (key,), {}
-        elif op == "DEL":
-            method, pos, kw = "delete", (key,), {}
-        elif op == "HSET":
-            fields = {f"f{j}": f"{rng.randint(0, 9999)}" for j in range(rng.randint(1, 4))}
-            method, pos, kw = "hset", (f"h:{key}",), {"mapping": fields}
-        elif op == "HGETALL":
-            method, pos, kw = "hgetall", (f"h:{key}",), {}
-
-        o = getattr(oracle, method)(*pos, **kw)
+        expected = getattr(oracle, op.method)(*op.args, **op.kwargs)
         try:
-            c = getattr(candidate, method)(*pos, **kw)
+            actual = getattr(candidate, op.method)(*op.args, **op.kwargs)
         except redis.RedisError as exc:
-            # A malformed RESP reply or dropped connection is a candidate failure,
-            # not a checker crash — report it cleanly instead of a traceback.
+            # Malformed RESP or a dropped connection is a candidate failure, not a
+            # checker crash — count it and report cleanly instead of a traceback.
             mismatches += 1
-            print(f"  ERROR op[{i}] {op} {key}: candidate raised {exc!r}")
+            print(f"  ERROR op[{i}] {op.label} {op.args[0]}: candidate raised {exc!r}")
             if isinstance(exc, redis.ConnectionError):
                 print("  candidate connection lost — aborting run")
                 break
             continue
 
-        if o != c:
+        if expected != actual:
             mismatches += 1
             if mismatches <= 10:
-                print(f"  MISMATCH op[{i}] {op} {key}: oracle={o} candidate={c}")
+                print(f"  MISMATCH op[{i}] {op.label} {op.args[0]}: oracle={expected} candidate={actual}")
 
     print(f"\nOperations: {args.num_ops} | Mismatches: {mismatches}")
-    if mismatches == 0:
-        print("ALL CHECKS PASSED")
-    else:
-        print("ACCURACY CHECK FAILED")
+    print("ALL CHECKS PASSED" if mismatches == 0 else "ACCURACY CHECK FAILED")
     sys.exit(0 if mismatches == 0 else 1)
 
 

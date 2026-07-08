@@ -1,17 +1,16 @@
-"""YCSB benchmark: runs against an already-running candidate server.
+"""YCSB throughput benchmark against an already-running candidate server.
 
 Requires: Java 8+, YCSB at ./ycsb/ relative to this script.
 
-The headline metric is throughput under concurrent load, measured in
-**steady state** so it reflects the server, not JVM/JIT warmup: a discarded
-warmup run primes the JVM/JIT/connections, then several **fixed-duration**
-(`maxexecutiontime`) runs are taken and the **median** is reported with its
-coefficient of variation, so the window stays constant as the server speeds up
-across rounds and a single noisy sample can't mislead.
+Reports steady-state throughput so the number reflects the server, not JVM/JIT
+warmup: one discarded warmup run primes the JVM/JIT/connections, then several
+fixed-duration (`maxexecutiontime`) runs are taken and their median reported.
+A fixed window keeps the sample comparable as the server speeds up across rounds,
+and the reported coefficient of variation flags when a single run is noisy.
 
-Two machine-readable outputs (no LLM eyeballing):
-  - stdout ends with `PERF_METRIC: <median_throughput> ops/sec`,
-  - `--output-json PATH` writes the same metrics as JSON for the profiler.
+Machine-readable outputs (no LLM eyeballing):
+  - stdout ends with `PERF_METRIC: <median_throughput> ops/sec`
+  - `--output-json PATH` writes the same metrics as JSON for the profiler
 
 Usage:
     python benchmark.py --port 6380
@@ -31,7 +30,10 @@ YCSB_HOME = Path(__file__).resolve().parent / "ycsb"
 
 WORKLOADS = {"a": "workloads/workloada", "b": "workloads/workloadb", "c": "workloads/workloadc"}
 
-# Large op-count cap so a run is bounded by time (maxexecutiontime), not ops.
+# Metric key YCSB emits for overall throughput; the headline number.
+THROUGHPUT_KEY = "OVERALL.Throughput(ops/sec)"
+
+# Huge op-count cap so a run ends on maxexecutiontime, not on ops exhausted.
 _OP_CAP = 1_000_000_000
 
 
@@ -55,7 +57,8 @@ def _run_ycsb(phase, workload, port, num_keys, threads, *, duration=None):
     return result.stdout
 
 
-def _parse(output):
+def _parse_metrics(output):
+    """Turn YCSB's `[GROUP], metric, value` CSV lines into {'GROUP.metric': value}."""
     metrics = {}
     for line in output.splitlines():
         parts = [p.strip() for p in line.split(",")]
@@ -68,7 +71,10 @@ def _parse(output):
 
 
 def _p99_ms(run, op):
-    return run.get(f"{op}.99thPercentileLatency(us)", 0.0) / 1000 if run.get(f"{op}.Operations", 0) else None
+    """p99 latency in ms for an operation, or None if it wasn't exercised."""
+    if not run.get(f"{op}.Operations", 0):
+        return None
+    return run.get(f"{op}.99thPercentileLatency(us)", 0.0) / 1000
 
 
 def main():
@@ -85,50 +91,50 @@ def main():
     parser.add_argument("--output-json", type=Path, default=None, help="Write the headline metrics to this path as JSON.")
     args = parser.parse_args()
 
-    wl = WORKLOADS[args.workload]
-    _run_ycsb("load", wl, args.port, args.num_keys, args.threads)
+    workload_path = WORKLOADS[args.workload]
+    _run_ycsb("load", workload_path, args.port, args.num_keys, args.threads)
 
-    # Warmup run (discarded): primes JVM/JIT/connections/page-cache so the
-    # measured runs reflect steady state rather than a cold-start transient.
+    # Discarded warmup: primes JVM/JIT/connections/page-cache so measured runs
+    # reflect steady state rather than a cold-start transient.
     if not args.no_warmup:
-        _run_ycsb("run", wl, args.port, args.num_keys, args.threads, duration=min(args.duration, 3))
+        _run_ycsb("run", workload_path, args.port, args.num_keys, args.threads, duration=min(args.duration, 3))
 
     runs = [
-        _parse(_run_ycsb("run", wl, args.port, args.num_keys, args.threads, duration=args.duration))
+        _parse_metrics(_run_ycsb("run", workload_path, args.port, args.num_keys, args.threads, duration=args.duration))
         for _ in range(max(1, args.repeats))
     ]
 
-    thr = [m.get("OVERALL.Throughput(ops/sec)", 0.0) for m in runs]
-    median_thr = statistics.median(thr)
-    cov = (statistics.pstdev(thr) / median_thr * 100) if median_thr and len(thr) > 1 else 0.0
-    # Report latencies from the run closest to the median throughput.
-    med_run = min(runs, key=lambda m: abs(m.get("OVERALL.Throughput(ops/sec)", 0.0) - median_thr))
+    throughputs = [run.get(THROUGHPUT_KEY, 0.0) for run in runs]
+    median_throughput = statistics.median(throughputs)
+    cov_pct = (statistics.pstdev(throughputs) / median_throughput * 100) if median_throughput and len(throughputs) > 1 else 0.0
+    # Report latencies from the run whose throughput is closest to the median.
+    median_run = min(runs, key=lambda run: abs(run.get(THROUGHPUT_KEY, 0.0) - median_throughput))
 
     print(f"\n{'=' * 56}")
     print(f"  YCSB Workload {args.workload.upper()} — {args.threads} client thread"
           f"{'s' if args.threads != 1 else ''}, {args.duration}s x {args.repeats} runs")
     print(f"{'=' * 56}")
-    print(f"Throughput (median): {median_thr:.1f} ops/sec   (CoV {cov:.1f}% over {len(thr)} runs: "
-          f"{', '.join(f'{t:.0f}' for t in thr)})")
+    print(f"Throughput (median): {median_throughput:.1f} ops/sec   (CoV {cov_pct:.1f}% over {len(throughputs)} runs: "
+          f"{', '.join(f'{t:.0f}' for t in throughputs)})")
     for op in ["READ", "UPDATE", "INSERT"]:
-        if med_run.get(f"{op}.Operations", 0):
-            print(f"{op:7s} p99: {med_run.get(f'{op}.99thPercentileLatency(us)', 0) / 1000:.3f} ms   "
-                  f"p95: {med_run.get(f'{op}.95thPercentileLatency(us)', 0) / 1000:.3f} ms")
+        if median_run.get(f"{op}.Operations", 0):
+            print(f"{op:7s} p99: {median_run.get(f'{op}.99thPercentileLatency(us)', 0) / 1000:.3f} ms   "
+                  f"p95: {median_run.get(f'{op}.95thPercentileLatency(us)', 0) / 1000:.3f} ms")
 
     if args.output_json:
         args.output_json.write_text(json.dumps({
-            "throughput_ops_per_sec": round(median_thr, 1),
-            "cov_pct": round(cov, 1),
-            "read_p99_ms": _p99_ms(med_run, "READ"),
-            "update_p99_ms": _p99_ms(med_run, "UPDATE"),
+            "throughput_ops_per_sec": round(median_throughput, 1),
+            "cov_pct": round(cov_pct, 1),
+            "read_p99_ms": _p99_ms(median_run, "READ"),
+            "update_p99_ms": _p99_ms(median_run, "UPDATE"),
             "threads": args.threads,
             "workload": args.workload,
-            "runs_ops_per_sec": [round(t, 1) for t in thr],
+            "runs_ops_per_sec": [round(t, 1) for t in throughputs],
         }, indent=2))
 
     # Machine-readable headline (parse this line verbatim; do not eyeball the text above).
-    print(f"\nPERF_METRIC: {median_thr:.1f} ops/sec")
-    print(f"PERF_COV: {cov:.1f}%")
+    print(f"\nPERF_METRIC: {median_throughput:.1f} ops/sec")
+    print(f"PERF_COV: {cov_pct:.1f}%")
 
 
 if __name__ == "__main__":
