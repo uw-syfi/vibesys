@@ -386,7 +386,9 @@ def test_loop_skips_profiler_when_profiler_kind_is_none(tmp_path, ref_file):
         ],
         plans=[
             OrchestratorPlan(task="Build server", pass_criteria="ok", reasoning="start"),
-            OrchestratorPlan(task="Use benchmark evidence", pass_criteria="ok", reasoning="disabled"),
+            OrchestratorPlan(
+                task="Use benchmark evidence", pass_criteria="ok", reasoning="disabled"
+            ),
         ],
     )
 
@@ -410,7 +412,9 @@ def test_loop_generic_auto_profiler_resolves_to_none(tmp_path, ref_file):
         ],
         plans=[
             OrchestratorPlan(task="Build queue", pass_criteria="ok", reasoning="start"),
-            OrchestratorPlan(task="Use benchmark evidence", pass_criteria="ok", reasoning="generic"),
+            OrchestratorPlan(
+                task="Use benchmark evidence", pass_criteria="ok", reasoning="generic"
+            ),
         ],
     )
 

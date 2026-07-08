@@ -221,9 +221,7 @@ def test_service_judge_drops_vibeservemodel():
 # --------------------------------------------------------------------------- #
 # prompt rendering: single-agent
 # --------------------------------------------------------------------------- #
-def _render_single_agent(
-    interface: str, profiler_kind: ProfilerKind = ProfilerKind.TORCH
-) -> str:
+def _render_single_agent(interface: str, profiler_kind: ProfilerKind = ProfilerKind.TORCH) -> str:
     return render_template(
         "single_agent_round_prompt.j2",
         template_dir=_TEMPLATE_DIR,

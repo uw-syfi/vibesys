@@ -107,9 +107,7 @@ def test_profiler_resolution_invariants(
         assert resolved is ProfilerKind.TORCH
 
 
-@given(
-    value=st.text(min_size=1, max_size=12).filter(lambda text: text not in _PROFILER_VALUES)
-)
+@given(value=st.text(min_size=1, max_size=12).filter(lambda text: text not in _PROFILER_VALUES))
 def test_unknown_profiler_names_raise(value):
     with pytest.raises(ValueError, match="Unknown"):
         coerce_profiler_kind(value)
