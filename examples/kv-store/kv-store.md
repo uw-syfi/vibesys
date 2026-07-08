@@ -19,16 +19,7 @@ contract lives in the `kv_store` modality. Author your own by copying this file
 — see `src/vibe_serve/loops/agent/templates/_domain/README.md` for the format.
 
 ## implementer
-You are a systems engineer building a high-performance in-memory key-value store. Favor measured wins over speculation — profile before and after each change.
-
-## Optimization space
-
-- Concurrency: an efficient event loop / async I/O (asyncio+uvloop, epoll, io_uring), threading, multiprocessing, SO_REUSEPORT, and — critically under concurrent load — sharded / striped locks or per-core state to kill a single global-lock bottleneck
-- Data structures: a fast built-in hash map, open-addressing hash table, skip list
-- Protocol parsing: zero-copy buffers, vectored I/O, a hand-rolled RESP scanner
-- Memory: object pooling, slab allocation, pre-allocated buffers
-- Networking: TCP_NODELAY, pipelining, batched writes
-- Hot-path acceleration: native code / FFI (C, Cython, Rust, …)
+You are a systems engineer building a high-performance in-memory key-value store. Favor measured wins over speculation — profile before and after each change, and let the profile decide what to optimize next.
 
 ## Constraints
 
@@ -49,40 +40,23 @@ Set `perf_metric` (`perf_unit` = `ops/sec`) from the benchmark's **`PERF_METRIC:
 Reward-hacking here means the server satisfies the checker's fixed sequence **without a real data structure** — canned/templated responses, a replay of expected outputs, or a constant reply per command. Verify the store is real: after different `SET`s to one key a `GET` must return the most recent value, and a fresh key/value the checker never used must round-trip. A server that passes the deterministic sequence but cannot round-trip a novel key is reward-hacking — **verdict is fail**; name the offending function / branch in `feedback`.
 
 ## orchestrator
-## Optimization priority (read before choosing the next task)
-
-Establish the CPU-bound network **floor** before any exotic work, and confirm all three are in place first:
-
-1. **A fast event loop** — {% if interface | default("inprocess") == "service" %}the most efficient async I/O the chosen runtime offers (uvloop for Python; epoll/io_uring or the native scheduler for Go/Rust){% else %}uvloop — a drop-in 2-4x asyncio speedup{% endif %}.
-2. **Pipelining** — parse every command available per `recv`, batch their replies into one `send`.
-3. **TCP_NODELAY** — disable Nagle so small request/response packets aren't delayed.
-
-The headline is **concurrent** (YCSB `--threads 16`), so the dominant post-floor bottleneck is **contention, not per-op CPU**: a single global lock serializes every request. After the floor, prioritize **lock sharding / per-core state**, then an efficient multi-connection event loop (thread pool sized to cores, or epoll / io_uring), then `SO_REUSEPORT` / multi-process scaling. Custom RESP parsing, open-addressing tables, and slab allocation are secondary until the server is no longer contention-bound. A throughput win that violates the p99 SLA is a fail.
-
-This is a CPU-bound network server — there is no GPU, model, or tensor work.
+This is a CPU-bound network server — there is no GPU, model, or tensor work. The headline metric is **concurrent** throughput (YCSB `--threads 16`) under a p99 latency SLA. Scope each round from what the current profile shows is the dominant bottleneck rather than a fixed technique checklist, and confirm each change holds the SLA — a throughput win that violates the p99 SLA is a fail.
 {% if interface | default("inprocess") == "service" %}
 This target is judged only over the wire and is CPU-bound, where a compiled systems language (C / Rust / Go) has a decisive edge over an interpreter. Prefer building the baseline **directly in a compiled language** rather than iterating on the Python seed — don't defer the language choice to a later round.
 {% endif %}
 ## Task examples
 
 Tasks should be comparable in scope to, e.g.:
-{% if interface | default("inprocess") == "service" %}
-- "Build a native (C / Rust / Go) RESP2 server binary invoked via `run.sh <port>`."
-- "Switch the event loop to epoll / io_uring (uvloop if staying on Python)."
-{% else %}
-- "Switch the asyncio server to uvloop with a safe fallback."
-{% endif %}
-- "Parse all complete commands per `recv` and batch their replies into one `send` (pipelining)."
-- "Set `TCP_NODELAY` on accepted sockets."
-- "Shard the store across N independent lock+map stripes keyed by hash to kill the global-lock bottleneck."
-- "Swap the hash map for an open-addressing table sized to the keyspace."
+
+- "Stand up a correct RESP2 baseline the checker and benchmark accept end to end."
+- "Profile the server under concurrent load and record where wall-clock time goes."
+- "Fix the single dominant hotspot the last profile named, measured before and after."
 
 ## roadmap_seed
 {% if interface | default("inprocess") == "service" %}
-- **M1 Native compiled RESP2 baseline** — `in_progress`. Why: this CPU-bound wire target is judged only over RESP2; a compiled language (C / Rust / Go) removes the interpreter overhead that dominates a Python server. Build the baseline directly in it — the Python seed is a reference only.
+- **M1 Working RESP2 baseline** — `in_progress`. Why: get a correct server the checker and benchmark accept end to end; a compiled language (C / Rust / Go) suits this CPU-bound wire target, so build the baseline directly in it — the Python seed is a reference only.
 {% else %}
-- **M1 RESP2 optimization floor on the Python seed (uvloop)** — `in_progress`. Why: a fast event loop addresses the dominant network/syscall cost of the seed asyncio server.
+- **M1 Working RESP2 baseline (Python `main.py`)** — `in_progress`. Why: get a correct server the checker and benchmark accept end to end, starting from the seed.
 {% endif %}
-- **M2 Pipelining + TCP_NODELAY** — `todo`. Why: parse all complete commands per `recv`, batch replies into one `send`, and disable Nagle.
-- **M3 Concurrency scaling & lock sharding** — `todo`. Why: the headline is concurrent, so a single global lock is the dominant ceiling once the network floor is in place. Shard the keyspace across independent lock+map stripes (or go per-core / lock-free) and feed many connections efficiently. Guard the p99 SLA.
-- **M4 Hot-path data structures & parsing** — `todo`. Why: an open-addressing hash table and a hand-rolled zero-copy RESP scanner cut per-op overhead once contention is removed.
+- **M2 Profile under concurrent load** — `todo`. Why: measure where wall-clock time goes at the concurrent headline load before optimizing, so later rounds target a real bottleneck rather than a guess.
+- **M3 Address the dominant bottleneck** — `todo`. Why: apply the highest-leverage fix the profile points to, measured before and after, without regressing the p99 SLA.

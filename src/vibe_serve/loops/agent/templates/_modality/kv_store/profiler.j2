@@ -20,11 +20,10 @@ A CPU-bound TCP server; key axes are **throughput** (ops/sec), **p99 latency** (
 
 ## What to look for
 
-- >30% in RESP parsing → hand-rolled / native parser
-- >20% in asyncio/selector internals → uvloop or the Protocol API
-- >30% in socket read/write syscalls → batched I/O, pipelining
-- single core pinned at 100% → SO_REUSEPORT / multi-process, or lock sharding under concurrent load
-- most time in the hash map itself → already fast, look elsewhere
+Attribute the wall-clock time: which functions dominate CPU, where the syscalls
+concentrate, and whether one core is pinned while others idle under concurrent
+load. The largest consumer the profile reveals is the next round's target — let
+the measurement pick the optimization, not a prior.
 
 ## Performance metric
 

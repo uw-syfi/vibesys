@@ -14,7 +14,6 @@ in-memory KV server.
 - **Latency SLA (a gate, not a footnote):** the throughput only counts if
   **p99 < 1.0 ms** for READ and UPDATE at the concurrent load. Winning ops/sec
   by blowing up p99 is a fail.
-- Workload A stores each record as a **hash** (HSET / HGETALL), so optimize the
-  hash path, and expect server-side **concurrency** (lock sharding, an efficient
-  event loop, `SO_REUSEPORT`) to be the dominant lever once the network floor is
-  in place.
+- Workload A stores each record as a **hash** (HSET / HGETALL) and drives
+  concurrent client load (`--threads 16`), so the server's behaviour under
+  contention is what the headline measures.
