@@ -14,4 +14,4 @@ Your server must:
 
 ## Accuracy-checker compatibility
 
-The accuracy checker (`accuracy_checker/checker.py --port <port>`) has two phases. First it sends a **pipeline** of commands (many per packet) with binary-hostile values — empty, embedded `\r\n`, NUL, and a large value — and reads them back byte-exact: parse by the bulk-string **length**, never by splitting on `\r\n`, and handle multiple commands per `recv`. Then it hits the server with **many concurrent clients** and checks the history is **linearizable** (via Porcupine): your store must be thread-safe — a fast server that loses updates or serves torn reads under contention fails. The checker uses `redis-py` with `protocol=2`.
+The accuracy checker (`accuracy_checker/checker.py --port <port>`) drives the same deterministic operation sequence against your server and a Redis oracle. Every response must match byte-for-byte. The checker uses `redis-py` with `protocol=2`.
