@@ -1,9 +1,11 @@
-# Queue Default Harness
+# Queue Default Input
 
 Resolves #43.
 
-Reusable reference implementations, correctness checkers, and benchmark
-drivers for the five initial VibeServe queue scenarios.
+Default input for the five initial VibeServe queue scenarios. The reusable
+reference implementations, correctness checker, and benchmark driver live in
+the `queue-harness` package under `examples/libs/queue-harness`; this input
+depends on that package with a uv path dependency.
 
 ## Running the correctness checker
 

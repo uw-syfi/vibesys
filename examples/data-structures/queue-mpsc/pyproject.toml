@@ -1,0 +1,17 @@
+[project]
+name = "queue-mpsc-input"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["queue-harness"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+queue-harness = { path = "../../libs/queue-harness", editable = true }
+
+[tool.vibeserve.queue]
+scenario = "mpsc"
+capacity = 1024
+producers = 4
+consumers = 1

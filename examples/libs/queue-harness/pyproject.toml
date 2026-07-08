@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "queue-harness"
+version = "0.1.0"
+description = "Reusable queue reference, checker, and benchmark harness for VibeServe inputs"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["queue_harness*"]
+
+[tool.setuptools.package-data]
+queue_harness = ["porcupine_checker/*"]

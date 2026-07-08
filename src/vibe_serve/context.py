@@ -28,6 +28,7 @@ from vibe_serve.domains.environment import (
     EnvironmentHooks,
     NoopEnvironmentHooks,
 )
+from vibe_serve.input_project import discover_input_project, materialize_input_project
 from vibe_serve.llm_client import _build_model
 from vibe_serve.profilers import ProfilerKind, resolve_profiler_kind
 from vibe_serve.sandbox.run_environment import (
@@ -234,6 +235,8 @@ class _RunContext:
         else:
             raise ValueError(f"Reference path is invalid: {reference_path}")
 
+        input_project_dir = discover_input_project(ref_dir)
+
         self.workspace = self.exp_dir / "workspace"
         self.workspace.mkdir(parents=True, exist_ok=True)
 
@@ -313,6 +316,15 @@ class _RunContext:
             if self.bench_path:
                 src = Path(self.bench_path)
                 self._copy_excluding_extras(src, self.workspace / "bench")
+
+            if input_project_dir is not None:
+                materialize_input_project(
+                    input_project_dir,
+                    self.workspace,
+                    project_root=PROJECT_ROOT,
+                    copy_dir=self._copy_excluding_extras,
+                    log=self.lprint,
+                )
 
             if self.nsys_profiler_path:
                 src = Path(self.nsys_profiler_path)

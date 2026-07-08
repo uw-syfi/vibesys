@@ -226,3 +226,58 @@ def test_run_context_noop_environment_hooks_do_not_require_model_artifacts(tmp_p
     ):
         assert (ctx.workspace / "reference" / "reference.py").is_file()
         assert not (ref_dir / "model").exists()
+
+
+def test_run_context_materializes_input_project_path_dependencies(tmp_path):
+    project_root = tmp_path / "project"
+    harness = project_root / "examples" / "libs" / "queue-harness"
+    harness.mkdir(parents=True)
+    (harness / "pyproject.toml").write_text(
+        "[project]\nname = 'queue-harness'\nversion = '0.1.0'\n"
+    )
+    (harness / "harness.py").write_text("VALUE = 1\n")
+
+    input_dir = project_root / "examples" / "data-structures" / "queue-spsc"
+    ref_dir = input_dir / "reference"
+    acc_dir = input_dir / "accuracy_checker"
+    bench_dir = input_dir / "benchmark"
+    ref_dir.mkdir(parents=True)
+    acc_dir.mkdir()
+    bench_dir.mkdir()
+    (ref_dir / "reference.py").write_text("pass\n")
+    (acc_dir / "checker.py").write_text("pass\n")
+    (bench_dir / "benchmark.py").write_text("pass\n")
+    (input_dir / "pyproject.toml").write_text(
+        "[project]\n"
+        "name = 'queue-spsc-input'\n"
+        "version = '0.1.0'\n"
+        "dependencies = ['queue-harness']\n"
+        "\n"
+        "[tool.uv.sources]\n"
+        "queue-harness = { path = '../../libs/queue-harness', editable = true }\n"
+    )
+
+    with (
+        patch("vibe_serve.context.PROJECT_ROOT", project_root),
+        patch("vibe_serve.context._build_model", return_value="mock-model"),
+        patch("vibe_serve.context.build_agent_runner", return_value=MagicMock()),
+        patch("vibe_serve.context.backends.get", return_value=_FakeBackend()),
+        _RunContext(
+            config={"model": {"name": "claude-sonnet-4-6"}},
+            exp_name="input-local-package",
+            reference_path=str(ref_dir),
+            acc_checker=str(acc_dir),
+            bench=str(bench_dir),
+            skills_dirs=[],
+            run_environment=RunEnvironmentSpec("local"),
+            environment_hooks=NoopEnvironmentHooks(),
+        ) as ctx,
+    ):
+        assert (ctx.workspace / "reference" / "reference.py").is_file()
+        assert (ctx.workspace / "acc_checker" / "checker.py").is_file()
+        assert (ctx.workspace / "bench" / "benchmark.py").is_file()
+        assert (ctx.workspace / "_input_libs" / "queue-harness" / "harness.py").is_file()
+        assert (
+            "queue-harness = { path = '_input_libs/queue-harness', editable = true }\n"
+            in (ctx.workspace / "pyproject.toml").read_text()
+        )
