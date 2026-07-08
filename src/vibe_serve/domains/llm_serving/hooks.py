@@ -72,7 +72,9 @@ class LLMServingEnvironmentHooks:
             bind_mounts.append(EnvironmentBindMount(draft_model_path, "/draft_model", True))
 
         return EnvironmentPatch(
-            copy_excludes=self._MODEL_ARTIFACT_NAMES if ctx.run_environment.isolated else frozenset(),
+            copy_excludes=self._MODEL_ARTIFACT_NAMES
+            if ctx.run_environment.isolated
+            else frozenset(),
             bind_mounts=tuple(bind_mounts),
         )
 
