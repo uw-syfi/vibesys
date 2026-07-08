@@ -321,10 +321,10 @@ def _run_profiler(
 def _domain_render_context(
     ctx: _RunContext, modality: str | None, interface: str
 ) -> dict[str, object]:
-    """The uniform variable set every domain ``## <role>`` section is rendered with.
+    """The uniform variable set every domain role file is rendered with.
 
     One context contract for all roles: a pack author can branch (``{% if … %}``)
-    on any of these in any role section without memorizing which the loop happens
+    on any of these in any role file without memorizing which the loop happens
     to pass to which role. Variables that don't apply to the current run are
     falsy (``bench_path`` / ``accuracy_checker_path`` when nothing is attached),
     so ``{% if bench_path %}`` works everywhere. ``interface`` lets a
@@ -640,8 +640,8 @@ def run_agent_loop(
     if interface not in _INTERFACES:
         raise ValueError(f"Unknown interface {interface!r}; choose from {', '.join(_INTERFACES)}")
     # Resolve the registered domain once (fail fast on an unknown name). The
-    # per-role sections are parsed and rendered into the prompts at each call
-    # site. The implementation language is not a pack — ``interface`` carries it
+    # per-role files are rendered into the prompts at each call site. The
+    # implementation language is not a pack — ``interface`` carries it
     # (``inprocess`` pins Python; ``service`` leaves it to the agent).
     domain_definition = resolve_domain(domain)
     if modality is None and domain_definition.name is DomainName.LLM_SERVING:

@@ -21,62 +21,47 @@ vibe-serve --outer-loop agent --domain generic ...          # no domain context
 | `llm-serving` | The default. LLM inference server context: the `serving-systems` skill/references, `/model` weights, the accuracy + benchmark + reward-hack judge gates. |
 | `generic`     | Empty — no domain prose injected. The neutral baseline; copy it to start your own. |
 
-## Anatomy of a domain file
+## Anatomy of a domain directory
 
-A domain is **one Markdown file**. The injected content lives under `##` headings
-named for the agent roles; everything before the first role heading is human
-documentation (a title, a "use for…" line) and is ignored by the loop.
+Each domain is a directory. The injected content lives in Markdown files named
+for the agent roles; `README.md` is human documentation and is ignored by the
+loop.
 
-```markdown
-# My domain
-**Use for:** a one-line description of when to reach for this domain.
-
-## implementer        ← injected as {{ domain_implementer }}
-What the builder must know / read for this domain.
-
-## judge              ← injected as {{ domain_judge }}
-What the reviewer must check for this domain.
-
-## single_agent       ← injected as {{ domain_single_agent }} (optional)
-Combined builder+reviewer context for the single-agent ablation.
-
-## orchestrator       ← injected as {{ domain_orchestrator }} (optional)
-Planning guidance for the round orchestrator — e.g. the optimization floor it
-should establish before chasing workload-specific wins.
-
-## profiler           ← injected as {{ domain_profiler }} (optional)
-Domain-specific capture workflow details for whichever profiler strategy is
-selected.
+```text
+_domain/my-domain/
+  README.md        # optional human documentation
+  implementer.md   # injected as {{ domain_implementer }}
+  judge.md         # injected as {{ domain_judge }}
+  single_agent.md  # injected as {{ domain_single_agent }} (optional)
+  orchestrator.md  # injected as {{ domain_orchestrator }} (optional)
+  profiler.md      # injected as {{ domain_profiler }} (optional)
 ```
 
 Rules:
 
-- **The heading is the address.** A line that is exactly `## implementer`,
-  `## judge`, `## single_agent`, `## orchestrator`, or `## profiler` starts that
-  role's section; it runs until the next role heading. Your section body can use
-  its own `##` sub-headings — only those exact names delimit a section.
-- **A missing section injects nothing** for that role.
-- **`## single_agent` is optional.** Omit it and it's derived automatically by
-  concatenating your `## implementer` and `## judge` sections — no third copy to
-  hand-maintain. Add it only when the single-agent ablation needs different
-  framing.
-- **`## orchestrator` is optional.** Omit it to inject nothing into the planner
+- **The filename is the address.** `implementer.md` maps to
+  `{{ domain_implementer }}`, `judge.md` maps to `{{ domain_judge }}`, and so on.
+- **A missing role file injects nothing** for that role.
+- **`single_agent.md` is optional.** Omit it and it's derived automatically by
+  concatenating `implementer.md` and `judge.md` — no third copy to hand-maintain.
+  Add it only when the single-agent ablation needs different framing.
+- **`orchestrator.md` is optional.** Omit it to inject nothing into the planner
   prompt (its neutral skeleton still applies). Add it to give the planner
   domain-specific strategy — `llm-serving` uses it for the
   continuous-batching/attention-kernel/CUDA-graph optimization floor.
-- **`## profiler` is optional.** Omit it to use only the selected profiler's
+- **`profiler.md` is optional.** Omit it to use only the selected profiler's
   neutral mechanics. Add it when the domain needs a specific capture recipe,
   server startup contract, benchmark shape, or remote profiling entry point.
 - Write normal Markdown prose. The base template owns the surrounding structure
-  (task, pass criteria, workspace, output contract); your section owns the
+  (task, pass criteria, workspace, output contract); your role file owns the
   domain content.
 
 ### Branching on the run (optional Jinja)
 
-Section bodies are rendered with Jinja, so you can branch on the run's context.
+Role files are rendered with Jinja, so you can branch on the run's context.
 Most domains never need this — reach for it only when a gate depends on what's
-attached to the run. **Every role section gets the same variables**, so you can
-use any of these in any section without tracking which role you're in:
+attached to the run. **Every role file gets the same variables**, so you can
+use any of these in any file without tracking which role you're in:
 
 | Variable | Meaning |
 |----------|---------|
@@ -90,7 +75,7 @@ use any of these in any section without tracking which role you're in:
 These are always defined (falsy when not applicable), so a plain `{% if bench_path %}`
 is enough — no `is defined` guard needed.
 
-Example (inside a `## judge` section):
+Example (inside `judge.md`):
 
 ```jinja
 ## Correctness gates
@@ -103,13 +88,13 @@ Example (inside a `## judge` section):
 
 ## How to add a domain
 
-1. Copy `generic.md` to a new in-repo `_domain/<name>.md` file.
-2. Edit the title and "use for…" line at the top.
-3. Fill `## implementer` (what to read / what "done" means here) and `## judge`
-   (what to check). Leave a section out to inject nothing for that role.
-4. Optionally add `## single_agent` for the `--inner-loop single-agent` ablation;
-   omit it to derive it from the other two.
-5. Optionally add `## orchestrator` and `## profiler` when the neutral planning
+1. Copy `generic/` to a new in-repo `_domain/<name>/` directory.
+2. Edit `README.md` with the title and "use for…" line.
+3. Add `implementer.md` (what to read / what "done" means here) and `judge.md`
+   (what to check). Leave a file out to inject nothing for that role.
+4. Optionally add `single_agent.md` for the `--inner-loop single-agent`
+   ablation; omit it to derive it from the other two.
+5. Optionally add `orchestrator.md` and `profiler.md` when the neutral planning
    or profiling skeleton needs domain-specific examples or capture commands.
 6. Register the domain in `vibe_serve.loops.agent.domain.DOMAINS`. If the domain
    needs setup/teardown behavior such as mounts or copy exclusions, attach an
@@ -122,7 +107,7 @@ stay tied to the same domain identity.
 ## Scope
 
 Domains cover **implementer + judge + profiler (+ single-agent + orchestrator) context**.
-One adjacent concern is deliberately *not* part of a domain prompt file:
+One adjacent concern is deliberately *not* part of a domain prompt directory:
 
 - **Language/tooling** (e.g. "use `uv`/`pytest`") is decided by the run's
   `--interface` mode, not the domain: `inprocess` pins Python (uv toolchain +

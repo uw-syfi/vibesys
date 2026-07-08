@@ -95,7 +95,7 @@ Registered domains include:
 | `llm-serving` | Default LLM-serving guidance, including serving-system skills and judge gates. |
 | `generic` | No extra domain guidance. Useful for custom/non-LLM targets. |
 
-New domains are added in source by registering a prompt file and optional
+New domains are added in source by registering a prompt directory and optional
 environment setup/teardown hooks.
 
 `--modality` supplies the task I/O contract, such as text generation or

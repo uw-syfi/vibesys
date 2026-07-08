@@ -1,9 +1,9 @@
 """Tests for registered domains — the ``--domain`` pluggable-context mechanism.
 
-Covers the resolver (registered name / error), the section renderer
-(present, empty, missing, ``single_agent`` derivation, context branching), and
-end-to-end injection into the base prompts for both registered domains
-(``llm-serving`` carries serving prose; ``generic`` injects nothing of its own).
+Covers the resolver (registered name / error), the role-file renderer (present,
+empty, missing, ``single_agent`` derivation, context branching), and end-to-end
+injection into the base prompts for both registered domains (``llm-serving``
+carries serving prose; ``generic`` injects nothing of its own).
 """
 
 from __future__ import annotations
@@ -44,13 +44,14 @@ def test_registered_domains_present():
 def test_resolve_registered_name():
     d = resolve_domain("llm-serving")
     assert d.name is DomainName.LLM_SERVING
-    assert d.prompt_path.is_file()
-    assert d.prompt_path.name == "llm-serving.md"
+    assert d.prompt_dir.is_dir()
+    assert d.prompt_dir.name == "llm-serving"
 
 
 def test_resolve_path_is_not_supported(tmp_path: Path):
-    f = tmp_path / "mine.md"
-    f.write_text("# Mine\n\n## implementer\nhello\n")
+    f = tmp_path / "mine"
+    f.mkdir()
+    (f / "implementer.md").write_text("hello\n")
     with pytest.raises(ValueError, match="Unknown domain"):
         resolve_domain(str(f))
 
@@ -68,17 +69,18 @@ def test_resolve_unknown_raises():
 
 
 # --------------------------------------------------------------------------- #
-# section renderer
+# role-file renderer
 # --------------------------------------------------------------------------- #
 def test_render_missing_role_is_empty(tmp_path: Path):
-    # a domain file with no matching ## <role> section injects nothing
-    f = tmp_path / "d.md"
-    f.write_text("# Just docs, no role sections\n")
-    assert render_domain_section(f, DomainRole.IMPLEMENTER) == ""
+    # a domain directory with no matching <role>.md file injects nothing
+    domain_dir = tmp_path / "domain"
+    domain_dir.mkdir()
+    (domain_dir / "README.md").write_text("# Just docs, no role files\n")
+    assert render_domain_section(domain_dir, DomainRole.IMPLEMENTER) == ""
 
 
 def test_render_empty_role_is_empty():
-    # generic.md has no role sections, so every role injects nothing
+    # generic has no role files, so every role injects nothing
     d = resolve_domain("generic")
     for role in (DomainRole.IMPLEMENTER, DomainRole.JUDGE, DomainRole.SINGLE_AGENT):
         assert render_domain_section(d, role) == ""
@@ -96,31 +98,32 @@ def test_render_llm_serving_has_content():
     assert "## Required:" in impl
 
 
-def test_deeper_markdown_heading_does_not_delimit_role(tmp_path: Path):
-    """Only exact ``## <role>`` headings split sections."""
-    f = tmp_path / "d.md"
-    f.write_text(
-        "# D\n\n"
-        "## implementer\n"
+def test_role_file_keeps_markdown_headings(tmp_path: Path):
+    """Role files are normal Markdown; headings inside them are preserved."""
+    domain_dir = tmp_path / "domain"
+    domain_dir.mkdir()
+    (domain_dir / "implementer.md").write_text(
         "IMPL-BEFORE\n\n"
+        "## Required:\n"
+        "This is an implementer subsection, not a role delimiter.\n\n"
         "### judge\n"
         "This is an implementer subsection, not the judge role.\n\n"
-        "IMPL-AFTER\n\n"
-        "## judge\n"
-        "JUDGE-BODY\n"
+        "IMPL-AFTER\n"
     )
+    (domain_dir / "judge.md").write_text("JUDGE-BODY\n")
 
-    impl = render_domain_section(f, DomainRole.IMPLEMENTER)
-    judge = render_domain_section(f, DomainRole.JUDGE)
+    impl = render_domain_section(domain_dir, DomainRole.IMPLEMENTER)
+    judge = render_domain_section(domain_dir, DomainRole.JUDGE)
 
     assert "IMPL-BEFORE" in impl
+    assert "## Required:" in impl
     assert "### judge" in impl
     assert "IMPL-AFTER" in impl
     assert judge == "JUDGE-BODY"
 
 
 def test_render_role_branches_on_context():
-    """A role section rendered with bench_path set should reference it."""
+    """A role file rendered with bench_path set should reference it."""
     d = resolve_domain("llm-serving")
     with_bench = render_domain_section(
         d, DomainRole.JUDGE, modality="text_generation", bench_path="/BENCHX"
@@ -133,18 +136,21 @@ def test_render_role_branches_on_context():
 
 
 def test_render_role_branches_on_interface(tmp_path: Path):
-    """`interface` reaches domain sections, so a language-agnostic pack can drop
+    """`interface` reaches domain role files, so a language-agnostic pack can drop
     its in-process/Python-only gates under `--interface service`."""
-    f = tmp_path / "d.md"
-    f.write_text('## judge\n{% if interface != "service" %}IN_PROCESS_GATE{% endif %}\n')
-    inprocess = render_domain_section(f, DomainRole.JUDGE, interface="inprocess")
-    service = render_domain_section(f, DomainRole.JUDGE, interface="service")
+    domain_dir = tmp_path / "domain"
+    domain_dir.mkdir()
+    (domain_dir / "judge.md").write_text(
+        '{% if interface != "service" %}IN_PROCESS_GATE{% endif %}\n'
+    )
+    inprocess = render_domain_section(domain_dir, DomainRole.JUDGE, interface="inprocess")
+    service = render_domain_section(domain_dir, DomainRole.JUDGE, interface="service")
     assert "IN_PROCESS_GATE" in inprocess
     assert "IN_PROCESS_GATE" not in service
 
 
 def test_single_agent_uses_explicit_section_when_present():
-    # llm-serving.md ships a bespoke ## single_agent section
+    # llm-serving ships a bespoke single_agent.md file
     d = resolve_domain("llm-serving")
     sa = render_domain_section(
         d, DomainRole.SINGLE_AGENT, modality="text_generation", reference_path="/ref"
@@ -153,10 +159,12 @@ def test_single_agent_uses_explicit_section_when_present():
 
 
 def test_single_agent_derives_from_implementer_and_judge(tmp_path: Path):
-    # no ## single_agent section -> derived from implementer + judge
-    f = tmp_path / "d.md"
-    f.write_text("# D\n\n## implementer\nIMPL-BODY\n\n## judge\nJUDGE-BODY\n")
-    sa = render_domain_section(f, DomainRole.SINGLE_AGENT)
+    # no single_agent.md -> derived from implementer + judge
+    domain_dir = tmp_path / "domain"
+    domain_dir.mkdir()
+    (domain_dir / "implementer.md").write_text("IMPL-BODY\n")
+    (domain_dir / "judge.md").write_text("JUDGE-BODY\n")
+    sa = render_domain_section(domain_dir, DomainRole.SINGLE_AGENT)
     assert "IMPL-BODY" in sa
     assert "JUDGE-BODY" in sa
 

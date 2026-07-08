@@ -4,28 +4,20 @@ A *domain* tells the agent loop what kind of system it is building and what
 "good" means there: the background knowledge the implementer must read, and the
 correctness/performance/integrity gates the judge must enforce. It is selected
 with ``--domain`` from the repo's registered domains. Each domain has a
-Markdown prompt file whose ``##`` role sections are injected into the neutral
-base prompts, and optional environment hooks for domain-specific setup:
+prompt directory whose role files are injected into the neutral base prompts,
+and optional environment hooks for domain-specific setup:
 
-    _domain/<name>.md
-    ├── (free-form prose / description — ignored by the loop)
-    ├── ## implementer    ← injected as {{ domain_implementer }}
-    ├── ## judge          ← injected as {{ domain_judge }}
-    ├── ## single_agent   ← injected as {{ domain_single_agent }}
-    ├── ## orchestrator   ← injected as {{ domain_orchestrator }}
-    └── ## profiler       ← injected as {{ domain_profiler }}
+    _domain/<name>/
+    ├── README.md          ← human documentation, ignored by the loop
+    ├── implementer.md     ← injected as {{ domain_implementer }}
+    ├── judge.md           ← injected as {{ domain_judge }}
+    ├── single_agent.md    ← injected as {{ domain_single_agent }}
+    ├── orchestrator.md    ← injected as {{ domain_orchestrator }}
+    └── profiler.md        ← injected as {{ domain_profiler }}
 
-The section heading *is* the address: a line that is exactly ``## <role>`` (for a
-role in :data:`DOMAIN_ROLES`) starts that role's section, which runs until the
-next role heading. The section body is normal Markdown — it may use its own
-``##`` sub-headings (those never match a role name) and may use ``{% if %}``
-Jinja to branch on the run's context. Any prose before the first role heading is
-human documentation and is not injected.
-
-A missing role section injects nothing. ``single_agent`` is special: if the file
-has no ``## single_agent`` section, it is *derived* by concatenating the
-``implementer`` and ``judge`` sections, so authors don't hand-maintain a third
-copy.
+A missing role file injects nothing. ``single_agent`` is special: if the
+directory has no ``single_agent.md`` file, it is *derived* by concatenating
+``implementer.md`` and ``judge.md``, so authors don't hand-maintain a third copy.
 """
 
 from __future__ import annotations
@@ -57,8 +49,8 @@ class DomainRole(StrEnum):
 
 DEFAULT_DOMAIN = DomainName.LLM_SERVING
 
-# The roles a domain pack can contribute to. Each maps to a ``## <role>`` section
-# in the domain file and a ``{{ domain_<role> }}`` injection point in the
+# The roles a domain can contribute to. Each maps to a ``<role>.md`` file in the
+# domain prompt directory and a ``{{ domain_<role> }}`` injection point in the
 # corresponding base prompt.
 DOMAIN_ROLES: tuple[DomainRole, ...] = tuple(DomainRole)
 
@@ -68,19 +60,19 @@ _DOMAINS_DIR = Path(__file__).resolve().parent / "templates" / "_domain"
 @dataclass(frozen=True)
 class DomainDefinition:
     name: DomainName
-    prompt_path: Path
+    prompt_dir: Path
     environment_hooks: EnvironmentHooks
 
 
 DOMAINS: dict[DomainName, DomainDefinition] = {
     DomainName.LLM_SERVING: DomainDefinition(
         name=DomainName.LLM_SERVING,
-        prompt_path=_DOMAINS_DIR / "llm-serving.md",
+        prompt_dir=_DOMAINS_DIR / "llm-serving",
         environment_hooks=LLMServingEnvironmentHooks(),
     ),
     DomainName.GENERIC: DomainDefinition(
         name=DomainName.GENERIC,
-        prompt_path=_DOMAINS_DIR / "generic.md",
+        prompt_dir=_DOMAINS_DIR / "generic",
         environment_hooks=NoopEnvironmentHooks(),
     ),
 }
@@ -101,8 +93,10 @@ def resolve_domain(spec: str | DomainName) -> DomainDefinition:
         ) from exc
 
     domain = DOMAINS[name]
-    if not domain.prompt_path.is_file():
-        raise ValueError(f"Registered domain {name.value!r} has no prompt file: {domain.prompt_path}")
+    if not domain.prompt_dir.is_dir():
+        raise ValueError(
+            f"Registered domain {name.value!r} has no prompt directory: {domain.prompt_dir}"
+        )
     return domain
 
 
@@ -116,39 +110,15 @@ def _coerce_role(role: DomainRole | str) -> DomainRole:
         ) from exc
 
 
-def _domain_prompt_path(domain: DomainDefinition | Path) -> Path:
-    return domain.prompt_path if isinstance(domain, DomainDefinition) else domain
+def _domain_prompt_dir(domain: DomainDefinition | Path) -> Path:
+    return domain.prompt_dir if isinstance(domain, DomainDefinition) else domain
 
 
-def _role_heading(line: str) -> DomainRole | None:
-    """Return the role name if ``line`` is exactly a ``## <role>`` heading.
-
-    Only headings whose text matches a name in :data:`DOMAIN_ROLES` delimit a
-    section, so a body's own ``## Required: …`` sub-headings are left intact.
-    """
-    stripped = line.strip()
-    for role in DOMAIN_ROLES:
-        if stripped == f"## {role.value}":
-            return role
-    return None
-
-
-def _load_sections(domain_file: Path) -> dict[DomainRole, str]:
-    """Parse a domain file into ``{role: raw_section_text}``.
-
-    Lines before the first role heading (description prose) are ignored.
-    """
-    sections: dict[DomainRole, list[str]] = {}
-    current: DomainRole | None = None
-    for line in domain_file.read_text().splitlines():
-        heading = _role_heading(line)
-        if heading is not None:
-            current = heading
-            sections.setdefault(current, [])
-            continue
-        if current is not None:
-            sections[current].append(line)
-    return {role: "\n".join(lines).strip("\n") for role, lines in sections.items()}
+def _load_role_file(domain_dir: Path, role: DomainRole) -> str | None:
+    role_file = domain_dir / f"{role.value}.md"
+    if not role_file.is_file():
+        return None
+    return role_file.read_text().strip("\n")
 
 
 def render_domain_section(
@@ -156,27 +126,27 @@ def render_domain_section(
     role: DomainRole | str,
     **context: object,
 ) -> str:
-    """Render a domain file's ``## <role>`` section, or ``""`` if absent/empty.
+    """Render a domain directory's ``<role>.md`` file, or ``""`` if absent/empty.
 
-    The section is rendered through Jinja with ``context`` — the same uniform
+    The role file is rendered through Jinja with ``context`` — the same uniform
     variable set for every role (``modality``, ``interface``, ``reference_path``,
     ``bench_path``, ``accuracy_checker_path``, ``runtime_notes``; built by
     ``_domain_render_context`` in ``loop.py``) so authors can branch on the run
-    from any section.
+    from any file.
     ``single_agent`` falls back to ``implementer`` + ``judge`` when the
-    file has no explicit ``## single_agent`` section. Leading and trailing blank
-    lines are stripped — the base template owns the spacing around the
+    directory has no explicit ``single_agent.md`` file. Leading and trailing
+    blank lines are stripped — the base template owns the spacing around the
     ``{{ domain_<role> }}`` injection point.
     """
     role_name = _coerce_role(role)
-    sections = _load_sections(_domain_prompt_path(domain))
-    raw = sections.get(role_name)
+    domain_dir = _domain_prompt_dir(domain)
+    raw = _load_role_file(domain_dir, role_name)
     if raw is None and role_name is DomainRole.SINGLE_AGENT:
         raw = "\n\n".join(
             text
             for text in (
-                sections.get(DomainRole.IMPLEMENTER),
-                sections.get(DomainRole.JUDGE),
+                _load_role_file(domain_dir, DomainRole.IMPLEMENTER),
+                _load_role_file(domain_dir, DomainRole.JUDGE),
             )
             if text
         )
