@@ -30,6 +30,7 @@ from vibe_serve.constants import (
 )
 from vibe_serve.domains.base import DEFAULT_DOMAIN, DomainName
 from vibe_serve.domains.registry import registered_domains
+from vibe_serve.input_manifest import InputBundle, load_input_bundle
 from vibe_serve.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
@@ -137,16 +138,9 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         type=Path,
         default=None,
         help=(
-            "Path to a target input bundle containing reference/, "
-            "accuracy_checker/, and benchmark/. Missing --ref, "
-            "--acc-checker, and --bench values are derived from this layout; "
-            "explicit path flags override the derived defaults."
+            "Path to a target input bundle containing OBJECTIVE.md and "
+            "vibeserve.input.toml with accuracy and benchmark commands."
         ),
-    )
-    parser.add_argument(
-        "--ref",
-        default=None,
-        help="Path to reference implementation file, or directory containing at least one reference.py.",
     )
     parser.add_argument(
         "--exp-name",
@@ -159,18 +153,6 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         type=Path,
         default=PROJECT_ROOT / "agent.toml",
         help="Path to agent TOML config file (default: agent.toml)",
-    )
-    parser.add_argument(
-        "--acc-checker",
-        type=Path,
-        default=None,
-        help="Path to a directory containing accuracy checker code/documents.",
-    )
-    parser.add_argument(
-        "--bench",
-        type=Path,
-        default=None,
-        help="Path to a directory containing benchmark code/documents.",
     )
     parser.add_argument(
         "--nsys-profiler",
@@ -390,21 +372,13 @@ def _make_parser(prog: str, description: str) -> argparse.ArgumentParser:
 
 
 # ---------------------------------------------------------------------------
-# Shared OBJECTIVE.md discovery (agent + evolve)
+# Shared input-bundle discovery
 # ---------------------------------------------------------------------------
 
 
-def _load_objective(reference_path: str) -> str:
-    """Return the contents of OBJECTIVE.md sibling to *reference_path*."""
-    ref = Path(reference_path).expanduser().resolve()
-    objective_md = ref.parent / "OBJECTIVE.md"
-    if not objective_md.exists():
-        raise FileNotFoundError(
-            f"OBJECTIVE.md not found at {objective_md}. Create one next to the "
-            f"model input directory; it should describe the objective "
-            f"(metric, goal, and any model-specific notes)."
-        )
-    return objective_md.read_text()
+def _load_objective(bundle: InputBundle) -> str:
+    """Return the input bundle's objective text."""
+    return bundle.objective
 
 
 # ===========================================================================
@@ -485,66 +459,19 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     return parser
 
 
-_INPUT_TARGETS = (
-    ("ref", "--ref", "reference"),
-    ("acc_checker", "--acc-checker", "accuracy_checker"),
-    ("bench", "--bench", "benchmark"),
-)
-
-
-def _apply_input_defaults(args: argparse.Namespace) -> None:
+def _validate_target_inputs(args: argparse.Namespace) -> None:
     input_arg = getattr(args, "input", None)
     if input_arg is None:
-        return
-
-    input_dir = Path(input_arg).expanduser().resolve()
-    if not input_dir.exists():
-        print(f"Error: --input path does not exist: {input_arg}", file=sys.stderr)
-        sys.exit(2)
-    if not input_dir.is_dir():
-        print(f"Error: --input path is not a directory: {input_arg}", file=sys.stderr)
-        sys.exit(2)
-
-    missing = []
-    for attr, flag, dirname in _INPUT_TARGETS:
-        if getattr(args, attr) is not None:
-            continue
-        candidate = input_dir / dirname
-        if not candidate.is_dir():
-            missing.append(f"{dirname}/ for {flag}")
-            continue
-        # Keep the historical argparse shape: --ref is a string, while
-        # --acc-checker and --bench are pathlib.Path values.
-        setattr(args, attr, str(candidate) if attr == "ref" else candidate)
-
-    if missing:
         print(
-            "Error: --input bundle is missing required target subdir(s): "
-            + ", ".join(missing)
-            + f" under {input_dir}.",
+            "Error: missing required target input: --input. "
+            "Pass a bundle containing OBJECTIVE.md and vibeserve.input.toml.",
             file=sys.stderr,
         )
         sys.exit(2)
-
-
-def _validate_target_inputs(args: argparse.Namespace) -> None:
-    _apply_input_defaults(args)
-    missing = [
-        flag
-        for flag, value in (
-            ("--ref", args.ref),
-            ("--acc-checker", args.acc_checker),
-            ("--bench", args.bench),
-        )
-        if value is None
-    ]
-    if missing:
-        print(
-            "Error: missing required target input(s): "
-            + ", ".join(missing)
-            + ". Pass all three paths from the same example bundle.",
-            file=sys.stderr,
-        )
+    try:
+        args.input_bundle = load_input_bundle(input_arg)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         sys.exit(2)
 
 
@@ -562,7 +489,8 @@ def _run_agent(args: argparse.Namespace) -> None:
     config, skills, backend = load_config_and_skills(args)
     from vibe_serve.loops.agent.loop import run_agent_loop
 
-    objective = _load_objective(args.ref)
+    bundle: InputBundle = args.input_bundle
+    objective = _load_objective(bundle)
 
     existing = False
     exp_name = args.exp_name
@@ -584,15 +512,15 @@ def _run_agent(args: argparse.Namespace) -> None:
     success = run_agent_loop(
         config=config,
         exp_name=exp_name,
-        reference_path=args.ref,
+        input_path=str(bundle.root),
+        accuracy_command=bundle.accuracy_command_display,
+        benchmark_command=bundle.benchmark_command_display,
         objective=objective,
         max_rounds=args.max_rounds,
         max_retries_per_round=args.max_retries_per_round,
         start_round=start_round,
         existing=existing,
         debug=args.debug,
-        acc_checker=str(args.acc_checker) if args.acc_checker else None,
-        bench=str(args.bench) if args.bench else None,
         nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
         torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
         neuron_profiler=str(args.neuron_profiler) if args.neuron_profiler else None,
@@ -638,12 +566,11 @@ def _parse_cli_objective(spec: str):
     return Objective(name=name, direction=direction)
 
 
-def _load_objectives_toml(reference_path: str) -> list:
-    """Read ``objectives.toml`` sibling to OBJECTIVE.md if present."""
+def _load_objectives_toml(input_path: Path) -> list:
+    """Read ``objectives.toml`` from the input bundle if present."""
     from vibe_serve.loops.evolve.population import Objective
 
-    ref = Path(reference_path).expanduser().resolve()
-    path = ref.parent / "objectives.toml"
+    path = input_path / "objectives.toml"
     if not path.exists():
         return []
     data = tomllib.loads(path.read_text())
@@ -664,7 +591,7 @@ def _load_objectives_toml(reference_path: str) -> list:
 def _resolve_objectives(args: argparse.Namespace) -> list:
     if args.objective:
         return list(args.objective)
-    return _load_objectives_toml(args.ref)
+    return _load_objectives_toml(args.input_bundle.root)
 
 
 def _build_evolve_parser() -> argparse.ArgumentParser:
@@ -716,7 +643,8 @@ def _run_evolve(args: argparse.Namespace) -> None:
     config, skills, backend = load_config_and_skills(args)
     from vibe_serve.loops.evolve.loop import run_evolve_loop
 
-    objective = _load_objective(args.ref)
+    bundle: InputBundle = args.input_bundle
+    objective = _load_objective(bundle)
     objectives = _resolve_objectives(args)
     if objectives:
         spec = ", ".join(f"{o.name}({o.direction})" for o in objectives)
@@ -733,7 +661,9 @@ def _run_evolve(args: argparse.Namespace) -> None:
     success = run_evolve_loop(
         config=config,
         exp_name=exp_name,
-        reference_path=args.ref,
+        input_path=str(bundle.root),
+        accuracy_command=bundle.accuracy_command_display,
+        benchmark_command=bundle.benchmark_command_display,
         objective=objective,
         max_generations=args.max_generations,
         children_per_generation=args.children_per_generation,
@@ -743,8 +673,6 @@ def _run_evolve(args: argparse.Namespace) -> None:
         seed=args.seed,
         existing=existing,
         debug=args.debug,
-        acc_checker=str(args.acc_checker) if args.acc_checker else None,
-        bench=str(args.bench) if args.bench else None,
         nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
         torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
         neuron_profiler=str(args.neuron_profiler) if args.neuron_profiler else None,
@@ -809,7 +737,8 @@ def _run_openevolve(args: argparse.Namespace) -> None:
     config, skills, backend = load_config_and_skills(args)
     from vibe_serve.loops.openevolve.loop import run_openevolve_loop
 
-    objective = _load_objective(args.ref)
+    bundle: InputBundle = args.input_bundle
+    objective = _load_objective(bundle)
 
     existing = False
     exp_name = args.exp_name
@@ -822,15 +751,15 @@ def _run_openevolve(args: argparse.Namespace) -> None:
     success = run_openevolve_loop(
         config=config,
         exp_name=exp_name,
-        reference_path=args.ref,
+        input_path=str(bundle.root),
+        accuracy_command=bundle.accuracy_command_display,
+        benchmark_command=bundle.benchmark_command_display,
         objective=objective,
         max_iterations=args.max_iterations,
         k_inspirations=args.k_inspirations,
         seed=args.seed,
         existing=existing,
         debug=args.debug,
-        acc_checker=str(args.acc_checker) if args.acc_checker else None,
-        bench=str(args.bench) if args.bench else None,
         nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
         torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
         neuron_profiler=str(args.neuron_profiler) if args.neuron_profiler else None,
@@ -888,6 +817,8 @@ def _run_plain(args: argparse.Namespace) -> None:
         run_plain_loop,
     )
 
+    bundle: InputBundle = args.input_bundle
+
     existing = False
     exp_name = args.exp_name
     resume_state: PlainLoopState | None = None
@@ -928,15 +859,15 @@ def _run_plain(args: argparse.Namespace) -> None:
     success = run_plain_loop(
         config=config,
         exp_name=exp_name,
-        reference_path=args.ref,
+        input_path=str(bundle.root),
+        accuracy_command=bundle.accuracy_command_display,
+        benchmark_command=bundle.benchmark_command_display,
         max_rounds=args.max_rounds,
         max_attempts_per_issue=args.max_attempts_per_issue,
         max_issues_per_perf_eval=args.max_issues_per_perf_eval,
         existing=existing,
         resume_state=resume_state,
         debug=args.debug,
-        acc_checker=str(args.acc_checker) if args.acc_checker else None,
-        bench=str(args.bench) if args.bench else None,
         nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
         torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
         neuron_profiler=str(args.neuron_profiler) if args.neuron_profiler else None,

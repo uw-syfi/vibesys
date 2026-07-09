@@ -28,7 +28,7 @@ from vibe_serve.domains.environment import (
     EnvironmentHooks,
     NoopEnvironmentHooks,
 )
-from vibe_serve.input_project import discover_input_project, materialize_input_project
+from vibe_serve.input_project import materialize_input_project
 from vibe_serve.llm_client import _build_model
 from vibe_serve.profilers import ProfilerKind, resolve_profiler_kind
 from vibe_serve.sandbox.run_environment import (
@@ -101,11 +101,11 @@ class _RunContext:
         self,
         config: Config,
         exp_name: str,
-        reference_path: str,
+        input_path: str,
+        accuracy_command: str,
+        benchmark_command: str,
         existing: bool = False,
         debug: bool = False,
-        acc_checker: str | None = None,
-        bench: str | None = None,
         nsys_profiler: str | None = None,
         torch_profiler: str | None = None,
         neuron_profiler: str | None = None,
@@ -155,6 +155,8 @@ class _RunContext:
             "_opt_vibeserve",
             "_mounts",
             ".cache",
+            ".venv",
+            "exp_env",
         }
         self.debug = debug
         self.git_tracking = git_tracking
@@ -174,8 +176,9 @@ class _RunContext:
         self.model = _build_model(config)
         self.model_name = config.model.name
 
-        self.acc_checker_path = self._coerce_dir_path(acc_checker, "--acc-checker")
-        self.bench_path = self._coerce_dir_path(bench, "--bench")
+        self.input_path = self._coerce_dir_path(input_path, "--input")
+        self.accuracy_command = accuracy_command
+        self.benchmark_command = benchmark_command
         self.nsys_profiler_path = self._coerce_dir_path(nsys_profiler, "--nsys-profiler")
         self.torch_profiler_path = self._coerce_dir_path(torch_profiler, "--torch-profiler")
         self.neuron_profiler_path = self._coerce_dir_path(neuron_profiler, "--neuron-profiler")
@@ -213,29 +216,21 @@ class _RunContext:
         skill_source_paths = self._coerce_skills_dirs(skills_dirs)
         self._skill_source_paths: list[Path] = skill_source_paths
 
-        ref_path = Path(reference_path).expanduser().resolve()
-        if not ref_path.exists():
-            raise ValueError(f"Reference path does not exist: {reference_path}")
-
-        ref_dir: Path | None = None
-        if ref_path.is_file():
-            ref_script = ref_path
-            self.ref_name = ref_script.name
-        elif ref_path.is_dir():
-            reference_py = sorted(ref_path.glob("*.py"))
-            if not reference_py:
-                raise ValueError(f"No reference Python script found in directory: {reference_path}")
-            if len(reference_py) != 1:
-                raise ValueError(
-                    f"Expected one reference Python script in {reference_path}, found {len(reference_py)}"
-                )
-            ref_script = reference_py[0]
-            ref_dir = ref_path
-            self.ref_name = f"reference/{ref_script.name}"
+        input_dir = Path(self.input_path)
+        ref_dir: Path | None = input_dir / "reference"
+        if ref_dir.exists():
+            if not ref_dir.is_dir():
+                raise ValueError(f"reference path is not a directory: {ref_dir}")
+            reference_py = sorted(ref_dir.glob("*.py"))
+            self.ref_name = (
+                f"reference/{reference_py[0].name}" if len(reference_py) == 1 else "reference"
+            )
         else:
-            raise ValueError(f"Reference path is invalid: {reference_path}")
+            ref_dir = None
+            self.ref_name = "."
 
-        input_project_dir = discover_input_project(ref_dir)
+        environment_reference = ref_dir or (input_dir / "reference")
+        input_project_dir = input_dir if (input_dir / "pyproject.toml").is_file() else None
 
         self.workspace = self.exp_dir / "workspace"
         self.workspace.mkdir(parents=True, exist_ok=True)
@@ -256,7 +251,7 @@ class _RunContext:
 
         self.environment_hooks = environment_hooks or NoopEnvironmentHooks()
         self.environment_context = EnvironmentContext(
-            reference_path=ref_path,
+            reference_path=environment_reference,
             workspace=self.workspace,
             run_environment=self.run_environment,
             project_root=PROJECT_ROOT,
@@ -293,29 +288,15 @@ class _RunContext:
                 if d.exists():
                     shutil.rmtree(d)
 
-            if ref_dir is not None:
-                self._copy_excluding_extras(
-                    ref_dir,
-                    self.workspace / "reference",
-                    extra_excludes=self.environment_patch.copy_excludes,
-                )
-            else:
-                if (self.workspace / ref_script.name).exists():
-                    (self.workspace / ref_script.name).unlink()
-                shutil.copy2(ref_script, self.workspace / ref_script.name)
+            self._copy_excluding_extras(
+                input_dir,
+                self.workspace,
+                extra_excludes=self.environment_patch.copy_excludes,
+            )
 
             for src in skill_source_paths:
                 rel = src.name
                 self._copy_excluding_extras(src, self.workspace / rel)
-
-            # Copy acc_checker and bench into the workspace so agents can
-            # access them directly (not only via Docker bind mounts).
-            if self.acc_checker_path:
-                src = Path(self.acc_checker_path)
-                self._copy_excluding_extras(src, self.workspace / "acc_checker")
-            if self.bench_path:
-                src = Path(self.bench_path)
-                self._copy_excluding_extras(src, self.workspace / "bench")
 
             if input_project_dir is not None:
                 materialize_input_project(
@@ -363,8 +344,8 @@ class _RunContext:
                     backend=self.backend_impl,
                     agent_backend=self._resolved_backend,
                     cli_provider=self._cli_provider,
-                    acc_checker_path=self.acc_checker_path,
-                    bench_path=self.bench_path,
+                    accuracy_command=self.accuracy_command,
+                    benchmark_command=self.benchmark_command,
                     nsys_profiler_path=self.nsys_profiler_path,
                     torch_profiler_path=self.torch_profiler_path,
                     neuron_profiler_path=self.neuron_profiler_path,
@@ -807,14 +788,14 @@ class _RunContext:
             self.lprint(f"[git-tracking] no changes to commit for '{label}'")
 
     @property
-    def judge_acc_checker_path(self) -> str | None:
-        """Return the acc_checker path as seen by the judge agent."""
-        return self.run_environment_view.paths.acc_checker
+    def judge_accuracy_command(self) -> str | None:
+        """Return the accuracy command as seen by the judge agent."""
+        return self.run_environment_view.paths.accuracy_command
 
     @property
-    def judge_bench_path(self) -> str | None:
-        """Return the bench path as seen by the judge agent."""
-        return self.run_environment_view.paths.bench
+    def judge_benchmark_command(self) -> str | None:
+        """Return the benchmark command as seen by the judge agent."""
+        return self.run_environment_view.paths.benchmark_command
 
     @property
     def profiler_nsys_profiler_path(self) -> str | None:
@@ -827,9 +808,9 @@ class _RunContext:
         return self.run_environment_view.paths.torch_profiler
 
     @property
-    def profiler_bench_path(self) -> str | None:
-        """Return the bench path as seen by the profiler agent."""
-        return self.run_environment_view.paths.bench
+    def profiler_benchmark_command(self) -> str | None:
+        """Return the benchmark command as seen by the profiler agent."""
+        return self.run_environment_view.paths.benchmark_command
 
     def lprint(self, text: str) -> None:
         _log_and_print(text, self.run_log_file)

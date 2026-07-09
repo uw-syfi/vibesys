@@ -19,7 +19,7 @@ An NVIDIA Nsight Systems analysis toolkit is available at `nsys_profiler/analyze
    for i in $(seq 1 120); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
    curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
      -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 300
-   uv run python bench/benchmark.py --url http://localhost:8077 --rate <chosen_rate> --duration 10 --max-tokens 64
+   {% if benchmark_command is defined and benchmark_command %}{{ benchmark_command }}{% else %}<manifest benchmark command>{% endif %} --url http://localhost:8077 --rate <chosen_rate> --duration 10 --max-tokens 64
    kill -INT $NSYS_PID 2>/dev/null; wait $NSYS_PID 2>/dev/null; sleep 3
    ```
 

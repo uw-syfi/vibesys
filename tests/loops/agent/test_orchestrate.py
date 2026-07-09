@@ -1,5 +1,6 @@
 """Tests for vibe_serve.loops.agent — orchestrator-driven build loop."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -36,6 +37,17 @@ def ref_file(tmp_path):
     ref = model_dir / "ref.py"
     ref.write_text("def predict(x): return x * 2\n")
     (model_dir / "OBJECTIVE.md").write_text("Maximize tok/s throughput.\n")
+    (model_dir / "vibeserve.input.toml").write_text(
+        """
+version = 1
+
+[accuracy]
+command = ["uv", "run", "python", "accuracy_checker/checker.py"]
+
+[benchmark]
+command = ["uv", "run", "python", "benchmark/benchmark.py"]
+""".lstrip()
+    )
     return str(ref)
 
 
@@ -110,7 +122,9 @@ def _invoke_orchestrate(tmp_path, ref_file, runner, **kwargs):
     defaults = dict(
         config={"model": {"name": "claude-sonnet-4-6"}},
         exp_name="test-orch",
-        reference_path=ref_file,
+        input_path=str(Path(ref_file).parent),
+        accuracy_command="uv run python accuracy_checker/checker.py",
+        benchmark_command="uv run python benchmark/benchmark.py",
         objective="Maximize tok/s throughput.",
         max_rounds=5,
         max_retries_per_round=2,
@@ -467,25 +481,34 @@ def test_loop_max_rounds_terminates(tmp_path, ref_file):
 
 def test_cli_loads_objective_md_from_ref_parent(tmp_path):
     from vibe_serve.cli import _load_objective
+    from vibe_serve.input_manifest import load_input_bundle
 
-    ref_dir = tmp_path / "modelA" / "reference"
-    ref_dir.mkdir(parents=True)
-    (ref_dir / "reference.py").write_text("pass\n")
-    (ref_dir.parent / "OBJECTIVE.md").write_text(
-        "Maximize throughput (tok/s). Prefer CUDA graphs.\n"
+    bundle = tmp_path / "modelA"
+    bundle.mkdir()
+    (bundle / "OBJECTIVE.md").write_text("Maximize throughput (tok/s). Prefer CUDA graphs.\n")
+    (bundle / "vibeserve.input.toml").write_text(
+        "version = 1\n\n"
+        "[accuracy]\ncommand = ['uv', 'run', 'python', 'accuracy_checker/checker.py']\n\n"
+        "[benchmark]\ncommand = ['uv', 'run', 'python', 'benchmark/benchmark.py']\n"
     )
-    objective = _load_objective(str(ref_dir))
+
+    objective = _load_objective(load_input_bundle(bundle))
     assert "Maximize throughput" in objective
 
 
 def test_cli_missing_objective_md_errors(tmp_path):
-    from vibe_serve.cli import _load_objective
+    from vibe_serve.input_manifest import load_input_bundle
 
-    ref_dir = tmp_path / "modelB" / "reference"
-    ref_dir.mkdir(parents=True)
-    (ref_dir / "reference.py").write_text("pass\n")
+    bundle = tmp_path / "modelB"
+    bundle.mkdir()
+    (bundle / "vibeserve.input.toml").write_text(
+        "version = 1\n\n"
+        "[accuracy]\ncommand = ['uv', 'run', 'python', 'accuracy_checker/checker.py']\n\n"
+        "[benchmark]\ncommand = ['uv', 'run', 'python', 'benchmark/benchmark.py']\n"
+    )
+
     with pytest.raises(FileNotFoundError, match="OBJECTIVE.md"):
-        _load_objective(str(ref_dir))
+        load_input_bundle(bundle)
 
 
 def test_cli_rejects_modal_with_nsys_profiler(tmp_path, ref_file):
@@ -496,8 +519,8 @@ def test_cli_rejects_modal_with_nsys_profiler(tmp_path, ref_file):
     validate_args = _validate_agent
     args = parser.parse_args(
         [
-            "--ref",
-            ref_file,
+            "--input",
+            str(Path(ref_file).parent),
             "--exp-name",
             "test",
             "--modal",

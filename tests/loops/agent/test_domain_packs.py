@@ -136,16 +136,16 @@ def test_role_file_keeps_markdown_headings(tmp_path: Path):
 
 
 def test_render_role_branches_on_context():
-    """A role file rendered with bench_path set should reference it."""
+    """A role file rendered with benchmark_command set should reference it."""
     d = resolve_domain(DomainName.LLM_SERVING)
     with_bench = render_domain_section(
-        d, DomainRole.JUDGE, modality="text_generation", bench_path="/BENCHX"
+        d, DomainRole.JUDGE, modality="text_generation", benchmark_command="./BENCHX"
     )
     without_bench = render_domain_section(
-        d, DomainRole.JUDGE, modality="text_generation", bench_path=None
+        d, DomainRole.JUDGE, modality="text_generation", benchmark_command=None
     )
-    assert "/BENCHX" in with_bench
-    assert "/BENCHX" not in without_bench
+    assert "./BENCHX" in with_bench
+    assert "./BENCHX" not in without_bench
 
 
 def test_render_role_branches_on_interface(tmp_path: Path):

@@ -50,15 +50,15 @@ def test_local_environment_opens_local_sandbox_with_host_paths(tmp_path):
         _request(
             tmp_path,
             backend,
-            acc_checker_path="/host/acc",
-            bench_path="/host/bench",
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
         )
     )
 
     assert backend.calls[0][0] is SandboxKind.LOCAL
     assert session.sandbox is backend.sandbox
-    assert session.view.paths.acc_checker == "/host/acc"
-    assert session.view.paths.bench == "/host/bench"
+    assert session.view.paths.accuracy_command == "uv run python accuracy_checker/checker.py"
+    assert session.view.paths.benchmark_command == "uv run python benchmark/benchmark.py"
     assert session.view.isolated is False
     backend.sandbox.start.assert_not_called()
 
@@ -71,16 +71,16 @@ def test_docker_environment_opens_one_started_sandbox_with_agent_paths(tmp_path)
         _request(
             tmp_path,
             backend,
-            acc_checker_path="/host/acc",
-            bench_path="/host/bench",
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
         )
     )
 
     assert backend.calls[0][0] is SandboxKind.DOCKER
     assert session.view.isolated is True
     assert session.view.cli_sandboxed is True
-    assert session.view.paths.acc_checker == "acc_checker"
-    assert session.view.paths.bench == "bench"
+    assert session.view.paths.accuracy_command == "uv run python accuracy_checker/checker.py"
+    assert session.view.paths.benchmark_command == "uv run python benchmark/benchmark.py"
     backend.sandbox.start.assert_called_once()
 
     session.close()

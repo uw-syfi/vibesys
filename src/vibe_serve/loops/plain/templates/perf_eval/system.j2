@@ -4,7 +4,7 @@ Your job is to benchmark the server, collect structured performance metrics, and
 
 ## Workspace
 
-Your working directory contains the implementer's code. A benchmark tool is available at `bench/benchmark.py`.
+Your working directory contains the implementer's code. The benchmark command is `{% if benchmark_command is defined and benchmark_command %}{{ benchmark_command }}{% else %}<not configured>{% endif %}`.
 
 {% if runtime_notes is defined and runtime_notes %}
 {{ runtime_notes }}
@@ -26,16 +26,16 @@ Your working directory contains the implementer's code. A benchmark tool is avai
 
 3. **Start the server**: Launch it in the background. Wait until `/health` returns 200 (use `curl` in a retry loop, up to 120 seconds). Check the server log for errors — if you see "address already in use", kill the conflicting process and retry.
 
-4. **Run benchmarks** at multiple load levels to understand how performance scales. Use the `--output-json` flag to save structured results:
+4. **Run benchmarks** to understand how performance scales. The benchmark command owns the supported workload parameters; inspect `{{ benchmark_command }} --help` first and use its suite or targeted flags. Use the benchmark's structured-output flag when available to save results:
 {% if load_levels is defined and load_levels %}
 {% for level in load_levels %}
-   - `uv run python bench/benchmark.py --url http://localhost:8000 --rate {{ level.rate }} --duration {{ level.duration }} --max-tokens {{ level.max_tokens }} --output-json bench_result_{{ loop.index }}.json`
+   - If supported: `{{ benchmark_command }} --url http://localhost:8000 --rate {{ level.rate }} --duration {{ level.duration }} --max-tokens {{ level.max_tokens }} --output-json bench_result_{{ loop.index }}.json`
 {% endfor %}
 {% else %}
    Start with these load levels:
-   - Low load: `uv run python bench/benchmark.py --url http://localhost:8000 --rate 1 --duration 20 --max-tokens 128 --output-json bench_result_1.json`
-   - Medium load: `uv run python bench/benchmark.py --url http://localhost:8000 --rate 4 --duration 20 --max-tokens 128 --output-json bench_result_2.json`
-   - High load: `uv run python bench/benchmark.py --url http://localhost:8000 --rate 8 --duration 20 --max-tokens 128 --output-json bench_result_3.json`
+   - Low load, if supported: `{{ benchmark_command }} --url http://localhost:8000 --rate 1 --duration 20 --max-tokens 128 --output-json bench_result_1.json`
+   - Medium load, if supported: `{{ benchmark_command }} --url http://localhost:8000 --rate 4 --duration 20 --max-tokens 128 --output-json bench_result_2.json`
+   - High load, if supported: `{{ benchmark_command }} --url http://localhost:8000 --rate 8 --duration 20 --max-tokens 128 --output-json bench_result_3.json`
 
    **Important: Find the saturation point.** After running rate=8, check whether the GPU appears saturated (i.e., actual throughput plateaus, latency spikes sharply, or requests start failing). If the server is still handling rate=8 comfortably (low error rate, latency not spiking dramatically), **increase the load** and run additional benchmarks at higher rates (e.g., 16, 32, or higher) until you find the point where performance degrades significantly or requests start failing. The goal is to discover the server's maximum sustainable throughput, not just test up to an arbitrary cap. Number your additional output files sequentially (bench_result_4.json, bench_result_5.json, etc.).
 

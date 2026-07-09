@@ -1,0 +1,9 @@
+version = 1
+
+[accuracy]
+command = ["./accuracy_checker/checker"]
+timeout_seconds = 120
+
+[benchmark]
+command = ["./benchmark/benchmark"]
+timeout_seconds = 300

@@ -1,7 +1,8 @@
 # Train Ticket Scripts
 
 Standalone accuracy and benchmark scripts for a running Train Ticket deployment.
-These scripts do not depend on the `vibe-serve --ref` input contract.
+These scripts can be run directly and do not require a full `vibe-serve --input`
+optimization run.
 
 Expected target for a gateway/proxy deployment:
 

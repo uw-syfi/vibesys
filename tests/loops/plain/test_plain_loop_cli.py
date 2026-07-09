@@ -9,12 +9,8 @@ from vibe_serve.cli import main
 from vibe_serve.loops.plain.loop import PlainLoopState
 
 TARGET_ARGS = [
-    "--ref",
-    "examples/Llama-3-8B/reference",
-    "--acc-checker",
-    "examples/Llama-3-8B/accuracy_checker",
-    "--bench",
-    "examples/Llama-3-8B/benchmark",
+    "--input",
+    "examples/model-serving/Llama-3-8B",
 ]
 
 
@@ -69,9 +65,7 @@ class TestBuildParser:
         parser = build_parser()
         args = parser.parse_args(["--exp-name", "myexp"])
         assert args.exp_name == "myexp"
-        assert args.ref is None
-        assert args.acc_checker is None
-        assert args.bench is None
+        assert args.input is None
         assert hasattr(args, "docker")
         assert hasattr(args, "debug")
 

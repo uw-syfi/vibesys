@@ -1,9 +1,10 @@
 moonshine-streaming-medium input bundle.
 
 Use:
-- `--ref inputs/moonshine-streaming/reference`
-- `--acc-checker inputs/moonshine-streaming/accuracy_checker`
-- `--bench inputs/moonshine-streaming/benchmark`
+
+```bash
+vibe-serve --input examples/model-serving/moonshine-streaming
+```
 
 Each folder contains scripts plus a short README.
 

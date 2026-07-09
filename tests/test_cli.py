@@ -12,14 +12,26 @@ from vibe_serve.cli import _extract_flag, _extract_loop_selection, _validate_tar
 from vibe_serve.domains.base import DomainName
 from vibe_serve.profilers import ProfilerKind
 
-TARGET_ARGS = [
-    "--ref",
-    "examples/Llama-3-8B/reference",
-    "--acc-checker",
-    "examples/Llama-3-8B/accuracy_checker",
-    "--bench",
-    "examples/Llama-3-8B/benchmark",
-]
+TARGET_ARGS = ["--input", "examples/model-serving/Llama-3-8B"]
+
+
+def _write_input_bundle(tmp_path: Path) -> Path:
+    bundle = tmp_path / "queue-default"
+    (bundle / "reference").mkdir(parents=True)
+    (bundle / "OBJECTIVE.md").write_text("objective\n")
+    (bundle / "vibeserve.input.toml").write_text(
+        """
+version = 1
+
+[accuracy]
+command = ["uv", "run", "python", "accuracy_checker/checker.py"]
+
+[benchmark]
+command = ["uv", "run", "python", "benchmark/benchmark.py"]
+""".lstrip()
+    )
+    return bundle
+
 
 # ---------------------------------------------------------------------------
 # Flag extraction
@@ -27,21 +39,21 @@ TARGET_ARGS = [
 
 
 def test_extract_flag_space_form():
-    val, rest = _extract_flag(["--outer-loop", "agent", "--ref", "x"], "--outer-loop")
+    val, rest = _extract_flag(["--outer-loop", "agent", "--input", "x"], "--outer-loop")
     assert val == "agent"
-    assert rest == ["--ref", "x"]
+    assert rest == ["--input", "x"]
 
 
 def test_extract_flag_equals_form():
-    val, rest = _extract_flag(["--ref", "x", "--outer-loop=evolve"], "--outer-loop")
+    val, rest = _extract_flag(["--input", "x", "--outer-loop=evolve"], "--outer-loop")
     assert val == "evolve"
-    assert rest == ["--ref", "x"]
+    assert rest == ["--input", "x"]
 
 
 def test_extract_flag_missing_returns_none():
-    val, rest = _extract_flag(["--ref", "x"], "--outer-loop")
+    val, rest = _extract_flag(["--input", "x"], "--outer-loop")
     assert val is None
-    assert rest == ["--ref", "x"]
+    assert rest == ["--input", "x"]
 
 
 def test_extract_flag_dangling_exits():
@@ -51,14 +63,14 @@ def test_extract_flag_dangling_exits():
 
 
 # ---------------------------------------------------------------------------
-# argv → loop kind
+# argv -> loop kind
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     "argv,expected_kind,expected_rest",
     [
-        (["--outer-loop", "agent", "--ref", "x"], "agent", ["--ref", "x"]),
+        (["--outer-loop", "agent", "--input", "x"], "agent", ["--input", "x"]),
         (["--outer-loop", "plain", "--exp-name", "e"], "plain", ["--exp-name", "e"]),
         (["--outer-loop", "evolve", "--seed", "1"], "evolve", ["--seed", "1"]),
     ],
@@ -70,9 +82,9 @@ def test_extract_loop_selection(argv: list[str], expected_kind: str, expected_re
 
 
 def test_extract_loop_selection_defaults_to_agent():
-    kind, rest = _extract_loop_selection(["--ref", "x"])
+    kind, rest = _extract_loop_selection(["--input", "x"])
     assert kind == "agent"
-    assert rest == ["--ref", "x"]
+    assert rest == ["--input", "x"]
 
 
 def test_extract_loop_selection_unknown_outer_loop_exits():
@@ -81,15 +93,15 @@ def test_extract_loop_selection_unknown_outer_loop_exits():
     assert exc.value.code == 2
 
 
-def test_target_inputs_default_to_none():
+def test_target_input_defaults_to_none():
     from vibe_serve.cli import _build_agent_parser
 
     args = _build_agent_parser().parse_args([])
 
     assert args.input is None
-    assert args.ref is None
-    assert args.acc_checker is None
-    assert args.bench is None
+    assert not hasattr(args, "ref")
+    assert not hasattr(args, "acc_checker")
+    assert not hasattr(args, "bench")
     assert args.profiler is ProfilerKind.AUTO
     assert args.domain is DomainName.LLM_SERVING
 
@@ -121,15 +133,17 @@ def test_input_arg_is_available_on_all_loop_parsers(builder_name):
         ("_build_plain_parser", "_validate_plain"),
     ],
 )
-def test_profiler_none_is_valid_with_modal(builder_name, validator_name):
+def test_profiler_none_is_valid_with_modal(builder_name, validator_name, tmp_path):
     import vibe_serve.cli as cli
 
+    bundle = _write_input_bundle(tmp_path)
     parser = getattr(cli, builder_name)()
     validator = getattr(cli, validator_name)
-    args = parser.parse_args(["--modal", "--profiler", "none", *TARGET_ARGS])
+    args = parser.parse_args(["--modal", "--profiler", "none", "--input", str(bundle)])
 
     assert args.profiler is ProfilerKind.NONE
     validator(args)
+    assert args.input_bundle.root == bundle.resolve()
 
 
 def test_agent_parser_outputs_domain_enum():
@@ -156,39 +170,26 @@ def test_agent_parser_rejects_invalid_enum_args(argv):
     assert exc.value.code == 2
 
 
-def test_validate_target_inputs_derives_bundle_paths_from_input(tmp_path):
+def test_agent_parser_rejects_obsolete_target_flags():
     from vibe_serve.cli import _build_agent_parser
 
-    bundle = tmp_path / "queue-default"
-    (bundle / "reference").mkdir(parents=True)
-    (bundle / "accuracy_checker").mkdir()
-    (bundle / "benchmark").mkdir()
+    with pytest.raises(SystemExit) as exc:
+        _build_agent_parser().parse_args(["--ref", "examples/Llama-3-8B/reference"])
 
+    assert exc.value.code == 2
+
+
+def test_validate_target_inputs_loads_manifest(tmp_path):
+    from vibe_serve.cli import _build_agent_parser
+
+    bundle = _write_input_bundle(tmp_path)
     args = _build_agent_parser().parse_args(["--input", str(bundle)])
 
     _validate_target_inputs(args)
 
-    assert args.ref == str(bundle / "reference")
-    assert args.acc_checker == bundle / "accuracy_checker"
-    assert args.bench == bundle / "benchmark"
-
-
-def test_validate_target_inputs_keeps_explicit_overrides(tmp_path):
-    from vibe_serve.cli import _build_agent_parser
-
-    bundle = tmp_path / "queue-default"
-    (bundle / "reference").mkdir(parents=True)
-    (bundle / "accuracy_checker").mkdir()
-    custom_bench = tmp_path / "custom-benchmark"
-    custom_bench.mkdir()
-
-    args = _build_agent_parser().parse_args(["--input", str(bundle), "--bench", str(custom_bench)])
-
-    _validate_target_inputs(args)
-
-    assert args.ref == str(bundle / "reference")
-    assert args.acc_checker == bundle / "accuracy_checker"
-    assert args.bench == custom_bench
+    assert args.input_bundle.root == bundle.resolve()
+    assert args.input_bundle.accuracy_command_display == "uv run python accuracy_checker/checker.py"
+    assert args.input_bundle.benchmark_command_display == "uv run python benchmark/benchmark.py"
 
 
 def test_validate_target_inputs_rejects_missing_input_dir(tmp_path, capsys):
@@ -204,11 +205,12 @@ def test_validate_target_inputs_rejects_missing_input_dir(tmp_path, capsys):
     assert "--input path does not exist" in capsys.readouterr().err
 
 
-def test_validate_target_inputs_reports_missing_input_subdirs(tmp_path, capsys):
+def test_validate_target_inputs_reports_missing_manifest(tmp_path, capsys):
     from vibe_serve.cli import _build_agent_parser
 
     bundle = tmp_path / "incomplete"
-    (bundle / "reference").mkdir(parents=True)
+    bundle.mkdir()
+    (bundle / "OBJECTIVE.md").write_text("objective\n")
 
     args = _build_agent_parser().parse_args(["--input", str(bundle)])
 
@@ -216,23 +218,47 @@ def test_validate_target_inputs_reports_missing_input_subdirs(tmp_path, capsys):
         _validate_target_inputs(args)
 
     assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "accuracy_checker/ for --acc-checker" in err
-    assert "benchmark/ for --bench" in err
+    assert "vibeserve.input.toml" in capsys.readouterr().err
 
 
-def test_validate_target_inputs_requires_bundle_paths(capsys):
+def test_validate_target_inputs_reports_missing_command(tmp_path, capsys):
     from vibe_serve.cli import _build_agent_parser
 
-    args = _build_agent_parser().parse_args(["--ref", "examples/Llama-3-8B/reference"])
+    bundle = _write_input_bundle(tmp_path)
+    tools = bundle / "tools"
+    tools.mkdir()
+    (tools / "check").write_text("#!/usr/bin/env bash\nexit 0\n")
+    (tools / "check").chmod(0o755)
+    (bundle / "vibeserve.input.toml").write_text(
+        """
+version = 1
+
+[accuracy]
+command = ["./tools/check"]
+
+[benchmark]
+command = ["./tools/bench"]
+""".lstrip()
+    )
+    args = _build_agent_parser().parse_args(["--input", str(bundle)])
 
     with pytest.raises(SystemExit) as exc:
         _validate_target_inputs(args)
 
     assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "--acc-checker" in err
-    assert "--bench" in err
+    assert "benchmark.command executable does not exist" in capsys.readouterr().err
+
+
+def test_validate_target_inputs_requires_input(capsys):
+    from vibe_serve.cli import _build_agent_parser
+
+    args = _build_agent_parser().parse_args([])
+
+    with pytest.raises(SystemExit) as exc:
+        _validate_target_inputs(args)
+
+    assert exc.value.code == 2
+    assert "missing required target input: --input" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -255,3 +281,4 @@ def test_main_routes_to_runner(loop_name: str, runner_attr: str):
         runner.assert_called_once()
         args = runner.call_args.args[0]
         assert args.exp_name == "x"
+        assert args.input_bundle.root.name == "Llama-3-8B"

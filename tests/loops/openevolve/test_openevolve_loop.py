@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -64,7 +65,9 @@ def test_openevolve_uses_candidate_progress_for_agent_calls(tmp_path, ref_file):
         result = run_openevolve_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test-openevolve",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             objective="Maximize tok/s throughput.",
             max_iterations=1,
             seed=0,

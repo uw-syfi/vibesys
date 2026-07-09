@@ -57,10 +57,10 @@ class RunEnvironmentSpec:
 
 @dataclass(frozen=True)
 class AgentPaths:
-    """Paths as agents should refer to them inside the active environment."""
+    """Command and helper paths as agents should use them in the active environment."""
 
-    acc_checker: str | None = None
-    bench: str | None = None
+    accuracy_command: str | None = None
+    benchmark_command: str | None = None
     nsys_profiler: str | None = None
     torch_profiler: str | None = None
     neuron_profiler: str | None = None
@@ -93,8 +93,8 @@ class RunEnvironmentRequest:
     backend: ComputeBackendImpl
     agent_backend: str | None
     cli_provider: str | None
-    acc_checker_path: str | None = None
-    bench_path: str | None = None
+    accuracy_command: str | None = None
+    benchmark_command: str | None = None
     nsys_profiler_path: str | None = None
     torch_profiler_path: str | None = None
     neuron_profiler_path: str | None = None
@@ -180,8 +180,8 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
             sandbox=sandbox,
             view=RunEnvironmentView(
                 paths=AgentPaths(
-                    acc_checker=request.acc_checker_path,
-                    bench=request.bench_path,
+                    accuracy_command=request.accuracy_command,
+                    benchmark_command=request.benchmark_command,
                     nsys_profiler=request.nsys_profiler_path,
                     torch_profiler=request.torch_profiler_path,
                     neuron_profiler=request.neuron_profiler_path,
@@ -657,8 +657,8 @@ def _modal_runtime_notes(gpu: str, app_name: str) -> str:
 
 def _isolated_paths(request: RunEnvironmentRequest) -> AgentPaths:
     return AgentPaths(
-        acc_checker="acc_checker" if request.acc_checker_path else None,
-        bench="bench" if request.bench_path else None,
+        accuracy_command=request.accuracy_command,
+        benchmark_command=request.benchmark_command,
         nsys_profiler="nsys_profiler" if request.nsys_profiler_path else None,
         torch_profiler="torch_profiler" if request.torch_profiler_path else None,
         neuron_profiler="neuron_profiler" if request.neuron_profiler_path else None,
@@ -743,10 +743,6 @@ def _container_mount_plan(
         if mount.container_path.startswith("/"):
             passthrough_paths.append(mount.container_path)
 
-    if request.acc_checker_path:
-        bind_mounts.append((request.acc_checker_path, "/workspace/acc_checker", True))
-    if request.bench_path:
-        bind_mounts.append((request.bench_path, "/workspace/bench", True))
     if request.nsys_profiler_path:
         bind_mounts.append((request.nsys_profiler_path, "/workspace/nsys_profiler", True))
     if request.torch_profiler_path:

@@ -6,9 +6,10 @@ difference is the deployment target described in `OBJECTIVE.md` (from-scratch
 model on a NeuronCore via the AWS Neuron SDK, BF16, `/dev/neuron0`).
 
 Use:
-- `--ref examples/model-serving/Llama-3-8B-trn2/reference`
-- `--acc-checker examples/model-serving/Llama-3-8B-trn2/accuracy_checker`
-- `--bench examples/model-serving/Llama-3-8B-trn2/benchmark`
+
+```bash
+vibe-serve --input examples/model-serving/Llama-3-8B-trn2
+```
 - `--backend trainium --docker` (Neuron DLC container; profiler is
   `neuron-explorer`, selected automatically)
 

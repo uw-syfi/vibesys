@@ -18,7 +18,7 @@ Several flags look independent, but they combine into one execution contract:
 | Domain | `--domain` | Agent-loop problem-space package, such as `llm-serving` or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--no-skills` | Candidate skill roots and the ablation switch that disables skill loading. |
-| Target inputs | `--input`, `--ref`, `--acc-checker`, `--bench` | Target bundle directory, reference implementation, correctness checker, and benchmark harness. |
+| Target inputs | `--input` | Target bundle directory with manifest-declared correctness and benchmark commands. |
 
 Do not treat these as simple toggles. Some combinations imply a language,
 startup contract, profiler, or sandbox capability.
@@ -63,7 +63,7 @@ starts with an actionable error.
 | Flags | Environment | Notes |
 | --- | --- | --- |
 | neither `--docker` nor `--modal` | Local shell. | Commands run on the host through `LocalShellBackend`. |
-| `--docker` | Docker container. | Mounts the workspace and target inputs. Backend controls GPU/device passthrough. |
+| `--docker` | Docker container. | Mounts the workspace. Backend controls GPU/device passthrough. |
 | `--modal` | Modal workflow. | Mutually exclusive with `--docker`. Intended for remote GPU dispatch. |
 
 `--docker-image` overrides the backend's default container image when Docker or
@@ -137,6 +137,7 @@ Most examples use the standard bundle layout:
 ```text
 examples/<target>/
 ├── OBJECTIVE.md
+├── vibeserve.input.toml
 ├── reference/
 ├── accuracy_checker/
 └── benchmark/
@@ -148,18 +149,23 @@ For those bundles, pass the root once:
 vibe-serve --input examples/<target> ...
 ```
 
-This derives any missing target path flags as:
+The manifest declares the evaluator entrypoints and intentionally does not
+define the candidate command or benchmark metadata:
 
-- `--ref <input>/reference`
-- `--acc-checker <input>/accuracy_checker`
-- `--bench <input>/benchmark`
+```toml
+version = 1
 
-Explicit flags override derived values, so a custom benchmark can be mixed in
-without repeating every path:
+[accuracy]
+command = ["uv", "run", "python", "accuracy_checker/checker.py"]
 
-```bash
-vibe-serve --input examples/<target> --bench /tmp/custom-benchmark ...
+[benchmark]
+command = ["uv", "run", "python", "benchmark/benchmark.py"]
 ```
+
+Those command arrays are bundle-specific. They may point at Python, shell, Go,
+Rust, C++, or any other evaluator entrypoint, and VibeServe does not require
+standard wrapper filenames. VibeServe copies the input bundle into the
+experiment workspace and tells agents to run the manifest commands.
 
 ## Common Commands
 

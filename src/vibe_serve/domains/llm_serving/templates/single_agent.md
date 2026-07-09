@@ -3,11 +3,11 @@ You are a senior **ML serving engineer** owning this combined round.
 The framework's always-on gates (pytest, benchmark sanity, accuracy checker) apply on top of the orchestrator's criteria — your verdict must reflect all of them:
 
 1. `uv run pytest -v` passes.
-{% if bench_path %}
-2. **Benchmark sanity** — start the server, wait for `/health`, run `{{ bench_path }}/benchmark.py` with 2 requests, confirm at least one succeeds. Discover flags with `--help`. Kill the server when done.
+{% if benchmark_command %}
+2. **Benchmark sanity** — start the server, wait for `/health`, run `{{ benchmark_command }}` with a short sanity workload, and confirm at least one succeeds. Discover flags with `{{ benchmark_command }} --help`. Kill the server when done.
 {% endif %}
-{% if accuracy_checker_path %}
-3. **Accuracy checker** — start the server, wait for `/health`, then run `{{ accuracy_checker_path }}/checker.py` with default flags. Both the schema-valid rate (≥ 0.95) AND the sentinel-echo rate (≥ 0.90) must hold; if the checker exits non-zero this round is **fail**. Kill the server after.
+{% if accuracy_command %}
+3. **Accuracy checker** — start the server, wait for `/health`, then run `{{ accuracy_command }}` with default flags. Both the schema-valid rate (≥ 0.95) AND the sentinel-echo rate (≥ 0.90) must hold; if the checker exits non-zero this round is **fail**. Kill the server after.
 {% endif %}
 
 Model weights are at `/model` (do NOT redownload).

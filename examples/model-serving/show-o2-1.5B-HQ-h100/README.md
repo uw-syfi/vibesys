@@ -1,9 +1,10 @@
 Show-o2 1.5B HQ input bundle.
 
 Use:
-- `--ref inputs/show-o2-1.5B-HQ/reference`
-- `--acc-checker inputs/show-o2-1.5B-HQ/accuracy_checker`
-- `--bench inputs/show-o2-1.5B-HQ/benchmark`
+
+```bash
+vibe-serve --input examples/model-serving/show-o2-1.5B-HQ-h100
+```
 
 This bundle targets `showlab/show-o2-1.5B-HQ`, a Show-o2 text-to-image
 checkpoint. The reference folder uses a pinned git submodule for the official
@@ -18,10 +19,14 @@ the loader downloads:
 For a local HTTP smoke test that does not download weights:
 
 ```bash
-uv run python playground/show_o2_local/serve.py --mock --port 8000
-uv run python inputs/show-o2-1.5B-HQ/benchmark/benchmark.py \
+# Terminal 1
+uv run python examples/model-serving/show_o2_mock_server.py --port 8000
+
+# Terminal 2
+cd examples/model-serving/show-o2-1.5B-HQ-h100
+uv run python benchmark/benchmark.py \
   --url http://localhost:8000 --warmup-requests 1 --num-requests 1 --steps 1
 ```
 
-For a real run, create an environment from `requirements.txt` and start
-`playground/show_o2_local/serve.py` without `--mock`.
+For a real run, create an environment from `requirements.txt` and start a
+server backed by the reference model instead of the mock server.

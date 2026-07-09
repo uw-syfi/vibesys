@@ -11,7 +11,7 @@ as the execution container.  Key differences:
 - Read-only model weights must live in a pre-existing named Modal Volume
   (pass the name via ``model_volume_name``).  The volume is mounted at
   ``/model`` with ``read_only=True``.
-- Other RO bind mounts (``bench``, ``acc_checker``, ``nsys_profiler``) are
+- Other RO bind mounts (``nsys_profiler`` and similar helper directories) are
   uploaded once into the workspace volume under their container-path leaf.
 """
 
@@ -795,8 +795,8 @@ class ModalSandbox(BaseSandbox):
         "_mounts",
         "_auth",  # host CLI auth uploaded from ~/.codex etc.
         "_opt_vibeserve",  # vibe_serve pkg uploaded for MCP
-        "acc_checker",
-        "bench",
+        "accuracy_checker",
+        "benchmark",
         "skills",
         "nsys_profiler",
         "reference",

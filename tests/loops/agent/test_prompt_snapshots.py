@@ -37,14 +37,14 @@ _BASE_CONTEXT = {
 _CONTEXTS = {
     "full": _BASE_CONTEXT
     | {
-        "bench_path": "/workspace/bench",
-        "accuracy_checker_path": "/workspace/acc_checker",
+        "benchmark_command": "uv run python benchmark/benchmark.py",
+        "accuracy_command": "uv run python accuracy_checker/checker.py",
         "runtime_notes": "Runtime note: local Docker workspace with NVIDIA CUDA access.",
     },
     "minimal": _BASE_CONTEXT
     | {
-        "bench_path": None,
-        "accuracy_checker_path": None,
+        "benchmark_command": None,
+        "accuracy_command": None,
         "runtime_notes": "",
     },
 }
@@ -54,8 +54,8 @@ def _domain_context(context: dict[str, object]) -> dict[str, object]:
     return {
         "modality": context["modality"],
         "reference_path": context["reference_path"],
-        "bench_path": context["bench_path"],
-        "accuracy_checker_path": context["accuracy_checker_path"],
+        "benchmark_command": context["benchmark_command"],
+        "accuracy_command": context["accuracy_command"],
         "runtime_notes": context["runtime_notes"],
     }
 
@@ -85,8 +85,8 @@ def _render_prompt(domain: DomainName, role: str, context: dict[str, object]) ->
             objective=context["objective"],
             pass_criteria=context["pass_criteria"],
             runtime_notes=context["runtime_notes"],
-            bench_path=context["bench_path"],
-            accuracy_checker_path=context["accuracy_checker_path"],
+            benchmark_command=context["benchmark_command"],
+            accuracy_command=context["accuracy_command"],
             domain_judge=_domain_section(domain, "judge", context),
         )
     if role == "single_agent":
@@ -99,8 +99,8 @@ def _render_prompt(domain: DomainName, role: str, context: dict[str, object]) ->
             runtime_notes=context["runtime_notes"],
             task=context["task"],
             pass_criteria=context["pass_criteria"],
-            bench_path=context["bench_path"],
-            accuracy_checker_path=context["accuracy_checker_path"],
+            benchmark_command=context["benchmark_command"],
+            accuracy_command=context["accuracy_command"],
             retry=1,
             feedback=None,
             reference_path=context["reference_path"],
