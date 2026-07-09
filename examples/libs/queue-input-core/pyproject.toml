@@ -14,4 +14,4 @@ where = ["src"]
 include = ["queue_input_core*"]
 
 [tool.setuptools.package-data]
-queue_input_core = ["porcupine_checker/*"]
+queue_input_core = ["porcupine_checker/*", "trusted_harness/*"]

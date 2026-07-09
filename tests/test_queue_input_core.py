@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 def test_queue_input_core_contract_drives_reference_scenarios(monkeypatch):
@@ -94,3 +98,29 @@ def test_focused_queue_inputs_do_not_import_core_main():
             assert "SCENARIO =" in text
             assert "import main" not in text
             assert "--scenario" not in text
+
+
+def test_linearizable_queue_inputs_use_trusted_harness():
+    root = Path(__file__).parents[1] / "examples" / "data-structures"
+
+    for input_name in ["queue-default", "queue-spsc", "queue-mpsc", "queue-mpmc"]:
+        for rel_path in ["accuracy_checker/checker.py", "benchmark/benchmark.py"]:
+            text = (root / input_name / rel_path).read_text()
+            assert "queue_input_core.trusted" in text
+            assert "queue_input_core.candidate" not in text
+
+
+def test_trusted_queue_harness_rejects_adversarial_histories():
+    if shutil.which("go") is None:
+        pytest.skip("Go is required by the trusted queue evaluator")
+
+    harness = (
+        Path(__file__).parents[1]
+        / "examples"
+        / "libs"
+        / "queue-input-core"
+        / "src"
+        / "queue_input_core"
+        / "trusted_harness"
+    )
+    subprocess.run(["go", "test", "./..."], cwd=harness, check=True)
