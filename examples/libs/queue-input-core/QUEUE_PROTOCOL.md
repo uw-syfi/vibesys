@@ -91,8 +91,8 @@ used as a verdict or performance result.
 
 The Go reference server is in
 `src/queue_input_core/trusted_harness/candidate.go`. It is also available via
-the evaluator's `--use-reference` option. Native candidates can use the frame
-definitions in `include/vibeserve_queue_protocol.h`.
+the evaluator's `--use-reference` option. Candidate implementations should use
+the frame encoding defined in this document as the canonical wire contract.
 
 For scored execution, the evaluator and this protocol definition must be
 provided from a trusted, immutable input copy. A convenience copy inside an
