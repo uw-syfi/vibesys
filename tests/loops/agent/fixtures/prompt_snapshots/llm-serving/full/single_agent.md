@@ -27,8 +27,8 @@ You are a senior **ML serving engineer** owning this combined round.
 The framework's always-on gates (pytest, benchmark sanity, accuracy checker) apply on top of the orchestrator's criteria — your verdict must reflect all of them:
 
 1. `uv run pytest -v` passes.
-2. **Benchmark sanity** — start the server, wait for `/health`, run `/workspace/bench/benchmark.py` with 2 requests, confirm at least one succeeds. Discover flags with `--help`. Kill the server when done.
-3. **Accuracy checker** — start the server, wait for `/health`, then run `/workspace/acc_checker/checker.py` with default flags. Both the schema-valid rate (≥ 0.95) AND the sentinel-echo rate (≥ 0.90) must hold; if the checker exits non-zero this round is **fail**. Kill the server after.
+2. **Benchmark sanity** — start the server, wait for `/health`, run `uv run python benchmark/benchmark.py` with a short sanity workload, and confirm at least one succeeds. Discover flags with `uv run python benchmark/benchmark.py --help`. Kill the server when done.
+3. **Accuracy checker** — start the server, wait for `/health`, then run `uv run python accuracy_checker/checker.py` with default flags. Both the schema-valid rate (≥ 0.95) AND the sentinel-echo rate (≥ 0.90) must hold; if the checker exits non-zero this round is **fail**. Kill the server after.
 
 Model weights are at `/model` (do NOT redownload).
 
@@ -61,7 +61,7 @@ For local server-style captures, the usual shape is:
 2. Kill prior servers: `pkill -f "python main.py" 2>/dev/null || true; sleep 2`.
 3. Pre-warm — first-time kernel compilation or model load can take minutes.
 4. Start the candidate server under the profiler.
-5. Drive load using the benchmark, for example `uv run python /workspace/bench/benchmark.py --url http://localhost:8077 --rate 1 --num-requests 5 --max-tokens 64` when those flags exist.
+5. Drive load using the benchmark command (`uv run python benchmark/benchmark.py`). Use `--help` to find a short representative workload and output flag; do not assume every benchmark accepts the same rate, request-count, or token flags.
 6. Stop the profiled server and analyze the report.
 
 For torch in-process captures, the reference harness is designed around `VibeServeModel.from_pretrained(...)` and `.generate(...)`:

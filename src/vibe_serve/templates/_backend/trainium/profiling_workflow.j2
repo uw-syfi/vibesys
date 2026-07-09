@@ -18,7 +18,7 @@ A Neuron profiling toolkit ships at `neuron_profiler/analyze_neuron.py`, wrappin
    for i in $(seq 1 180); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
    python neuron_profiler/analyze_neuron.py capture \
      --out-dir /tmp/neuronprof \
-     --workload "uv run python bench/benchmark.py --url http://localhost:8077 --lengths 256 --concurrency 4 --duration 10 --warmup-requests 1"
+     --workload "{% if benchmark_command is defined and benchmark_command %}{{ benchmark_command }}{% else %}<manifest benchmark command>{% endif %} --url http://localhost:8077 --lengths 256 --concurrency 4 --duration 10 --warmup-requests 1"
    kill $PID 2>/dev/null; wait $PID 2>/dev/null; sleep 2
    ```
    (If your server cannot be driven this way, capture directly around a single compiled forward — see `analyze_neuron.py --help`.)

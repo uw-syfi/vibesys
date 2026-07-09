@@ -71,11 +71,11 @@ use any of these in any file without tracking which role you're in:
 | `modality` | The `--modality` value (e.g. `text_generation`). |
 | `interface` | The `--interface` value: `inprocess` (checker imports the code; Python) or `service` (exercised over the wire; any language). Gate in-process/Python-only requirements with `{% if interface != "service" %}`. |
 | `reference_path` | Path to the reference implementation. |
-| `bench_path` | Benchmark harness dir, or falsy if no benchmark is attached. |
-| `accuracy_checker_path` | Accuracy checker dir, or falsy if not attached. |
+| `benchmark_command` | Benchmark command declared by the input manifest, or falsy if no benchmark is attached. |
+| `accuracy_command` | Accuracy-checker command declared by the input manifest, or falsy if not attached. |
 | `runtime_notes` | Runtime-environment notes for the round. |
 
-These are always defined (falsy when not applicable), so a plain `{% if bench_path %}`
+These are always defined (falsy when not applicable), so a plain `{% if benchmark_command %}`
 is enough — no `is defined` guard needed.
 
 Example (inside `judge.md`):
@@ -84,8 +84,8 @@ Example (inside `judge.md`):
 ## Correctness gates
 
 1. `pytest` passes.
-{% if bench_path %}
-2. Run `{{ bench_path }}/benchmark.py` and confirm it succeeds.
+{% if benchmark_command %}
+2. Run `{{ benchmark_command }}` and confirm it succeeds.
 {% endif %}
 ```
 

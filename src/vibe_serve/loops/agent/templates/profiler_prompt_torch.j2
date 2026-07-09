@@ -26,8 +26,8 @@ This run may execute in a Modal sandbox, which hides `/proc/driver/nvidia/`. `ns
 ## Workspace
 
 Your working directory contains the implementer's code and a `torch_profiler/` directory with the analysis MCP server plus the capture CLI (`analyze_torch_profile.py`).
-{% if bench_path is defined and bench_path %}
-A benchmark tool is available at `{{ bench_path }}/benchmark.py`.
+{% if benchmark_command is defined and benchmark_command %}
+The benchmark command is `{{ benchmark_command }}`.
 {% endif %}
 
 {% if modality %}

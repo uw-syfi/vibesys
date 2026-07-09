@@ -26,7 +26,7 @@ def sandbox_with_mounts(tmp_path):
         gpus="all",
         bind_mounts=[
             (str(tmp_path / "model_weights"), "/workspace/reference/model", True),
-            (str(tmp_path / "acc_checker"), "/workspace/acc_checker", True),
+            (str(tmp_path / "accuracy_checker"), "/workspace/accuracy_checker", True),
         ],
     )
 
@@ -135,7 +135,7 @@ class TestStart:
         cmd_str = " ".join(cmd)
         # Extra bind mounts should be read-only
         assert "/workspace/reference/model:ro" in cmd_str
-        assert "/workspace/acc_checker:ro" in cmd_str
+        assert "/workspace/accuracy_checker:ro" in cmd_str
 
     @patch("subprocess.run")
     def test_start_installs_uv(self, mock_run, sandbox):

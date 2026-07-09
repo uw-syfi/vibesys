@@ -60,8 +60,8 @@ The orchestrator is deliberately narrow with each round's scope. Do **NOT** inve
 
 When a `pass_criteria` clause says "static inspection must show no profiler/Nsight code", "no fast-path bypass in the code", "no per-token KV-growth `torch.cat`", or any similar code-level prohibition, the gate applies **only to implementer-authored files** — chiefly `main.py` and any modules / tests / scripts the implementer created next to it inside `/workspace`. The clause does **not** apply to the framework-provided directories listed below. Their presence is required by the framework, the implementer cannot delete them (they are read-only bind mounts on Docker; on Modal they live outside the editor container entirely), and they are **never** part of the submitted implementation:
 
-- `bench/` (the framework's benchmark harness)
-- `acc_checker/` (the framework's accuracy checker)
+- `benchmark/` and the manifest benchmark command (framework-provided benchmark harness)
+- `accuracy_checker/` and the manifest accuracy command (framework-provided accuracy checker)
 - `nsys_profiler/` and `torch_profiler/` (the framework's profile-analysis MCP servers + capture CLIs)
 - `reference/` (the input reference implementation)
 - `skills/` (the curated reference library)

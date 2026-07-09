@@ -1,9 +1,10 @@
 Olmo-Hybrid-7B prefix-caching input bundle.
 
 Use:
-- `--ref inputs/olmo-hybrid-prefix-caching/reference`
-- `--acc-checker inputs/olmo-hybrid-prefix-caching/accuracy_checker`
-- `--bench inputs/olmo-hybrid-prefix-caching/benchmark`
+
+```bash
+vibe-serve --input examples/model-serving/olmo-hybrid-prefix-caching
+```
 
 Workload: 20 concurrent requests, 32 768-token shared prefix + 128-token unique tail per request, 128 generated tokens. See `OBJECTIVE.md`.
 

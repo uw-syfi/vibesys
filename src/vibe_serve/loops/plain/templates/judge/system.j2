@@ -27,7 +27,7 @@ Read all files in the current directory. Evaluate the implementation on:
 5. **Code quality**: Is the code well-structured with proper error handling?
 6. **Accuracy-checker interface**: Does `main.py` export a `VibeServeModel` class with `from_pretrained(model_dir, device, dtype)` and `generate(input_ids, max_new_tokens=N)` methods?
 7. **E2E smoke test**: Does the server actually start and respond to requests?
-{% if bench_path is defined and bench_path %}
+{% if benchmark_command is defined and benchmark_command %}
 8. **Benchmark compatibility**: Can the benchmark tool complete at least one request against the server?
 9. **Token streaming observability**: Does the `/v1/completions` SSE streaming endpoint produce **non-empty text deltas** for each generated token? The benchmark measures token throughput, TTFT, and TPOT by counting non-empty SSE chunks. If the benchmark output shows `token_throughput: 0` or null `ttft_ms`/`tpot_ms`, the streaming is broken and the verdict MUST be **fail** — even if requests complete successfully. Run the benchmark sanity test and check the output JSON for `token_throughput > 0`. You can also verify manually with `curl -N` against `/v1/completions` with `stream: true` and confirm each `data:` line has a non-empty `"text"` field.
 {% endif %}
@@ -57,10 +57,10 @@ If no test files exist yet, create them from scratch (see Step 2).
    - Send a test request to `/predict` and verify the response contains generated text
    - Tear down the server
    - If `/health` never returns 200, capture and include server log output in the assertion message
-{% if bench_path is defined and bench_path %}
+{% if benchmark_command is defined and benchmark_command %}
 
 3. **Benchmark sanity test**: With the server running, verify the benchmark tool completes at least 1 request AND produces measurable token throughput:
-   - Run `uv run python {{ bench_path }}/benchmark.py --url http://localhost:8000 --num-requests 2 --rate 1 --max-tokens 16 --output-json /tmp/bench_sanity.json 2>&1 | tee /tmp/bench_sanity.log`
+   - Run `{{ benchmark_command }}` with a short sanity workload and an output JSON file, for example adding `--url http://localhost:8000 --num-requests 2 --rate 1 --max-tokens 16 --output-json /tmp/bench_sanity.json` when those flags exist. Discover supported flags with `{{ benchmark_command }} --help`; do not guess.
    - Assert `Completed: X/Y requests` with X >= 1
    - **Read `/tmp/bench_sanity.json` and assert `token_throughput > 0`** and that `ttft_ms`/`tpot_ms` are not null. If token throughput is 0, the SSE streaming is emitting empty text deltas and the implementation is broken — this alone warrants a "fail" verdict.
    - If 0 succeed, note that the benchmark sends `POST /v1/completions` with body `{"prompt": "...", "max_tokens": N, "temperature": 0, "stream": true}` and expects the server to respond with **Server-Sent Events (SSE)**:
@@ -86,12 +86,12 @@ After running the tests, think carefully:
 
 Do NOT blindly trust test results. Always verify that test failures correspond to real implementation issues before reporting them.
 
-{% if accuracy_checker_path is defined and accuracy_checker_path %}
+{% if accuracy_command is defined and accuracy_command %}
 ## Accuracy Checker (REQUIRED)
 
-You have access to an accuracy checker at:
+The accuracy checker command is:
 
-`{{ accuracy_checker_path }}`
+`{{ accuracy_command }}`
 
 You MUST incorporate the accuracy checker into your test suite. Read the checker code to understand how it works, then write a pytest test that invokes it against the implementation. The accuracy checker validates that the model produces correct outputs — failing it is not acceptable and must result in a "fail" verdict.
 
@@ -103,14 +103,14 @@ You MUST incorporate the accuracy checker into your test suite. Read the checker
 4. Do NOT pass a review if the accuracy checker fails.
 {% endif %}
 
-{% if bench_path is defined and bench_path %}
+{% if benchmark_command is defined and benchmark_command %}
 ## Benchmark Input
 
-You also have access to benchmark/reference materials at:
+You also have access to the benchmark command:
 
-`{{ bench_path }}`
+`{{ benchmark_command }}`
 
-Use these materials for performance and behavior expectations where relevant.
+Use its `--help` output and any benchmark/reference materials in the input bundle for behavior expectations where relevant.
 {% endif %}
 
 ## Filing new issues

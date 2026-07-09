@@ -1,9 +1,10 @@
 Llama 3.1 8B Instruct MLX 8-bit input bundle.
 
 Use:
-- `--ref inputs/Llama-3.1-8B-Instruct-MLX-8bit/reference`
-- `--acc-checker inputs/Llama-3.1-8B-Instruct-MLX-8bit/accuracy_checker`
-- `--bench inputs/Llama-3.1-8B-Instruct-MLX-8bit/benchmark`
+
+```bash
+vibe-serve --input examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit
+```
 
 This bundle targets `mlx-community/Meta-Llama-3.1-8B-Instruct-8bit`,
 the MLX 8-bit quantized Llama 3.1 8B Instruct model used as the target

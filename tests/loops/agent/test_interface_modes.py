@@ -66,7 +66,7 @@ def test_cli_exposes_interface_not_language():
 def test_cli_default_interface_is_inprocess():
     from vibe_serve.cli import _build_agent_parser
 
-    args = _build_agent_parser().parse_args(["--ref", "/x", "--exp-name", "e"])
+    args = _build_agent_parser().parse_args(["--input", "/x", "--exp-name", "e"])
     assert args.interface == "inprocess"
 
 
@@ -74,7 +74,9 @@ def test_cli_rejects_unknown_interface():
     from vibe_serve.cli import _build_agent_parser
 
     with pytest.raises(SystemExit):
-        _build_agent_parser().parse_args(["--ref", "/x", "--exp-name", "e", "--interface", "rust"])
+        _build_agent_parser().parse_args(
+            ["--input", "/x", "--exp-name", "e", "--interface", "rust"]
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -94,7 +96,9 @@ def test_loop_constants_and_rejects_unknown_interface():
         run_agent_loop(
             config=None,
             exp_name="e",
-            reference_path="/x",
+            input_path="/x",
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             objective="o",
             interface="rust",
         )
@@ -197,8 +201,8 @@ def _render_judge(interface: str) -> str:
         modality="text_generation",
         interface=interface,
         domain_judge="",
-        accuracy_checker_path="/acc",
-        bench_path="/bench",
+        accuracy_command="uv run python accuracy_checker/checker.py",
+        benchmark_command="uv run python benchmark/benchmark.py",
         pass_criteria="PC",
         retry=1,
         runtime_notes="",
@@ -237,8 +241,8 @@ def _render_single_agent(interface: str, profiler_kind: ProfilerKind = ProfilerK
         objective="OBJ",
         profile_focus="focus",
         profiler_kind=profiler_kind,
-        bench_path="/bench",
-        accuracy_checker_path="/acc",
+        benchmark_command="uv run python benchmark/benchmark.py",
+        accuracy_command="uv run python accuracy_checker/checker.py",
         reference_path="/ref",
         runtime_notes="",
     )

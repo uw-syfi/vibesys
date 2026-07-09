@@ -15,8 +15,8 @@ Your job is to collect a profile, analyze the results via the `vibeserve-nsys-pr
 ## Workspace
 
 Your working directory contains the implementer's code. A small `nsys_profiler/` directory ships alongside — it provides the MCP server you use for analysis.
-{% if bench_path is defined and bench_path %}
-A benchmark tool is available at `{{ bench_path }}/benchmark.py`.
+{% if benchmark_command is defined and benchmark_command %}
+The benchmark command is `{{ benchmark_command }}`.
 {% endif %}
 
 {% if modality %}
@@ -51,7 +51,7 @@ Start with `tables`, then pick the analyses that matter most. If `graph_replays`
 
 Capture is a long-running shell step — do it before calling the MCP tools.
 
-1. Read `main.py` and the benchmark `--help` output to understand how the candidate is exercised.
+1. Read `main.py` and the benchmark `--help` output to understand how the candidate is exercised{% if benchmark_command is defined and benchmark_command %}: `{{ benchmark_command }} --help`{% endif %}.
 2. Stop any stale candidate processes from previous attempts.
 3. Pre-warm if the domain context or benchmark recommends it.
 4. Profile under the benchmark load. Example:
@@ -59,7 +59,7 @@ Capture is a long-running shell step — do it before calling the MCP tools.
    nsys profile --trace=cuda,nvtx --cuda-memory-usage=true --force-overwrite true -o /tmp/profile \
      <benchmark command>
    ```
-   Use any domain-specific capture recipe above when one is provided{% if bench_path is defined and bench_path %}, otherwise discover a short representative command from `uv run python {{ bench_path }}/benchmark.py --help`{% endif %}.
+   Use any domain-specific capture recipe above when one is provided{% if benchmark_command is defined and benchmark_command %}, otherwise discover a short representative command from `{{ benchmark_command }} --help`{% endif %}.
 5. Stop any background candidate process you started.
 6. Call `export` (or any analysis tool — they auto-export) to produce the SQLite file.
 

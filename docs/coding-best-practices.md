@@ -13,7 +13,9 @@ path.
 - Put long-form serving knowledge under `resources/skills/`, not in framework
   code or prompt skeletons.
 - Keep example targets in the standard bundle shape: `OBJECTIVE.md`,
-  `reference/`, `accuracy_checker/`, `benchmark/`, and `README.md`.
+  `vibeserve.input.toml`, optional `reference/`, evaluator source directories,
+  and `README.md`. Evaluator commands are declared by the manifest and may be
+  problem-specific.
 - Keep compatibility wrappers thin. New behavior should live in the canonical
   implementation module or reusable library.
 

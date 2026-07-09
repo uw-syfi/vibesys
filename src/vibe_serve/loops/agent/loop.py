@@ -299,7 +299,7 @@ def _run_profiler(
         template,
         template_dir=_TEMPLATE_DIR,
         profile_focus=profile_focus,
-        bench_path=ctx.profiler_bench_path,
+        benchmark_command=ctx.profiler_benchmark_command,
         modality=modality,
         domain_profiler=domain_profiler,
         runtime_notes=ctx.run_environment_view.prompt_notes,
@@ -326,8 +326,8 @@ def _domain_render_context(
     One context contract for all roles: a pack author can branch (``{% if … %}``)
     on any of these in any role file without memorizing which the loop happens
     to pass to which role. Variables that don't apply to the current run are
-    falsy (``bench_path`` / ``accuracy_checker_path`` when nothing is attached),
-    so ``{% if bench_path %}`` works everywhere. ``interface`` lets a
+    falsy (``benchmark_command`` / ``accuracy_command`` when nothing is attached),
+    so ``{% if benchmark_command %}`` works everywhere. ``interface`` lets a
     language-agnostic pack drop its in-process/Python-specific gates under
     ``--interface service``. See ``vibe_serve/domains/README.md``.
     """
@@ -335,8 +335,8 @@ def _domain_render_context(
         "modality": modality,
         "interface": interface,
         "reference_path": ctx.ref_name,
-        "bench_path": ctx.judge_bench_path,
-        "accuracy_checker_path": ctx.judge_acc_checker_path,
+        "benchmark_command": ctx.judge_benchmark_command,
+        "accuracy_command": ctx.judge_accuracy_command,
         "runtime_notes": ctx.run_environment_view.prompt_notes,
     }
 
@@ -458,8 +458,8 @@ def _run_judge(
     system_prompt = render_template(
         "judge_prompt.j2",
         template_dir=_TEMPLATE_DIR,
-        accuracy_checker_path=ctx.judge_acc_checker_path,
-        bench_path=ctx.judge_bench_path,
+        accuracy_command=ctx.judge_accuracy_command,
+        benchmark_command=ctx.judge_benchmark_command,
         pass_criteria=plan.pass_criteria,
         modality=modality,
         interface=interface,
@@ -533,8 +533,8 @@ def _run_single_agent_round(
         objective=objective,
         profile_focus=profile_focus,
         profiler_kind=ctx.profiler_kind,
-        bench_path=ctx.judge_bench_path,
-        accuracy_checker_path=ctx.judge_acc_checker_path,
+        benchmark_command=ctx.judge_benchmark_command,
+        accuracy_command=ctx.judge_accuracy_command,
         runtime_notes=ctx.run_environment_view.prompt_notes,
         env_kind=ctx.run_environment_view.env_kind,
     )
@@ -584,7 +584,9 @@ def _profiler_summary_from_single_agent(
 def run_agent_loop(
     config: Config,
     exp_name: str,
-    reference_path: str,
+    input_path: str,
+    accuracy_command: str,
+    benchmark_command: str,
     objective: str,
     *,
     max_rounds: int = 24,
@@ -592,8 +594,6 @@ def run_agent_loop(
     start_round: int = 1,
     existing: bool = False,
     debug: bool = False,
-    acc_checker: str | None = None,
-    bench: str | None = None,
     nsys_profiler: str | None = None,
     torch_profiler: str | None = None,
     neuron_profiler: str | None = None,
@@ -650,11 +650,11 @@ def run_agent_loop(
     ctx = _RunContext(
         config=config,
         exp_name=exp_name,
-        reference_path=reference_path,
+        input_path=input_path,
+        accuracy_command=accuracy_command,
+        benchmark_command=benchmark_command,
         existing=existing,
         debug=debug,
-        acc_checker=acc_checker,
-        bench=bench,
         nsys_profiler=nsys_profiler,
         torch_profiler=torch_profiler,
         neuron_profiler=neuron_profiler,

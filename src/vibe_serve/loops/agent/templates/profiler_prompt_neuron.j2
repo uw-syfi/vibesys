@@ -15,8 +15,8 @@ Your job is to capture a profile, analyze the results via the `vibeserve-neuron-
 ## Workspace
 
 Your working directory contains the implementer's code. A small `neuron_profiler/` directory ships alongside — it provides the analysis CLI (`analyze_neuron.py`) and the MCP server you use for analysis.
-{% if bench_path is defined and bench_path %}
-A benchmark tool is available at `{{ bench_path }}/benchmark.py`.
+{% if benchmark_command is defined and benchmark_command %}
+The benchmark command is `{{ benchmark_command }}`.
 {% endif %}
 
 {% if modality %}
@@ -34,7 +34,7 @@ NeuronCores execute *compiled graphs* (NEFFs). You cannot profile work that neve
 
 ## Capturing a profile (shell — long-running, do this first)
 
-1. Read `main.py` and the benchmark `--help` output to understand how the candidate is exercised.
+1. Read `main.py` and the benchmark `--help` output to understand how the candidate is exercised{% if benchmark_command is defined and benchmark_command %}: `{{ benchmark_command }} --help`{% endif %}.
 2. Stop any stale candidate processes from previous attempts.
 3. Pre-warm — the first `neuronx-cc` compile of each graph shape takes minutes; warm it so the capture reflects steady state, not compilation.
 4. Capture around a benchmark load using the `capture` MCP tool (or shell):
@@ -43,7 +43,7 @@ NeuronCores execute *compiled graphs* (NEFFs). You cannot profile work that neve
      --out-dir /tmp/neuronprof \
      --workload "<benchmark command>"
    ```
-   Use any domain-specific capture recipe above when one is provided{% if bench_path is defined and bench_path %}, otherwise discover a short representative command from `uv run python {{ bench_path }}/benchmark.py --help`{% endif %}. `capture` wraps `neuron-explorer inspect`, which runs the workload and writes a system + device profile (NTFF) plus the NEFF into the out-dir. If it reports **no NTFF/NEFF produced**, the candidate is not executing on the NeuronCore — record that as the headline finding.
+   Use any domain-specific capture recipe above when one is provided{% if benchmark_command is defined and benchmark_command %}, otherwise discover a short representative command from `{{ benchmark_command }} --help`{% endif %}. `capture` wraps `neuron-explorer inspect`, which runs the workload and writes a system + device profile (NTFF) plus the NEFF into the out-dir. If it reports **no NTFF/NEFF produced**, the candidate is not executing on the NeuronCore — record that as the headline finding.
 
 ## Analysis toolkit — `vibeserve-neuron-profiler` MCP tools OR shell
 

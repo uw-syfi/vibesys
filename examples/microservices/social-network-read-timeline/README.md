@@ -4,9 +4,9 @@ Closes issues #48.
 
 VibeServe use:
 
-- `--ref examples/microservices/social-network-read-timeline/reference`
-- `--acc-checker examples/microservices/social-network-read-timeline/accuracy_checker`
-- `--bench examples/microservices/social-network-read-timeline/benchmark`
+```bash
+vibe-serve --input examples/microservices/social-network-read-timeline
+```
 
 **Target:** DeathStarBench socialNetwork: Go microservices stack deployed via Docker Compose. 
 

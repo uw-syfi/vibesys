@@ -24,11 +24,11 @@ You are a senior code reviewer evaluating one offspring in an LLM-driven evoluti
 In addition to the pass criteria above, all of the following must hold for a **pass** verdict:
 
 1. **Unit tests** — run `uv run pytest -v`. All tests must pass.
-{% if bench_path is defined and bench_path %}
-2. **Benchmark sanity** — start the server, wait for `/health`, run the benchmark tool at `{{ bench_path }}/benchmark.py` with 2 requests, confirm at least one request succeeds. Discover flags via `--help`; do NOT guess. Kill the server after. If `/health` never returns 200, read `/tmp/server.log` for the error.
+{% if benchmark_command is defined and benchmark_command %}
+2. **Benchmark sanity** — start the server, wait for `/health`, run `{{ benchmark_command }}` with a short sanity workload, and confirm at least one request succeeds. Discover flags via `{{ benchmark_command }} --help`; do NOT guess. Kill the server after. If `/health` never returns 200, read `/tmp/server.log` for the error.
 {% endif %}
-{% if accuracy_checker_path is defined and accuracy_checker_path %}
-3. **Accuracy checker — required to pass**. Start the server, wait for `/health`, then run `{{ accuracy_checker_path }}/checker.py` against it with default flags (discover flags via `--help`). The checker enforces both a schema-valid rate (≥ 0.95) and a sentinel-echo rate (≥ 0.90); a prompt-ignoring shortcut will fail the sentinel gate even with a valid schema. Non-zero exit → **fail**. Report both rates in feedback.
+{% if accuracy_command is defined and accuracy_command %}
+3. **Accuracy checker — required to pass**. Start the server, wait for `/health`, then run `{{ accuracy_command }}` against it with default flags (discover flags via `{{ accuracy_command }} --help`). The checker enforces both a schema-valid rate (≥ 0.95) and a sentinel-echo rate (≥ 0.90); a prompt-ignoring shortcut will fail the sentinel gate even with a valid schema. Non-zero exit → **fail**. Report both rates in feedback.
 
 For every "sentinel-missing" finding, treat it as a **correctness defect** — a strong signal that the offspring introduced a reward-hacking shortcut (schema synthesizer, fixed template, prebuilt-output cache).
 {% endif %}
@@ -53,7 +53,7 @@ Whenever a pass criterion references performance ("must improve over parent", "m
 
 ## Static-inspection scope
 
-When a `pass_criteria` clause says "static inspection must show no X", the gate applies **only to implementer-authored files** — chiefly `main.py` and modules / tests / scripts the offspring's mutator created next to it inside `/workspace`. It does **not** apply to framework-provided read-only mounts: `bench/`, `acc_checker/`, `nsys_profiler/`, `torch_profiler/`, `reference/`, `skills/`. If a grep happens to hit one of those, ignore it.
+When a `pass_criteria` clause says "static inspection must show no X", the gate applies **only to implementer-authored files** — chiefly `main.py` and modules / tests / scripts the offspring's mutator created next to it inside `/workspace`. It does **not** apply to framework-provided input/helper files: `benchmark/`, `accuracy_checker/`, `nsys_profiler/`, `torch_profiler/`, `reference/`, `skills/`, or the manifest command wrappers. If a grep happens to hit one of those, ignore it.
 
 The exception: if the offspring inlined profiler / benchmark / accuracy-checker source *into* `main.py` or a sibling module to game the metric, that **is** in scope.
 

@@ -72,7 +72,9 @@ def test_run_context_defaults_profiler_support_paths(tmp_path, profiler_kind, at
         _RunContext(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name=f"{profiler_kind}-defaults",
-            reference_path=str(ref),
+            input_path=str(ref.parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             profiler_kind=profiler_kind,
             skills_dirs=[],
             run_environment=RunEnvironmentSpec("local"),
@@ -99,7 +101,9 @@ def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
         _RunContext(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name=f"{selected.value}-support",
-            reference_path=str(ref),
+            input_path=str(ref.parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             profiler_kind=selected,
             nsys_profiler=support_paths[ProfilerKind.NSYS],
             torch_profiler=support_paths[ProfilerKind.TORCH],
@@ -132,7 +136,9 @@ def test_run_context_generic_auto_resolves_to_none_without_profiler_support(tmp_
         _RunContext(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="generic-auto-none",
-            reference_path=str(ref),
+            input_path=str(ref.parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             profiler_kind=ProfilerKind.AUTO,
             profiler_domain=DomainName.GENERIC,
             nsys_profiler=support_paths[ProfilerKind.NSYS],
@@ -168,7 +174,9 @@ def test_run_context_rejects_generic_explicit_active_profilers(tmp_path, profile
         _RunContext(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name=f"generic-{profiler_kind.value}",
-            reference_path=str(ref),
+            input_path=str(ref.parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             profiler_kind=profiler_kind,
             profiler_domain=DomainName.GENERIC,
             skills_dirs=[],
@@ -190,7 +198,9 @@ def test_run_context_llm_auto_uses_backend_profiler_and_defaults_support_dir(tmp
         _RunContext(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="llm-auto-nsys",
-            reference_path=str(ref),
+            input_path=str(ref.parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             profiler_kind=ProfilerKind.AUTO,
             profiler_domain=DomainName.LLM_SERVING,
             skills_dirs=[],
@@ -218,7 +228,9 @@ def test_run_context_noop_environment_hooks_do_not_require_model_artifacts(tmp_p
         _RunContext(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="generic-reference-dir",
-            reference_path=str(ref_dir),
+            input_path=str(ref_dir.parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             skills_dirs=[],
             run_environment=RunEnvironmentSpec("local"),
             environment_hooks=NoopEnvironmentHooks(),
@@ -265,17 +277,17 @@ def test_run_context_materializes_input_project_path_dependencies(tmp_path):
         _RunContext(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="input-local-package",
-            reference_path=str(ref_dir),
-            acc_checker=str(acc_dir),
-            bench=str(bench_dir),
+            input_path=str(ref_dir.parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             skills_dirs=[],
             run_environment=RunEnvironmentSpec("local"),
             environment_hooks=NoopEnvironmentHooks(),
         ) as ctx,
     ):
         assert (ctx.workspace / "reference" / "reference.py").is_file()
-        assert (ctx.workspace / "acc_checker" / "checker.py").is_file()
-        assert (ctx.workspace / "bench" / "benchmark.py").is_file()
+        assert (ctx.workspace / "accuracy_checker" / "checker.py").is_file()
+        assert (ctx.workspace / "benchmark" / "benchmark.py").is_file()
         assert (ctx.workspace / "_input_libs" / "queue-input-core" / "core.py").is_file()
         assert (
             "queue-input-core = { path = '_input_libs/queue-input-core', editable = true }\n"

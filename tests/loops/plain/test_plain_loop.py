@@ -135,7 +135,9 @@ def test_bootstrap_creates_initial_feature_issue_on_first_run(
         result = run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
         )
 
@@ -174,7 +176,9 @@ def test_bootstrap_idempotent_on_resume(
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
         )
 
@@ -193,7 +197,9 @@ def test_bootstrap_idempotent_on_resume(
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name=exp_dir.name,
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
             existing=True,
             resume_state=PlainLoopState(bootstrap_done=True),
@@ -228,7 +234,9 @@ def test_judge_pass_closes_issue(mock_build_runner, mock_backend, mock_build, re
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
         )
 
@@ -262,7 +270,9 @@ def test_judge_fail_increments_attempts_and_keeps_open(
         result = run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
             max_attempts_per_issue=3,
         )
@@ -297,7 +307,9 @@ def test_issue_blocks_after_max_attempts_exhausted(
         result = run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
             max_attempts_per_issue=2,
         )
@@ -376,7 +388,9 @@ def test_judge_invoke_receives_tracker_kwargs(
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
             max_issues_per_perf_eval=3,
         )
@@ -433,7 +447,9 @@ def test_perf_eval_invoke_receives_tracker_kwargs(
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
             max_issues_per_perf_eval=2,
         )
@@ -512,7 +528,9 @@ def test_judge_phase_calls_store_reload_after_invoke(
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
         )
 
@@ -551,7 +569,9 @@ def test_implementer_invoke_has_no_tracker_kwargs(
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
         )
 
@@ -602,7 +622,9 @@ def test_perf_eval_runs_after_drain_complete(
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
         )
 
@@ -649,7 +671,9 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
         )
 
@@ -666,7 +690,9 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(
         result = run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name=exp_dir.name,
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
             existing=True,
             resume_state=PlainLoopState(bootstrap_done=True),
@@ -707,7 +733,9 @@ def test_resume_retries_previously_blocked_issue(
         result1 = run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
             max_attempts_per_issue=2,
         )
@@ -732,7 +760,9 @@ def test_resume_retries_previously_blocked_issue(
         result2 = run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name=exp_dir.name,
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
             max_attempts_per_issue=2,
             existing=True,
@@ -775,7 +805,9 @@ def test_run_returns_true_when_perf_eval_files_no_issues_after_clean_drain(
         result = run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
         )
 
@@ -808,7 +840,9 @@ def test_state_json_written_with_bootstrap_done_after_run(
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
         )
 
@@ -850,7 +884,9 @@ def test_issue_loop_writes_per_issue_markdown_via_callback(
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
         )
 
@@ -917,7 +953,9 @@ def test_implementer_retry_user_prompt_includes_prior_judge_feedback(
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
-            reference_path=ref_file,
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
             max_attempts_per_issue=3,
         )

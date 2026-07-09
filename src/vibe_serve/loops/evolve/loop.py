@@ -174,8 +174,8 @@ def _run_judge(
 ) -> JudgeResponse:
     system_prompt = _render(
         "judge_prompt.j2",
-        accuracy_checker_path=ctx.judge_acc_checker_path,
-        bench_path=ctx.judge_bench_path,
+        accuracy_command=ctx.judge_accuracy_command,
+        benchmark_command=ctx.judge_benchmark_command,
         pass_criteria=pass_criteria,
         modality=modality,
         runtime_notes=ctx.run_environment_view.prompt_notes,
@@ -234,7 +234,7 @@ def _run_profiler(
     )
     base_prompt = _render(
         template,
-        bench_path=ctx.profiler_bench_path,
+        benchmark_command=ctx.profiler_benchmark_command,
         modality=modality,
         runtime_notes=ctx.run_environment_view.prompt_notes,
         env_kind=ctx.run_environment_view.env_kind,
@@ -264,7 +264,9 @@ def _run_profiler(
 def run_evolve_loop(
     config: Config,
     exp_name: str,
-    reference_path: str,
+    input_path: str,
+    accuracy_command: str,
+    benchmark_command: str,
     objective: str,
     *,
     max_generations: int = 8,
@@ -280,8 +282,6 @@ def run_evolve_loop(
     ),
     existing: bool = False,
     debug: bool = False,
-    acc_checker: str | None = None,
-    bench: str | None = None,
     nsys_profiler: str | None = None,
     torch_profiler: str | None = None,
     neuron_profiler: str | None = None,
@@ -312,11 +312,11 @@ def run_evolve_loop(
     ctx = _RunContext(
         config=config,
         exp_name=exp_name,
-        reference_path=reference_path,
+        input_path=input_path,
+        accuracy_command=accuracy_command,
+        benchmark_command=benchmark_command,
         existing=existing,
         debug=debug,
-        acc_checker=acc_checker,
-        bench=bench,
         nsys_profiler=nsys_profiler,
         torch_profiler=torch_profiler,
         neuron_profiler=neuron_profiler,

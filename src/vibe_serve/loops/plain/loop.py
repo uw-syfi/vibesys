@@ -317,8 +317,8 @@ def _ensure_bootstrap_issue(
     description = prompt.render(
         "bootstrap_issue.j2",
         reference_path=ctx.ref_name,
-        acc_checker_path=ctx.judge_acc_checker_path,
-        bench_path=ctx.judge_bench_path,
+        accuracy_command=ctx.judge_accuracy_command,
+        benchmark_command=ctx.judge_benchmark_command,
         runtime_notes=ctx.run_environment_view.prompt_notes,
     )
     issue = store.create(
@@ -341,7 +341,9 @@ def _ensure_bootstrap_issue(
 def run_plain_loop(
     config: Config,
     exp_name: str,
-    reference_path: str,
+    input_path: str,
+    accuracy_command: str,
+    benchmark_command: str,
     *,
     max_rounds: int = 5,
     max_attempts_per_issue: int = 3,
@@ -349,8 +351,6 @@ def run_plain_loop(
     existing: bool = False,
     resume_state: PlainLoopState | None = None,
     debug: bool = False,
-    acc_checker: str | None = None,
-    bench: str | None = None,
     nsys_profiler: str | None = None,
     torch_profiler: str | None = None,
     neuron_profiler: str | None = None,
@@ -377,11 +377,11 @@ def run_plain_loop(
     with _RunContext(
         config=config,
         exp_name=exp_name,
-        reference_path=reference_path,
+        input_path=input_path,
+        accuracy_command=accuracy_command,
+        benchmark_command=benchmark_command,
         existing=existing,
         debug=debug,
-        acc_checker=acc_checker,
-        bench=bench,
         nsys_profiler=nsys_profiler,
         torch_profiler=torch_profiler,
         neuron_profiler=neuron_profiler,
@@ -612,8 +612,8 @@ def run_plain_loop(
 
                     judge_system_prompt = prompt.render(
                         "judge/system.j2",
-                        accuracy_checker_path=ctx.judge_acc_checker_path,
-                        bench_path=ctx.judge_bench_path,
+                        accuracy_command=ctx.judge_accuracy_command,
+                        benchmark_command=ctx.judge_benchmark_command,
                         issue=issue,
                     )
                     judge_prompt = prompt.render("judge/user.j2", issue=issue)
@@ -723,6 +723,7 @@ def run_plain_loop(
                     perf_metrics_path="perf_metrics.json",
                     previous_evaluator_feedback=previous_evaluator_feedback,
                     issue_create_cap=max_issues_per_perf_eval,
+                    benchmark_command=ctx.judge_benchmark_command,
                     runtime_notes=ctx.run_environment_view.prompt_notes,
                 )
                 perf_prompt = prompt.render("perf_eval/user.j2")

@@ -12,11 +12,11 @@ This is the foundation issue. Subsequent perf, feature, and bug issues filed by 
 - Every layer of the model architecture is implemented in the workspace code (no `LlamaModel` / `LlamaAttention` imports).
 - The project is initialized with `uv init`, dependencies added via `uv add`, and scripts run through `uv run`.
 - The `/v1/completions` SSE stream emits a non-empty `text` delta per generated token, and the benchmark reports `token_throughput > 0` with non-null `ttft_ms` / `tpot_ms`.
-{% if acc_checker_path %}
-- The accuracy checker at `{{ acc_checker_path }}` passes when run against `VibeServeModel`.
+{% if accuracy_command %}
+- The accuracy checker command `{{ accuracy_command }}` passes when run against `VibeServeModel`.
 {% endif %}
-{% if bench_path %}
-- The benchmark tool at `{{ bench_path }}` completes at least one request and reports `token_throughput > 0`.
+{% if benchmark_command %}
+- The benchmark command `{{ benchmark_command }}` completes at least one request and reports `token_throughput > 0`.
 {% endif %}
 - A pytest test suite covers `/health`, `/v1/completions`, the accuracy checker, and a benchmark sanity run.
 - All tests pass via `uv run pytest -v`.

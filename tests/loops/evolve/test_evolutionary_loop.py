@@ -9,6 +9,7 @@ are patched out — same pattern as ``tests/test_orchestrate.py``.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -107,7 +108,9 @@ def _invoke_loop(tmp_path, ref_file, runner, **kwargs):
     defaults = dict(
         config={"model": {"name": "claude-sonnet-4-6"}},
         exp_name="test-evolve",
-        reference_path=ref_file,
+        input_path=str(Path(ref_file).parent),
+        accuracy_command="uv run python accuracy_checker/checker.py",
+        benchmark_command="uv run python benchmark/benchmark.py",
         objective="Maximize tok/s throughput.",
         max_generations=2,
         children_per_generation=1,

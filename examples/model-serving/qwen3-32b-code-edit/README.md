@@ -49,7 +49,8 @@ The `prediction` field is the OpenAI predicted-outputs format. Servers that don'
 Launch the server, then:
 
 ```bash
-uv run python inputs/qwen3-32b-code-edit/benchmark/benchmark.py \
+cd examples/model-serving/qwen3-32b-code-edit
+uv run python benchmark/benchmark.py \
     --url http://localhost:8000 --model qwen3-32b \
     --num-samples 100 \
     --output-json /tmp/code_edit_baseline.json

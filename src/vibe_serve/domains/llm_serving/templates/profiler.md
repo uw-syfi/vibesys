@@ -8,7 +8,7 @@ For local server-style captures, the usual shape is:
 2. Kill prior servers: `pkill -f "python main.py" 2>/dev/null || true; sleep 2`.
 3. Pre-warm — first-time kernel compilation or model load can take minutes.
 4. Start the candidate server under the profiler.
-5. Drive load using the benchmark, for example `uv run python {{ bench_path or 'bench' }}/benchmark.py --url http://localhost:8077 --rate 1 --num-requests 5 --max-tokens 64` when those flags exist.
+5. Drive load using the benchmark command{% if benchmark_command %} (`{{ benchmark_command }}`){% endif %}. Use `--help` to find a short representative workload and output flag; do not assume every benchmark accepts the same rate, request-count, or token flags.
 6. Stop the profiled server and analyze the report.
 
 For torch in-process captures, the reference harness is designed around `VibeServeModel.from_pretrained(...)` and `.generate(...)`:

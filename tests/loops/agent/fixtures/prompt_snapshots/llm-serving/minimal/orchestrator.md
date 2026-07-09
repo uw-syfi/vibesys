@@ -113,12 +113,12 @@ Criteria must be specific and testable. The framework ALWAYS runs the accuracy c
 
 Avoid pass criteria that use an internal microbenchmark as a proxy for the objective unless the objective explicitly names that microbenchmark. A local timing can miss end-to-end effects that determine the real score. Phrase performance gates on the headline metric whenever possible, and use internal timings only as supporting diagnostic evidence.
 
-**Scope static-inspection clauses to implementer-authored files.** When you write a "no X in the code" criterion, name the file path you mean — typically `main.py` or modules the implementer authored. Phrasings like "no profiler code" or "no benchmark code" are over-broad: the workspace contains framework-mounted directories (`bench/`, `acc_checker/`, `nsys_profiler/`, `torch_profiler/`, `reference/`, `skills/`) that the implementer can't delete and that legitimately contain the very keywords you'd grep for. Prefer wordings like:
+**Scope static-inspection clauses to implementer-authored files.** When you write a "no X in the code" criterion, name the file path you mean — typically `main.py` or modules the implementer authored. Phrasings like "no profiler code" or "no benchmark code" are over-broad: the workspace contains framework-provided input/helper files (`benchmark/`, `accuracy_checker/`, `nsys_profiler/`, `torch_profiler/`, `reference/`, `skills/`, and manifest command wrappers) that the implementer can't delete and that legitimately contain the very keywords you'd grep for. Prefer wordings like:
 
 - ✅ "no `<forbidden helper>` invocations in `main.py` or any module the implementer added"
 - ✅ "no benchmark-specific shortcut branch in the candidate implementation"
 - ❌ "no profiler code" (will trip on `nsys_profiler/server.py` and burn rounds in retry loops)
-- ❌ "no benchmark code" (will trip on `bench/benchmark.py`)
+- ❌ "no benchmark code" (will trip on the framework-provided benchmark harness)
 
 This was a real failure mode in earlier runs: an over-broad "no profiler code" clause caused the judge to demand deletion of the framework's read-only profiler mount, which the implementer cannot remove, exhausting the retry budget and forcing a packaging workaround the next round.
 
