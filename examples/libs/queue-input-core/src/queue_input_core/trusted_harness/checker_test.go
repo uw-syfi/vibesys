@@ -159,7 +159,7 @@ func TestAccuracyUsesFixedExternalLauncherContract(t *testing.T) {
 	workspace := t.TempDir()
 	launcher := filepath.Join(workspace, "queue-candidate")
 	script := "#!/bin/sh\n" +
-		"exec go -C \"$VSQ_HARNESS_SOURCE\" run . serve-reference --shared-memory \"$2\"\n"
+		"exec go -C \"$VSQ_HARNESS_SOURCE\" run . serve-reference \"$@\"\n"
 	if err := os.WriteFile(launcher, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}

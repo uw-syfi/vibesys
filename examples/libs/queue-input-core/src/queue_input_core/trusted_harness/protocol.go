@@ -4,41 +4,18 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
-	"runtime"
-	"sync/atomic"
 	"syscall"
-	"unsafe"
 )
 
 const (
 	protocolVersion = uint32(1)
-	headerSize      = 4096
-	laneSize        = 4096
-	ringSlots       = 64
+	protocolFDBase  = 3
+	frameSize       = 16
 	maxLaneCount    = 256
-
-	offsetVersion   = 8
-	offsetLaneCount = 12
-	offsetCapacity  = 16
-	offsetScenario  = 24
-	offsetRingSlots = 28
-	offsetReady     = 32
-	offsetStop      = 40
-
-	requestPublishedOffset  = 0
-	requestConsumedOffset   = 64
-	responsePublishedOffset = 128
-	responseConsumedOffset  = 192
-	requestSlotsOffset      = 256
-	responseSlotsOffset     = requestSlotsOffset + ringSlots*16
-	requestOperationOffset  = 0
-	requestValueOffset      = 8
-	responseStatusOffset    = 0
-	responseValueOffset     = 8
 )
-
-var protocolMagic = [8]byte{'V', 'S', 'Q', 'U', 'E', 'U', 'E', '1'}
 
 type scenario uint32
 
@@ -101,231 +78,125 @@ type response struct {
 	value  uint64
 }
 
-type mappedRegion struct {
-	path      string
-	file      *os.File
-	data      []byte
-	laneCount int
-	capacity  uint64
-	scenario  scenario
-	owner     bool
+func createSocketPair(name string) (net.Conn, *os.File, error) {
+	descriptors, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create socketpair for %s: %w", name, err)
+	}
+	syscall.CloseOnExec(descriptors[0])
+	syscall.CloseOnExec(descriptors[1])
+
+	trustedFile := os.NewFile(uintptr(descriptors[0]), name+"-trusted")
+	candidateFile := os.NewFile(uintptr(descriptors[1]), name+"-candidate")
+	trustedConn, err := net.FileConn(trustedFile)
+	if err != nil {
+		_ = trustedFile.Close()
+		_ = candidateFile.Close()
+		return nil, nil, fmt.Errorf("open trusted socket for %s: %w", name, err)
+	}
+	if err := trustedFile.Close(); err != nil {
+		_ = trustedConn.Close()
+		_ = candidateFile.Close()
+		return nil, nil, fmt.Errorf("close duplicated trusted socket for %s: %w", name, err)
+	}
+	return trustedConn, candidateFile, nil
 }
 
-func createRegion(s scenario, capacity uint64, laneCount int) (*mappedRegion, error) {
-	if capacity == 0 {
-		return nil, errors.New("capacity must be greater than zero")
+func inheritedSocket(fd int, name string) (net.Conn, error) {
+	file := os.NewFile(uintptr(fd), name)
+	if file == nil {
+		return nil, fmt.Errorf("open inherited socket fd %d", fd)
 	}
-	if laneCount <= 0 {
-		return nil, errors.New("lane count must be greater than zero")
-	}
-	if laneCount > maxLaneCount {
-		return nil, fmt.Errorf("lane count must not exceed %d", maxLaneCount)
-	}
-
-	file, err := os.CreateTemp("", "vibeserve-queue-*.shm")
+	conn, err := net.FileConn(file)
+	closeErr := file.Close()
 	if err != nil {
-		return nil, fmt.Errorf("create shared-memory file: %w", err)
+		return nil, fmt.Errorf("use inherited socket fd %d: %w", fd, err)
 	}
-	cleanup := func() {
-		_ = file.Close()
-		_ = os.Remove(file.Name())
+	if closeErr != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("close inherited socket fd %d after duplication: %w", fd, closeErr)
 	}
-
-	size := headerSize + laneCount*laneSize
-	if err := file.Truncate(int64(size)); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("size shared-memory file: %w", err)
-	}
-	data, err := syscall.Mmap(int(file.Fd()), 0, size, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
-	if err != nil {
-		cleanup()
-		return nil, fmt.Errorf("map shared-memory file: %w", err)
-	}
-
-	copy(data[:len(protocolMagic)], protocolMagic[:])
-	binary.LittleEndian.PutUint32(data[offsetVersion:], protocolVersion)
-	binary.LittleEndian.PutUint32(data[offsetLaneCount:], uint32(laneCount))
-	binary.LittleEndian.PutUint64(data[offsetCapacity:], capacity)
-	binary.LittleEndian.PutUint32(data[offsetScenario:], uint32(s))
-	binary.LittleEndian.PutUint32(data[offsetRingSlots:], ringSlots)
-
-	return &mappedRegion{
-		path:      file.Name(),
-		file:      file,
-		data:      data,
-		laneCount: laneCount,
-		capacity:  capacity,
-		scenario:  s,
-		owner:     true,
-	}, nil
+	return conn, nil
 }
 
-func openRegion(path string) (*mappedRegion, error) {
-	file, err := os.OpenFile(path, os.O_RDWR, 0)
-	if err != nil {
-		return nil, fmt.Errorf("open shared-memory file: %w", err)
-	}
-	stat, err := file.Stat()
-	if err != nil {
-		_ = file.Close()
-		return nil, fmt.Errorf("stat shared-memory file: %w", err)
-	}
-	if stat.Size() < headerSize+laneSize {
-		_ = file.Close()
-		return nil, errors.New("shared-memory file is too small")
-	}
-	data, err := syscall.Mmap(
-		int(file.Fd()),
-		0,
-		int(stat.Size()),
-		syscall.PROT_READ|syscall.PROT_WRITE,
-		syscall.MAP_SHARED,
-	)
-	if err != nil {
-		_ = file.Close()
-		return nil, fmt.Errorf("map shared-memory file: %w", err)
-	}
-
-	closeOnError := func(err error) (*mappedRegion, error) {
-		_ = syscall.Munmap(data)
-		_ = file.Close()
-		return nil, err
-	}
-	if string(data[:len(protocolMagic)]) != string(protocolMagic[:]) {
-		return closeOnError(errors.New("invalid shared-memory protocol magic"))
-	}
-	if got := binary.LittleEndian.Uint32(data[offsetVersion:]); got != protocolVersion {
-		return closeOnError(fmt.Errorf("unsupported shared-memory protocol version %d", got))
-	}
-	laneCount := int(binary.LittleEndian.Uint32(data[offsetLaneCount:]))
-	if laneCount <= 0 || laneCount > maxLaneCount || headerSize+laneCount*laneSize != len(data) {
-		return closeOnError(errors.New("invalid shared-memory lane count"))
-	}
-	capacity := binary.LittleEndian.Uint64(data[offsetCapacity:])
-	if capacity == 0 {
-		return closeOnError(errors.New("invalid zero queue capacity"))
-	}
-	s := scenario(binary.LittleEndian.Uint32(data[offsetScenario:]))
-	if _, err := parseScenario(s.String()); err != nil {
-		return closeOnError(err)
-	}
-	if got := binary.LittleEndian.Uint32(data[offsetRingSlots:]); got != ringSlots {
-		return closeOnError(fmt.Errorf("unsupported shared-memory ring size %d", got))
-	}
-
-	return &mappedRegion{
-		path:      path,
-		file:      file,
-		data:      data,
-		laneCount: laneCount,
-		capacity:  capacity,
-		scenario:  s,
-	}, nil
-}
-
-func (r *mappedRegion) close() error {
-	var errs []error
-	if r.data != nil {
-		if err := syscall.Munmap(r.data); err != nil {
-			errs = append(errs, err)
+func writeAll(writer io.Writer, data []byte) error {
+	for len(data) > 0 {
+		written, err := writer.Write(data)
+		if err != nil {
+			return err
 		}
-		r.data = nil
-	}
-	if r.file != nil {
-		if err := r.file.Close(); err != nil {
-			errs = append(errs, err)
+		if written == 0 {
+			return io.ErrShortWrite
 		}
-		r.file = nil
+		data = data[written:]
 	}
-	if r.owner {
-		if err := os.Remove(r.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
-}
-
-func (r *mappedRegion) laneOffset(lane int) int {
-	return headerSize + lane*laneSize
-}
-
-func atomicUint64At(data []byte, offset int) *uint64 {
-	return (*uint64)(unsafe.Pointer(&data[offset]))
-}
-
-func (r *mappedRegion) ready() bool {
-	return atomic.LoadUint64(atomicUint64At(r.data, offsetReady)) == 1
-}
-
-func (r *mappedRegion) markReady() {
-	atomic.StoreUint64(atomicUint64At(r.data, offsetReady), 1)
-}
-
-func (r *mappedRegion) stopped() bool {
-	return atomic.LoadUint64(atomicUint64At(r.data, offsetStop)) == 1
-}
-
-func (r *mappedRegion) stop() {
-	atomic.StoreUint64(atomicUint64At(r.data, offsetStop), 1)
-}
-
-func (r *mappedRegion) publish(lane int, sequence uint64, req request) error {
-	if lane < 0 || lane >= r.laneCount {
-		return fmt.Errorf("lane %d is outside [0, %d)", lane, r.laneCount)
-	}
-	offset := r.laneOffset(lane)
-	consumed := atomic.LoadUint64(atomicUint64At(r.data, offset+requestConsumedOffset))
-	if sequence-consumed > ringSlots {
-		return errors.New("request ring is full")
-	}
-	slot := offset + requestSlotsOffset + int((sequence-1)%ringSlots)*16
-	binary.LittleEndian.PutUint32(r.data[slot+requestOperationOffset:], uint32(req.operation))
-	binary.LittleEndian.PutUint64(r.data[slot+requestValueOffset:], req.value)
-	atomic.StoreUint64(atomicUint64At(r.data, offset+requestPublishedOffset), sequence)
 	return nil
 }
 
-func (r *mappedRegion) response(lane int, sequence uint64) (response, bool) {
-	offset := r.laneOffset(lane)
-	if atomic.LoadUint64(atomicUint64At(r.data, offset+responsePublishedOffset)) < sequence {
-		return response{}, false
+func writeRequests(writer io.Writer, requests []request) error {
+	data := make([]byte, len(requests)*frameSize)
+	for index, req := range requests {
+		offset := index * frameSize
+		binary.LittleEndian.PutUint32(data[offset:], uint32(req.operation))
+		binary.LittleEndian.PutUint64(data[offset+8:], req.value)
 	}
-	slot := offset + responseSlotsOffset + int((sequence-1)%ringSlots)*16
-	return response{
-		status: responseStatus(binary.LittleEndian.Uint32(r.data[slot+responseStatusOffset:])),
-		value:  binary.LittleEndian.Uint64(r.data[slot+responseValueOffset:]),
-	}, true
+	return writeAll(writer, data)
 }
 
-func (r *mappedRegion) consumeResponse(lane int, sequence uint64) {
-	offset := r.laneOffset(lane)
-	atomic.StoreUint64(atomicUint64At(r.data, offset+responseConsumedOffset), sequence)
+func writeRequest(writer io.Writer, req request) error {
+	var data [frameSize]byte
+	binary.LittleEndian.PutUint32(data[:], uint32(req.operation))
+	binary.LittleEndian.PutUint64(data[8:], req.value)
+	return writeAll(writer, data[:])
 }
 
-func (r *mappedRegion) waitForRequest(lane int, previous uint64) (uint64, request, bool) {
-	offset := r.laneOffset(lane)
-	for {
-		published := atomic.LoadUint64(atomicUint64At(r.data, offset+requestPublishedOffset))
-		if published > previous {
-			sequence := previous + 1
-			slot := offset + requestSlotsOffset + int((sequence-1)%ringSlots)*16
-			return sequence, request{
-				operation: operation(binary.LittleEndian.Uint32(r.data[slot+requestOperationOffset:])),
-				value:     binary.LittleEndian.Uint64(r.data[slot+requestValueOffset:]),
-			}, true
-		}
-		if r.stopped() {
-			return 0, request{}, false
-		}
-		runtime.Gosched()
+func readRequest(reader io.Reader) (request, error) {
+	var data [frameSize]byte
+	if _, err := io.ReadFull(reader, data[:]); err != nil {
+		return request{}, err
 	}
+	if reserved := binary.LittleEndian.Uint32(data[4:]); reserved != 0 {
+		return request{}, fmt.Errorf("request reserved field is %d, want zero", reserved)
+	}
+	req := request{
+		operation: operation(binary.LittleEndian.Uint32(data[:])),
+		value:     binary.LittleEndian.Uint64(data[8:]),
+	}
+	if req.operation != operationEnqueue && req.operation != operationDequeue {
+		return request{}, fmt.Errorf("unknown request operation %d", req.operation)
+	}
+	return req, nil
 }
 
-func (r *mappedRegion) respond(lane int, sequence uint64, resp response) {
-	offset := r.laneOffset(lane)
-	slot := offset + responseSlotsOffset + int((sequence-1)%ringSlots)*16
-	binary.LittleEndian.PutUint32(r.data[slot+responseStatusOffset:], uint32(resp.status))
-	binary.LittleEndian.PutUint64(r.data[slot+responseValueOffset:], resp.value)
-	atomic.StoreUint64(atomicUint64At(r.data, offset+requestConsumedOffset), sequence)
-	atomic.StoreUint64(atomicUint64At(r.data, offset+responsePublishedOffset), sequence)
+func writeResponse(writer io.Writer, resp response) error {
+	var data [frameSize]byte
+	binary.LittleEndian.PutUint32(data[:], uint32(resp.status))
+	binary.LittleEndian.PutUint64(data[8:], resp.value)
+	return writeAll(writer, data[:])
+}
+
+func readResponse(reader io.Reader) (response, error) {
+	var data [frameSize]byte
+	if _, err := io.ReadFull(reader, data[:]); err != nil {
+		return response{}, err
+	}
+	if reserved := binary.LittleEndian.Uint32(data[4:]); reserved != 0 {
+		return response{}, fmt.Errorf("response reserved field is %d, want zero", reserved)
+	}
+	resp := response{
+		status: responseStatus(binary.LittleEndian.Uint32(data[:])),
+		value:  binary.LittleEndian.Uint64(data[8:]),
+	}
+	if resp.status < statusEnqueued || resp.status > statusError {
+		return response{}, fmt.Errorf("unknown response status %d", resp.status)
+	}
+	return resp, nil
+}
+
+func closeAll[T interface{ Close() error }](values []T) error {
+	var result error
+	for _, value := range values {
+		result = errors.Join(result, value.Close())
+	}
+	return result
 }

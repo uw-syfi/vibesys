@@ -229,14 +229,33 @@ func printBenchmarkResult(result benchmarkResult) {
 
 func runReferenceCommand(args []string) error {
 	flags := flag.NewFlagSet("serve-reference", flag.ContinueOnError)
-	sharedMemory := flags.String("shared-memory", "", "Shared-memory protocol file")
+	protocol := flags.Uint("vibeserve-queue-protocol", 0, "Queue protocol version")
+	fdBase := flags.Int("vibeserve-queue-fd-base", -1, "First inherited lane descriptor")
+	laneCount := flags.Int("vibeserve-queue-lanes", 0, "Number of inherited lane descriptors")
+	capacity := flags.Uint64("vibeserve-queue-capacity", 0, "Bounded queue capacity")
+	scenarioName := flags.String("vibeserve-queue-scenario", "", "Queue scenario")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if *sharedMemory == "" {
-		return errors.New("--shared-memory is required")
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", flags.Args())
 	}
-	return serveReference(*sharedMemory)
+	if uint32(*protocol) != protocolVersion {
+		return fmt.Errorf("unsupported queue protocol version %d", *protocol)
+	}
+	if *fdBase < protocolFDBase {
+		return fmt.Errorf("queue fd base must be at least %d", protocolFDBase)
+	}
+	if *laneCount <= 0 || *laneCount > maxLaneCount {
+		return fmt.Errorf("queue lane count must be in [1, %d]", maxLaneCount)
+	}
+	if *capacity == 0 || *capacity > maxQueueCapacity {
+		return fmt.Errorf("queue capacity must be in [1, %d]", maxQueueCapacity)
+	}
+	if _, err := parseScenario(*scenarioName); err != nil {
+		return err
+	}
+	return serveReference(*fdBase, *laneCount, *capacity)
 }
 
 func run(args []string) error {

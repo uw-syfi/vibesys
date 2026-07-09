@@ -1,43 +1,9 @@
 package main
 
-import (
-	"runtime"
-	"testing"
-)
-
-func startInProcessCandidate(t *testing.T, capacity uint64) (*candidateSession, func()) {
-	t.Helper()
-	region, err := createRegion(scenarioSPSC, capacity, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	serverDone := make(chan error, 1)
-	go func() {
-		serverDone <- serveReference(region.path)
-	}()
-	for !region.ready() {
-		runtime.Gosched()
-	}
-	session := &candidateSession{
-		region:    region,
-		done:      make(chan struct{}),
-		sequences: make([]uint64, 1),
-		log:       newBoundedLog(1024),
-	}
-	cleanup := func() {
-		region.stop()
-		if err := <-serverDone; err != nil {
-			t.Error(err)
-		}
-		if err := region.close(); err != nil {
-			t.Error(err)
-		}
-	}
-	return session, cleanup
-}
+import "testing"
 
 func TestBenchmarkDrainValidatesSuccessfulOperationMultiset(t *testing.T) {
-	session, cleanup := startInProcessCandidate(t, 4)
+	session, cleanup := startInProcessCandidate(t, 4, 1)
 	defer cleanup()
 	keys := fingerprintKeys{11, 29}
 	counts := benchmarkCounts{enqueued: 2, dequeued: 1}
@@ -62,7 +28,7 @@ func TestBenchmarkDrainValidatesSuccessfulOperationMultiset(t *testing.T) {
 }
 
 func TestBenchmarkDrainRejectsFabricatedValue(t *testing.T) {
-	session, cleanup := startInProcessCandidate(t, 4)
+	session, cleanup := startInProcessCandidate(t, 4, 1)
 	defer cleanup()
 	keys := fingerprintKeys{11, 29}
 	counts := benchmarkCounts{enqueued: 1}
@@ -78,7 +44,7 @@ func TestBenchmarkDrainRejectsFabricatedValue(t *testing.T) {
 }
 
 func TestBenchmarkDrainRejectsLostValue(t *testing.T) {
-	session, cleanup := startInProcessCandidate(t, 4)
+	session, cleanup := startInProcessCandidate(t, 4, 1)
 	defer cleanup()
 	keys := fingerprintKeys{11, 29}
 	counts := benchmarkCounts{enqueued: 1}

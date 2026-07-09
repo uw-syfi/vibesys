@@ -88,7 +88,7 @@ func drainAndValidate(
 	drained := uint64(0)
 	drainedFingerprint := [2]uint64{}
 	for {
-		requests := make([]request, ringSlots)
+		requests := make([]request, benchmarkPipelineDepth)
 		for index := range requests {
 			requests[index] = request{operation: operationDequeue}
 		}
@@ -160,8 +160,7 @@ func runBenchmarkPhase(config benchmarkConfig, duration time.Duration) (benchmar
 	errCh := make(chan error, producers+consumers)
 	var workers sync.WaitGroup
 	workers.Add(producers + consumers)
-	started := time.Now()
-	deadline := started.Add(duration)
+	var deadline time.Time
 
 	for lane := 0; lane < producers+consumers; lane++ {
 		go func(lane int) {
@@ -169,68 +168,60 @@ func runBenchmarkPhase(config benchmarkConfig, duration time.Duration) (benchmar
 			localCounts := &perLaneCounts[lane]
 			var nextValue uint64
 			<-start
-			for time.Now().Before(deadline) {
-				requests := make([]request, ringSlots)
-				for index := range requests {
-					requests[index] = request{operation: operationDequeue}
-					if lane < producers {
-						nextValue++
-						requests[index] = request{
-							operation: operationEnqueue,
-							value:     uint64(lane)<<56 | nextValue,
-						}
+			err := session.invokeUntil(
+				lane,
+				benchmarkPipelineDepth,
+				deadline,
+				func() request {
+					if lane >= producers {
+						return request{operation: operationDequeue}
 					}
-				}
-				responses, err := session.invokeBatch(lane, requests)
-				if err != nil {
-					errCh <- fmt.Errorf("lane %d: %w", lane, err)
-					return
-				}
-				for index, resp := range responses {
+					nextValue++
+					return request{
+						operation: operationEnqueue,
+						value:     uint64(lane)<<56 | nextValue,
+					}
+				},
+				func(req request, resp response) error {
 					switch resp.status {
 					case statusEnqueued:
-						if requests[index].operation != operationEnqueue {
-							errCh <- fmt.Errorf("lane %d: dequeue returned enqueue status", lane)
-							return
+						if req.operation != operationEnqueue {
+							return errors.New("dequeue returned enqueue status")
 						}
 						localCounts.enqueued++
 						addFingerprint(
 							&localCounts.enqueuedFingerprint,
 							keys,
-							requests[index].value,
+							req.value,
 						)
 					case statusFull:
-						if requests[index].operation != operationEnqueue {
-							errCh <- fmt.Errorf("lane %d: dequeue returned full status", lane)
-							return
+						if req.operation != operationEnqueue {
+							return errors.New("dequeue returned full status")
 						}
 						localCounts.full++
 					case statusValue:
-						if requests[index].operation != operationDequeue {
-							errCh <- fmt.Errorf("lane %d: enqueue returned value status", lane)
-							return
+						if req.operation != operationDequeue {
+							return errors.New("enqueue returned value status")
 						}
 						localCounts.dequeued++
 						addFingerprint(&localCounts.dequeuedFingerprint, keys, resp.value)
 					case statusEmpty:
-						if requests[index].operation != operationDequeue {
-							errCh <- fmt.Errorf("lane %d: enqueue returned empty status", lane)
-							return
+						if req.operation != operationDequeue {
+							return errors.New("enqueue returned empty status")
 						}
 						localCounts.empty++
 					default:
-						errCh <- fmt.Errorf(
-							"lane %d: invalid response status %d",
-							lane,
-							resp.status,
-						)
-						return
+						return fmt.Errorf("invalid response status %d", resp.status)
 					}
-				}
+					return nil
+				},
+			)
+			if err != nil {
+				errCh <- fmt.Errorf("lane %d: %w", lane, err)
 			}
 		}(lane)
 	}
-	started = time.Now()
+	started := time.Now()
 	deadline = started.Add(duration)
 	close(start)
 	workers.Wait()
