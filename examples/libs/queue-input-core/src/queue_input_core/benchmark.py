@@ -2,26 +2,87 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import threading
 import time
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from queue_input_core.config import load_config
-from queue_input_core.contract import SCENARIOS, get_contract
-from queue_input_core.reference import QueueFactory
+from queue_input_core.config import QueueInputConfig
+from queue_input_core.contract import QueueContract
 
 
-def _load_candidate():
-    workspace = Path.cwd()
-    if str(workspace) not in sys.path:
-        sys.path.insert(0, str(workspace))
-    try:
-        from main import VibeServeQueue
+@dataclass(frozen=True)
+class BenchmarkConfig:
+    capacity: int
+    item_bytes: int
+    producers: int
+    consumers: int
+    duration: float
+    warmup: float
 
-        return VibeServeQueue
-    except ImportError:
-        return None
+
+@dataclass(frozen=True)
+class BenchmarkResult:
+    scenario: str
+    enqueued: int
+    dropped: int
+    dequeued: int
+    duration: float
+    total_ops_per_sec: float
+    producers: int
+    consumers: int
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def default_benchmark_config(
+    contract: QueueContract | None,
+    input_config: QueueInputConfig | None = None,
+) -> BenchmarkConfig:
+    return BenchmarkConfig(
+        capacity=input_config.capacity
+        if input_config and input_config.capacity is not None
+        else (contract.default_capacity if contract else 1024),
+        item_bytes=64,
+        producers=input_config.producers
+        if input_config and input_config.producers is not None
+        else (contract.default_producers if contract else 1),
+        consumers=input_config.consumers
+        if input_config and input_config.consumers is not None
+        else (contract.default_consumers if contract else 1),
+        duration=10.0,
+        warmup=2.0,
+    )
+
+
+def add_benchmark_arguments(
+    parser: argparse.ArgumentParser,
+    contract: QueueContract | None,
+    input_config: QueueInputConfig | None = None,
+) -> None:
+    defaults = default_benchmark_config(contract, input_config)
+    parser.add_argument("--capacity", type=int, default=defaults.capacity)
+    parser.add_argument("--item-bytes", type=int, default=defaults.item_bytes)
+    parser.add_argument("--producers", type=int, default=defaults.producers)
+    parser.add_argument("--consumers", type=int, default=defaults.consumers)
+    parser.add_argument("--duration", type=float, default=defaults.duration)
+    parser.add_argument("--warmup", type=float, default=defaults.warmup)
+
+
+def benchmark_config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
+    return BenchmarkConfig(
+        capacity=args.capacity,
+        item_bytes=args.item_bytes,
+        producers=args.producers,
+        consumers=args.consumers,
+        duration=args.duration,
+        warmup=args.warmup,
+    )
+
+
+def make_queue(queue_cls, contract: QueueContract, capacity: int):
+    return queue_cls(scenario=contract.name, capacity=capacity)
 
 
 def _producer(queue, item, stop, c, lock):
@@ -45,9 +106,16 @@ def _consumer(queue, stop, c, lock, is_batch):
         c[0] += dec
 
 
-def _run(queue, scenario, duration, warmup, producers, consumers, item_bytes):
-    is_batch = scenario == "batch"
-    item = b"x" * item_bytes
+def _worker_counts(contract: QueueContract, config: BenchmarkConfig) -> tuple[int, int]:
+    producers = config.producers if contract.configurable_producers else contract.default_producers
+    consumers = config.consumers if contract.configurable_consumers else contract.default_consumers
+    return producers, consumers
+
+
+def run_benchmark(queue, contract: QueueContract, config: BenchmarkConfig) -> BenchmarkResult:
+    producers, consumers = _worker_counts(contract, config)
+    is_batch = contract.batched_dequeue
+    item = b"x" * config.item_bytes
     stop = threading.Event()
     lock = threading.Lock()
     pc, dc = [0, 0], [0]
@@ -63,88 +131,55 @@ def _run(queue, scenario, duration, warmup, producers, consumers, item_bytes):
         ]
         return ts
 
-    if warmup > 0:
+    if config.warmup > 0:
         wts = make()
         for t in wts:
             t.start()
-        time.sleep(warmup)
+        time.sleep(config.warmup)
         stop.set()
         for t in wts:
             t.join(timeout=2)
         stop.clear()
         pc[:] = [0, 0]
         dc[:] = [0]
+
     ts = make()
     for t in ts:
         t.start()
     t0 = time.perf_counter()
-    time.sleep(duration)
+    time.sleep(config.duration)
     stop.set()
     for t in ts:
         t.join(timeout=5)
     elapsed = time.perf_counter() - t0
     enc, drp, dec = pc[0], pc[1], dc[0]
+    return BenchmarkResult(
+        scenario=contract.name,
+        enqueued=enc,
+        dropped=drp,
+        dequeued=dec,
+        duration=elapsed,
+        total_ops_per_sec=(enc + dec) / elapsed,
+        producers=producers,
+        consumers=consumers,
+    )
+
+
+def print_benchmark_result(result: BenchmarkResult) -> None:
     print(
-        f"Scenario: {scenario.upper()}  Duration: {elapsed:.1f}s  Prod: {producers}  Cons: {consumers}"
+        f"Scenario: {result.scenario.upper()}  Duration: {result.duration:.1f}s  "
+        f"Prod: {result.producers}  Cons: {result.consumers}"
     )
     print(
-        f"  Enqueued: {enc:,} ({enc / elapsed:,.0f} ops/s)  Dropped: {drp:,}  Dequeued: {dec:,} ({dec / elapsed:,.0f} ops/s)"
+        f"  Enqueued: {result.enqueued:,} ({result.enqueued / result.duration:,.0f} ops/s)  "
+        f"Dropped: {result.dropped:,}  "
+        f"Dequeued: {result.dequeued:,} ({result.dequeued / result.duration:,.0f} ops/s)"
     )
-    print(f"  Total: {enc + dec:,} ({(enc + dec) / elapsed:,.0f} ops/s)")
-    return {
-        "scenario": scenario,
-        "enqueued": enc,
-        "dropped": drp,
-        "dequeued": dec,
-        "duration": elapsed,
-        "total_ops_per_sec": (enc + dec) / elapsed,
-    }
+    total = result.enqueued + result.dequeued
+    print(f"  Total: {total:,} ({result.total_ops_per_sec:,.0f} ops/s)")
 
 
-def main(default_scenario: str | None = None):
-    config = load_config()
-    scenario_default = default_scenario or config.scenario or "spsc"
-    contract_default = get_contract(scenario_default) if scenario_default != "all" else None
-    capacity_default = config.capacity or (
-        contract_default.default_capacity if contract_default else 1024
-    )
-    producers_default = config.producers or (
-        contract_default.default_producers if contract_default else 1
-    )
-    consumers_default = config.consumers or (
-        contract_default.default_consumers if contract_default else 1
-    )
-
-    parser = argparse.ArgumentParser(
-        description="Throughput benchmark for VibeServe queue scenarios."
-    )
-    parser.add_argument("--scenario", choices=[*SCENARIOS, "all"], default=scenario_default)
-    parser.add_argument("--capacity", type=int, default=capacity_default)
-    parser.add_argument("--item-bytes", type=int, default=64)
-    parser.add_argument("--producers", type=int, default=producers_default)
-    parser.add_argument("--consumers", type=int, default=consumers_default)
-    parser.add_argument("--duration", type=float, default=10.0)
-    parser.add_argument("--warmup", type=float, default=2.0)
-    parser.add_argument("--use-reference", action="store_true")
-    parser.add_argument("--output-json", type=str, default=None)
-    args = parser.parse_args()
-    targets = SCENARIOS if args.scenario == "all" else [args.scenario]
-    results = []
-    for s in targets:
-        contract = get_contract(s)
-        n_prod = args.producers if contract.configurable_producers else contract.default_producers
-        n_cons = args.consumers if contract.configurable_consumers else contract.default_consumers
-        if args.use_reference:
-            q = QueueFactory(s, args.capacity)
-        else:
-            cls = _load_candidate()
-            q = cls(scenario=s, capacity=args.capacity) if cls else QueueFactory(s, args.capacity)
-        results.append(_run(q, s, args.duration, args.warmup, n_prod, n_cons, args.item_bytes))
-    if args.output_json:
-        with open(args.output_json, "w") as f:
-            json.dump(results, f, indent=2)
-        print(f"Results written to {args.output_json}")
-
-
-if __name__ == "__main__":
-    main()
+def write_benchmark_results(results: list[BenchmarkResult], output_json: str | Path) -> None:
+    output_path = Path(output_json)
+    output_path.write_text(json.dumps([result.to_dict() for result in results], indent=2))
+    print(f"Results written to {output_path}")

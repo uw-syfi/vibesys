@@ -6,24 +6,24 @@ from pathlib import Path
 
 
 @dataclass(frozen=True)
-class QueueHarnessConfig:
+class QueueInputConfig:
     scenario: str | None = None
     capacity: int | None = None
     producers: int | None = None
     consumers: int | None = None
 
 
-def load_config(project_dir: Path | None = None) -> QueueHarnessConfig:
+def load_config(project_dir: Path | None = None) -> QueueInputConfig:
     pyproject = (project_dir or Path.cwd()) / "pyproject.toml"
     if not pyproject.is_file():
-        return QueueHarnessConfig()
+        return QueueInputConfig()
 
     data = tomllib.loads(pyproject.read_text())
     queue = data.get("tool", {}).get("vibeserve", {}).get("queue", {})
     if not isinstance(queue, dict):
-        return QueueHarnessConfig()
+        return QueueInputConfig()
 
-    return QueueHarnessConfig(
+    return QueueInputConfig(
         scenario=_optional_str(queue.get("scenario")),
         capacity=_optional_int(queue.get("capacity")),
         producers=_optional_int(queue.get("producers")),

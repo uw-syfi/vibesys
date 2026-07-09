@@ -4,52 +4,83 @@ import argparse
 import json
 import random
 import subprocess
-import sys
 import tempfile
-import threading
-import time
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
-from queue_input_core.config import load_config
-from queue_input_core.contract import SCENARIOS, get_contract
-from queue_input_core.reference import QueueFactory
+from queue_input_core.config import QueueInputConfig
+from queue_input_core.contract import QueueContract
+from queue_input_core.trace import (
+    TraceCollection,
+    collect_trace,
+    make_linearizability_workload,
+    to_porcupine_history,
+)
 
 
-def _load_candidate():
-    workspace = Path.cwd()
-    if str(workspace) not in sys.path:
-        sys.path.insert(0, str(workspace))
-    try:
-        from main import VibeServeQueue
-
-        return VibeServeQueue
-    except ImportError as exc:
-        raise RuntimeError("Could not import VibeServeQueue from main.py") from exc
+@dataclass(frozen=True)
+class CheckConfig:
+    capacity: int
+    ops: int
+    producers: int
+    consumers: int
+    seed: int
+    timeout_seconds: float = 10.0
 
 
-def _run_enqueue(queue, item):
-    call = time.monotonic_ns()
-    result = queue.enqueue(item)
-    ret = time.monotonic_ns()
-    if not isinstance(result, bool):
-        raise TypeError(f"enqueue must return bool, got {type(result).__name__}")
-    return {"enqueue_ok": result}, call, ret
+@dataclass(frozen=True)
+class CheckResult:
+    ok: bool
+    message: str
+    trace: TraceCollection | None = None
 
 
-def _run_dequeue(queue):
-    call = time.monotonic_ns()
-    result = queue.dequeue()
-    ret = time.monotonic_ns()
-    if result is None:
-        output = {"dequeue_none": True}
-    elif isinstance(result, int) and not isinstance(result, bool):
-        output = {"dequeue_none": False, "dequeue_value": result}
-    else:
-        raise TypeError(f"dequeue must return int|None, got {type(result).__name__}")
-    return output, call, ret
+def default_check_config(
+    contract: QueueContract | None,
+    input_config: QueueInputConfig | None = None,
+) -> CheckConfig:
+    return CheckConfig(
+        capacity=input_config.capacity
+        if input_config and input_config.capacity is not None
+        else (contract.default_capacity if contract else 64),
+        ops=2000,
+        producers=input_config.producers
+        if input_config and input_config.producers is not None
+        else (contract.default_producers if contract else 4),
+        consumers=input_config.consumers
+        if input_config and input_config.consumers is not None
+        else (contract.default_consumers if contract else 4),
+        seed=42,
+    )
 
 
-def _run_porcupine_checker(history, capacity):
+def add_check_arguments(
+    parser: argparse.ArgumentParser,
+    contract: QueueContract | None,
+    input_config: QueueInputConfig | None = None,
+) -> None:
+    defaults = default_check_config(contract, input_config)
+    parser.add_argument("--capacity", type=int, default=defaults.capacity)
+    parser.add_argument("--ops", type=int, default=defaults.ops)
+    parser.add_argument("--producers", type=int, default=defaults.producers)
+    parser.add_argument("--consumers", type=int, default=defaults.consumers)
+    parser.add_argument("--seed", type=int, default=defaults.seed)
+    parser.add_argument("--timeout-seconds", type=float, default=defaults.timeout_seconds)
+
+
+def check_config_from_args(args: argparse.Namespace) -> CheckConfig:
+    return CheckConfig(
+        capacity=args.capacity,
+        ops=args.ops,
+        producers=args.producers,
+        consumers=args.consumers,
+        seed=args.seed,
+        timeout_seconds=args.timeout_seconds,
+    )
+
+
+def run_porcupine_checker(history: list[dict], capacity: int) -> None:
     checker_dir = Path(__file__).parent / "porcupine_checker"
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tmp:
         json.dump(history, tmp)
@@ -79,211 +110,123 @@ def _run_porcupine_checker(history, capacity):
         raise RuntimeError(detail or "Porcupine checker failed")
 
 
-def _check_linearizable_queue(cls, scenario, capacity, ops, producers, consumers, seed):
-    contract = get_contract(scenario)
-    if not contract.configurable_producers:
-        producers = contract.default_producers
-    if not contract.configurable_consumers:
-        consumers = contract.default_consumers
+def check_linearizable_queue(cls, contract: QueueContract, config: CheckConfig) -> CheckResult:
+    queue = cls(scenario=contract.name, capacity=config.capacity)
+    plan = make_linearizability_workload(
+        contract,
+        ops=config.ops,
+        producers=config.producers,
+        consumers=config.consumers,
+        seed=config.seed,
+    )
+    trace = collect_trace(queue, plan, timeout_seconds=config.timeout_seconds)
 
-    queue = cls(scenario=scenario, capacity=capacity)
-    total_clients = producers + consumers
-    ops_per_client = max(1, ops // total_clients)
-    history = []
-    history_lock = threading.Lock()
-    barrier = threading.Barrier(total_clients)
-    next_item = 0
-    next_item_lock = threading.Lock()
-    rng = random.Random(seed)
-    thread_seeds = [rng.randrange(1 << 30) for _ in range(total_clients)]
-
-    def producer(client_id, local_seed):
-        nonlocal next_item
-        local_rng = random.Random(local_seed)
-        barrier.wait()
-        for _ in range(ops_per_client):
-            with next_item_lock:
-                item = next_item
-                next_item += 1
-            if local_rng.random() < 0.05:
-                time.sleep(0)
-            output, call, ret = _run_enqueue(queue, item)
-            with history_lock:
-                history.append(
-                    {
-                        "client_id": client_id,
-                        "input": {"kind": "enqueue", "value": item},
-                        "output": output,
-                        "call": call,
-                        "return": ret,
-                    }
-                )
-
-    def consumer(client_id, local_seed):
-        local_rng = random.Random(local_seed)
-        barrier.wait()
-        for _ in range(ops_per_client):
-            if local_rng.random() < 0.1:
-                time.sleep(0)
-            output, call, ret = _run_dequeue(queue)
-            with history_lock:
-                history.append(
-                    {
-                        "client_id": client_id,
-                        "input": {"kind": "dequeue"},
-                        "output": output,
-                        "call": call,
-                        "return": ret,
-                    }
-                )
-
-    threads = []
-    for client_id in range(producers):
-        threads.append(
-            threading.Thread(
-                target=producer,
-                args=(client_id, thread_seeds[client_id]),
-                daemon=True,
-            )
+    if trace.timed_out:
+        return false_result(
+            f"{contract.name.upper()} timed out while collecting history",
+            trace=trace,
         )
-    for offset in range(consumers):
-        client_id = producers + offset
-        threads.append(
-            threading.Thread(
-                target=consumer,
-                args=(client_id, thread_seeds[client_id]),
-                daemon=True,
-            )
+    if trace.errors:
+        return false_result(
+            f"{contract.name.upper()} trace collection failed: {'; '.join(trace.errors)}",
+            trace=trace,
         )
-
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=10)
-
-    if any(thread.is_alive() for thread in threads):
-        return False, f"{scenario.upper()} timed out while collecting history"
 
     try:
-        _run_porcupine_checker(history, capacity)
+        run_porcupine_checker(to_porcupine_history(trace.events), config.capacity)
     except Exception as exc:
-        return False, f"{scenario.upper()} linearizability failure: {exc}"
+        return false_result(f"{contract.name.upper()} linearizability failure: {exc}", trace=trace)
 
-    return (
+    return CheckResult(
         True,
-        f"{scenario.upper()} linearizable ({len(history)} ops, {producers}P/{consumers}C, capacity={capacity})",
+        (
+            f"{contract.name.upper()} linearizable "
+            f"({len(trace.events)} ops, {trace.producers}P/{trace.consumers}C, "
+            f"capacity={config.capacity})"
+        ),
+        trace=trace,
     )
 
 
-def _check_lossy(cls, capacity, ops, seed):
-    queue = cls(scenario="lossy", capacity=capacity)
-    rng = random.Random(seed)
+def false_result(message: str, trace: TraceCollection | None = None) -> CheckResult:
+    return CheckResult(False, message, trace=trace)
+
+
+def check_lossy(cls, contract: QueueContract, config: CheckConfig) -> CheckResult:
+    queue = cls(scenario=contract.name, capacity=config.capacity)
+    rng = random.Random(config.seed)
     enqueued, dequeued = set(), []
-    for i in range(ops):
+    for i in range(config.ops):
         if rng.random() < 0.6:
             ok = queue.enqueue(i)
             if not ok:
-                return False, f"Lossy enqueue returned False at op {i}"
+                return false_result(f"Lossy enqueue returned False at op {i}")
             enqueued.add(i)
         else:
             x = queue.dequeue()
             if x is not None:
                 dequeued.append(x)
-        if queue.size() > capacity:
-            return False, f"size {queue.size()} > capacity {capacity}"
+        if queue.size() > config.capacity:
+            return false_result(f"size {queue.size()} > capacity {config.capacity}")
     fabricated = set(dequeued) - enqueued
     if fabricated:
-        return False, f"Lossy returned items never enqueued: {list(fabricated)[:5]}"
-    return True, f"Lossy OK ({ops} ops, capacity={capacity}, dequeued={len(dequeued)})"
+        return false_result(f"Lossy returned items never enqueued: {list(fabricated)[:5]}")
+    return CheckResult(
+        True,
+        f"Lossy OK ({config.ops} ops, capacity={config.capacity}, dequeued={len(dequeued)})",
+    )
 
 
-def _check_batch(cls, capacity, ops, seed):
-    queue = cls(scenario="batch", capacity=capacity)
-    rng = random.Random(seed)
+def check_batch(cls, contract: QueueContract, config: CheckConfig) -> CheckResult:
+    queue = cls(scenario=contract.name, capacity=config.capacity)
+    rng = random.Random(config.seed)
     enqueued, dequeued = [], []
-    for i in range(ops):
+    for i in range(config.ops):
         if rng.random() < 0.6:
             if queue.enqueue(i):
                 enqueued.append(i)
         else:
             batch = queue.dequeue()
             if not isinstance(batch, list):
-                return False, f"Batch dequeue must return list, got {type(batch).__name__}"
+                return false_result(f"Batch dequeue must return list, got {type(batch).__name__}")
             dequeued.extend(batch)
     fabricated = set(dequeued) - set(enqueued)
     if fabricated:
-        return False, f"Batch returned items never enqueued: {list(fabricated)[:5]}"
+        return false_result(f"Batch returned items never enqueued: {list(fabricated)[:5]}")
     duplicates = len(dequeued) - len(set(dequeued))
     if duplicates:
-        return False, f"Batch returned {duplicates} duplicates"
-    return True, f"Batch OK ({ops} ops, capacity={capacity}, dequeued={len(dequeued)})"
-
-
-def main(default_scenario: str | None = None):
-    config = load_config()
-    scenario_default = default_scenario or config.scenario or "all"
-    contract_default = get_contract(scenario_default) if scenario_default != "all" else None
-    capacity_default = config.capacity or (
-        contract_default.default_capacity if contract_default else 64
-    )
-    producers_default = config.producers or (
-        contract_default.default_producers if contract_default else 4
-    )
-    consumers_default = config.consumers or (
-        contract_default.default_consumers if contract_default else 4
+        return false_result(f"Batch returned {duplicates} duplicates")
+    return CheckResult(
+        True,
+        f"Batch OK ({config.ops} ops, capacity={config.capacity}, dequeued={len(dequeued)})",
     )
 
-    parser = argparse.ArgumentParser(
-        description="Correctness checker for VibeServe queue scenarios."
-    )
-    parser.add_argument("--scenario", choices=[*SCENARIOS, "all"], default=scenario_default)
-    parser.add_argument("--capacity", type=int, default=capacity_default)
-    parser.add_argument("--ops", type=int, default=2000)
-    parser.add_argument("--producers", type=int, default=producers_default)
-    parser.add_argument("--consumers", type=int, default=consumers_default)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--use-reference", action="store_true")
-    args = parser.parse_args()
 
-    if args.use_reference:
-        print("Loading reference QueueFactory ...")
-        cls = QueueFactory
-    else:
-        print("Loading VibeServeQueue from main.py ...")
-        cls = _load_candidate()
-    print("  Loaded.")
+def run_check(cls, contract: QueueContract, config: CheckConfig) -> CheckResult:
+    if contract.linearizable_fifo:
+        return check_linearizable_queue(cls, contract, config)
+    if contract.lossy:
+        return check_lossy(cls, contract, config)
+    if contract.batched_dequeue:
+        return check_batch(cls, contract, config)
+    return false_result(f"Unknown scenario: {contract.name}")
 
-    targets = SCENARIOS if args.scenario == "all" else [args.scenario]
-    results = {}
-    for scenario in targets:
+
+def run_checks(
+    cls,
+    contracts: Iterable[QueueContract],
+    config: CheckConfig,
+) -> dict[str, CheckResult]:
+    return {contract.name: run_check(cls, contract, config) for contract in contracts}
+
+
+def print_check_result(result: CheckResult) -> None:
+    print(f"  PASS - {result.message}" if result.ok else f"  FAIL - {result.message}")
+
+
+def print_check_results(results: Mapping[str, CheckResult]) -> None:
+    for scenario, result in results.items():
         print(f"[{scenario.upper()}] Checking ...")
-        try:
-            contract = get_contract(scenario)
-            if contract.linearizable_fifo:
-                ok, msg = _check_linearizable_queue(
-                    cls,
-                    scenario,
-                    args.capacity,
-                    args.ops,
-                    args.producers,
-                    args.consumers,
-                    args.seed,
-                )
-            elif contract.lossy:
-                ok, msg = _check_lossy(cls, args.capacity, args.ops, args.seed)
-            elif contract.batched_dequeue:
-                ok, msg = _check_batch(cls, args.capacity, args.ops, args.seed)
-            else:
-                ok, msg = False, f"Unknown scenario: {scenario}"
-        except Exception as exc:
-            ok, msg = False, f"Exception: {exc}"
-        print(f"  PASS - {msg}" if ok else f"  FAIL - {msg}")
-        results[scenario] = ok
-
-    passed = sum(results.values())
+        print_check_result(result)
+    passed = sum(result.ok for result in results.values())
     print(f"Results: {passed}/{len(results)} passed")
-    sys.exit(0 if passed == len(results) else 1)
-
-
-if __name__ == "__main__":
-    main()
