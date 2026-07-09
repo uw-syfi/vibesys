@@ -1,9 +1,15 @@
 version = 1
 
 [accuracy]
-command = ["uv", "run", "python", "accuracy_checker/checker.py"]
+command = [
+  "go", "-C", "_input_libs/queue-input-core/src/queue_input_core/trusted_harness",
+  "run", ".", "check", "--scenario", "mpmc",
+]
 timeout_seconds = 120
 
 [benchmark]
-command = ["uv", "run", "python", "benchmark/benchmark.py"]
+command = [
+  "go", "-C", "_input_libs/queue-input-core/src/queue_input_core/trusted_harness",
+  "run", ".", "benchmark", "--scenario", "mpmc",
+]
 timeout_seconds = 300

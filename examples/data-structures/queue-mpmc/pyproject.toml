@@ -9,9 +9,3 @@ package = false
 
 [tool.uv.sources]
 queue-input-core = { path = "../../libs/queue-input-core", editable = true }
-
-[tool.vibeserve.queue]
-scenario = "mpmc"
-capacity = 1024
-producers = 4
-consumers = 4

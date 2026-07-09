@@ -69,7 +69,7 @@ Operations are `1` for enqueue and `2` for dequeue. Response statuses are:
 |---:|---|
 | 1 | Enqueue succeeded |
 | 2 | Enqueue observed a full queue |
-| 3 | Dequeue returned the value at lane offset 80 |
+| 3 | Dequeue returned the value at offset 8 in its response slot |
 | 4 | Dequeue observed an empty queue |
 | 5 | Candidate protocol error |
 

@@ -10,9 +10,9 @@ path dependency.
 
 ## Running the correctness checker
 
-    uv run python accuracy_checker/checker.py --use-reference --scenario all
-    uv run python accuracy_checker/checker.py --scenario all
-    uv run python accuracy_checker/checker.py --scenario mpmc --producers 4 --consumers 4
+    go -C ../../libs/queue-input-core/src/queue_input_core/trusted_harness run . check --workspace "$PWD" --use-reference --scenario all
+    go -C ../../libs/queue-input-core/src/queue_input_core/trusted_harness run . check --workspace "$PWD" --scenario all
+    go -C ../../libs/queue-input-core/src/queue_input_core/trusted_harness run . check --workspace "$PWD" --scenario mpmc --producers 4 --consumers 4
 
 Notes:
 - Use `--use-reference` to validate the bundled reference server.
@@ -28,9 +28,9 @@ Notes:
 
 ## Running the benchmark
 
-    uv run python benchmark/benchmark.py --scenario spsc --duration 10
-    uv run python benchmark/benchmark.py --scenario all --output-json results.json
-    uv run python benchmark/benchmark.py --scenario spsc --use-reference
+    go -C ../../libs/queue-input-core/src/queue_input_core/trusted_harness run . benchmark --workspace "$PWD" --scenario spsc --duration 10s
+    go -C ../../libs/queue-input-core/src/queue_input_core/trusted_harness run . benchmark --workspace "$PWD" --scenario all --output-json results.json
+    go -C ../../libs/queue-input-core/src/queue_input_core/trusted_harness run . benchmark --workspace "$PWD" --scenario spsc --use-reference
 
 ## Acceptance criteria (from #43)
 

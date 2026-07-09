@@ -304,11 +304,11 @@ func runBenchmark(config benchmarkConfig) (benchmarkResult, error) {
 	return runBenchmarkPhase(config, config.duration)
 }
 
-func writeBenchmarkResult(path string, result benchmarkResult) error {
+func writeBenchmarkResults(path string, results []benchmarkResult) error {
 	if path == "" {
 		return nil
 	}
-	data, err := json.MarshalIndent([]benchmarkResult{result}, "", "  ")
+	data, err := json.MarshalIndent(results, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode benchmark result: %w", err)
 	}

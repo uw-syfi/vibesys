@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -88,26 +90,75 @@ def test_collect_trace_uses_per_thread_events_and_porcupine_shape(monkeypatch):
     assert set(history[0]) == {"client_id", "input", "output", "call", "return"}
 
 
-def test_focused_queue_inputs_do_not_import_core_main():
+def test_linearizable_queue_manifests_invoke_go_harness_directly():
     root = Path(__file__).parents[1] / "examples" / "data-structures"
-    focused_inputs = ["queue-spsc", "queue-mpsc", "queue-mpmc"]
+    expected_scenarios = {
+        "queue-default": "all",
+        "queue-spsc": "spsc",
+        "queue-mpsc": "mpsc",
+        "queue-mpmc": "mpmc",
+    }
 
-    for input_name in focused_inputs:
-        for rel_path in ["accuracy_checker/checker.py", "benchmark/benchmark.py"]:
-            text = (root / input_name / rel_path).read_text()
-            assert "SCENARIO =" in text
-            assert "import main" not in text
-            assert "--scenario" not in text
+    for input_name, scenario in expected_scenarios.items():
+        manifest = tomllib.loads((root / input_name / "vibeserve.input.toml").read_text())
+        for section, action in [("accuracy", "check"), ("benchmark", "benchmark")]:
+            command = manifest[section]["command"]
+            assert command[:2] == ["go", "-C"]
+            assert command[3:] == ["run", ".", action, "--scenario", scenario]
+
+    trusted_wrapper = (
+        root.parents[0] / "libs" / "queue-input-core" / "src" / "queue_input_core" / "trusted.py"
+    )
+    assert not trusted_wrapper.exists()
 
 
-def test_linearizable_queue_inputs_use_trusted_harness():
-    root = Path(__file__).parents[1] / "examples" / "data-structures"
+def test_materialized_manifest_commands_run_go_harness_directly(tmp_path):
+    if shutil.which("go") is None:
+        pytest.skip("Go is required by the trusted queue evaluator")
 
-    for input_name in ["queue-default", "queue-spsc", "queue-mpsc", "queue-mpmc"]:
-        for rel_path in ["accuracy_checker/checker.py", "benchmark/benchmark.py"]:
-            text = (root / input_name / rel_path).read_text()
-            assert "queue_input_core.trusted" in text
-            assert "queue_input_core.candidate" not in text
+    from vibe_serve.input_project import materialize_input_project
+
+    project_root = Path(__file__).parents[1]
+    input_dir = project_root / "examples" / "data-structures" / "queue-default"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    materialize_input_project(
+        input_dir,
+        workspace,
+        project_root=project_root,
+        copy_dir=lambda source, target: shutil.copytree(source, target),
+    )
+    manifest = tomllib.loads((input_dir / "vibeserve.input.toml").read_text())
+
+    accuracy = [
+        *manifest["accuracy"]["command"],
+        "--use-reference",
+        "--capacity",
+        "4",
+        "--operations",
+        "12",
+        "--trials",
+        "1",
+    ]
+    subprocess.run(accuracy, cwd=workspace, check=True)
+
+    output = workspace / "results.json"
+    benchmark = [
+        *manifest["benchmark"]["command"],
+        "--use-reference",
+        "--capacity",
+        "4",
+        "--duration",
+        "20ms",
+        "--warmup",
+        "0s",
+        "--output-json",
+        str(output),
+    ]
+    subprocess.run(benchmark, cwd=workspace, check=True)
+    results = json.loads(output.read_text())
+    assert [result["scenario"] for result in results] == ["spsc", "mpsc", "mpmc"]
 
 
 def test_trusted_queue_harness_rejects_adversarial_histories():
