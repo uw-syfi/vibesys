@@ -15,7 +15,7 @@ Several flags look independent, but they combine into one execution contract:
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, or `cpu`. |
 | Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, Docker container, or Modal-backed workflow. |
 | Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, or `auto`. |
-| Domain | `--domain` | Agent-loop problem-space package, such as `llm-serving` or `generic`. |
+| Domain | `--domain` | Optional agent-loop override for the input manifest's problem-space package, such as `llm-serving` or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--no-skills` | Candidate skill roots and the ablation switch that disables skill loading. |
 | Target inputs | `--input` | Target bundle directory with manifest-declared correctness and benchmark commands. |
@@ -99,11 +99,14 @@ Registered domains include:
 
 | Domain | Meaning |
 | --- | --- |
-| `llm-serving` | Default LLM-serving guidance, including serving-system skills and judge gates. |
+| `llm-serving` | LLM-serving guidance, including serving-system skills and judge gates. |
 | `generic` | No extra domain guidance. Useful for custom/non-LLM targets. |
 
-New domains are added in source by registering a domain package with optional
-environment setup/teardown hooks.
+Each input bundle must declare `[agent].domain` in `vibeserve.input.toml`.
+When `--domain` is omitted, the agent loop uses that manifest value. When
+`--domain` is provided and differs from the manifest, the CLI warns and uses the
+explicit override. New domains are added in source by registering a domain
+package with optional environment setup/teardown hooks.
 
 `--modality` supplies the task I/O contract, such as text generation or
 speech-to-text. Domains and modalities may define language, toolchain, and
@@ -168,6 +171,9 @@ command:
 
 ```toml
 version = 1
+
+[agent]
+domain = "generic"
 
 [accuracy]
 command = ["uv", "run", "python", "accuracy_checker/checker.py"]

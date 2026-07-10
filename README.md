@@ -76,19 +76,22 @@ correctness/performance/integrity gates the judge enforces. It answers *"what
 kind of system is this, and what does 'good' mean here?"* — kept separate from
 the neutral prompt skeleton and from the per-task I/O contract (`--modality`).
 
-Select one with `--domain` (agent loop):
+Each input bundle declares its domain in `vibeserve.input.toml`. You can
+override it with `--domain` when running the agent loop:
 
 ```bash
-vibe-serve --outer-loop agent --domain llm-serving ...      # default
+vibe-serve --outer-loop agent --domain llm-serving ...
 vibe-serve --outer-loop agent --domain generic ...          # no domain context
 ```
 
-`--domain` takes a registered domain name such as `llm-serving` or `generic`.
-A domain is an in-repo package: prompt templates plus optional environment
-setup/teardown hooks. The package's `templates/` directory contains role files such as
-`implementer.md`, `judge.md`, and optionally `single_agent.md`; those files drop
-into the prompts at labelled points. Omit `single_agent.md` and it's derived
-from `implementer.md` plus `judge.md`.
+If `--domain` differs from the manifest's `[agent].domain`, the CLI prints a
+warning and uses the explicit override. `--domain` takes a registered domain
+name such as `llm-serving` or `generic`. A domain is an in-repo package: prompt
+templates plus optional environment setup/teardown hooks. The package's
+`templates/` directory contains role files such as `implementer.md`, `judge.md`,
+and optionally `single_agent.md`; those files drop into the prompts at labelled
+points. Omit `single_agent.md` and it's derived from `implementer.md` plus
+`judge.md`.
 
 Full authoring guide: [`src/vibe_serve/domains/README.md`](src/vibe_serve/domains/README.md).
 
@@ -122,6 +125,7 @@ Each evaluation target lives under `examples/<name>/`:
 ```
 examples/<name>/
 ├── OBJECTIVE.md          # free-form deployment goal (model + hardware + workload + interface)
+├── vibeserve.input.toml  # manifest-declared domain, checker, benchmark, and optional inputs
 ├── reference/            # reference HuggingFace Transformers implementation
 │   ├── reference.py
 │   ├── config.json
@@ -131,10 +135,10 @@ examples/<name>/
 └── README.md             # human-readable description
 ```
 
-Pass the bundle root with `--input examples/<name>/` to derive `--ref`,
-`--acc-checker`, and `--bench` from the standard subdirectory names. You can
-still pass those three flags explicitly; explicit paths override `--input`
-defaults when you need a custom checker or benchmark.
+Pass the bundle root with `--input examples/<name>/`. The manifest declares the
+agent domain, correctness command, benchmark command, optional starter
+workspace, optional trusted evaluator source, and optional benchmark result
+metric.
 
 `OBJECTIVE.md` is read at the start of every run and must live next to the
 `reference/` directory (sibling, not inside). See `examples/model-serving/Llama-3-8B/`, `examples/model-serving/moonshine-streaming/`, `examples/model-serving/qwen3-32b-code-edit/`, `examples/model-serving/olmo-hybrid-prefix-caching/`, `examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit/`, `examples/model-serving/show-o2-1.5B-HQ-h100/`, and `examples/model-serving/show-o2-1.5B-HQ-macbook/` for the paper scenarios.
