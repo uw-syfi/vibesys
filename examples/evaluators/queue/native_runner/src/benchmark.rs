@@ -359,7 +359,7 @@ fn drain_and_validate(
     Ok(())
 }
 
-#[allow(clippy::manual_is_multiple_of)]
+#[allow(unknown_lints, clippy::manual_is_multiple_of)]
 fn clock_check_due(attempts: u64) -> bool {
     attempts % CLOCK_CHECK_INTERVAL == 0
 }
