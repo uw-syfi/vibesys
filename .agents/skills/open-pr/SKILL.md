@@ -1,9 +1,9 @@
 ---
-name: vs-open-pr
+name: open-pr
 description: Prepare and open VibeServe pull requests from local repo changes. Use when the user asks to create, open, publish, submit, or draft a PR for this repository, including tasks that need branch hygiene, targeted validation, PR intent reflection, PR template completion, commit/push, or GitHub pull request creation.
 ---
 
-# VibeServe Open PR
+# Open PR
 
 ## Overview
 
