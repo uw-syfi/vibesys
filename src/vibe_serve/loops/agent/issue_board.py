@@ -264,6 +264,48 @@ def append_single_agent_round(
     _append(progress_path, block)
 
 
+def append_framework_accuracy_gate(
+    progress_path: Path,
+    round_number: int,
+    retry: int,
+    *,
+    command: str,
+    passed: bool,
+    output: str,
+) -> None:
+    verdict = "pass" if passed else "fail"
+    block = (
+        f"## Round {round_number} — Framework accuracy gate (attempt {retry})\n"
+        f"- **verdict**: {verdict}\n"
+        f"- **command**: `{command}`\n\n"
+        f"### Output\n{output or '(no output)'}\n"
+    )
+    _append(progress_path, block)
+
+
+def append_framework_benchmark(
+    progress_path: Path,
+    round_number: int,
+    retry: int,
+    *,
+    command: str,
+    passed: bool,
+    metric_name: str,
+    metric_value: float | None,
+    output: str,
+) -> None:
+    verdict = "pass" if passed else "fail"
+    metric_line = f"- **{metric_name}**: {metric_value}\n" if metric_value is not None else ""
+    block = (
+        f"## Round {round_number} — Framework benchmark (attempt {retry})\n"
+        f"- **verdict**: {verdict}\n"
+        f"- **command**: `{command}`\n"
+        f"{metric_line}\n"
+        f"### Output\n{output or '(no output)'}\n"
+    )
+    _append(progress_path, block)
+
+
 def append_exhaustion_note(
     progress_path: Path, round_number: int, attempts: int, last_feedback: str
 ) -> None:

@@ -437,13 +437,11 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         choices=["inprocess", "service"],
         default="inprocess",
         help=(
-            "Evaluation contract for the built artifact, which also fixes the "
-            "implementation language (you never pick a language directly). "
-            "'inprocess' (default): the accuracy checker imports main.py in "
-            "process, so the implementation is Python (uv toolchain + "
-            "VibeServeModel contract). 'service': the artifact is exercised "
-            "only over its network interface, so the agent chooses the "
-            "language; supply a checker/benchmark that probes it over the wire."
+            "Process boundary used by the evaluator. 'inprocess' (default): "
+            "the evaluator invokes the candidate directly using the input-defined "
+            "contract. 'service': the evaluator communicates with a running "
+            "service over its network interface. Language, tooling, and artifact "
+            "requirements come from the selected domain and input bundle."
         ),
     )
     parser.add_argument(
@@ -516,6 +514,8 @@ def _run_agent(args: argparse.Namespace) -> None:
         accuracy_command=bundle.accuracy_command_display,
         benchmark_command=bundle.benchmark_command_display,
         workspace_seed=bundle.workspace_seed_path,
+        evaluator_path=bundle.evaluator_path,
+        benchmark_result=bundle.benchmark_result,
         objective=objective,
         max_rounds=args.max_rounds,
         max_retries_per_round=args.max_retries_per_round,
@@ -666,6 +666,7 @@ def _run_evolve(args: argparse.Namespace) -> None:
         accuracy_command=bundle.accuracy_command_display,
         benchmark_command=bundle.benchmark_command_display,
         workspace_seed=bundle.workspace_seed_path,
+        evaluator_path=bundle.evaluator_path,
         objective=objective,
         max_generations=args.max_generations,
         children_per_generation=args.children_per_generation,
@@ -757,6 +758,7 @@ def _run_openevolve(args: argparse.Namespace) -> None:
         accuracy_command=bundle.accuracy_command_display,
         benchmark_command=bundle.benchmark_command_display,
         workspace_seed=bundle.workspace_seed_path,
+        evaluator_path=bundle.evaluator_path,
         objective=objective,
         max_iterations=args.max_iterations,
         k_inspirations=args.k_inspirations,
@@ -866,6 +868,7 @@ def _run_plain(args: argparse.Namespace) -> None:
         accuracy_command=bundle.accuracy_command_display,
         benchmark_command=bundle.benchmark_command_display,
         workspace_seed=bundle.workspace_seed_path,
+        evaluator_path=bundle.evaluator_path,
         max_rounds=args.max_rounds,
         max_attempts_per_issue=args.max_attempts_per_issue,
         max_issues_per_perf_eval=args.max_issues_per_perf_eval,

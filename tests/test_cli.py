@@ -192,6 +192,24 @@ def test_validate_target_inputs_loads_manifest(tmp_path):
     assert args.input_bundle.benchmark_command_display == "uv run python benchmark/benchmark.py"
 
 
+def test_validate_target_inputs_loads_trusted_benchmark_result_contract(tmp_path):
+    from vibe_serve.cli import _build_agent_parser
+
+    bundle = _write_input_bundle(tmp_path)
+    manifest = bundle / "vibeserve.input.toml"
+    manifest.write_text(
+        manifest.read_text()
+        + "\n[benchmark.result]\njson_argument = '--output-json'\nmetric = 'ops_per_sec'\n"
+    )
+    args = _build_agent_parser().parse_args(["--input", str(bundle)])
+
+    _validate_target_inputs(args)
+
+    assert args.input_bundle.benchmark_result is not None
+    assert args.input_bundle.benchmark_result.json_argument == "--output-json"
+    assert args.input_bundle.benchmark_result.metric == "ops_per_sec"
+
+
 def test_validate_target_inputs_rejects_missing_input_dir(tmp_path, capsys):
     from vibe_serve.cli import _build_agent_parser
 

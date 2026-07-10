@@ -43,6 +43,51 @@ jobs:
       - name: Check Python lint
         run: ./scripts/check_lint.sh
 
+  queue-native:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: examples/evaluators/queue/go.mod
+          cache-dependency-path: examples/evaluators/queue/go.sum
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.78.0
+        with:
+          components: clippy, rustfmt
+
+      - name: Check native runner formatting
+        working-directory: examples/evaluators/queue/native_runner
+        run: cargo fmt -- --check
+
+      - name: Lint native runner
+        working-directory: examples/evaluators/queue/native_runner
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test native runner
+        working-directory: examples/evaluators/queue/native_runner
+        run: cargo test --locked
+
+      - name: Check starter formatting
+        working-directory: examples/starters/queue-rs
+        run: cargo fmt -- --check
+
+      - name: Lint starter
+        working-directory: examples/starters/queue-rs
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test starter
+        working-directory: examples/starters/queue-rs
+        run: cargo test --locked
+
+      - name: Test queue evaluator
+        working-directory: examples/evaluators/queue
+        run: go test -race ./...
+
   test:
     runs-on: ubuntu-latest
     strategy:

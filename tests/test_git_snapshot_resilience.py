@@ -39,7 +39,7 @@ def _make_ctx(ws):
 
 def test_workspace_gitignore_excludes_compiled_artifacts():
     ctx = SimpleNamespace(
-        EXCLUDED_WORKSPACE_DIRS={".git", "__pycache__", "_mounts"},
+        EXCLUDED_WORKSPACE_DIRS={".git", "__pycache__", "_mounts", "target"},
         _ARTIFACT_GITIGNORE_PATTERNS=_RunContext._ARTIFACT_GITIGNORE_PATTERNS,
     )
     gi = _RunContext._workspace_gitignore(ctx)
@@ -47,7 +47,7 @@ def test_workspace_gitignore_excludes_compiled_artifacts():
     for pat in ("*.neff", "*.ntff", "neuron-compile-cache/"):
         assert pat in gi
     # still excludes the standard dirs
-    assert ".git" in gi and "_mounts" in gi
+    assert ".git" in gi and "_mounts" in gi and "target" in gi
 
 
 def test_unreadable_from_stderr_parses_git_output():

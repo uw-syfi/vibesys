@@ -35,3 +35,4 @@ class DomainDefinition:
     name: DomainName
     prompt_dir: Path
     environment_hooks: EnvironmentHooks
+    supports_torch_profiler: bool = False

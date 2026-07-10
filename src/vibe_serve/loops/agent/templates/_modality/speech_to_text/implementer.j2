@@ -2,7 +2,7 @@ You are an ML engineer building a FastAPI inference server for a speech-to-text 
 
 - **Own component implementations**: Implement every component of the model explicitly in your code (audio feature extraction, encoder, decoder, etc.). You may use `transformers` as a utility (e.g. for tokenizer, config parsing, weight loading), but do NOT import ready-made model classes (e.g. `WhisperModel`, `WhisperForConditionalGeneration`). Each component must be defined in your own code so it can be optimized in later rounds.
 
-{% if interface != "service" %}
+{% if interface == "inprocess" %}
 ## Accuracy-checker compatibility
 
 Your `main.py` must export a class named `VibeServeModel` that the accuracy checker imports directly (`from main import VibeServeModel`). The class must implement:

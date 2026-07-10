@@ -1,18 +1,9 @@
-"""Tests for ``--interface`` — the in-process-vs-service evaluation contract.
+"""Tests for topology-only in-process and service evaluation modes.
 
-The implementation language is no longer a user-facing axis (there is no
-``--language`` flag and no ``_language/`` packs). Instead the run's
-``--interface`` mode fixes the contract by which the accuracy checker and
-benchmark reach the artifact, and that contract decides the language:
-
-- ``inprocess`` (default): the checker imports ``main.py`` in process, so the
-  implementation is Python — the prompts carry the ``uv`` toolchain and the
-  ``VibeServeModel`` import contract.
-- ``service``: the artifact is exercised only over the wire, so the agent picks
-  the language — the in-process contract and the Python/uv tooling drop out and a
-  language-freedom block takes their place.
-
-These tests pin that behaviour at the prompt layer plus the CLI/loop wiring.
+``--interface`` describes only how evaluator-owned code reaches the candidate:
+direct invocation inside an evaluator process or communication with a service.
+Domains, modalities, and input-owned contracts supply language, tooling, and
+artifact requirements.
 """
 
 from __future__ import annotations
@@ -21,7 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from vibe_serve.domains.base import DomainName
+from vibe_serve.domains.base import DomainName, DomainRole
+from vibe_serve.domains.registry import resolve_domain
+from vibe_serve.domains.rendering import render_domain_section
 from vibe_serve.profilers import ProfilerKind
 from vibe_serve.prompts import render_template
 
@@ -30,17 +23,11 @@ _TEMPLATE_DIR = (
 )
 
 
-# --------------------------------------------------------------------------- #
-# no user-facing language axis
-# --------------------------------------------------------------------------- #
 def test_domain_module_has_no_language_axis():
-    """The implementation language is carried by ``--interface``, not a pack.
-    The domain module exposes only the domain axis — no language constants."""
     import vibe_serve.domains.base as domain
 
     assert not hasattr(domain, "DEFAULT_LANGUAGE")
     assert not hasattr(domain, "LANGUAGE_DIR")
-    # the domain axis is untouched
     assert domain.DEFAULT_DOMAIN is DomainName.LLM_SERVING
 
 
@@ -48,19 +35,14 @@ def test_no_language_pack_directory():
     assert not (_TEMPLATE_DIR / "_language").exists()
 
 
-# --------------------------------------------------------------------------- #
-# CLI wiring
-# --------------------------------------------------------------------------- #
-def test_cli_exposes_interface_not_language():
+def test_cli_exposes_only_process_boundary_modes():
     from vibe_serve.cli import _build_agent_parser
 
     parser = _build_agent_parser()
-    # --interface is present with the two modes and defaults to inprocess
-    action = next(a for a in parser._actions if a.dest == "interface")
+    action = next(action for action in parser._actions if action.dest == "interface")
     assert set(action.choices) == {"inprocess", "service"}
     assert action.default == "inprocess"
-    # --language is gone
-    assert all(a.dest != "language" for a in parser._actions)
+    assert all(action.dest != "language" for action in parser._actions)
 
 
 def test_cli_default_interface_is_inprocess():
@@ -70,18 +52,16 @@ def test_cli_default_interface_is_inprocess():
     assert args.interface == "inprocess"
 
 
-def test_cli_rejects_unknown_interface():
+@pytest.mark.parametrize("interface", ["native", "rust"])
+def test_cli_rejects_unknown_interface(interface):
     from vibe_serve.cli import _build_agent_parser
 
     with pytest.raises(SystemExit):
         _build_agent_parser().parse_args(
-            ["--input", "/x", "--exp-name", "e", "--interface", "rust"]
+            ["--input", "/x", "--exp-name", "e", "--interface", interface]
         )
 
 
-# --------------------------------------------------------------------------- #
-# loop validation
-# --------------------------------------------------------------------------- #
 def test_loop_constants_and_rejects_unknown_interface():
     from vibe_serve.loops.agent.loop import (
         _INTERFACES,
@@ -91,34 +71,50 @@ def test_loop_constants_and_rejects_unknown_interface():
 
     assert DEFAULT_INTERFACE == "inprocess"
     assert _INTERFACES == ("inprocess", "service")
-    # validation happens before any heavy setup, so dummy args are fine
     with pytest.raises(ValueError, match="interface"):
         run_agent_loop(
             config=None,
             exp_name="e",
             input_path="/x",
-            accuracy_command="uv run python accuracy_checker/checker.py",
-            benchmark_command="uv run python benchmark/benchmark.py",
+            accuracy_command="accuracy-checker",
+            benchmark_command="benchmark",
             objective="o",
-            interface="rust",
+            interface="native",
         )
 
 
-# --------------------------------------------------------------------------- #
-# standalone (multi-agent) profiler selection
-# --------------------------------------------------------------------------- #
-def test_standalone_profiler_drops_torch_under_service():
-    """The multi-agent standalone profiler must treat the torch profiler the
-    same way the single-agent prompt does: torch is a white-box, in-process
-    PyTorch tool, so ``--interface service`` (exercised only over the wire, any
-    language) falls back to the black-box nsys profiler."""
+def test_torch_profiler_requires_inprocess_boundary_and_domain_support():
     from vibe_serve.loops.agent.loop import _profiler_prompt_template
 
-    # inprocess keeps the white-box torch profiler
-    assert _profiler_prompt_template(ProfilerKind.TORCH, "inprocess") == "profiler_prompt_torch.j2"
-    # service swaps torch -> nsys (torch imports the implementation)
-    assert _profiler_prompt_template(ProfilerKind.TORCH, "service") == "profiler_prompt_nsys.j2"
-    # non-torch kinds are unaffected by the interface
+    assert (
+        _profiler_prompt_template(
+            ProfilerKind.TORCH,
+            "inprocess",
+            supports_torch_profiler=True,
+        )
+        == "profiler_prompt_torch.j2"
+    )
+    assert (
+        _profiler_prompt_template(
+            ProfilerKind.TORCH,
+            "inprocess",
+            supports_torch_profiler=False,
+        )
+        == "profiler_prompt_nsys.j2"
+    )
+    assert (
+        _profiler_prompt_template(
+            ProfilerKind.TORCH,
+            "service",
+            supports_torch_profiler=True,
+        )
+        == "profiler_prompt_nsys.j2"
+    )
+
+
+def test_non_torch_profilers_do_not_depend_on_interface():
+    from vibe_serve.loops.agent.loop import _profiler_prompt_template
+
     assert _profiler_prompt_template(ProfilerKind.NEURON, "service") == "profiler_prompt_neuron.j2"
     assert _profiler_prompt_template(ProfilerKind.NSYS, "service") == "profiler_prompt_nsys.j2"
 
@@ -137,16 +133,13 @@ def test_standalone_profiler_rejects_unknown_kind():
         _profiler_prompt_template("bogus", "inprocess")
 
 
-# --------------------------------------------------------------------------- #
-# prompt rendering: implementer
-# --------------------------------------------------------------------------- #
-def _render_implementer(interface: str) -> str:
+def _render_implementer(interface: str, *, modality: str | None = None) -> str:
     return render_template(
         "implementer_prompt.j2",
         template_dir=_TEMPLATE_DIR,
-        modality="text_generation",
+        modality=modality,
         interface=interface,
-        domain_implementer="",  # isolate the interface axis
+        domain_implementer="",
         task="TASK",
         pass_criteria="PC",
         reference_path="/ref",
@@ -155,32 +148,48 @@ def _render_implementer(interface: str) -> str:
     )
 
 
-def test_inprocess_implementer_keeps_python_contract():
-    out = _render_implementer("inprocess")
-    # uv toolchain prose and the in-process import contract are both present
-    assert "uv" in out
-    assert "VibeServeModel" in out
-    assert "from main import VibeServeModel" in out
+def test_inprocess_prompt_describes_direct_invocation_without_language_assumptions():
+    output = _render_implementer("inprocess")
+
+    assert "invokes the candidate directly" in output
+    assert "input-owned candidate contract" in output
+    assert "Use `uv`" not in output
+    assert "VibeServeModel" not in output
+    assert "native artifact" not in output
 
 
-def test_service_implementer_is_language_free():
-    out = _render_implementer("service")
-    # the in-process Python contract and uv tooling are gone
-    assert "VibeServeModel" not in out
-    assert "uv" not in out
-    # ...replaced by an explicit language-freedom statement
-    assert "over the wire" in out
-    assert "language" in out.lower()
+def test_service_prompt_describes_network_boundary_without_language_assumptions():
+    output = _render_implementer("service")
+
+    assert "running candidate service" in output
+    assert "network interface" in output
+    assert "Use `uv`" not in output
+    assert "VibeServeModel" not in output
+
+
+def test_inprocess_implementer_handles_missing_reference_explicitly():
+    output = render_template(
+        "implementer_prompt.j2",
+        template_dir=_TEMPLATE_DIR,
+        modality=None,
+        interface="inprocess",
+        domain_implementer="",
+        task="TASK",
+        pass_criteria="PC",
+        reference_path=".",
+        runtime_notes="",
+        feedback=None,
+    )
+    assert "No separate reference implementation is provided" in output
+    assert "Reference implementation is at `.`" not in output
 
 
 def test_default_interface_matches_inprocess_for_implementer():
-    """Rendering with no interface set must equal explicit inprocess (the
-    template's own default), so existing runs are unchanged."""
     explicit = _render_implementer("inprocess")
     implied = render_template(
         "implementer_prompt.j2",
         template_dir=_TEMPLATE_DIR,
-        modality="text_generation",
+        modality=None,
         domain_implementer="",
         task="TASK",
         pass_criteria="PC",
@@ -191,9 +200,24 @@ def test_default_interface_matches_inprocess_for_implementer():
     assert explicit == implied
 
 
-# --------------------------------------------------------------------------- #
-# prompt rendering: judge
-# --------------------------------------------------------------------------- #
+def test_llm_domain_owns_python_tooling():
+    llm_domain = resolve_domain(DomainName.LLM_SERVING)
+    generic_domain = resolve_domain(DomainName.GENERIC)
+
+    llm_prompt = render_domain_section(
+        llm_domain,
+        DomainRole.IMPLEMENTER,
+        interface="inprocess",
+    )
+    generic_prompt = render_domain_section(
+        generic_domain,
+        DomainRole.IMPLEMENTER,
+        interface="inprocess",
+    )
+    assert "Use `uv` for Python package management" in llm_prompt
+    assert generic_prompt == ""
+
+
 def _render_judge(interface: str) -> str:
     return render_template(
         "judge_prompt.j2",
@@ -201,8 +225,8 @@ def _render_judge(interface: str) -> str:
         modality="text_generation",
         interface=interface,
         domain_judge="",
-        accuracy_command="uv run python accuracy_checker/checker.py",
-        benchmark_command="uv run python benchmark/benchmark.py",
+        accuracy_command="accuracy-checker",
+        benchmark_command="benchmark",
         pass_criteria="PC",
         retry=1,
         runtime_notes="",
@@ -211,25 +235,26 @@ def _render_judge(interface: str) -> str:
     )
 
 
-def test_inprocess_judge_requires_vibeservemodel():
+def test_text_generation_use_case_owns_inprocess_python_contract():
     assert "VibeServeModel" in _render_judge("inprocess")
 
 
-def test_service_judge_drops_vibeservemodel():
-    out = _render_judge("service")
-    assert "VibeServeModel" not in out
-    # decode invariants (modality content) still render
-    assert "Decode invariants" in out
+def test_service_judge_drops_direct_import_contract():
+    output = _render_judge("service")
+    assert "VibeServeModel" not in output
+    assert "Decode invariants" in output
 
 
-# --------------------------------------------------------------------------- #
-# prompt rendering: single-agent
-# --------------------------------------------------------------------------- #
-def _render_single_agent(interface: str, profiler_kind: ProfilerKind = ProfilerKind.TORCH) -> str:
+def _render_single_agent(
+    interface: str,
+    *,
+    profiler_kind: ProfilerKind = ProfilerKind.TORCH,
+    supports_torch_profiler: bool = False,
+) -> str:
     return render_template(
         "single_agent_round_prompt.j2",
         template_dir=_TEMPLATE_DIR,
-        modality="text_generation",
+        modality=None,
         interface=interface,
         env_kind="local",
         domain_single_agent="",
@@ -241,35 +266,40 @@ def _render_single_agent(interface: str, profiler_kind: ProfilerKind = ProfilerK
         objective="OBJ",
         profile_focus="focus",
         profiler_kind=profiler_kind,
-        benchmark_command="uv run python benchmark/benchmark.py",
-        accuracy_command="uv run python accuracy_checker/checker.py",
+        supports_torch_profiler=supports_torch_profiler,
+        benchmark_command="benchmark",
+        accuracy_command="accuracy-checker",
         reference_path="/ref",
         runtime_notes="",
     )
 
 
-def test_inprocess_single_agent_keeps_uv_and_torch_capture():
-    out = _render_single_agent("inprocess", profiler_kind=ProfilerKind.TORCH)
-    assert "uv" in out
-    # torch in-process capture path is offered for Python implementations
-    assert "torch.profiler" in out
+def test_inprocess_single_agent_uses_torch_only_for_supporting_domain():
+    supported = _render_single_agent(
+        "inprocess",
+        supports_torch_profiler=True,
+    )
+    unsupported = _render_single_agent(
+        "inprocess",
+        supports_torch_profiler=False,
+    )
+    assert "torch.profiler" in supported
+    assert "torch.profiler" not in unsupported
+    assert "nsys" in unsupported
 
 
-def test_service_single_agent_is_language_free_and_avoids_inprocess_torch():
-    out = _render_single_agent("service", profiler_kind=ProfilerKind.TORCH)
-    assert "uv" not in out
-    assert "over the wire" in out
-    # torch in-process capture is Python-only; service falls back to nsys /
-    # server-driven profiling instead
-    assert "torch.profiler" not in out
-    assert "nsys" in out
+def test_service_single_agent_avoids_inprocess_torch():
+    output = _render_single_agent(
+        "service",
+        supports_torch_profiler=True,
+    )
+    assert "torch.profiler" not in output
+    assert "nsys" in output
 
 
 def test_single_agent_profiler_none_avoids_profiler_tools():
-    out = _render_single_agent("inprocess", profiler_kind=ProfilerKind.NONE)
-    assert "Standalone profiling is disabled" in out
-    assert "nsys_profiler" not in out
-    assert "torch_profiler" not in out
-    assert "neuron_profiler" not in out
-    assert "vibeserve-nsys-profiler" not in out
-    assert "vibeserve-torch-profiler" not in out
+    output = _render_single_agent("inprocess", profiler_kind=ProfilerKind.NONE)
+    assert "Standalone profiling is disabled" in output
+    assert "nsys_profiler" not in output
+    assert "torch_profiler" not in output
+    assert "neuron_profiler" not in output

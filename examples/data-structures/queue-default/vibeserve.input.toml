@@ -1,9 +1,23 @@
 version = 1
 
+[workspace]
+seed = "../../starters/queue-rs"
+
+[evaluator]
+source = "../../evaluators/queue"
+
 [accuracy]
-command = ["uv", "run", "python", "accuracy_checker/checker.py"]
+command = [
+  "go", "-C", "_evaluator/queue",
+  "run", ".", "check", "--workspace", "../..",
+  "--scenario", "all", "--operations", "24", "--trials", "50",
+]
 timeout_seconds = 120
 
 [benchmark]
-command = ["uv", "run", "python", "benchmark/benchmark.py"]
+command = [
+  "go", "-C", "_evaluator/queue",
+  "run", ".", "benchmark", "--workspace", "../..",
+  "--scenario", "all", "--repetitions", "3",
+]
 timeout_seconds = 300

@@ -2,32 +2,53 @@
 
 Resolves #43.
 
-Default input for the SPSC, MPSC, and MPMC bounded FIFO queue scenarios. The reusable
-reference implementations, correctness checker, and benchmark driver live in
-the `queue-input-core` package under `examples/libs/queue-input-core`; this input
-depends on that package with a uv path dependency.
+Default input for the SPSC, MPSC, and MPMC linearizable bounded-queue
+scenarios. The trusted Go checker, Rust benchmark runner, and ABI definition
+live under `examples/evaluators/queue`. VibeServe materializes that source at
+`_evaluator/queue` separately from the editable candidate workspace seed.
+
+The shared seed at `examples/starters/queue-rs` is copied into each
+fresh workspace. Its editable `src/lib.rs` is deliberately simple Rust: one
+`Mutex<VecDeque<Vec<u8>>>` shared by every producer and consumer. It is a
+candidate baseline, not trusted code. From a materialized workspace, build the
+required shared library with:
+
+    make
 
 ## Running the correctness checker
 
-    uv run python accuracy_checker/checker.py --use-reference --scenario all
-    uv run python accuracy_checker/checker.py --scenario all
-    uv run python accuracy_checker/checker.py --scenario mpmc --producers 4 --consumers 4
+    go -C _evaluator/queue run . check --workspace "$PWD" --scenario all
+    go -C _evaluator/queue run . check --workspace "$PWD" --scenario mpmc --producers 4 --consumers 4
 
 Notes:
-- Use `--use-reference` to validate the bundled reference implementations.
-- Omit `--use-reference` to check a candidate `main.py` exposing `VibeServeQueue`.
-- Every scenario collects concurrent operation histories and validates
+- `make` creates the workspace's `./queue-candidate.so` shared library.
+- `--use-reference` remains available only to self-test the evaluator's
+  internal model; it is not the editable candidate.
+- The candidate ABI is documented at
+  `_evaluator/queue/CANDIDATE_CONTRACT.md` in a materialized workspace.
+- The evaluator architecture and trust model are documented at
+  `_evaluator/queue/DESIGN.md`.
+- The trusted evaluator records concurrent operation histories and validates
   linearizability with [Porcupine](https://github.com/anishathalye/porcupine).
-- Go must be installed locally for the Porcupine-backed scenarios.
+- Boundary probes explicitly exercise empty, full, drain, and wraparound
+  behavior before independently seeded concurrent histories.
+- ABI probes cover copied values from zero bytes through 1 MiB, producer-buffer
+  reuse, undersized dequeue retry, and unchanged empty outputs.
+- Go and Rust must be installed locally for the trusted evaluator.
 
 ## Running the benchmark
 
-    uv run python benchmark/benchmark.py --scenario spsc --duration 10
-    uv run python benchmark/benchmark.py --scenario all --output-json results.json
-    uv run python benchmark/benchmark.py --scenario spsc --use-reference
+    go -C _evaluator/queue run . benchmark --workspace "$PWD" --scenario spsc --duration 10s
+    go -C _evaluator/queue run . benchmark --workspace "$PWD" --scenario all --output-json results.json
+    go -C _evaluator/queue run . benchmark --workspace "$PWD" --scenario spsc
+
+Use an odd `--repetitions` count to report the median run in
+`total_ops_per_sec`; the manifest uses three repetitions and preserves every
+sample in `total_ops_per_sec_samples`.
 
 ## Acceptance criteria (from #43)
 
-- Each reference implementation passes its linearizability checker.
-- The benchmark runs each scenario without changing benchmark code.
-- Scenario issues can reference this input core without restating shared terminology.
+- The evaluator's internal test implementation passes each scenario checker.
+- The benchmark owns the measured interval, operation counts, and output JSON.
+- Candidate stdout is diagnostic and cannot supply correctness or performance
+  results.

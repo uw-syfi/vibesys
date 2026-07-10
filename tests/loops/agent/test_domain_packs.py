@@ -74,6 +74,11 @@ def test_registered_domains_carry_environment_hooks():
     assert isinstance(DOMAINS[DomainName.GENERIC].environment_hooks, NoopEnvironmentHooks)
 
 
+def test_domains_declare_torch_profiler_compatibility():
+    assert DOMAINS[DomainName.LLM_SERVING].supports_torch_profiler
+    assert not DOMAINS[DomainName.GENERIC].supports_torch_profiler
+
+
 def test_resolve_unknown_raises():
     with pytest.raises(TypeError) as exc:
         resolve_domain("does-not-exist-xyz")
@@ -149,12 +154,11 @@ def test_render_role_branches_on_context():
 
 
 def test_render_role_branches_on_interface(tmp_path: Path):
-    """`interface` reaches domain role files, so a language-agnostic pack can drop
-    its in-process/Python-only gates under `--interface service`."""
+    """The process boundary reaches domain role files."""
     domain_dir = tmp_path / "domain"
     domain_dir.mkdir()
     (domain_dir / "judge.md").write_text(
-        '{% if interface != "service" %}IN_PROCESS_GATE{% endif %}\n'
+        '{% if interface == "inprocess" %}IN_PROCESS_GATE{% endif %}\n'
     )
     d = _temporary_domain(domain_dir)
     inprocess = render_domain_section(d, DomainRole.JUDGE, interface="inprocess")

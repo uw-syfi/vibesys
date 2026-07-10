@@ -16,6 +16,9 @@ path.
   `vibeserve.input.toml`, optional `reference/`, evaluator source directories,
   and `README.md`. Evaluator commands are declared by the manifest and may be
   problem-specific.
+- Put nontrivial candidate-facing APIs, ABIs, ownership rules, and service
+  protocols in `CANDIDATE_CONTRACT.md`; keep evaluator internals and trust-model
+  discussion in a separate design document.
 - Keep compatibility wrappers thin. New behavior should live in the canonical
   implementation module or reusable library.
 

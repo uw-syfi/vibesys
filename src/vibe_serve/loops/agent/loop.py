@@ -9,6 +9,8 @@ collect kernel-level data first.
 from __future__ import annotations
 
 import json
+import math
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +21,7 @@ from vibe_serve.context import _RunContext
 from vibe_serve.domains.base import DEFAULT_DOMAIN, DomainDefinition, DomainName, DomainRole
 from vibe_serve.domains.registry import resolve_domain
 from vibe_serve.domains.rendering import render_domain_section
+from vibe_serve.input_manifest import BenchmarkResult
 from vibe_serve.loops.agent import issue_board
 from vibe_serve.loops.profiler import invoke_profiler
 from vibe_serve.profilers import ProfilerKind, require_profiler_kind
@@ -37,10 +40,8 @@ from vibe_serve.schemas import (
     Verdict,
 )
 
-# Implementation-language modes, selected by ``--interface`` (not a user-facing
-# language choice). ``inprocess`` pins Python so the accuracy checker can import
-# ``main.py`` directly; ``service`` evaluates the artifact only over the wire and
-# leaves the language to the agent.
+# Candidate process boundaries selected by ``--interface``. Language, tooling,
+# and artifact requirements belong to the selected domain and input bundle.
 _INTERFACES = ("inprocess", "service")
 DEFAULT_INTERFACE = "inprocess"
 
@@ -256,20 +257,17 @@ def _run_pre_round_decision(
     return decision
 
 
-def _profiler_prompt_template(profiler_kind: ProfilerKind, interface: str) -> str:
-    """Pick the standalone-profiler prompt for the run's profiler + interface.
-
-    ``torch`` is a white-box, in-process PyTorch profiler that imports the
-    implementation; under ``--interface service`` the artifact is exercised only
-    over the wire (and may not even be Python), so it falls back to the black-box
-    ``nsys`` profiler. This mirrors the single-agent prompt's
-    ``profiler_kind == "torch" and interface != "service"`` guard so both inner
-    loops treat the torch profiler the same way.
-    """
+def _profiler_prompt_template(
+    profiler_kind: ProfilerKind,
+    interface: str,
+    *,
+    supports_torch_profiler: bool = False,
+) -> str:
+    """Pick a profiler prompt compatible with the boundary and domain."""
     kind = require_profiler_kind(profiler_kind)
     if kind is ProfilerKind.NONE:
         raise ValueError("No profiler prompt exists when profiling is disabled.")
-    if interface == "service" and kind is ProfilerKind.TORCH:
+    if kind is ProfilerKind.TORCH and (interface != "inprocess" or not supports_torch_profiler):
         kind = ProfilerKind.NSYS
     return {
         ProfilerKind.NSYS: "profiler_prompt_nsys.j2",
@@ -289,7 +287,11 @@ def _run_profiler(
     progress_path: Path,
     objective: str,
 ) -> ProfilerSummary | None:
-    template = _profiler_prompt_template(ctx.profiler_kind, interface)
+    template = _profiler_prompt_template(
+        ctx.profiler_kind,
+        interface,
+        supports_torch_profiler=domain_definition.supports_torch_profiler,
+    )
     domain_profiler = render_domain_section(
         domain_definition,
         DomainRole.PROFILER,
@@ -328,8 +330,8 @@ def _domain_render_context(
     to pass to which role. Variables that don't apply to the current run are
     falsy (``benchmark_command`` / ``accuracy_command`` when nothing is attached),
     so ``{% if benchmark_command %}`` works everywhere. ``interface`` lets a
-    language-agnostic pack drop its in-process/Python-specific gates under
-    ``--interface service``. See ``vibe_serve/domains/README.md``.
+    domain distinguish direct invocation from an over-the-wire service without
+    treating that boundary as a language choice. See ``vibe_serve/domains/README.md``.
     """
     return {
         "modality": modality,
@@ -533,6 +535,7 @@ def _run_single_agent_round(
         objective=objective,
         profile_focus=profile_focus,
         profiler_kind=ctx.profiler_kind,
+        supports_torch_profiler=domain_definition.supports_torch_profiler,
         benchmark_command=ctx.judge_benchmark_command,
         accuracy_command=ctx.judge_accuracy_command,
         runtime_notes=ctx.run_environment_view.prompt_notes,
@@ -576,6 +579,198 @@ def _profiler_summary_from_single_agent(
     )
 
 
+def _run_framework_accuracy_gate(
+    ctx: _RunContext,
+    *,
+    round_number: int,
+    retry: int,
+    progress_path: Path,
+) -> str | None:
+    """Run the immutable manifest accuracy command after an agent reports PASS."""
+    changed = ctx.trusted_input_changes()
+    command = ctx.judge_accuracy_command
+    if changed:
+        feedback = "Evaluator-owned files were modified: " + ", ".join(changed)
+        issue_board.append_framework_accuracy_gate(
+            progress_path,
+            round_number,
+            retry,
+            command=command or "(not configured)",
+            passed=False,
+            output=feedback,
+        )
+        ctx.snapshot_workspace(f"round-{round_number}-retry-{retry}-framework-accuracy")
+        ctx.lprint(f"[framework-accuracy] FAIL: {feedback}")
+        return feedback
+    if not command:
+        return None
+
+    ctx.lprint(f"[framework-accuracy] running: {command}")
+    try:
+        result = ctx.judge_backend.execute(command)
+        output = result.output.strip()
+        passed = result.exit_code == 0
+    except Exception as exc:
+        output = f"accuracy command could not be executed: {exc}"
+        passed = False
+
+    changed_after_execution = ctx.trusted_input_changes()
+    if changed_after_execution:
+        mutation = "Evaluator-owned files changed during accuracy execution: " + ", ".join(
+            changed_after_execution
+        )
+        output = f"{output}\n{mutation}".strip()
+        passed = False
+
+    issue_board.append_framework_accuracy_gate(
+        progress_path,
+        round_number,
+        retry,
+        command=command,
+        passed=passed,
+        output=output[-8000:],
+    )
+    ctx.snapshot_workspace(f"round-{round_number}-retry-{retry}-framework-accuracy")
+    if passed:
+        ctx.lprint("[framework-accuracy] PASS")
+        return None
+
+    feedback = f"Framework accuracy gate failed.\n{output[-4000:]}"
+    ctx.lprint(f"[framework-accuracy] FAIL: {output[-1000:]}")
+    return feedback
+
+
+_FRAMEWORK_BENCHMARK_MARKER = "__VIBESERVE_FRAMEWORK_BENCHMARK_JSON__"
+
+
+def _metric_values(value: object, metric: str) -> list[object]:
+    if isinstance(value, dict):
+        matches = [item for key, item in value.items() if key == metric]
+        for item in value.values():
+            matches.extend(_metric_values(item, metric))
+        return matches
+    if isinstance(value, list):
+        matches: list[object] = []
+        for item in value:
+            matches.extend(_metric_values(item, metric))
+        return matches
+    return []
+
+
+def _run_framework_benchmark(
+    ctx: _RunContext,
+    *,
+    result_spec: BenchmarkResult | None,
+    round_number: int,
+    retry: int,
+    progress_path: Path,
+) -> tuple[str | None, float | None]:
+    """Run and parse an opt-in trusted benchmark result contract."""
+    if result_spec is None:
+        return None, None
+
+    base_command = ctx.judge_benchmark_command
+    if not base_command:
+        return "Benchmark result contract is configured without a benchmark command.", None
+
+    output_path = f"/tmp/vibeserve-framework-benchmark-{round_number}-{retry}.json"
+    command = (
+        f"{base_command} {shlex.quote(result_spec.json_argument)} {shlex.quote(output_path)}"
+        f" && printf '\\n{_FRAMEWORK_BENCHMARK_MARKER}\\n'"
+        f" && cat {shlex.quote(output_path)}"
+    )
+    ctx.lprint(f"[framework-benchmark] running: {base_command}")
+    metric_value: float | None = None
+    changed_before_execution = ctx.trusted_input_changes()
+    if changed_before_execution:
+        output = "Evaluator-owned files were modified: " + ", ".join(changed_before_execution)
+        passed = False
+    else:
+        try:
+            result = ctx.judge_backend.execute(command)
+            output = result.output.strip()
+            passed = result.exit_code == 0
+        except Exception as exc:
+            output = f"benchmark command could not be executed: {exc}"
+            passed = False
+
+    if passed:
+        _, marker, encoded = output.rpartition(_FRAMEWORK_BENCHMARK_MARKER)
+        if not marker:
+            output = f"{output}\nbenchmark output did not include its result JSON".strip()
+            passed = False
+        else:
+            try:
+                payload = json.loads(encoded.strip())
+                values = _metric_values(payload, result_spec.metric)
+                if len(values) != 1:
+                    raise ValueError(
+                        f"expected exactly one {result_spec.metric!r} field, found {len(values)}"
+                    )
+                value = values[0]
+                if isinstance(value, bool) or not isinstance(value, int | float):
+                    raise ValueError(f"{result_spec.metric!r} is not numeric")
+                metric_value = float(value)
+                if not math.isfinite(metric_value):
+                    raise ValueError(f"{result_spec.metric!r} is not finite")
+            except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                output = f"{output}\ninvalid benchmark result: {exc}".strip()
+                passed = False
+
+    changed = [] if changed_before_execution else ctx.trusted_input_changes()
+    if changed:
+        output = (
+            f"{output}\nEvaluator-owned files changed during benchmark execution: "
+            + ", ".join(changed)
+        ).strip()
+        passed = False
+        metric_value = None
+
+    issue_board.append_framework_benchmark(
+        progress_path,
+        round_number,
+        retry,
+        command=base_command,
+        passed=passed,
+        metric_name=result_spec.metric,
+        metric_value=metric_value,
+        output=output[-8000:],
+    )
+    ctx.snapshot_workspace(f"round-{round_number}-retry-{retry}-framework-benchmark")
+    if passed:
+        ctx.lprint(f"[framework-benchmark] PASS: {result_spec.metric}={metric_value}")
+        return None, metric_value
+
+    feedback = f"Framework benchmark failed.\n{output[-4000:]}"
+    ctx.lprint(f"[framework-benchmark] FAIL: {output[-1000:]}")
+    return feedback, None
+
+
+def _run_framework_gates(
+    ctx: _RunContext,
+    *,
+    benchmark_result: BenchmarkResult | None,
+    round_number: int,
+    retry: int,
+    progress_path: Path,
+) -> tuple[str | None, float | None]:
+    feedback = _run_framework_accuracy_gate(
+        ctx,
+        round_number=round_number,
+        retry=retry,
+        progress_path=progress_path,
+    )
+    if feedback is not None:
+        return feedback, None
+    return _run_framework_benchmark(
+        ctx,
+        result_spec=benchmark_result,
+        round_number=round_number,
+        retry=retry,
+        progress_path=progress_path,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -590,6 +785,8 @@ def run_agent_loop(
     objective: str,
     *,
     workspace_seed: Path | None = None,
+    evaluator_path: Path | None = None,
+    benchmark_result: BenchmarkResult | None = None,
     max_rounds: int = 24,
     max_retries_per_round: int = 3,
     start_round: int = 1,
@@ -624,15 +821,15 @@ def run_agent_loop(
       passes are skipped; the prior round's profile output is fed to the
       orchestrator as ``profiler_summary``.
 
-    ``interface`` selects the artifact's evaluation contract and, with it, the
-    implementation language (the user never picks a language directly):
+    ``interface`` selects only the evaluator-to-candidate process boundary:
 
-    - ``"inprocess"`` (default): the accuracy checker imports ``main.py`` in
-      process, so the implementation must be Python; the prompts carry the
-      ``uv`` toolchain and the ``VibeServeModel`` import contract.
-    - ``"service"``: the artifact is exercised only over its network interface,
-      so the agent may implement it in any language. The in-process contract and
-      the Python/torch tooling are dropped from the prompts.
+    - ``"inprocess"`` (default): evaluator-owned code invokes the candidate
+      directly using the input-defined contract.
+    - ``"service"``: evaluator-owned code communicates with a running service
+      through its network interface.
+
+    Language, tooling, and artifact requirements come from the domain and input
+    bundle rather than the process-boundary mode.
     """
     if inner_loop not in _INNER_LOOPS:
         raise ValueError(
@@ -641,9 +838,7 @@ def run_agent_loop(
     if interface not in _INTERFACES:
         raise ValueError(f"Unknown interface {interface!r}; choose from {', '.join(_INTERFACES)}")
     # Resolve the registered domain once (fail fast on an unknown name). The
-    # per-role files are rendered into the prompts at each call site. The
-    # implementation language is not a pack — ``interface`` carries it
-    # (``inprocess`` pins Python; ``service`` leaves it to the agent).
+    # per-role files carry language, tooling, and use-case-specific contracts.
     domain_definition = resolve_domain(domain)
     if modality is None and domain_definition.name is DomainName.LLM_SERVING:
         modality = "text_generation"
@@ -655,6 +850,7 @@ def run_agent_loop(
         accuracy_command=accuracy_command,
         benchmark_command=benchmark_command,
         workspace_seed=workspace_seed,
+        evaluator_path=evaluator_path,
         existing=existing,
         debug=debug,
         nsys_profiler=nsys_profiler,
@@ -776,6 +972,7 @@ def run_agent_loop(
                 feedback: str | None = None
                 passed = False
                 single_agent_response: SingleAgentRoundResponse | None = None
+                framework_perf_metric: float | None = None
                 for retry in range(1, max_retries_per_round + 1):
                     ctx.lprint(f"\n--- attempt {retry}/{max_retries_per_round} ---\n")
                     if inner_loop == "multi-agent":
@@ -804,8 +1001,18 @@ def run_agent_loop(
                             objective=objective,
                         )
                         if verdict.verdict == Verdict.PASS:
-                            passed = True
-                            break
+                            gate_feedback, framework_perf_metric = _run_framework_gates(
+                                ctx,
+                                benchmark_result=benchmark_result,
+                                round_number=round_number,
+                                retry=retry,
+                                progress_path=progress_path,
+                            )
+                            if gate_feedback is None:
+                                passed = True
+                                break
+                            feedback = gate_feedback
+                            continue
                         feedback = verdict.feedback
                     else:
                         ctx.reselect_gpu()
@@ -823,8 +1030,18 @@ def run_agent_loop(
                             profile_focus=last_profile_focus,
                         )
                         if single_agent_response.verdict == Verdict.PASS:
-                            passed = True
-                            break
+                            gate_feedback, framework_perf_metric = _run_framework_gates(
+                                ctx,
+                                benchmark_result=benchmark_result,
+                                round_number=round_number,
+                                retry=retry,
+                                progress_path=progress_path,
+                            )
+                            if gate_feedback is None:
+                                passed = True
+                                break
+                            feedback = gate_feedback
+                            continue
                         feedback = single_agent_response.feedback
 
                 # --- Record round result & update carry-over ---
@@ -838,6 +1055,11 @@ def run_agent_loop(
                 # PREVIOUS round's profile (fed forward to the orchestrator),
                 # so this round's perf comes from `single_agent_response` instead.
                 if inner_loop == "single-agent":
+                    if single_agent_response is not None and framework_perf_metric is not None:
+                        single_agent_response.perf_metric = framework_perf_metric
+                        single_agent_response.perf_unit = (
+                            benchmark_result.metric if benchmark_result else None
+                        )
                     profile_skipped = single_agent_response is None or (
                         single_agent_response.perf_metric is None
                     )
@@ -856,13 +1078,17 @@ def run_agent_loop(
                     if single_agent_response is not None:
                         last_single_agent_response = single_agent_response
                 else:
-                    profile_skipped = profiler_summary is None
-                    perf_metric = (
-                        profiler_summary.perf_metric if (profiler_summary and passed) else None
-                    )
-                    perf_unit = (
-                        profiler_summary.perf_unit if (profiler_summary and passed) else None
-                    )
+                    profile_skipped = profiler_summary is None and framework_perf_metric is None
+                    if framework_perf_metric is not None and passed:
+                        perf_metric = framework_perf_metric
+                        perf_unit = benchmark_result.metric if benchmark_result else None
+                    else:
+                        perf_metric = (
+                            profiler_summary.perf_metric if (profiler_summary and passed) else None
+                        )
+                        perf_unit = (
+                            profiler_summary.perf_unit if (profiler_summary and passed) else None
+                        )
                 records.append(
                     _RoundRecord(
                         round_number=round_number,

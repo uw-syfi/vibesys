@@ -105,6 +105,7 @@ class _RunContext:
         accuracy_command: str,
         benchmark_command: str,
         workspace_seed: Path | None = None,
+        evaluator_path: Path | None = None,
         existing: bool = False,
         debug: bool = False,
         nsys_profiler: str | None = None,
@@ -158,6 +159,7 @@ class _RunContext:
             ".cache",
             ".venv",
             "exp_env",
+            "target",
         }
         self.debug = debug
         self.git_tracking = git_tracking
@@ -179,6 +181,7 @@ class _RunContext:
 
         self.input_path = self._coerce_dir_path(input_path, "--input")
         self.workspace_seed_path = self._coerce_dir(workspace_seed, "workspace.seed")
+        self.evaluator_path = self._coerce_dir(evaluator_path, "evaluator.source")
         self.accuracy_command = accuracy_command
         self.benchmark_command = benchmark_command
         self.nsys_profiler_path = self._coerce_dir_path(nsys_profiler, "--nsys-profiler")
@@ -307,6 +310,18 @@ class _RunContext:
                     input_dir,
                     self.workspace,
                     extra_excludes=self.environment_patch.copy_excludes,
+                )
+
+            if self.evaluator_path is not None:
+                evaluator_root = self.workspace / "_evaluator"
+                if evaluator_root.exists() or evaluator_root.is_symlink():
+                    raise ValueError(
+                        "_evaluator is reserved for the manifest-declared evaluator source"
+                    )
+                self._copy_excluding_extras(
+                    self.evaluator_path,
+                    evaluator_root / self.evaluator_path.name,
+                    respect_source_gitignore=True,
                 )
 
             for src in skill_source_paths:
@@ -737,6 +752,46 @@ class _RunContext:
         "neuroncc_compile_workdir/",
         "neuron-compile-cache/",
     )
+
+    _TRUSTED_INPUT_PATHS: tuple[str, ...] = (
+        "OBJECTIVE.md",
+        "vibeserve.input.toml",
+        "reference",
+        "accuracy_checker",
+        "benchmark",
+        "_input_libs",
+        "_evaluator",
+    )
+
+    def trusted_input_changes(self) -> list[str]:
+        """Return evaluator-owned paths changed since workspace initialization."""
+        if not self.git_tracking:
+            return []
+
+        root = self._git_run(["git", "rev-list", "--max-parents=0", "HEAD"])
+        root_commit = root.stdout.decode().strip()
+        if not root_commit:
+            return ["unable to resolve the initial workspace commit"]
+
+        pathspec = ["--", *self._TRUSTED_INPUT_PATHS]
+        committed = self._git_run(["git", "diff", "--name-only", f"{root_commit}..HEAD", *pathspec])
+        pending = self._git_run(
+            [
+                "git",
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                *pathspec,
+            ]
+        )
+
+        changes = {line for line in committed.stdout.decode(errors="replace").splitlines() if line}
+        changes.update(
+            line[3:]
+            for line in pending.stdout.decode(errors="replace").splitlines()
+            if len(line) > 3
+        )
+        return sorted(changes)
 
     def _workspace_gitignore(self) -> str:
         """Contents of the workspace ``.gitignore`` (excluded dirs + artifacts)."""

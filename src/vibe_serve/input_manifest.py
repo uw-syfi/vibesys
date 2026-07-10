@@ -52,6 +52,52 @@ class WorkspaceInput(BaseModel):
         return value
 
 
+class EvaluatorInput(BaseModel):
+    """Trusted evaluator source copied into a fresh candidate workspace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str
+
+    @field_validator("source")
+    @classmethod
+    def _relative_source(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("source must be a non-empty path")
+        if Path(value).is_absolute():
+            raise ValueError("source must be relative to the input bundle")
+        return value
+
+
+class BenchmarkResult(BaseModel):
+    """Machine-readable scalar result emitted by a benchmark command."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    json_argument: str
+    metric: str
+
+    @field_validator("json_argument")
+    @classmethod
+    def _single_option(cls, value: str) -> str:
+        if not value.startswith("-") or any(character.isspace() for character in value):
+            raise ValueError("json_argument must be one option-style argv element")
+        return value
+
+    @field_validator("metric")
+    @classmethod
+    def _metric_name(cls, value: str) -> str:
+        if not value or any(character.isspace() for character in value):
+            raise ValueError("metric must be a non-empty JSON field name without whitespace")
+        return value
+
+
+class BenchmarkCommand(InputCommand):
+    """Benchmark command with an optional trusted scalar-result contract."""
+
+    result: BenchmarkResult | None = None
+
+
 class InputManifest(BaseModel):
     """Versioned evaluator-command manifest for an input bundle."""
 
@@ -59,8 +105,9 @@ class InputManifest(BaseModel):
 
     version: Literal[1]
     accuracy: InputCommand
-    benchmark: InputCommand
+    benchmark: BenchmarkCommand
     workspace: WorkspaceInput | None = None
+    evaluator: EvaluatorInput | None = None
 
 
 class InputBundle(BaseModel):
@@ -73,6 +120,7 @@ class InputBundle(BaseModel):
     objective_path: Path
     reference_path: Path | None
     workspace_seed_path: Path | None
+    evaluator_path: Path | None
     manifest: InputManifest
 
     @property
@@ -94,6 +142,10 @@ class InputBundle(BaseModel):
     @property
     def benchmark_command_display(self) -> str:
         return self.manifest.benchmark.display()
+
+    @property
+    def benchmark_result(self) -> BenchmarkResult | None:
+        return self.manifest.benchmark.result
 
 
 def load_input_bundle(path: Path, *, project_root: Path | None = None) -> InputBundle:
@@ -161,11 +213,28 @@ def load_input_bundle(path: Path, *, project_root: Path | None = None) -> InputB
         if not workspace_seed_path.is_dir():
             raise ValueError(f"workspace.seed path is not a directory: {workspace_seed_path}")
 
+    evaluator_path = None
+    if manifest.evaluator is not None:
+        evaluators_root = (project_root / "examples" / "evaluators").resolve()
+        evaluator_path = (root / manifest.evaluator.source).resolve()
+        try:
+            evaluator_path.relative_to(evaluators_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"evaluator.source must resolve inside {evaluators_root}: "
+                f"{manifest.evaluator.source}"
+            ) from exc
+        if not evaluator_path.exists():
+            raise FileNotFoundError(f"evaluator.source path does not exist: {evaluator_path}")
+        if not evaluator_path.is_dir():
+            raise ValueError(f"evaluator.source path is not a directory: {evaluator_path}")
+
     return InputBundle(
         root=root,
         manifest_path=manifest_path,
         objective_path=objective_path,
         reference_path=reference_path,
         workspace_seed_path=workspace_seed_path,
+        evaluator_path=evaluator_path,
         manifest=manifest,
     )

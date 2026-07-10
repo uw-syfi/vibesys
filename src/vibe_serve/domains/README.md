@@ -69,7 +69,7 @@ use any of these in any file without tracking which role you're in:
 | Variable | Meaning |
 |----------|---------|
 | `modality` | The `--modality` value (e.g. `text_generation`). |
-| `interface` | The `--interface` value: `inprocess` (checker imports the code; Python) or `service` (exercised over the wire; any language). Gate in-process/Python-only requirements with `{% if interface != "service" %}`. |
+| `interface` | The `--interface` value: `inprocess` (direct invocation inside an evaluator process) or `service` (over the wire). It does not imply a language or artifact format. |
 | `reference_path` | Path to the reference implementation. |
 | `benchmark_command` | Benchmark command declared by the input manifest, or falsy if no benchmark is attached. |
 | `accuracy_command` | Accuracy-checker command declared by the input manifest, or falsy if not attached. |
@@ -113,10 +113,8 @@ stay tied to the same domain identity.
 
 ## Scope
 
-Domains cover **implementer + judge + profiler (+ single-agent + orchestrator) context**.
-One adjacent concern is deliberately *not* part of a domain package:
-
-- **Language/tooling** (e.g. "use `uv`/`pytest`") is decided by the run's
-  `--interface` mode, not the domain: `inprocess` pins Python (uv toolchain +
-  the in-process accuracy-checker contract); `service` leaves the language to
-  the agent. It is not a user-facing pack.
+Domains cover **implementer + judge + profiler (+ single-agent + orchestrator)
+context**, including language and tooling requirements shared by that problem
+space. More specific callable APIs, ABIs, artifacts, ownership rules, and
+service protocols belong to the input bundle's objective and candidate-contract
+documentation. The `--interface` mode describes only the process boundary.

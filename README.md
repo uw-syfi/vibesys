@@ -92,27 +92,28 @@ from `implementer.md` plus `judge.md`.
 
 Full authoring guide: [`src/vibe_serve/domains/README.md`](src/vibe_serve/domains/README.md).
 
-## Interface — how the artifact is evaluated (and which language)
+## Interface: how the artifact is evaluated
 
 See the full flag-composition guide in [`docs/cli-flags.md`](docs/cli-flags.md).
 
-The implementation language is **not** a user choice. It falls out of `--interface`,
-which sets the contract by which the accuracy checker and benchmark reach the
-built artifact:
+`--interface` describes only how evaluator-owned code reaches the candidate.
+The selected domain and input bundle define the implementation language,
+toolchain, artifact, and callable contract:
 
 ```bash
-vibe-serve --outer-loop agent --interface inprocess ...   # default: in-process Python
-vibe-serve --outer-loop agent --interface service ...     # over-the-wire, any language
+vibe-serve --outer-loop agent --interface inprocess ...   # default: direct invocation
+vibe-serve --outer-loop agent --interface service ...     # network service
 ```
 
-- **`inprocess`** (default): the accuracy checker imports `main.py` directly, so
-  the implementation is Python. The prompts carry the `uv` toolchain and the
-  `VibeServeModel` import contract — vibeserve's original behaviour, unchanged.
-- **`service`**: the artifact is exercised only through its network interface, so
-  the agent picks whatever language and toolchain fit. The in-process contract and
-  the Python/torch tooling drop out of the prompts; supply an accuracy checker and
-  benchmark that probe the running service over the wire (e.g. HTTP, or the YCSB
-  harness for a key-value store).
+- **`inprocess`** (default): evaluator-owned code invokes the candidate directly
+  inside an evaluator process. This can be a Python module, a C ABI shared
+  library, or another input-defined callable contract.
+- **`service`**: evaluator-owned code communicates with a running candidate over
+  a network protocol defined by the input bundle.
+
+Neither mode implies a programming language. Domain prompts may define shared
+language or toolchain requirements, while each input's candidate contract defines
+the exact artifact and API or protocol.
 
 ## Per-target inputs
 

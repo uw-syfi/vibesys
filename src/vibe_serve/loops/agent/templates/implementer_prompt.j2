@@ -19,9 +19,14 @@
 
 ## Workspace
 
-Your working directory is the shared experiment workspace. All files you create must be here. The reference implementation is at `{{ reference_path }}`.
+Your working directory is the shared experiment workspace. All files you create must be here.
+{% if reference_path and reference_path != "." %}
+The reference implementation is at `{{ reference_path }}`.
+{% else %}
+No separate reference implementation is provided. Treat `OBJECTIVE.md` and the input-owned contract files it names as authoritative.
+{% endif %}
 
-{% include "_interface/language.j2" %}
+{% include "_interface/execution.j2" %}
 {% if domain_implementer %}
 {{ domain_implementer }}
 

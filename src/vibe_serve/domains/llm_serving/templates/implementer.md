@@ -1,5 +1,11 @@
 Model weights are at `/model` — do NOT download models.
 
+## Python toolchain
+
+Use `uv` for Python package management. Run `uv init` if `pyproject.toml`
+doesn't exist yet, and `uv add` for new dependencies. Always execute Python
+scripts via `uv run`.
+
 The Judge also runs a standard accuracy check and benchmark sanity test in addition to this round's pass criteria. Your implementation must pass those too.
 
 ## Required: read the relevant skill BEFORE writing code
