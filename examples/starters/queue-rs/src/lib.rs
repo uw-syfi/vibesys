@@ -1,10 +1,9 @@
-// Pointer validity and lifecycle requirements are defined by CANDIDATE_CONTRACT.md.
-#![allow(clippy::missing_safety_doc)]
+#![deny(unsafe_op_in_unsafe_fn)]
+
+mod ffi;
 
 use std::collections::VecDeque;
-use std::ptr;
-use std::slice;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 const ABI_VERSION: u32 = 1;
 const STATUS_OK: u32 = 0;
@@ -13,190 +12,151 @@ const STATUS_EMPTY: u32 = 2;
 const STATUS_INVALID: u32 = 3;
 const STATUS_INTERNAL_ERROR: u32 = 4;
 
-pub struct Queue {
+struct QueueState {
     capacity: usize,
     max_value_size: usize,
-    producer_count: u32,
-    consumer_count: u32,
     values: Mutex<VecDeque<Vec<u8>>>,
 }
 
+pub struct Queue {
+    producer_count: u32,
+    consumer_count: u32,
+    state: Arc<QueueState>,
+}
+
+impl Queue {
+    fn new(
+        capacity: u64,
+        max_value_size: u64,
+        producer_count: u32,
+        consumer_count: u32,
+    ) -> Result<Self, u32> {
+        if capacity == 0 || max_value_size == 0 || producer_count == 0 || consumer_count == 0 {
+            return Err(STATUS_INVALID);
+        }
+
+        let capacity = usize::try_from(capacity).map_err(|_| STATUS_INVALID)?;
+        let max_value_size = usize::try_from(max_value_size).map_err(|_| STATUS_INVALID)?;
+        let mut values = VecDeque::new();
+        values
+            .try_reserve_exact(capacity)
+            .map_err(|_| STATUS_INTERNAL_ERROR)?;
+
+        Ok(Self {
+            producer_count,
+            consumer_count,
+            state: Arc::new(QueueState {
+                capacity,
+                max_value_size,
+                values: Mutex::new(values),
+            }),
+        })
+    }
+
+    fn producer(&self, id: u32) -> Result<Producer, u32> {
+        if id >= self.producer_count {
+            return Err(STATUS_INVALID);
+        }
+        Ok(Producer {
+            state: Arc::clone(&self.state),
+        })
+    }
+
+    fn consumer(&self, id: u32) -> Result<Consumer, u32> {
+        if id >= self.consumer_count {
+            return Err(STATUS_INVALID);
+        }
+        Ok(Consumer {
+            state: Arc::clone(&self.state),
+        })
+    }
+}
+
 pub struct Producer {
-    queue: *mut Queue,
+    state: Arc<QueueState>,
+}
+
+impl Producer {
+    fn try_enqueue(&self, data: &[u8]) -> u32 {
+        if data.len() > self.state.max_value_size {
+            return STATUS_INVALID;
+        }
+
+        let Ok(mut values) = self.state.values.lock() else {
+            return STATUS_INTERNAL_ERROR;
+        };
+        if values.len() == self.state.capacity {
+            return STATUS_FULL;
+        }
+
+        let mut value = Vec::new();
+        if value.try_reserve_exact(data.len()).is_err() {
+            return STATUS_INTERNAL_ERROR;
+        }
+        value.extend_from_slice(data);
+        values.push_back(value);
+        STATUS_OK
+    }
 }
 
 pub struct Consumer {
-    queue: *mut Queue,
+    state: Arc<QueueState>,
 }
 
-#[no_mangle]
-pub extern "C" fn vsq_abi_version() -> u32 {
-    ABI_VERSION
-}
+impl Consumer {
+    fn try_dequeue(&self, output: &mut [u8]) -> Result<usize, u32> {
+        let Ok(mut values) = self.state.values.lock() else {
+            return Err(STATUS_INTERNAL_ERROR);
+        };
+        let Some(value) = values.front() else {
+            return Err(STATUS_EMPTY);
+        };
+        if value.len() > output.len() {
+            return Err(STATUS_INVALID);
+        }
 
-#[no_mangle]
-pub unsafe extern "C" fn vsq_queue_create(
-    capacity: u64,
-    max_value_size: u64,
-    producer_count: u32,
-    consumer_count: u32,
-    queue_out: *mut *mut Queue,
-) -> u32 {
-    if capacity == 0
-        || max_value_size == 0
-        || producer_count == 0
-        || consumer_count == 0
-        || queue_out.is_null()
-    {
-        return STATUS_INVALID;
-    }
-
-    let Ok(capacity) = usize::try_from(capacity) else {
-        return STATUS_INVALID;
-    };
-    let Ok(max_value_size) = usize::try_from(max_value_size) else {
-        return STATUS_INVALID;
-    };
-
-    let mut values = VecDeque::new();
-    if values.try_reserve_exact(capacity).is_err() {
-        return STATUS_INTERNAL_ERROR;
-    }
-    let queue = Box::new(Queue {
-        capacity,
-        max_value_size,
-        producer_count,
-        consumer_count,
-        values: Mutex::new(values),
-    });
-    unsafe { *queue_out = Box::into_raw(queue) };
-    STATUS_OK
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn vsq_queue_destroy(queue: *mut Queue) {
-    if !queue.is_null() {
-        drop(unsafe { Box::from_raw(queue) });
+        output[..value.len()].copy_from_slice(value);
+        let length = value.len();
+        values.pop_front();
+        Ok(length)
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn vsq_producer_create(
-    queue: *mut Queue,
-    producer_id: u32,
-    producer_out: *mut *mut Producer,
-) -> u32 {
-    if queue.is_null()
-        || producer_out.is_null()
-        || producer_id >= unsafe { (*queue).producer_count }
-    {
-        return STATUS_INVALID;
-    }
-    let producer = Box::new(Producer { queue });
-    unsafe { *producer_out = Box::into_raw(producer) };
-    STATUS_OK
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[no_mangle]
-pub unsafe extern "C" fn vsq_producer_destroy(producer: *mut Producer) {
-    if !producer.is_null() {
-        drop(unsafe { Box::from_raw(producer) });
-    }
-}
+    #[test]
+    fn safe_core_is_bounded_fifo() {
+        let queue = Queue::new(2, 8, 1, 1).unwrap();
+        let producer = queue.producer(0).unwrap();
+        let consumer = queue.consumer(0).unwrap();
 
-#[no_mangle]
-pub unsafe extern "C" fn vsq_consumer_create(
-    queue: *mut Queue,
-    consumer_id: u32,
-    consumer_out: *mut *mut Consumer,
-) -> u32 {
-    if queue.is_null()
-        || consumer_out.is_null()
-        || consumer_id >= unsafe { (*queue).consumer_count }
-    {
-        return STATUS_INVALID;
-    }
-    let consumer = Box::new(Consumer { queue });
-    unsafe { *consumer_out = Box::into_raw(consumer) };
-    STATUS_OK
-}
+        assert_eq!(producer.try_enqueue(b"first"), STATUS_OK);
+        assert_eq!(producer.try_enqueue(b"second"), STATUS_OK);
+        assert_eq!(producer.try_enqueue(b"third"), STATUS_FULL);
 
-#[no_mangle]
-pub unsafe extern "C" fn vsq_consumer_destroy(consumer: *mut Consumer) {
-    if !consumer.is_null() {
-        drop(unsafe { Box::from_raw(consumer) });
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn vsq_try_enqueue(
-    producer: *mut Producer,
-    data: *const u8,
-    length: u64,
-) -> u32 {
-    if producer.is_null() || (data.is_null() && length != 0) {
-        return STATUS_INVALID;
-    }
-    let queue = unsafe { (*producer).queue };
-    if queue.is_null() {
-        return STATUS_INVALID;
-    }
-    let Ok(length) = usize::try_from(length) else {
-        return STATUS_INVALID;
-    };
-    if length > unsafe { (*queue).max_value_size } {
-        return STATUS_INVALID;
+        let mut output = [0_u8; 8];
+        assert_eq!(consumer.try_dequeue(&mut output), Ok(5));
+        assert_eq!(&output[..5], b"first");
+        assert_eq!(consumer.try_dequeue(&mut output), Ok(6));
+        assert_eq!(&output[..6], b"second");
+        assert_eq!(consumer.try_dequeue(&mut output), Err(STATUS_EMPTY));
     }
 
-    let Ok(mut values) = (unsafe { (*queue).values.lock() }) else {
-        return STATUS_INTERNAL_ERROR;
-    };
-    if values.len() == unsafe { (*queue).capacity } {
-        return STATUS_FULL;
-    }
+    #[test]
+    fn failed_dequeue_leaves_value_and_output_unchanged() {
+        let queue = Queue::new(1, 8, 1, 1).unwrap();
+        let producer = queue.producer(0).unwrap();
+        let consumer = queue.consumer(0).unwrap();
+        assert_eq!(producer.try_enqueue(b"value"), STATUS_OK);
 
-    let mut value = Vec::new();
-    if value.try_reserve_exact(length).is_err() {
-        return STATUS_INTERNAL_ERROR;
-    }
-    if length != 0 {
-        value.extend_from_slice(unsafe { slice::from_raw_parts(data, length) });
-    }
-    values.push_back(value);
-    STATUS_OK
-}
+        let mut short = [0xA5_u8; 4];
+        assert_eq!(consumer.try_dequeue(&mut short), Err(STATUS_INVALID));
+        assert_eq!(short, [0xA5; 4]);
 
-#[no_mangle]
-pub unsafe extern "C" fn vsq_try_dequeue(
-    consumer: *mut Consumer,
-    output: *mut u8,
-    output_capacity: u64,
-    output_length: *mut u64,
-) -> u32 {
-    if consumer.is_null() || output_length.is_null() {
-        return STATUS_INVALID;
+        let mut output = [0_u8; 8];
+        assert_eq!(consumer.try_dequeue(&mut output), Ok(5));
+        assert_eq!(&output[..5], b"value");
     }
-    let queue = unsafe { (*consumer).queue };
-    if queue.is_null() {
-        return STATUS_INVALID;
-    }
-    let Ok(output_capacity) = usize::try_from(output_capacity) else {
-        return STATUS_INVALID;
-    };
-
-    let Ok(mut values) = (unsafe { (*queue).values.lock() }) else {
-        return STATUS_INTERNAL_ERROR;
-    };
-    let Some(value) = values.front() else {
-        return STATUS_EMPTY;
-    };
-    if value.len() > output_capacity || (output.is_null() && !value.is_empty()) {
-        return STATUS_INVALID;
-    }
-    if !value.is_empty() {
-        unsafe { ptr::copy_nonoverlapping(value.as_ptr(), output, value.len()) };
-    }
-    unsafe { *output_length = value.len() as u64 };
-    values.pop_front();
-    STATUS_OK
 }
