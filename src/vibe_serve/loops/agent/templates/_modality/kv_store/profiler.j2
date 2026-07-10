@@ -1,0 +1,25 @@
+## KV store (Redis RESP2) profiling
+
+A CPU-bound TCP server; key axes are **throughput** (ops/sec), **p99 latency** (ms), and **per-core CPU**.
+
+## How to profile
+
+1. Start the server: `./run.sh 6380 &`
+2. Find its PID: `PID=$(lsof -ti tcp:6380 -s tcp:LISTEN)`
+3. Drive load in the background: `uv run python {{ bench_path }}/benchmark.py --port 6380 &`
+4. Sample it:
+   - Python: `py-spy record -o /tmp/profile.svg --pid $PID --duration 10`
+   - Native (C / Rust / Go): `perf record -p $PID -g -- sleep 10 && perf report`
+   - Syscall breakdown (any language, Linux): `strace -c -p $PID -e trace=read,write,epoll_wait`
+5. Kill the server after.
+
+## What to look for
+
+Attribute the wall-clock time: which functions dominate CPU, where the syscalls
+concentrate, and whether one core is pinned while others idle under concurrent
+load. The largest consumer the profile reveals is the next round's target — let
+the measurement pick the optimization, not a prior.
+
+## Performance metric
+
+Headline is **ops/sec** from YCSB Workload A. Set `perf_metric` from the benchmark's machine-readable `PERF_METRIC: <n> ops/sec` line (not the human-readable throughput text); `perf_unit` is `ops/sec`.

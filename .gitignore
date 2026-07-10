@@ -243,6 +243,10 @@ inputs/**/model
 examples/**/model
 examples/**/draft_model
 
+# KV store benchmark: YCSB Redis binding (auto-fetched on first run)
+examples/kv-store/benchmark/ycsb/
+examples/kv-store/benchmark/ycsb-*.tar.gz
+
 # Agent instructions (kept local)
 AGENTS.md
 CLAUDE.md
