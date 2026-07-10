@@ -59,62 +59,10 @@ class MPSCQueue(_BoundedQueue):
     pass
 
 
-class LossyQueue:
-    def __init__(self, capacity):
-        if capacity <= 0:
-            raise ValueError(f"capacity must be > 0, got {capacity}")
-        self.capacity = capacity
-        self._dq = deque(maxlen=capacity)
-        self._lock = threading.Lock()
-
-    def enqueue(self, item, **_):
-        with self._lock:
-            self._dq.append(item)
-        return True
-
-    def dequeue(self, **_):
-        with self._lock:
-            return self._dq.popleft() if self._dq else None
-
-    def size(self):
-        with self._lock:
-            return len(self._dq)
-
-
-class BatchSPSCQueue:
-    def __init__(self, capacity):
-        if capacity <= 0:
-            raise ValueError(f"capacity must be > 0, got {capacity}")
-        self.capacity = capacity
-        self._dq = deque()
-        self._lock = threading.Lock()
-
-    def enqueue(self, item, **_):
-        with self._lock:
-            if len(self._dq) >= self.capacity:
-                return False
-            self._dq.append(item)
-            return True
-
-    def dequeue(self, **_):
-        with self._lock:
-            if not self._dq:
-                return []
-            batch = list(self._dq)
-            self._dq.clear()
-            return batch
-
-    def size(self):
-        with self._lock:
-            return len(self._dq)
-
-
 _SCENARIO_MAP = {
     "spsc": SPSCQueue,
     "mpmc": MPMCQueue,
     "mpsc": MPSCQueue,
-    "lossy": LossyQueue,
-    "batch": BatchSPSCQueue,
 }
 
 

@@ -11,6 +11,7 @@ def test_queue_input_core_contract_drives_reference_scenarios(monkeypatch):
     from queue_input_core.reference import QueueFactory
 
     assert SCENARIOS == list(QUEUE_CONTRACTS)
+    assert set(SCENARIOS) == {"spsc", "mpsc", "mpmc"}
 
     for scenario, contract in QUEUE_CONTRACTS.items():
         queue = QueueFactory(scenario, capacity=contract.default_capacity)
@@ -85,7 +86,7 @@ def test_collect_trace_uses_per_thread_events_and_porcupine_shape(monkeypatch):
 
 def test_focused_queue_inputs_do_not_import_core_main():
     root = Path(__file__).parents[1] / "examples" / "data-structures"
-    focused_inputs = ["queue-spsc", "queue-mpsc", "queue-mpmc", "queue-lossy", "queue-batch"]
+    focused_inputs = ["queue-spsc", "queue-mpsc", "queue-mpmc"]
 
     for input_name in focused_inputs:
         for rel_path in ["accuracy_checker/checker.py", "benchmark/benchmark.py"]:

@@ -12,9 +12,6 @@ class QueueContract:
     default_consumers: int
     configurable_producers: bool
     configurable_consumers: bool
-    linearizable_fifo: bool = False
-    lossy: bool = False
-    batched_dequeue: bool = False
 
 
 QUEUE_CONTRACTS: dict[str, QueueContract] = {
@@ -26,7 +23,6 @@ QUEUE_CONTRACTS: dict[str, QueueContract] = {
         default_consumers=1,
         configurable_producers=False,
         configurable_consumers=False,
-        linearizable_fifo=True,
     ),
     "mpmc": QueueContract(
         name="mpmc",
@@ -36,7 +32,6 @@ QUEUE_CONTRACTS: dict[str, QueueContract] = {
         default_consumers=4,
         configurable_producers=True,
         configurable_consumers=True,
-        linearizable_fifo=True,
     ),
     "mpsc": QueueContract(
         name="mpsc",
@@ -46,27 +41,6 @@ QUEUE_CONTRACTS: dict[str, QueueContract] = {
         default_consumers=1,
         configurable_producers=True,
         configurable_consumers=False,
-        linearizable_fifo=True,
-    ),
-    "lossy": QueueContract(
-        name="lossy",
-        description="single-writer lossy bounded queue",
-        default_capacity=1024,
-        default_producers=1,
-        default_consumers=1,
-        configurable_producers=False,
-        configurable_consumers=False,
-        lossy=True,
-    ),
-    "batch": QueueContract(
-        name="batch",
-        description="single-producer single-consumer batched bounded queue",
-        default_capacity=1024,
-        default_producers=1,
-        default_consumers=1,
-        configurable_producers=False,
-        configurable_consumers=False,
-        batched_dequeue=True,
     ),
 }
 

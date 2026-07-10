@@ -2,7 +2,7 @@
 
 Resolves #43.
 
-Default input for the five initial VibeServe queue scenarios. The reusable
+Default input for the SPSC, MPSC, and MPMC bounded FIFO queue scenarios. The reusable
 reference implementations, correctness checker, and benchmark driver live in
 the `queue-input-core` package under `examples/libs/queue-input-core`; this input
 depends on that package with a uv path dependency.
@@ -16,9 +16,8 @@ depends on that package with a uv path dependency.
 Notes:
 - Use `--use-reference` to validate the bundled reference implementations.
 - Omit `--use-reference` to check a candidate `main.py` exposing `VibeServeQueue`.
-- `spsc`, `mpsc`, and `mpmc` scenarios collect concurrent operation histories and
-  validate linearizability with [Porcupine](https://github.com/anishathalye/porcupine).
-- `lossy` and `batch` scenarios use scenario-specific property checks.
+- Every scenario collects concurrent operation histories and validates
+  linearizability with [Porcupine](https://github.com/anishathalye/porcupine).
 - Go must be installed locally for the Porcupine-backed scenarios.
 
 ## Running the benchmark
@@ -29,6 +28,6 @@ Notes:
 
 ## Acceptance criteria (from #43)
 
-- Each reference implementation passes its scenario correctness checker.
+- Each reference implementation passes its linearizability checker.
 - The benchmark runs each scenario without changing benchmark code.
 - Scenario issues can reference this input core without restating shared terminology.

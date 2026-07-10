@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import subprocess
 import tempfile
 from collections.abc import Iterable, Mapping
@@ -152,64 +151,8 @@ def false_result(message: str, trace: TraceCollection | None = None) -> CheckRes
     return CheckResult(False, message, trace=trace)
 
 
-def check_lossy(cls, contract: QueueContract, config: CheckConfig) -> CheckResult:
-    queue = cls(scenario=contract.name, capacity=config.capacity)
-    rng = random.Random(config.seed)
-    enqueued, dequeued = set(), []
-    for i in range(config.ops):
-        if rng.random() < 0.6:
-            ok = queue.enqueue(i)
-            if not ok:
-                return false_result(f"Lossy enqueue returned False at op {i}")
-            enqueued.add(i)
-        else:
-            x = queue.dequeue()
-            if x is not None:
-                dequeued.append(x)
-        if queue.size() > config.capacity:
-            return false_result(f"size {queue.size()} > capacity {config.capacity}")
-    fabricated = set(dequeued) - enqueued
-    if fabricated:
-        return false_result(f"Lossy returned items never enqueued: {list(fabricated)[:5]}")
-    return CheckResult(
-        True,
-        f"Lossy OK ({config.ops} ops, capacity={config.capacity}, dequeued={len(dequeued)})",
-    )
-
-
-def check_batch(cls, contract: QueueContract, config: CheckConfig) -> CheckResult:
-    queue = cls(scenario=contract.name, capacity=config.capacity)
-    rng = random.Random(config.seed)
-    enqueued, dequeued = [], []
-    for i in range(config.ops):
-        if rng.random() < 0.6:
-            if queue.enqueue(i):
-                enqueued.append(i)
-        else:
-            batch = queue.dequeue()
-            if not isinstance(batch, list):
-                return false_result(f"Batch dequeue must return list, got {type(batch).__name__}")
-            dequeued.extend(batch)
-    fabricated = set(dequeued) - set(enqueued)
-    if fabricated:
-        return false_result(f"Batch returned items never enqueued: {list(fabricated)[:5]}")
-    duplicates = len(dequeued) - len(set(dequeued))
-    if duplicates:
-        return false_result(f"Batch returned {duplicates} duplicates")
-    return CheckResult(
-        True,
-        f"Batch OK ({config.ops} ops, capacity={config.capacity}, dequeued={len(dequeued)})",
-    )
-
-
 def run_check(cls, contract: QueueContract, config: CheckConfig) -> CheckResult:
-    if contract.linearizable_fifo:
-        return check_linearizable_queue(cls, contract, config)
-    if contract.lossy:
-        return check_lossy(cls, contract, config)
-    if contract.batched_dequeue:
-        return check_batch(cls, contract, config)
-    return false_result(f"Unknown scenario: {contract.name}")
+    return check_linearizable_queue(cls, contract, config)
 
 
 def run_checks(
