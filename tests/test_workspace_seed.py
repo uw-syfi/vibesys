@@ -86,6 +86,16 @@ def _make_context(input_dir: Path, seed: Path | None = None, **kwargs) -> _RunCo
     )
 
 
+def test_all_repo_example_input_bundles_are_valid():
+    project_root = Path(__file__).parents[1]
+    manifests = sorted((project_root / "examples").glob("**/vibeserve.input.toml"))
+
+    assert manifests
+    for manifest in manifests:
+        bundle = load_input_bundle(manifest.parent, project_root=project_root)
+        assert bundle.domain is bundle.manifest.agent.domain
+
+
 def test_manifest_without_workspace_seed_remains_valid(tmp_path):
     project_root = tmp_path / "project"
     bundle = _write_bundle(project_root)
