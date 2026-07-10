@@ -9,14 +9,12 @@ from pathlib import Path
 import pytest
 
 LINEARIZABLE_QUEUE_INPUTS = {
-    "queue-default": "all",
     "queue-spsc": "spsc",
     "queue-mpsc": "mpsc",
     "queue-mpmc": "mpmc",
 }
 
 LINEARIZABLE_ACCURACY_SETTINGS = {
-    "queue-default": ("24", "50"),
     "queue-spsc": ("32", "100"),
     "queue-mpsc": ("24", "50"),
     "queue-mpmc": ("24", "100"),
@@ -89,21 +87,19 @@ def test_linearizable_queue_manifests_invoke_go_evaluator_directly():
             command = manifest[section]["command"]
             assert command[:3] == ["go", "-C", "_evaluator/queue"]
             assert command[3:] == expected_suffix
-        result = manifest["benchmark"].get("result")
-        if input_name == "queue-default":
-            assert result is None
-        else:
-            assert result == {
-                "json_argument": "--output-json",
-                "metric": "total_ops_per_sec",
-            }
+        assert manifest["benchmark"]["result"] == {
+            "json_argument": "--output-json",
+            "metric": "total_ops_per_sec",
+        }
 
     evaluator = root.parents[0] / "evaluators" / "queue"
     assert (evaluator / "DESIGN.md").exists()
     assert (evaluator / "CANDIDATE_CONTRACT.md").exists()
     assert (evaluator / "include" / "vibeserve_queue_abi.h").exists()
     assert not (evaluator / "QUEUE_PROTOCOL.md").exists()
-    assert not (root.parents[0] / "libs" / "queue-input-core").exists()
+    old_core = root.parents[0] / "libs" / "queue-input-core"
+    assert not (old_core / "pyproject.toml").exists()
+    assert not any(old_core.glob("src/queue_input_core/*.py"))
 
 
 def test_linearizable_queue_inputs_use_shared_editable_rust_starter():
@@ -182,7 +178,7 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):
     workspace = tmp_path / "workspace"
     input_dir = _materialize_linearizable_input(
         project_root,
-        "queue-default",
+        "queue-spsc",
         workspace,
     )
     assert (workspace / "_evaluator" / "queue" / "DESIGN.md").is_file()
@@ -214,7 +210,7 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):
     ]
     subprocess.run(benchmark, cwd=workspace, check=True)
     results = json.loads(output.read_text())
-    assert [result["scenario"] for result in results] == ["spsc", "mpsc", "mpmc"]
+    assert [result["scenario"] for result in results] == ["spsc"]
     assert all(result["repetitions"] == 3 for result in results)
     assert all(len(result["total_ops_per_sec_samples"]) == 3 for result in results)
 

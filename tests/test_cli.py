@@ -16,7 +16,7 @@ TARGET_ARGS = ["--input", "examples/model-serving/Llama-3-8B"]
 
 
 def _write_input_bundle(tmp_path: Path) -> Path:
-    bundle = tmp_path / "queue-default"
+    bundle = tmp_path / "queue-spsc"
     (bundle / "reference").mkdir(parents=True)
     (bundle / "OBJECTIVE.md").write_text("objective\n")
     (bundle / "vibeserve.input.toml").write_text(
@@ -119,9 +119,9 @@ def test_input_arg_is_available_on_all_loop_parsers(builder_name):
     import vibe_serve.cli as cli
 
     parser = getattr(cli, builder_name)()
-    args = parser.parse_args(["--input", "examples/data-structures/queue-default"])
+    args = parser.parse_args(["--input", "examples/data-structures/queue-spsc"])
 
-    assert args.input == Path("examples/data-structures/queue-default")
+    assert args.input == Path("examples/data-structures/queue-spsc")
 
 
 @pytest.mark.parametrize(
