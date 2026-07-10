@@ -182,6 +182,7 @@ def test_linearizable_queue_manifests_invoke_go_harness_directly():
     assert not trusted_wrapper.exists()
 
     queue_core = root.parents[0] / "libs" / "queue-input-core"
+    assert (queue_core / "DESIGN.md").exists()
     assert (queue_core / "QUEUE_ABI.md").exists()
     assert (queue_core / "include" / "vibeserve_queue_abi.h").exists()
     assert not (queue_core / "QUEUE_PROTOCOL.md").exists()
@@ -267,6 +268,7 @@ def test_materialized_manifest_commands_run_go_harness_directly(tmp_path):
         "queue-default",
         workspace,
     )
+    assert (workspace / "_input_libs" / "queue-input-core" / "DESIGN.md").is_file()
     subprocess.run(["make"], cwd=workspace, check=True)
     manifest = tomllib.loads((input_dir / "vibeserve.input.toml").read_text())
 

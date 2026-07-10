@@ -26,6 +26,8 @@ Notes:
   internal model; it is not the editable candidate.
 - The candidate ABI is documented at
   `_input_libs/queue-input-core/QUEUE_ABI.md` in a materialized workspace.
+- The evaluator architecture and trust model are documented at
+  `_input_libs/queue-input-core/DESIGN.md`.
 - The trusted harness records concurrent operation histories and validates
   linearizability with [Porcupine](https://github.com/anishathalye/porcupine).
 - Boundary probes explicitly exercise empty, full, drain, and wraparound

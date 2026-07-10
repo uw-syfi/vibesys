@@ -4,6 +4,9 @@ Candidates provide a native shared library named `queue-candidate.so`. The
 library may be implemented in any language that can export the C ABI declared
 in `include/vibeserve_queue_abi.h`.
 
+See [`DESIGN.md`](DESIGN.md) for the end-to-end architecture, trust model,
+correctness protocol, benchmark design, and isolation limitations.
+
 The trusted Rust runner is the only component that loads the library. During
 correctness checks it runs in a worker process controlled by the Go Porcupine
 checker. During performance measurement it calls the same ABI directly from
