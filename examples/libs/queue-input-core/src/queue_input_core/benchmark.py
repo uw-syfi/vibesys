@@ -97,11 +97,11 @@ def _producer(queue, item, stop, c, lock):
         c[1] += drp
 
 
-def _consumer(queue, stop, c, lock, is_batch):
+def _consumer(queue, stop, c, lock):
     dec = 0
     while not stop.is_set() or queue.size() > 0:
         r = queue.dequeue()
-        dec += len(r) if is_batch else (1 if r is not None else 0)
+        dec += 1 if r is not None else 0
     with lock:
         c[0] += dec
 
@@ -114,7 +114,6 @@ def _worker_counts(contract: QueueContract, config: BenchmarkConfig) -> tuple[in
 
 def run_benchmark(queue, contract: QueueContract, config: BenchmarkConfig) -> BenchmarkResult:
     producers, consumers = _worker_counts(contract, config)
-    is_batch = contract.batched_dequeue
     item = b"x" * config.item_bytes
     stop = threading.Event()
     lock = threading.Lock()
@@ -126,7 +125,7 @@ def run_benchmark(queue, contract: QueueContract, config: BenchmarkConfig) -> Be
             for _ in range(producers)
         ]
         ts += [
-            threading.Thread(target=_consumer, args=(queue, stop, dc, lock, is_batch), daemon=True)
+            threading.Thread(target=_consumer, args=(queue, stop, dc, lock), daemon=True)
             for _ in range(consumers)
         ]
         return ts
