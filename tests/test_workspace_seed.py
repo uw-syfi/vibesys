@@ -40,6 +40,9 @@ def _write_bundle(project_root: Path, manifest_blocks: str = "") -> Path:
         f"""
 version = 1
 
+[agent]
+domain = "generic"
+
 [accuracy]
 command = ["accuracy-checker"]
 
@@ -81,6 +84,16 @@ def _make_context(input_dir: Path, seed: Path | None = None, **kwargs) -> _RunCo
         environment_hooks=NoopEnvironmentHooks(),
         **kwargs,
     )
+
+
+def test_all_repo_example_input_bundles_are_valid():
+    project_root = Path(__file__).parents[1]
+    manifests = sorted((project_root / "examples").glob("**/vibeserve.input.toml"))
+
+    assert manifests
+    for manifest in manifests:
+        bundle = load_input_bundle(manifest.parent, project_root=project_root)
+        assert bundle.domain is bundle.manifest.agent.domain
 
 
 def test_manifest_without_workspace_seed_remains_valid(tmp_path):

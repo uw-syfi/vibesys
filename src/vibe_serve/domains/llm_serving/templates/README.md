@@ -14,6 +14,7 @@ output correctness.
   performance judging, reward-hack / model-bypass detection, and scope /
   static-inspection discipline.
 
-This is the default domain (`--domain llm-serving`); it reproduces vibeserve's
-original serving-oriented prompts. The `single_agent` ablation reuses a bespoke
-combined section below rather than the default implementer+judge concatenation.
+This reproduces vibeserve's original serving-oriented prompts. Input bundles
+select it with `[agent].domain = "llm-serving"`. The `single_agent` ablation
+reuses a bespoke combined section below rather than the default implementer+judge
+concatenation.

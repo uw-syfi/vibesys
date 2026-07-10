@@ -1,5 +1,8 @@
 version = 1
 
+[agent]
+domain = "llm-serving"
+
 [accuracy]
 command = ["uv", "run", "python", "accuracy_checker/checker.py"]
 timeout_seconds = 120

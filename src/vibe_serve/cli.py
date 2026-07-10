@@ -28,8 +28,6 @@ from vibe_serve.constants import (
     PROJECT_ROOT,
     ComputeBackend,
 )
-from vibe_serve.domains.base import DEFAULT_DOMAIN, DomainName
-from vibe_serve.domains.registry import registered_domains
 from vibe_serve.input_manifest import InputBundle, load_input_bundle
 from vibe_serve.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind
 from vibe_serve.sandbox.run_environment import (
@@ -49,15 +47,6 @@ _MODALITIES = (
 )
 
 _MODAL_PROFILERS = frozenset({ProfilerKind.AUTO, ProfilerKind.TORCH, ProfilerKind.NONE})
-
-
-def _parse_domain_name(value: str) -> DomainName:
-    try:
-        return DomainName(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"Unknown domain {value!r}. Choose from: {', '.join(registered_domains())}."
-        ) from exc
 
 
 def _parse_profiler_kind(value: str) -> ProfilerKind:
@@ -421,18 +410,6 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start-round", type=int, default=None, metavar="N")
     parser.add_argument("--modality", default=None, choices=_MODALITIES)
     parser.add_argument(
-        "--domain",
-        type=_parse_domain_name,
-        choices=tuple(DomainName),
-        default=DEFAULT_DOMAIN,
-        metavar="NAME",
-        help=(
-            "Domain package supplying the implementer/judge context for your "
-            f"problem space. Registered domains: {', '.join(registered_domains())}. Default: "
-            f"{DEFAULT_DOMAIN}. See domains/README.md."
-        ),
-    )
-    parser.add_argument(
         "--interface",
         choices=["inprocess", "service"],
         default="inprocess",
@@ -532,7 +509,7 @@ def _run_agent(args: argparse.Namespace) -> None:
         cli_provider=args.cli_provider,
         backend=backend,
         modality=args.modality,
-        domain=args.domain,
+        domain=bundle.domain,
         interface=args.interface,
         inner_loop=args.inner_loop,
     )

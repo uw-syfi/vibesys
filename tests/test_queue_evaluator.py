@@ -82,6 +82,7 @@ def test_linearizable_queue_manifests_invoke_go_evaluator_directly():
                 "3",
             ],
         }
+        assert manifest["agent"] == {"domain": "generic"}
         assert manifest["evaluator"] == {"source": "../../evaluators/queue"}
         for section, expected_suffix in expected_suffixes.items():
             command = manifest[section]["command"]

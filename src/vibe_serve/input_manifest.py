@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from vibe_serve.constants import PROJECT_ROOT
+from vibe_serve.domains.base import DomainName
 
 MANIFEST_NAME = "vibeserve.input.toml"
 
@@ -98,12 +99,21 @@ class BenchmarkCommand(InputCommand):
     result: BenchmarkResult | None = None
 
 
+class AgentInput(BaseModel):
+    """Agent-loop metadata declared by an input bundle."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    domain: DomainName
+
+
 class InputManifest(BaseModel):
     """Versioned evaluator-command manifest for an input bundle."""
 
     model_config = ConfigDict(extra="forbid")
 
     version: Literal[1]
+    agent: AgentInput
     accuracy: InputCommand
     benchmark: BenchmarkCommand
     workspace: WorkspaceInput | None = None
@@ -134,6 +144,10 @@ class InputBundle(BaseModel):
     @property
     def benchmark_command(self) -> tuple[str, ...]:
         return self.manifest.benchmark.command
+
+    @property
+    def domain(self) -> DomainName:
+        return self.manifest.agent.domain
 
     @property
     def accuracy_command_display(self) -> str:

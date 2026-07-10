@@ -28,7 +28,7 @@ def test_domain_module_has_no_language_axis():
 
     assert not hasattr(domain, "DEFAULT_LANGUAGE")
     assert not hasattr(domain, "LANGUAGE_DIR")
-    assert domain.DEFAULT_DOMAIN is DomainName.LLM_SERVING
+    assert not hasattr(domain, "DEFAULT_DOMAIN")
 
 
 def test_no_language_pack_directory():

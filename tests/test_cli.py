@@ -23,6 +23,9 @@ def _write_input_bundle(tmp_path: Path) -> Path:
         """
 version = 1
 
+[agent]
+domain = "generic"
+
 [accuracy]
 command = ["uv", "run", "python", "accuracy_checker/checker.py"]
 
@@ -103,7 +106,7 @@ def test_target_input_defaults_to_none():
     assert not hasattr(args, "acc_checker")
     assert not hasattr(args, "bench")
     assert args.profiler is ProfilerKind.AUTO
-    assert args.domain is DomainName.LLM_SERVING
+    assert not hasattr(args, "domain")
 
 
 @pytest.mark.parametrize(
@@ -146,19 +149,10 @@ def test_profiler_none_is_valid_with_modal(builder_name, validator_name, tmp_pat
     assert args.input_bundle.root == bundle.resolve()
 
 
-def test_agent_parser_outputs_domain_enum():
-    from vibe_serve.cli import _build_agent_parser
-
-    args = _build_agent_parser().parse_args(["--domain", "generic"])
-
-    assert args.domain is DomainName.GENERIC
-
-
 @pytest.mark.parametrize(
     "argv",
     [
         ["--profiler", "bogus"],
-        ["--domain", "bogus"],
     ],
 )
 def test_agent_parser_rejects_invalid_enum_args(argv):
@@ -188,8 +182,18 @@ def test_validate_target_inputs_loads_manifest(tmp_path):
     _validate_target_inputs(args)
 
     assert args.input_bundle.root == bundle.resolve()
+    assert args.input_bundle.domain is DomainName.GENERIC
     assert args.input_bundle.accuracy_command_display == "uv run python accuracy_checker/checker.py"
     assert args.input_bundle.benchmark_command_display == "uv run python benchmark/benchmark.py"
+
+
+def test_agent_parser_rejects_domain_override_flag():
+    from vibe_serve.cli import _build_agent_parser
+
+    with pytest.raises(SystemExit) as exc:
+        _build_agent_parser().parse_args(["--domain", "llm-serving"])
+
+    assert exc.value.code == 2
 
 
 def test_validate_target_inputs_loads_trusted_benchmark_result_contract(tmp_path):
@@ -250,6 +254,9 @@ def test_validate_target_inputs_reports_missing_command(tmp_path, capsys):
     (bundle / "vibeserve.input.toml").write_text(
         """
 version = 1
+
+[agent]
+domain = "generic"
 
 [accuracy]
 command = ["./tools/check"]

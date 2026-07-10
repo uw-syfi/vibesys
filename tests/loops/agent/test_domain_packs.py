@@ -1,4 +1,4 @@
-"""Tests for registered domains — the ``--domain`` pluggable-context mechanism.
+"""Tests for registered domains — the manifest-selected pluggable context.
 
 Covers the resolver (registered name / error), the role-file renderer (present,
 empty, missing, ``single_agent`` derivation, context branching), and end-to-end
@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from vibe_serve.domains.base import (
-    DEFAULT_DOMAIN,
     DOMAIN_ROLES,
     DomainDefinition,
     DomainName,
@@ -50,7 +49,6 @@ def test_registered_domains_present():
     assert "llm-serving" in names
     assert "generic" in names
     assert "README" not in names  # the authoring guide is not a domain
-    assert DEFAULT_DOMAIN is DomainName.LLM_SERVING
 
 
 def test_resolve_registered_name():
