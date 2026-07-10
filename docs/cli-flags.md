@@ -160,12 +160,22 @@ command = ["uv", "run", "python", "accuracy_checker/checker.py"]
 
 [benchmark]
 command = ["uv", "run", "python", "benchmark/benchmark.py"]
+
+[workspace]
+seed = "../../starters/example-rust-candidate"
 ```
 
 Those command arrays are bundle-specific. They may point at Python, shell, Go,
 Rust, C++, or any other evaluator entrypoint, and VibeServe does not require
 standard wrapper filenames. VibeServe copies the input bundle into the
 experiment workspace and tells agents to run the manifest commands.
+
+The optional `workspace.seed` path is relative to the input manifest and must
+resolve inside the repository's `examples/starters/` directory. On a fresh run,
+VibeServe copies non-ignored seed files first and then copies the input bundle.
+Any top-level path supplied by both sources is rejected instead of being
+overwritten. The resulting files are ordinary candidate workspace files: agents
+may edit or delete them, and resumed runs never refresh them from the seed.
 
 ## Common Commands
 
