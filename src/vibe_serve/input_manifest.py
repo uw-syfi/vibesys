@@ -9,6 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from vibe_serve.constants import PROJECT_ROOT
+
 MANIFEST_NAME = "vibeserve.input.toml"
 
 
@@ -33,6 +35,23 @@ class InputCommand(BaseModel):
         return " ".join(shlex.quote(part) for part in self.command)
 
 
+class WorkspaceInput(BaseModel):
+    """Optional starter content copied into a fresh candidate workspace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    seed: str
+
+    @field_validator("seed")
+    @classmethod
+    def _relative_seed(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("seed must be a non-empty path")
+        if Path(value).is_absolute():
+            raise ValueError("seed must be relative to the input bundle")
+        return value
+
+
 class InputManifest(BaseModel):
     """Versioned evaluator-command manifest for an input bundle."""
 
@@ -41,6 +60,7 @@ class InputManifest(BaseModel):
     version: Literal[1]
     accuracy: InputCommand
     benchmark: InputCommand
+    workspace: WorkspaceInput | None = None
 
 
 class InputBundle(BaseModel):
@@ -52,6 +72,7 @@ class InputBundle(BaseModel):
     manifest_path: Path
     objective_path: Path
     reference_path: Path | None
+    workspace_seed_path: Path | None
     manifest: InputManifest
 
     @property
@@ -75,9 +96,10 @@ class InputBundle(BaseModel):
         return self.manifest.benchmark.display()
 
 
-def load_input_bundle(path: Path) -> InputBundle:
+def load_input_bundle(path: Path, *, project_root: Path | None = None) -> InputBundle:
     """Load and validate a command-based input bundle."""
 
+    project_root = (project_root or PROJECT_ROOT).resolve()
     root = path.expanduser().resolve()
     if not root.exists():
         raise FileNotFoundError(f"--input path does not exist: {path}")
@@ -124,10 +146,26 @@ def load_input_bundle(path: Path) -> InputBundle:
     if not reference_path.exists():
         reference_path = None
 
+    workspace_seed_path = None
+    if manifest.workspace is not None:
+        starters_root = (project_root / "examples" / "starters").resolve()
+        workspace_seed_path = (root / manifest.workspace.seed).resolve()
+        try:
+            workspace_seed_path.relative_to(starters_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"workspace.seed must resolve inside {starters_root}: {manifest.workspace.seed}"
+            ) from exc
+        if not workspace_seed_path.exists():
+            raise FileNotFoundError(f"workspace.seed path does not exist: {workspace_seed_path}")
+        if not workspace_seed_path.is_dir():
+            raise ValueError(f"workspace.seed path is not a directory: {workspace_seed_path}")
+
     return InputBundle(
         root=root,
         manifest_path=manifest_path,
         objective_path=objective_path,
         reference_path=reference_path,
+        workspace_seed_path=workspace_seed_path,
         manifest=manifest,
     )

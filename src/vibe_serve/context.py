@@ -104,6 +104,7 @@ class _RunContext:
         input_path: str,
         accuracy_command: str,
         benchmark_command: str,
+        workspace_seed: str | None = None,
         existing: bool = False,
         debug: bool = False,
         nsys_profiler: str | None = None,
@@ -177,6 +178,7 @@ class _RunContext:
         self.model_name = config.model.name
 
         self.input_path = self._coerce_dir_path(input_path, "--input")
+        self.workspace_seed_path = self._coerce_dir_path(workspace_seed, "workspace.seed")
         self.accuracy_command = accuracy_command
         self.benchmark_command = benchmark_command
         self.nsys_profiler_path = self._coerce_dir_path(nsys_profiler, "--nsys-profiler")
@@ -288,11 +290,24 @@ class _RunContext:
                 if d.exists():
                     shutil.rmtree(d)
 
-            self._copy_excluding_extras(
-                input_dir,
-                self.workspace,
-                extra_excludes=self.environment_patch.copy_excludes,
-            )
+            if self.workspace_seed_path is not None:
+                self._copy_excluding_extras(
+                    Path(self.workspace_seed_path),
+                    self.workspace,
+                    respect_source_gitignore=True,
+                )
+                self._copy_excluding_extras(
+                    input_dir,
+                    self.workspace,
+                    extra_excludes=self.environment_patch.copy_excludes,
+                    reject_collisions=True,
+                )
+            else:
+                self._copy_excluding_extras(
+                    input_dir,
+                    self.workspace,
+                    extra_excludes=self.environment_patch.copy_excludes,
+                )
 
             for src in skill_source_paths:
                 rel = src.name
@@ -522,13 +537,43 @@ class _RunContext:
         dst: Path,
         *,
         extra_excludes: frozenset[str] = frozenset(),
+        respect_source_gitignore: bool = False,
+        reject_collisions: bool = False,
     ) -> None:
         skip = self.EXCLUDED_WORKSPACE_DIRS | {"_mounts"} | set(extra_excludes)
+        ignored_paths = (
+            self._source_gitignored_paths(src) if respect_source_gitignore else frozenset()
+        )
+        resolved_src = src.resolve()
 
-        def _ignore(_: str, names: list[str]) -> list[str]:
-            return [name for name in names if name in skip]
+        def _is_ignored(path: Path) -> bool:
+            if not ignored_paths:
+                return False
+            relative_parts = path.absolute().relative_to(resolved_src).parts
+            return any(
+                relative_parts[:index] in ignored_paths
+                for index in range(1, len(relative_parts) + 1)
+            )
 
-        if dst.exists():
+        def _ignore(directory: str, names: list[str]) -> list[str]:
+            parent = Path(directory)
+            return [name for name in names if name in skip or _is_ignored(parent / name)]
+
+        children = [
+            child for child in src.iterdir() if child.name not in skip and not _is_ignored(child)
+        ]
+
+        if reject_collisions:
+            collisions = sorted(
+                child.name
+                for child in children
+                if (dst / child.name).exists() or (dst / child.name).is_symlink()
+            )
+            if collisions:
+                paths = ", ".join(collisions)
+                raise ValueError(f"workspace seed and input bundle contain the same paths: {paths}")
+
+        if dst.exists() and not reject_collisions:
             # Remove children individually so we can skip mount points and
             # tolerate permission errors (e.g. root-owned dirs left by Docker).
             for child in list(dst.iterdir()):
@@ -550,9 +595,7 @@ class _RunContext:
                             f"remove {child.name} from {dst}"
                         )
         dst.mkdir(parents=True, exist_ok=True)
-        for child in src.iterdir():
-            if child.name in skip:
-                continue
+        for child in children:
             child_dst = dst / child.name
             if child_dst.exists() or child_dst.is_symlink():
                 # Stale leftover — try once more to remove before copying
@@ -583,6 +626,32 @@ class _RunContext:
             self._remove_external_symlinks(dst)
         else:
             self._replace_external_symlinks(dst)
+
+    @staticmethod
+    def _source_gitignored_paths(src: Path) -> frozenset[tuple[str, ...]]:
+        """Return untracked paths ignored by Git below ``src``."""
+
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(src),
+                "ls-files",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "--directory",
+                "-z",
+            ],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.decode(errors="replace").strip()
+            raise RuntimeError(f"could not evaluate Git ignores for workspace.seed: {detail}")
+        return frozenset(
+            Path(os.fsdecode(raw).rstrip("/")).parts for raw in result.stdout.split(b"\0") if raw
+        )
 
     def wait_for_debug(self, step: str) -> None:
         if self.debug:
@@ -681,7 +750,10 @@ class _RunContext:
         self._git_run(["git", "init"])
 
         gitignore = self.workspace / ".gitignore"
-        gitignore.write_text(self._workspace_gitignore())
+        existing_gitignore = gitignore.read_text() if gitignore.is_file() else ""
+        if existing_gitignore and not existing_gitignore.endswith("\n"):
+            existing_gitignore += "\n"
+        gitignore.write_text(existing_gitignore + self._workspace_gitignore())
 
         self._git_add_all()
         self._git_run(["git", "commit", "-m", "initial: workspace setup"])
