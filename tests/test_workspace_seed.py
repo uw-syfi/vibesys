@@ -94,11 +94,11 @@ def test_manifest_without_workspace_seed_remains_valid(tmp_path):
 
 def test_manifest_resolves_seed_relative_to_bundle(tmp_path):
     project_root = tmp_path / "project"
-    seed = project_root / "examples" / "starters" / "queue-copying-rust"
+    seed = project_root / "examples" / "starters" / "queue-rs"
     seed.mkdir(parents=True)
     bundle = _write_bundle(
         project_root,
-        '[workspace]\nseed = "../../starters/queue-copying-rust"',
+        '[workspace]\nseed = "../../starters/queue-rs"',
     )
 
     loaded = load_input_bundle(bundle, project_root=project_root)

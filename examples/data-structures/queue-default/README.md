@@ -7,7 +7,7 @@ scenarios. The trusted Go checker, Rust benchmark runner, and ABI definition
 live in the `queue-input-core` package under `examples/libs/queue-input-core`;
 this input depends on that package with a uv path dependency.
 
-The shared seed at `examples/starters/queue-copying-rust` is copied into each
+The shared seed at `examples/starters/queue-rs` is copied into each
 fresh workspace. Its editable `src/lib.rs` is deliberately simple Rust: one
 `Mutex<VecDeque<Vec<u8>>>` shared by every producer and consumer. It is a
 candidate baseline, not trusted code. From a materialized workspace, build the

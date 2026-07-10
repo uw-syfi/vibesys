@@ -192,7 +192,7 @@ def test_linearizable_queue_inputs_use_shared_editable_rust_starter():
 
     project_root = Path(__file__).parents[1]
     root = project_root / "examples" / "data-structures"
-    starter = project_root / "examples" / "starters" / "queue-copying-rust"
+    starter = project_root / "examples" / "starters" / "queue-rs"
     starter_files = [".gitignore", "Cargo.toml", "Cargo.lock", "Makefile", "src/lib.rs"]
 
     for relative in starter_files:

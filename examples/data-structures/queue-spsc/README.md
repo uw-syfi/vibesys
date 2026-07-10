@@ -5,7 +5,7 @@ manifest invokes the trusted Go harness directly. Candidates implement the
 copying C ABI documented at `_input_libs/queue-input-core/QUEUE_ABI.md` and
 export it from `./queue-candidate.so`.
 
-The shared seed at `examples/starters/queue-copying-rust` provides an editable
+The shared seed at `examples/starters/queue-rs` provides an editable
 `src/lib.rs` with an intentionally naive Rust candidate using one mutex and
 `VecDeque`. Build and validate it from a materialized workspace:
 

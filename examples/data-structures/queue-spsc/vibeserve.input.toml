@@ -1,7 +1,7 @@
 version = 1
 
 [workspace]
-seed = "../../starters/queue-copying-rust"
+seed = "../../starters/queue-rs"
 
 [accuracy]
 command = [
