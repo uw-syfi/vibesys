@@ -1,9 +1,9 @@
 # Queue Evaluator Design
 
 This document describes the v1 architecture for the linearizable queue inputs:
-`queue-default`, `queue-spsc`, `queue-mpsc`, and `queue-mpmc`. It explains the
-trust boundary and the split between VibeServe, the Go checker, the Rust native
-runner, and the candidate shared library.
+`queue-spsc`, `queue-mpsc`, and `queue-mpmc`. It explains the trust boundary and
+the split between VibeServe, the Go checker, the Rust native runner, and the
+candidate shared library.
 
 The exact candidate function contract is specified separately in
 [`CANDIDATE_CONTRACT.md`](CANDIDATE_CONTRACT.md).
@@ -260,9 +260,7 @@ retained.
 
 For manifests with `[benchmark.result]`, VibeServe runs the immutable benchmark
 command and accepts only one finite numeric field with the declared name.
-SPSC, MPSC, and MPMC declare `total_ops_per_sec`. `queue-default` omits this
-contract because its multi-scenario JSON contains more than one field with that
-name.
+SPSC, MPSC, and MPMC declare `total_ops_per_sec`.
 
 ## Trust Model
 
