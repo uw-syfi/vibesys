@@ -2,9 +2,13 @@
 
 import json
 import re
+import sys
 import uuid
 
 from pydantic import ValidationError
+from rich.console import Console
+from rich.json import JSON
+from rich.markdown import Markdown
 
 from vibe_serve.agents.callbacks import AgentLogger, TodoDisplay
 from vibe_serve.schemas import (
@@ -149,6 +153,60 @@ def _log_and_print(
         print(text)
 
 
+def _log_markdown_and_print(
+    text: str,
+    log_file=None,
+    max_len: int | None = None,
+) -> None:
+    """Render Markdown to stdout while preserving raw text in logs."""
+    if log_file:
+        log_file.write(text + "\n")
+        log_file.flush()
+
+    display_text = text
+    truncated_chars = 0
+    if max_len is not None and len(text) > max_len:
+        display_text = text[:max_len]
+        truncated_chars = len(text) - max_len
+
+    Console(file=sys.stdout).print(Markdown(display_text))
+    if truncated_chars:
+        print(f"... [{truncated_chars} more chars, see log for full text]")
+
+
+def _log_prompt_markdown_and_print(
+    prompt: str,
+    log_file=None,
+    max_len: int | None = None,
+) -> None:
+    """Render prompt Markdown to stdout while preserving raw prompt text in logs."""
+    _log_markdown_and_print(prompt, log_file=log_file, max_len=max_len)
+
+
+def _log_json_and_print(
+    text: str,
+    log_file=None,
+    max_len: int | None = None,
+) -> None:
+    """Render JSON to stdout while preserving raw JSON text in logs."""
+    if log_file:
+        log_file.write(text + "\n")
+        log_file.flush()
+
+    display_text = text
+    truncated_chars = 0
+    if max_len is not None and len(text) > max_len:
+        display_text = text[:max_len]
+        truncated_chars = len(text) - max_len
+
+    try:
+        Console(file=sys.stdout).print(JSON(display_text))
+    except ValueError:
+        print(display_text)
+    if truncated_chars:
+        print(f"... [{truncated_chars} more chars, see log for full text]")
+
+
 # ---------------------------------------------------------------------------
 # Generic typed-response parsing
 # ---------------------------------------------------------------------------
@@ -248,7 +306,7 @@ def run_agent(
     _log_and_print(f"callbacks: {callbacks_label}", log_file)
     _log_and_print(f"thread_id: {thread_id}", log_file)
     _log_and_print("--- input ---", log_file)
-    _log_and_print(prompt, log_file, max_len=max_text_len)
+    _log_prompt_markdown_and_print(prompt, log_file, max_len=max_text_len)
     last_ai_message = ""
     try:
         for update in agent.stream(
@@ -270,7 +328,7 @@ def run_agent(
         raise
     output_text = last_ai_message if last_ai_message else "<no ai message returned>"
     _log_and_print("\n=== LLM ROUND OUTPUT (final ai message) ===", log_file)
-    _log_and_print(output_text, log_file, max_len=max_text_len)
+    _log_markdown_and_print(output_text, log_file, max_len=max_text_len)
     return last_ai_message
 
 
@@ -305,7 +363,7 @@ def _run_typed_agent(
     _log_and_print(f"callbacks: {callbacks_label}", log_file)
     _log_and_print(f"thread_id: {thread_id}", log_file)
     _log_and_print("--- input ---", log_file)
-    _log_and_print(prompt, log_file, max_len=max_text_len)
+    _log_prompt_markdown_and_print(prompt, log_file, max_len=max_text_len)
     try:
         for update in agent.stream(
             {"messages": [("human", prompt)]},
@@ -333,11 +391,11 @@ def _run_typed_agent(
         _log_and_print(f"No structured response received from {label.lower()}.", log_file)
         if last_ai_message:
             _log_and_print(f"\n=== {label} ROUND OUTPUT (raw ai message) ===", log_file)
-            _log_and_print(last_ai_message, log_file, max_len=max_text_len)
+            _log_markdown_and_print(last_ai_message, log_file, max_len=max_text_len)
         return fallback_factory()
     output_json = structured_response.model_dump_json(indent=2)
     _log_and_print(f"\n=== {label} ROUND OUTPUT ===", log_file)
-    _log_and_print(output_json, log_file, max_len=max_text_len)
+    _log_json_and_print(output_json, log_file, max_len=max_text_len)
     return structured_response
 
 
@@ -518,7 +576,7 @@ def run_profiler_agent(
     _log_and_print(f"callbacks: {callbacks_label}", log_file)
     _log_and_print(f"thread_id: {thread_id}", log_file)
     _log_and_print("--- input ---", log_file)
-    _log_and_print(prompt, log_file, max_len=max_text_len)
+    _log_prompt_markdown_and_print(prompt, log_file, max_len=max_text_len)
     try:
         for update in agent.stream(
             {"messages": [("human", prompt)]},
@@ -546,7 +604,7 @@ def run_profiler_agent(
         _log_and_print("No structured response received from profiler.", log_file)
         if last_ai_message:
             _log_and_print("\n=== PROFILER ROUND OUTPUT (raw ai message) ===", log_file)
-            _log_and_print(last_ai_message, log_file, max_len=max_text_len)
+            _log_markdown_and_print(last_ai_message, log_file, max_len=max_text_len)
         return ProfilerResponse(
             analysis="No structured response received from profiler.",
             bottlenecks="Profiler did not produce a structured response.",
@@ -554,7 +612,7 @@ def run_profiler_agent(
         )
     output_json = structured_response.model_dump_json(indent=2)
     _log_and_print("\n=== PROFILER ROUND OUTPUT ===", log_file)
-    _log_and_print(output_json, log_file, max_len=max_text_len)
+    _log_json_and_print(output_json, log_file, max_len=max_text_len)
     return structured_response
 
 

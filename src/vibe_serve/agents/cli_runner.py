@@ -37,6 +37,9 @@ from vibe_serve._agent_cli.opencode import OpencodeCodingAgent
 from vibe_serve.agent_runner import (
     _DEFAULT_MAX_TEXT_LEN,
     _log_and_print,
+    _log_json_and_print,
+    _log_markdown_and_print,
+    _log_prompt_markdown_and_print,
     _parse_typed_response_text,
 )
 from vibe_serve.agents.callbacks import AgentLogger
@@ -301,7 +304,11 @@ class CliAgentRunner:
             self._run_log_file,
         )
         _log_and_print("--- input ---", self._run_log_file)
-        _log_and_print(combined_prompt, self._run_log_file, max_len=_DEFAULT_MAX_TEXT_LEN)
+        _log_prompt_markdown_and_print(
+            combined_prompt,
+            self._run_log_file,
+            max_len=_DEFAULT_MAX_TEXT_LEN,
+        )
 
         # 7. Run the agent. Wrap exceptions to surface them in the run log
         #    before re-raising. The ``finally`` clause runs both cleanups —
@@ -349,14 +356,14 @@ class CliAgentRunner:
                     f"\n=== {label} ROUND OUTPUT (raw output) ===",
                     self._run_log_file,
                 )
-                _log_and_print(text, self._run_log_file, max_len=_DEFAULT_MAX_TEXT_LEN)
+                _log_markdown_and_print(text, self._run_log_file, max_len=_DEFAULT_MAX_TEXT_LEN)
             return fallback_factory()
 
         _log_and_print(
             f"\n=== {label} ROUND OUTPUT ===",
             self._run_log_file,
         )
-        _log_and_print(
+        _log_json_and_print(
             parsed.model_dump_json(indent=2),
             self._run_log_file,
             max_len=_DEFAULT_MAX_TEXT_LEN,
