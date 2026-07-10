@@ -1,4 +1,4 @@
-module vibe-serve/queue-porcupine-checker
+module vibe-serve/queue-evaluator
 
 go 1.21
 

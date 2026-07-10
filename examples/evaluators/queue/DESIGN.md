@@ -1,4 +1,4 @@
-# Trusted Queue Evaluation Design
+# Queue Evaluator Design
 
 This document describes the v1 architecture for the linearizable queue inputs:
 `queue-default`, `queue-spsc`, `queue-mpsc`, and `queue-mpmc`. It explains the
@@ -6,8 +6,7 @@ trust boundary and the split between VibeServe, the Go checker, the Rust native
 runner, and the candidate shared library.
 
 The exact candidate function contract is specified separately in
-[`QUEUE_ABI.md`](QUEUE_ABI.md). Lossy and batched queues use legacy evaluators
-and are outside this design.
+[`QUEUE_ABI.md`](QUEUE_ABI.md).
 
 ## Goals
 
@@ -41,7 +40,7 @@ VibeServe agent loop
   | materializes workspace seed and immutable evaluator input
   | runs manifest accuracy and benchmark commands
   v
-Go trusted harness
+Go queue evaluator
   |-- correctness control, histories, Porcupine model and verdict
   |-- benchmark repetition and result validation
   |
@@ -58,8 +57,8 @@ The source is organized as follows:
 
 | Path | Responsibility |
 | --- | --- |
-| `trusted_harness/*.go` | CLI, candidate process control, histories, Porcupine checking, benchmark aggregation |
-| `trusted_harness/native_runner/src/abi.rs` | Dynamic loading and typed ownership of the candidate C ABI |
+| `*.go` | CLI, candidate process control, histories, Porcupine checking, benchmark aggregation |
+| `native_runner/src/abi.rs` | Dynamic loading and typed ownership of the candidate C ABI |
 | `native_runner/src/protocol.rs` | Correctness worker and per-lane socket protocol |
 | `native_runner/src/probe.rs` | ABI edge-case and copying-lifetime probes |
 | `native_runner/src/benchmark.rs` | Native timed producer and consumer threads |
@@ -78,17 +77,21 @@ Each linearizable queue manifest declares:
 ```toml
 [workspace]
 seed = "../../starters/queue-rs"
+
+[evaluator]
+source = "../../evaluators/queue"
 ```
 
 VibeServe copies this seed into a fresh workspace before copying the input
 bundle. The starter, `Cargo.toml`, `Makefile`, and generated
 `queue-candidate.so` are candidate-owned and may be replaced by the agent.
 
-The input project materializer copies `queue-input-core` to
-`_input_libs/queue-input-core`. VibeServe records the initial workspace commit
-and rejects framework accuracy or benchmark gates when evaluator-owned paths
-have changed. Those paths include the objective, manifest, reference/checker
-directories, benchmark directories, and `_input_libs`.
+VibeServe copies the evaluator source to `_evaluator/queue` on a fresh run.
+The evaluator is not refreshed on resume, so the run keeps the same verification
+logic. VibeServe records the initial workspace commit and rejects framework
+accuracy or benchmark gates when evaluator-owned paths have changed. Those
+paths include the objective, manifest, reference/checker directories, benchmark
+directories, and `_evaluator`.
 
 This Git comparison protects against ordinary agent edits to evaluator files.
 It is not a substitute for an OS sandbox against native code that can access
@@ -118,8 +121,8 @@ therefore use a new ABI version rather than extending v1 implicitly.
 
 ## Correctness Flow
 
-The manifest accuracy command starts the Go harness. For each selected scenario
-the harness performs these steps:
+The manifest accuracy command starts the Go evaluator. For each selected
+scenario the evaluator performs these steps:
 
 1. Validate scenario, capacity, value size, worker counts, and candidate path.
 2. Run isolated ABI probes for the configured profile, a 257-byte profile, and
@@ -266,7 +269,7 @@ name.
 | Component | Status | Rationale |
 | --- | --- | --- |
 | VibeServe framework gate | Trusted | Chooses immutable commands, checks evaluator paths, extracts the score |
-| Go harness and Porcupine | Trusted | Own histories, queue model, correctness verdict, repetitions, and result validation |
+| Go evaluator and Porcupine | Trusted | Own histories, queue model, correctness verdict, repetitions, and result validation |
 | Rust native runner | Trusted | Owns C ABI adaptation, probes, timed threads, counters, payload checks, and output JSON |
 | ABI document/header | Trusted contract | Defines the candidate behavior being evaluated |
 | Rust starter and build files | Untrusted | Initial candidate only; agents may replace them |
@@ -292,7 +295,7 @@ extension.
   worker crashes fail evaluation.
 - Worker output is capped at 64 KiB before inclusion in an error.
 - A rejected linearizability history can be persisted for reproduction.
-- The harness does not currently impose its own per-operation deadline. Command
+- The evaluator does not currently impose its own per-operation deadline. Command
   timeout enforcement belongs to the surrounding execution layer.
 - Correctness schedules are sampled, not exhaustive.
 - Fingerprints make benchmark conservation validation probabilistic.
@@ -303,10 +306,10 @@ extension.
 
 The main checks for this design are:
 
-- `go test -race ./...` in `trusted_harness`;
+- `go test -race ./...` in `examples/evaluators/queue`;
 - Rust unit tests, formatting, and Clippy in `native_runner`;
 - Rust formatting and Clippy for the shared starter;
-- `tests/test_queue_input_core.py` for manifest, materialization, build,
+- `tests/test_queue_evaluator.py` for manifest, materialization, build,
   correctness, benchmark, and adversarial-history integration;
 - `tests/loops/agent/test_orchestrate.py` for framework accuracy and benchmark
   gate behavior.

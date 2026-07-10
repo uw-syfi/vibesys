@@ -3,16 +3,21 @@ version = 1
 [workspace]
 seed = "../../starters/queue-rs"
 
+[evaluator]
+source = "../../evaluators/queue"
+
 [accuracy]
 command = [
-  "go", "-C", "_input_libs/queue-input-core/src/queue_input_core/trusted_harness",
-  "run", ".", "check", "--scenario", "all", "--operations", "24", "--trials", "50",
+  "go", "-C", "_evaluator/queue",
+  "run", ".", "check", "--workspace", "../..",
+  "--scenario", "all", "--operations", "24", "--trials", "50",
 ]
 timeout_seconds = 120
 
 [benchmark]
 command = [
-  "go", "-C", "_input_libs/queue-input-core/src/queue_input_core/trusted_harness",
-  "run", ".", "benchmark", "--scenario", "all", "--repetitions", "3",
+  "go", "-C", "_evaluator/queue",
+  "run", ".", "benchmark", "--workspace", "../..",
+  "--scenario", "all", "--repetitions", "3",
 ]
 timeout_seconds = 300

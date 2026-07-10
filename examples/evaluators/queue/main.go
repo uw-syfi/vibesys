@@ -16,8 +16,7 @@ const (
 )
 
 func candidateFlags(flags *flag.FlagSet) (*string, *string, *bool) {
-	workspace := defaultWorkspace()
-	workspaceFlag := flags.String("workspace", workspace, "Candidate workspace")
+	workspaceFlag := flags.String("workspace", ".", "Candidate workspace")
 	candidate := flags.String(
 		"candidate",
 		"queue-candidate.so",
@@ -25,23 +24,6 @@ func candidateFlags(flags *flag.FlagSet) (*string, *string, *bool) {
 	)
 	useReference := flags.Bool("use-reference", false, "Use the bundled reference candidate")
 	return workspaceFlag, candidate, useReference
-}
-
-func defaultWorkspace() string {
-	cwd, _ := os.Getwd()
-	for current := filepath.Clean(cwd); ; current = filepath.Dir(current) {
-		if filepath.Base(current) == "_input_libs" {
-			return filepath.Dir(current)
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			break
-		}
-	}
-	if workspace := os.Getenv("PWD"); workspace != "" {
-		return workspace
-	}
-	return cwd
 }
 
 func selectedScenarios(value string) ([]scenario, error) {

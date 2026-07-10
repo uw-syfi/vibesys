@@ -163,14 +163,14 @@ func compileCandidateFixture(t *testing.T, retainInput bool) string {
 
 func compileCandidateFixtureWithDefines(t *testing.T, defines ...string) string {
 	t.Helper()
-	harnessSource, err := os.Getwd()
+	evaluatorSource, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
 	workspace := t.TempDir()
 	library := filepath.Join(workspace, "queue-candidate.so")
-	include := filepath.Clean(filepath.Join(harnessSource, "..", "..", "..", "include"))
-	source := filepath.Join(harnessSource, "testdata", "reference_candidate.c")
+	include := filepath.Join(evaluatorSource, "include")
+	source := filepath.Join(evaluatorSource, "testdata", "abi_test_candidate.c")
 	args := []string{"-std=c11", "-O2", "-pthread", "-I", include, source, "-o", library}
 	for _, define := range defines {
 		args = append([]string{"-D" + define}, args...)

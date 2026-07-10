@@ -7,7 +7,7 @@ in `include/vibeserve_queue_abi.h`.
 See [`DESIGN.md`](DESIGN.md) for the end-to-end architecture, trust model,
 correctness protocol, benchmark design, and isolation limitations.
 
-The trusted Rust runner is the only component that loads the library. During
+The evaluator's Rust runner is the only component that loads the library. During
 correctness checks it runs in a worker process controlled by the Go Porcupine
 checker. During performance measurement it calls the same ABI directly from
 native producer and consumer threads.
@@ -74,7 +74,7 @@ maximum for 8-byte, 257-byte, and 1 MiB queue profiles. It also checks input
 retention, undersized-output retry, and unchanged output on empty and invalid
 dequeues before running concurrent Porcupine histories.
 
-The trusted benchmark may run multiple independent repetitions. Its
+The evaluator benchmark may run multiple independent repetitions. Its
 `total_ops_per_sec` field is the median repetition, and the JSON output includes
 the individual `total_ops_per_sec_samples` values.
 

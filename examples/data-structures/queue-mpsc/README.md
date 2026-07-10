@@ -1,8 +1,8 @@
 # Queue MPSC Input
 
 This input targets a multi-producer, single-consumer bounded FIFO queue. The
-manifest invokes the trusted Go harness directly. Candidates implement the
-copying C ABI documented at `_input_libs/queue-input-core/QUEUE_ABI.md` and
+manifest invokes the trusted Go evaluator directly. Candidates implement the
+copying C ABI documented at `_evaluator/queue/QUEUE_ABI.md` and
 export it from `./queue-candidate.so`.
 
 The shared seed at `examples/starters/queue-rs` provides an editable
@@ -10,10 +10,10 @@ The shared seed at `examples/starters/queue-rs` provides an editable
 `VecDeque`. Build and validate it from a materialized workspace:
 
     make
-    go -C _input_libs/queue-input-core/src/queue_input_core/trusted_harness run . check --workspace "$PWD" --scenario mpsc
-    go -C _input_libs/queue-input-core/src/queue_input_core/trusted_harness run . benchmark --workspace "$PWD" --scenario mpsc --duration 1s --warmup 0s
+    go -C _evaluator/queue run . check --workspace "$PWD" --scenario mpsc
+    go -C _evaluator/queue run . benchmark --workspace "$PWD" --scenario mpsc --duration 1s --warmup 0s
 
 The starter is untrusted and may be replaced with any implementation that
-exports the same ABI. `--use-reference` only self-tests the harness's internal
+exports the same ABI. `--use-reference` only self-tests the evaluator's internal
 model; it is not the optimization starting point. The manifest benchmark uses
 three repetitions and reports their median as `total_ops_per_sec`.

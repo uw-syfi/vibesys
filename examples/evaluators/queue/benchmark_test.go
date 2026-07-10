@@ -56,9 +56,9 @@ func TestBenchmarkRejectsNonPositiveOrEvenRepetitions(t *testing.T) {
 				capacity:     1,
 				valueSize:    8,
 			},
-			producers:  1,
-			consumers:  1,
-			duration:   time.Millisecond,
+			producers:   1,
+			consumers:   1,
+			duration:    time.Millisecond,
 			repetitions: repetitions,
 		})
 		if err == nil {

@@ -52,6 +52,23 @@ class WorkspaceInput(BaseModel):
         return value
 
 
+class EvaluatorInput(BaseModel):
+    """Trusted evaluator source copied into a fresh candidate workspace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str
+
+    @field_validator("source")
+    @classmethod
+    def _relative_source(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("source must be a non-empty path")
+        if Path(value).is_absolute():
+            raise ValueError("source must be relative to the input bundle")
+        return value
+
+
 class BenchmarkResult(BaseModel):
     """Machine-readable scalar result emitted by a benchmark command."""
 
@@ -90,6 +107,7 @@ class InputManifest(BaseModel):
     accuracy: InputCommand
     benchmark: BenchmarkCommand
     workspace: WorkspaceInput | None = None
+    evaluator: EvaluatorInput | None = None
 
 
 class InputBundle(BaseModel):
@@ -102,6 +120,7 @@ class InputBundle(BaseModel):
     objective_path: Path
     reference_path: Path | None
     workspace_seed_path: Path | None
+    evaluator_path: Path | None
     manifest: InputManifest
 
     @property
@@ -194,11 +213,28 @@ def load_input_bundle(path: Path, *, project_root: Path | None = None) -> InputB
         if not workspace_seed_path.is_dir():
             raise ValueError(f"workspace.seed path is not a directory: {workspace_seed_path}")
 
+    evaluator_path = None
+    if manifest.evaluator is not None:
+        evaluators_root = (project_root / "examples" / "evaluators").resolve()
+        evaluator_path = (root / manifest.evaluator.source).resolve()
+        try:
+            evaluator_path.relative_to(evaluators_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"evaluator.source must resolve inside {evaluators_root}: "
+                f"{manifest.evaluator.source}"
+            ) from exc
+        if not evaluator_path.exists():
+            raise FileNotFoundError(f"evaluator.source path does not exist: {evaluator_path}")
+        if not evaluator_path.is_dir():
+            raise ValueError(f"evaluator.source path is not a directory: {evaluator_path}")
+
     return InputBundle(
         root=root,
         manifest_path=manifest_path,
         objective_path=objective_path,
         reference_path=reference_path,
         workspace_seed_path=workspace_seed_path,
+        evaluator_path=evaluator_path,
         manifest=manifest,
     )

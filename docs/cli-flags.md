@@ -168,6 +168,9 @@ command = ["uv", "run", "python", "benchmark/benchmark.py"]
 [workspace]
 seed = "../../starters/example-rust-candidate"
 
+[evaluator]
+source = "../../evaluators/example"
+
 [benchmark.result]
 json_argument = "--output-json"
 metric = "requests_per_second"
@@ -190,6 +193,13 @@ VibeServe copies non-ignored seed files first and then copies the input bundle.
 Any top-level path supplied by both sources is rejected instead of being
 overwritten. The resulting files are ordinary candidate workspace files: agents
 may edit or delete them, and resumed runs never refresh them from the seed.
+
+The optional `evaluator.source` path is relative to the input manifest and must
+resolve inside `examples/evaluators/`. On a fresh run, VibeServe copies it to
+`_evaluator/<source-name>`. This is a separate, evaluator-owned input: Git-backed
+integrity checks reject accuracy and benchmark gates after it is modified.
+Resumed runs keep the evaluator snapshot from the original run instead of
+refreshing it from repository source.
 
 ## Common Commands
 

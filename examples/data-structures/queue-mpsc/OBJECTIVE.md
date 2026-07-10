@@ -5,7 +5,7 @@ Headline metric: `total_ops_per_sec` (maximize).
 Preserve the required interface:
 - Provide a native shared library named `./queue-candidate.so`.
 - Export the copying C ABI documented in
-  `_input_libs/queue-input-core/QUEUE_ABI.md`.
+  `_evaluator/queue/QUEUE_ABI.md`.
 - Implement enqueue and dequeue for copied byte values using the capacity and
   value size supplied by the trusted runner.
 

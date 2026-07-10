@@ -17,7 +17,7 @@ Headline metric: `total_ops_per_sec` (maximize).
 
 - Provide a native shared library named `./queue-candidate.so`.
 - Export the copying C ABI documented in
-  `_input_libs/queue-input-core/QUEUE_ABI.md`.
+  `_evaluator/queue/QUEUE_ABI.md`.
 - The candidate may use any language or combination of languages.
 - The trusted runner supplies capacity, copied value size, and worker counts.
 - No hardware accelerator is required; this workload is CPU-only.

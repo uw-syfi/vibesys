@@ -1,4 +1,4 @@
-"""Tests for manifest-declared candidate workspace seeds."""
+"""Tests for manifest-declared workspace seeds and evaluator sources."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ class _FakeBackend:
         return None
 
 
-def _write_bundle(project_root: Path, workspace_block: str = "") -> Path:
+def _write_bundle(project_root: Path, manifest_blocks: str = "") -> Path:
     bundle = project_root / "examples" / "data-structures" / "queue-spsc"
     bundle.mkdir(parents=True)
     (bundle / "OBJECTIVE.md").write_text("Build a queue.\n")
@@ -46,7 +46,7 @@ command = ["accuracy-checker"]
 [benchmark]
 command = ["benchmark"]
 
-{workspace_block}
+{manifest_blocks}
 """.lstrip()
     )
     return bundle
@@ -67,7 +67,7 @@ def _patched_context_dependencies(project_root: Path):
         yield
 
 
-def _make_context(input_dir: Path, seed: Path, **kwargs) -> _RunContext:
+def _make_context(input_dir: Path, seed: Path | None = None, **kwargs) -> _RunContext:
     return _RunContext(
         config={"model": {"name": "claude-sonnet-4-6"}},
         exp_name=kwargs.pop("exp_name", "workspace-seed"),
@@ -90,6 +90,7 @@ def test_manifest_without_workspace_seed_remains_valid(tmp_path):
     loaded = load_input_bundle(bundle, project_root=project_root)
 
     assert loaded.workspace_seed_path is None
+    assert loaded.evaluator_path is None
 
 
 def test_manifest_resolves_seed_relative_to_bundle(tmp_path):
@@ -104,6 +105,20 @@ def test_manifest_resolves_seed_relative_to_bundle(tmp_path):
     loaded = load_input_bundle(bundle, project_root=project_root)
 
     assert loaded.workspace_seed_path == seed.resolve()
+
+
+def test_manifest_resolves_evaluator_relative_to_bundle(tmp_path):
+    project_root = tmp_path / "project"
+    evaluator = project_root / "examples" / "evaluators" / "queue"
+    evaluator.mkdir(parents=True)
+    bundle = _write_bundle(
+        project_root,
+        '[evaluator]\nsource = "../../evaluators/queue"',
+    )
+
+    loaded = load_input_bundle(bundle, project_root=project_root)
+
+    assert loaded.evaluator_path == evaluator.resolve()
 
 
 @pytest.mark.parametrize(
@@ -168,6 +183,68 @@ def test_manifest_rejects_unknown_workspace_keys(tmp_path):
         load_input_bundle(bundle, project_root=project_root)
 
 
+@pytest.mark.parametrize(
+    ("source_value", "error"),
+    [
+        ("/tmp/evaluator", "source must be relative"),
+        ("../../../outside", "must resolve inside"),
+        ("../../evaluators/missing", "path does not exist"),
+    ],
+)
+def test_manifest_rejects_invalid_evaluator_paths(tmp_path, source_value, error):
+    project_root = tmp_path / "project"
+    bundle = _write_bundle(
+        project_root,
+        f'[evaluator]\nsource = "{source_value}"',
+    )
+
+    with pytest.raises((FileNotFoundError, ValueError), match=error):
+        load_input_bundle(bundle, project_root=project_root)
+
+
+def test_manifest_rejects_evaluator_file(tmp_path):
+    project_root = tmp_path / "project"
+    evaluator = project_root / "examples" / "evaluators" / "not-a-directory"
+    evaluator.parent.mkdir(parents=True)
+    evaluator.write_text("not a directory\n")
+    bundle = _write_bundle(
+        project_root,
+        '[evaluator]\nsource = "../../evaluators/not-a-directory"',
+    )
+
+    with pytest.raises(ValueError, match="path is not a directory"):
+        load_input_bundle(bundle, project_root=project_root)
+
+
+def test_manifest_rejects_evaluator_symlink_that_escapes_evaluators(tmp_path):
+    project_root = tmp_path / "project"
+    outside = project_root / "outside"
+    outside.mkdir(parents=True)
+    evaluator = project_root / "examples" / "evaluators" / "escape"
+    evaluator.parent.mkdir(parents=True)
+    evaluator.symlink_to(outside, target_is_directory=True)
+    bundle = _write_bundle(
+        project_root,
+        '[evaluator]\nsource = "../../evaluators/escape"',
+    )
+
+    with pytest.raises(ValueError, match="must resolve inside"):
+        load_input_bundle(bundle, project_root=project_root)
+
+
+def test_manifest_rejects_unknown_evaluator_keys(tmp_path):
+    project_root = tmp_path / "project"
+    evaluator = project_root / "examples" / "evaluators" / "queue"
+    evaluator.mkdir(parents=True)
+    bundle = _write_bundle(
+        project_root,
+        '[evaluator]\nsource = "../../evaluators/queue"\nmutable = false',
+    )
+
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        load_input_bundle(bundle, project_root=project_root)
+
+
 def test_fresh_workspace_materializes_seed_and_preserves_it_in_initial_commit(tmp_path):
     project_root = tmp_path / "project"
     project_root.mkdir()
@@ -182,20 +259,34 @@ def test_fresh_workspace_materializes_seed_and_preserves_it_in_initial_commit(tm
     (seed / "target" / "debug.o").write_bytes(b"build artifact")
     (seed / "candidate.so").write_bytes(b"shared library")
 
+    evaluator = project_root / "examples" / "evaluators" / "queue"
+    (evaluator / "target").mkdir(parents=True)
+    (evaluator / ".gitignore").write_text("target/\n")
+    (evaluator / "checker.go").write_text("package main\n")
+    (evaluator / "target" / "checker").write_bytes(b"build artifact")
+
     input_dir = project_root / "examples" / "data-structures" / "queue"
     input_dir.mkdir(parents=True)
     (input_dir / "OBJECTIVE.md").write_text("Build a queue.\n")
     (input_dir / "checker.py").write_text("pass\n")
 
     with _patched_context_dependencies(project_root):
-        with _make_context(input_dir, seed, git_tracking=True) as ctx:
+        with _make_context(
+            input_dir,
+            seed,
+            evaluator_path=evaluator,
+            git_tracking=True,
+        ) as ctx:
             assert ctx.workspace_seed_path == seed.resolve()
+            assert ctx.evaluator_path == evaluator.resolve()
             assert (ctx.workspace / "Cargo.toml").is_file()
             assert (ctx.workspace / "src" / "lib.rs").is_file()
             assert (ctx.workspace / "OBJECTIVE.md").is_file()
             assert (ctx.workspace / "checker.py").is_file()
             assert not (ctx.workspace / "target").exists()
             assert not (ctx.workspace / "candidate.so").exists()
+            assert (ctx.workspace / "_evaluator" / "queue" / "checker.go").is_file()
+            assert not (ctx.workspace / "_evaluator" / "queue" / "target").exists()
             assert "target/\n" in (ctx.workspace / ".gitignore").read_text()
 
             tracked = subprocess.run(
@@ -208,6 +299,12 @@ def test_fresh_workspace_materializes_seed_and_preserves_it_in_initial_commit(tm
             assert "Cargo.toml" in tracked
             assert "src/lib.rs" in tracked
             assert "OBJECTIVE.md" in tracked
+            assert "_evaluator/queue/checker.go" in tracked
+
+            (ctx.workspace / "_evaluator" / "queue" / "checker.go").write_text(
+                "package compromised\n"
+            )
+            assert ctx.trusted_input_changes() == ["_evaluator/queue/checker.go"]
 
 
 def test_input_collision_is_rejected_before_overlay(tmp_path):
@@ -245,26 +342,43 @@ def test_resume_does_not_refresh_workspace_from_seed(tmp_path):
     seed_file = seed / "candidate.rs"
     seed_file.write_text("seed version 1\n")
 
+    evaluator = project_root / "examples" / "evaluators" / "queue"
+    evaluator.mkdir(parents=True)
+    evaluator_file = evaluator / "checker.go"
+    evaluator_file.write_text("evaluator version 1\n")
+
     input_dir = project_root / "examples" / "data-structures" / "queue"
     input_dir.mkdir(parents=True)
     (input_dir / "OBJECTIVE.md").write_text("Build a queue.\n")
 
     with _patched_context_dependencies(project_root):
-        with _make_context(input_dir, seed, git_tracking=True) as first:
+        with _make_context(
+            input_dir,
+            seed,
+            evaluator_path=evaluator,
+            git_tracking=True,
+        ) as first:
             run_name = first.exp_dir.name
             workspace_file = first.workspace / "candidate.rs"
             workspace_file.write_text("agent version\n")
+            workspace_evaluator = first.workspace / "_evaluator" / "queue" / "checker.go"
+            workspace_evaluator.write_text("run evaluator\n")
 
         seed_file.write_text("seed version 2\n")
+        evaluator_file.write_text("evaluator version 2\n")
 
         with _make_context(
             input_dir,
             seed,
+            evaluator_path=evaluator,
             exp_name=run_name,
             existing=True,
             git_tracking=True,
         ) as resumed:
             assert (resumed.workspace / "candidate.rs").read_text() == "agent version\n"
+            assert (
+                resumed.workspace / "_evaluator" / "queue" / "checker.go"
+            ).read_text() == "run evaluator\n"
 
 
 @pytest.mark.parametrize(
@@ -276,13 +390,16 @@ def test_resume_does_not_refresh_workspace_from_seed(tmp_path):
         ("plain", "vibe_serve.loops.plain.loop.run_plain_loop"),
     ],
 )
-def test_cli_forwards_workspace_seed_to_every_outer_loop(tmp_path, outer_loop, runner_path):
+def test_cli_forwards_workspace_sources_to_every_outer_loop(tmp_path, outer_loop, runner_path):
     project_root = tmp_path / "project"
     seed = project_root / "examples" / "starters" / "queue"
     seed.mkdir(parents=True)
+    evaluator = project_root / "examples" / "evaluators" / "queue"
+    evaluator.mkdir(parents=True)
     bundle = _write_bundle(
         project_root,
-        '[workspace]\nseed = "../../starters/queue"',
+        '[workspace]\nseed = "../../starters/queue"\n\n'
+        '[evaluator]\nsource = "../../evaluators/queue"',
     )
     argv = ["vibe-serve", "--outer-loop", outer_loop, "--input", str(bundle)]
 
@@ -302,3 +419,4 @@ def test_cli_forwards_workspace_seed_to_every_outer_loop(tmp_path, outer_loop, r
         main()
 
     assert runner.call_args.kwargs["workspace_seed"] == seed.resolve()
+    assert runner.call_args.kwargs["evaluator_path"] == evaluator.resolve()

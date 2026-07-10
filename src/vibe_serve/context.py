@@ -105,6 +105,7 @@ class _RunContext:
         accuracy_command: str,
         benchmark_command: str,
         workspace_seed: Path | None = None,
+        evaluator_path: Path | None = None,
         existing: bool = False,
         debug: bool = False,
         nsys_profiler: str | None = None,
@@ -180,6 +181,7 @@ class _RunContext:
 
         self.input_path = self._coerce_dir_path(input_path, "--input")
         self.workspace_seed_path = self._coerce_dir(workspace_seed, "workspace.seed")
+        self.evaluator_path = self._coerce_dir(evaluator_path, "evaluator.source")
         self.accuracy_command = accuracy_command
         self.benchmark_command = benchmark_command
         self.nsys_profiler_path = self._coerce_dir_path(nsys_profiler, "--nsys-profiler")
@@ -308,6 +310,18 @@ class _RunContext:
                     input_dir,
                     self.workspace,
                     extra_excludes=self.environment_patch.copy_excludes,
+                )
+
+            if self.evaluator_path is not None:
+                evaluator_root = self.workspace / "_evaluator"
+                if evaluator_root.exists() or evaluator_root.is_symlink():
+                    raise ValueError(
+                        "_evaluator is reserved for the manifest-declared evaluator source"
+                    )
+                self._copy_excluding_extras(
+                    self.evaluator_path,
+                    evaluator_root / self.evaluator_path.name,
+                    respect_source_gitignore=True,
                 )
 
             for src in skill_source_paths:
@@ -746,6 +760,7 @@ class _RunContext:
         "accuracy_checker",
         "benchmark",
         "_input_libs",
+        "_evaluator",
     )
 
     def trusted_input_changes(self) -> list[str]:
