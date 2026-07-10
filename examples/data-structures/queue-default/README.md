@@ -7,16 +7,18 @@ scenarios. The trusted Go checker, Rust benchmark runner, and ABI definition
 live in the `queue-input-core` package under `examples/libs/queue-input-core`;
 this input depends on that package with a uv path dependency.
 
-The editable starter candidate in `src/lib.rs` is deliberately simple Rust:
-one `Mutex<VecDeque<Vec<u8>>>` shared by every producer and consumer. It is a
-candidate baseline, not trusted code. Build the required shared library with:
+The shared seed at `examples/starters/queue-copying-rust` is copied into each
+fresh workspace. Its editable `src/lib.rs` is deliberately simple Rust: one
+`Mutex<VecDeque<Vec<u8>>>` shared by every producer and consumer. It is a
+candidate baseline, not trusted code. From a materialized workspace, build the
+required shared library with:
 
     make
 
 ## Running the correctness checker
 
-    go -C ../../libs/queue-input-core/src/queue_input_core/trusted_harness run . check --workspace "$PWD" --scenario all
-    go -C ../../libs/queue-input-core/src/queue_input_core/trusted_harness run . check --workspace "$PWD" --scenario mpmc --producers 4 --consumers 4
+    go -C _input_libs/queue-input-core/src/queue_input_core/trusted_harness run . check --workspace "$PWD" --scenario all
+    go -C _input_libs/queue-input-core/src/queue_input_core/trusted_harness run . check --workspace "$PWD" --scenario mpmc --producers 4 --consumers 4
 
 Notes:
 - `make` creates the workspace's `./queue-candidate.so` shared library.
@@ -34,9 +36,9 @@ Notes:
 
 ## Running the benchmark
 
-    go -C ../../libs/queue-input-core/src/queue_input_core/trusted_harness run . benchmark --workspace "$PWD" --scenario spsc --duration 10s
-    go -C ../../libs/queue-input-core/src/queue_input_core/trusted_harness run . benchmark --workspace "$PWD" --scenario all --output-json results.json
-    go -C ../../libs/queue-input-core/src/queue_input_core/trusted_harness run . benchmark --workspace "$PWD" --scenario spsc
+    go -C _input_libs/queue-input-core/src/queue_input_core/trusted_harness run . benchmark --workspace "$PWD" --scenario spsc --duration 10s
+    go -C _input_libs/queue-input-core/src/queue_input_core/trusted_harness run . benchmark --workspace "$PWD" --scenario all --output-json results.json
+    go -C _input_libs/queue-input-core/src/queue_input_core/trusted_harness run . benchmark --workspace "$PWD" --scenario spsc
 
 Use an odd `--repetitions` count to report the median run in
 `total_ops_per_sec`; the manifest uses three repetitions and preserves every

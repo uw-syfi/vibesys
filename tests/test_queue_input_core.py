@@ -32,6 +32,28 @@ def _copy_input_bundle(source: Path, target: Path) -> None:
     )
 
 
+def _materialize_linearizable_input(
+    project_root: Path,
+    input_name: str,
+    workspace: Path,
+) -> Path:
+    from vibe_serve.input_manifest import load_input_bundle
+    from vibe_serve.input_project import materialize_input_project
+
+    input_dir = project_root / "examples" / "data-structures" / input_name
+    bundle = load_input_bundle(input_dir, project_root=project_root)
+    assert bundle.workspace_seed_path is not None
+    _copy_input_bundle(bundle.workspace_seed_path, workspace)
+    _copy_input_bundle(input_dir, workspace)
+    materialize_input_project(
+        input_dir,
+        workspace,
+        project_root=project_root,
+        copy_dir=lambda source, target: shutil.copytree(source, target),
+    )
+    return input_dir
+
+
 def test_queue_input_core_contract_drives_reference_scenarios(monkeypatch):
     package_src = Path(__file__).parents[1] / "examples" / "libs" / "queue-input-core" / "src"
     monkeypatch.syspath_prepend(str(package_src))
@@ -165,21 +187,29 @@ def test_linearizable_queue_manifests_invoke_go_harness_directly():
     assert not (queue_core / "QUEUE_PROTOCOL.md").exists()
 
 
-def test_linearizable_queue_inputs_ship_the_same_editable_rust_starter():
-    root = Path(__file__).parents[1] / "examples" / "data-structures"
-    starter_files = ["Cargo.toml", "Cargo.lock", "Makefile", "src/lib.rs"]
-    canonical = {
-        relative: (root / "queue-default" / relative).read_bytes() for relative in starter_files
-    }
+def test_linearizable_queue_inputs_use_shared_editable_rust_starter():
+    from vibe_serve.input_manifest import load_input_bundle
+
+    project_root = Path(__file__).parents[1]
+    root = project_root / "examples" / "data-structures"
+    starter = project_root / "examples" / "starters" / "queue-copying-rust"
+    starter_files = [".gitignore", "Cargo.toml", "Cargo.lock", "Makefile", "src/lib.rs"]
+
+    for relative in starter_files:
+        assert (starter / relative).is_file()
 
     for input_name in LINEARIZABLE_QUEUE_INPUTS:
         input_dir = root / input_name
+        bundle = load_input_bundle(input_dir, project_root=project_root)
+        assert bundle.workspace_seed_path == starter.resolve()
         assert not (input_dir / "reference" / "reference.py").exists()
-        for relative, expected in canonical.items():
-            assert (input_dir / relative).read_bytes() == expected
+        for relative in starter_files:
+            assert not (input_dir / relative).exists()
 
     for input_name in ["queue-lossy", "queue-batch"]:
         assert not (root / input_name / "Cargo.toml").exists()
+        manifest = tomllib.loads((root / input_name / "vibeserve.input.toml").read_text())
+        assert "workspace" not in manifest
 
 
 @pytest.mark.parametrize(("input_name", "scenario"), LINEARIZABLE_QUEUE_INPUTS.items())
@@ -187,18 +217,9 @@ def test_materialized_rust_starter_builds_and_passes_accuracy(tmp_path, input_na
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted queue evaluator")
 
-    from vibe_serve.input_project import materialize_input_project
-
     project_root = Path(__file__).parents[1]
-    input_dir = project_root / "examples" / "data-structures" / input_name
     workspace = tmp_path / "workspace"
-    _copy_input_bundle(input_dir, workspace)
-    materialize_input_project(
-        input_dir,
-        workspace,
-        project_root=project_root,
-        copy_dir=lambda source, target: shutil.copytree(source, target),
-    )
+    _materialize_linearizable_input(project_root, input_name, workspace)
 
     subprocess.run(["make"], cwd=workspace, check=True)
     assert (workspace / "queue-candidate.so").is_file()
@@ -239,18 +260,12 @@ def test_materialized_manifest_commands_run_go_harness_directly(tmp_path):
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted queue evaluator")
 
-    from vibe_serve.input_project import materialize_input_project
-
     project_root = Path(__file__).parents[1]
-    input_dir = project_root / "examples" / "data-structures" / "queue-default"
     workspace = tmp_path / "workspace"
-    _copy_input_bundle(input_dir, workspace)
-
-    materialize_input_project(
-        input_dir,
+    input_dir = _materialize_linearizable_input(
+        project_root,
+        "queue-default",
         workspace,
-        project_root=project_root,
-        copy_dir=lambda source, target: shutil.copytree(source, target),
     )
     subprocess.run(["make"], cwd=workspace, check=True)
     manifest = tomllib.loads((input_dir / "vibeserve.input.toml").read_text())

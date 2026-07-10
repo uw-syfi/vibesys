@@ -5,12 +5,13 @@ manifest invokes the trusted Go harness directly. Candidates implement the
 copying C ABI documented at `_input_libs/queue-input-core/QUEUE_ABI.md` and
 export it from `./queue-candidate.so`.
 
-The editable `src/lib.rs` is an intentionally naive Rust candidate using one
-mutex and `VecDeque`. Build and validate it from this directory:
+The shared seed at `examples/starters/queue-copying-rust` provides an editable
+`src/lib.rs` with an intentionally naive Rust candidate using one mutex and
+`VecDeque`. Build and validate it from a materialized workspace:
 
     make
-    go -C ../../libs/queue-input-core/src/queue_input_core/trusted_harness run . check --workspace "$PWD" --scenario mpmc
-    go -C ../../libs/queue-input-core/src/queue_input_core/trusted_harness run . benchmark --workspace "$PWD" --scenario mpmc --duration 1s --warmup 0s
+    go -C _input_libs/queue-input-core/src/queue_input_core/trusted_harness run . check --workspace "$PWD" --scenario mpmc
+    go -C _input_libs/queue-input-core/src/queue_input_core/trusted_harness run . benchmark --workspace "$PWD" --scenario mpmc --duration 1s --warmup 0s
 
 The starter is untrusted and may be replaced with any implementation that
 exports the same ABI. `--use-reference` only self-tests the harness's internal
