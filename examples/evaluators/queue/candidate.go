@@ -90,7 +90,7 @@ func candidateLibraryPath(config candidateConfig) (string, error) {
 
 func candidateSourceArgs(config candidateConfig) ([]string, error) {
 	if config.useReference {
-		return []string{"--reference", "1"}, nil
+		return []string{"--reference"}, nil
 	}
 	path, err := candidateLibraryPath(config)
 	if err != nil {
@@ -175,10 +175,12 @@ func startCandidate(config candidateConfig) (*candidateSession, error) {
 		"--lanes", strconv.Itoa(config.laneCount),
 		"--producers", strconv.Itoa(config.producerCount),
 		"--consumers", strconv.Itoa(config.consumerCount),
-		"--mixed-lane", strconv.Itoa(boolInt(config.mixedLane)),
 		"--capacity", strconv.FormatUint(config.capacity, 10),
 		"--value-size", strconv.Itoa(config.valueSize),
 	)
+	if config.mixedLane {
+		args = append(args, "--mixed-lane")
+	}
 	command := exec.Command(runner, args...)
 	command.Dir = config.workspace
 	command.ExtraFiles = runnerFiles
@@ -214,13 +216,6 @@ func startCandidate(config candidateConfig) (*candidateSession, error) {
 		close(session.done)
 	}()
 	return session, nil
-}
-
-func boolInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
 }
 
 func (s *candidateSession) waitError() error {

@@ -5,14 +5,69 @@ mod protocol;
 mod value;
 
 use abi::Api;
+use argparse::{ArgumentParser, Store, StoreOption, StoreTrue};
 use benchmark::BenchmarkConfig;
 use protocol::WorkerConfig;
-use std::collections::HashMap;
-use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process;
+use std::str::FromStr;
 use std::time::Duration;
 use value::MIN_VALUE_SIZE;
+
+#[derive(Clone, Copy)]
+enum Command {
+    Worker,
+    Probe,
+    Benchmark,
+}
+
+impl FromStr for Command {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "worker" => Ok(Self::Worker),
+            "probe" => Ok(Self::Probe),
+            "benchmark" => Ok(Self::Benchmark),
+            _ => Err(format!("unknown command {value:?}")),
+        }
+    }
+}
+
+#[derive(Default)]
+struct Args {
+    command: Option<Command>,
+    use_reference: bool,
+    library: Option<PathBuf>,
+    capacity: u64,
+    value_size: usize,
+    producer_count: u32,
+    consumer_count: u32,
+    fd_base: Option<i32>,
+    lane_count: Option<usize>,
+    mixed_lane: bool,
+    scenario: Option<String>,
+    warmup_ns: Option<u64>,
+    duration_ns: Option<u64>,
+    output: Option<PathBuf>,
+}
+
+impl Args {
+    fn load_api(&self) -> Result<Api, String> {
+        match (self.use_reference, self.library.as_ref()) {
+            (true, None) => Ok(Api::reference()),
+            (false, Some(path)) => Api::load(path),
+            _ => Err("expected exactly one of --reference or --library PATH".to_string()),
+        }
+    }
+
+    fn checked_value_size(&self) -> Result<usize, String> {
+        if self.value_size < MIN_VALUE_SIZE {
+            return Err(format!("value size must be at least {MIN_VALUE_SIZE}"));
+        }
+        Ok(self.value_size)
+    }
+}
 
 fn main() {
     if let Err(error) = run() {
@@ -22,153 +77,127 @@ fn main() {
 }
 
 fn run() -> Result<(), String> {
-    let mut args = env::args().skip(1);
-    let command = args
-        .next()
-        .ok_or_else(|| "expected worker, probe, or benchmark command".to_string())?;
-    let values = parse_flags(args.collect())?;
-    match command.as_str() {
-        "worker" => {
-            validate_flags(
-                &values,
-                &[
-                    "reference",
-                    "library",
-                    "fd-base",
-                    "lanes",
-                    "producers",
-                    "consumers",
-                    "mixed-lane",
-                    "capacity",
-                    "value-size",
-                ],
-            )?;
-            protocol::run_worker(
-                load_api(&values)?,
-                WorkerConfig {
-                    fd_base: parse(&values, "fd-base")?,
-                    lane_count: parse(&values, "lanes")?,
-                    producer_count: parse(&values, "producers")?,
-                    consumer_count: parse(&values, "consumers")?,
-                    mixed_lane: parse::<u32>(&values, "mixed-lane")? != 0,
-                    capacity: parse(&values, "capacity")?,
-                    value_size: value_size(&values)?,
-                },
-            )
-        }
-        "benchmark" => {
-            validate_flags(
-                &values,
-                &[
-                    "reference",
-                    "library",
-                    "scenario",
-                    "capacity",
-                    "value-size",
-                    "producers",
-                    "consumers",
-                    "warmup-ns",
-                    "duration-ns",
-                    "output",
-                ],
-            )?;
-            benchmark::run_benchmark(
-                load_api(&values)?,
-                BenchmarkConfig {
-                    scenario: required(&values, "scenario")?.to_string(),
-                    capacity: parse(&values, "capacity")?,
-                    value_size: value_size(&values)?,
-                    producer_count: parse(&values, "producers")?,
-                    consumer_count: parse(&values, "consumers")?,
-                    warmup: Duration::from_nanos(parse(&values, "warmup-ns")?),
-                    duration: Duration::from_nanos(parse(&values, "duration-ns")?),
-                },
-                Path::new(required(&values, "output")?),
-            )
-        }
-        "probe" => {
-            validate_flags(
-                &values,
-                &[
-                    "reference",
-                    "library",
-                    "capacity",
-                    "value-size",
-                    "producers",
-                    "consumers",
-                ],
-            )?;
-            probe::run_probe(
-                load_api(&values)?,
-                parse(&values, "capacity")?,
-                value_size(&values)?,
-                parse(&values, "producers")?,
-                parse(&values, "consumers")?,
-            )
-        }
-        _ => Err(format!("unknown command {command:?}")),
+    let args = parse_args();
+    let api = args.load_api()?;
+    let value_size = args.checked_value_size()?;
+
+    match args
+        .command
+        .expect("argparse enforces the required command")
+    {
+        Command::Worker => protocol::run_worker(
+            api,
+            WorkerConfig {
+                fd_base: required(args.fd_base, "--fd-base")?,
+                lane_count: required(args.lane_count, "--lanes")?,
+                producer_count: args.producer_count,
+                consumer_count: args.consumer_count,
+                mixed_lane: args.mixed_lane,
+                capacity: args.capacity,
+                value_size,
+            },
+        ),
+        Command::Probe => probe::run_probe(
+            api,
+            args.capacity,
+            value_size,
+            args.producer_count,
+            args.consumer_count,
+        ),
+        Command::Benchmark => benchmark::run_benchmark(
+            api,
+            BenchmarkConfig {
+                scenario: required(args.scenario, "--scenario")?,
+                capacity: args.capacity,
+                value_size,
+                producer_count: args.producer_count,
+                consumer_count: args.consumer_count,
+                warmup: Duration::from_nanos(required(args.warmup_ns, "--warmup-ns")?),
+                duration: Duration::from_nanos(required(args.duration_ns, "--duration-ns")?),
+            },
+            &required(args.output, "--output")?,
+        ),
     }
 }
 
-fn validate_flags(values: &HashMap<String, String>, allowed: &[&str]) -> Result<(), String> {
-    for name in values.keys() {
-        if !allowed.contains(&name.as_str()) {
-            return Err(format!("unknown flag --{name}"));
-        }
+fn parse_args() -> Args {
+    let mut args = Args::default();
+    {
+        let mut parser = ArgumentParser::new();
+        parser.set_description("Runs queue candidate ABI workers and benchmarks");
+        parser.refer(&mut args.command).required().add_argument(
+            "command",
+            StoreOption,
+            "worker, probe, or benchmark",
+        );
+        parser.refer(&mut args.use_reference).add_option(
+            &["--reference"],
+            StoreTrue,
+            "use the built-in reference candidate",
+        );
+        parser.refer(&mut args.library).add_option(
+            &["--library"],
+            StoreOption,
+            "candidate shared library path",
+        );
+        parser.refer(&mut args.capacity).required().add_option(
+            &["--capacity"],
+            Store,
+            "queue capacity in items",
+        );
+        parser.refer(&mut args.value_size).required().add_option(
+            &["--value-size"],
+            Store,
+            "maximum copied value size",
+        );
+        parser
+            .refer(&mut args.producer_count)
+            .required()
+            .add_option(&["--producers"], Store, "producer count");
+        parser
+            .refer(&mut args.consumer_count)
+            .required()
+            .add_option(&["--consumers"], Store, "consumer count");
+        parser.refer(&mut args.fd_base).add_option(
+            &["--fd-base"],
+            StoreOption,
+            "first inherited lane file descriptor",
+        );
+        parser.refer(&mut args.lane_count).add_option(
+            &["--lanes"],
+            StoreOption,
+            "number of correctness lanes",
+        );
+        parser.refer(&mut args.mixed_lane).add_option(
+            &["--mixed-lane"],
+            StoreTrue,
+            "allow enqueue and dequeue on the single lane",
+        );
+        parser.refer(&mut args.scenario).add_option(
+            &["--scenario"],
+            StoreOption,
+            "queue concurrency scenario",
+        );
+        parser.refer(&mut args.warmup_ns).add_option(
+            &["--warmup-ns"],
+            StoreOption,
+            "warmup duration in nanoseconds",
+        );
+        parser.refer(&mut args.duration_ns).add_option(
+            &["--duration-ns"],
+            StoreOption,
+            "measured duration in nanoseconds",
+        );
+        parser.refer(&mut args.output).add_option(
+            &["--output"],
+            StoreOption,
+            "benchmark result path",
+        );
+        parser.parse_args_or_exit();
     }
-    Ok(())
+    args
 }
 
-fn parse_flags(args: Vec<String>) -> Result<HashMap<String, String>, String> {
-    if has_odd_length(&args) {
-        return Err("runner flags must be --name value pairs".to_string());
-    }
-    let mut values = HashMap::new();
-    for pair in args.chunks_exact(2) {
-        let name = pair[0]
-            .strip_prefix("--")
-            .ok_or_else(|| format!("expected flag, got {:?}", pair[0]))?;
-        if values.insert(name.to_string(), pair[1].clone()).is_some() {
-            return Err(format!("flag --{name} was supplied more than once"));
-        }
-    }
-    Ok(values)
-}
-
-#[allow(clippy::manual_is_multiple_of)]
-fn has_odd_length<T>(values: &[T]) -> bool {
-    values.len() % 2 != 0
-}
-
-fn load_api(values: &HashMap<String, String>) -> Result<Api, String> {
-    match (values.get("reference"), values.get("library")) {
-        (Some(value), None) if value == "1" => Ok(Api::reference()),
-        (None, Some(path)) => Api::load(&PathBuf::from(path)),
-        _ => Err("expected exactly one of --reference 1 or --library PATH".to_string()),
-    }
-}
-
-fn required<'a>(values: &'a HashMap<String, String>, name: &str) -> Result<&'a str, String> {
-    values
-        .get(name)
-        .map(String::as_str)
-        .ok_or_else(|| format!("--{name} is required"))
-}
-
-fn parse<T>(values: &HashMap<String, String>, name: &str) -> Result<T, String>
-where
-    T: std::str::FromStr,
-    T::Err: std::fmt::Display,
-{
-    required(values, name)?
-        .parse()
-        .map_err(|error| format!("invalid --{name}: {error}"))
-}
-
-fn value_size(values: &HashMap<String, String>) -> Result<usize, String> {
-    let size: usize = parse(values, "value-size")?;
-    if size < MIN_VALUE_SIZE {
-        return Err(format!("value size must be at least {MIN_VALUE_SIZE}"));
-    }
-    Ok(size)
+fn required<T>(value: Option<T>, name: &str) -> Result<T, String> {
+    value.ok_or_else(|| format!("{name} is required for this command"))
 }
