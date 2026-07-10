@@ -42,9 +42,21 @@ PASS: pytest passes and /v1/completions streams valid SSE.
 Your working directory is the shared experiment workspace. All files you create must be here.
 The reference implementation is at `/workspace/reference/main.py`.
 
-Use `uv` for Python package management. Run `uv init` if `pyproject.toml` doesn't exist yet, and `uv add` for new dependencies. Always execute scripts via `uv run`.
+## Execution boundary
 
+Evaluator-owned code invokes the candidate directly inside an evaluator process.
+The input bundle defines the callable API or ABI, artifacts, ownership rules,
+and lifecycle requirements.
+
+Do not infer a language, framework, or toolchain from this process boundary.
+Follow the selected domain guidance and the input-owned candidate contract.
 Model weights are at `/model` — do NOT download models.
+
+## Python toolchain
+
+Use `uv` for Python package management. Run `uv init` if `pyproject.toml`
+doesn't exist yet, and `uv add` for new dependencies. Always execute Python
+scripts via `uv run`.
 
 The Judge also runs a standard accuracy check and benchmark sanity test in addition to this round's pass criteria. Your implementation must pass those too.
 

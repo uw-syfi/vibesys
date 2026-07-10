@@ -2,7 +2,7 @@
 
 This input targets a multi-producer, multi-consumer bounded FIFO queue. The
 manifest invokes the trusted Go evaluator directly. Candidates implement the
-copying C ABI documented at `_evaluator/queue/QUEUE_ABI.md` and
+copying C ABI documented at `_evaluator/queue/CANDIDATE_CONTRACT.md` and
 export it from `./queue-candidate.so`.
 
 The shared seed at `examples/starters/queue-rs` provides an editable

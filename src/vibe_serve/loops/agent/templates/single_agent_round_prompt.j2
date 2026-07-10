@@ -49,7 +49,7 @@ Reference implementation: `{{ reference_path }}`.
 No separate reference implementation is provided. Treat `OBJECTIVE.md` and the input-owned contract files it names as authoritative.
 {% endif %}
 
-{% include "_interface/language.j2" %}
+{% include "_interface/execution.j2" %}
 {% if accuracy_command or benchmark_command %}
 ## Evaluator commands
 
@@ -73,7 +73,7 @@ After (and only after) the implementation passes your self-judge gates, capture 
 {% endif %}
 {% if profiler_kind == "none" %}
 Standalone profiling is disabled for this run. Use the benchmark's headline metric and judge-visible evidence for the profile fields; do not invoke profiler helper directories or profiler MCP tools.
-{% elif profiler_kind == "torch" and interface == "inprocess" %}
+{% elif profiler_kind == "torch" and interface == "inprocess" and supports_torch_profiler %}
 Use `torch.profiler` via `torch_profiler/analyze_torch_profile.py` (or the `vibeserve-torch-profiler` MCP tools when attached). Start with `tables`, then `kernels` / `operators` / `cpu_overhead` / `memory` / `summary` as relevant.
 
 {% if env_kind == "modal" %}

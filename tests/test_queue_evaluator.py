@@ -100,7 +100,7 @@ def test_linearizable_queue_manifests_invoke_go_evaluator_directly():
 
     evaluator = root.parents[0] / "evaluators" / "queue"
     assert (evaluator / "DESIGN.md").exists()
-    assert (evaluator / "QUEUE_ABI.md").exists()
+    assert (evaluator / "CANDIDATE_CONTRACT.md").exists()
     assert (evaluator / "include" / "vibeserve_queue_abi.h").exists()
     assert not (evaluator / "QUEUE_PROTOCOL.md").exists()
     assert not (root.parents[0] / "libs" / "queue-input-core").exists()

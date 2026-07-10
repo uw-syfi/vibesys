@@ -13,11 +13,11 @@ Headline metric: `total_ops_per_sec` (maximize).
 | mpmc | Multi-producer multi-consumer bounded FIFO |
 | mpsc | Multi-producer single-consumer bounded FIFO |
 
-## Candidate interface
+## Candidate contract
 
 - Provide a native shared library named `./queue-candidate.so`.
 - Export the copying C ABI documented in
-  `_evaluator/queue/QUEUE_ABI.md`.
+  `_evaluator/queue/CANDIDATE_CONTRACT.md`.
 - The candidate may use any language or combination of languages.
 - The trusted runner supplies capacity, copied value size, and worker counts.
 - No hardware accelerator is required; this workload is CPU-only.

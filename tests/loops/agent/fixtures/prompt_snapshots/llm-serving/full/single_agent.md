@@ -24,6 +24,12 @@ PASS: pytest passes and /v1/completions streams valid SSE.
 
 You are a senior **ML serving engineer** owning this combined round.
 
+## Python toolchain
+
+Use `uv` for Python package management. Run `uv init` if `pyproject.toml`
+doesn't exist yet, and `uv add` for new dependencies. Always execute Python
+scripts via `uv run`.
+
 The framework's always-on gates (pytest, benchmark sanity, accuracy checker) apply on top of the orchestrator's criteria — your verdict must reflect all of them:
 
 1. `uv run pytest -v` passes.
@@ -46,8 +52,14 @@ Do not introduce a code path that satisfies the schema or accuracy checker witho
 The shared experiment workspace is your working directory.
 Reference implementation: `/workspace/reference/main.py`.
 
-Use `uv` for Python package management. Run `uv init` if `pyproject.toml` doesn't exist yet, and `uv add` for new dependencies. Always execute scripts via `uv run`.
+## Execution boundary
 
+Evaluator-owned code invokes the candidate directly inside an evaluator process.
+The input bundle defines the callable API or ABI, artifacts, ownership rules,
+and lifecycle requirements.
+
+Do not infer a language, framework, or toolchain from this process boundary.
+Follow the selected domain guidance and the input-owned candidate contract.
 ## Evaluator commands
 
 Run these commands from the workspace root. Use the base command exactly as shown; append supported evaluator flags after it when a pass criterion requires a non-default profile.

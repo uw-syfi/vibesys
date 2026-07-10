@@ -1,18 +1,32 @@
-# VibeServe Queue Candidate ABI v1
+# Queue Candidate Contract v1
 
-Candidates provide a native shared library named `queue-candidate.so`. The
-library may be implemented in any language that can export the C ABI declared
-in `include/vibeserve_queue_abi.h`.
+This document is the normative interface between the evaluator and an untrusted
+queue implementation. Candidate behavior is accepted only when it satisfies
+this contract; evaluator implementation details are described separately in
+[`DESIGN.md`](DESIGN.md).
 
-See [`DESIGN.md`](DESIGN.md) for the end-to-end architecture, trust model,
-correctness protocol, benchmark design, and isolation limitations.
+## Required artifact
+
+Candidates must provide a shared library named `queue-candidate.so` in the
+workspace root. The library may be implemented in any language or combination
+of languages that exports the C ABI declared in
+`include/vibeserve_queue_abi.h`.
+
+The queue uses VibeServe's `inprocess` execution mode: the evaluator loads and
+invokes the library directly inside an evaluator-owned Rust process. The
+candidate does not implement a network service. Process isolation used between
+trusted evaluator components is not part of the candidate interface.
+
+The header is authoritative for symbol names, signatures, constants, and ABI
+version. This document is authoritative for lifecycle, concurrency, ownership,
+semantic, and error requirements.
 
 The evaluator's Rust runner is the only component that loads the library. During
 correctness checks it runs in a worker process controlled by the Go Porcupine
 checker. During performance measurement it calls the same ABI directly from
 native producer and consumer threads.
 
-## Queue lifecycle
+## Lifecycle
 
 `vsq_abi_version` must return `VSQ_ABI_VERSION`. The runner calls
 `vsq_queue_create` with an item capacity, a maximum value size, and the exact
@@ -28,7 +42,7 @@ may use thin handles that only reference the queue.
 The runner destroys all producer and consumer handles before destroying the
 queue. It drains the queue before normal destruction.
 
-## Copying operations
+## Operations and ownership
 
 `vsq_try_enqueue` receives a byte pointer and length:
 
@@ -57,7 +71,7 @@ evaluation.
 All operations are nonblocking. Successful operations must form a linearizable
 bounded FIFO queue. Full and empty observations are part of that history.
 
-## Value profiles
+## Value-size guarantees
 
 The evaluator selects a fixed `--value-size` for each run, currently bounded to
 8 bytes through 1 MiB. Every measured value in a run has that size. Candidate
@@ -74,9 +88,16 @@ maximum for 8-byte, 257-byte, and 1 MiB queue profiles. It also checks input
 retention, undersized-output retry, and unchanged output on empty and invalid
 dequeues before running concurrent Porcupine histories.
 
-The evaluator benchmark may run multiple independent repetitions. Its
+The evaluator may run multiple independent benchmark repetitions. Its
 `total_ops_per_sec` field is the median repetition, and the JSON output includes
 the individual `total_ops_per_sec_samples` values.
+
+## Unsupported contracts
+
+Version 1 does not support zero-copy ownership transfer, queue-managed producer
+buffers, batched operations, or lossy queue semantics. A candidate must not
+infer such behavior from implementation details. Any future contract with those
+semantics requires a new version.
 
 ## Trust boundary
 
@@ -87,5 +108,5 @@ address space to avoid per-operation IPC and FFI transitions. Consequently,
 performance scoring assumes cooperative native candidate code; Rust memory
 safety does not isolate the runner from a hostile library.
 
-For scored execution, the Go and Rust evaluators and this ABI definition must
-come from a trusted, immutable input copy.
+For scored execution, the Go and Rust evaluators, this contract, and the ABI
+header come from a trusted input snapshot.

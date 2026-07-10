@@ -1,4 +1,4 @@
-// Pointer validity and lifecycle requirements are defined by QUEUE_ABI.md.
+// Pointer validity and lifecycle requirements are defined by CANDIDATE_CONTRACT.md.
 #![allow(clippy::missing_safety_doc)]
 
 use std::collections::VecDeque;

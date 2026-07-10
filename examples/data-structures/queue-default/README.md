@@ -25,7 +25,7 @@ Notes:
 - `--use-reference` remains available only to self-test the evaluator's
   internal model; it is not the editable candidate.
 - The candidate ABI is documented at
-  `_evaluator/queue/QUEUE_ABI.md` in a materialized workspace.
+  `_evaluator/queue/CANDIDATE_CONTRACT.md` in a materialized workspace.
 - The evaluator architecture and trust model are documented at
   `_evaluator/queue/DESIGN.md`.
 - The trusted evaluator records concurrent operation histories and validates

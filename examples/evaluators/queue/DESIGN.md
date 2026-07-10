@@ -6,7 +6,7 @@ trust boundary and the split between VibeServe, the Go checker, the Rust native
 runner, and the candidate shared library.
 
 The exact candidate function contract is specified separately in
-[`QUEUE_ABI.md`](QUEUE_ABI.md).
+[`CANDIDATE_CONTRACT.md`](CANDIDATE_CONTRACT.md).
 
 ## Goals
 

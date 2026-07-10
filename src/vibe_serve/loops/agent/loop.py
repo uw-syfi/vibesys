@@ -40,11 +40,9 @@ from vibe_serve.schemas import (
     Verdict,
 )
 
-# Implementation-language modes, selected by ``--interface`` (not a user-facing
-# language choice). ``inprocess`` pins Python so the accuracy checker can import
-# ``main.py`` directly; ``service`` and ``native`` leave the language to the
-# agent while defining different evaluator boundaries.
-_INTERFACES = ("inprocess", "service", "native")
+# Candidate process boundaries selected by ``--interface``. Language, tooling,
+# and artifact requirements belong to the selected domain and input bundle.
+_INTERFACES = ("inprocess", "service")
 DEFAULT_INTERFACE = "inprocess"
 
 _INNER_LOOPS = ("multi-agent", "single-agent")
@@ -259,19 +257,17 @@ def _run_pre_round_decision(
     return decision
 
 
-def _profiler_prompt_template(profiler_kind: ProfilerKind, interface: str) -> str:
-    """Pick the standalone-profiler prompt for the run's profiler + interface.
-
-    ``torch`` is a white-box, in-process PyTorch profiler that imports the
-    implementation; under any non-inprocess interface the artifact may not be
-    Python, so it falls back to the black-box ``nsys`` profiler. This mirrors the
-    single-agent prompt's ``profiler_kind == "torch" and interface == "inprocess"``
-    guard so both inner loops treat the torch profiler the same way.
-    """
+def _profiler_prompt_template(
+    profiler_kind: ProfilerKind,
+    interface: str,
+    *,
+    supports_torch_profiler: bool = False,
+) -> str:
+    """Pick a profiler prompt compatible with the boundary and domain."""
     kind = require_profiler_kind(profiler_kind)
     if kind is ProfilerKind.NONE:
         raise ValueError("No profiler prompt exists when profiling is disabled.")
-    if interface != "inprocess" and kind is ProfilerKind.TORCH:
+    if kind is ProfilerKind.TORCH and (interface != "inprocess" or not supports_torch_profiler):
         kind = ProfilerKind.NSYS
     return {
         ProfilerKind.NSYS: "profiler_prompt_nsys.j2",
@@ -291,7 +287,11 @@ def _run_profiler(
     progress_path: Path,
     objective: str,
 ) -> ProfilerSummary | None:
-    template = _profiler_prompt_template(ctx.profiler_kind, interface)
+    template = _profiler_prompt_template(
+        ctx.profiler_kind,
+        interface,
+        supports_torch_profiler=domain_definition.supports_torch_profiler,
+    )
     domain_profiler = render_domain_section(
         domain_definition,
         DomainRole.PROFILER,
@@ -330,8 +330,8 @@ def _domain_render_context(
     to pass to which role. Variables that don't apply to the current run are
     falsy (``benchmark_command`` / ``accuracy_command`` when nothing is attached),
     so ``{% if benchmark_command %}`` works everywhere. ``interface`` lets a
-    language-agnostic pack drop its in-process/Python-specific gates under
-    ``--interface service``. See ``vibe_serve/domains/README.md``.
+    domain distinguish direct invocation from an over-the-wire service without
+    treating that boundary as a language choice. See ``vibe_serve/domains/README.md``.
     """
     return {
         "modality": modality,
@@ -535,6 +535,7 @@ def _run_single_agent_round(
         objective=objective,
         profile_focus=profile_focus,
         profiler_kind=ctx.profiler_kind,
+        supports_torch_profiler=domain_definition.supports_torch_profiler,
         benchmark_command=ctx.judge_benchmark_command,
         accuracy_command=ctx.judge_accuracy_command,
         runtime_notes=ctx.run_environment_view.prompt_notes,
@@ -820,17 +821,15 @@ def run_agent_loop(
       passes are skipped; the prior round's profile output is fed to the
       orchestrator as ``profiler_summary``.
 
-    ``interface`` selects the artifact's evaluation contract and, with it, the
-    implementation language (the user never picks a language directly):
+    ``interface`` selects only the evaluator-to-candidate process boundary:
 
-    - ``"inprocess"`` (default): the accuracy checker imports ``main.py`` in
-      process, so the implementation must be Python; the prompts carry the
-      ``uv`` toolchain and the ``VibeServeModel`` import contract.
-    - ``"service"``: the artifact is exercised only over its network interface,
-      so the agent may implement it in any language. The in-process contract and
-      the Python/torch tooling are dropped from the prompts.
-    - ``"native"``: manifest commands load a native artifact such as a shared
-      library, so the agent may use any language that satisfies that ABI.
+    - ``"inprocess"`` (default): evaluator-owned code invokes the candidate
+      directly using the input-defined contract.
+    - ``"service"``: evaluator-owned code communicates with a running service
+      through its network interface.
+
+    Language, tooling, and artifact requirements come from the domain and input
+    bundle rather than the process-boundary mode.
     """
     if inner_loop not in _INNER_LOOPS:
         raise ValueError(
@@ -839,9 +838,7 @@ def run_agent_loop(
     if interface not in _INTERFACES:
         raise ValueError(f"Unknown interface {interface!r}; choose from {', '.join(_INTERFACES)}")
     # Resolve the registered domain once (fail fast on an unknown name). The
-    # per-role files are rendered into the prompts at each call site. The
-    # implementation language is not a pack — ``interface`` carries it
-    # (``inprocess`` pins Python; ``service`` and ``native`` leave it to the agent).
+    # per-role files carry language, tooling, and use-case-specific contracts.
     domain_definition = resolve_domain(domain)
     if modality is None and domain_definition.name is DomainName.LLM_SERVING:
         modality = "text_generation"

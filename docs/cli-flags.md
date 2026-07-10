@@ -11,7 +11,7 @@ Several flags look independent, but they combine into one execution contract:
 | Axis | Flag | Meaning |
 | --- | --- | --- |
 | Search loop | `--outer-loop` | Which outer-loop policy runs: `agent`, `plain`, `evolve`, or `openevolve`. |
-| Evaluation interface | `--interface` | Agent loop only. Whether the checker imports Python in-process or probes a service over the wire. |
+| Evaluation interface | `--interface` | Agent loop only. Whether evaluator-owned code invokes the candidate directly or communicates with a service. |
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, or `cpu`. |
 | Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, Docker container, or Modal-backed workflow. |
 | Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, or `auto`. |
@@ -20,8 +20,9 @@ Several flags look independent, but they combine into one execution contract:
 | Skills | `--skills-dir`, `--no-skills` | Candidate skill roots and the ablation switch that disables skill loading. |
 | Target inputs | `--input` | Target bundle directory with manifest-declared correctness and benchmark commands. |
 
-Do not treat these as simple toggles. Some combinations imply a language,
-startup contract, profiler, or sandbox capability.
+Do not treat these as simple toggles. Some combinations imply a startup
+contract, profiler, or sandbox capability. Language and artifact requirements
+come from the domain and input bundle, not the interface mode.
 
 ## Outer Loops
 
@@ -38,17 +39,18 @@ Use `vibe-serve --outer-loop <kind> --help` for loop-specific flags.
 
 `--interface` applies to the agent loop.
 
-| Value | Artifact contract | Language effect |
+| Value | Process boundary | Contract ownership |
 | --- | --- | --- |
-| `inprocess` | Accuracy checker imports `main.py` directly. | Python is required. Prompts include the `uv` workflow and `VibeServeModel` contract. |
-| `service` | Checker/benchmark exercise the artifact only through its network interface. | Implementation language is chosen by the agent. Checkers and benchmarks must be over-the-wire. |
-| `native` | Manifest commands load a native artifact such as a shared library. | Implementation language is chosen by the agent and must satisfy the objective's ABI. |
+| `inprocess` | Evaluator-owned code invokes the candidate directly inside an evaluator process. | The input defines the callable API or ABI, artifacts, ownership, and lifecycle. |
+| `service` | Checker and benchmark communicate with a running candidate over its network interface. | The input defines the protocol, endpoints, startup behavior, and artifacts. |
 
 `service` does not automatically rewrite a checker or benchmark. The target
 inputs must already know how to probe the running service.
 
-`native` likewise does not define an ABI. The objective and input-owned
-documentation must name the artifact and contract exercised by the manifest commands.
+`inprocess` does not imply Python. A Python module imported by an accuracy
+checker and a C-ABI shared library loaded by a trusted adapter are both
+in-process candidates. Their exact requirements belong to domain/use-case
+prompts and input-owned candidate-contract documentation.
 
 ## Compute Backends
 
@@ -85,9 +87,10 @@ Modal is active.
 `--modal --profiler nsys` is rejected by the CLI because Modal runs must use the
 torch profiler path.
 
-Profiler prompts must match the interface and backend. For example, a service
-interface must not assume `uv run python main.py` unless the implementation is
-actually Python, and a CPU backend must not receive a GPU-kernel workflow.
+Profiler prompts must match the interface, domain, and backend. In-process
+execution alone does not make the candidate Python or PyTorch-compatible; the
+selected domain must explicitly support Torch profiling. A CPU backend must not
+receive a GPU-kernel workflow.
 
 ## Domain and Modality
 
@@ -103,8 +106,9 @@ New domains are added in source by registering a domain package with optional
 environment setup/teardown hooks.
 
 `--modality` supplies the task I/O contract, such as text generation or
-speech-to-text. Domains should avoid hardcoding modality or interface
-requirements that are already expressed by `--modality` or `--interface`.
+speech-to-text. Domains and modalities may define language, toolchain, and
+artifact requirements. Interface-specific prose should describe only the
+direct-call or service boundary.
 
 ## Skills
 
@@ -146,6 +150,12 @@ examples/<target>/
 ├── accuracy_checker/
 └── benchmark/
 ```
+
+For nontrivial callable APIs, ABIs, ownership rules, or service protocols, keep
+the normative implementation requirements in `CANDIDATE_CONTRACT.md` and link
+to it from `OBJECTIVE.md`. A shared evaluator may own this file when several
+input bundles use exactly the same contract. Keep evaluator internals and trust
+assumptions in a separate design document.
 
 For those bundles, pass the root once:
 

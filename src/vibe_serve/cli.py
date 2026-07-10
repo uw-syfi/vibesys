@@ -434,18 +434,14 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--interface",
-        choices=["inprocess", "service", "native"],
+        choices=["inprocess", "service"],
         default="inprocess",
         help=(
-            "Evaluation contract for the built artifact, which also fixes the "
-            "implementation language (you never pick a language directly). "
-            "'inprocess' (default): the accuracy checker imports main.py in "
-            "process, so the implementation is Python (uv toolchain + "
-            "VibeServeModel contract). 'service': the artifact is exercised "
-            "only over its network interface, so the agent chooses the "
-            "language; supply a checker/benchmark that probes it over the wire. "
-            "'native': manifest commands load a native artifact such as a shared "
-            "library, so the agent chooses any language that satisfies its ABI."
+            "Process boundary used by the evaluator. 'inprocess' (default): "
+            "the evaluator invokes the candidate directly using the input-defined "
+            "contract. 'service': the evaluator communicates with a running "
+            "service over its network interface. Language, tooling, and artifact "
+            "requirements come from the selected domain and input bundle."
         ),
     )
     parser.add_argument(

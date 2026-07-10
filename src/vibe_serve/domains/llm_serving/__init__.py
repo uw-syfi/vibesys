@@ -11,4 +11,5 @@ DEFINITION = DomainDefinition(
     name=DomainName.LLM_SERVING,
     prompt_dir=Path(__file__).resolve().parent / "templates",
     environment_hooks=LLMServingEnvironmentHooks(),
+    supports_torch_profiler=True,
 )
