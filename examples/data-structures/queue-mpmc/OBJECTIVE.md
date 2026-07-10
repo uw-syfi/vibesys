@@ -1,11 +1,11 @@
 Optimize a multi-producer, multi-consumer bounded FIFO queue.
 
 Preserve the required interface:
-- Provide an executable `./queue-candidate` launcher.
-- Accept the protocol v1 arguments and inherited socket descriptors documented in
-  `_input_libs/queue-input-core/QUEUE_PROTOCOL.md`.
-- Implement enqueue and dequeue for unsigned 64-bit values using the capacity
-  and MPMC scenario supplied by trusted launcher arguments.
+- Provide a native shared library named `./queue-candidate.so`.
+- Export the copying C ABI documented in
+  `_input_libs/queue-input-core/QUEUE_ABI.md`.
+- Implement enqueue and dequeue for copied byte values using the capacity and
+  value size supplied by the trusted runner.
 
 The candidate may use any language or combination of languages. The queue must
 remain linearizable, must not fabricate or duplicate items, and must respect

@@ -11,10 +11,9 @@ import (
 )
 
 const (
-	protocolVersion = uint32(1)
-	protocolFDBase  = 3
-	frameSize       = 16
-	maxLaneCount    = 256
+	protocolFDBase = 3
+	frameSize      = 16
+	maxLaneCount   = 256
 )
 
 type scenario uint32
@@ -87,36 +86,106 @@ func createSocketPair(name string) (net.Conn, *os.File, error) {
 	syscall.CloseOnExec(descriptors[1])
 
 	trustedFile := os.NewFile(uintptr(descriptors[0]), name+"-trusted")
-	candidateFile := os.NewFile(uintptr(descriptors[1]), name+"-candidate")
+	runnerFile := os.NewFile(uintptr(descriptors[1]), name+"-runner")
 	trustedConn, err := net.FileConn(trustedFile)
 	if err != nil {
 		_ = trustedFile.Close()
-		_ = candidateFile.Close()
+		_ = runnerFile.Close()
 		return nil, nil, fmt.Errorf("open trusted socket for %s: %w", name, err)
 	}
 	if err := trustedFile.Close(); err != nil {
 		_ = trustedConn.Close()
-		_ = candidateFile.Close()
+		_ = runnerFile.Close()
 		return nil, nil, fmt.Errorf("close duplicated trusted socket for %s: %w", name, err)
 	}
-	return trustedConn, candidateFile, nil
+	return trustedConn, runnerFile, nil
 }
 
-func inheritedSocket(fd int, name string) (net.Conn, error) {
-	file := os.NewFile(uintptr(fd), name)
-	if file == nil {
-		return nil, fmt.Errorf("open inherited socket fd %d", fd)
+func writeRequest(writer io.Writer, req request, valueSize int) error {
+	var payload []byte
+	if req.operation == operationEnqueue {
+		payload = queuePayload(req.value, valueSize)
 	}
-	conn, err := net.FileConn(file)
-	closeErr := file.Close()
-	if err != nil {
-		return nil, fmt.Errorf("use inherited socket fd %d: %w", fd, err)
+	data := make([]byte, frameSize+len(payload))
+	binary.LittleEndian.PutUint32(data[:4], uint32(req.operation))
+	binary.LittleEndian.PutUint32(data[4:8], uint32(len(payload)))
+	copy(data[frameSize:], payload)
+	return writeAll(writer, data)
+}
+
+func readResponse(reader io.Reader, valueSize int) (response, error) {
+	var header [frameSize]byte
+	if _, err := io.ReadFull(reader, header[:]); err != nil {
+		return response{}, err
 	}
-	if closeErr != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("close inherited socket fd %d after duplication: %w", fd, closeErr)
+	status := responseStatus(binary.LittleEndian.Uint32(header[:4]))
+	length := int(binary.LittleEndian.Uint32(header[4:8]))
+	reserved := binary.LittleEndian.Uint64(header[8:])
+	if reserved != 0 {
+		return response{}, fmt.Errorf("response reserved field is %d, want zero", reserved)
 	}
-	return conn, nil
+	if status < statusEnqueued || status > statusError {
+		return response{}, fmt.Errorf("unknown response status %d", status)
+	}
+	if length > valueSize {
+		return response{}, fmt.Errorf(
+			"response payload length %d exceeds configured value size %d",
+			length,
+			valueSize,
+		)
+	}
+	payload := make([]byte, length)
+	if _, err := io.ReadFull(reader, payload); err != nil {
+		return response{}, fmt.Errorf("read response payload: %w", err)
+	}
+	if status == statusValue {
+		if length != valueSize {
+			return response{}, fmt.Errorf(
+				"dequeue returned %d bytes, expected %d",
+				length,
+				valueSize,
+			)
+		}
+		value, err := queuePayloadValue(payload)
+		if err != nil {
+			return response{}, err
+		}
+		return response{status: status, value: value}, nil
+	}
+	if length != 0 {
+		return response{}, fmt.Errorf("response status %d included an unexpected payload", status)
+	}
+	return response{status: status}, nil
+}
+
+func queuePayload(value uint64, size int) []byte {
+	payload := make([]byte, size)
+	binary.LittleEndian.PutUint64(payload[:8], value)
+	lane := byte(value >> 56)
+	for index := 8; index < len(payload); index++ {
+		payload[index] = lane*31 + byte(index-8)*17 + 0x5d
+	}
+	return payload
+}
+
+func queuePayloadValue(payload []byte) (uint64, error) {
+	if len(payload) < minQueueValueSize {
+		return 0, fmt.Errorf("payload is %d bytes, want at least %d", len(payload), minQueueValueSize)
+	}
+	value := binary.LittleEndian.Uint64(payload[:8])
+	lane := byte(value >> 56)
+	for index := 8; index < len(payload); index++ {
+		expected := lane*31 + byte(index-8)*17 + 0x5d
+		if payload[index] != expected {
+			return 0, fmt.Errorf(
+				"payload byte %d is %d, want %d",
+				index,
+				payload[index],
+				expected,
+			)
+		}
+	}
+	return value, nil
 }
 
 func writeAll(writer io.Writer, data []byte) error {
@@ -131,66 +200,6 @@ func writeAll(writer io.Writer, data []byte) error {
 		data = data[written:]
 	}
 	return nil
-}
-
-func writeRequests(writer io.Writer, requests []request) error {
-	data := make([]byte, len(requests)*frameSize)
-	for index, req := range requests {
-		offset := index * frameSize
-		binary.LittleEndian.PutUint32(data[offset:], uint32(req.operation))
-		binary.LittleEndian.PutUint64(data[offset+8:], req.value)
-	}
-	return writeAll(writer, data)
-}
-
-func writeRequest(writer io.Writer, req request) error {
-	var data [frameSize]byte
-	binary.LittleEndian.PutUint32(data[:], uint32(req.operation))
-	binary.LittleEndian.PutUint64(data[8:], req.value)
-	return writeAll(writer, data[:])
-}
-
-func readRequest(reader io.Reader) (request, error) {
-	var data [frameSize]byte
-	if _, err := io.ReadFull(reader, data[:]); err != nil {
-		return request{}, err
-	}
-	if reserved := binary.LittleEndian.Uint32(data[4:]); reserved != 0 {
-		return request{}, fmt.Errorf("request reserved field is %d, want zero", reserved)
-	}
-	req := request{
-		operation: operation(binary.LittleEndian.Uint32(data[:])),
-		value:     binary.LittleEndian.Uint64(data[8:]),
-	}
-	if req.operation != operationEnqueue && req.operation != operationDequeue {
-		return request{}, fmt.Errorf("unknown request operation %d", req.operation)
-	}
-	return req, nil
-}
-
-func writeResponse(writer io.Writer, resp response) error {
-	var data [frameSize]byte
-	binary.LittleEndian.PutUint32(data[:], uint32(resp.status))
-	binary.LittleEndian.PutUint64(data[8:], resp.value)
-	return writeAll(writer, data[:])
-}
-
-func readResponse(reader io.Reader) (response, error) {
-	var data [frameSize]byte
-	if _, err := io.ReadFull(reader, data[:]); err != nil {
-		return response{}, err
-	}
-	if reserved := binary.LittleEndian.Uint32(data[4:]); reserved != 0 {
-		return response{}, fmt.Errorf("response reserved field is %d, want zero", reserved)
-	}
-	resp := response{
-		status: responseStatus(binary.LittleEndian.Uint32(data[:])),
-		value:  binary.LittleEndian.Uint64(data[8:]),
-	}
-	if resp.status < statusEnqueued || resp.status > statusError {
-		return response{}, fmt.Errorf("unknown response status %d", resp.status)
-	}
-	return resp, nil
 }
 
 func closeAll[T interface{ Close() error }](values []T) error {

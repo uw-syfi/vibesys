@@ -195,6 +195,9 @@ func recordInvoke(
 func runBoundaryHistory(config accuracyConfig) ([]recordedOperation, error) {
 	sessionConfig := config.candidateConfig
 	sessionConfig.laneCount = 1
+	sessionConfig.producerCount = 1
+	sessionConfig.consumerCount = 1
+	sessionConfig.mixedLane = true
 	session, err := startCandidate(sessionConfig)
 	if err != nil {
 		return nil, err
@@ -265,6 +268,9 @@ func runConcurrentHistory(config accuracyConfig, trial int) ([]recordedOperation
 	clientCount := producers + consumers
 	sessionConfig := config.candidateConfig
 	sessionConfig.laneCount = clientCount
+	sessionConfig.producerCount = producers
+	sessionConfig.consumerCount = consumers
+	sessionConfig.mixedLane = false
 	session, err := startCandidate(sessionConfig)
 	if err != nil {
 		return nil, err

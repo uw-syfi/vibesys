@@ -9,12 +9,20 @@ import (
 	"time"
 )
 
-const maxQueueCapacity = 1 << 16
+const (
+	maxQueueCapacity  = 1 << 16
+	minQueueValueSize = 8
+	maxQueueValueSize = 1 << 20
+)
 
 func candidateFlags(flags *flag.FlagSet) (*string, *string, *bool) {
 	workspace := defaultWorkspace()
 	workspaceFlag := flags.String("workspace", workspace, "Candidate workspace")
-	candidate := flags.String("candidate", "queue-candidate", "Candidate launcher relative to workspace")
+	candidate := flags.String(
+		"candidate",
+		"queue-candidate.so",
+		"Candidate shared library relative to workspace",
+	)
 	useReference := flags.Bool("use-reference", false, "Use the bundled reference candidate")
 	return workspaceFlag, candidate, useReference
 }
@@ -53,6 +61,7 @@ func parseCandidateConfig(
 	useReference bool,
 	scenarioName string,
 	capacity uint64,
+	valueSize uint64,
 ) (candidateConfig, error) {
 	s, err := parseScenario(scenarioName)
 	if err != nil {
@@ -78,12 +87,20 @@ func parseCandidateConfig(
 			maxQueueCapacity,
 		)
 	}
+	if valueSize < minQueueValueSize || valueSize > maxQueueValueSize {
+		return candidateConfig{}, fmt.Errorf(
+			"value size must be in [%d, %d] bytes",
+			minQueueValueSize,
+			maxQueueValueSize,
+		)
+	}
 	return candidateConfig{
 		workspace:    absWorkspace,
 		candidate:    candidate,
 		useReference: useReference,
 		scenario:     s,
 		capacity:     capacity,
+		valueSize:    int(valueSize),
 	}, nil
 }
 
@@ -92,6 +109,7 @@ func runCheckCommand(args []string) error {
 	workspace, candidate, useReference := candidateFlags(flags)
 	scenarioName := flags.String("scenario", "spsc", "Queue scenario: spsc, mpsc, mpmc, or all")
 	capacity := flags.Uint64("capacity", 1024, "Bounded queue capacity")
+	valueSize := flags.Uint64("value-size", 8, "Copied queue value size in bytes")
 	operations := flags.Int("operations", 24, "Approximate operations per concurrent trial")
 	trials := flags.Int("trials", 20, "Independent concurrent histories")
 	producers := flags.Int("producers", 4, "Producer count for configurable scenarios")
@@ -115,6 +133,7 @@ func runCheckCommand(args []string) error {
 			*useReference,
 			selected.String(),
 			*capacity,
+			*valueSize,
 		)
 		if err != nil {
 			return err
@@ -133,13 +152,14 @@ func runCheckCommand(args []string) error {
 		}
 		actualProducers, actualConsumers, _ := workerCounts(selected, *producers, *consumers)
 		fmt.Printf(
-			"PASS - %s linearizable (%d trials, approximately %d ops/trial, %dP/%dC, capacity=%d)\n",
+			"PASS - %s linearizable (%d trials, approximately %d ops/trial, %dP/%dC, capacity=%d, value_size=%d)\n",
 			selected,
 			*trials,
 			*operations,
 			actualProducers,
 			actualConsumers,
 			*capacity,
+			*valueSize,
 		)
 	}
 	return nil
@@ -159,6 +179,7 @@ func runBenchmarkCommand(args []string) error {
 	workspace, candidate, useReference := candidateFlags(flags)
 	scenarioName := flags.String("scenario", "spsc", "Queue scenario: spsc, mpsc, mpmc, or all")
 	capacity := flags.Uint64("capacity", 1024, "Bounded queue capacity")
+	valueSize := flags.Uint64("value-size", 8, "Copied queue value size in bytes")
 	producers := flags.Int("producers", 4, "Producer count for configurable scenarios")
 	consumers := flags.Int("consumers", 4, "Consumer count for MPMC")
 	duration := flags.Duration("duration", 10*time.Second, "Measured benchmark duration")
@@ -183,6 +204,7 @@ func runBenchmarkCommand(args []string) error {
 			*useReference,
 			selected.String(),
 			*capacity,
+			*valueSize,
 		)
 		if err != nil {
 			return err
@@ -227,48 +249,15 @@ func printBenchmarkResult(result benchmarkResult) {
 	)
 }
 
-func runReferenceCommand(args []string) error {
-	flags := flag.NewFlagSet("serve-reference", flag.ContinueOnError)
-	protocol := flags.Uint("vibeserve-queue-protocol", 0, "Queue protocol version")
-	fdBase := flags.Int("vibeserve-queue-fd-base", -1, "First inherited lane descriptor")
-	laneCount := flags.Int("vibeserve-queue-lanes", 0, "Number of inherited lane descriptors")
-	capacity := flags.Uint64("vibeserve-queue-capacity", 0, "Bounded queue capacity")
-	scenarioName := flags.String("vibeserve-queue-scenario", "", "Queue scenario")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if flags.NArg() != 0 {
-		return fmt.Errorf("unexpected positional arguments: %v", flags.Args())
-	}
-	if uint32(*protocol) != protocolVersion {
-		return fmt.Errorf("unsupported queue protocol version %d", *protocol)
-	}
-	if *fdBase < protocolFDBase {
-		return fmt.Errorf("queue fd base must be at least %d", protocolFDBase)
-	}
-	if *laneCount <= 0 || *laneCount > maxLaneCount {
-		return fmt.Errorf("queue lane count must be in [1, %d]", maxLaneCount)
-	}
-	if *capacity == 0 || *capacity > maxQueueCapacity {
-		return fmt.Errorf("queue capacity must be in [1, %d]", maxQueueCapacity)
-	}
-	if _, err := parseScenario(*scenarioName); err != nil {
-		return err
-	}
-	return serveReference(*fdBase, *laneCount, *capacity)
-}
-
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("expected one of: check, benchmark, serve-reference")
+		return errors.New("expected one of: check, benchmark")
 	}
 	switch args[0] {
 	case "check":
 		return runCheckCommand(args[1:])
 	case "benchmark":
 		return runBenchmarkCommand(args[1:])
-	case "serve-reference":
-		return runReferenceCommand(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}

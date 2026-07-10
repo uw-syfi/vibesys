@@ -1,13 +1,13 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"sync"
+	"os/exec"
+	"strconv"
 	"time"
 )
 
@@ -33,235 +33,79 @@ type benchmarkResult struct {
 	Consumers      int     `json:"consumers"`
 }
 
-type benchmarkCounts struct {
-	enqueued            uint64
-	full                uint64
-	dequeued            uint64
-	empty               uint64
-	enqueuedFingerprint [2]uint64
-	dequeuedFingerprint [2]uint64
-}
-
-type fingerprintKeys [2]uint64
-
-func newFingerprintKeys() (fingerprintKeys, error) {
-	var data [16]byte
-	if _, err := rand.Read(data[:]); err != nil {
-		return fingerprintKeys{}, fmt.Errorf("generate benchmark fingerprint key: %w", err)
-	}
-	return fingerprintKeys{
-		binary.LittleEndian.Uint64(data[:8]),
-		binary.LittleEndian.Uint64(data[8:]),
-	}, nil
-}
-
-func mixFingerprint(value, key uint64) uint64 {
-	value += key + 0x9e3779b97f4a7c15
-	value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9
-	value = (value ^ (value >> 27)) * 0x94d049bb133111eb
-	return value ^ (value >> 31)
-}
-
-func addFingerprint(target *[2]uint64, keys fingerprintKeys, value uint64) {
-	target[0] += mixFingerprint(value, keys[0])
-	target[1] += mixFingerprint(value, keys[1])
-}
-
-func (counts *benchmarkCounts) add(other benchmarkCounts) {
-	counts.enqueued += other.enqueued
-	counts.full += other.full
-	counts.dequeued += other.dequeued
-	counts.empty += other.empty
-	for index := range counts.enqueuedFingerprint {
-		counts.enqueuedFingerprint[index] += other.enqueuedFingerprint[index]
-		counts.dequeuedFingerprint[index] += other.dequeuedFingerprint[index]
-	}
-}
-
-func drainAndValidate(
-	session *candidateSession,
-	lane int,
-	capacity uint64,
-	counts *benchmarkCounts,
-	keys fingerprintKeys,
-) error {
-	drained := uint64(0)
-	drainedFingerprint := [2]uint64{}
-	for {
-		requests := make([]request, benchmarkPipelineDepth)
-		for index := range requests {
-			requests[index] = request{operation: operationDequeue}
-		}
-		responses, err := session.invokeBatch(lane, requests)
-		if err != nil {
-			return fmt.Errorf("drain queue: %w", err)
-		}
-		emptyObserved := false
-		for _, resp := range responses {
-			switch resp.status {
-			case statusValue:
-				if emptyObserved {
-					return errors.New("dequeue returned a value after the queue became empty")
-				}
-				drained++
-				if drained > capacity {
-					return fmt.Errorf("drained more than queue capacity %d", capacity)
-				}
-				drainedFingerprint[0] += mixFingerprint(resp.value, keys[0])
-				drainedFingerprint[1] += mixFingerprint(resp.value, keys[1])
-			case statusEmpty:
-				emptyObserved = true
-			default:
-				return fmt.Errorf("drain dequeue returned invalid status %d", resp.status)
-			}
-		}
-		if emptyObserved {
-			break
-		}
-	}
-
-	dequeued := counts.dequeued + drained
-	if dequeued != counts.enqueued {
-		return fmt.Errorf(
-			"enqueue/dequeue conservation failed: %d successful enqueues, %d returned values",
-			counts.enqueued,
-			dequeued,
-		)
-	}
-	for index := range keys {
-		got := counts.dequeuedFingerprint[index] + drainedFingerprint[index]
-		want := counts.enqueuedFingerprint[index]
-		if got != want {
-			return errors.New("dequeued values do not match the successfully enqueued multiset")
-		}
-	}
-	return nil
-}
-
-func runBenchmarkPhase(config benchmarkConfig, duration time.Duration) (benchmarkResult, error) {
+func runNativeBenchmark(config benchmarkConfig) (benchmarkResult, error) {
 	producers, consumers, err := workerCounts(config.scenario, config.producers, config.consumers)
 	if err != nil {
 		return benchmarkResult{}, err
 	}
-	sessionConfig := config.candidateConfig
-	sessionConfig.laneCount = producers + consumers
-	session, err := startCandidate(sessionConfig)
+	runner, err := nativeRunnerPath()
 	if err != nil {
 		return benchmarkResult{}, err
 	}
-
-	perLaneCounts := make([]benchmarkCounts, producers+consumers)
-	keys, err := newFingerprintKeys()
+	sourceArgs, err := candidateSourceArgs(config.candidateConfig)
 	if err != nil {
-		_ = session.close()
 		return benchmarkResult{}, err
 	}
-	start := make(chan struct{})
-	errCh := make(chan error, producers+consumers)
-	var workers sync.WaitGroup
-	workers.Add(producers + consumers)
-	var deadline time.Time
+	output, err := os.CreateTemp("", "vibeserve-queue-benchmark-*.json")
+	if err != nil {
+		return benchmarkResult{}, fmt.Errorf("create native benchmark result file: %w", err)
+	}
+	outputPath := output.Name()
+	if err := output.Close(); err != nil {
+		_ = os.Remove(outputPath)
+		return benchmarkResult{}, fmt.Errorf("close native benchmark result file: %w", err)
+	}
+	defer os.Remove(outputPath)
 
-	for lane := 0; lane < producers+consumers; lane++ {
-		go func(lane int) {
-			defer workers.Done()
-			localCounts := &perLaneCounts[lane]
-			var nextValue uint64
-			<-start
-			err := session.invokeUntil(
-				lane,
-				benchmarkPipelineDepth,
-				deadline,
-				func() request {
-					if lane >= producers {
-						return request{operation: operationDequeue}
-					}
-					nextValue++
-					return request{
-						operation: operationEnqueue,
-						value:     uint64(lane)<<56 | nextValue,
-					}
-				},
-				func(req request, resp response) error {
-					switch resp.status {
-					case statusEnqueued:
-						if req.operation != operationEnqueue {
-							return errors.New("dequeue returned enqueue status")
-						}
-						localCounts.enqueued++
-						addFingerprint(
-							&localCounts.enqueuedFingerprint,
-							keys,
-							req.value,
-						)
-					case statusFull:
-						if req.operation != operationEnqueue {
-							return errors.New("dequeue returned full status")
-						}
-						localCounts.full++
-					case statusValue:
-						if req.operation != operationDequeue {
-							return errors.New("enqueue returned value status")
-						}
-						localCounts.dequeued++
-						addFingerprint(&localCounts.dequeuedFingerprint, keys, resp.value)
-					case statusEmpty:
-						if req.operation != operationDequeue {
-							return errors.New("enqueue returned empty status")
-						}
-						localCounts.empty++
-					default:
-						return fmt.Errorf("invalid response status %d", resp.status)
-					}
-					return nil
-				},
-			)
-			if err != nil {
-				errCh <- fmt.Errorf("lane %d: %w", lane, err)
-			}
-		}(lane)
-	}
-	started := time.Now()
-	deadline = started.Add(duration)
-	close(start)
-	workers.Wait()
-	elapsed := time.Since(started)
-	close(errCh)
-
-	var operationErr error
-	for err := range errCh {
-		operationErr = errors.Join(operationErr, err)
-	}
-	var counts benchmarkCounts
-	for _, laneCounts := range perLaneCounts {
-		counts.add(laneCounts)
-	}
-	if operationErr == nil {
-		operationErr = drainAndValidate(session, 0, config.capacity, &counts, keys)
-	}
-	closeErr := session.close()
-	if operationErr != nil || closeErr != nil {
-		return benchmarkResult{}, errors.Join(operationErr, closeErr)
+	args := append([]string{"benchmark"}, sourceArgs...)
+	args = append(args,
+		"--scenario", config.scenario.String(),
+		"--capacity", strconv.FormatUint(config.capacity, 10),
+		"--value-size", strconv.Itoa(config.valueSize),
+		"--producers", strconv.Itoa(producers),
+		"--consumers", strconv.Itoa(consumers),
+		"--warmup-ns", strconv.FormatInt(config.warmup.Nanoseconds(), 10),
+		"--duration-ns", strconv.FormatInt(config.duration.Nanoseconds(), 10),
+		"--output", outputPath,
+	)
+	command := exec.Command(runner, args...)
+	command.Dir = config.workspace
+	log := newBoundedLog(64 * 1024)
+	command.Stdout = io.Writer(log)
+	command.Stderr = io.Writer(log)
+	if err := command.Run(); err != nil {
+		return benchmarkResult{}, fmt.Errorf(
+			"native benchmark failed: %w\nnative runner output:\n%s",
+			err,
+			log.String(),
+		)
 	}
 
-	enqueued := counts.enqueued
-	full := counts.full
-	dequeued := counts.dequeued
-	empty := counts.empty
-	attempts := enqueued + full + dequeued + empty
-	successful := enqueued + dequeued
-	return benchmarkResult{
-		Scenario:       config.scenario.String(),
-		Enqueued:       enqueued,
-		Dropped:        full,
-		Dequeued:       dequeued,
-		Empty:          empty,
-		Attempts:       attempts,
-		Duration:       elapsed.Seconds(),
-		TotalOpsPerSec: float64(successful) / elapsed.Seconds(),
-		Producers:      producers,
-		Consumers:      consumers,
-	}, nil
+	data, err := os.Open(outputPath)
+	if err != nil {
+		return benchmarkResult{}, fmt.Errorf("open native benchmark result: %w", err)
+	}
+	defer data.Close()
+	decoder := json.NewDecoder(data)
+	decoder.DisallowUnknownFields()
+	var result benchmarkResult
+	if err := decoder.Decode(&result); err != nil {
+		return benchmarkResult{}, fmt.Errorf("decode native benchmark result: %w", err)
+	}
+	if result.Scenario != config.scenario.String() {
+		return benchmarkResult{}, fmt.Errorf(
+			"native benchmark reported scenario %q, expected %q",
+			result.Scenario,
+			config.scenario,
+		)
+	}
+	if result.Producers != producers || result.Consumers != consumers {
+		return benchmarkResult{}, errors.New("native benchmark reported incorrect worker counts")
+	}
+	if result.Duration <= 0 || result.Attempts != result.Enqueued+result.Dropped+result.Dequeued+result.Empty {
+		return benchmarkResult{}, errors.New("native benchmark reported inconsistent metrics")
+	}
+	return result, nil
 }
 
 func runBenchmark(config benchmarkConfig) (benchmarkResult, error) {
@@ -286,13 +130,7 @@ func runBenchmark(config benchmarkConfig) (benchmarkResult, error) {
 	if err := runAccuracy(gate); err != nil {
 		return benchmarkResult{}, fmt.Errorf("correctness gate: %w", err)
 	}
-
-	if config.warmup > 0 {
-		if _, err := runBenchmarkPhase(config, config.warmup); err != nil {
-			return benchmarkResult{}, fmt.Errorf("warmup: %w", err)
-		}
-	}
-	return runBenchmarkPhase(config, config.duration)
+	return runNativeBenchmark(config)
 }
 
 func writeBenchmarkResults(path string, results []benchmarkResult) error {

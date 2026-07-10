@@ -27,3 +27,37 @@ func TestFailureHistoryGetsScenarioSuffixForAll(t *testing.T) {
 		t.Fatalf("single-scenario failure history = %q", got)
 	}
 }
+
+func TestCandidateConfigValidatesCopiedValueSize(t *testing.T) {
+	workspace := t.TempDir()
+	if _, err := parseCandidateConfig(
+		workspace,
+		"queue-candidate.so",
+		true,
+		"spsc",
+		4,
+		minQueueValueSize-1,
+	); err == nil {
+		t.Fatal("undersized copied value was accepted")
+	}
+	if _, err := parseCandidateConfig(
+		workspace,
+		"queue-candidate.so",
+		true,
+		"spsc",
+		4,
+		maxQueueValueSize+1,
+	); err == nil {
+		t.Fatal("oversized copied value was accepted")
+	}
+	if _, err := parseCandidateConfig(
+		workspace,
+		"queue-candidate.so",
+		true,
+		"spsc",
+		4,
+		64,
+	); err != nil {
+		t.Fatal(err)
+	}
+}

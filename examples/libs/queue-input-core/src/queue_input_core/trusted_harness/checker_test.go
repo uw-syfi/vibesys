@@ -2,7 +2,9 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -151,26 +153,42 @@ func TestQueueOutputRejectsWrongOperationStatus(t *testing.T) {
 	}
 }
 
-func TestAccuracyUsesFixedExternalLauncherContract(t *testing.T) {
+func compileCandidateFixture(t *testing.T, retainInput bool) string {
+	t.Helper()
 	harnessSource, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
 	workspace := t.TempDir()
-	launcher := filepath.Join(workspace, "queue-candidate")
-	script := "#!/bin/sh\n" +
-		"exec go -C \"$VSQ_HARNESS_SOURCE\" run . serve-reference \"$@\"\n"
-	if err := os.WriteFile(launcher, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
+	library := filepath.Join(workspace, "queue-candidate.so")
+	include := filepath.Clean(filepath.Join(harnessSource, "..", "..", "..", "include"))
+	source := filepath.Join(harnessSource, "testdata", "reference_candidate.c")
+	args := []string{"-std=c11", "-O2", "-pthread", "-I", include, source, "-o", library}
+	if retainInput {
+		args = append([]string{"-DVSQ_TEST_RETAIN_INPUT"}, args...)
 	}
-	t.Setenv("VSQ_HARNESS_SOURCE", harnessSource)
+	if runtime.GOOS == "darwin" {
+		args = append([]string{"-dynamiclib"}, args...)
+	} else {
+		args = append([]string{"-shared", "-fPIC"}, args...)
+	}
+	command := exec.Command("cc", args...)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("compile candidate fixture: %v\n%s", err, output)
+	}
+	return workspace
+}
 
-	err = runAccuracy(accuracyConfig{
+func TestAccuracyUsesCopyingCABI(t *testing.T) {
+	workspace := compileCandidateFixture(t, false)
+
+	err := runAccuracy(accuracyConfig{
 		candidateConfig: candidateConfig{
 			workspace: workspace,
-			candidate: "queue-candidate",
+			candidate: "queue-candidate.so",
 			scenario:  scenarioMPSC,
 			capacity:  4,
+			valueSize: 64,
 		},
 		operations: 16,
 		trials:     1,
@@ -180,5 +198,26 @@ func TestAccuracyUsesFixedExternalLauncherContract(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAccuracyRejectsCandidateThatRetainsEnqueueInput(t *testing.T) {
+	workspace := compileCandidateFixture(t, true)
+	err := runAccuracy(accuracyConfig{
+		candidateConfig: candidateConfig{
+			workspace: workspace,
+			candidate: "queue-candidate.so",
+			scenario:  scenarioSPSC,
+			capacity:  4,
+			valueSize: 64,
+		},
+		operations: 8,
+		trials:     1,
+		producers:  1,
+		consumers:  1,
+		seed:       7,
+	})
+	if err == nil {
+		t.Fatal("candidate that retained enqueue input passed copying ABI checks")
 	}
 }

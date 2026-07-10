@@ -2,9 +2,8 @@
 
 This input targets a single-producer, single-consumer bounded FIFO queue. The
 manifest invokes the trusted Go harness directly. Candidates implement the
-versioned inherited-socket protocol documented at
-`_input_libs/queue-input-core/QUEUE_PROTOCOL.md` and expose it through the fixed
-`./queue-candidate` launcher.
+copying C ABI documented at `_input_libs/queue-input-core/QUEUE_ABI.md` and
+export it from `./queue-candidate.so`.
 
 Validate the bundled trusted reference:
 

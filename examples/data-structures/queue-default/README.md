@@ -3,8 +3,8 @@
 Resolves #43.
 
 Default input for the SPSC, MPSC, and MPMC linearizable bounded-queue
-scenarios. The trusted Go checker, benchmark, reference server, and protocol
-definition live in the `queue-input-core` package under
+scenarios. The trusted Go checker, Rust benchmark runner, reference server, and
+ABI definition live in the `queue-input-core` package under
 `examples/libs/queue-input-core`; this input depends on that package with a uv
 path dependency.
 
@@ -16,15 +16,15 @@ path dependency.
 
 Notes:
 - Use `--use-reference` to validate the bundled reference server.
-- Omit `--use-reference` to check the workspace's executable
-  `./queue-candidate` launcher.
-- The candidate protocol is documented at
-  `_input_libs/queue-input-core/QUEUE_PROTOCOL.md` in a materialized workspace.
+- Omit `--use-reference` to check the workspace's
+  `./queue-candidate.so` shared library.
+- The candidate ABI is documented at
+  `_input_libs/queue-input-core/QUEUE_ABI.md` in a materialized workspace.
 - The trusted harness records concurrent operation histories and validates
   linearizability with [Porcupine](https://github.com/anishathalye/porcupine).
 - Boundary probes explicitly exercise empty, full, drain, and wraparound
   behavior before independently seeded concurrent histories.
-- Go must be installed locally for the Porcupine-backed scenarios.
+- Go and Rust must be installed locally for the trusted evaluator.
 
 ## Running the benchmark
 

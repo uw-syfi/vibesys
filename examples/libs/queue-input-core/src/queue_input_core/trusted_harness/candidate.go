@@ -11,10 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
-	"time"
 )
-
-const benchmarkPipelineDepth = 64
 
 type boundedLog struct {
 	mu        sync.Mutex
@@ -51,6 +48,7 @@ type candidateLane struct {
 
 type candidateSession struct {
 	lanes     []candidateLane
+	valueSize int
 	done      chan struct{}
 	log       *boundedLog
 	waitMu    sync.Mutex
@@ -60,91 +58,119 @@ type candidateSession struct {
 }
 
 type candidateConfig struct {
-	workspace    string
-	candidate    string
-	useReference bool
-	scenario     scenario
-	capacity     uint64
-	laneCount    int
+	workspace     string
+	candidate     string
+	useReference  bool
+	scenario      scenario
+	capacity      uint64
+	valueSize     int
+	laneCount     int
+	producerCount int
+	consumerCount int
+	mixedLane     bool
 }
 
-func candidateProtocolArgs(config candidateConfig) []string {
-	return []string{
-		"--vibeserve-queue-protocol", strconv.FormatUint(uint64(protocolVersion), 10),
-		"--vibeserve-queue-fd-base", strconv.Itoa(protocolFDBase),
-		"--vibeserve-queue-lanes", strconv.Itoa(config.laneCount),
-		"--vibeserve-queue-capacity", strconv.FormatUint(config.capacity, 10),
-		"--vibeserve-queue-scenario", config.scenario.String(),
+func candidateLibraryPath(config candidateConfig) (string, error) {
+	if config.useReference {
+		return "", nil
 	}
+	path := config.candidate
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(config.workspace, path)
+	}
+	stat, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("candidate library %q: %w", path, err)
+	}
+	if stat.IsDir() || !stat.Mode().IsRegular() {
+		return "", fmt.Errorf("candidate library %q must be a regular file", path)
+	}
+	return path, nil
+}
+
+func candidateSourceArgs(config candidateConfig) ([]string, error) {
+	if config.useReference {
+		return []string{"--reference", "1"}, nil
+	}
+	path, err := candidateLibraryPath(config)
+	if err != nil {
+		return nil, err
+	}
+	return []string{"--library", path}, nil
 }
 
 func startCandidate(config candidateConfig) (*candidateSession, error) {
 	if config.laneCount <= 0 || config.laneCount > maxLaneCount {
 		return nil, fmt.Errorf("lane count must be in [1, %d]", maxLaneCount)
 	}
+	if config.producerCount <= 0 || config.consumerCount <= 0 {
+		return nil, errors.New("candidate session requires producers and consumers")
+	}
+	if config.mixedLane && config.laneCount != 1 {
+		return nil, errors.New("mixed candidate session requires exactly one lane")
+	}
+	if !config.mixedLane && config.laneCount != config.producerCount+config.consumerCount {
+		return nil, errors.New("candidate lane count does not match worker counts")
+	}
 
 	trustedConnections := make([]net.Conn, 0, config.laneCount)
-	candidateFiles := make([]*os.File, 0, config.laneCount)
+	runnerFiles := make([]*os.File, 0, config.laneCount)
 	for lane := 0; lane < config.laneCount; lane++ {
-		trusted, candidate, err := createSocketPair(fmt.Sprintf("queue-lane-%d", lane))
+		trusted, runner, err := createSocketPair(fmt.Sprintf("queue-lane-%d", lane))
 		if err != nil {
 			_ = closeAll(trustedConnections)
-			_ = closeAll(candidateFiles)
+			_ = closeAll(runnerFiles)
 			return nil, err
 		}
 		trustedConnections = append(trustedConnections, trusted)
-		candidateFiles = append(candidateFiles, candidate)
+		runnerFiles = append(runnerFiles, runner)
 	}
 
-	protocolArgs := candidateProtocolArgs(config)
-	var command *exec.Cmd
-	if config.useReference {
-		executable, err := os.Executable()
-		if err != nil {
-			_ = closeAll(trustedConnections)
-			_ = closeAll(candidateFiles)
-			return nil, fmt.Errorf("resolve harness executable: %w", err)
-		}
-		command = exec.Command(executable, append([]string{"serve-reference"}, protocolArgs...)...)
-	} else {
-		candidatePath := config.candidate
-		if !filepath.IsAbs(candidatePath) {
-			candidatePath = filepath.Join(config.workspace, candidatePath)
-		}
-		stat, err := os.Stat(candidatePath)
-		if err != nil {
-			_ = closeAll(trustedConnections)
-			_ = closeAll(candidateFiles)
-			return nil, fmt.Errorf("candidate launcher %q: %w", candidatePath, err)
-		}
-		if stat.IsDir() || stat.Mode()&0o111 == 0 {
-			_ = closeAll(trustedConnections)
-			_ = closeAll(candidateFiles)
-			return nil, fmt.Errorf("candidate launcher %q must be an executable file", candidatePath)
-		}
-		command = exec.Command(candidatePath, protocolArgs...)
+	runner, err := nativeRunnerPath()
+	if err != nil {
+		_ = closeAll(trustedConnections)
+		_ = closeAll(runnerFiles)
+		return nil, err
 	}
+	sourceArgs, err := candidateSourceArgs(config)
+	if err != nil {
+		_ = closeAll(trustedConnections)
+		_ = closeAll(runnerFiles)
+		return nil, err
+	}
+	args := append([]string{"worker"}, sourceArgs...)
+	args = append(args,
+		"--fd-base", strconv.Itoa(protocolFDBase),
+		"--lanes", strconv.Itoa(config.laneCount),
+		"--producers", strconv.Itoa(config.producerCount),
+		"--consumers", strconv.Itoa(config.consumerCount),
+		"--mixed-lane", strconv.Itoa(boolInt(config.mixedLane)),
+		"--capacity", strconv.FormatUint(config.capacity, 10),
+		"--value-size", strconv.Itoa(config.valueSize),
+	)
+	command := exec.Command(runner, args...)
 	command.Dir = config.workspace
-	command.ExtraFiles = candidateFiles
+	command.ExtraFiles = runnerFiles
 	log := newBoundedLog(64 * 1024)
 	command.Stdout = io.Writer(log)
 	command.Stderr = io.Writer(log)
 	if err := command.Start(); err != nil {
 		_ = closeAll(trustedConnections)
-		_ = closeAll(candidateFiles)
-		return nil, fmt.Errorf("start candidate: %w", err)
+		_ = closeAll(runnerFiles)
+		return nil, fmt.Errorf("start trusted native worker: %w", err)
 	}
-	if err := closeAll(candidateFiles); err != nil {
+	if err := closeAll(runnerFiles); err != nil {
 		_ = closeAll(trustedConnections)
 		_ = command.Process.Kill()
 		_ = command.Wait()
-		return nil, fmt.Errorf("close candidate socket copies: %w", err)
+		return nil, fmt.Errorf("close native worker socket copies: %w", err)
 	}
 
 	session := &candidateSession{
-		lanes: make([]candidateLane, len(trustedConnections)),
-		done:  make(chan struct{}),
-		log:   log,
+		lanes:     make([]candidateLane, len(trustedConnections)),
+		valueSize: config.valueSize,
+		done:      make(chan struct{}),
+		log:       log,
 	}
 	for lane, conn := range trustedConnections {
 		session.lanes[lane].conn = conn
@@ -159,6 +185,13 @@ func startCandidate(config candidateConfig) (*candidateSession, error) {
 	return session, nil
 }
 
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
 func (s *candidateSession) waitError() error {
 	s.waitMu.Lock()
 	defer s.waitMu.Unlock()
@@ -171,139 +204,41 @@ func (s *candidateSession) processError(message string, err error) error {
 		return errors.New(message)
 	}
 	if err == nil {
-		return fmt.Errorf("%s\ncandidate output:\n%s", message, detail)
+		return fmt.Errorf("%s\nnative runner output:\n%s", message, detail)
 	}
 	if detail == "" {
 		return fmt.Errorf("%s: %w", message, err)
 	}
-	return fmt.Errorf("%s: %w\ncandidate output:\n%s", message, err, detail)
+	return fmt.Errorf("%s: %w\nnative runner output:\n%s", message, err, detail)
 }
 
 func (s *candidateSession) communicationError(action string, err error) error {
 	select {
 	case <-s.done:
-		return s.processError("candidate exited while attempting to "+action, s.waitError())
+		return s.processError("native worker exited while attempting to "+action, s.waitError())
 	default:
-		return s.processError("candidate failed to "+action, err)
+		return s.processError("native worker failed to "+action, err)
 	}
 }
 
-func (s *candidateSession) lane(index int) (*candidateLane, error) {
-	if index < 0 || index >= len(s.lanes) {
-		return nil, fmt.Errorf("invalid candidate lane %d", index)
+func (s *candidateSession) invoke(laneIndex int, req request) (response, error) {
+	if laneIndex < 0 || laneIndex >= len(s.lanes) {
+		return response{}, fmt.Errorf("invalid candidate lane %d", laneIndex)
 	}
-	return &s.lanes[index], nil
-}
-
-func (s *candidateSession) receive(lane *candidateLane) (response, error) {
-	resp, err := readResponse(lane.conn)
+	lane := &s.lanes[laneIndex]
+	lane.mu.Lock()
+	defer lane.mu.Unlock()
+	if err := writeRequest(lane.conn, req, s.valueSize); err != nil {
+		return response{}, s.communicationError("send a correctness request", err)
+	}
+	resp, err := readResponse(lane.conn, s.valueSize)
 	if err != nil {
-		return response{}, s.communicationError("read a response", err)
+		return response{}, s.communicationError("read a correctness response", err)
 	}
 	if resp.status == statusError {
-		return response{}, errors.New("candidate reported a protocol error")
+		return response{}, errors.New("candidate reported an ABI or worker error")
 	}
 	return resp, nil
-}
-
-func (s *candidateSession) invoke(lane int, req request) (response, error) {
-	responses, err := s.invokeBatch(lane, []request{req})
-	if err != nil {
-		return response{}, err
-	}
-	return responses[0], nil
-}
-
-func (s *candidateSession) invokeBatch(laneIndex int, requests []request) ([]response, error) {
-	lane, err := s.lane(laneIndex)
-	if err != nil {
-		return nil, err
-	}
-	if len(requests) == 0 {
-		return []response{}, nil
-	}
-	lane.mu.Lock()
-	defer lane.mu.Unlock()
-
-	initial := min(benchmarkPipelineDepth, len(requests))
-	if err := writeRequests(lane.conn, requests[:initial]); err != nil {
-		return nil, s.communicationError("send requests", err)
-	}
-	sent := initial
-	responses := make([]response, 0, len(requests))
-	for len(responses) < len(requests) {
-		resp, err := s.receive(lane)
-		if err != nil {
-			return nil, err
-		}
-		responses = append(responses, resp)
-		if sent < len(requests) {
-			if err := writeRequest(lane.conn, requests[sent]); err != nil {
-				return nil, s.communicationError("send a request", err)
-			}
-			sent++
-		}
-	}
-	return responses, nil
-}
-
-func (s *candidateSession) invokeUntil(
-	laneIndex int,
-	depth int,
-	deadline time.Time,
-	nextRequest func() request,
-	observe func(request, response) error,
-) error {
-	if depth <= 0 {
-		return errors.New("pipeline depth must be greater than zero")
-	}
-	lane, err := s.lane(laneIndex)
-	if err != nil {
-		return err
-	}
-	lane.mu.Lock()
-	defer lane.mu.Unlock()
-
-	if !time.Now().Before(deadline) {
-		return nil
-	}
-	pending := make([]request, depth)
-	initial := make([]request, depth)
-	for index := range initial {
-		initial[index] = nextRequest()
-		pending[index] = initial[index]
-	}
-	if err := writeRequests(lane.conn, initial); err != nil {
-		return s.communicationError("fill the request pipeline", err)
-	}
-
-	sent := uint64(depth)
-	received := uint64(0)
-	accepting := true
-	for received < sent {
-		resp, err := s.receive(lane)
-		if err != nil {
-			return err
-		}
-		completedRequest := pending[received%uint64(depth)]
-		received++
-
-		if received%uint64(depth) == 0 {
-			accepting = time.Now().Before(deadline)
-		}
-		if accepting {
-			next := nextRequest()
-			pending[sent%uint64(depth)] = next
-			if err := writeRequest(lane.conn, next); err != nil {
-				return s.communicationError("refill the request pipeline", err)
-			}
-			sent++
-		}
-		if err := observe(completedRequest, resp); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *candidateSession) close() error {
@@ -315,92 +250,9 @@ func (s *candidateSession) close() error {
 		connectionErr := closeAll(connections)
 		<-s.done
 		if waitErr := s.waitError(); waitErr != nil {
-			s.closeErr = s.processError("candidate shutdown failed", waitErr)
+			s.closeErr = s.processError("native worker shutdown failed", waitErr)
 		}
 		s.closeErr = errors.Join(s.closeErr, connectionErr)
 	})
 	return s.closeErr
-}
-
-type referenceQueue struct {
-	mu       sync.Mutex
-	capacity int
-	values   []uint64
-}
-
-func newReferenceQueue(capacity uint64) *referenceQueue {
-	return &referenceQueue{capacity: int(capacity)}
-}
-
-func (q *referenceQueue) apply(req request) response {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	switch req.operation {
-	case operationEnqueue:
-		if len(q.values) == q.capacity {
-			return response{status: statusFull}
-		}
-		q.values = append(q.values, req.value)
-		return response{status: statusEnqueued}
-	case operationDequeue:
-		if len(q.values) == 0 {
-			return response{status: statusEmpty}
-		}
-		value := q.values[0]
-		q.values = q.values[1:]
-		return response{status: statusValue, value: value}
-	default:
-		return response{status: statusError}
-	}
-}
-
-func serveReferenceLane(conn net.Conn, queue *referenceQueue) error {
-	defer conn.Close()
-	for {
-		req, err := readRequest(conn)
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("read request: %w", err)
-		}
-		if err := writeResponse(conn, queue.apply(req)); err != nil {
-			return fmt.Errorf("write response: %w", err)
-		}
-	}
-}
-
-func serveReferenceConnections(connections []net.Conn, capacity uint64) error {
-	queue := newReferenceQueue(capacity)
-	errorsByLane := make(chan error, len(connections))
-	var workers sync.WaitGroup
-	workers.Add(len(connections))
-	for lane, conn := range connections {
-		go func(lane int, conn net.Conn) {
-			defer workers.Done()
-			if err := serveReferenceLane(conn, queue); err != nil {
-				errorsByLane <- fmt.Errorf("lane %d: %w", lane, err)
-			}
-		}(lane, conn)
-	}
-	workers.Wait()
-	close(errorsByLane)
-	var result error
-	for err := range errorsByLane {
-		result = errors.Join(result, err)
-	}
-	return result
-}
-
-func serveReference(fdBase, laneCount int, capacity uint64) error {
-	connections := make([]net.Conn, 0, laneCount)
-	for lane := 0; lane < laneCount; lane++ {
-		conn, err := inheritedSocket(fdBase+lane, fmt.Sprintf("queue-lane-%d", lane))
-		if err != nil {
-			_ = closeAll(connections)
-			return err
-		}
-		connections = append(connections, conn)
-	}
-	return serveReferenceConnections(connections, capacity)
 }

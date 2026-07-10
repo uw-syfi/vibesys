@@ -111,10 +111,15 @@ def test_linearizable_queue_manifests_invoke_go_harness_directly():
     )
     assert not trusted_wrapper.exists()
 
+    queue_core = root.parents[0] / "libs" / "queue-input-core"
+    assert (queue_core / "QUEUE_ABI.md").exists()
+    assert (queue_core / "include" / "vibeserve_queue_abi.h").exists()
+    assert not (queue_core / "QUEUE_PROTOCOL.md").exists()
+
 
 def test_materialized_manifest_commands_run_go_harness_directly(tmp_path):
-    if shutil.which("go") is None:
-        pytest.skip("Go is required by the trusted queue evaluator")
+    if shutil.which("go") is None or shutil.which("cargo") is None:
+        pytest.skip("Go and Rust are required by the trusted queue evaluator")
 
     from vibe_serve.input_project import materialize_input_project
 
@@ -162,8 +167,8 @@ def test_materialized_manifest_commands_run_go_harness_directly(tmp_path):
 
 
 def test_trusted_queue_harness_rejects_adversarial_histories():
-    if shutil.which("go") is None:
-        pytest.skip("Go is required by the trusted queue evaluator")
+    if shutil.which("go") is None or shutil.which("cargo") is None:
+        pytest.skip("Go and Rust are required by the trusted queue evaluator")
 
     harness = (
         Path(__file__).parents[1]
