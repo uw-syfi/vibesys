@@ -1,4 +1,4 @@
-"""Tests for registered domains — the ``--domain`` pluggable-context mechanism.
+"""Tests for registered domains — the manifest-selected pluggable context.
 
 Covers the resolver (registered name / error), the role-file renderer (present,
 empty, missing, ``single_agent`` derivation, context branching), and end-to-end

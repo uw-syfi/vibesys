@@ -15,6 +15,6 @@ output correctness.
   static-inspection discipline.
 
 This reproduces vibeserve's original serving-oriented prompts. Input bundles
-select it with `[agent].domain = "llm-serving"`, or users can override with
-`--domain llm-serving`. The `single_agent` ablation reuses a bespoke combined
-section below rather than the default implementer+judge concatenation.
+select it with `[agent].domain = "llm-serving"`. The `single_agent` ablation
+reuses a bespoke combined section below rather than the default implementer+judge
+concatenation.

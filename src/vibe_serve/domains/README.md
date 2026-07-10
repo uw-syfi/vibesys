@@ -7,18 +7,14 @@ workflow details, and the same for the single-agent ablation. It's the answer to
 *"what kind of system is this, and what does 'good' mean here?"* — kept separate
 from the neutral prompt skeleton.
 
-Pick one with `--domain` (agent loop):
+Pick one in the input bundle manifest:
 
-```bash
-vibe-serve --outer-loop agent --domain llm-serving ...
-vibe-serve --outer-loop agent --domain generic ...          # no domain context
+```toml
+[agent]
+domain = "llm-serving"
 ```
 
-When `--domain` is omitted, the agent loop uses `[agent].domain` from the
-input bundle's `vibeserve.input.toml`. If both are provided and differ, the CLI
-prints a warning and uses the explicit `--domain` value.
-
-`--domain` accepts a registered repo domain name:
+`domain` accepts a registered repo domain name:
 
 | Domain        | What it does |
 |---------------|--------------|
@@ -110,7 +106,8 @@ Example (inside `judge.md`):
    needs setup/teardown behavior such as mounts or copy exclusions, implement
    `EnvironmentHooks` in that package and attach it to the definition.
 7. Register the definition in `vibe_serve.domains.registry.DOMAINS`.
-8. Run `vibe-serve --outer-loop agent --domain <name> ...`.
+8. Add `[agent].domain = "<name>"` to the input manifest and run
+   `vibe-serve --outer-loop agent ...`.
 
 Domains are registered explicitly so prompt context, environment hooks, and tests
 stay tied to the same domain identity.

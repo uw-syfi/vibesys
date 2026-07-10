@@ -838,7 +838,7 @@ def run_agent_loop(
     if interface not in _INTERFACES:
         raise ValueError(f"Unknown interface {interface!r}; choose from {', '.join(_INTERFACES)}")
     if domain is None:
-        raise ValueError("domain is required; pass --domain or declare [agent].domain")
+        raise ValueError("domain is required; declare [agent].domain in vibeserve.input.toml")
     # Resolve the registered domain once (fail fast on an unknown name). The
     # per-role files carry language, tooling, and use-case-specific contracts.
     domain_definition = resolve_domain(domain)

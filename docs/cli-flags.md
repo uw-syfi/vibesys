@@ -15,7 +15,7 @@ Several flags look independent, but they combine into one execution contract:
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, or `cpu`. |
 | Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, Docker container, or Modal-backed workflow. |
 | Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, or `auto`. |
-| Domain | `--domain` | Optional agent-loop override for the input manifest's problem-space package, such as `llm-serving` or `generic`. |
+| Domain | `[agent].domain` in `vibeserve.input.toml` | Agent-loop problem-space package, such as `llm-serving` or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--no-skills` | Candidate skill roots and the ablation switch that disables skill loading. |
 | Target inputs | `--input` | Target bundle directory with manifest-declared correctness and benchmark commands. |
@@ -28,7 +28,7 @@ come from the domain and input bundle, not the interface mode.
 
 | Value | Behavior | Notes |
 | --- | --- | --- |
-| `agent` | Orchestrator-driven loop with implementer, judge, and profiler roles. | Default. Supports `--domain`, `--interface`, and `--inner-loop`. |
+| `agent` | Orchestrator-driven loop with implementer, judge, and profiler roles. | Default. Supports `--interface` and `--inner-loop`. |
 | `plain` | Issue-board loop with deterministic issue draining and perf evaluation. | Uses backend prompt fragments from `src/vibe_serve/templates/_backend/`. |
 | `evolve` | Evolutionary search over candidate implementations. | Uses mutator, judge, and profiler roles. |
 | `openevolve` | MAP-Elites-style evolutionary loop. | Reuses evolve mutator, judge, and profiler prompts. |
@@ -94,19 +94,17 @@ receive a GPU-kernel workflow.
 
 ## Domain and Modality
 
-`--domain` supplies cross-cutting problem-space context for the agent loop.
-Registered domains include:
+`[agent].domain` in `vibeserve.input.toml` supplies cross-cutting problem-space
+context for the agent loop. Registered domains include:
 
 | Domain | Meaning |
 | --- | --- |
 | `llm-serving` | LLM-serving guidance, including serving-system skills and judge gates. |
 | `generic` | No extra domain guidance. Useful for custom/non-LLM targets. |
 
-Each input bundle must declare `[agent].domain` in `vibeserve.input.toml`.
-When `--domain` is omitted, the agent loop uses that manifest value. When
-`--domain` is provided and differs from the manifest, the CLI warns and uses the
-explicit override. New domains are added in source by registering a domain
-package with optional environment setup/teardown hooks.
+Each input bundle must declare `[agent].domain`; there is no CLI override. New
+domains are added in source by registering a domain package with optional
+environment setup/teardown hooks.
 
 `--modality` supplies the task I/O contract, such as text generation or
 speech-to-text. Domains and modalities may define language, toolchain, and
@@ -253,7 +251,6 @@ Over-the-wire service target:
 vibe-serve \
   --outer-loop agent \
   --interface service \
-  --domain generic \
   --input examples/<target>
 ```
 

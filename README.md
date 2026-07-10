@@ -76,22 +76,19 @@ correctness/performance/integrity gates the judge enforces. It answers *"what
 kind of system is this, and what does 'good' mean here?"* — kept separate from
 the neutral prompt skeleton and from the per-task I/O contract (`--modality`).
 
-Each input bundle declares its domain in `vibeserve.input.toml`. You can
-override it with `--domain` when running the agent loop:
+Each input bundle declares its domain in `vibeserve.input.toml`:
 
-```bash
-vibe-serve --outer-loop agent --domain llm-serving ...
-vibe-serve --outer-loop agent --domain generic ...          # no domain context
+```toml
+[agent]
+domain = "llm-serving"
 ```
 
-If `--domain` differs from the manifest's `[agent].domain`, the CLI prints a
-warning and uses the explicit override. `--domain` takes a registered domain
-name such as `llm-serving` or `generic`. A domain is an in-repo package: prompt
-templates plus optional environment setup/teardown hooks. The package's
-`templates/` directory contains role files such as `implementer.md`, `judge.md`,
-and optionally `single_agent.md`; those files drop into the prompts at labelled
-points. Omit `single_agent.md` and it's derived from `implementer.md` plus
-`judge.md`.
+The domain must be a registered name such as `llm-serving` or `generic`. A
+domain is an in-repo package: prompt templates plus optional environment
+setup/teardown hooks. The package's `templates/` directory contains role files
+such as `implementer.md`, `judge.md`, and optionally `single_agent.md`; those
+files drop into the prompts at labelled points. Omit `single_agent.md` and it's
+derived from `implementer.md` plus `judge.md`.
 
 Full authoring guide: [`src/vibe_serve/domains/README.md`](src/vibe_serve/domains/README.md).
 
