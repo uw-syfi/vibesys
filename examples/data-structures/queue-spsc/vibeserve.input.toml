@@ -3,13 +3,17 @@ version = 1
 [accuracy]
 command = [
   "go", "-C", "_input_libs/queue-input-core/src/queue_input_core/trusted_harness",
-  "run", ".", "check", "--scenario", "spsc",
+  "run", ".", "check", "--scenario", "spsc", "--operations", "32", "--trials", "100",
 ]
 timeout_seconds = 120
 
 [benchmark]
 command = [
   "go", "-C", "_input_libs/queue-input-core/src/queue_input_core/trusted_harness",
-  "run", ".", "benchmark", "--scenario", "spsc",
+  "run", ".", "benchmark", "--scenario", "spsc", "--repetitions", "3",
 ]
 timeout_seconds = 300
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "total_ops_per_sec"

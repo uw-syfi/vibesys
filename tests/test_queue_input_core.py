@@ -8,6 +8,29 @@ from pathlib import Path
 
 import pytest
 
+LINEARIZABLE_QUEUE_INPUTS = {
+    "queue-default": "all",
+    "queue-spsc": "spsc",
+    "queue-mpsc": "mpsc",
+    "queue-mpmc": "mpmc",
+}
+
+LINEARIZABLE_ACCURACY_SETTINGS = {
+    "queue-default": ("24", "50"),
+    "queue-spsc": ("32", "100"),
+    "queue-mpsc": ("24", "50"),
+    "queue-mpmc": ("24", "100"),
+}
+
+
+def _copy_input_bundle(source: Path, target: Path) -> None:
+    shutil.copytree(
+        source,
+        target,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns(".venv", "queue-candidate.so", "target"),
+    )
+
 
 def test_queue_input_core_contract_drives_reference_scenarios(monkeypatch):
     package_src = Path(__file__).parents[1] / "examples" / "libs" / "queue-input-core" / "src"
@@ -92,19 +115,44 @@ def test_collect_trace_uses_per_thread_events_and_porcupine_shape(monkeypatch):
 
 def test_linearizable_queue_manifests_invoke_go_harness_directly():
     root = Path(__file__).parents[1] / "examples" / "data-structures"
-    expected_scenarios = {
-        "queue-default": "all",
-        "queue-spsc": "spsc",
-        "queue-mpsc": "mpsc",
-        "queue-mpmc": "mpmc",
-    }
 
-    for input_name, scenario in expected_scenarios.items():
+    for input_name, scenario in LINEARIZABLE_QUEUE_INPUTS.items():
         manifest = tomllib.loads((root / input_name / "vibeserve.input.toml").read_text())
-        for section, action in [("accuracy", "check"), ("benchmark", "benchmark")]:
+        operations, trials = LINEARIZABLE_ACCURACY_SETTINGS[input_name]
+        expected_suffixes = {
+            "accuracy": [
+                "run",
+                ".",
+                "check",
+                "--scenario",
+                scenario,
+                "--operations",
+                operations,
+                "--trials",
+                trials,
+            ],
+            "benchmark": [
+                "run",
+                ".",
+                "benchmark",
+                "--scenario",
+                scenario,
+                "--repetitions",
+                "3",
+            ],
+        }
+        for section, expected_suffix in expected_suffixes.items():
             command = manifest[section]["command"]
             assert command[:2] == ["go", "-C"]
-            assert command[3:] == ["run", ".", action, "--scenario", scenario]
+            assert command[3:] == expected_suffix
+        result = manifest["benchmark"].get("result")
+        if input_name == "queue-default":
+            assert result is None
+        else:
+            assert result == {
+                "json_argument": "--output-json",
+                "metric": "total_ops_per_sec",
+            }
 
     trusted_wrapper = (
         root.parents[0] / "libs" / "queue-input-core" / "src" / "queue_input_core" / "trusted.py"
@@ -117,6 +165,76 @@ def test_linearizable_queue_manifests_invoke_go_harness_directly():
     assert not (queue_core / "QUEUE_PROTOCOL.md").exists()
 
 
+def test_linearizable_queue_inputs_ship_the_same_editable_rust_starter():
+    root = Path(__file__).parents[1] / "examples" / "data-structures"
+    starter_files = ["Cargo.toml", "Cargo.lock", "Makefile", "src/lib.rs"]
+    canonical = {
+        relative: (root / "queue-default" / relative).read_bytes() for relative in starter_files
+    }
+
+    for input_name in LINEARIZABLE_QUEUE_INPUTS:
+        input_dir = root / input_name
+        assert not (input_dir / "reference" / "reference.py").exists()
+        for relative, expected in canonical.items():
+            assert (input_dir / relative).read_bytes() == expected
+
+    for input_name in ["queue-lossy", "queue-batch"]:
+        assert not (root / input_name / "Cargo.toml").exists()
+
+
+@pytest.mark.parametrize(("input_name", "scenario"), LINEARIZABLE_QUEUE_INPUTS.items())
+def test_materialized_rust_starter_builds_and_passes_accuracy(tmp_path, input_name, scenario):
+    if shutil.which("go") is None or shutil.which("cargo") is None:
+        pytest.skip("Go and Rust are required by the trusted queue evaluator")
+
+    from vibe_serve.input_project import materialize_input_project
+
+    project_root = Path(__file__).parents[1]
+    input_dir = project_root / "examples" / "data-structures" / input_name
+    workspace = tmp_path / "workspace"
+    _copy_input_bundle(input_dir, workspace)
+    materialize_input_project(
+        input_dir,
+        workspace,
+        project_root=project_root,
+        copy_dir=lambda source, target: shutil.copytree(source, target),
+    )
+
+    subprocess.run(["make"], cwd=workspace, check=True)
+    assert (workspace / "queue-candidate.so").is_file()
+    rebuilt = subprocess.run(
+        ["make"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "cargo build --release --locked" in rebuilt.stdout
+
+    manifest = tomllib.loads((workspace / "vibeserve.input.toml").read_text())
+    accuracy = [
+        *manifest["accuracy"]["command"],
+        "--capacity",
+        "4",
+        "--value-size",
+        "64",
+        "--operations",
+        "12",
+        "--trials",
+        "1",
+    ]
+    completed = subprocess.run(
+        accuracy,
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    expected = ["spsc", "mpsc", "mpmc"] if scenario == "all" else [scenario]
+    for checked_scenario in expected:
+        assert f"PASS - {checked_scenario} linearizable" in completed.stdout
+
+
 def test_materialized_manifest_commands_run_go_harness_directly(tmp_path):
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted queue evaluator")
@@ -126,7 +244,7 @@ def test_materialized_manifest_commands_run_go_harness_directly(tmp_path):
     project_root = Path(__file__).parents[1]
     input_dir = project_root / "examples" / "data-structures" / "queue-default"
     workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    _copy_input_bundle(input_dir, workspace)
 
     materialize_input_project(
         input_dir,
@@ -134,11 +252,11 @@ def test_materialized_manifest_commands_run_go_harness_directly(tmp_path):
         project_root=project_root,
         copy_dir=lambda source, target: shutil.copytree(source, target),
     )
+    subprocess.run(["make"], cwd=workspace, check=True)
     manifest = tomllib.loads((input_dir / "vibeserve.input.toml").read_text())
 
     accuracy = [
         *manifest["accuracy"]["command"],
-        "--use-reference",
         "--capacity",
         "4",
         "--operations",
@@ -151,7 +269,6 @@ def test_materialized_manifest_commands_run_go_harness_directly(tmp_path):
     output = workspace / "results.json"
     benchmark = [
         *manifest["benchmark"]["command"],
-        "--use-reference",
         "--capacity",
         "4",
         "--duration",
@@ -164,6 +281,8 @@ def test_materialized_manifest_commands_run_go_harness_directly(tmp_path):
     subprocess.run(benchmark, cwd=workspace, check=True)
     results = json.loads(output.read_text())
     assert [result["scenario"] for result in results] == ["spsc", "mpsc", "mpmc"]
+    assert all(result["repetitions"] == 3 for result in results)
+    assert all(len(result["total_ops_per_sec_samples"]) == 3 for result in results)
 
 
 def test_trusted_queue_harness_rejects_adversarial_histories():

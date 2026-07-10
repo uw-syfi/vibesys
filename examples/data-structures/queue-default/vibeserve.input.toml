@@ -3,13 +3,13 @@ version = 1
 [accuracy]
 command = [
   "go", "-C", "_input_libs/queue-input-core/src/queue_input_core/trusted_harness",
-  "run", ".", "check", "--scenario", "all",
+  "run", ".", "check", "--scenario", "all", "--operations", "24", "--trials", "50",
 ]
 timeout_seconds = 120
 
 [benchmark]
 command = [
   "go", "-C", "_input_libs/queue-input-core/src/queue_input_core/trusted_harness",
-  "run", ".", "benchmark", "--scenario", "all",
+  "run", ".", "benchmark", "--scenario", "all", "--repetitions", "3",
 ]
 timeout_seconds = 300

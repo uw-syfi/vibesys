@@ -123,6 +123,11 @@ vsq_status vsq_try_enqueue(vsq_producer *producer, const uint8_t *data, uint64_t
         length > producer->queue->max_value_size) {
         return VSQ_INVALID;
     }
+#ifdef VSQ_TEST_FIXED_LENGTH_ONLY
+    if (length != producer->queue->max_value_size) {
+        return VSQ_INVALID;
+    }
+#endif
     struct vsq_queue *queue = producer->queue;
     pthread_mutex_lock(&queue->mutex);
     if (queue->size == queue->capacity) {

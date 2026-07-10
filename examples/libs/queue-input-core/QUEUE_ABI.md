@@ -41,12 +41,15 @@ queue. It drains the queue before normal destruction.
   `output_length` was set.
 - `VSQ_EMPTY` means the queue was empty. Output storage and `output_length`
   must remain unchanged.
+- `VSQ_INVALID` means the output is null or too small for the oldest value. The
+  value remains queued, and output storage and `output_length` remain unchanged.
 - The candidate must not retain the output pointer after returning.
 - A candidate must never write more than `output_capacity` bytes.
 
-For enqueue, only `VSQ_OK` and `VSQ_FULL` are normal results. For dequeue, only
-`VSQ_OK` and `VSQ_EMPTY` are normal results. `VSQ_INVALID` and
-`VSQ_INTERNAL_ERROR` fail evaluation.
+For valid enqueue inputs, only `VSQ_OK` and `VSQ_FULL` are normal results. For a
+sufficient dequeue output, only `VSQ_OK` and `VSQ_EMPTY` are normal results.
+`VSQ_INTERNAL_ERROR`, or `VSQ_INVALID` for otherwise valid arguments, fails
+evaluation.
 
 All operations are nonblocking. Successful operations must form a linearizable
 bounded FIFO queue. Full and empty observations are part of that history.
@@ -62,6 +65,15 @@ The producer may overwrite its input immediately after enqueue returns, and
 the consumer may overwrite its output immediately after dequeue returns. This
 deliberately requires copying and makes allocation and byte movement part of
 the measured implementation.
+
+The correctness gate probes actual lengths 0, 1, 7, 8, 9, intermediate, and
+maximum for 8-byte, 257-byte, and 1 MiB queue profiles. It also checks input
+retention, undersized-output retry, and unchanged output on empty and invalid
+dequeues before running concurrent Porcupine histories.
+
+The trusted benchmark may run multiple independent repetitions. Its
+`total_ops_per_sec` field is the median repetition, and the JSON output includes
+the individual `total_ops_per_sec_samples` values.
 
 ## Trust boundary
 

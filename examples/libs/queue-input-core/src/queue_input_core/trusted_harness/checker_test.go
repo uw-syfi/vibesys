@@ -154,6 +154,14 @@ func TestQueueOutputRejectsWrongOperationStatus(t *testing.T) {
 }
 
 func compileCandidateFixture(t *testing.T, retainInput bool) string {
+	defines := []string{}
+	if retainInput {
+		defines = append(defines, "VSQ_TEST_RETAIN_INPUT")
+	}
+	return compileCandidateFixtureWithDefines(t, defines...)
+}
+
+func compileCandidateFixtureWithDefines(t *testing.T, defines ...string) string {
 	t.Helper()
 	harnessSource, err := os.Getwd()
 	if err != nil {
@@ -164,8 +172,8 @@ func compileCandidateFixture(t *testing.T, retainInput bool) string {
 	include := filepath.Clean(filepath.Join(harnessSource, "..", "..", "..", "include"))
 	source := filepath.Join(harnessSource, "testdata", "reference_candidate.c")
 	args := []string{"-std=c11", "-O2", "-pthread", "-I", include, source, "-o", library}
-	if retainInput {
-		args = append([]string{"-DVSQ_TEST_RETAIN_INPUT"}, args...)
+	for _, define := range defines {
+		args = append([]string{"-D" + define}, args...)
 	}
 	if runtime.GOOS == "darwin" {
 		args = append([]string{"-dynamiclib"}, args...)
@@ -177,6 +185,27 @@ func compileCandidateFixture(t *testing.T, retainInput bool) string {
 		t.Fatalf("compile candidate fixture: %v\n%s", err, output)
 	}
 	return workspace
+}
+
+func TestAccuracyRejectsCandidateThatOnlySupportsMaximumLength(t *testing.T) {
+	workspace := compileCandidateFixtureWithDefines(t, "VSQ_TEST_FIXED_LENGTH_ONLY")
+	err := runAccuracy(accuracyConfig{
+		candidateConfig: candidateConfig{
+			workspace: workspace,
+			candidate: "queue-candidate.so",
+			scenario:  scenarioSPSC,
+			capacity:  4,
+			valueSize: 64,
+		},
+		operations: 8,
+		trials:     1,
+		producers:  1,
+		consumers:  1,
+		seed:       7,
+	})
+	if err == nil {
+		t.Fatal("candidate that only supports maximum-length values passed ABI probes")
+	}
 }
 
 func TestAccuracyUsesCopyingCABI(t *testing.T) {

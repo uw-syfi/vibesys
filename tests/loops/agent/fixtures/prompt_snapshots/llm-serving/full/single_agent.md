@@ -43,9 +43,17 @@ Do not introduce a code path that satisfies the schema or accuracy checker witho
 
 ## Workspace
 
-The shared experiment workspace is your working directory. Reference implementation: `/workspace/reference/main.py`.
+The shared experiment workspace is your working directory.
+Reference implementation: `/workspace/reference/main.py`.
 
 Use `uv` for Python package management. Run `uv init` if `pyproject.toml` doesn't exist yet, and `uv add` for new dependencies. Always execute scripts via `uv run`.
+
+## Evaluator commands
+
+Run these commands from the workspace root. Use the base command exactly as shown; append supported evaluator flags after it when a pass criterion requires a non-default profile.
+
+- Accuracy: `uv run python accuracy_checker/checker.py`
+- Benchmark: `uv run python benchmark/benchmark.py`
 
 ## Profiling step
 
@@ -97,7 +105,7 @@ Profiler focus this round: general bottleneck analysis on the steady-state bench
 The plateau detector compares this raw float across rounds, so the **unit must not change** between rounds.
 
 1. The OBJECTIVE block above names the headline field — look for `Headline metric: <field_name>`.
-2. Run the benchmark with `--output-json /tmp/bench.json` (discover the exact flag with `--help`).
+2. Run the benchmark command shown above with `--output-json /tmp/bench.json` appended (confirm the exact flag with `--help`).
 3. Read **that exact field**. Set `perf_metric` to its numeric value and `perf_unit` to that field's name (e.g. `"median_tok_per_sec"`). Do not substitute a different field, do not invert it, do not convert units.
 
 If you could not run the benchmark this round, set `perf_metric: null` rather than fabricating a value.

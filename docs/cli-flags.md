@@ -42,9 +42,13 @@ Use `vibe-serve --outer-loop <kind> --help` for loop-specific flags.
 | --- | --- | --- |
 | `inprocess` | Accuracy checker imports `main.py` directly. | Python is required. Prompts include the `uv` workflow and `VibeServeModel` contract. |
 | `service` | Checker/benchmark exercise the artifact only through its network interface. | Implementation language is chosen by the agent. Checkers and benchmarks must be over-the-wire. |
+| `native` | Manifest commands load a native artifact such as a shared library. | Implementation language is chosen by the agent and must satisfy the objective's ABI. |
 
 `service` does not automatically rewrite a checker or benchmark. The target
 inputs must already know how to probe the running service.
+
+`native` likewise does not define an ABI. The objective and input-owned
+documentation must name the artifact and contract exercised by the manifest commands.
 
 ## Compute Backends
 
@@ -149,8 +153,8 @@ For those bundles, pass the root once:
 vibe-serve --input examples/<target> ...
 ```
 
-The manifest declares the evaluator entrypoints and intentionally does not
-define the candidate command or benchmark metadata:
+The manifest declares the evaluator entrypoints and does not define a candidate
+command:
 
 ```toml
 version = 1
@@ -163,12 +167,22 @@ command = ["uv", "run", "python", "benchmark/benchmark.py"]
 
 [workspace]
 seed = "../../starters/example-rust-candidate"
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "requests_per_second"
 ```
 
 Those command arrays are bundle-specific. They may point at Python, shell, Go,
 Rust, C++, or any other evaluator entrypoint, and VibeServe does not require
 standard wrapper filenames. VibeServe copies the input bundle into the
-experiment workspace and tells agents to run the manifest commands.
+experiment workspace and tells agents to run the manifest commands. The
+optional `benchmark.result` block opts a single-metric benchmark into trusted
+framework scoring: VibeServe appends `json_argument`, reads the resulting JSON,
+and requires exactly one numeric field named by `metric`. Omit it for
+multi-profile or multi-objective benchmarks whose result cannot be represented
+by one scalar. Named profiles and benchmark parameter schemas are not part of
+manifest version 1.
 
 The optional `workspace.seed` path is relative to the input manifest and must
 resolve inside the repository's `examples/starters/` directory. On a fresh run,

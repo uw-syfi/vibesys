@@ -9,6 +9,27 @@ use std::time::{Duration, Instant};
 
 const CLOCK_CHECK_INTERVAL: u64 = 64;
 
+#[cfg(target_os = "macos")]
+fn configure_benchmark_thread() -> Result<(), String> {
+    const QOS_CLASS_USER_INTERACTIVE: u32 = 0x21;
+
+    extern "C" {
+        fn pthread_set_qos_class_self_np(qos_class: u32, relative_priority: i32) -> i32;
+    }
+
+    let status = unsafe { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(format!("set benchmark thread QoS: errno {status}"))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn configure_benchmark_thread() -> Result<(), String> {
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct BenchmarkConfig {
     pub scenario: String,
@@ -215,7 +236,9 @@ fn run_producer(
     let mut payload = vec![0_u8; value_size];
     let mut sequence = 0_u64;
     prepare_payload(&mut payload, (lane as u64) << 56);
+    let thread_configuration = configure_benchmark_thread();
     barrier.wait();
+    thread_configuration?;
     let deadline = *start.get().expect("benchmark start missing") + duration;
     let mut attempts = 0_u64;
     while !stop.load(Ordering::Relaxed) {
@@ -253,7 +276,9 @@ fn run_consumer(
 ) -> Result<(Consumer, Counts), String> {
     let mut counts = Counts::default();
     let mut output = vec![0_u8; value_size];
+    let thread_configuration = configure_benchmark_thread();
     barrier.wait();
+    thread_configuration?;
     let deadline = *start.get().expect("benchmark start missing") + duration;
     let mut attempts = 0_u64;
     while !stop.load(Ordering::Relaxed) {

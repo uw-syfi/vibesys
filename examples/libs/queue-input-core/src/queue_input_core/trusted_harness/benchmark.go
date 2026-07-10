@@ -7,30 +7,34 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"time"
 )
 
 type benchmarkConfig struct {
 	candidateConfig
-	producers int
-	consumers int
-	duration  time.Duration
-	warmup    time.Duration
-	seed      int64
+	producers   int
+	consumers   int
+	duration    time.Duration
+	warmup      time.Duration
+	repetitions int
+	seed        int64
 }
 
 type benchmarkResult struct {
-	Scenario       string  `json:"scenario"`
-	Enqueued       uint64  `json:"enqueued"`
-	Dropped        uint64  `json:"dropped"`
-	Dequeued       uint64  `json:"dequeued"`
-	Empty          uint64  `json:"empty"`
-	Attempts       uint64  `json:"attempts"`
-	Duration       float64 `json:"duration"`
-	TotalOpsPerSec float64 `json:"total_ops_per_sec"`
-	Producers      int     `json:"producers"`
-	Consumers      int     `json:"consumers"`
+	Scenario              string    `json:"scenario"`
+	Enqueued              uint64    `json:"enqueued"`
+	Dropped               uint64    `json:"dropped"`
+	Dequeued              uint64    `json:"dequeued"`
+	Empty                 uint64    `json:"empty"`
+	Attempts              uint64    `json:"attempts"`
+	Duration              float64   `json:"duration"`
+	TotalOpsPerSec        float64   `json:"total_ops_per_sec"`
+	Producers             int       `json:"producers"`
+	Consumers             int       `json:"consumers"`
+	Repetitions           int       `json:"repetitions,omitempty"`
+	TotalOpsPerSecSamples []float64 `json:"total_ops_per_sec_samples,omitempty"`
 }
 
 func runNativeBenchmark(config benchmarkConfig) (benchmarkResult, error) {
@@ -115,6 +119,9 @@ func runBenchmark(config benchmarkConfig) (benchmarkResult, error) {
 	if config.warmup < 0 {
 		return benchmarkResult{}, errors.New("warmup must not be negative")
 	}
+	if config.repetitions <= 0 || config.repetitions%2 == 0 {
+		return benchmarkResult{}, errors.New("repetitions must be a positive odd number")
+	}
 	if _, _, err := workerCounts(config.scenario, config.producers, config.consumers); err != nil {
 		return benchmarkResult{}, err
 	}
@@ -130,7 +137,42 @@ func runBenchmark(config benchmarkConfig) (benchmarkResult, error) {
 	if err := runAccuracy(gate); err != nil {
 		return benchmarkResult{}, fmt.Errorf("correctness gate: %w", err)
 	}
-	return runNativeBenchmark(config)
+
+	results := make([]benchmarkResult, 0, config.repetitions)
+	for repetition := 0; repetition < config.repetitions; repetition++ {
+		result, err := runNativeBenchmark(config)
+		if err != nil {
+			return benchmarkResult{}, fmt.Errorf(
+				"benchmark repetition %d/%d: %w",
+				repetition+1,
+				config.repetitions,
+				err,
+			)
+		}
+		results = append(results, result)
+	}
+	return medianBenchmarkResult(results), nil
+}
+
+func medianBenchmarkResult(results []benchmarkResult) benchmarkResult {
+	rates := make([]float64, len(results))
+	for index, result := range results {
+		rates[index] = result.TotalOpsPerSec
+	}
+	sortedRates := append([]float64(nil), rates...)
+	sort.Float64s(sortedRates)
+	medianRate := sortedRates[len(sortedRates)/2]
+
+	median := results[0]
+	for _, result := range results {
+		if result.TotalOpsPerSec == medianRate {
+			median = result
+			break
+		}
+	}
+	median.Repetitions = len(results)
+	median.TotalOpsPerSecSamples = rates
+	return median
 }
 
 func writeBenchmarkResults(path string, results []benchmarkResult) error {

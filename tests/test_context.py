@@ -1,3 +1,5 @@
+import subprocess
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -7,6 +9,66 @@ from vibe_serve.domains.base import DomainName
 from vibe_serve.domains.environment import NoopEnvironmentHooks
 from vibe_serve.profilers import ACTIVE_PROFILER_KINDS, ProfilerKind
 from vibe_serve.sandbox.run_environment import RunEnvironmentSpec
+
+
+def _minimal_copy_context(workspace):
+    ctx = object.__new__(_RunContext)
+    ctx.workspace = workspace
+    ctx.git_tracking = True
+    ctx.EXCLUDED_WORKSPACE_DIRS = {".git", "target"}
+    ctx.run_environment = SimpleNamespace(isolated=False)
+    ctx.backend_impl = MagicMock()
+    ctx.lprint = MagicMock()
+    return ctx
+
+
+def test_input_copy_respects_source_gitignore(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / ".gitignore").write_text("/candidate.so\n/build/\n")
+    (source / "main.rs").write_text("fn main() {}\n")
+    (source / "candidate.so").write_bytes(b"stale")
+    (source / "build").mkdir()
+    (source / "build" / "cache").write_text("stale")
+    subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+
+    destination = tmp_path / "workspace"
+    ctx = _minimal_copy_context(destination)
+    ctx._copy_excluding_extras(source, destination, respect_source_gitignore=True)
+
+    assert (destination / "main.rs").is_file()
+    assert not (destination / "candidate.so").exists()
+    assert not (destination / "build").exists()
+
+
+def test_trusted_input_changes_compare_against_initial_commit(tmp_path):
+    workspace = tmp_path / "workspace"
+    (workspace / "accuracy_checker").mkdir(parents=True)
+    (workspace / "accuracy_checker" / "checker.py").write_text("print('ok')\n")
+    (workspace / "main.py").write_text("VALUE = 1\n")
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(["git", "add", "."], cwd=workspace, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-qm",
+            "initial",
+        ],
+        cwd=workspace,
+        check=True,
+    )
+
+    ctx = _minimal_copy_context(workspace)
+    (workspace / "main.py").write_text("VALUE = 2\n")
+    assert ctx.trusted_input_changes() == []
+
+    (workspace / "accuracy_checker" / "checker.py").write_text("print('forged')\n")
+    assert ctx.trusted_input_changes() == ["accuracy_checker/checker.py"]
 
 
 class _FakeBackend:

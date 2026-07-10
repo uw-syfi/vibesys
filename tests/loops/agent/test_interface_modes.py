@@ -1,4 +1,4 @@
-"""Tests for ``--interface`` — the in-process-vs-service evaluation contract.
+"""Tests for the in-process, service, and native evaluation contracts.
 
 The implementation language is no longer a user-facing axis (there is no
 ``--language`` flag and no ``_language/`` packs). Instead the run's
@@ -11,6 +11,8 @@ benchmark reach the artifact, and that contract decides the language:
 - ``service``: the artifact is exercised only over the wire, so the agent picks
   the language — the in-process contract and the Python/uv tooling drop out and a
   language-freedom block takes their place.
+- ``native``: manifest commands load a native artifact, so the agent picks any
+  language that satisfies the objective's ABI without service assumptions.
 
 These tests pin that behaviour at the prompt layer plus the CLI/loop wiring.
 """
@@ -55,9 +57,9 @@ def test_cli_exposes_interface_not_language():
     from vibe_serve.cli import _build_agent_parser
 
     parser = _build_agent_parser()
-    # --interface is present with the two modes and defaults to inprocess
+    # --interface is present with all modes and defaults to inprocess
     action = next(a for a in parser._actions if a.dest == "interface")
-    assert set(action.choices) == {"inprocess", "service"}
+    assert set(action.choices) == {"inprocess", "service", "native"}
     assert action.default == "inprocess"
     # --language is gone
     assert all(a.dest != "language" for a in parser._actions)
@@ -90,7 +92,7 @@ def test_loop_constants_and_rejects_unknown_interface():
     )
 
     assert DEFAULT_INTERFACE == "inprocess"
-    assert _INTERFACES == ("inprocess", "service")
+    assert _INTERFACES == ("inprocess", "service", "native")
     # validation happens before any heavy setup, so dummy args are fine
     with pytest.raises(ValueError, match="interface"):
         run_agent_loop(
@@ -118,6 +120,7 @@ def test_standalone_profiler_drops_torch_under_service():
     assert _profiler_prompt_template(ProfilerKind.TORCH, "inprocess") == "profiler_prompt_torch.j2"
     # service swaps torch -> nsys (torch imports the implementation)
     assert _profiler_prompt_template(ProfilerKind.TORCH, "service") == "profiler_prompt_nsys.j2"
+    assert _profiler_prompt_template(ProfilerKind.TORCH, "native") == "profiler_prompt_nsys.j2"
     # non-torch kinds are unaffected by the interface
     assert _profiler_prompt_template(ProfilerKind.NEURON, "service") == "profiler_prompt_neuron.j2"
     assert _profiler_prompt_template(ProfilerKind.NSYS, "service") == "profiler_prompt_nsys.j2"
@@ -173,6 +176,31 @@ def test_service_implementer_is_language_free():
     assert "language" in out.lower()
 
 
+def test_native_implementer_is_language_free_without_service_contract():
+    out = _render_implementer("native")
+    assert "VibeServeModel" not in out
+    assert "uv" not in out
+    assert "native artifact" in out
+    assert "over the wire" not in out
+
+
+def test_native_implementer_handles_missing_reference_explicitly():
+    out = render_template(
+        "implementer_prompt.j2",
+        template_dir=_TEMPLATE_DIR,
+        modality=None,
+        interface="native",
+        domain_implementer="",
+        task="TASK",
+        pass_criteria="PC",
+        reference_path=".",
+        runtime_notes="",
+        feedback=None,
+    )
+    assert "No separate reference implementation is provided" in out
+    assert "Reference implementation is at `.`" not in out
+
+
 def test_default_interface_matches_inprocess_for_implementer():
     """Rendering with no interface set must equal explicit inprocess (the
     template's own default), so existing runs are unchanged."""
@@ -222,6 +250,10 @@ def test_service_judge_drops_vibeservemodel():
     assert "Decode invariants" in out
 
 
+def test_native_judge_drops_vibeservemodel():
+    assert "VibeServeModel" not in _render_judge("native")
+
+
 # --------------------------------------------------------------------------- #
 # prompt rendering: single-agent
 # --------------------------------------------------------------------------- #
@@ -257,10 +289,21 @@ def test_inprocess_single_agent_keeps_uv_and_torch_capture():
 
 def test_service_single_agent_is_language_free_and_avoids_inprocess_torch():
     out = _render_single_agent("service", profiler_kind=ProfilerKind.TORCH)
-    assert "uv" not in out
+    assert "Use `uv` for Python package management" not in out
+    assert "Accuracy: `uv run python accuracy_checker/checker.py`" in out
     assert "over the wire" in out
     # torch in-process capture is Python-only; service falls back to nsys /
     # server-driven profiling instead
+    assert "torch.profiler" not in out
+    assert "nsys" in out
+
+
+def test_native_single_agent_uses_native_contract_and_avoids_inprocess_torch():
+    out = _render_single_agent("native", profiler_kind=ProfilerKind.TORCH)
+    assert "Use `uv` for Python package management" not in out
+    assert "Benchmark: `uv run python benchmark/benchmark.py`" in out
+    assert "native artifact" in out
+    assert "over the wire" not in out
     assert "torch.profiler" not in out
     assert "nsys" in out
 

@@ -52,6 +52,35 @@ class WorkspaceInput(BaseModel):
         return value
 
 
+class BenchmarkResult(BaseModel):
+    """Machine-readable scalar result emitted by a benchmark command."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    json_argument: str
+    metric: str
+
+    @field_validator("json_argument")
+    @classmethod
+    def _single_option(cls, value: str) -> str:
+        if not value.startswith("-") or any(character.isspace() for character in value):
+            raise ValueError("json_argument must be one option-style argv element")
+        return value
+
+    @field_validator("metric")
+    @classmethod
+    def _metric_name(cls, value: str) -> str:
+        if not value or any(character.isspace() for character in value):
+            raise ValueError("metric must be a non-empty JSON field name without whitespace")
+        return value
+
+
+class BenchmarkCommand(InputCommand):
+    """Benchmark command with an optional trusted scalar-result contract."""
+
+    result: BenchmarkResult | None = None
+
+
 class InputManifest(BaseModel):
     """Versioned evaluator-command manifest for an input bundle."""
 
@@ -59,7 +88,7 @@ class InputManifest(BaseModel):
 
     version: Literal[1]
     accuracy: InputCommand
-    benchmark: InputCommand
+    benchmark: BenchmarkCommand
     workspace: WorkspaceInput | None = None
 
 
@@ -94,6 +123,10 @@ class InputBundle(BaseModel):
     @property
     def benchmark_command_display(self) -> str:
         return self.manifest.benchmark.display()
+
+    @property
+    def benchmark_result(self) -> BenchmarkResult | None:
+        return self.manifest.benchmark.result
 
 
 def load_input_bundle(path: Path, *, project_root: Path | None = None) -> InputBundle:

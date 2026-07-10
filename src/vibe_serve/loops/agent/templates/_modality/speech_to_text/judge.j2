@@ -1,6 +1,6 @@
 ## Modality: speech-to-text (ASR)
 
-{% if interface != "service" %}
+{% if interface == "inprocess" %}
 **Accuracy-checker interface** (always required): `main.py` must export a `VibeServeModel` class with `from_pretrained(model_dir, device, dtype)` and `transcribe(audio_path)`.
 
 {% endif %}

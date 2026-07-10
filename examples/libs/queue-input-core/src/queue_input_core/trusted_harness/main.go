@@ -184,6 +184,11 @@ func runBenchmarkCommand(args []string) error {
 	consumers := flags.Int("consumers", 4, "Consumer count for MPMC")
 	duration := flags.Duration("duration", 10*time.Second, "Measured benchmark duration")
 	warmup := flags.Duration("warmup", 2*time.Second, "Warmup duration")
+	repetitions := flags.Int(
+		"repetitions",
+		1,
+		"Odd number of measured runs; total_ops_per_sec reports their median",
+	)
 	seed := flags.Int64("seed", 42, "Correctness-gate seed")
 	output := flags.String("output-json", "", "Write trusted benchmark metrics as JSON")
 	if err := flags.Parse(args); err != nil {
@@ -215,6 +220,7 @@ func runBenchmarkCommand(args []string) error {
 			consumers:       *consumers,
 			duration:        *duration,
 			warmup:          *warmup,
+			repetitions:     *repetitions,
 			seed:            *seed,
 		})
 		if err != nil {
@@ -227,6 +233,15 @@ func runBenchmarkCommand(args []string) error {
 }
 
 func printBenchmarkResult(result benchmarkResult) {
+	if len(result.TotalOpsPerSecSamples) > 1 {
+		fmt.Printf(
+			"Scenario: %s  Repetitions: %d  Median successful ops/s: %.0f\n",
+			result.Scenario,
+			result.Repetitions,
+			result.TotalOpsPerSec,
+		)
+		fmt.Printf("  Samples: %v\n", result.TotalOpsPerSecSamples)
+	}
 	fmt.Printf(
 		"Scenario: %s  Duration: %.3fs  Prod: %d  Cons: %d\n",
 		result.Scenario,

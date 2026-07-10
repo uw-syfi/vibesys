@@ -103,6 +103,7 @@ built artifact:
 ```bash
 vibe-serve --outer-loop agent --interface inprocess ...   # default: in-process Python
 vibe-serve --outer-loop agent --interface service ...     # over-the-wire, any language
+vibe-serve --outer-loop agent --interface native ...      # native ABI, any compiled language
 ```
 
 - **`inprocess`** (default): the accuracy checker imports `main.py` directly, so
@@ -113,6 +114,9 @@ vibe-serve --outer-loop agent --interface service ...     # over-the-wire, any l
   the Python/torch tooling drop out of the prompts; supply an accuracy checker and
   benchmark that probe the running service over the wire (e.g. HTTP, or the YCSB
   harness for a key-value store).
+- **`native`**: manifest commands load a native artifact such as a shared library.
+  The agent may use any language that produces the ABI and artifact required by
+  the objective; prompts carry neither Python-import nor network-service assumptions.
 
 ## Per-target inputs
 

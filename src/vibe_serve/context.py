@@ -158,6 +158,7 @@ class _RunContext:
             ".cache",
             ".venv",
             "exp_env",
+            "target",
         }
         self.debug = debug
         self.git_tracking = git_tracking
@@ -737,6 +738,45 @@ class _RunContext:
         "neuroncc_compile_workdir/",
         "neuron-compile-cache/",
     )
+
+    _TRUSTED_INPUT_PATHS: tuple[str, ...] = (
+        "OBJECTIVE.md",
+        "vibeserve.input.toml",
+        "reference",
+        "accuracy_checker",
+        "benchmark",
+        "_input_libs",
+    )
+
+    def trusted_input_changes(self) -> list[str]:
+        """Return evaluator-owned paths changed since workspace initialization."""
+        if not self.git_tracking:
+            return []
+
+        root = self._git_run(["git", "rev-list", "--max-parents=0", "HEAD"])
+        root_commit = root.stdout.decode().strip()
+        if not root_commit:
+            return ["unable to resolve the initial workspace commit"]
+
+        pathspec = ["--", *self._TRUSTED_INPUT_PATHS]
+        committed = self._git_run(["git", "diff", "--name-only", f"{root_commit}..HEAD", *pathspec])
+        pending = self._git_run(
+            [
+                "git",
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                *pathspec,
+            ]
+        )
+
+        changes = {line for line in committed.stdout.decode(errors="replace").splitlines() if line}
+        changes.update(
+            line[3:]
+            for line in pending.stdout.decode(errors="replace").splitlines()
+            if len(line) > 3
+        )
+        return sorted(changes)
 
     def _workspace_gitignore(self) -> str:
         """Contents of the workspace ``.gitignore`` (excluded dirs + artifacts)."""

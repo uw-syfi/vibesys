@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -26,6 +27,43 @@ func TestNativeReferenceBenchmark(t *testing.T) {
 	}
 	if result.Attempts != result.Enqueued+result.Dropped+result.Dequeued+result.Empty {
 		t.Fatalf("benchmark returned inconsistent counters: %+v", result)
+	}
+}
+
+func TestMedianBenchmarkResultPreservesMedianSampleAndAllRates(t *testing.T) {
+	results := []benchmarkResult{
+		{Scenario: "spsc", Enqueued: 10, TotalOpsPerSec: 30},
+		{Scenario: "spsc", Enqueued: 20, TotalOpsPerSec: 10},
+		{Scenario: "spsc", Enqueued: 30, TotalOpsPerSec: 20},
+	}
+	result := medianBenchmarkResult(results)
+	if result.TotalOpsPerSec != 20 || result.Enqueued != 30 || result.Repetitions != 3 {
+		t.Fatalf("median result = %+v", result)
+	}
+	wantRates := []float64{30, 10, 20}
+	if !reflect.DeepEqual(result.TotalOpsPerSecSamples, wantRates) {
+		t.Fatalf("sample rates = %v, want %v", result.TotalOpsPerSecSamples, wantRates)
+	}
+}
+
+func TestBenchmarkRejectsNonPositiveOrEvenRepetitions(t *testing.T) {
+	for _, repetitions := range []int{0, 2} {
+		_, err := runBenchmark(benchmarkConfig{
+			candidateConfig: candidateConfig{
+				workspace:    t.TempDir(),
+				useReference: true,
+				scenario:     scenarioSPSC,
+				capacity:     1,
+				valueSize:    8,
+			},
+			producers:  1,
+			consumers:  1,
+			duration:   time.Millisecond,
+			repetitions: repetitions,
+		})
+		if err == nil {
+			t.Fatalf("repetitions=%d unexpectedly passed", repetitions)
+		}
 	}
 }
 

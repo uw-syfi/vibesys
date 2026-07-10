@@ -69,7 +69,7 @@ use any of these in any file without tracking which role you're in:
 | Variable | Meaning |
 |----------|---------|
 | `modality` | The `--modality` value (e.g. `text_generation`). |
-| `interface` | The `--interface` value: `inprocess` (checker imports the code; Python) or `service` (exercised over the wire; any language). Gate in-process/Python-only requirements with `{% if interface != "service" %}`. |
+| `interface` | The `--interface` value: `inprocess` (checker imports the code; Python), `service` (over the wire), or `native` (manifest commands load a native artifact). Gate Python-only requirements with `{% if interface == "inprocess" %}`. |
 | `reference_path` | Path to the reference implementation. |
 | `benchmark_command` | Benchmark command declared by the input manifest, or falsy if no benchmark is attached. |
 | `accuracy_command` | Accuracy-checker command declared by the input manifest, or falsy if not attached. |

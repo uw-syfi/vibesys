@@ -434,7 +434,7 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--interface",
-        choices=["inprocess", "service"],
+        choices=["inprocess", "service", "native"],
         default="inprocess",
         help=(
             "Evaluation contract for the built artifact, which also fixes the "
@@ -443,7 +443,9 @@ def _build_agent_parser() -> argparse.ArgumentParser:
             "process, so the implementation is Python (uv toolchain + "
             "VibeServeModel contract). 'service': the artifact is exercised "
             "only over its network interface, so the agent chooses the "
-            "language; supply a checker/benchmark that probes it over the wire."
+            "language; supply a checker/benchmark that probes it over the wire. "
+            "'native': manifest commands load a native artifact such as a shared "
+            "library, so the agent chooses any language that satisfies its ABI."
         ),
     )
     parser.add_argument(
@@ -516,6 +518,7 @@ def _run_agent(args: argparse.Namespace) -> None:
         accuracy_command=bundle.accuracy_command_display,
         benchmark_command=bundle.benchmark_command_display,
         workspace_seed=bundle.workspace_seed_path,
+        benchmark_result=bundle.benchmark_result,
         objective=objective,
         max_rounds=args.max_rounds,
         max_retries_per_round=args.max_retries_per_round,

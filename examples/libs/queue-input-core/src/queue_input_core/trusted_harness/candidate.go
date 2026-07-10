@@ -99,6 +99,37 @@ func candidateSourceArgs(config candidateConfig) ([]string, error) {
 	return []string{"--library", path}, nil
 }
 
+func runCandidateABIProbe(config candidateConfig) error {
+	runner, err := nativeRunnerPath()
+	if err != nil {
+		return err
+	}
+	sourceArgs, err := candidateSourceArgs(config)
+	if err != nil {
+		return err
+	}
+	args := append([]string{"probe"}, sourceArgs...)
+	args = append(args,
+		"--capacity", strconv.FormatUint(config.capacity, 10),
+		"--value-size", strconv.Itoa(config.valueSize),
+		"--producers", strconv.Itoa(config.producerCount),
+		"--consumers", strconv.Itoa(config.consumerCount),
+	)
+	command := exec.Command(runner, args...)
+	command.Dir = config.workspace
+	log := newBoundedLog(64 * 1024)
+	command.Stdout = io.Writer(log)
+	command.Stderr = io.Writer(log)
+	if err := command.Run(); err != nil {
+		return fmt.Errorf(
+			"native ABI probe failed: %w\nnative runner output:\n%s",
+			err,
+			log.String(),
+		)
+	}
+	return nil
+}
+
 func startCandidate(config candidateConfig) (*candidateSession, error) {
 	if config.laneCount <= 0 || config.laneCount > maxLaneCount {
 		return nil, fmt.Errorf("lane count must be in [1, %d]", maxLaneCount)

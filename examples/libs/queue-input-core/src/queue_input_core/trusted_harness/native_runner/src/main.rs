@@ -1,5 +1,6 @@
 mod abi;
 mod benchmark;
+mod probe;
 mod protocol;
 mod value;
 
@@ -24,7 +25,7 @@ fn run() -> Result<(), String> {
     let mut args = env::args().skip(1);
     let command = args
         .next()
-        .ok_or_else(|| "expected worker or benchmark command".to_string())?;
+        .ok_or_else(|| "expected worker, probe, or benchmark command".to_string())?;
     let values = parse_flags(args.collect())?;
     match command.as_str() {
         "worker" => {
@@ -83,6 +84,26 @@ fn run() -> Result<(), String> {
                     duration: Duration::from_nanos(parse(&values, "duration-ns")?),
                 },
                 Path::new(required(&values, "output")?),
+            )
+        }
+        "probe" => {
+            validate_flags(
+                &values,
+                &[
+                    "reference",
+                    "library",
+                    "capacity",
+                    "value-size",
+                    "producers",
+                    "consumers",
+                ],
+            )?;
+            probe::run_probe(
+                load_api(&values)?,
+                parse(&values, "capacity")?,
+                value_size(&values)?,
+                parse(&values, "producers")?,
+                parse(&values, "consumers")?,
             )
         }
         _ => Err(format!("unknown command {command:?}")),

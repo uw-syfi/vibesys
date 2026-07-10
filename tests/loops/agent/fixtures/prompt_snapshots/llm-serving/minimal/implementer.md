@@ -39,7 +39,8 @@ PASS: pytest passes and /v1/completions streams valid SSE.
 
 ## Workspace
 
-Your working directory is the shared experiment workspace. All files you create must be here. The reference implementation is at `/workspace/reference/main.py`.
+Your working directory is the shared experiment workspace. All files you create must be here.
+The reference implementation is at `/workspace/reference/main.py`.
 
 Use `uv` for Python package management. Run `uv init` if `pyproject.toml` doesn't exist yet, and `uv add` for new dependencies. Always execute scripts via `uv run`.
 

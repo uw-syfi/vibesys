@@ -173,16 +173,25 @@ impl Drop for Producer {
 }
 
 impl Consumer {
-    pub fn dequeue(&mut self, output: &mut [u8]) -> Result<(u32, usize), String> {
-        let mut length = u64::MAX;
-        let status = unsafe {
+    pub fn dequeue_raw(
+        &mut self,
+        output: *mut u8,
+        output_capacity: u64,
+        output_length: &mut u64,
+    ) -> u32 {
+        unsafe {
             (self.api.dequeue)(
                 self.handle,
-                output.as_mut_ptr(),
-                output.len() as u64,
-                &mut length,
+                output,
+                output_capacity,
+                output_length as *mut u64,
             )
-        };
+        }
+    }
+
+    pub fn dequeue(&mut self, output: &mut [u8]) -> Result<(u32, usize), String> {
+        let mut length = u64::MAX;
+        let status = self.dequeue_raw(output.as_mut_ptr(), output.len() as u64, &mut length);
         if status == STATUS_EMPTY {
             if length != u64::MAX {
                 return Err("candidate modified output length for an empty dequeue".to_string());

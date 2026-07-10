@@ -1,6 +1,7 @@
 """Tests for vibe_serve.loops.agent — orchestrator-driven build loop."""
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -119,6 +120,7 @@ def _make_orchestrate_runner(
 
 def _invoke_orchestrate(tmp_path, ref_file, runner, **kwargs):
     """Shared plumbing: patch context globals, run the loop, return result."""
+    accuracy_gate_results = kwargs.pop("_accuracy_gate_results", None)
     defaults = dict(
         config={"model": {"name": "claude-sonnet-4-6"}},
         exp_name="test-orch",
@@ -135,6 +137,11 @@ def _invoke_orchestrate(tmp_path, ref_file, runner, **kwargs):
         patch("vibe_serve.backends.cuda.LocalShellBackend"),
         patch("vibe_serve.context.build_agent_runner", return_value=runner),
         patch("vibe_serve.context.PROJECT_ROOT", tmp_path),
+        patch(
+            "vibe_serve.loops.agent.loop._run_framework_accuracy_gate",
+            side_effect=accuracy_gate_results,
+            return_value=None,
+        ),
     ):
         return run_agent_loop(**defaults)
 
@@ -229,6 +236,149 @@ def test_progress_append_implementer_and_judge(tmp_path):
     assert "verdict**: pass" in text
 
 
+def test_framework_accuracy_gate_runs_manifest_command_and_records_pass(tmp_path):
+    from vibe_serve.loops.agent.loop import _run_framework_accuracy_gate
+
+    ctx = MagicMock()
+    ctx.trusted_input_changes.return_value = []
+    ctx.judge_accuracy_command = "trusted-check --profile hard"
+    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=0, output="PASS")
+    progress = tmp_path / "progress.md"
+
+    feedback = _run_framework_accuracy_gate(
+        ctx,
+        round_number=2,
+        retry=1,
+        progress_path=progress,
+    )
+
+    assert feedback is None
+    ctx.judge_backend.execute.assert_called_once_with("trusted-check --profile hard")
+    text = progress.read_text()
+    assert "Framework accuracy gate" in text
+    assert "verdict**: pass" in text
+    assert "PASS" in text
+    ctx.snapshot_workspace.assert_called_once_with("round-2-retry-1-framework-accuracy")
+
+
+def test_framework_accuracy_gate_rejects_checker_failure(tmp_path):
+    from vibe_serve.loops.agent.loop import _run_framework_accuracy_gate
+
+    ctx = MagicMock()
+    ctx.trusted_input_changes.return_value = []
+    ctx.judge_accuracy_command = "trusted-check"
+    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=1, output="bad history")
+
+    feedback = _run_framework_accuracy_gate(
+        ctx,
+        round_number=1,
+        retry=2,
+        progress_path=tmp_path / "progress.md",
+    )
+
+    assert "Framework accuracy gate failed" in feedback
+    assert "bad history" in feedback
+
+
+def test_framework_accuracy_gate_rejects_evaluator_changes_without_execution(tmp_path):
+    from vibe_serve.loops.agent.loop import _run_framework_accuracy_gate
+
+    ctx = MagicMock()
+    ctx.trusted_input_changes.return_value = ["_input_libs/checker.go"]
+    ctx.judge_accuracy_command = "trusted-check"
+
+    feedback = _run_framework_accuracy_gate(
+        ctx,
+        round_number=1,
+        retry=1,
+        progress_path=tmp_path / "progress.md",
+    )
+
+    assert "Evaluator-owned files were modified" in feedback
+    ctx.judge_backend.execute.assert_not_called()
+
+
+def test_framework_accuracy_gate_rejects_changes_during_execution(tmp_path):
+    from vibe_serve.loops.agent.loop import _run_framework_accuracy_gate
+
+    ctx = MagicMock()
+    ctx.trusted_input_changes.side_effect = [[], ["_input_libs/checker.go"]]
+    ctx.judge_accuracy_command = "trusted-check"
+    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=0, output="PASS")
+
+    feedback = _run_framework_accuracy_gate(
+        ctx,
+        round_number=1,
+        retry=1,
+        progress_path=tmp_path / "progress.md",
+    )
+
+    assert "changed during accuracy execution" in feedback
+
+
+def test_framework_benchmark_extracts_declared_metric(tmp_path):
+    from vibe_serve.input_manifest import BenchmarkResult
+    from vibe_serve.loops.agent.loop import (
+        _FRAMEWORK_BENCHMARK_MARKER,
+        _run_framework_benchmark,
+    )
+
+    ctx = MagicMock()
+    ctx.judge_benchmark_command = "trusted-benchmark --repetitions 3"
+    ctx.trusted_input_changes.side_effect = [[], []]
+    ctx.judge_backend.execute.return_value = SimpleNamespace(
+        exit_code=0,
+        output=(
+            f'benchmark diagnostics\n{_FRAMEWORK_BENCHMARK_MARKER}\n[{{"total_ops_per_sec": 42.5}}]'
+        ),
+    )
+
+    feedback, metric = _run_framework_benchmark(
+        ctx,
+        result_spec=BenchmarkResult(
+            json_argument="--output-json",
+            metric="total_ops_per_sec",
+        ),
+        round_number=3,
+        retry=1,
+        progress_path=tmp_path / "progress.md",
+    )
+
+    assert feedback is None
+    assert metric == 42.5
+    executed = ctx.judge_backend.execute.call_args.args[0]
+    assert "trusted-benchmark --repetitions 3 --output-json" in executed
+    assert "cat /tmp/vibeserve-framework-benchmark-3-1.json" in executed
+    assert "total_ops_per_sec**: 42.5" in (tmp_path / "progress.md").read_text()
+
+
+def test_framework_benchmark_rejects_ambiguous_metric(tmp_path):
+    from vibe_serve.input_manifest import BenchmarkResult
+    from vibe_serve.loops.agent.loop import (
+        _FRAMEWORK_BENCHMARK_MARKER,
+        _run_framework_benchmark,
+    )
+
+    ctx = MagicMock()
+    ctx.judge_benchmark_command = "trusted-benchmark"
+    ctx.trusted_input_changes.side_effect = [[], []]
+    ctx.judge_backend.execute.return_value = SimpleNamespace(
+        exit_code=0,
+        output=(f'{_FRAMEWORK_BENCHMARK_MARKER}\n[{{"ops": 1}}, {{"ops": 2}}]'),
+    )
+
+    feedback, metric = _run_framework_benchmark(
+        ctx,
+        result_spec=BenchmarkResult(json_argument="--json", metric="ops"),
+        round_number=1,
+        retry=1,
+        progress_path=tmp_path / "progress.md",
+    )
+
+    assert metric is None
+    assert "expected exactly one 'ops' field" in feedback
+
+
 # ---------------------------------------------------------------------------
 # Loop happy paths
 # ---------------------------------------------------------------------------
@@ -268,6 +418,26 @@ def test_loop_judge_retry_then_pass(tmp_path, ref_file):
         judge_verdicts=["fail", "pass"],
     )
     result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1, max_retries_per_round=3)
+    assert result is True
+    assert runner.counters["impl"] == 2
+    assert runner.counters["judge"] == 2
+
+
+def test_loop_retries_when_framework_accuracy_gate_fails(tmp_path, ref_file):
+    runner = _make_orchestrate_runner(
+        plans=[OrchestratorPlan(task="Build", pass_criteria="tests", reasoning="start")],
+        judge_verdicts=["pass", "pass"],
+    )
+
+    result = _invoke_orchestrate(
+        tmp_path,
+        ref_file,
+        runner,
+        max_rounds=1,
+        max_retries_per_round=2,
+        _accuracy_gate_results=["checker rejected history", None],
+    )
+
     assert result is True
     assert runner.counters["impl"] == 2
     assert runner.counters["judge"] == 2

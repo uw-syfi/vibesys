@@ -384,6 +384,9 @@ func runAccuracy(config accuracyConfig) error {
 	if _, _, err := workerCounts(config.scenario, config.producers, config.consumers); err != nil {
 		return err
 	}
+	if err := runABIProfiles(config); err != nil {
+		return err
+	}
 
 	capacities := accuracyCapacities(config.capacity)
 	for _, capacity := range capacities {
@@ -426,6 +429,47 @@ func runAccuracy(config accuracyConfig) error {
 					capacity,
 				),
 				writeErr,
+			)
+		}
+	}
+	return nil
+}
+
+func runABIProfiles(config accuracyConfig) error {
+	producers, consumers, err := workerCounts(
+		config.scenario,
+		config.producers,
+		config.consumers,
+	)
+	if err != nil {
+		return err
+	}
+	profiles := []struct {
+		capacity  uint64
+		valueSize int
+	}{
+		{config.capacity, config.valueSize},
+		{7, 257},
+		{3, maxQueueValueSize},
+	}
+	seen := make(map[[2]uint64]bool, len(profiles))
+	for _, profile := range profiles {
+		key := [2]uint64{profile.capacity, uint64(profile.valueSize)}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		probeConfig := config.candidateConfig
+		probeConfig.capacity = profile.capacity
+		probeConfig.valueSize = profile.valueSize
+		probeConfig.producerCount = producers
+		probeConfig.consumerCount = consumers
+		if err := runCandidateABIProbe(probeConfig); err != nil {
+			return fmt.Errorf(
+				"ABI profile capacity=%d value_size=%d: %w",
+				profile.capacity,
+				profile.valueSize,
+				err,
 			)
 		}
 	}
