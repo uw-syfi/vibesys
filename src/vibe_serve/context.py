@@ -22,7 +22,7 @@ from vibe_serve.constants import (
     PROJECT_ROOT,
     ComputeBackend,
 )
-from vibe_serve.domains.base import DEFAULT_DOMAIN, DomainName
+from vibe_serve.domains.base import DomainName
 from vibe_serve.domains.environment import (
     EnvironmentContext,
     EnvironmentHooks,
@@ -112,7 +112,7 @@ class _RunContext:
         torch_profiler: str | None = None,
         neuron_profiler: str | None = None,
         profiler_kind: ProfilerKind = ProfilerKind.AUTO,
-        profiler_domain: DomainName = DEFAULT_DOMAIN,
+        profiler_domain: DomainName = DomainName.LLM_SERVING,
         skills_dirs: list[str] | None = None,
         run_environment: RunEnvironmentSpec | None = None,
         git_tracking: bool = False,

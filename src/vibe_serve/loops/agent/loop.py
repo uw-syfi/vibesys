@@ -18,7 +18,7 @@ from vibe_serve.agents.progress import RoundProgress
 from vibe_serve.config import Config
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibe_serve.context import _RunContext
-from vibe_serve.domains.base import DEFAULT_DOMAIN, DomainDefinition, DomainName, DomainRole
+from vibe_serve.domains.base import DomainDefinition, DomainName, DomainRole
 from vibe_serve.domains.registry import resolve_domain
 from vibe_serve.domains.rendering import render_domain_section
 from vibe_serve.input_manifest import BenchmarkResult
@@ -803,7 +803,7 @@ def run_agent_loop(
     backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
     modality: str | None = None,
     inner_loop: str = "multi-agent",
-    domain: DomainName = DEFAULT_DOMAIN,
+    domain: DomainName | None = None,
     interface: str = DEFAULT_INTERFACE,
 ) -> bool:
     """Run the orchestrator-driven build loop.
@@ -837,6 +837,8 @@ def run_agent_loop(
         )
     if interface not in _INTERFACES:
         raise ValueError(f"Unknown interface {interface!r}; choose from {', '.join(_INTERFACES)}")
+    if domain is None:
+        raise ValueError("domain is required; pass --domain or declare [agent].domain")
     # Resolve the registered domain once (fail fast on an unknown name). The
     # per-role files carry language, tooling, and use-case-specific contracts.
     domain_definition = resolve_domain(domain)

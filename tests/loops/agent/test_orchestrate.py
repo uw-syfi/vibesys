@@ -42,6 +42,9 @@ def ref_file(tmp_path):
         """
 version = 1
 
+[agent]
+domain = "llm-serving"
+
 [accuracy]
 command = ["uv", "run", "python", "accuracy_checker/checker.py"]
 
@@ -130,6 +133,7 @@ def _invoke_orchestrate(tmp_path, ref_file, runner, **kwargs):
         objective="Maximize tok/s throughput.",
         max_rounds=5,
         max_retries_per_round=2,
+        domain=DomainName.LLM_SERVING,
     )
     defaults.update(kwargs)
     with (
@@ -658,6 +662,7 @@ def test_cli_loads_objective_md_from_ref_parent(tmp_path):
     (bundle / "OBJECTIVE.md").write_text("Maximize throughput (tok/s). Prefer CUDA graphs.\n")
     (bundle / "vibeserve.input.toml").write_text(
         "version = 1\n\n"
+        "[agent]\ndomain = 'llm-serving'\n\n"
         "[accuracy]\ncommand = ['uv', 'run', 'python', 'accuracy_checker/checker.py']\n\n"
         "[benchmark]\ncommand = ['uv', 'run', 'python', 'benchmark/benchmark.py']\n"
     )
@@ -673,6 +678,7 @@ def test_cli_missing_objective_md_errors(tmp_path):
     bundle.mkdir()
     (bundle / "vibeserve.input.toml").write_text(
         "version = 1\n\n"
+        "[agent]\ndomain = 'llm-serving'\n\n"
         "[accuracy]\ncommand = ['uv', 'run', 'python', 'accuracy_checker/checker.py']\n\n"
         "[benchmark]\ncommand = ['uv', 'run', 'python', 'benchmark/benchmark.py']\n"
     )

@@ -40,6 +40,9 @@ def _write_bundle(project_root: Path, manifest_blocks: str = "") -> Path:
         f"""
 version = 1
 
+[agent]
+domain = "generic"
+
 [accuracy]
 command = ["accuracy-checker"]
 

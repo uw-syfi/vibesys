@@ -28,7 +28,7 @@ from vibe_serve.constants import (
     PROJECT_ROOT,
     ComputeBackend,
 )
-from vibe_serve.domains.base import DEFAULT_DOMAIN, DomainName
+from vibe_serve.domains.base import DomainName
 from vibe_serve.domains.registry import registered_domains
 from vibe_serve.input_manifest import InputBundle, load_input_bundle
 from vibe_serve.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind
@@ -424,12 +424,13 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         "--domain",
         type=_parse_domain_name,
         choices=tuple(DomainName),
-        default=DEFAULT_DOMAIN,
+        default=None,
         metavar="NAME",
         help=(
             "Domain package supplying the implementer/judge context for your "
-            f"problem space. Registered domains: {', '.join(registered_domains())}. Default: "
-            f"{DEFAULT_DOMAIN}. See domains/README.md."
+            "problem space. Optional; defaults to [agent].domain from "
+            "vibeserve.input.toml. "
+            f"Registered domains: {', '.join(registered_domains())}. See domains/README.md."
         ),
     )
     parser.add_argument(
@@ -471,6 +472,26 @@ def _validate_target_inputs(args: argparse.Namespace) -> None:
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(2)
+    if hasattr(args, "domain"):
+        _resolve_agent_domain(args)
+
+
+def _resolve_agent_domain(args: argparse.Namespace) -> None:
+    """Resolve optional ``--domain`` against the input manifest."""
+
+    bundle: InputBundle = args.input_bundle
+    manifest_domain = bundle.domain
+    cli_domain = args.domain
+    if cli_domain is None:
+        args.domain = manifest_domain
+        return
+    if cli_domain is not manifest_domain:
+        print(
+            "Warning: --domain "
+            f"{cli_domain.value!r} differs from {bundle.manifest_path}'s "
+            f"[agent].domain {manifest_domain.value!r}; using --domain override.",
+            file=sys.stderr,
+        )
 
 
 def _validate_agent(args: argparse.Namespace) -> None:

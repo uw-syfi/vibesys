@@ -22,8 +22,6 @@ class DomainRole(StrEnum):
     PROFILER = "profiler"
 
 
-DEFAULT_DOMAIN = DomainName.LLM_SERVING
-
 # The roles a domain can contribute to. Each maps to a ``<role>.md`` file in the
 # domain prompt directory and a ``{{ domain_<role> }}`` injection point in the
 # corresponding base prompt.

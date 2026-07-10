@@ -10,15 +10,19 @@ from the neutral prompt skeleton.
 Pick one with `--domain` (agent loop):
 
 ```bash
-vibe-serve --outer-loop agent --domain llm-serving ...      # default
+vibe-serve --outer-loop agent --domain llm-serving ...
 vibe-serve --outer-loop agent --domain generic ...          # no domain context
 ```
+
+When `--domain` is omitted, the agent loop uses `[agent].domain` from the
+input bundle's `vibeserve.input.toml`. If both are provided and differ, the CLI
+prints a warning and uses the explicit `--domain` value.
 
 `--domain` accepts a registered repo domain name:
 
 | Domain        | What it does |
 |---------------|--------------|
-| `llm-serving` | The default. LLM inference server context: the `serving-systems` skill/references, `/model` weights, the accuracy + benchmark + reward-hack judge gates. |
+| `llm-serving` | LLM inference server context: the `serving-systems` skill/references, `/model` weights, the accuracy + benchmark + reward-hack judge gates. |
 | `generic`     | Empty — no domain prose injected. The neutral baseline; copy it to start your own. |
 
 ## Anatomy of a domain package

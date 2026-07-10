@@ -23,6 +23,9 @@ def _write_input_bundle(tmp_path: Path) -> Path:
         """
 version = 1
 
+[agent]
+domain = "generic"
+
 [accuracy]
 command = ["uv", "run", "python", "accuracy_checker/checker.py"]
 
@@ -103,7 +106,7 @@ def test_target_input_defaults_to_none():
     assert not hasattr(args, "acc_checker")
     assert not hasattr(args, "bench")
     assert args.profiler is ProfilerKind.AUTO
-    assert args.domain is DomainName.LLM_SERVING
+    assert args.domain is None
 
 
 @pytest.mark.parametrize(
@@ -188,8 +191,23 @@ def test_validate_target_inputs_loads_manifest(tmp_path):
     _validate_target_inputs(args)
 
     assert args.input_bundle.root == bundle.resolve()
+    assert args.domain is DomainName.GENERIC
     assert args.input_bundle.accuracy_command_display == "uv run python accuracy_checker/checker.py"
     assert args.input_bundle.benchmark_command_display == "uv run python benchmark/benchmark.py"
+
+
+def test_validate_target_inputs_warns_when_cli_domain_overrides_manifest(tmp_path, capsys):
+    from vibe_serve.cli import _build_agent_parser
+
+    bundle = _write_input_bundle(tmp_path)
+    args = _build_agent_parser().parse_args(["--domain", "llm-serving", "--input", str(bundle)])
+
+    _validate_target_inputs(args)
+
+    assert args.domain is DomainName.LLM_SERVING
+    err = capsys.readouterr().err
+    assert "Warning: --domain 'llm-serving' differs" in err
+    assert "[agent].domain 'generic'" in err
 
 
 def test_validate_target_inputs_loads_trusted_benchmark_result_contract(tmp_path):
@@ -250,6 +268,9 @@ def test_validate_target_inputs_reports_missing_command(tmp_path, capsys):
     (bundle / "vibeserve.input.toml").write_text(
         """
 version = 1
+
+[agent]
+domain = "generic"
 
 [accuracy]
 command = ["./tools/check"]
