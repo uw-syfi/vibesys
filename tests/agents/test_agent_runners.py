@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from io import StringIO
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from vibe_serve.agent_runner import _log_json_and_print, _log_prompt_markdown_and_print
 from vibe_serve.agents import build_agent_runner
 from vibe_serve.agents.callbacks import AgentLogger
 from vibe_serve.agents.cli_runner import CliAgentRunner
@@ -30,6 +32,31 @@ def _judge_fallback() -> JudgeResponse:
         feedback="fallback-feedback",
         verdict=Verdict.FAIL,
     )
+
+
+def test_prompt_markdown_renderer_preserves_raw_log_and_truncates_stdout(capsys):
+    log = StringIO()
+    prompt = "# Title\n\nUse **markdown** and `code`."
+
+    _log_prompt_markdown_and_print(prompt, log_file=log, max_len=20)
+
+    stdout = capsys.readouterr().out
+    assert "Title" in stdout
+    assert "# Title" not in stdout
+    assert "... [17 more chars, see log for full text]" in stdout
+    assert log.getvalue() == prompt + "\n"
+
+
+def test_json_renderer_preserves_raw_log_and_pretty_prints_stdout(capsys):
+    log = StringIO()
+    raw_json = '{"analysis":"ok","items":[1,2]}'
+
+    _log_json_and_print(raw_json, log_file=log)
+
+    stdout = capsys.readouterr().out
+    assert '{\n  "analysis": "ok",' in stdout
+    assert '"items": [\n    1,\n    2\n  ]' in stdout
+    assert log.getvalue() == raw_json + "\n"
 
 
 class TestDeepAgentsRunner:
@@ -235,10 +262,10 @@ class TestCliAgentRunner:
         assert len(captured) == 1
         assert captured[0].generate_calls[0]["cwd"] == str(workspace)
 
-    def test_cli_runner_falls_back_on_unparseable_output(self, monkeypatch, tmp_path):
+    def test_cli_runner_falls_back_on_unparseable_output(self, monkeypatch, tmp_path, capsys):
         captured: list = []
         fake_cls = _make_fake_agent_class(
-            generate_returns="banana",
+            generate_returns="# Failure\n\nCould not produce **JSON**.",
             captured=captured,
         )
         monkeypatch.setitem(
@@ -272,6 +299,10 @@ class TestCliAgentRunner:
         assert result.verdict == Verdict.FAIL
         assert result.feedback == "fallback-feedback"
         assert result.analysis == "fallback"
+        stdout = capsys.readouterr().out
+        assert "Failure" in stdout
+        assert "# Failure" not in stdout
+        assert "**JSON**" not in stdout
 
     def test_cli_runner_passes_progress_to_logger(self, monkeypatch, tmp_path):
         captured: list = []
@@ -498,6 +529,59 @@ class TestCliAgentRunner:
         prompt = captured[0].generate_calls[0]["prompt"]
         assert "JudgeResponse" in prompt
         assert prompt.startswith("THE-SYSTEM-PROMPT")
+
+    def test_cli_runner_prints_prompt_as_rendered_markdown_before_generate(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        stdout_before_generate: list[str] = []
+
+        class FakeAgent:
+            def __init__(self, model=None, event_handler=None):
+                self.model = model
+                self.event_handler = event_handler
+                self.env: dict[str, str] = {}
+
+            def install_mcp_servers(self, workspace, servers):
+                pass
+
+            def uninstall_mcp_servers(self, workspace, servers):
+                pass
+
+            def generate(self, prompt, cwd=None, timeout=300, silent=False):
+                stdout_before_generate.append(capsys.readouterr().out)
+                return '{"analysis": "ok", "feedback": "", "verdict": "pass"}'
+
+        monkeypatch.setitem(
+            __import__(
+                "vibe_serve.agents.cli_runner",
+                fromlist=["_PROVIDER_CLASSES"],
+            )._PROVIDER_CLASSES,
+            "claude",
+            FakeAgent,
+        )
+
+        runner = CliAgentRunner(
+            provider="claude",
+            model="m",
+            run_log_file=None,
+        )
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+
+        runner.invoke(
+            kind="judge",
+            workspace=workspace,
+            system_prompt="# System Prompt\n\nUse **bold** guidance.",
+            user_prompt="## User Prompt\n\nRun `pytest`.",
+            response_cls=JudgeResponse,
+            fallback_factory=_judge_fallback,
+            round_label="judge #1",
+        )
+
+        input_idx = stdout_before_generate[0].index("--- input ---")
+        assert "System Prompt" in stdout_before_generate[0][input_idx:]
+        assert "User Prompt" in stdout_before_generate[0][input_idx:]
+        assert "**bold**" not in stdout_before_generate[0][input_idx:]
 
     def test_cli_runner_writes_usage_jsonl_on_success(self, monkeypatch, tmp_path):
         """CliAgentRunner appends one JSON record per invoke() to ``<log_dir>/usage.jsonl``."""
