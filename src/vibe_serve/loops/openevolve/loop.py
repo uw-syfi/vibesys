@@ -13,6 +13,7 @@ State persistence reuses ``population.json`` (extended in
 from __future__ import annotations
 
 import random
+from pathlib import Path
 
 from vibe_serve.agents.progress import CandidateProgress
 from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
@@ -44,7 +45,7 @@ def run_openevolve_loop(
     benchmark_command: str,
     objective: str,
     *,
-    workspace_seed: str | None = None,
+    workspace_seed: Path | None = None,
     max_iterations: int = 16,
     k_inspirations: int = 3,
     seed: int | None = None,

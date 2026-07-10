@@ -345,7 +345,7 @@ def run_plain_loop(
     accuracy_command: str,
     benchmark_command: str,
     *,
-    workspace_seed: str | None = None,
+    workspace_seed: Path | None = None,
     max_rounds: int = 5,
     max_attempts_per_issue: int = 3,
     max_issues_per_perf_eval: int = 3,

@@ -104,7 +104,7 @@ class _RunContext:
         input_path: str,
         accuracy_command: str,
         benchmark_command: str,
-        workspace_seed: str | None = None,
+        workspace_seed: Path | None = None,
         existing: bool = False,
         debug: bool = False,
         nsys_profiler: str | None = None,
@@ -178,7 +178,7 @@ class _RunContext:
         self.model_name = config.model.name
 
         self.input_path = self._coerce_dir_path(input_path, "--input")
-        self.workspace_seed_path = self._coerce_dir_path(workspace_seed, "workspace.seed")
+        self.workspace_seed_path = self._coerce_dir(workspace_seed, "workspace.seed")
         self.accuracy_command = accuracy_command
         self.benchmark_command = benchmark_command
         self.nsys_profiler_path = self._coerce_dir_path(nsys_profiler, "--nsys-profiler")
@@ -292,7 +292,7 @@ class _RunContext:
 
             if self.workspace_seed_path is not None:
                 self._copy_excluding_extras(
-                    Path(self.workspace_seed_path),
+                    self.workspace_seed_path,
                     self.workspace,
                     respect_source_gitignore=True,
                 )
@@ -478,7 +478,8 @@ class _RunContext:
             **extra,
         )
 
-    def _coerce_dir_path(self, raw: str | None, label: str) -> str | None:
+    @staticmethod
+    def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
         if raw is None:
             return None
         p = Path(raw).expanduser().resolve()
@@ -486,7 +487,11 @@ class _RunContext:
             raise ValueError(f"{label} path does not exist: {raw}")
         if not p.is_dir():
             raise ValueError(f"{label} path is not a directory: {raw}")
-        return str(p)
+        return p
+
+    def _coerce_dir_path(self, raw: str | None, label: str) -> str | None:
+        path = self._coerce_dir(raw, label)
+        return str(path) if path is not None else None
 
     def _coerce_skills_dirs(self, raw_dirs: list[str] | None) -> list[Path]:
         if not raw_dirs:

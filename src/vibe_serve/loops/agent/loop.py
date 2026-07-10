@@ -589,7 +589,7 @@ def run_agent_loop(
     benchmark_command: str,
     objective: str,
     *,
-    workspace_seed: str | None = None,
+    workspace_seed: Path | None = None,
     max_rounds: int = 24,
     max_retries_per_round: int = 3,
     start_round: int = 1,

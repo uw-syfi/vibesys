@@ -74,7 +74,7 @@ def _make_context(input_dir: Path, seed: Path, **kwargs) -> _RunContext:
         input_path=str(input_dir),
         accuracy_command="accuracy-checker",
         benchmark_command="benchmark",
-        workspace_seed=str(seed),
+        workspace_seed=seed,
         profiler_kind=ProfilerKind.NONE,
         skills_dirs=[],
         run_environment=RunEnvironmentSpec("local"),
@@ -189,6 +189,7 @@ def test_fresh_workspace_materializes_seed_and_preserves_it_in_initial_commit(tm
 
     with _patched_context_dependencies(project_root):
         with _make_context(input_dir, seed, git_tracking=True) as ctx:
+            assert ctx.workspace_seed_path == seed.resolve()
             assert (ctx.workspace / "Cargo.toml").is_file()
             assert (ctx.workspace / "src" / "lib.rs").is_file()
             assert (ctx.workspace / "OBJECTIVE.md").is_file()
@@ -300,4 +301,4 @@ def test_cli_forwards_workspace_seed_to_every_outer_loop(tmp_path, outer_loop, r
     ):
         main()
 
-    assert runner.call_args.kwargs["workspace_seed"] == str(seed.resolve())
+    assert runner.call_args.kwargs["workspace_seed"] == seed.resolve()

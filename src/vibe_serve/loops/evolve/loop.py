@@ -269,7 +269,7 @@ def run_evolve_loop(
     benchmark_command: str,
     objective: str,
     *,
-    workspace_seed: str | None = None,
+    workspace_seed: Path | None = None,
     max_generations: int = 8,
     children_per_generation: int = 2,
     k_top_inspirations: int = 2,
