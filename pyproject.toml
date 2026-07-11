@@ -75,7 +75,7 @@ ignore = ["E501"]
 package = true
 
 [tool.uv.workspace]
-exclude = ["exp_env"]
+exclude = ["exp_env/**"]
 members = ["libs/*"]
 
 [tool.uv.sources]
