@@ -26,6 +26,7 @@ export function createOpenTuiApp(
   let liveContent = 'Waiting for run output…';
   let detailContent = '';
   let view = 'live';
+  let exitScheduled = false;
 
   const root = new BoxRenderable(renderer, {
     id: 'app',
@@ -127,6 +128,10 @@ export function createOpenTuiApp(
       ? `${snapshot.status} · ${snapshot.agent_kind ?? 'starting'} · ${snapshot.round_label ?? 'no round yet'}`
       : 'connecting';
     header.content = `VibeServe · ${status}`;
+    if (!exitScheduled && (snapshot?.status === 'completed' || snapshot?.status === 'failed')) {
+      exitScheduled = true;
+      setTimeout(() => renderer.destroy(), 100);
+    }
   }
 
   async function submit(value: string): Promise<void> {

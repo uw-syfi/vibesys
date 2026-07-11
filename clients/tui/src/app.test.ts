@@ -32,6 +32,14 @@ describe('OpenTUI app', () => {
     const frame = await testRenderer.waitForFrame(value => value.includes('output line 1'));
     expect(frame).not.toContain('output line 50');
   });
+
+  it('exits after the backend reaches a terminal state', async () => {
+    const testRenderer = await createTestRenderer({width: 80, height: 16});
+    const app = createOpenTuiApp(testRenderer.renderer, new FakeClient('', 'completed'));
+    cleanup.push(() => app.destroy());
+
+    await new Promise<void>(resolve => testRenderer.renderer.once('destroy', resolve));
+  });
 });
 
 function registerCleanup(
@@ -47,7 +55,10 @@ function registerCleanup(
 class FakeClient implements SupervisionClientLike {
   private deliveredOutput = false;
 
-  constructor(private readonly output = 'latest agent output\n') {}
+  constructor(
+    private readonly output = 'latest agent output\n',
+    private readonly status = 'running',
+  ) {}
 
   request(input: RequestInput): Promise<ProtocolResponse> {
     if (input.type === 'query.snapshot') {
@@ -55,7 +66,7 @@ class FakeClient implements SupervisionClientLike {
         snapshot: {
           run_id: 'test-run',
           sequence: 1,
-          status: 'running',
+          status: this.status,
           agent_kind: 'optimizer',
           round_label: 'round 2',
         },
