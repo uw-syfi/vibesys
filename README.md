@@ -8,14 +8,18 @@ default view follows sequenced output messages. Use `--headless` to disable the
 client for backend tests, CI, or redirected execution. Type a question to see
 the current phase and record the exchange, or use these commands:
 
-The terminal client is implemented in TypeScript with Ink and requires Node.js
-20+. Build it once after checkout:
+From a source checkout, use the repository launcher for both interactive and
+headless runs:
 
 ```bash
-pnpm --dir clients/tui install
-pnpm --dir clients/tui generate:protocol
-pnpm --dir clients/tui build
+./vs --input examples/data-structures/queue-spsc --max-rounds 1
 ```
+
+`./vs` forwards all arguments to `vibe-serve`. For an interactive terminal it
+also installs, regenerates, and rebuilds the TypeScript Ink client when its
+inputs are newer than the compiled entrypoint, avoiding stale frontend builds.
+It requires Node.js 20+ and pnpm (directly or through Corepack). Non-TTY and
+`--headless` runs skip all frontend preparation.
 
 The Python process remains the authoritative supervision server. It exposes a
 private versioned JSONL protocol over a Unix socket, allowing future terminal,

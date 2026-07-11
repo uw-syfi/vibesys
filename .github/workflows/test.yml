@@ -69,6 +69,9 @@ jobs:
       - name: Install TUI dependencies
         run: pnpm --dir clients/tui install --frozen-lockfile
 
+      - name: Test repository launcher
+        run: ./vs --headless --help >/dev/null
+
       - name: Check generated protocol bindings
         run: |
           pnpm --dir clients/tui generate:protocol
