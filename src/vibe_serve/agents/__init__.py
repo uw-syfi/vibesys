@@ -114,6 +114,11 @@ def build_agent_runner(
             run_log_file=run_log_file,
         )
 
+    if backend == "stub":
+        from .stub_runner import StubAgentRunner
+
+        return StubAgentRunner()
+
     if backend == "cli":
         provider = cli_provider or agent_cfg.cli_provider or "codex"
         docker_sandboxes = None

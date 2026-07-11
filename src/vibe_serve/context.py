@@ -979,9 +979,9 @@ class _RunContext:
         ``run-<ts>-step3.log``).  Callers that want a different prefix
         (e.g. ``round007``) should pass a string.
 
-        The previous log file is flushed but kept open (the ``_TeeWriter``
-        on stderr still references it).  A new file is opened and both
-        ``run_log_file`` and the stderr tee are updated.
+        The previous log file is flushed but kept open. A new file becomes
+        ``run_log_file``. In headless mode the stderr tee is updated as well;
+        interactive mode keeps stderr owned by the supervision capture.
         """
         self.run_log_file.flush()
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -990,7 +990,8 @@ class _RunContext:
         new_file = new_path.open("a", encoding="utf-8")
         self.run_log_path = new_path
         self.run_log_file = new_file
-        sys.stderr = _TeeWriter(self._original_stderr, new_file)
+        if self._stderr_redirected:
+            sys.stderr = _TeeWriter(self._original_stderr, new_file)
         # Update the agent runner's log file handle so subsequent
         # invoke() calls write to the new step log.
         if hasattr(self, "agent_runner") and hasattr(self.agent_runner, "_run_log_file"):

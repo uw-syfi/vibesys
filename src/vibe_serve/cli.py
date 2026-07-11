@@ -412,6 +412,11 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--max-rounds", type=int, default=24)
     parser.add_argument("--max-retries-per-round", type=int, default=3)
+    parser.add_argument(
+        "--stub-agent",
+        action="store_true",
+        help="Use deterministic local agent responses for fast TUI smoke tests.",
+    )
     parser.add_argument("--start-round", type=int, default=None, metavar="N")
     parser.add_argument("--modality", default=None, choices=_MODALITIES)
     parser.add_argument(
@@ -510,7 +515,7 @@ def _run_agent(args: argparse.Namespace) -> None:
         profiler_kind=args.profiler,
         skills_dirs=skills,
         run_environment=run_environment_spec_from_args(args),
-        agent_backend=args.agent_backend,
+        agent_backend="stub" if args.stub_agent else args.agent_backend,
         cli_provider=args.cli_provider,
         backend=backend,
         modality=args.modality,
