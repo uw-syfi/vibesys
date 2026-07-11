@@ -1,78 +1,5 @@
 {
   "$defs": {
-    "ArtifactData": {
-      "properties": {
-        "kind": {
-          "const": "artifact",
-          "default": "artifact",
-          "title": "Kind",
-          "type": "string"
-        },
-        "path": {
-          "title": "Path",
-          "type": "string"
-        }
-      },
-      "required": [
-        "path"
-      ],
-      "title": "ArtifactData",
-      "type": "object"
-    },
-    "ArtifactQuery": {
-      "additionalProperties": false,
-      "properties": {
-        "protocol_version": {
-          "const": 1,
-          "default": 1,
-          "title": "Protocol Version",
-          "type": "integer"
-        },
-        "request_id": {
-          "title": "Request Id",
-          "type": "string"
-        },
-        "timestamp": {
-          "format": "date-time",
-          "title": "Timestamp",
-          "type": "string"
-        },
-        "type": {
-          "const": "query.artifact",
-          "default": "query.artifact",
-          "title": "Type",
-          "type": "string"
-        },
-        "path": {
-          "title": "Path",
-          "type": "string"
-        }
-      },
-      "required": [
-        "path"
-      ],
-      "title": "ArtifactQuery",
-      "type": "object"
-    },
-    "ArtifactResult": {
-      "additionalProperties": false,
-      "properties": {
-        "path": {
-          "title": "Path",
-          "type": "string"
-        },
-        "content": {
-          "title": "Content",
-          "type": "string"
-        }
-      },
-      "required": [
-        "path",
-        "content"
-      ],
-      "title": "ArtifactResult",
-      "type": "object"
-    },
     "ChatData": {
       "properties": {
         "kind": {
@@ -194,7 +121,6 @@
     "EventType": {
       "enum": [
         "server_started",
-        "tui_started",
         "chat",
         "status_query",
         "control",
@@ -302,41 +228,6 @@
         }
       },
       "title": "InvocationFinishedData",
-      "type": "object"
-    },
-    "InvocationQuery": {
-      "additionalProperties": false,
-      "properties": {
-        "protocol_version": {
-          "const": 1,
-          "default": 1,
-          "title": "Protocol Version",
-          "type": "integer"
-        },
-        "request_id": {
-          "title": "Request Id",
-          "type": "string"
-        },
-        "timestamp": {
-          "format": "date-time",
-          "title": "Timestamp",
-          "type": "string"
-        },
-        "type": {
-          "const": "query.invocation",
-          "default": "query.invocation",
-          "title": "Type",
-          "type": "string"
-        },
-        "invocation_id": {
-          "title": "Invocation Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "invocation_id"
-      ],
-      "title": "InvocationQuery",
       "type": "object"
     },
     "InvocationStartedData": {
@@ -487,28 +378,6 @@
           ],
           "default": null
         },
-        "round": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RoundResult"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "artifact": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ArtifactResult"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "snapshot": {
           "anyOf": [
             {
@@ -560,63 +429,6 @@
         }
       },
       "title": "ResumeCommand",
-      "type": "object"
-    },
-    "RoundQuery": {
-      "additionalProperties": false,
-      "properties": {
-        "protocol_version": {
-          "const": 1,
-          "default": 1,
-          "title": "Protocol Version",
-          "type": "integer"
-        },
-        "request_id": {
-          "title": "Request Id",
-          "type": "string"
-        },
-        "timestamp": {
-          "format": "date-time",
-          "title": "Timestamp",
-          "type": "string"
-        },
-        "type": {
-          "const": "query.round",
-          "default": "query.round",
-          "title": "Type",
-          "type": "string"
-        },
-        "round_number": {
-          "minimum": 1,
-          "title": "Round Number",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "round_number"
-      ],
-      "title": "RoundQuery",
-      "type": "object"
-    },
-    "RoundResult": {
-      "additionalProperties": false,
-      "properties": {
-        "round_number": {
-          "title": "Round Number",
-          "type": "integer"
-        },
-        "blocks": {
-          "items": {
-            "$ref": "#/$defs/TextBlock"
-          },
-          "title": "Blocks",
-          "type": "array"
-        }
-      },
-      "required": [
-        "round_number"
-      ],
-      "title": "RoundResult",
       "type": "object"
     },
     "RunEvent": {
@@ -705,7 +517,6 @@
             {
               "discriminator": {
                 "mapping": {
-                  "artifact": "#/$defs/ArtifactData",
                   "chat": "#/$defs/ChatData",
                   "invocation_finished": "#/$defs/InvocationFinishedData",
                   "invocation_started": "#/$defs/InvocationStartedData",
@@ -722,9 +533,6 @@
                 },
                 {
                   "$ref": "#/$defs/InvocationFinishedData"
-                },
-                {
-                  "$ref": "#/$defs/ArtifactData"
                 },
                 {
                   "$ref": "#/$defs/OutputData"
@@ -827,53 +635,6 @@
       },
       "title": "SnapshotQuery",
       "type": "object"
-    },
-    "StatusQuery": {
-      "additionalProperties": false,
-      "properties": {
-        "protocol_version": {
-          "const": 1,
-          "default": 1,
-          "title": "Protocol Version",
-          "type": "integer"
-        },
-        "request_id": {
-          "title": "Request Id",
-          "type": "string"
-        },
-        "timestamp": {
-          "format": "date-time",
-          "title": "Timestamp",
-          "type": "string"
-        },
-        "type": {
-          "const": "query.status",
-          "default": "query.status",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "title": "StatusQuery",
-      "type": "object"
-    },
-    "TextBlock": {
-      "additionalProperties": false,
-      "properties": {
-        "source": {
-          "title": "Source",
-          "type": "string"
-        },
-        "content": {
-          "title": "Content",
-          "type": "string"
-        }
-      },
-      "required": [
-        "source",
-        "content"
-      ],
-      "title": "TextBlock",
-      "type": "object"
     }
   },
   "properties": {
@@ -882,14 +643,10 @@
         "mapping": {
           "command.pause": "#/$defs/PauseCommand",
           "command.resume": "#/$defs/ResumeCommand",
-          "query.artifact": "#/$defs/ArtifactQuery",
           "query.chat": "#/$defs/ChatQuery",
           "query.events": "#/$defs/EventsQuery",
           "query.history": "#/$defs/HistoryQuery",
-          "query.invocation": "#/$defs/InvocationQuery",
-          "query.round": "#/$defs/RoundQuery",
-          "query.snapshot": "#/$defs/SnapshotQuery",
-          "query.status": "#/$defs/StatusQuery"
+          "query.snapshot": "#/$defs/SnapshotQuery"
         },
         "propertyName": "type"
       },
@@ -901,9 +658,6 @@
           "$ref": "#/$defs/ResumeCommand"
         },
         {
-          "$ref": "#/$defs/StatusQuery"
-        },
-        {
           "$ref": "#/$defs/SnapshotQuery"
         },
         {
@@ -911,15 +665,6 @@
         },
         {
           "$ref": "#/$defs/HistoryQuery"
-        },
-        {
-          "$ref": "#/$defs/RoundQuery"
-        },
-        {
-          "$ref": "#/$defs/InvocationQuery"
-        },
-        {
-          "$ref": "#/$defs/ArtifactQuery"
         },
         {
           "$ref": "#/$defs/EventsQuery"

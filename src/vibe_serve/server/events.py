@@ -14,9 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 class EventType(StrEnum):
     SERVER_STARTED = "server_started"
-    # Read compatibility for audit logs created before the backend was
-    # extracted from the terminal client namespace.
-    TUI_STARTED = "tui_started"
     CHAT = "chat"
     STATUS_QUERY = "status_query"
     CONTROL = "control"
@@ -53,11 +50,6 @@ class InvocationFinishedData(BaseModel):
     error: str | None = None
 
 
-class ArtifactData(BaseModel):
-    kind: Literal["artifact"] = "artifact"
-    path: str
-
-
 class OutputData(BaseModel):
     kind: Literal["output"] = "output"
     stream: Literal["stdout", "stderr"]
@@ -66,7 +58,7 @@ class OutputData(BaseModel):
 
 
 EventData = Annotated[
-    ChatData | InvocationStartedData | InvocationFinishedData | ArtifactData | OutputData,
+    ChatData | InvocationStartedData | InvocationFinishedData | OutputData,
     Field(discriminator="kind"),
 ]
 
@@ -136,35 +128,15 @@ class EventStore:
         events = []
         for index, line in enumerate(lines):
             try:
-                raw = json.loads(line)
-                data = raw.get("data")
-                if data == {}:
-                    raw["data"] = None
-                elif isinstance(data, dict) and "kind" not in data:
-                    data["kind"] = _legacy_data_kind(raw.get("type"), data)
-                event = RunEvent.model_validate(raw)
-                if event.sequence == 0:
-                    event = event.model_copy(update={"sequence": index + 1})
+                event = RunEvent.model_validate_json(line)
                 events.append(event)
-            except (json.JSONDecodeError, ValidationError):
+            except ValidationError:
                 # Preserve access to earlier audit history if a process was
                 # interrupted during its final append.
                 if index == len(lines) - 1:
                     continue
                 raise
         return events
-
-
-def _legacy_data_kind(event_type: str | None, data: dict[str, Any]) -> str:
-    if event_type == EventType.INVOCATION_STARTED:
-        return "invocation_started"
-    if event_type == EventType.INVOCATION_FINISHED:
-        return "invocation_finished"
-    if "answer" in data:
-        return "chat"
-    if "path" in data:
-        return "artifact"
-    return "chat"
 
 
 def make_event(event_type: EventType, text: str = "", **fields: Any) -> RunEvent:

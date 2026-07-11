@@ -5,21 +5,17 @@ from __future__ import annotations
 from vibe_serve.server.events import EventType, RunEvent
 from vibe_serve.server.inspector import RunInspector
 from vibe_serve.server.protocol import (
-    ArtifactQuery,
     ChatQuery,
     ChatResult,
     CommandAck,
     EventsQuery,
     HistoryQuery,
-    InvocationQuery,
     PauseCommand,
     ProtocolRequest,
     Response,
     ResumeCommand,
-    RoundQuery,
     RunSnapshot,
     SnapshotQuery,
-    StatusQuery,
 )
 from vibe_serve.server.supervisor import RunSupervisor
 
@@ -44,9 +40,6 @@ class SupervisionService:
                 request_id=request.request_id,
                 ack=CommandAck(action="resume", status="consumed"),
             )
-        if isinstance(request, StatusQuery):
-            self.supervisor.record(EventType.STATUS_QUERY, "status")
-            return Response(request_id=request.request_id, snapshot=self.snapshot())
         if isinstance(request, ChatQuery):
             answer = self.supervisor.chat(request.text)
             return Response(
@@ -56,23 +49,6 @@ class SupervisionService:
         if isinstance(request, HistoryQuery):
             self.supervisor.record(EventType.STATUS_QUERY, "/history")
             return Response(request_id=request.request_id, events=self.events())
-        if isinstance(request, RoundQuery):
-            self.supervisor.record(EventType.STATUS_QUERY, f"/round {request.round_number}")
-            return Response(
-                request_id=request.request_id,
-                round=self.inspector.round_result(request.round_number),
-            )
-        if isinstance(request, InvocationQuery):
-            self.supervisor.record(EventType.STATUS_QUERY, f"/invocation {request.invocation_id}")
-            return Response(
-                request_id=request.request_id,
-                events=self.inspector.invocation_events(request.invocation_id),
-            )
-        if isinstance(request, ArtifactQuery):
-            return Response(
-                request_id=request.request_id,
-                artifact=self.inspector.artifact_result(request.path),
-            )
         if isinstance(request, SnapshotQuery):
             return Response(request_id=request.request_id, snapshot=self.snapshot())
         if isinstance(request, EventsQuery):

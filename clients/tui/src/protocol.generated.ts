@@ -1,16 +1,6 @@
 /* Generated from the Python protocol models. Do not edit. */
 
-export type Request =
-  | PauseCommand
-  | ResumeCommand
-  | StatusQuery
-  | SnapshotQuery
-  | ChatQuery
-  | HistoryQuery
-  | RoundQuery
-  | InvocationQuery
-  | ArtifactQuery
-  | EventsQuery;
+export type Request = PauseCommand | ResumeCommand | SnapshotQuery | ChatQuery | HistoryQuery | EventsQuery;
 export type ProtocolVersion = 1;
 export type RequestId = string;
 export type Timestamp = string;
@@ -23,44 +13,25 @@ export type Type1 = "command.resume";
 export type ProtocolVersion2 = 1;
 export type RequestId2 = string;
 export type Timestamp2 = string;
-export type Type2 = "query.status";
+export type Type2 = "query.snapshot";
 export type ProtocolVersion3 = 1;
 export type RequestId3 = string;
 export type Timestamp3 = string;
-export type Type3 = "query.snapshot";
+export type Type3 = "query.chat";
+export type Text = string;
 export type ProtocolVersion4 = 1;
 export type RequestId4 = string;
 export type Timestamp4 = string;
-export type Type4 = "query.chat";
-export type Text = string;
+export type Type4 = "query.history";
 export type ProtocolVersion5 = 1;
 export type RequestId5 = string;
 export type Timestamp5 = string;
-export type Type5 = "query.history";
+export type Type5 = "query.events";
+export type AfterSequence = number;
+export type TimeoutMs = number;
 export type ProtocolVersion6 = 1;
 export type RequestId6 = string;
 export type Timestamp6 = string;
-export type Type6 = "query.round";
-export type RoundNumber = number;
-export type ProtocolVersion7 = 1;
-export type RequestId7 = string;
-export type Timestamp7 = string;
-export type Type7 = "query.invocation";
-export type InvocationId = string;
-export type ProtocolVersion8 = 1;
-export type RequestId8 = string;
-export type Timestamp8 = string;
-export type Type8 = "query.artifact";
-export type Path = string;
-export type ProtocolVersion9 = 1;
-export type RequestId9 = string;
-export type Timestamp9 = string;
-export type Type9 = "query.events";
-export type AfterSequence = number;
-export type TimeoutMs = number;
-export type ProtocolVersion10 = 1;
-export type RequestId10 = string;
-export type Timestamp10 = string;
 export type Ok = boolean;
 export type Error = string | null;
 export type Action = "pause" | "resume";
@@ -68,25 +39,18 @@ export type Status = "pending" | "consumed";
 export type Question = string;
 export type Answer = string;
 export type Effect = "none";
-export type RoundNumber1 = number;
-export type Source = string;
-export type Content = string;
-export type Blocks = TextBlock[];
-export type Path1 = string;
-export type Content1 = string;
-export type ProtocolVersion11 = 1;
+export type ProtocolVersion7 = 1;
 export type RunId = string;
 export type Sequence = number;
 export type Status1 = string;
 export type AgentKind = string | null;
 export type RoundLabel = string | null;
-export type ProtocolVersion12 = 1;
+export type ProtocolVersion8 = 1;
 export type Sequence1 = number;
 export type RunId1 = string;
-export type Timestamp11 = string;
+export type Timestamp7 = string;
 export type EventType =
   | "server_started"
-  | "tui_started"
   | "chat"
   | "status_query"
   | "control"
@@ -99,8 +63,8 @@ export type Text1 = string;
 export type EventStatus = "active" | "answered" | "pending" | "consumed" | "completed" | "failed";
 export type RoundLabel1 = string | null;
 export type AgentKind1 = string | null;
-export type InvocationId1 = string | null;
-export type Data = (ChatData | InvocationStartedData | InvocationFinishedData | ArtifactData | OutputData) | null;
+export type InvocationId = string | null;
+export type Data = (ChatData | InvocationStartedData | InvocationFinishedData | OutputData) | null;
 export type Kind = "chat";
 export type Answer1 = string;
 export type Kind1 = "invocation_started";
@@ -108,12 +72,10 @@ export type SystemPrompt = string;
 export type UserPrompt = string;
 export type Kind2 = "invocation_finished";
 export type Error1 = string | null;
-export type Kind3 = "artifact";
-export type Path2 = string;
-export type Kind4 = "output";
+export type Kind3 = "output";
 export type Stream = "stdout" | "stderr";
-export type Source1 = string;
-export type Content2 = string;
+export type Source = string;
+export type Content = string;
 export type Events = RunEvent[];
 
 export interface ProtocolDocument {
@@ -136,70 +98,41 @@ export interface ResumeCommand {
   timestamp?: Timestamp1;
   type?: Type1;
 }
-export interface StatusQuery {
+export interface SnapshotQuery {
   protocol_version?: ProtocolVersion2;
   request_id?: RequestId2;
   timestamp?: Timestamp2;
   type?: Type2;
 }
-export interface SnapshotQuery {
+export interface ChatQuery {
   protocol_version?: ProtocolVersion3;
   request_id?: RequestId3;
   timestamp?: Timestamp3;
   type?: Type3;
+  text: Text;
 }
-export interface ChatQuery {
+export interface HistoryQuery {
   protocol_version?: ProtocolVersion4;
   request_id?: RequestId4;
   timestamp?: Timestamp4;
   type?: Type4;
-  text: Text;
 }
-export interface HistoryQuery {
+export interface EventsQuery {
   protocol_version?: ProtocolVersion5;
   request_id?: RequestId5;
   timestamp?: Timestamp5;
   type?: Type5;
-}
-export interface RoundQuery {
-  protocol_version?: ProtocolVersion6;
-  request_id?: RequestId6;
-  timestamp?: Timestamp6;
-  type?: Type6;
-  round_number: RoundNumber;
-}
-export interface InvocationQuery {
-  protocol_version?: ProtocolVersion7;
-  request_id?: RequestId7;
-  timestamp?: Timestamp7;
-  type?: Type7;
-  invocation_id: InvocationId;
-}
-export interface ArtifactQuery {
-  protocol_version?: ProtocolVersion8;
-  request_id?: RequestId8;
-  timestamp?: Timestamp8;
-  type?: Type8;
-  path: Path;
-}
-export interface EventsQuery {
-  protocol_version?: ProtocolVersion9;
-  request_id?: RequestId9;
-  timestamp?: Timestamp9;
-  type?: Type9;
   after_sequence?: AfterSequence;
   timeout_ms?: TimeoutMs;
 }
 export interface Response {
-  protocol_version?: ProtocolVersion10;
-  request_id: RequestId10;
-  timestamp?: Timestamp10;
+  protocol_version?: ProtocolVersion6;
+  request_id: RequestId6;
+  timestamp?: Timestamp6;
   ok?: Ok;
   error?: Error;
   ack?: CommandAck | null;
   chat?: ChatResult | null;
-  round?: RoundResult | null;
-  artifact?: ArtifactResult | null;
   snapshot?: RunSnapshot | null;
   events?: Events;
 }
@@ -212,20 +145,8 @@ export interface ChatResult {
   answer: Answer;
   effect?: Effect;
 }
-export interface RoundResult {
-  round_number: RoundNumber1;
-  blocks?: Blocks;
-}
-export interface TextBlock {
-  source: Source;
-  content: Content;
-}
-export interface ArtifactResult {
-  path: Path1;
-  content: Content1;
-}
 export interface RunSnapshot {
-  protocol_version?: ProtocolVersion11;
+  protocol_version?: ProtocolVersion7;
   run_id: RunId;
   sequence: Sequence;
   status: Status1;
@@ -236,16 +157,16 @@ export interface RunSnapshot {
  * One reproducible human, control, or invocation event.
  */
 export interface RunEvent {
-  protocol_version?: ProtocolVersion12;
+  protocol_version?: ProtocolVersion8;
   sequence?: Sequence1;
   run_id?: RunId1;
-  timestamp: Timestamp11;
+  timestamp: Timestamp7;
   type: EventType;
   text?: Text1;
   status?: EventStatus | null;
   round_label?: RoundLabel1;
   agent_kind?: AgentKind1;
-  invocation_id?: InvocationId1;
+  invocation_id?: InvocationId;
   data?: Data;
 }
 export interface ChatData {
@@ -268,15 +189,10 @@ export interface InvocationFinishedData {
 export interface Result {
   [k: string]: unknown;
 }
-export interface ArtifactData {
-  kind?: Kind3;
-  path: Path2;
-  [k: string]: unknown;
-}
 export interface OutputData {
-  kind?: Kind4;
+  kind?: Kind3;
   stream: Stream;
-  source?: Source1;
-  content: Content2;
+  source?: Source;
+  content: Content;
   [k: string]: unknown;
 }

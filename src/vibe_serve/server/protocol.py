@@ -32,10 +32,6 @@ class ResumeCommand(Request):
     type: Literal["command.resume"] = "command.resume"
 
 
-class StatusQuery(Request):
-    type: Literal["query.status"] = "query.status"
-
-
 class SnapshotQuery(Request):
     type: Literal["query.snapshot"] = "query.snapshot"
 
@@ -49,21 +45,6 @@ class HistoryQuery(Request):
     type: Literal["query.history"] = "query.history"
 
 
-class RoundQuery(Request):
-    type: Literal["query.round"] = "query.round"
-    round_number: int = Field(ge=1)
-
-
-class InvocationQuery(Request):
-    type: Literal["query.invocation"] = "query.invocation"
-    invocation_id: str
-
-
-class ArtifactQuery(Request):
-    type: Literal["query.artifact"] = "query.artifact"
-    path: str
-
-
 class EventsQuery(Request):
     type: Literal["query.events"] = "query.events"
     after_sequence: int = Field(default=0, ge=0)
@@ -71,16 +52,7 @@ class EventsQuery(Request):
 
 
 ProtocolRequest = Annotated[
-    PauseCommand
-    | ResumeCommand
-    | StatusQuery
-    | SnapshotQuery
-    | ChatQuery
-    | HistoryQuery
-    | RoundQuery
-    | InvocationQuery
-    | ArtifactQuery
-    | EventsQuery,
+    PauseCommand | ResumeCommand | SnapshotQuery | ChatQuery | HistoryQuery | EventsQuery,
     Field(discriminator="type"),
 ]
 
@@ -105,21 +77,6 @@ class ChatResult(ProtocolModel):
     effect: Literal["none"] = "none"
 
 
-class TextBlock(ProtocolModel):
-    source: str
-    content: str
-
-
-class RoundResult(ProtocolModel):
-    round_number: int
-    blocks: list[TextBlock] = Field(default_factory=list)
-
-
-class ArtifactResult(ProtocolModel):
-    path: str
-    content: str
-
-
 class Response(ProtocolModel):
     protocol_version: Literal[1] = PROTOCOL_VERSION
     request_id: str
@@ -128,7 +85,5 @@ class Response(ProtocolModel):
     error: str | None = None
     ack: CommandAck | None = None
     chat: ChatResult | None = None
-    round: RoundResult | None = None
-    artifact: ArtifactResult | None = None
     snapshot: RunSnapshot | None = None
     events: list[RunEvent] = Field(default_factory=list)

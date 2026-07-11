@@ -102,13 +102,8 @@ function renderResponse(request: RequestInput, response: ProtocolResponse): stri
     return `${response.ack.action}: ${response.ack.status}`;
   }
   if (response.chat) return `you: ${response.chat.question}\nvibeserve: ${response.chat.answer}`;
-  if (response.round) {
-    if (!response.round.blocks?.length) return `No data for round ${response.round.round_number}.`;
-    return response.round.blocks.map(block => `${block.source}\n${block.content}`).join('\n\n');
-  }
-  if (response.artifact) return `${response.artifact.path}\n${response.artifact.content}`;
   if (response.events?.length) return response.events.map(renderEvent).join('\n');
-  if (request.type === 'query.history' || request.type === 'query.invocation') return 'No events found.';
+  if (request.type === 'query.history') return 'No events found.';
   return null;
 }
 

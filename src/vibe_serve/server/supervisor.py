@@ -39,10 +39,6 @@ class RunSupervisor:
         self._current_round: str | None = None
 
     @property
-    def events_path(self) -> Path | None:
-        return self._store.path if self._store else None
-
-    @property
     def current_round(self) -> str | None:
         with self._condition:
             return self._current_round
@@ -51,9 +47,6 @@ class RunSupervisor:
         log_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir = log_dir
         events_path = log_dir / "run-events.jsonl"
-        legacy_path = log_dir / "tui-events.jsonl"
-        if not events_path.exists() and legacy_path.exists():
-            events_path = legacy_path
         store = EventStore(events_path, run_id=log_dir.parent.name)
         with self._condition:
             self._store = store

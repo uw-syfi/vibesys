@@ -8,8 +8,6 @@ import uuid
 from pathlib import Path
 from unittest.mock import Mock
 
-import pytest
-
 from vibe_serve.context import _RunContext
 from vibe_serve.server import (
     EventType,
@@ -17,7 +15,7 @@ from vibe_serve.server import (
     RunSupervisor,
     run_interactive,
 )
-from vibe_serve.server.protocol import ChatQuery, EventsQuery, StatusQuery
+from vibe_serve.server.protocol import ChatQuery, EventsQuery, SnapshotQuery
 from vibe_serve.server.runtime import _MessageCapture
 from vibe_serve.server.schema import ProtocolDocument
 from vibe_serve.server.service import SupervisionService
@@ -70,35 +68,18 @@ def test_invocation_audit_contains_prompts_and_result(tmp_path):
     assert started["data"]["user_prompt"] == "Do work"
     assert finished["invocation_id"] == started["invocation_id"]
     assert finished["data"]["result"] == {"summary": "done"}
-    detail = RunInspector(supervisor).invocation_detail(started["invocation_id"][:8])
-    assert "System rules" in detail
-    assert '"summary": "done"' in detail
 
 
-def test_inspector_answers_round_and_artifact_queries(tmp_path):
+def test_inspector_answers_round_and_failure_queries(tmp_path):
     supervisor = RunSupervisor()
     (tmp_path / "logs").mkdir()
     supervisor.attach(tmp_path / "logs")
     (supervisor.log_dir / "progress.md").write_text(
         "## Round 1 — Judge\nPASS\n\n## Round 2 — Judge\nFAIL: latency regressed\n"
     )
-    artifact = tmp_path / "workspace" / "result.txt"
-    artifact.parent.mkdir()
-    artifact.write_text("benchmark throughput: 42")
-
     inspector = RunInspector(supervisor)
     assert "Round 2" in inspector.round_detail(2)
     assert "latency regressed" in inspector.answer("why did the judge fail?")
-    assert "throughput: 42" in inspector.show_artifact("workspace/result.txt")
-
-
-def test_inspector_rejects_artifacts_outside_experiment(tmp_path):
-    log_dir = tmp_path / "run" / "logs"
-    log_dir.mkdir(parents=True)
-    supervisor = RunSupervisor()
-    supervisor.attach(log_dir)
-    with pytest.raises(ValueError, match="inside the experiment"):
-        RunInspector(supervisor).show_artifact("../../secret")
 
 
 def test_general_chat_is_distinct_from_status_query(tmp_path):
@@ -168,7 +149,7 @@ def test_socket_transport_supports_multiple_clients_and_event_replay(tmp_path):
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as first:
             first.connect(str(socket_path))
             first_file = first.makefile("rwb")
-            first_file.write(StatusQuery().model_dump_json().encode() + b"\n")
+            first_file.write(SnapshotQuery().model_dump_json().encode() + b"\n")
             first_file.flush()
             status = json.loads(first_file.readline())
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as second:
@@ -179,10 +160,11 @@ def test_socket_transport_supports_multiple_clients_and_event_replay(tmp_path):
             replay = json.loads(second_file.readline())
 
     assert status["ok"] is True
+    assert status["snapshot"]["status"] == "running"
     sequences = [event["sequence"] for event in replay["events"]]
     assert sequences == sorted(sequences)
     assert len(sequences) == len(set(sequences))
-    assert any(event["type"] == "status_query" for event in replay["events"])
+    assert any(event["type"] == "server_started" for event in replay["events"])
 
 
 def test_run_context_records_invocation_boundary(tmp_path):
