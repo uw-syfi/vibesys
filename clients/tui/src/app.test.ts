@@ -50,6 +50,22 @@ describe('OpenTUI presentation', () => {
     expect(controller.submissions).toEqual(['/help']);
   });
 
+  it('advertises Escape and returns a non-live view to live output', async () => {
+    const testRenderer = await createTestRenderer({width: 100, height: 16});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      view: 'help',
+      detailContent: 'Available commands',
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    await testRenderer.waitForFrame(value => value.includes('Esc: back to live'));
+    testRenderer.mockInput.pressKey('ESCAPE');
+    await testRenderer.waitForFrame(value => !value.includes('Esc: back to live'));
+    expect(controller.liveCalls).toBe(1);
+  });
+
   it('uses the native scrollbox for long output', async () => {
     const lines = Array.from({length: 50}, (_, index) => `tool output line ${index + 1}`).join('\n');
     const testRenderer = await createTestRenderer({width: 80, height: 16});
@@ -141,6 +157,7 @@ function registerCleanup(
 class FakeController implements SessionController {
   readonly #listeners = new Set<(state: SessionState) => void>();
   readonly submissions: string[] = [];
+  liveCalls = 0;
 
   constructor(public state: SessionState) {}
 
@@ -150,7 +167,11 @@ class FakeController implements SessionController {
     this.submissions.push(value);
     return Promise.resolve();
   }
-  live(): void {}
+  live(): void {
+    this.liveCalls += 1;
+    this.state = {...this.state, view: 'live'};
+    for (const listener of this.#listeners) listener(this.state);
+  }
 
   subscribe(listener: (state: SessionState) => void): () => void {
     this.#listeners.add(listener);

@@ -96,7 +96,8 @@ export function createOpenTuiApp(
   input.focus();
 
   function render(state: SessionState): void {
-    header.content = `VibeServe · ${statusText(state)}`;
+    const returnHint = state.view === 'live' ? '' : ' · Esc: back to live';
+    header.content = `VibeServe · ${statusText(state)}${returnHint}`;
     if (state.view === 'live') renderConversation(state.conversation);
     else renderDetail(state.detailContent);
     if (!exitScheduled && state.terminal) {
@@ -210,6 +211,12 @@ export function createOpenTuiApp(
   }
 
   function onKey(key: KeyEvent): void {
+    if (key.name === 'escape' && controller.state.view !== 'live') {
+      controller.live();
+      viewport.scrollTo(viewport.scrollHeight);
+      key.preventDefault();
+      return;
+    }
     if (key.ctrl && key.name === 'p') {
       const latestPrompt = [...controller.state.conversation]
         .reverse()
