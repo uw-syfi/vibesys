@@ -31,6 +31,25 @@ describe('App', () => {
     expect(app.lastFrame()).not.toContain('output line 1\n');
     expect(app.lastFrame()).toContain('›');
   });
+
+  it('scrolls through recent output and returns to live follow mode', async () => {
+    const lines = Array.from({length: 50}, (_, index) => `output line ${index + 1}`).join('\n');
+    const client = new FakeClient(`${lines}\n`);
+    const app = render(<App client={client}/>);
+    renderedApps.push(app);
+
+    await expect.poll(() => app.lastFrame()).toContain('output line 50');
+    app.stdin.write('\u001B[5~');
+    await expect.poll(() => app.lastFrame()).toContain('lines behind');
+    expect(app.lastFrame()).not.toContain('output line 50');
+
+    app.stdin.write('\u001B[1;5B');
+    await expect.poll(() => app.lastFrame()).toContain('lines behind');
+
+    app.stdin.write('\u001B[F');
+    await expect.poll(() => app.lastFrame()).not.toContain('lines behind');
+    expect(app.lastFrame()).toContain('output line 50');
+  });
 });
 
 class FakeClient implements SupervisionClientLike {

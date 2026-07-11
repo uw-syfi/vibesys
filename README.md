@@ -31,6 +31,8 @@ formatting and terminal rendering.
 - `/pause` pauses after the current agent call; `/resume` continues.
 - `/history` opens the human interaction audit; `/live` or `Ctrl+L` returns to
   current run output.
+- `PageUp`/`PageDown` scroll by a screen, `Ctrl+↑`/`Ctrl+↓` scroll by one line,
+  and `End` returns to live-follow mode.
 - `/help` shows the supported commands. Round, invocation, and artifact
   inspection are server capabilities reserved for future navigable views rather
   than user-facing slash commands.
@@ -92,7 +94,7 @@ cp agent.toml.example agent.toml
 
 ```bash
 # Issue-tracker outer loop, Codex CLI, Docker on local CUDA, 4 rounds
-vibe-serve \
+./vs \
   --input examples/model-serving/moonshine-streaming \
   --exp-name my-experiment \
   --docker \
@@ -101,7 +103,7 @@ vibe-serve \
   --modality speech_to_text
 ```
 
-`--outer-loop` defaults to `agent`. Pass `--outer-loop plain` or `--outer-loop evolve` to switch. See `vibe-serve --outer-loop <kind> --help` for loop-specific flags, and [`docs/cli-flags.md`](docs/cli-flags.md) for the supported flag combinations.
+`--outer-loop` defaults to `agent`. Pass `--outer-loop plain` or `--outer-loop evolve` to switch. See `./vs --outer-loop <kind> --help` for loop-specific flags, and [`docs/cli-flags.md`](docs/cli-flags.md) for the supported flag combinations.
 
 A separate entry point exposes the issue MCP server used by the plain loop:
 
@@ -142,8 +144,8 @@ The selected domain and input bundle define the implementation language,
 toolchain, artifact, and callable contract:
 
 ```bash
-vibe-serve --outer-loop agent --interface inprocess ...   # default: direct invocation
-vibe-serve --outer-loop agent --interface service ...     # network service
+./vs --outer-loop agent --interface inprocess ...   # default: direct invocation
+./vs --outer-loop agent --interface service ...     # network service
 ```
 
 - **`inprocess`** (default): evaluator-owned code invokes the candidate directly
@@ -181,7 +183,7 @@ metric.
 `OBJECTIVE.md` is read at the start of every run and must live next to the
 `reference/` directory (sibling, not inside). See `examples/model-serving/Llama-3-8B/`, `examples/model-serving/moonshine-streaming/`, `examples/model-serving/qwen3-32b-code-edit/`, `examples/model-serving/olmo-hybrid-prefix-caching/`, `examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit/`, `examples/model-serving/show-o2-1.5B-HQ-h100/`, and `examples/model-serving/show-o2-1.5B-HQ-macbook/` for the paper scenarios.
 
-For multi-objective evolutionary runs, drop an `objectives.toml` next to `OBJECTIVE.md` (or pass `--objective name:max|min` flags) — see `vibe-serve --outer-loop evolve --help`.
+For multi-objective evolutionary runs, drop an `objectives.toml` next to `OBJECTIVE.md` (or pass `--objective name:max|min` flags) — see `./vs --outer-loop evolve --help`.
 
 ## Configuration (`agent.toml`)
 
@@ -235,8 +237,8 @@ exp_env/<run>/
 Resume any run with `--resume` (defaults to "latest"):
 
 ```bash
-vibe-serve --resume                  # newest run
-vibe-serve --resume 20260507-...     # specific dir
+./vs --resume                  # newest run
+./vs --resume 20260507-...     # specific dir
 ```
 
 ## Repository layout

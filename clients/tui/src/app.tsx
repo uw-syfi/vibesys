@@ -19,6 +19,7 @@ export function App({client}: Props) {
   const [detailContent, setDetailContent] = useState('');
   const [view, setView] = useState('live');
   const [input, setInput] = useState('');
+  const [scrollOffset, setScrollOffset] = useState(0);
 
   const refresh = useCallback(async () => {
     const [snapshotResponse, eventResponse] = await Promise.all([
@@ -35,7 +36,10 @@ export function App({client}: Props) {
       const output = events.flatMap(event =>
         event.type === 'output' && event.data?.kind === 'output' ? [event.data.content] : [],
       ).join('');
-      if (output) setLiveContent(previous => appendLiveOutput(previous, output));
+      if (output) {
+        setLiveContent(previous => appendLiveOutput(previous, output));
+        setScrollOffset(previous => previous === 0 ? 0 : previous + countLines(output));
+      }
     }
   }, [client]);
 
@@ -46,8 +50,16 @@ export function App({client}: Props) {
   }, [refresh]);
 
   useInput((character, key) => {
-    if (key.ctrl && character === 'l') setView('live');
+    if (key.ctrl && character === 'l') {
+      setView('live');
+      setScrollOffset(0);
+    }
     if (key.ctrl && character === 'c') exit();
+    if (key.end) setScrollOffset(0);
+    if (key.pageUp) setScrollOffset(previous => previous + outputRows);
+    if (key.pageDown) setScrollOffset(previous => Math.max(0, previous - outputRows));
+    if (key.ctrl && key.upArrow) setScrollOffset(previous => previous + 1);
+    if (key.ctrl && key.downArrow) setScrollOffset(previous => Math.max(0, previous - 1));
   });
 
   function showError(error: unknown) {
@@ -59,9 +71,13 @@ export function App({client}: Props) {
     setInput('');
     const parsed = parseInput(value.trim());
     if (parsed.error) return showError(parsed.error);
-    if (parsed.localView === 'live') return setView('live');
+    if (parsed.localView === 'live') {
+      setScrollOffset(0);
+      return setView('live');
+    }
     if (parsed.localView === 'help') {
       setDetailContent(HELP_TEXT);
+      setScrollOffset(0);
       return setView('help');
     }
     if (!parsed.request) return;
@@ -70,6 +86,7 @@ export function App({client}: Props) {
       const rendered = renderResponse(parsed.request, response);
       if (rendered !== null) {
         setDetailContent(rendered);
+        setScrollOffset(0);
         setView(parsed.request.type ?? 'detail');
       }
     } catch (error) {
@@ -83,7 +100,12 @@ export function App({client}: Props) {
   const terminalRows = stdout.rows ?? 24;
   const outputRows = Math.max(3, terminalRows - 5);
   const content = view === 'live' ? liveContent : detailContent;
-  const visible = content.split('\n').slice(-outputRows).join('\n');
+  const lines = content.split('\n');
+  const maximumOffset = Math.max(0, lines.length - outputRows);
+  const effectiveOffset = Math.min(scrollOffset, maximumOffset);
+  const viewportEnd = lines.length - effectiveOffset;
+  const visible = lines.slice(Math.max(0, viewportEnd - outputRows), viewportEnd).join('\n');
+  const scrollStatus = effectiveOffset > 0 ? ` · ${effectiveOffset} lines behind` : '';
 
   return <Box flexDirection="column" height={terminalRows} overflowY="hidden">
     <Box flexShrink={0}><Text bold color="cyan">VibeServe · {status}</Text></Box>
@@ -91,7 +113,9 @@ export function App({client}: Props) {
       <Text>{visible}</Text>
     </Box>
     <Box flexShrink={0} height={1} overflowY="hidden">
-      <Text dimColor wrap="truncate-end">Ask a question or use /pause, /resume, /live, /history, /help</Text>
+      <Text dimColor wrap="truncate-end">
+        PgUp/PgDn · Ctrl+↑/↓ · End: live{scrollStatus} · /help
+      </Text>
     </Box>
     <Box flexShrink={0} height={1} overflowY="hidden">
       <Text color="green">› </Text>
@@ -126,4 +150,8 @@ function snapshotsEqual(left: RunSnapshot | null, right: RunSnapshot): boolean {
 function appendLiveOutput(previous: string, next: string): string {
   const current = previous === 'Waiting for run output…' ? '' : previous;
   return `${current}${next}`.slice(-200_000);
+}
+
+function countLines(content: string): number {
+  return content.split('\n').length - 1;
 }
