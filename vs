@@ -58,10 +58,20 @@ if [[ "$interactive" == true ]]; then
       exit 1
     fi
 
-    echo "vs: preparing the interactive client..." >&2
-    "${pnpm_command[@]}" --dir clients/tui install --frozen-lockfile
-    "${pnpm_command[@]}" --dir clients/tui generate:protocol
-    "${pnpm_command[@]}" --dir clients/tui build
+    echo "Launching VibeServe..." >&2
+    preparation_log="$(mktemp -t vibeserve-prepare.XXXXXX)"
+    trap 'rm -f "$preparation_log"' EXIT
+    if ! {
+      "${pnpm_command[@]}" --dir clients/tui install --frozen-lockfile &&
+        "${pnpm_command[@]}" --dir clients/tui generate:protocol &&
+        "${pnpm_command[@]}" --dir clients/tui build
+    } >"$preparation_log" 2>&1; then
+      echo "vs: failed to prepare the interactive client:" >&2
+      sed 's/^/  /' "$preparation_log" >&2
+      exit 1
+    fi
+    rm -f "$preparation_log"
+    trap - EXIT
   fi
 fi
 
