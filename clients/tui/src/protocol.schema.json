@@ -13,7 +13,8 @@
             "assistant",
             "analysis",
             "tool",
-            "diagnostic"
+            "diagnostic",
+            "prompt"
           ],
           "title": "Channel",
           "type": "string"

@@ -33,7 +33,7 @@ describe('session event model', () => {
     expect(state.terminal).toBe(true);
   });
 
-  it('coalesces streamed assistant chunks but keeps tool turns separate', () => {
+  it('coalesces streamed assistant chunks and pairs each tool call with its result', () => {
     let state = initialSessionState();
     state = applyEvent(state, event(1, 'agent_output_chunk', {
       kind: 'agent_output_chunk', channel: 'assistant', content: 'hello ',
@@ -42,15 +42,34 @@ describe('session event model', () => {
       kind: 'agent_output_chunk', channel: 'assistant', content: 'world',
     }, 'invocation-1'));
     state = applyEvent(state, event(3, 'agent_output_chunk', {
-      kind: 'agent_output_chunk', channel: 'tool', content: 'first tool',
+      kind: 'agent_output_chunk', channel: 'tool', content: '→ Bash(command="first")\n',
     }, 'invocation-1'));
     state = applyEvent(state, event(4, 'agent_output_chunk', {
-      kind: 'agent_output_chunk', channel: 'tool', content: 'second tool',
+      kind: 'agent_output_chunk', channel: 'tool', content: 'first result',
+    }, 'invocation-1'));
+    state = applyEvent(state, event(5, 'agent_output_chunk', {
+      kind: 'agent_output_chunk', channel: 'tool', content: '→ Bash(command="second")\n',
+    }, 'invocation-1'));
+    state = applyEvent(state, event(6, 'agent_output_chunk', {
+      kind: 'agent_output_chunk', channel: 'tool', content: 'second result',
     }, 'invocation-1'));
 
     expect(state.conversation.map(entry => entry.content)).toEqual([
-      'hello world', 'first tool', 'second tool',
+      'hello world',
+      '→ Bash(command="first")\nfirst result',
+      '→ Bash(command="second")\nsecond result',
     ]);
+  });
+
+  it('classifies prompt events as distinct markdown turns', () => {
+    const state = applyEvent(initialSessionState(), event(1, 'agent_output_chunk', {
+      kind: 'agent_output_chunk', channel: 'prompt', content: '# Task\n\nUse `pytest`.',
+    }, 'invocation-1'));
+
+    expect(state.conversation).toMatchObject([{
+      kind: 'prompt',
+      content: '# Task\n\nUse `pytest`.',
+    }]);
   });
 });
 

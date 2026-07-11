@@ -145,7 +145,7 @@ export function createOpenTuiApp(
       fg: palette.label,
       height: 1,
     }));
-    if (entry.kind === 'assistant') {
+    if (entry.kind === 'assistant' || entry.kind === 'prompt') {
       card.add(new MarkdownRenderable(renderer, {
         content: entry.content,
         syntaxStyle: markdownStyle,
@@ -154,7 +154,8 @@ export function createOpenTuiApp(
         width: '100%',
       }));
     } else {
-      const content = entry.kind === 'tool' || entry.kind === 'subprocess'
+      const content = entry.kind === 'tool' || entry.kind === 'diagnostic'
+        || entry.kind === 'subprocess'
         ? toolOutputPreview(entry.content)
         : entry.content;
       card.add(new TextRenderable(renderer, {
@@ -216,10 +217,13 @@ function entryPalette(entry: ConversationEntry): {
   if (entry.kind === 'assistant') {
     return {border: '#0891b2', background: '#0f1b24', label: '#67e8f9', content: '#e2e8f0'};
   }
+  if (entry.kind === 'prompt') {
+    return {border: '#d97706', background: '#21180d', label: '#fbbf24', content: '#fef3c7'};
+  }
   if (entry.kind === 'analysis') {
     return {border: '#475569', background: '#171923', label: '#a78bfa', content: '#94a3b8'};
   }
-  if (entry.kind === 'tool' || entry.kind === 'subprocess') {
+  if (entry.kind === 'tool' || entry.kind === 'diagnostic' || entry.kind === 'subprocess') {
     return {border: '#3f3f46', background: '#18181b', label: '#a1a1aa', content: '#a1a1aa'};
   }
   return {border: '#475569', background: '#111827', label: '#94a3b8', content: '#cbd5e1'};

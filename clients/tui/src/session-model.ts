@@ -14,11 +14,13 @@ export interface SessionState {
 
 export interface ConversationEntry {
   id: string;
-  kind: 'assistant' | 'analysis' | 'tool' | 'subprocess' | 'status' | 'result';
+  kind: 'assistant' | 'prompt' | 'analysis' | 'tool' | 'diagnostic' | 'subprocess' | 'status' | 'result';
   content: string;
   label?: string;
   tone?: 'normal' | 'success' | 'failure';
   turnId?: string;
+  invocationId?: string;
+  startsTurn?: boolean;
 }
 
 export function initialSessionState(): SessionState {
@@ -75,13 +77,21 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
   if (data?.kind === 'agent_output_chunk') {
     const kind = data.channel === 'assistant'
       ? 'assistant'
-      : data.channel === 'analysis' ? 'analysis' : 'tool';
+      : data.channel === 'prompt'
+        ? 'prompt'
+        : data.channel === 'analysis'
+          ? 'analysis'
+          : data.channel === 'tool' ? 'tool' : 'diagnostic';
+    const invocationId = event.invocation_id ?? undefined;
     return {
       id,
       kind,
       content: data.content,
       label: labelFor(event, data.channel),
-      turnId: event.invocation_id ?? id,
+      turnId: invocationId ?? id,
+      ...(invocationId === undefined ? {} : {invocationId}),
+      startsTurn: kind === 'tool' && data.channel === 'tool'
+        && data.content.trimStart().startsWith('→ '),
     };
   }
   if (data?.kind === 'subprocess_output') {
@@ -138,8 +148,17 @@ function appendConversation(
   incoming: ConversationEntry,
 ): ConversationEntry[] {
   const last = previous.at(-1);
+  if (last && incoming.kind === 'tool' && last.kind === 'tool'
+    && last.invocationId === incoming.invocationId && !incoming.startsTurn) {
+    const separator = last.content.endsWith('\n') || incoming.content.startsWith('\n') ? '' : '\n';
+    return [
+      ...previous.slice(0, -1),
+      {...last, content: last.content + separator + incoming.content},
+    ];
+  }
   if (last && last.kind === incoming.kind && last.turnId === incoming.turnId
-    && (incoming.kind === 'assistant' || incoming.kind === 'analysis')) {
+    && (incoming.kind === 'assistant' || incoming.kind === 'prompt'
+      || incoming.kind === 'analysis')) {
     return [...previous.slice(0, -1), {...last, content: last.content + incoming.content}];
   }
   return [...previous, incoming].slice(-1_000);

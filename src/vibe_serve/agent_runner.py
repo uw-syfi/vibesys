@@ -158,9 +158,23 @@ def _log_markdown_and_print(
     text: str,
     log_file=None,
     max_len: int | None = None,
+    *,
+    channel: str = "assistant",
 ) -> None:
     """Emit raw Markdown; presentation clients decide how to render it."""
-    _log_and_print(text, log_file=log_file, max_len=max_len)
+    from vibe_serve.server.registry import active_supervisor
+
+    supervisor = active_supervisor()
+    if supervisor is not None:
+        supervisor.publish_agent_output(text + "\n", channel=channel)
+    if log_file:
+        log_file.write(text + "\n")
+        log_file.flush()
+    if max_len is not None and len(text) > max_len:
+        print(text[:max_len])
+        print(f"... [{len(text) - max_len} more chars, see log for full text]")
+    else:
+        print(text)
 
 
 def _log_prompt_markdown_and_print(
@@ -169,7 +183,12 @@ def _log_prompt_markdown_and_print(
     max_len: int | None = None,
 ) -> None:
     """Emit raw prompt Markdown while preserving it in logs."""
-    _log_markdown_and_print(prompt, log_file=log_file, max_len=max_len)
+    _log_markdown_and_print(
+        prompt,
+        log_file=log_file,
+        max_len=max_len,
+        channel="prompt",
+    )
 
 
 def _log_json_and_print(

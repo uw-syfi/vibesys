@@ -93,7 +93,7 @@ class PhaseData(BaseModel):
 
 class AgentOutputChunkData(BaseModel):
     kind: Literal["agent_output_chunk"] = "agent_output_chunk"
-    channel: Literal["assistant", "analysis", "tool", "diagnostic"]
+    channel: Literal["assistant", "analysis", "tool", "diagnostic", "prompt"]
     content: str
 
 
