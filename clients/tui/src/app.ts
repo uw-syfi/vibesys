@@ -1,13 +1,15 @@
 import {
   BoxRenderable,
   InputRenderable,
+  MarkdownRenderable,
   ScrollBoxRenderable,
+  SyntaxStyle,
   TextRenderable,
   type CliRenderer,
   type KeyEvent,
 } from '@opentui/core';
 import type {SessionController} from './session-controller.js';
-import {statusText, type SessionState} from './session-model.js';
+import {statusText, type ConversationEntry, type SessionState} from './session-model.js';
 
 export interface OpenTuiApp {
   destroy(): void;
@@ -24,7 +26,19 @@ export function createOpenTuiApp(
   const header = new TextRenderable(renderer, {
     id: 'header', height: 1, fg: '#22d3ee', content: 'VibeServe · connecting',
   });
-  const output = new TextRenderable(renderer, {id: 'output', width: '100%', content: ''});
+  const output = new BoxRenderable(renderer, {
+    id: 'output', width: '100%', flexDirection: 'column', paddingLeft: 1, paddingRight: 1,
+  });
+  const markdownStyle = SyntaxStyle.fromStyles({
+    default: {fg: '#e2e8f0'},
+    heading: {fg: '#67e8f9', bold: true},
+    strong: {fg: '#f8fafc', bold: true},
+    em: {fg: '#cbd5e1', italic: true},
+    code: {fg: '#a5f3fc', bg: '#1e293b'},
+    link: {fg: '#38bdf8', underline: true},
+    blockquote: {fg: '#94a3b8', italic: true},
+  });
+  let renderedConversation: ConversationEntry[] = [];
   const viewport = new ScrollBoxRenderable(renderer, {
     id: 'viewport',
     width: '100%',
@@ -78,11 +92,73 @@ export function createOpenTuiApp(
 
   function render(state: SessionState): void {
     header.content = `VibeServe · ${statusText(state)}`;
-    output.content = state.view === 'live' ? state.liveContent : state.detailContent;
+    if (state.view === 'live') renderConversation(state.conversation);
+    else renderDetail(state.detailContent);
     if (!exitScheduled && state.terminal) {
       exitScheduled = true;
       setTimeout(() => renderer.destroy(), 100);
     }
+  }
+
+  function clearOutput(): void {
+    for (const child of [...output.getChildren()]) {
+      output.remove(child);
+      child.destroyRecursively();
+    }
+  }
+
+  function renderDetail(content: string): void {
+    renderedConversation = [];
+    clearOutput();
+    output.add(new TextRenderable(renderer, {content, fg: '#e2e8f0', width: '100%'}));
+  }
+
+  function renderConversation(entries: ConversationEntry[]): void {
+    if (entries === renderedConversation) return;
+    renderedConversation = entries;
+    clearOutput();
+    if (entries.length === 0) {
+      output.add(new TextRenderable(renderer, {content: 'Waiting for run events…', fg: '#64748b'}));
+      return;
+    }
+    for (const entry of entries) output.add(renderConversationEntry(entry));
+  }
+
+  function renderConversationEntry(entry: ConversationEntry): BoxRenderable {
+    const palette = entryPalette(entry);
+    const card = new BoxRenderable(renderer, {
+      id: `event-${entry.id}`,
+      width: '100%',
+      flexDirection: 'column',
+      marginTop: 1,
+      paddingLeft: entry.kind === 'status' ? 0 : 1,
+      paddingRight: 1,
+      border: entry.kind !== 'status',
+      borderStyle: 'rounded',
+      borderColor: palette.border,
+      backgroundColor: palette.background,
+    });
+    card.add(new TextRenderable(renderer, {
+      content: entry.label ?? entry.kind,
+      fg: palette.label,
+      height: 1,
+    }));
+    if (entry.kind === 'assistant') {
+      card.add(new MarkdownRenderable(renderer, {
+        content: entry.content,
+        syntaxStyle: markdownStyle,
+        conceal: true,
+        streaming: !controller.state.terminal,
+        width: '100%',
+      }));
+    } else {
+      card.add(new TextRenderable(renderer, {
+        content: entry.content,
+        fg: palette.content,
+        width: '100%',
+      }));
+    }
+    return card;
   }
 
   function onKey(key: KeyEvent): void {
@@ -109,6 +185,28 @@ export function createOpenTuiApp(
       unsubscribe();
       renderer.keyInput.off('keypress', onKey);
       root.destroyRecursively();
+      markdownStyle.destroy();
     },
   };
+}
+
+function entryPalette(entry: ConversationEntry): {
+  border: string; background: string; label: string; content: string;
+} {
+  if (entry.tone === 'failure') {
+    return {border: '#ef4444', background: '#1f1215', label: '#f87171', content: '#fecaca'};
+  }
+  if (entry.tone === 'success') {
+    return {border: '#22c55e', background: '#102018', label: '#4ade80', content: '#bbf7d0'};
+  }
+  if (entry.kind === 'assistant') {
+    return {border: '#0891b2', background: '#0f1b24', label: '#67e8f9', content: '#e2e8f0'};
+  }
+  if (entry.kind === 'analysis') {
+    return {border: '#475569', background: '#171923', label: '#a78bfa', content: '#94a3b8'};
+  }
+  if (entry.kind === 'tool' || entry.kind === 'subprocess') {
+    return {border: '#3f3f46', background: '#18181b', label: '#a1a1aa', content: '#a1a1aa'};
+  }
+  return {border: '#475569', background: '#111827', label: '#94a3b8', content: '#cbd5e1'};
 }

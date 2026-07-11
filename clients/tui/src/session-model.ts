@@ -6,9 +6,18 @@ export interface SessionState {
   agentKind: string | null;
   roundLabel: string | null;
   liveContent: string;
+  conversation: ConversationEntry[];
   detailContent: string;
   view: 'live' | 'detail' | 'help' | 'error';
   terminal: boolean;
+}
+
+export interface ConversationEntry {
+  id: string;
+  kind: 'assistant' | 'analysis' | 'tool' | 'subprocess' | 'status' | 'result';
+  content: string;
+  label?: string;
+  tone?: 'normal' | 'success' | 'failure';
 }
 
 export function initialSessionState(): SessionState {
@@ -18,6 +27,7 @@ export function initialSessionState(): SessionState {
     agentKind: null,
     roundLabel: null,
     liveContent: 'Waiting for run events…',
+    conversation: [],
     detailContent: '',
     view: 'live',
     terminal: false,
@@ -43,6 +53,8 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
 
   const line = renderEventForTranscript(event);
   if (line !== null) next.liveContent = appendTranscript(next.liveContent, line);
+  const entry = eventToConversationEntry(event);
+  if (entry !== null) next.conversation = appendConversation(next.conversation, entry);
 
   if (event.type === 'run_started') next.status = 'running';
   if (event.type === 'run_finished') {
@@ -54,6 +66,77 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
     next.terminal = true;
   }
   return next;
+}
+
+function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
+  const data = event.data;
+  const id = String(event.sequence ?? `${event.timestamp}-${event.type}`);
+  if (data?.kind === 'agent_output_chunk') {
+    const kind = data.channel === 'assistant'
+      ? 'assistant'
+      : data.channel === 'analysis' ? 'analysis' : 'tool';
+    return {id, kind, content: data.content, label: labelFor(event, data.channel)};
+  }
+  if (data?.kind === 'subprocess_output') {
+    return {
+      id,
+      kind: 'subprocess',
+      content: data.content,
+      label: `${data.process_kind} · ${data.stream}`,
+    };
+  }
+  if (event.type === 'phase_started') {
+    return {id, kind: 'status', content: 'started', label: labelFor(event, 'phase')};
+  }
+  if (data?.kind === 'judge_result') {
+    return {
+      id,
+      kind: 'result',
+      content: data.feedback || `Judge returned ${data.verdict}.`,
+      label: `Judge · ${data.verdict.toUpperCase()}`,
+      tone: data.verdict === 'pass' ? 'success' : 'failure',
+    };
+  }
+  if (data?.kind === 'benchmark_result') {
+    return {
+      id,
+      kind: 'result',
+      content: `${data.metric}: ${data.value} ${data.unit}`,
+      label: 'Benchmark',
+      tone: 'success',
+    };
+  }
+  if (data?.kind === 'round_finished') {
+    return {
+      id,
+      kind: 'result',
+      content: `${data.attempts} attempt(s)`,
+      label: `${event.round_label ?? 'Round'} · ${data.judge_verdict.toUpperCase()}`,
+      tone: data.judge_verdict === 'pass' ? 'success' : 'failure',
+    };
+  }
+  if (event.type === 'run_failed' || event.type === 'run_interrupted') {
+    return {id, kind: 'result', content: event.text || 'Run interrupted.', label: 'Run failed', tone: 'failure'};
+  }
+  return null;
+}
+
+function labelFor(event: RunEvent, fallback: string): string {
+  const phase = event.agent_kind ?? fallback;
+  return event.round_label ? `${phase} · ${event.round_label}` : phase;
+}
+
+function appendConversation(
+  previous: ConversationEntry[],
+  incoming: ConversationEntry,
+): ConversationEntry[] {
+  const last = previous.at(-1);
+  if (last && last.kind === incoming.kind && last.label === incoming.label
+    && (incoming.kind === 'assistant' || incoming.kind === 'analysis'
+      || incoming.kind === 'tool' || incoming.kind === 'subprocess')) {
+    return [...previous.slice(0, -1), {...last, content: last.content + incoming.content}];
+  }
+  return [...previous, incoming].slice(-1_000);
 }
 
 export function showLive(state: SessionState): SessionState {

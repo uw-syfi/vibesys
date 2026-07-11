@@ -142,7 +142,7 @@ class TestOnToolEnd:
         out = capsys.readouterr().out
         assert "raw string output" in out
 
-    def test_normal_output_prints_dim(self, capsys):
+    def test_normal_output_is_plain_text(self, capsys):
         logger = AgentLogger()
         output = MagicMock()
         output.content = "ok"
@@ -150,10 +150,11 @@ class TestOnToolEnd:
         output.status = "success"
         logger.on_tool_end(output)
         out = capsys.readouterr().out
-        assert _DIM in out
+        assert "ok" in out
+        assert _DIM not in out
         assert _RED not in out
 
-    def test_error_status_prints_red(self, capsys):
+    def test_error_status_is_plain_text(self, capsys):
         logger = AgentLogger()
         output = MagicMock()
         output.content = "Error: file not found"
@@ -161,10 +162,11 @@ class TestOnToolEnd:
         output.status = "error"
         logger.on_tool_end(output)
         out = capsys.readouterr().out
-        assert _RED in out
+        assert "Error: file not found" in out
+        assert _RED not in out
         assert _DIM not in out
 
-    def test_command_failed_exit_code_prints_red(self, capsys):
+    def test_command_failed_exit_code_is_plain_text(self, capsys):
         logger = AgentLogger()
         output = MagicMock()
         output.content = (
@@ -176,10 +178,11 @@ class TestOnToolEnd:
         output.status = "success"
         logger.on_tool_end(output)
         out = capsys.readouterr().out
-        assert _RED in out
+        assert "Exit code: 128" in out
+        assert _RED not in out
         assert _DIM not in out
 
-    def test_command_succeeded_exit_code_prints_dim(self, capsys):
+    def test_command_succeeded_exit_code_is_plain_text(self, capsys):
         logger = AgentLogger()
         output = MagicMock()
         output.content = "hello world\n[Command succeeded with exit code 0]"
@@ -187,20 +190,21 @@ class TestOnToolEnd:
         output.status = "success"
         logger.on_tool_end(output)
         out = capsys.readouterr().out
-        assert _DIM in out
+        assert "hello world" in out
+        assert _DIM not in out
         assert _RED not in out
 
 
 class TestOnToolError:
-    def test_prints_error_in_red(self, capsys):
+    def test_prints_plain_error(self, capsys):
         logger = AgentLogger()
         from uuid import uuid4
 
         logger.on_tool_error(Exception("something broke"), run_id=uuid4())
         out = capsys.readouterr().out
-        assert _RED in out
+        assert _RED not in out
         assert "something broke" in out
-        assert "✗" in out
+        assert "Tool error" in out
 
     def test_does_not_use_dim(self, capsys):
         logger = AgentLogger()

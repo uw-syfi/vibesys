@@ -8,7 +8,7 @@ from typing import Any
 from langchain_core.callbacks import BaseCallbackHandler
 
 from vibe_serve.agents.progress import AgentProgress
-from vibe_serve.constants import _BOLD, _CYAN, _DIM, _GREEN, _RED, _RESET, _YELLOW
+from vibe_serve.constants import _DIM, _GREEN, _RESET, _YELLOW
 
 ContextWindowLookup = Callable[[str | None], int | None]
 """Resolves a model name to its context window size in tokens.
@@ -170,7 +170,7 @@ class AgentLogger(BaseCallbackHandler):
         if self._agent_label:
             parts.append(self._agent_label)
         parts.extend([f"{elapsed:.1f}s", tokens_str])
-        return f"{_BOLD}[{' | '.join(parts)}]{_RESET} "
+        return f"[{' | '.join(parts)}] "
 
     # --- LLM call context (log-file only) ---
 
@@ -221,7 +221,7 @@ class AgentLogger(BaseCallbackHandler):
             self._publish(token, "assistant")
             if not self._streaming and self._agent_label:
                 self._print(f"{self._format_prefix()}", end="", flush=True)
-            self._print(f"{_GREEN}{token}{_RESET}", end="", flush=True)
+            self._print(token, end="", flush=True)
             self._streaming = True
 
     def on_llm_end(self, response, **kwargs):
@@ -268,7 +268,7 @@ class AgentLogger(BaseCallbackHandler):
         text = msg.text
         if text:
             self._publish(text, "assistant")
-            self._print(f"{_GREEN}{text}{_RESET}")
+            self._print(text)
         for tc in msg.tool_calls:
             self._print_tool_call(tc["name"], tc["args"])
 
@@ -280,16 +280,14 @@ class AgentLogger(BaseCallbackHandler):
     def on_tool_end(self, output, **kwargs):
         content = output.content if hasattr(output, "content") else str(output)
         name = getattr(output, "name", None) or "unknown"
-        status = getattr(output, "status", None)
-        is_error = status == "error" or "[Command failed" in str(content)
-        self._print_tool_result(name, content, color=_RED if is_error else _DIM)
+        self._print_tool_result(name, content)
 
     def on_tool_error(self, error, **kwargs):
-        self._print(f"  {_RED}✗ Tool error: {error!r}{_RESET}")
+        self._print(f"Tool error: {error!r}")
         if isinstance(error, BaseException):
             tb = traceback.format_exception(type(error), error, error.__traceback__)
             if tb:
-                self._print(f"  {_RED}{''.join(tb).strip()}{_RESET}")
+                self._print("".join(tb).strip())
 
     # --- Formatting ---
 
@@ -327,7 +325,7 @@ class AgentLogger(BaseCallbackHandler):
                     continue
                 s = json.dumps(v) if not isinstance(v, str) else v
                 full_parts.append(f'{k}="{s}"' if isinstance(v, str) else f"{k}={s}")
-            self._print_log(f"\n{_CYAN}{_BOLD}→ {name}({', '.join(full_parts)}){_RESET}")
+            self._print_log(f"\n→ {name}({', '.join(full_parts)})")
 
         # Truncated args to stdout
         parts = []
@@ -336,21 +334,20 @@ class AgentLogger(BaseCallbackHandler):
             if len(s) > 80:
                 s = s[:80] + "..."
             parts.append(f'{k}="{s}"' if isinstance(v, str) else f"{k}={s}")
-        self._print_stdout(
-            f"\n{self._format_prefix()}{_CYAN}{_BOLD}→ {name}({', '.join(parts)}){_RESET}"
-        )
+        self._print_stdout(f"\n{self._format_prefix()}→ {name}({', '.join(parts)})")
 
     def _print_thinking(self, text: str):
         self._publish(text, "analysis")
-        self._print(f"\n{_DIM}[thinking]{_RESET}")
+        self._print("\n[thinking]")
         for line in text.split("\n"):
-            self._print(f"{_DIM}{line}{_RESET}")
+            self._print(line)
 
     # Maximum chars to write per tool result in the log file.  Keeps logs
     # readable while still capturing enough output for debugging.
     _LOG_MAX_RESULT_LEN = 2000
 
     def _print_tool_result(self, name: str, content: str, color: str = _DIM):
+        del name, color
         full_text = str(content)
         self._publish(full_text, "tool")
 
@@ -363,14 +360,14 @@ class AgentLogger(BaseCallbackHandler):
                     + f"... [{len(full_text) - self._LOG_MAX_RESULT_LEN} more chars]"
                 )
             for line in log_preview.split("\n"):
-                self._print_log(f"  {color}{line}{_RESET}")
+                self._print_log(f"  {line}")
 
         # Truncated to stdout
         preview = full_text
         if self._max_result_len is not None and len(preview) > self._max_result_len:
             preview = preview[: self._max_result_len] + "..."
         for line in preview.split("\n"):
-            self._print_stdout(f"  {color}{line}{_RESET}")
+            self._print_stdout(f"  {line}")
 
     def _print(self, *args, **kwargs):
         """Write to both stdout and log file.
@@ -406,7 +403,10 @@ class AgentLogger(BaseCallbackHandler):
     # output is identical regardless of which backend is in use.
 
     def on_thinking(self, text: str) -> None:
-        self.log_text(text)
+        if not text:
+            return
+        self._publish(text, "analysis")
+        self._print(f"{self._format_prefix()}{text}")
 
     def on_tool_call(self, tool: str, args: dict[str, Any] | str | None = None) -> None:
         if isinstance(args, dict):
@@ -461,7 +461,7 @@ class AgentLogger(BaseCallbackHandler):
         if not text:
             return
         self._publish(text, "assistant")
-        self._print(f"{self._format_prefix()}{_GREEN}{text}{_RESET}")
+        self._print(f"{self._format_prefix()}{text}")
 
     def log_tool_call(self, name: str, args: dict) -> None:
         """Format a tool invocation the same way the deepagents path does."""
@@ -475,7 +475,7 @@ class AgentLogger(BaseCallbackHandler):
         is_error: bool = False,
     ) -> None:
         """Format a tool result the same way ``on_tool_end`` does."""
-        self._print_tool_result(name, content, color=_RED if is_error else _DIM)
+        self._print_tool_result(name, content)
 
     def _publish(self, content: str, channel: str) -> None:
         from vibe_serve.server.registry import active_supervisor

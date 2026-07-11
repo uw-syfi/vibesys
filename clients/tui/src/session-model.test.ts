@@ -18,6 +18,10 @@ describe('session event model', () => {
     expect(state.liveContent).toContain('[round-1] judge started');
     expect(state.liveContent).toContain('checking accuracy');
     expect(state.liveContent).toContain('Judge: PASS');
+    expect(state.conversation.map(entry => entry.kind)).toEqual([
+      'status', 'assistant', 'result',
+    ]);
+    expect(state.conversation[1]?.content).toBe('checking accuracy\n');
   });
 
   it('ignores replayed events and recognizes terminal state', () => {

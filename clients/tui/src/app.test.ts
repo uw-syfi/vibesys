@@ -18,28 +18,35 @@ describe('OpenTUI presentation', () => {
       status: 'running',
       agentKind: 'optimizer',
       roundLabel: 'round 2',
-      liveContent: 'latest agent output',
+      conversation: [{
+        id: '1', kind: 'assistant', label: 'optimizer · round 2',
+        content: '## Result\n\nUse `fast_path()`.',
+      }],
     });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
 
-    const frame = await testRenderer.waitForFrame(value => value.includes('latest agent output'));
+    const frame = await testRenderer.waitForFrame(value => value.includes('fast_path()'));
     expect(frame).toContain('running · optimizer · round 2');
+    expect(frame).toContain('Result');
     expect(frame).toContain('Ask or command');
     expect(frame).toContain('Type a question or /help');
   });
 
   it('uses the native scrollbox for long output', async () => {
-    const lines = Array.from({length: 50}, (_, index) => `output line ${index + 1}`).join('\n');
+    const lines = Array.from({length: 50}, (_, index) => `tool output line ${index + 1}`).join('\n');
     const testRenderer = await createTestRenderer({width: 80, height: 16});
-    const controller = new FakeController({...initialSessionState(), liveContent: lines});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      conversation: [{id: 'tool', kind: 'tool', label: 'Bash', content: lines}],
+    });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
 
-    await testRenderer.waitForFrame(value => value.includes('output line 50'));
+    await testRenderer.waitForFrame(value => value.includes('tool output line 50'));
     testRenderer.mockInput.pressKey('HOME');
-    const frame = await testRenderer.waitForFrame(value => value.includes('output line 1'));
-    expect(frame).not.toContain('output line 50');
+    const frame = await testRenderer.waitForFrame(value => value.includes('tool output line 1'));
+    expect(frame).not.toContain('tool output line 50');
   });
 
   it('exits after the model reaches a terminal state', async () => {
