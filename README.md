@@ -24,8 +24,6 @@ cursor-based event replay. Python never renders interactive output: stdout and
 stderr are converted into typed `output` events, and the client owns all
 formatting and terminal rendering.
 
-- `/steer TEXT` queues guidance for the next agent invocation. The status line
-  shows pending guidance; the audit log records the exact phase that consumed it.
 - `/pause` pauses after the current agent call; `/resume` continues.
 - `/history` opens the human interaction audit; `/live` or `Ctrl+L` returns to
   current run output.
@@ -35,10 +33,9 @@ formatting and terminal rendering.
 
 Prompts, streamed outputs, judge feedback, and benchmark output remain in the
 normal `logs/run-*.log` and per-loop history files. Human chat, status queries,
-control actions, and steering lifecycle events are appended to
-`logs/run-events.jsonl`. Agent invocation start/finish events store the rendered
-prompts, structured result or error, and IDs of any steering notes consumed by
-that invocation. Plain chat is never added to an agent prompt.
+and control actions are appended to `logs/run-events.jsonl`. Agent invocation
+start/finish events store the rendered prompts and structured result or error.
+Plain chat is never added to an agent prompt.
 
 [![arXiv](https://img.shields.io/badge/arXiv-2605.06068-b31b1b.svg)](https://arxiv.org/abs/2605.06068)
 

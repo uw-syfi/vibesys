@@ -23,12 +23,6 @@ class Request(ProtocolModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
-class SteerCommand(Request):
-    type: Literal["command.steer"] = "command.steer"
-    text: str
-    target: Literal["next_safe_point"] = "next_safe_point"
-
-
 class PauseCommand(Request):
     type: Literal["command.pause"] = "command.pause"
     mode: Literal["after_current_agent_call"] = "after_current_agent_call"
@@ -77,8 +71,7 @@ class EventsQuery(Request):
 
 
 ProtocolRequest = Annotated[
-    SteerCommand
-    | PauseCommand
+    PauseCommand
     | ResumeCommand
     | StatusQuery
     | SnapshotQuery
@@ -99,14 +92,11 @@ class RunSnapshot(ProtocolModel):
     status: str
     agent_kind: str | None = None
     round_label: str | None = None
-    pending_steering: int = 0
-    last_consumed_steering: str | None = None
 
 
 class CommandAck(ProtocolModel):
-    action: Literal["steer", "pause", "resume"]
+    action: Literal["pause", "resume"]
     status: Literal["pending", "consumed"]
-    resource_id: str | None = None
 
 
 class ChatResult(ProtocolModel):

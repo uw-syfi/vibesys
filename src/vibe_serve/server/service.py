@@ -20,7 +20,6 @@ from vibe_serve.server.protocol import (
     RunSnapshot,
     SnapshotQuery,
     StatusQuery,
-    SteerCommand,
 )
 from vibe_serve.server.supervisor import RunSupervisor
 
@@ -33,12 +32,6 @@ class SupervisionService:
         self.inspector = RunInspector(supervisor)
 
     def execute(self, request: ProtocolRequest) -> Response:
-        if isinstance(request, SteerCommand):
-            note = self.supervisor.steer(request.text)
-            return Response(
-                request_id=request.request_id,
-                ack=CommandAck(action="steer", status="pending", resource_id=note.id),
-            )
         if isinstance(request, PauseCommand):
             self.supervisor.pause_after_call()
             return Response(

@@ -492,7 +492,7 @@ class _RunContext:
         """
         supervisor = getattr(self, "supervisor", None)
         if supervisor is not None:
-            user_prompt = supervisor.before_agent(kind, round_label, user_prompt, system_prompt)
+            supervisor.before_agent(kind, round_label, user_prompt, system_prompt)
         result = None
         error = None
         try:

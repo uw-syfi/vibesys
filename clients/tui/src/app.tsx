@@ -75,7 +75,7 @@ export function App({client}: Props) {
   }
 
   const status = snapshot
-    ? `${snapshot.status} · ${snapshot.agent_kind ?? 'starting'} · ${snapshot.round_label ?? 'no round yet'} · ${snapshot.pending_steering} steering pending`
+    ? `${snapshot.status} · ${snapshot.agent_kind ?? 'starting'} · ${snapshot.round_label ?? 'no round yet'}`
     : 'connecting';
   const terminalRows = stdout.rows ?? 24;
   const outputRows = Math.max(3, terminalRows - 5);
@@ -88,7 +88,7 @@ export function App({client}: Props) {
       <Text>{visible}</Text>
     </Box>
     <Box flexShrink={0} height={1} overflowY="hidden">
-      <Text dimColor wrap="truncate-end">Ask a question or use /steer, /pause, /resume, /live, /history, /help</Text>
+      <Text dimColor wrap="truncate-end">Ask a question or use /pause, /resume, /live, /history, /help</Text>
     </Box>
     <Box flexShrink={0} height={1} overflowY="hidden">
       <Text color="green">› </Text>
@@ -99,8 +99,7 @@ export function App({client}: Props) {
 
 function renderResponse(request: RequestInput, response: ProtocolResponse): string | null {
   if (response.ack) {
-    const id = response.ack.resource_id ? ` ${response.ack.resource_id.slice(0, 8)}` : '';
-    return `${response.ack.action}${id}: ${response.ack.status}`;
+    return `${response.ack.action}: ${response.ack.status}`;
   }
   if (response.chat) return `you: ${response.chat.question}\nvibeserve: ${response.chat.answer}`;
   if (response.round) {
@@ -123,9 +122,7 @@ function snapshotsEqual(left: RunSnapshot | null, right: RunSnapshot): boolean {
   return left?.sequence === right.sequence
     && left.status === right.status
     && left.agent_kind === right.agent_kind
-    && left.round_label === right.round_label
-    && left.pending_steering === right.pending_steering
-    && left.last_consumed_steering === right.last_consumed_steering;
+    && left.round_label === right.round_label;
 }
 
 function appendLiveOutput(previous: string, next: string): string {

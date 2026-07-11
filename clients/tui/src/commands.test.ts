@@ -2,9 +2,9 @@ import {describe, expect, it} from 'vitest';
 import {parseInput} from './commands.js';
 
 describe('parseInput', () => {
-  it('keeps chat separate from steering', () => {
+  it('treats plain input as chat', () => {
     expect(parseInput('what is happening?').request?.type).toBe('query.chat');
-    expect(parseInput('/steer inspect the cache').request?.type).toBe('command.steer');
+    expect(parseInput('/steer inspect the cache').error).toBe('Unknown command: /steer inspect the cache');
   });
 
   it('keeps inspection commands out of the public command surface', () => {

@@ -157,7 +157,6 @@
       "properties": {
         "action": {
           "enum": [
-            "steer",
             "pause",
             "resume"
           ],
@@ -171,18 +170,6 @@
           ],
           "title": "Status",
           "type": "string"
-        },
-        "resource_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Resource Id"
         }
       },
       "required": [
@@ -210,7 +197,6 @@
         "tui_started",
         "chat",
         "status_query",
-        "steering",
         "control",
         "invocation_started",
         "invocation_finished",
@@ -714,13 +700,6 @@
           "default": null,
           "title": "Invocation Id"
         },
-        "steering_ids": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Steering Ids",
-          "type": "array"
-        },
         "data": {
           "anyOf": [
             {
@@ -730,17 +709,13 @@
                   "chat": "#/$defs/ChatData",
                   "invocation_finished": "#/$defs/InvocationFinishedData",
                   "invocation_started": "#/$defs/InvocationStartedData",
-                  "output": "#/$defs/OutputData",
-                  "steering": "#/$defs/SteeringData"
+                  "output": "#/$defs/OutputData"
                 },
                 "propertyName": "kind"
               },
               "oneOf": [
                 {
                   "$ref": "#/$defs/ChatData"
-                },
-                {
-                  "$ref": "#/$defs/SteeringData"
                 },
                 {
                   "$ref": "#/$defs/InvocationStartedData"
@@ -815,23 +790,6 @@
           ],
           "default": null,
           "title": "Round Label"
-        },
-        "pending_steering": {
-          "default": 0,
-          "title": "Pending Steering",
-          "type": "integer"
-        },
-        "last_consumed_steering": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Last Consumed Steering"
         }
       },
       "required": [
@@ -898,66 +856,6 @@
       "title": "StatusQuery",
       "type": "object"
     },
-    "SteerCommand": {
-      "additionalProperties": false,
-      "properties": {
-        "protocol_version": {
-          "const": 1,
-          "default": 1,
-          "title": "Protocol Version",
-          "type": "integer"
-        },
-        "request_id": {
-          "title": "Request Id",
-          "type": "string"
-        },
-        "timestamp": {
-          "format": "date-time",
-          "title": "Timestamp",
-          "type": "string"
-        },
-        "type": {
-          "const": "command.steer",
-          "default": "command.steer",
-          "title": "Type",
-          "type": "string"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "target": {
-          "const": "next_safe_point",
-          "default": "next_safe_point",
-          "title": "Target",
-          "type": "string"
-        }
-      },
-      "required": [
-        "text"
-      ],
-      "title": "SteerCommand",
-      "type": "object"
-    },
-    "SteeringData": {
-      "properties": {
-        "kind": {
-          "const": "steering",
-          "default": "steering",
-          "title": "Kind",
-          "type": "string"
-        },
-        "steering_id": {
-          "title": "Steering Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "steering_id"
-      ],
-      "title": "SteeringData",
-      "type": "object"
-    },
     "TextBlock": {
       "additionalProperties": false,
       "properties": {
@@ -984,7 +882,6 @@
         "mapping": {
           "command.pause": "#/$defs/PauseCommand",
           "command.resume": "#/$defs/ResumeCommand",
-          "command.steer": "#/$defs/SteerCommand",
           "query.artifact": "#/$defs/ArtifactQuery",
           "query.chat": "#/$defs/ChatQuery",
           "query.events": "#/$defs/EventsQuery",
@@ -997,9 +894,6 @@
         "propertyName": "type"
       },
       "oneOf": [
-        {
-          "$ref": "#/$defs/SteerCommand"
-        },
         {
           "$ref": "#/$defs/PauseCommand"
         },

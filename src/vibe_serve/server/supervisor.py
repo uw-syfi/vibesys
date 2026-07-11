@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +17,6 @@ from vibe_serve.server.events import (
     InvocationStartedData,
     OutputData,
     RunEvent,
-    SteeringData,
-    SteeringNote,
     json_value,
     make_event,
 )
@@ -27,11 +24,10 @@ from vibe_serve.server.protocol import RunSnapshot
 
 
 class RunSupervisor:
-    """Own steering, pause state, invocation metadata, and its audit store."""
+    """Own pause state, invocation metadata, and the run audit store."""
 
     def __init__(self) -> None:
         self._condition = threading.Condition()
-        self._pending: list[SteeringNote] = []
         self._pause_after_call = False
         self._paused = False
         self._active_invocation: str | None = None
@@ -41,7 +37,6 @@ class RunSupervisor:
         self.log_dir: Path | None = None
         self._current_kind: str | None = None
         self._current_round: str | None = None
-        self._last_consumed: str | None = None
 
     @property
     def events_path(self) -> Path | None:
@@ -110,8 +105,6 @@ class RunSupervisor:
                 status="paused" if self._paused else self._run_status,
                 agent_kind=self._current_kind,
                 round_label=self._current_round,
-                pending_steering=len(self._pending),
-                last_consumed_steering=self._last_consumed,
             )
 
     def chat(self, text: str) -> str:
@@ -125,20 +118,6 @@ class RunSupervisor:
             data=ChatData(answer=answer),
         )
         return answer
-
-    def steer(self, text: str) -> SteeringNote:
-        if not text.strip():
-            raise ValueError("/steer requires guidance text")
-        note = SteeringNote(id=uuid.uuid4().hex, text=text.strip(), created_at=datetime.now(UTC))
-        with self._condition:
-            self._pending.append(note)
-        self.record(
-            EventType.STEERING,
-            note.text,
-            status=EventStatus.PENDING,
-            data=SteeringData(steering_id=note.id),
-        )
-        return note
 
     def pause_after_call(self) -> None:
         with self._condition:
@@ -154,31 +133,13 @@ class RunSupervisor:
 
     def before_agent(
         self, kind: str, round_label: str, user_prompt: str, system_prompt: str = ""
-    ) -> str:
+    ) -> None:
         with self._condition:
             while self._paused:
                 self._condition.wait()
             self._current_kind, self._current_round = kind, round_label
-            notes, self._pending = self._pending, []
             invocation_id = uuid.uuid4().hex
             self._active_invocation = invocation_id
-
-        if notes:
-            user_prompt += "\n\n## Human steering\n" + "\n".join(f"- {note.text}" for note in notes)
-            for note in notes:
-                self.record(
-                    EventType.STEERING,
-                    note.text,
-                    status=EventStatus.CONSUMED,
-                    agent_kind=kind,
-                    round_label=round_label,
-                    invocation_id=invocation_id,
-                    data=SteeringData(steering_id=note.id),
-                )
-            with self._condition:
-                self._last_consumed = (
-                    f"steering {notes[-1].id[:8]} consumed by {kind} / {round_label}"
-                )
 
         self.record(
             EventType.INVOCATION_STARTED,
@@ -186,10 +147,8 @@ class RunSupervisor:
             agent_kind=kind,
             round_label=round_label,
             invocation_id=invocation_id,
-            steering_ids=[note.id for note in notes],
             data=InvocationStartedData(system_prompt=system_prompt, user_prompt=user_prompt),
         )
-        return user_prompt
 
     def after_agent(
         self, kind: str, round_label: str, *, result: Any = None, error: BaseException | None = None
@@ -225,12 +184,9 @@ class RunSupervisor:
     def status(self) -> str:
         with self._condition:
             state = "paused" if self._paused else self._run_status
-            pending = len(self._pending)
             kind = self._current_kind or "starting"
             round_label = self._current_round or "no round yet"
-            consumed = self._last_consumed
-        status = f"{state} · {kind} · {round_label} · {pending} steering note(s) pending"
-        return f"{status} · {consumed}" if consumed else status
+        return f"{state} · {kind} · {round_label}"
 
     def finish(self, error: BaseException | None = None) -> None:
         with self._condition:

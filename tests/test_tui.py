@@ -17,7 +17,7 @@ from vibe_serve.server import (
     RunSupervisor,
     run_interactive,
 )
-from vibe_serve.server.protocol import ChatQuery, EventsQuery, StatusQuery, SteerCommand
+from vibe_serve.server.protocol import ChatQuery, EventsQuery, StatusQuery
 from vibe_serve.server.runtime import _MessageCapture
 from vibe_serve.server.schema import ProtocolDocument
 from vibe_serve.server.service import SupervisionService
@@ -32,23 +32,12 @@ def test_chat_is_audited_but_not_injected(tmp_path):
     supervisor = RunSupervisor()
     supervisor.attach(tmp_path)
     supervisor.record(EventType.CHAT, "What is happening?", status="answered")
-    assert supervisor.before_agent("judge", "round 2", "original prompt") == "original prompt"
+    supervisor.before_agent("judge", "round 2", "original prompt")
+    started = next(
+        event for event in supervisor.read_events() if event.type == "invocation_started"
+    )
+    assert started.data.user_prompt == "original prompt"
     assert _events(tmp_path / "run-events.jsonl")[-2]["type"] == "chat"
-
-
-def test_steering_is_consumed_once_and_records_target(tmp_path):
-    supervisor = RunSupervisor()
-    supervisor.attach(tmp_path)
-    supervisor.steer("Re-check the benchmark units")
-    prompt = supervisor.before_agent("judge", "round 3 attempt 1", "Judge this")
-    assert "## Human steering" in prompt
-    assert "Re-check the benchmark units" in prompt
-    assert supervisor.before_agent("implementer", "round 4", "Next") == "Next"
-    steering = [e for e in _events(tmp_path / "run-events.jsonl") if e["type"] == "steering"]
-    assert [e["status"] for e in steering] == ["pending", "consumed"]
-    assert steering[-1]["agent_kind"] == "judge"
-    assert steering[-1]["round_label"] == "round 3 attempt 1"
-    assert "consumed by judge / round 3 attempt 1" in supervisor.status()
 
 
 def test_pause_takes_effect_at_next_safe_point(tmp_path):
@@ -65,22 +54,20 @@ def test_pause_takes_effect_at_next_safe_point(tmp_path):
     assert waiter.is_alive()
     supervisor.resume()
     waiter.join(timeout=1)
-    assert result == ["prompt"]
+    assert result == [None]
 
 
-def test_invocation_audit_contains_prompts_result_and_steering_identity(tmp_path):
+def test_invocation_audit_contains_prompts_and_result(tmp_path):
     supervisor = RunSupervisor()
     supervisor.attach(tmp_path)
-    note = supervisor.steer("Prefer the simpler fix")
-    prompt = supervisor.before_agent("implementer", "round 4", "Do work", "System rules")
+    supervisor.before_agent("implementer", "round 4", "Do work", "System rules")
     supervisor.after_agent("implementer", "round 4", result={"summary": "done"})
 
     events = _events(tmp_path / "run-events.jsonl")
     started = next(e for e in events if e["type"] == "invocation_started")
     finished = next(e for e in events if e["type"] == "invocation_finished")
     assert started["data"]["system_prompt"] == "System rules"
-    assert started["data"]["user_prompt"] == prompt
-    assert started["steering_ids"] == [note.id]
+    assert started["data"]["user_prompt"] == "Do work"
     assert finished["invocation_id"] == started["invocation_id"]
     assert finished["data"]["result"] == {"summary": "done"}
     detail = RunInspector(supervisor).invocation_detail(started["invocation_id"][:8])
@@ -159,18 +146,14 @@ def test_run_interactive_keeps_python_output_off_terminal(monkeypatch, capsys):
     assert "backend output" not in capsys.readouterr().out
 
 
-def test_service_accepts_chat_and_steering(tmp_path):
+def test_service_accepts_chat(tmp_path):
     (tmp_path / "logs").mkdir()
     supervisor = RunSupervisor()
     supervisor.attach(tmp_path / "logs")
     service = SupervisionService(supervisor)
-    steering = service.execute(SteerCommand(text="inspect the cache key"))
     chat = service.execute(ChatQuery(text="what is the current status?"))
-    assert steering.ack.action == "steer"
-    assert steering.ack.resource_id
     assert chat.chat.question == "what is the current status?"
     events = _events(tmp_path / "logs" / "run-events.jsonl")
-    assert any(event["type"] == "steering" and event["status"] == "pending" for event in events)
     assert any(event["type"] == "chat" for event in events)
     assert any(event["type"] == "status_query" for event in events)
 
@@ -202,10 +185,9 @@ def test_socket_transport_supports_multiple_clients_and_event_replay(tmp_path):
     assert any(event["type"] == "status_query" for event in replay["events"])
 
 
-def test_run_context_applies_steering_at_invocation_boundary(tmp_path):
+def test_run_context_records_invocation_boundary(tmp_path):
     supervisor = RunSupervisor()
     supervisor.attach(tmp_path)
-    note = supervisor.steer("Measure before changing code")
     ctx = _RunContext.__new__(_RunContext)
     ctx.supervisor = supervisor
     ctx.agent_runner = Mock()
@@ -224,11 +206,10 @@ def test_run_context_applies_steering_at_invocation_boundary(tmp_path):
 
     assert result == {"summary": "measured"}
     sent_prompt = ctx.agent_runner.invoke.call_args.kwargs["user_prompt"]
-    assert "original" in sent_prompt
-    assert "Measure before changing code" in sent_prompt
+    assert sent_prompt == "original"
     events = _events(tmp_path / "run-events.jsonl")
     started = next(event for event in events if event["type"] == "invocation_started")
-    assert started["steering_ids"] == [note.id]
+    assert started["data"]["user_prompt"] == "original"
 
 
 def test_committed_protocol_schema_matches_python_contract():

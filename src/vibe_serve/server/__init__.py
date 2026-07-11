@@ -1,6 +1,6 @@
 """Client-neutral run-control server API."""
 
-from vibe_serve.server.events import EventStatus, EventType, RunEvent, SteeringNote
+from vibe_serve.server.events import EventStatus, EventType, RunEvent
 from vibe_serve.server.inspector import RunInspector
 from vibe_serve.server.protocol import ProtocolRequest, Response, RunSnapshot
 from vibe_serve.server.registry import active_supervisor
@@ -16,7 +16,6 @@ __all__ = [
     "RunSnapshot",
     "RunSupervisor",
     "SupervisionService",
-    "SteeringNote",
     "ProtocolRequest",
     "Response",
     "active_supervisor",

@@ -19,7 +19,6 @@ class EventType(StrEnum):
     TUI_STARTED = "tui_started"
     CHAT = "chat"
     STATUS_QUERY = "status_query"
-    STEERING = "steering"
     CONTROL = "control"
     INVOCATION_STARTED = "invocation_started"
     INVOCATION_FINISHED = "invocation_finished"
@@ -40,11 +39,6 @@ class EventStatus(StrEnum):
 class ChatData(BaseModel):
     kind: Literal["chat"] = "chat"
     answer: str
-
-
-class SteeringData(BaseModel):
-    kind: Literal["steering"] = "steering"
-    steering_id: str
 
 
 class InvocationStartedData(BaseModel):
@@ -72,12 +66,7 @@ class OutputData(BaseModel):
 
 
 EventData = Annotated[
-    ChatData
-    | SteeringData
-    | InvocationStartedData
-    | InvocationFinishedData
-    | ArtifactData
-    | OutputData,
+    ChatData | InvocationStartedData | InvocationFinishedData | ArtifactData | OutputData,
     Field(discriminator="kind"),
 ]
 
@@ -97,14 +86,7 @@ class RunEvent(BaseModel):
     round_label: str | None = None
     agent_kind: str | None = None
     invocation_id: str | None = None
-    steering_ids: list[str] = Field(default_factory=list)
     data: EventData | None = None
-
-
-class SteeringNote(BaseModel):
-    id: str
-    text: str
-    created_at: datetime
 
 
 class EventStore:
@@ -178,8 +160,6 @@ def _legacy_data_kind(event_type: str | None, data: dict[str, Any]) -> str:
         return "invocation_started"
     if event_type == EventType.INVOCATION_FINISHED:
         return "invocation_finished"
-    if "steering_id" in data:
-        return "steering"
     if "answer" in data:
         return "chat"
     if "path" in data:
