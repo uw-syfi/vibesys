@@ -59,6 +59,27 @@ describe('OpenTUI presentation', () => {
     expect(content).toContain('line 20');
   });
 
+  it('renders a tool call and response as two regions in one card', async () => {
+    const testRenderer = await createTestRenderer({width: 80, height: 16});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      conversation: [{
+        id: 'tool',
+        kind: 'tool',
+        label: 'implementer · round 1',
+        content: '→ Bash(command="pytest")\n2 passed',
+        toolCall: '→ Bash(command="pytest")\n',
+        toolResponse: '2 passed',
+      }],
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    const frame = await testRenderer.waitForFrame(value => value.includes('2 passed'));
+    expect(frame).toContain('→ Bash(command="pytest")');
+    expect(frame.match(/╭/g)).toHaveLength(3);
+  });
+
   it('exits after the model reaches a terminal state', async () => {
     const testRenderer = await createTestRenderer({width: 80, height: 16});
     const controller = new FakeController({...initialSessionState(), terminal: true});

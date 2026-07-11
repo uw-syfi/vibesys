@@ -21,6 +21,8 @@ export interface ConversationEntry {
   turnId?: string;
   invocationId?: string;
   startsTurn?: boolean;
+  toolCall?: string;
+  toolResponse?: string;
 }
 
 export function initialSessionState(): SessionState {
@@ -92,6 +94,10 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
       ...(invocationId === undefined ? {} : {invocationId}),
       startsTurn: kind === 'tool' && data.channel === 'tool'
         && data.content.trimStart().startsWith('→ '),
+      ...(kind === 'tool' && data.channel === 'tool'
+        && data.content.trimStart().startsWith('→ ')
+        ? {toolCall: data.content}
+        : {}),
     };
   }
   if (data?.kind === 'subprocess_output') {
@@ -153,7 +159,12 @@ function appendConversation(
     const separator = last.content.endsWith('\n') || incoming.content.startsWith('\n') ? '' : '\n';
     return [
       ...previous.slice(0, -1),
-      {...last, content: last.content + separator + incoming.content},
+      {
+        ...last,
+        content: last.content + separator + incoming.content,
+        toolResponse: (last.toolResponse ?? '')
+          + (last.toolResponse ? separator : '') + incoming.content,
+      },
     ];
   }
   if (last && last.kind === incoming.kind && last.turnId === incoming.turnId

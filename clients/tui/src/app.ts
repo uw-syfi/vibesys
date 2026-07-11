@@ -153,6 +153,21 @@ export function createOpenTuiApp(
         streaming: !controller.state.terminal,
         width: '100%',
       }));
+    } else if (entry.kind === 'tool' && entry.toolCall) {
+      card.add(new TextRenderable(renderer, {
+        content: entry.toolCall.trimEnd(),
+        fg: '#dbeafe',
+        bg: '#1e3a8a',
+        width: '100%',
+      }));
+      if (entry.toolResponse) {
+        card.add(new TextRenderable(renderer, {
+          content: toolOutputPreview(entry.toolResponse),
+          fg: '#a1a1aa',
+          bg: '#18181b',
+          width: '100%',
+        }));
+      }
     } else {
       const content = entry.kind === 'tool' || entry.kind === 'diagnostic'
         || entry.kind === 'subprocess'
@@ -218,7 +233,7 @@ function entryPalette(entry: ConversationEntry): {
     return {border: '#0891b2', background: '#0f1b24', label: '#67e8f9', content: '#e2e8f0'};
   }
   if (entry.kind === 'prompt') {
-    return {border: '#d97706', background: '#21180d', label: '#fbbf24', content: '#fef3c7'};
+    return {border: '#3b82f6', background: '#102548', label: '#93c5fd', content: '#dbeafe'};
   }
   if (entry.kind === 'analysis') {
     return {border: '#475569', background: '#171923', label: '#a78bfa', content: '#94a3b8'};

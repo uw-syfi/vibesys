@@ -59,6 +59,10 @@ describe('session event model', () => {
       '→ Bash(command="first")\nfirst result',
       '→ Bash(command="second")\nsecond result',
     ]);
+    expect(state.conversation[1]).toMatchObject({
+      toolCall: '→ Bash(command="first")\n',
+      toolResponse: 'first result',
+    });
   });
 
   it('classifies prompt events as distinct markdown turns', () => {
