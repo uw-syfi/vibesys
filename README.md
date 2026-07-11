@@ -1,48 +1,5 @@
 # VibeServe: Can AI Agents Build Bespoke LLM Serving Systems?
 
-## Interactive terminal UI
-
-When stdin and stdout are attached to a terminal, VibeServe automatically opens
-the interactive client. The run continues on a background thread while the
-default view follows sequenced output messages. Use `--headless` to disable the
-client for backend tests, CI, or redirected execution. Type a question to see
-the current phase and record the exchange, or use these commands:
-
-From a source checkout, use the repository launcher for both interactive and
-headless runs:
-
-```bash
-./vs --input examples/data-structures/queue-spsc --max-rounds 1
-```
-
-`./vs` forwards all arguments to `vibe-serve`. For an interactive terminal it
-also installs, regenerates, and rebuilds the TypeScript Ink client when its
-inputs are newer than the compiled entrypoint, avoiding stale frontend builds.
-It requires Node.js 20+ and pnpm (directly or through Corepack). Non-TTY and
-`--headless` runs skip all frontend preparation.
-
-The Python process remains the authoritative supervision server. It exposes a
-private versioned JSONL protocol over a Unix socket, allowing future terminal,
-web-server, and browser-facing clients to share snapshots, commands, and
-cursor-based event replay. Python never renders interactive output: stdout and
-stderr are converted into typed `output` events, and the client owns all
-formatting and terminal rendering.
-
-- `/pause` pauses after the current agent call; `/resume` continues.
-- `/history` opens the human interaction audit; `/live` or `Ctrl+L` returns to
-  current run output.
-- `PageUp`/`PageDown` scroll by a screen, `Ctrl+↑`/`Ctrl+↓` scroll by one line,
-  and `End` returns to live-follow mode.
-- `/help` shows the supported commands. Round, invocation, and artifact
-  inspection are server capabilities reserved for future navigable views rather
-  than user-facing slash commands.
-
-Prompts, streamed outputs, judge feedback, and benchmark output remain in the
-normal `logs/run-*.log` and per-loop history files. Human chat, status queries,
-and control actions are appended to `logs/run-events.jsonl`. Agent invocation
-start/finish events store the rendered prompts and structured result or error.
-Plain chat is never added to an agent prompt.
-
 [![arXiv](https://img.shields.io/badge/arXiv-2605.06068-b31b1b.svg)](https://arxiv.org/abs/2605.06068)
 
 **An agentic loop that synthesizes bespoke LLM serving systems — one per (model, hardware, workload) target — instead of forcing every deployment through a single general-purpose runtime.**
