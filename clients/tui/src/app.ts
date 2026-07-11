@@ -12,6 +12,7 @@ import type {SessionController} from './session-controller.js';
 import {statusText, type ConversationEntry, type SessionState} from './session-model.js';
 
 const MAX_TOOL_OUTPUT_LINES = 12;
+const MAX_PROMPT_LINES = 12;
 
 export interface OpenTuiApp {
   destroy(): void;
@@ -22,6 +23,7 @@ export function createOpenTuiApp(
   controller: SessionController,
 ): OpenTuiApp {
   let exitScheduled = false;
+  const expandedPrompts = new Set<string>();
   const root = new BoxRenderable(renderer, {
     id: 'app', width: '100%', height: '100%', flexDirection: 'column',
   });
@@ -57,7 +59,7 @@ export function createOpenTuiApp(
     id: 'key-help',
     height: 1,
     fg: '#64748b',
-    content: '↑/↓ · PgUp/PgDn · Home/End · Ctrl+L: live · /help',
+    content: '↑/↓ · PgUp/PgDn · Ctrl+P: prompt · Ctrl+L: live · /help',
   });
   const inputBox = new BoxRenderable(renderer, {
     id: 'input-box',
@@ -126,6 +128,17 @@ export function createOpenTuiApp(
     for (const entry of entries) output.add(renderConversationEntry(entry));
   }
 
+  function rerenderConversation(): void {
+    renderedConversation = [];
+    renderConversation(controller.state.conversation);
+  }
+
+  function togglePrompt(id: string): void {
+    if (expandedPrompts.has(id)) expandedPrompts.delete(id);
+    else expandedPrompts.add(id);
+    rerenderConversation();
+  }
+
   function renderConversationEntry(entry: ConversationEntry): BoxRenderable {
     const palette = entryPalette(entry);
     const card = new BoxRenderable(renderer, {
@@ -139,6 +152,7 @@ export function createOpenTuiApp(
       borderStyle: 'rounded',
       borderColor: palette.border,
       backgroundColor: palette.background,
+      ...(entry.kind === 'prompt' ? {onMouseUp: () => togglePrompt(entry.id)} : {}),
     });
     card.add(new TextRenderable(renderer, {
       content: entry.label ?? entry.kind,
@@ -146,13 +160,25 @@ export function createOpenTuiApp(
       height: 1,
     }));
     if (entry.kind === 'assistant' || entry.kind === 'prompt') {
+      const prompt = entry.kind === 'prompt'
+        ? promptPreview(entry.content, expandedPrompts.has(entry.id))
+        : {content: entry.content, hiddenLines: 0};
       card.add(new MarkdownRenderable(renderer, {
-        content: entry.content,
+        content: prompt.content,
         syntaxStyle: markdownStyle,
         conceal: true,
         streaming: !controller.state.terminal,
         width: '100%',
       }));
+      if (entry.kind === 'prompt' && (prompt.hiddenLines > 0 || expandedPrompts.has(entry.id))) {
+        card.add(new TextRenderable(renderer, {
+          content: expandedPrompts.has(entry.id)
+            ? '▴ click or Ctrl+P to collapse'
+            : `▾ ${prompt.hiddenLines} more lines · click or Ctrl+P to expand`,
+          fg: '#60a5fa',
+          width: '100%',
+        }));
+      }
     } else if (entry.kind === 'tool' && entry.toolCall) {
       card.add(new TextRenderable(renderer, {
         content: entry.toolCall.trimEnd(),
@@ -183,6 +209,14 @@ export function createOpenTuiApp(
   }
 
   function onKey(key: KeyEvent): void {
+    if (key.ctrl && key.name === 'p') {
+      const latestPrompt = [...controller.state.conversation]
+        .reverse()
+        .find(entry => entry.kind === 'prompt');
+      if (latestPrompt) togglePrompt(latestPrompt.id);
+      key.preventDefault();
+      return;
+    }
     if (key.ctrl && key.name === 'l') {
       controller.live();
       viewport.scrollTo(viewport.scrollHeight);
@@ -218,6 +252,20 @@ export function toolOutputPreview(content: string, maxLines = MAX_TOOL_OUTPUT_LI
   if (lines.length <= maxLines) return content;
   const hidden = lines.length - maxLines;
   return `${lines.slice(0, maxLines).join('\n')}\n… ${hidden} more line${hidden === 1 ? '' : 's'} hidden`;
+}
+
+export function promptPreview(
+  content: string,
+  expanded: boolean,
+  maxLines = MAX_PROMPT_LINES,
+): {content: string; hiddenLines: number} {
+  const lines = content.split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  const hiddenLines = Math.max(0, lines.length - maxLines);
+  return {
+    content: expanded || hiddenLines === 0 ? content : lines.slice(0, maxLines).join('\n'),
+    hiddenLines,
+  };
 }
 
 function entryPalette(entry: ConversationEntry): {

@@ -1,6 +1,11 @@
 import {createTestRenderer} from '@opentui/core/testing';
 import {afterEach, describe, expect, it} from 'vitest';
-import {createOpenTuiApp, toolOutputPreview, type OpenTuiApp} from './app.js';
+import {
+  createOpenTuiApp,
+  promptPreview,
+  toolOutputPreview,
+  type OpenTuiApp,
+} from './app.js';
 import type {SessionController} from './session-controller.js';
 import {initialSessionState, type SessionState} from './session-model.js';
 
@@ -78,6 +83,27 @@ describe('OpenTUI presentation', () => {
     const frame = await testRenderer.waitForFrame(value => value.includes('2 passed'));
     expect(frame).toContain('→ Bash(command="pytest")');
     expect(frame.match(/╭/g)).toHaveLength(3);
+  });
+
+  it('collapses prompts and expands the latest prompt with Ctrl+P', async () => {
+    const content = Array.from({length: 20}, (_, index) => `prompt line ${index + 1}`).join('\n');
+    expect(promptPreview(content, false)).toMatchObject({hiddenLines: 8});
+    expect(promptPreview(content, false).content).not.toContain('prompt line 13');
+    expect(promptPreview(content, true).content).toContain('prompt line 20');
+
+    const testRenderer = await createTestRenderer({width: 80, height: 20});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      conversation: [{id: 'prompt', kind: 'prompt', label: 'Prompt', content}],
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    const collapsed = await testRenderer.waitForFrame(value => value.includes('8 more lines'));
+    expect(collapsed).not.toContain('prompt line 20');
+    testRenderer.mockInput.pressKey('p', {ctrl: true});
+    const expanded = await testRenderer.waitForFrame(value => value.includes('prompt line 20'));
+    expect(expanded).toContain('collapse');
   });
 
   it('exits after the model reaches a terminal state', async () => {
