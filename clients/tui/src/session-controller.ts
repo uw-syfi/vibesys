@@ -71,7 +71,6 @@ export class SocketSessionController implements SessionController {
   async submit(value: string): Promise<void> {
     const parsed = parseInput(value.trim());
     if (parsed.error) return this.#setState(showDetail(this.#state, parsed.error, 'error'));
-    if (parsed.localView === 'live') return this.live();
     if (parsed.localView === 'help') {
       return this.#setState(showDetail(this.#state, HELP_TEXT, 'help'));
     }
@@ -106,11 +105,44 @@ export class SocketSessionController implements SessionController {
 function renderResponse(request: RequestInput, response: ProtocolResponse): string | null {
   if (response.ack) return `${response.ack.action}: ${response.ack.status}`;
   if (response.chat) return `you: ${response.chat.question}\nvibeserve: ${response.chat.answer}`;
-  if (response.events?.length) {
-    return response.events.map(event =>
-      `${event.timestamp} ${event.type} ${event.round_label ?? ''} ${event.text ?? ''}`.trim()
-    ).join('\n');
-  }
-  if (request.type === 'query.history') return 'No events found.';
+  if (request.type === 'query.history') return renderRoundHistory(response.events ?? []);
   return null;
+}
+
+export function renderRoundHistory(
+  events: ProtocolResponse['events'],
+  now = new Date(),
+): string {
+  const rounds = new Map<number, {startedAt: Date; finishedAt?: Date}>();
+  for (const event of events ?? []) {
+    const match = event.round_label?.match(/^round-(\d+)/);
+    if (!match) continue;
+    const round = Number(match[1]);
+    const timestamp = new Date(event.timestamp);
+    const current = rounds.get(round);
+    if (!current || timestamp < current.startedAt) {
+      rounds.set(round, {...current, startedAt: timestamp});
+    }
+    if (event.type === 'round_finished') {
+      const updated = rounds.get(round);
+      if (updated) updated.finishedAt = timestamp;
+    }
+  }
+  if (rounds.size === 0) return 'No rounds have started yet.';
+  const lines = ['Rounds'];
+  for (const [round, timing] of [...rounds.entries()].sort(([a], [b]) => a - b)) {
+    const end = timing.finishedAt ?? now;
+    const elapsedSeconds = Math.max(0, Math.floor((end.getTime() - timing.startedAt.getTime()) / 1000));
+    lines.push(`Round ${round} · ${timing.finishedAt ? 'completed' : 'running'} · ${formatDuration(elapsedSeconds)}`);
+  }
+  return lines.join('\n');
+}
+
+function formatDuration(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
 }

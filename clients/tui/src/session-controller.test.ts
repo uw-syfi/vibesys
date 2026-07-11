@@ -1,9 +1,25 @@
 import {describe, expect, it} from 'vitest';
 import type {EventSubscription} from './client.js';
 import type {ProtocolResponse, RequestInput, RunEvent, ServerMessage} from './protocol.js';
-import {SocketSessionController, type SupervisionTransport} from './session-controller.js';
+import {
+  renderRoundHistory,
+  SocketSessionController,
+  type SupervisionTransport,
+} from './session-controller.js';
 
 describe('session controller', () => {
+  it('shows local help without sending a backend command', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+
+    await controller.submit('/help');
+
+    expect(controller.state.view).toBe('help');
+    expect(controller.state.detailContent).toContain('/history');
+    expect(controller.state.detailContent).toContain('Planned');
+    expect(transport.requests).toEqual([]);
+  });
+
   it('reduces replay and live events without depending on OpenTUI', async () => {
     const transport = new FakeTransport();
     const controller = new SocketSessionController(transport);
@@ -28,14 +44,30 @@ describe('session controller', () => {
     expect(controller.state.status).toBe('completed');
     expect(controller.state.view).toBe('live');
   });
+
+  it('summarizes completed and running round durations', () => {
+    const events = [
+      {...event(1, 'phase_started'), round_label: 'round-1-plan', timestamp: '2026-01-01T00:00:00Z'},
+      {...event(2, 'round_finished'), round_label: 'round-1', timestamp: '2026-01-01T00:02:05Z'},
+      {...event(3, 'phase_started'), round_label: 'round-2-plan', timestamp: '2026-01-01T00:03:00Z'},
+    ];
+
+    expect(renderRoundHistory(events, new Date('2026-01-01T00:03:42Z'))).toBe([
+      'Rounds',
+      'Round 1 · completed · 2m 5s',
+      'Round 2 · running · 42s',
+    ].join('\n'));
+  });
 });
 
 class FakeTransport implements SupervisionTransport {
   closed = false;
+  readonly requests: RequestInput[] = [];
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
 
-  request(_input: RequestInput): Promise<ProtocolResponse> {
+  request(input: RequestInput): Promise<ProtocolResponse> {
+    this.requests.push(input);
     return Promise.resolve({
       protocol_version: 1,
       request_id: 'request',

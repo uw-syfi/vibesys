@@ -1,6 +1,7 @@
 import {
   BoxRenderable,
   InputRenderable,
+  InputRenderableEvents,
   MarkdownRenderable,
   ScrollBoxRenderable,
   SyntaxStyle,
@@ -78,12 +79,12 @@ export function createOpenTuiApp(
     placeholder: 'Type a question or /help',
     textColor: '#f8fafc',
     focusedTextColor: '#f8fafc',
-    onSubmit: () => {
-      const value = input.value;
-      input.value = '';
-      void controller.submit(value);
-    },
   });
+  const submitInput = (value: string): void => {
+    input.value = '';
+    void controller.submit(value);
+  };
+  input.on(InputRenderableEvents.ENTER, submitInput);
 
   viewport.add(output);
   inputBox.add(input);
@@ -239,6 +240,7 @@ export function createOpenTuiApp(
     destroy(): void {
       unsubscribe();
       renderer.keyInput.off('keypress', onKey);
+      input.off(InputRenderableEvents.ENTER, submitInput);
       root.destroyRecursively();
       markdownStyle.destroy();
     },

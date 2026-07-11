@@ -38,6 +38,18 @@ describe('OpenTUI presentation', () => {
     expect(frame).toContain('Type a question or /help');
   });
 
+  it('submits typed commands when Enter is pressed', async () => {
+    const testRenderer = await createTestRenderer({width: 80, height: 16});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    await testRenderer.mockInput.typeText('/help');
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.submissions.length === 1);
+    expect(controller.submissions).toEqual(['/help']);
+  });
+
   it('uses the native scrollbox for long output', async () => {
     const lines = Array.from({length: 50}, (_, index) => `tool output line ${index + 1}`).join('\n');
     const testRenderer = await createTestRenderer({width: 80, height: 16});
@@ -128,12 +140,16 @@ function registerCleanup(
 
 class FakeController implements SessionController {
   readonly #listeners = new Set<(state: SessionState) => void>();
+  readonly submissions: string[] = [];
 
   constructor(public state: SessionState) {}
 
   start(): Promise<void> { return Promise.resolve(); }
   stop(): Promise<void> { return Promise.resolve(); }
-  submit(): Promise<void> { return Promise.resolve(); }
+  submit(value: string): Promise<void> {
+    this.submissions.push(value);
+    return Promise.resolve();
+  }
   live(): void {}
 
   subscribe(listener: (state: SessionState) => void): () => void {

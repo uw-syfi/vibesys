@@ -1,25 +1,26 @@
 import type {RequestInput} from './protocol.js';
 
 export type ParsedInput = {
-  localView?: 'live' | 'help';
+  localView?: 'help';
   request?: RequestInput;
   error?: string;
 };
 
 export const HELP_TEXT = [
-  '/pause             Pause after the current agent call',
-  '/resume            Resume a paused run',
-  '/live              Return to live output (Ctrl+L)',
-  '/history           Show the audited event history',
-  '/help              Show this help',
+  'Available',
+  '  /help              Show this help',
+  '  /history           List rounds and their elapsed time',
+  '',
+  'Planned',
+  '  /pause             Pause at the next safe point',
+  '  /resume            Resume a paused run',
+  '  /steer <message>   Guide a future agent invocation',
+  '  /round <number>    Inspect a completed round',
+  '  /invocation <id>   Inspect an agent invocation',
 ].join('\n');
 
 export function parseInput(text: string): ParsedInput {
-  if (text === '/live') return {localView: 'live'};
   if (text === '/help') return {localView: 'help'};
-  if (text === '/pause') return {request: {type: 'command.pause', mode: 'after_current_agent_call'}};
-  if (text === '/resume') return {request: {type: 'command.resume'}};
   if (text === '/history') return {request: {type: 'query.history'}};
-  if (text.startsWith('/')) return {error: `Unknown command: ${text}`};
-  return {request: {type: 'query.chat', text}};
+  return {error: `Unknown command: ${text || '(empty)'}. Use /help.`};
 }
