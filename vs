@@ -83,4 +83,7 @@ if [[ "$interactive" == true ]]; then
   fi
 fi
 
+if [[ "$interactive" == true ]]; then
+  exec uv run vibe-serve-launch "$@"
+fi
 exec uv run vibe-serve "$@"

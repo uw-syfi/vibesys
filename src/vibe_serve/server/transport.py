@@ -6,11 +6,19 @@ import json
 import os
 import socketserver
 import threading
+import time
 from pathlib import Path
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from vibe_serve.server.protocol import ProtocolRequest, Response
+from vibe_serve.server.protocol import (
+    EventBatchMessage,
+    EventMessage,
+    ProtocolRequest,
+    Response,
+    SubscribedMessage,
+    SubscribeRequest,
+)
 from vibe_serve.server.service import SupervisionService
 
 _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
@@ -25,6 +33,12 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 raw = json.loads(line)
                 request_id = str(raw.get("request_id", request_id))
                 request = _REQUEST_ADAPTER.validate_python(raw)
+                if isinstance(request, SubscribeRequest):
+                    try:
+                        self._stream(request)
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+                    return
                 response = service.execute(request)
             except (json.JSONDecodeError, TypeError, ValidationError, ValueError) as exc:
                 response = Response(
@@ -34,6 +48,35 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 )
             self.wfile.write(response.model_dump_json().encode() + b"\n")
             self.wfile.flush()
+
+    def _stream(self, request: SubscribeRequest) -> None:
+        service: SupervisionService = self.server.service  # type: ignore[attr-defined]
+        snapshot = service.snapshot()
+        self._write_message(
+            SubscribedMessage(
+                request_id=request.request_id,
+                run_id=snapshot.run_id,
+                latest_sequence=snapshot.sequence,
+            )
+        )
+        cursor = request.after_sequence
+        replay = service.events(cursor)
+        if replay:
+            self._write_message(EventBatchMessage(events=replay))
+            cursor = max(event.sequence for event in replay)
+        while True:
+            events = service.wait_for_events(cursor, timeout=1.0)
+            if not events:
+                time.sleep(0.05)
+                continue
+            for event in events:
+                self._write_message(EventMessage(event=event))
+                cursor = event.sequence
+
+    def _write_message(self, message: BaseModel) -> None:
+        payload = message.model_dump_json()
+        self.wfile.write(payload.encode() + b"\n")
+        self.wfile.flush()
 
 
 class _UnixServer(socketserver.ThreadingUnixStreamServer):

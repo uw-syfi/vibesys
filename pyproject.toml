@@ -32,6 +32,7 @@ dependencies = [
 
 [project.scripts]
 vibe-serve = "vibe_serve.cli:main"
+vibe-serve-launch = "vibe_serve.launcher:main"
 vibe-serve-issue-mcp = "vs_issue_board.mcp:main"
 
 [tool.setuptools.packages.find]

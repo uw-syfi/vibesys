@@ -14,11 +14,21 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 class EventType(StrEnum):
     SERVER_STARTED = "server_started"
+    SERVER_READY = "server_ready"
+    RUN_STARTED = "run_started"
+    RUN_INTERRUPTED = "run_interrupted"
     CHAT = "chat"
     STATUS_QUERY = "status_query"
     CONTROL = "control"
     INVOCATION_STARTED = "invocation_started"
     INVOCATION_FINISHED = "invocation_finished"
+    PHASE_STARTED = "phase_started"
+    PHASE_FINISHED = "phase_finished"
+    AGENT_OUTPUT_CHUNK = "agent_output_chunk"
+    SUBPROCESS_OUTPUT = "subprocess_output"
+    JUDGE_RESULT = "judge_result"
+    BENCHMARK_RESULT = "benchmark_result"
+    ROUND_FINISHED = "round_finished"
     RUN_FINISHED = "run_finished"
     RUN_FAILED = "run_failed"
     OUTPUT = "output"
@@ -57,8 +67,80 @@ class OutputData(BaseModel):
     content: str
 
 
+class ServerReadyData(BaseModel):
+    kind: Literal["server_ready"] = "server_ready"
+    socket_protocol: Literal["jsonl"] = "jsonl"
+
+
+class RunStartedData(BaseModel):
+    kind: Literal["run_started"] = "run_started"
+    outer_loop: str
+    input: str
+    max_rounds: int
+
+
+class RunInterruptedData(BaseModel):
+    kind: Literal["run_interrupted"] = "run_interrupted"
+    reason: str
+    signal: str | None = None
+
+
+class PhaseData(BaseModel):
+    kind: Literal["phase"] = "phase"
+    phase: str
+    attempt: int | None = None
+
+
+class AgentOutputChunkData(BaseModel):
+    kind: Literal["agent_output_chunk"] = "agent_output_chunk"
+    channel: Literal["assistant", "analysis", "tool", "diagnostic"]
+    content: str
+
+
+class SubprocessOutputData(BaseModel):
+    kind: Literal["subprocess_output"] = "subprocess_output"
+    process_id: str
+    process_kind: str
+    stream: Literal["stdout", "stderr"]
+    content: str
+
+
+class JudgeResultData(BaseModel):
+    kind: Literal["judge_result"] = "judge_result"
+    verdict: Literal["pass", "fail"]
+    feedback: str
+    attempt: int
+
+
+class BenchmarkResultData(BaseModel):
+    kind: Literal["benchmark_result"] = "benchmark_result"
+    metric: str
+    value: float
+    unit: str
+
+
+class RoundFinishedData(BaseModel):
+    kind: Literal["round_finished"] = "round_finished"
+    attempts: int
+    judge_verdict: Literal["pass", "fail"]
+    perf_metric: float | None = None
+    perf_unit: str | None = None
+
+
 EventData = Annotated[
-    ChatData | InvocationStartedData | InvocationFinishedData | OutputData,
+    ChatData
+    | InvocationStartedData
+    | InvocationFinishedData
+    | OutputData
+    | ServerReadyData
+    | RunStartedData
+    | RunInterruptedData
+    | PhaseData
+    | AgentOutputChunkData
+    | SubprocessOutputData
+    | JudgeResultData
+    | BenchmarkResultData
+    | RoundFinishedData,
     Field(discriminator="kind"),
 ]
 

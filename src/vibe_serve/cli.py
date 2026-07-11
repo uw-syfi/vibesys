@@ -349,6 +349,7 @@ def _apply_common_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Disable the interactive client even when attached to a terminal.",
     )
+    parser.add_argument("--control-socket", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         "--resume",
         nargs="?",
@@ -914,16 +915,24 @@ def main() -> None:
     # ``vibe_serve.cli._{validate,run}_<kind>`` takes effect.
     globals()[_VALIDATORS[loop_kind]](args)
     runner = globals()[_RUNNERS[loop_kind]]
+    if args.control_socket is not None:
+        from vibe_serve.server.runtime import run_server
+
+        input_path = str(args.input_bundle.root) if args.input_bundle is not None else ""
+        max_rounds = getattr(args, "max_rounds", getattr(args, "max_iterations", 1))
+        run_server(
+            lambda: runner(args),
+            socket_path=args.control_socket,
+            outer_loop=loop_kind,
+            input_path=input_path,
+            max_rounds=max_rounds,
+        )
+        return
     interactive = not args.headless and sys.stdin.isatty() and sys.stdout.isatty()
     if interactive:
-        from vibe_serve.server import run_interactive
-        from vibe_serve.server.runtime import InteractiveClientError
+        from vibe_serve.launcher import launch
 
-        try:
-            run_interactive(lambda: runner(args), exp_name=args.exp_name)
-        except InteractiveClientError as exc:
-            print(f"vibe-serve: {exc}", file=sys.stderr)
-            sys.exit(1)
+        raise SystemExit(launch(sys.argv[1:]))
     else:
         runner(args)
 

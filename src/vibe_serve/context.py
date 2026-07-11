@@ -980,8 +980,8 @@ class _RunContext:
         (e.g. ``round007``) should pass a string.
 
         The previous log file is flushed but kept open. A new file becomes
-        ``run_log_file``. In headless mode the stderr tee is updated as well;
-        interactive mode keeps stderr owned by the supervision capture.
+        ``run_log_file``. When stderr logging is enabled, its tee is updated
+        to write to the new file as well.
         """
         self.run_log_file.flush()
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")

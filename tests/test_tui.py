@@ -1,24 +1,18 @@
 import json
-import os
 import socket
-import sys
 import threading
 import time
 import uuid
 from pathlib import Path
 from unittest.mock import Mock
 
-import pytest
-
 from vibe_serve.context import _RunContext
 from vibe_serve.server import (
     EventType,
     RunInspector,
     RunSupervisor,
-    run_interactive,
 )
-from vibe_serve.server.protocol import ChatQuery, EventsQuery, SnapshotQuery
-from vibe_serve.server.runtime import _MessageCapture
+from vibe_serve.server.protocol import ChatQuery, EventsQuery, SnapshotQuery, SubscribeRequest
 from vibe_serve.server.schema import ProtocolDocument
 from vibe_serve.server.service import SupervisionService
 from vibe_serve.server.transport import SupervisionSocketServer
@@ -37,7 +31,8 @@ def test_chat_is_audited_but_not_injected(tmp_path):
         event for event in supervisor.read_events() if event.type == "invocation_started"
     )
     assert started.data.user_prompt == "original prompt"
-    assert _events(tmp_path / "run-events.jsonl")[-2]["type"] == "chat"
+    event_types = [event["type"] for event in _events(tmp_path / "run-events.jsonl")]
+    assert event_types.index("chat") < event_types.index("invocation_started")
 
 
 def test_pause_takes_effect_at_next_safe_point(tmp_path):
@@ -102,80 +97,6 @@ def test_chat_reports_structured_failed_invocation(tmp_path):
     assert "agent process exited" in answer
 
 
-def test_message_capture_converts_direct_output_to_events(tmp_path):
-    supervisor = RunSupervisor()
-    with _MessageCapture(supervisor):
-        os.write(1, b"direct output\n")
-        os.write(2, b"direct error\n")
-    supervisor.attach(tmp_path)
-    output_events = [event for event in supervisor.read_events() if event.type == "output"]
-    assert {(event.data.stream, event.data.content) for event in output_events} == {
-        ("stdout", "direct output\n"),
-        ("stderr", "direct error\n"),
-    }
-
-
-def test_run_interactive_keeps_python_output_off_terminal(monkeypatch, capsys):
-    original_stdout, original_stderr = sys.stdout, sys.stderr
-    monkeypatch.setattr("vibe_serve.server.runtime._validate_client", lambda: None)
-    client = Mock()
-    client.wait.return_value = 0
-    monkeypatch.setattr("vibe_serve.server.runtime._start_client", lambda path: client)
-
-    def run():
-        print("backend output")
-        return 7
-
-    assert run_interactive(run, exp_name="unused") == 7
-    assert sys.stdout is original_stdout
-    assert sys.stderr is original_stderr
-    assert "backend output" not in capsys.readouterr().out
-
-
-def test_run_interactive_starts_client_before_redirecting_terminal(monkeypatch):
-    order = []
-    client = Mock()
-    client.wait.return_value = 0
-
-    class Capture:
-        def __init__(self, supervisor):
-            pass
-
-        def __enter__(self):
-            order.append("capture")
-
-        def __exit__(self, exc_type, exc, traceback):
-            pass
-
-    monkeypatch.setattr("vibe_serve.server.runtime._validate_client", lambda: None)
-    monkeypatch.setattr("vibe_serve.server.runtime._MessageCapture", Capture)
-    monkeypatch.setattr(
-        "vibe_serve.server.runtime._start_client",
-        lambda path: order.append("client") or client,
-    )
-
-    run_interactive(lambda: None, exp_name="unused")
-
-    assert order == ["client", "capture"]
-
-
-def test_run_interactive_validates_client_before_starting_run(monkeypatch):
-    from vibe_serve.server.runtime import InteractiveClientError
-
-    started = False
-
-    def run():
-        nonlocal started
-        started = True
-
-    monkeypatch.setattr("vibe_serve.server.runtime.shutil.which", lambda name: None)
-    monkeypatch.delenv("VIBESERVE_TUI_RUNTIME", raising=False)
-
-    with pytest.raises(InteractiveClientError, match=r"Use `\./vs .*recommended"):
-        run_interactive(run, exp_name="unused")
-    assert started is False
-
-
 def test_service_accepts_chat(tmp_path):
     (tmp_path / "logs").mkdir()
     supervisor = RunSupervisor()
@@ -214,6 +135,31 @@ def test_socket_transport_supports_multiple_clients_and_event_replay(tmp_path):
     assert sequences == sorted(sequences)
     assert len(sequences) == len(set(sequences))
     assert any(event["type"] == "server_started" for event in replay["events"])
+
+
+def test_socket_subscription_replays_then_streams_new_events(tmp_path):
+    supervisor = RunSupervisor()
+    supervisor.attach(tmp_path / "logs")
+    service = SupervisionService(supervisor)
+    socket_path = Path("/tmp") / f"vibeserve-test-{uuid.uuid4().hex}.sock"
+
+    with SupervisionSocketServer(socket_path, service):
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(2)
+            client.connect(str(socket_path))
+            stream = client.makefile("rwb")
+            request = SubscribeRequest(after_sequence=0)
+            stream.write(request.model_dump_json().encode() + b"\n")
+            stream.flush()
+            subscribed = json.loads(stream.readline())
+            replay = json.loads(stream.readline())
+            supervisor.record(EventType.CHAT, "hello", status="answered")
+            streamed = json.loads(stream.readline())
+
+    assert subscribed["type"] == "subscribed"
+    assert replay["type"] == "event_batch"
+    assert streamed["type"] == "event"
+    assert streamed["event"]["type"] == "chat"
 
 
 def test_run_context_records_invocation_boundary(tmp_path):

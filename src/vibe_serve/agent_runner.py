@@ -143,6 +143,11 @@ def _log_and_print(
     max_len: int | None = None,
 ) -> None:
     """Print to stdout (optionally truncated) and write full text to log_file."""
+    from vibe_serve.server.registry import active_supervisor
+
+    supervisor = active_supervisor()
+    if supervisor is not None:
+        supervisor.publish_agent_output(text + "\n", channel="diagnostic")
     if log_file:
         log_file.write(text + "\n")
         log_file.flush()
@@ -159,6 +164,11 @@ def _log_markdown_and_print(
     max_len: int | None = None,
 ) -> None:
     """Render Markdown to stdout while preserving raw text in logs."""
+    from vibe_serve.server.registry import active_supervisor
+
+    supervisor = active_supervisor()
+    if supervisor is not None:
+        supervisor.publish_agent_output(text + "\n", channel="diagnostic")
     if log_file:
         log_file.write(text + "\n")
         log_file.flush()

@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from vibe_serve.server.events import RunEvent
-from vibe_serve.server.protocol import ProtocolRequest, Response, RunSnapshot
+from vibe_serve.server.protocol import ProtocolRequest, Response, RunSnapshot, ServerMessage
 
 
 class ProtocolDocument(BaseModel):
@@ -17,6 +17,7 @@ class ProtocolDocument(BaseModel):
     response: Response
     event: RunEvent
     snapshot: RunSnapshot
+    server_message: ServerMessage
 
 
 def main() -> None:

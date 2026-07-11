@@ -323,16 +323,14 @@ def test_main_wraps_tty_run_in_tui():
         patch.object(sys.stdin, "isatty", return_value=True),
         patch.object(sys.stdout, "isatty", return_value=True),
         patch("vibe_serve.cli._run_agent") as runner,
-        patch("vibe_serve.server.run_interactive") as run_interactive,
+        patch("vibe_serve.launcher.launch", return_value=0) as launch,
     ):
-        main()
+        with pytest.raises(SystemExit) as exc:
+            main()
 
+    assert exc.value.code == 0
     runner.assert_not_called()
-    run_interactive.assert_called_once()
-    run_callable = run_interactive.call_args.args[0]
-    assert run_interactive.call_args.kwargs == {"exp_name": "x"}
-    run_callable()
-    runner.assert_called_once()
+    launch.assert_called_once_with(argv[1:])
 
 
 def test_main_headless_skips_tui():
@@ -346,8 +344,8 @@ def test_main_headless_skips_tui():
     with (
         patch.object(sys, "argv", argv),
         patch("vibe_serve.cli._run_agent") as runner,
-        patch("vibe_serve.server.run_interactive") as run_interactive,
+        patch("vibe_serve.launcher.launch") as launch,
     ):
         main()
     runner.assert_called_once()
-    run_interactive.assert_not_called()
+    launch.assert_not_called()

@@ -218,6 +218,7 @@ class AgentLogger(BaseCallbackHandler):
 
     def on_llm_new_token(self, token, **kwargs):
         if token:
+            self._publish(token, "assistant")
             if not self._streaming and self._agent_label:
                 self._print(f"{self._format_prefix()}", end="", flush=True)
             self._print(f"{_GREEN}{token}{_RESET}", end="", flush=True)
@@ -266,6 +267,7 @@ class AgentLogger(BaseCallbackHandler):
         # Fallback: print full text for models that don't stream tokens
         text = msg.text
         if text:
+            self._publish(text, "assistant")
             self._print(f"{_GREEN}{text}{_RESET}")
         for tc in msg.tool_calls:
             self._print_tool_call(tc["name"], tc["args"])
@@ -313,6 +315,7 @@ class AgentLogger(BaseCallbackHandler):
     )
 
     def _print_tool_call(self, name: str, args: dict):
+        self._publish(f"→ {name}({json.dumps(args, default=str)})\n", "tool")
         is_code_tool = name in self._CODE_CHANGE_TOOLS
 
         # Log file: skip code content args for file-writing tools
@@ -338,6 +341,7 @@ class AgentLogger(BaseCallbackHandler):
         )
 
     def _print_thinking(self, text: str):
+        self._publish(text, "analysis")
         self._print(f"\n{_DIM}[thinking]{_RESET}")
         for line in text.split("\n"):
             self._print(f"{_DIM}{line}{_RESET}")
@@ -348,6 +352,7 @@ class AgentLogger(BaseCallbackHandler):
 
     def _print_tool_result(self, name: str, content: str, color: str = _DIM):
         full_text = str(content)
+        self._publish(full_text, "tool")
 
         # Truncated to log file
         if self._log_file:
@@ -455,6 +460,7 @@ class AgentLogger(BaseCallbackHandler):
         """
         if not text:
             return
+        self._publish(text, "assistant")
         self._print(f"{self._format_prefix()}{_GREEN}{text}{_RESET}")
 
     def log_tool_call(self, name: str, args: dict) -> None:
@@ -470,3 +476,10 @@ class AgentLogger(BaseCallbackHandler):
     ) -> None:
         """Format a tool result the same way ``on_tool_end`` does."""
         self._print_tool_result(name, content, color=_RED if is_error else _DIM)
+
+    def _publish(self, content: str, channel: str) -> None:
+        from vibe_serve.server.registry import active_supervisor
+
+        supervisor = active_supervisor()
+        if supervisor is not None:
+            supervisor.publish_agent_output(content, channel=channel)

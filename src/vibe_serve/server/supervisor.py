@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import uuid
 from pathlib import Path
 from typing import Any
 
 from vibe_serve.server.events import (
+    AgentOutputChunkData,
     ChatData,
     EventData,
     EventStatus,
@@ -16,6 +18,7 @@ from vibe_serve.server.events import (
     InvocationFinishedData,
     InvocationStartedData,
     OutputData,
+    PhaseData,
     RunEvent,
     json_value,
     make_event,
@@ -63,6 +66,24 @@ class RunSupervisor:
         self.record(
             EventType.OUTPUT,
             data=OutputData(stream=stream, source=source, content=content),
+        )
+
+    def publish_agent_output(
+        self,
+        content: str,
+        *,
+        channel: str = "assistant",
+        agent_kind: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        if not content:
+            return
+        self.record(
+            EventType.AGENT_OUTPUT_CHUNK,
+            agent_kind=agent_kind or self._current_kind,
+            round_label=self._current_round,
+            invocation_id=invocation_id or self._active_invocation,
+            data=AgentOutputChunkData(channel=channel, content=content),
         )
 
     def record(
@@ -134,6 +155,15 @@ class RunSupervisor:
             invocation_id = uuid.uuid4().hex
             self._active_invocation = invocation_id
 
+        phase = PhaseData(phase=kind, attempt=_attempt_from_label(round_label))
+        self.record(
+            EventType.PHASE_STARTED,
+            status=EventStatus.ACTIVE,
+            agent_kind=kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+            data=phase,
+        )
         self.record(
             EventType.INVOCATION_STARTED,
             status=EventStatus.ACTIVE,
@@ -164,6 +194,14 @@ class RunSupervisor:
                 result=json_value(result), error=repr(error) if error else None
             ),
         )
+        self.record(
+            EventType.PHASE_FINISHED,
+            status=EventStatus.FAILED if error else EventStatus.COMPLETED,
+            agent_kind=kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+            data=PhaseData(phase=kind, attempt=_attempt_from_label(round_label)),
+        )
         if should_pause:
             self.record(
                 EventType.CONTROL,
@@ -190,3 +228,8 @@ class RunSupervisor:
             repr(error) if error else "",
             status=EventStatus.FAILED if error else EventStatus.COMPLETED,
         )
+
+
+def _attempt_from_label(round_label: str) -> int | None:
+    match = re.search(r"retry-(\d+)", round_label)
+    return int(match.group(1)) if match else None

@@ -51,8 +51,19 @@ class EventsQuery(Request):
     timeout_ms: int = Field(default=0, ge=0, le=30_000)
 
 
+class SubscribeRequest(Request):
+    type: Literal["subscribe"] = "subscribe"
+    after_sequence: int = Field(default=0, ge=0)
+
+
 ProtocolRequest = Annotated[
-    PauseCommand | ResumeCommand | SnapshotQuery | ChatQuery | HistoryQuery | EventsQuery,
+    PauseCommand
+    | ResumeCommand
+    | SnapshotQuery
+    | ChatQuery
+    | HistoryQuery
+    | EventsQuery
+    | SubscribeRequest,
     Field(discriminator="type"),
 ]
 
@@ -87,3 +98,33 @@ class Response(ProtocolModel):
     chat: ChatResult | None = None
     snapshot: RunSnapshot | None = None
     events: list[RunEvent] = Field(default_factory=list)
+
+
+class SubscribedMessage(ProtocolModel):
+    type: Literal["subscribed"] = "subscribed"
+    request_id: str
+    run_id: str
+    latest_sequence: int
+
+
+class EventMessage(ProtocolModel):
+    type: Literal["event"] = "event"
+    event: RunEvent
+
+
+class EventBatchMessage(ProtocolModel):
+    type: Literal["event_batch"] = "event_batch"
+    events: list[RunEvent]
+
+
+class ProtocolErrorMessage(ProtocolModel):
+    type: Literal["protocol_error"] = "protocol_error"
+    request_id: str | None = None
+    code: str
+    message: str
+
+
+ServerMessage = Annotated[
+    SubscribedMessage | EventMessage | EventBatchMessage | ProtocolErrorMessage,
+    Field(discriminator="type"),
+]
