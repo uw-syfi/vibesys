@@ -1,5 +1,45 @@
 # VibeServe: Can AI Agents Build Bespoke LLM Serving Systems?
 
+## Interactive terminal UI
+
+When stdin and stdout are attached to a terminal, VibeServe automatically opens
+the interactive client. The run continues on a background thread while the
+default view follows sequenced output messages. Use `--headless` to disable the
+client for backend tests, CI, or redirected execution. Type a question to see
+the current phase and record the exchange, or use these commands:
+
+The terminal client is implemented in TypeScript with Ink and requires Node.js
+20+. Build it once after checkout:
+
+```bash
+pnpm --dir clients/tui install
+pnpm --dir clients/tui generate:protocol
+pnpm --dir clients/tui build
+```
+
+The Python process remains the authoritative supervision server. It exposes a
+private versioned JSONL protocol over a Unix socket, allowing future terminal,
+web-server, and browser-facing clients to share snapshots, commands, and
+cursor-based event replay. Python never renders interactive output: stdout and
+stderr are converted into typed `output` events, and the client owns all
+formatting and terminal rendering.
+
+- `/steer TEXT` queues guidance for the next agent invocation. The status line
+  shows pending guidance; the audit log records the exact phase that consumed it.
+- `/pause` pauses after the current agent call; `/resume` continues.
+- `/history` opens the human interaction audit; `/live` or `Ctrl+L` returns to
+  current run output.
+- `/help` shows the supported commands. Round, invocation, and artifact
+  inspection are server capabilities reserved for future navigable views rather
+  than user-facing slash commands.
+
+Prompts, streamed outputs, judge feedback, and benchmark output remain in the
+normal `logs/run-*.log` and per-loop history files. Human chat, status queries,
+control actions, and steering lifecycle events are appended to
+`logs/run-events.jsonl`. Agent invocation start/finish events store the rendered
+prompts, structured result or error, and IDs of any steering notes consumed by
+that invocation. Plain chat is never added to an agent prompt.
+
 [![arXiv](https://img.shields.io/badge/arXiv-2605.06068-b31b1b.svg)](https://arxiv.org/abs/2605.06068)
 
 **An agentic loop that synthesizes bespoke LLM serving systems — one per (model, hardware, workload) target — instead of forcing every deployment through a single general-purpose runtime.**

@@ -1,0 +1,1054 @@
+{
+  "$defs": {
+    "ArtifactData": {
+      "properties": {
+        "kind": {
+          "const": "artifact",
+          "default": "artifact",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ArtifactData",
+      "type": "object"
+    },
+    "ArtifactQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "query.artifact",
+          "default": "query.artifact",
+          "title": "Type",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ArtifactQuery",
+      "type": "object"
+    },
+    "ArtifactResult": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "title": "ArtifactResult",
+      "type": "object"
+    },
+    "ChatData": {
+      "properties": {
+        "kind": {
+          "const": "chat",
+          "default": "chat",
+          "title": "Kind",
+          "type": "string"
+        },
+        "answer": {
+          "title": "Answer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "answer"
+      ],
+      "title": "ChatData",
+      "type": "object"
+    },
+    "ChatQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "query.chat",
+          "default": "query.chat",
+          "title": "Type",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "ChatQuery",
+      "type": "object"
+    },
+    "ChatResult": {
+      "additionalProperties": false,
+      "properties": {
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "answer": {
+          "title": "Answer",
+          "type": "string"
+        },
+        "effect": {
+          "const": "none",
+          "default": "none",
+          "title": "Effect",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question",
+        "answer"
+      ],
+      "title": "ChatResult",
+      "type": "object"
+    },
+    "CommandAck": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "steer",
+            "pause",
+            "resume"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "consumed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "resource_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resource Id"
+        }
+      },
+      "required": [
+        "action",
+        "status"
+      ],
+      "title": "CommandAck",
+      "type": "object"
+    },
+    "EventStatus": {
+      "enum": [
+        "active",
+        "answered",
+        "pending",
+        "consumed",
+        "completed",
+        "failed"
+      ],
+      "title": "EventStatus",
+      "type": "string"
+    },
+    "EventType": {
+      "enum": [
+        "server_started",
+        "tui_started",
+        "chat",
+        "status_query",
+        "steering",
+        "control",
+        "invocation_started",
+        "invocation_finished",
+        "run_finished",
+        "run_failed",
+        "output"
+      ],
+      "title": "EventType",
+      "type": "string"
+    },
+    "EventsQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "query.events",
+          "default": "query.events",
+          "title": "Type",
+          "type": "string"
+        },
+        "after_sequence": {
+          "default": 0,
+          "minimum": 0,
+          "title": "After Sequence",
+          "type": "integer"
+        },
+        "timeout_ms": {
+          "default": 0,
+          "maximum": 30000,
+          "minimum": 0,
+          "title": "Timeout Ms",
+          "type": "integer"
+        }
+      },
+      "title": "EventsQuery",
+      "type": "object"
+    },
+    "HistoryQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "query.history",
+          "default": "query.history",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "HistoryQuery",
+      "type": "object"
+    },
+    "InvocationFinishedData": {
+      "properties": {
+        "kind": {
+          "const": "invocation_finished",
+          "default": "invocation_finished",
+          "title": "Kind",
+          "type": "string"
+        },
+        "result": {
+          "default": null,
+          "title": "Result"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        }
+      },
+      "title": "InvocationFinishedData",
+      "type": "object"
+    },
+    "InvocationQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "query.invocation",
+          "default": "query.invocation",
+          "title": "Type",
+          "type": "string"
+        },
+        "invocation_id": {
+          "title": "Invocation Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "invocation_id"
+      ],
+      "title": "InvocationQuery",
+      "type": "object"
+    },
+    "InvocationStartedData": {
+      "properties": {
+        "kind": {
+          "const": "invocation_started",
+          "default": "invocation_started",
+          "title": "Kind",
+          "type": "string"
+        },
+        "system_prompt": {
+          "title": "System Prompt",
+          "type": "string"
+        },
+        "user_prompt": {
+          "title": "User Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "system_prompt",
+        "user_prompt"
+      ],
+      "title": "InvocationStartedData",
+      "type": "object"
+    },
+    "OutputData": {
+      "properties": {
+        "kind": {
+          "const": "output",
+          "default": "output",
+          "title": "Kind",
+          "type": "string"
+        },
+        "stream": {
+          "enum": [
+            "stdout",
+            "stderr"
+          ],
+          "title": "Stream",
+          "type": "string"
+        },
+        "source": {
+          "default": "backend",
+          "title": "Source",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stream",
+        "content"
+      ],
+      "title": "OutputData",
+      "type": "object"
+    },
+    "PauseCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "command.pause",
+          "default": "command.pause",
+          "title": "Type",
+          "type": "string"
+        },
+        "mode": {
+          "const": "after_current_agent_call",
+          "default": "after_current_agent_call",
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "title": "PauseCommand",
+      "type": "object"
+    },
+    "Response": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "ok": {
+          "default": true,
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "ack": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommandAck"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "chat": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChatResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "round": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoundResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "artifact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/RunEvent"
+          },
+          "title": "Events",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id"
+      ],
+      "title": "Response",
+      "type": "object"
+    },
+    "ResumeCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "command.resume",
+          "default": "command.resume",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "ResumeCommand",
+      "type": "object"
+    },
+    "RoundQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "query.round",
+          "default": "query.round",
+          "title": "Type",
+          "type": "string"
+        },
+        "round_number": {
+          "minimum": 1,
+          "title": "Round Number",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "round_number"
+      ],
+      "title": "RoundQuery",
+      "type": "object"
+    },
+    "RoundResult": {
+      "additionalProperties": false,
+      "properties": {
+        "round_number": {
+          "title": "Round Number",
+          "type": "integer"
+        },
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/TextBlock"
+          },
+          "title": "Blocks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "round_number"
+      ],
+      "title": "RoundResult",
+      "type": "object"
+    },
+    "RunEvent": {
+      "additionalProperties": false,
+      "description": "One reproducible human, control, or invocation event.",
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "sequence": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "run_id": {
+          "default": "",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/EventType"
+        },
+        "text": {
+          "default": "",
+          "title": "Text",
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EventStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "round_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Round Label"
+        },
+        "agent_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Kind"
+        },
+        "invocation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Invocation Id"
+        },
+        "steering_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Steering Ids",
+          "type": "array"
+        },
+        "data": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "artifact": "#/$defs/ArtifactData",
+                  "chat": "#/$defs/ChatData",
+                  "invocation_finished": "#/$defs/InvocationFinishedData",
+                  "invocation_started": "#/$defs/InvocationStartedData",
+                  "output": "#/$defs/OutputData",
+                  "steering": "#/$defs/SteeringData"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ChatData"
+                },
+                {
+                  "$ref": "#/$defs/SteeringData"
+                },
+                {
+                  "$ref": "#/$defs/InvocationStartedData"
+                },
+                {
+                  "$ref": "#/$defs/InvocationFinishedData"
+                },
+                {
+                  "$ref": "#/$defs/ArtifactData"
+                },
+                {
+                  "$ref": "#/$defs/OutputData"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        }
+      },
+      "required": [
+        "timestamp",
+        "type"
+      ],
+      "title": "RunEvent",
+      "type": "object"
+    },
+    "RunSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "agent_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Kind"
+        },
+        "round_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Round Label"
+        },
+        "pending_steering": {
+          "default": 0,
+          "title": "Pending Steering",
+          "type": "integer"
+        },
+        "last_consumed_steering": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Consumed Steering"
+        }
+      },
+      "required": [
+        "run_id",
+        "sequence",
+        "status"
+      ],
+      "title": "RunSnapshot",
+      "type": "object"
+    },
+    "SnapshotQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "query.snapshot",
+          "default": "query.snapshot",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "SnapshotQuery",
+      "type": "object"
+    },
+    "StatusQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "query.status",
+          "default": "query.status",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "StatusQuery",
+      "type": "object"
+    },
+    "SteerCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "command.steer",
+          "default": "command.steer",
+          "title": "Type",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "target": {
+          "const": "next_safe_point",
+          "default": "next_safe_point",
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "SteerCommand",
+      "type": "object"
+    },
+    "SteeringData": {
+      "properties": {
+        "kind": {
+          "const": "steering",
+          "default": "steering",
+          "title": "Kind",
+          "type": "string"
+        },
+        "steering_id": {
+          "title": "Steering Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "steering_id"
+      ],
+      "title": "SteeringData",
+      "type": "object"
+    },
+    "TextBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "content"
+      ],
+      "title": "TextBlock",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "request": {
+      "discriminator": {
+        "mapping": {
+          "command.pause": "#/$defs/PauseCommand",
+          "command.resume": "#/$defs/ResumeCommand",
+          "command.steer": "#/$defs/SteerCommand",
+          "query.artifact": "#/$defs/ArtifactQuery",
+          "query.chat": "#/$defs/ChatQuery",
+          "query.events": "#/$defs/EventsQuery",
+          "query.history": "#/$defs/HistoryQuery",
+          "query.invocation": "#/$defs/InvocationQuery",
+          "query.round": "#/$defs/RoundQuery",
+          "query.snapshot": "#/$defs/SnapshotQuery",
+          "query.status": "#/$defs/StatusQuery"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SteerCommand"
+        },
+        {
+          "$ref": "#/$defs/PauseCommand"
+        },
+        {
+          "$ref": "#/$defs/ResumeCommand"
+        },
+        {
+          "$ref": "#/$defs/StatusQuery"
+        },
+        {
+          "$ref": "#/$defs/SnapshotQuery"
+        },
+        {
+          "$ref": "#/$defs/ChatQuery"
+        },
+        {
+          "$ref": "#/$defs/HistoryQuery"
+        },
+        {
+          "$ref": "#/$defs/RoundQuery"
+        },
+        {
+          "$ref": "#/$defs/InvocationQuery"
+        },
+        {
+          "$ref": "#/$defs/ArtifactQuery"
+        },
+        {
+          "$ref": "#/$defs/EventsQuery"
+        }
+      ],
+      "title": "Request"
+    },
+    "response": {
+      "$ref": "#/$defs/Response"
+    },
+    "event": {
+      "$ref": "#/$defs/RunEvent"
+    },
+    "snapshot": {
+      "$ref": "#/$defs/RunSnapshot"
+    }
+  },
+  "required": [
+    "request",
+    "response",
+    "event",
+    "snapshot"
+  ],
+  "title": "ProtocolDocument",
+  "type": "object"
+}

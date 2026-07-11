@@ -345,6 +345,11 @@ def _apply_common_args(parser: argparse.ArgumentParser) -> None:
     """Common args + the cross-loop ``--resume`` flag."""
     _add_common_args(parser)
     parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Disable the interactive client even when attached to a terminal.",
+    )
+    parser.add_argument(
         "--resume",
         nargs="?",
         const="latest",
@@ -903,7 +908,14 @@ def main() -> None:
     # Resolve validator + runner via globals() so unittest.mock.patch on
     # ``vibe_serve.cli._{validate,run}_<kind>`` takes effect.
     globals()[_VALIDATORS[loop_kind]](args)
-    globals()[_RUNNERS[loop_kind]](args)
+    runner = globals()[_RUNNERS[loop_kind]]
+    interactive = not args.headless and sys.stdin.isatty() and sys.stdout.isatty()
+    if interactive:
+        from vibe_serve.server import run_interactive
+
+        run_interactive(lambda: runner(args), exp_name=args.exp_name)
+    else:
+        runner(args)
 
 
 if __name__ == "__main__":

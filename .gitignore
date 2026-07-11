@@ -249,3 +249,7 @@ examples/**/draft_model
 # Per-experiment scratch — not part of the repo
 baseline_eval_*/
 sandbox-*/
+
+# TypeScript client build/install output
+node_modules/
+clients/tui/dist/

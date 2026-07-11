@@ -1,0 +1,243 @@
+"""Thread-safe human controls at agent invocation boundaries."""
+
+from __future__ import annotations
+
+import threading
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from vibe_serve.server.events import (
+    ChatData,
+    EventData,
+    EventStatus,
+    EventStore,
+    EventType,
+    InvocationFinishedData,
+    InvocationStartedData,
+    OutputData,
+    RunEvent,
+    SteeringData,
+    SteeringNote,
+    json_value,
+    make_event,
+)
+from vibe_serve.server.protocol import RunSnapshot
+
+
+class RunSupervisor:
+    """Own steering, pause state, invocation metadata, and its audit store."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._pending: list[SteeringNote] = []
+        self._pause_after_call = False
+        self._paused = False
+        self._active_invocation: str | None = None
+        self._run_status = "starting"
+        self._store: EventStore | None = None
+        self._pending_events: list[RunEvent] = []
+        self.log_dir: Path | None = None
+        self._current_kind: str | None = None
+        self._current_round: str | None = None
+        self._last_consumed: str | None = None
+
+    @property
+    def events_path(self) -> Path | None:
+        return self._store.path if self._store else None
+
+    @property
+    def current_round(self) -> str | None:
+        with self._condition:
+            return self._current_round
+
+    def attach(self, log_dir: Path) -> None:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        self.log_dir = log_dir
+        events_path = log_dir / "run-events.jsonl"
+        legacy_path = log_dir / "tui-events.jsonl"
+        if not events_path.exists() and legacy_path.exists():
+            events_path = legacy_path
+        store = EventStore(events_path, run_id=log_dir.parent.name)
+        with self._condition:
+            self._store = store
+            pending, self._pending_events = self._pending_events, []
+        for event in pending:
+            store.append(event)
+        self.record(EventType.SERVER_STARTED, status=EventStatus.ACTIVE)
+        with self._condition:
+            self._run_status = "running"
+
+    def publish_output(self, stream: str, content: str, source: str = "backend") -> None:
+        if not content:
+            return
+        self.record(
+            EventType.OUTPUT,
+            data=OutputData(stream=stream, source=source, content=content),
+        )
+
+    def record(
+        self,
+        event_type: EventType,
+        text: str = "",
+        *,
+        data: EventData | None = None,
+        **fields: Any,
+    ) -> RunEvent | None:
+        event = make_event(event_type, text, data=data, **fields)
+        with self._condition:
+            store = self._store
+            if store is None:
+                self._pending_events.append(event)
+                return event
+        return store.append(event)
+
+    def read_events(self, after_sequence: int = 0) -> list[RunEvent]:
+        store = self._store
+        return store.read(after_sequence) if store else []
+
+    def wait_for_events(self, after_sequence: int, timeout: float | None = None) -> list[RunEvent]:
+        store = self._store
+        return store.wait(after_sequence, timeout) if store else []
+
+    def snapshot(self) -> RunSnapshot:
+        with self._condition:
+            store = self._store
+            return RunSnapshot(
+                run_id=store.run_id if store else "",
+                sequence=store.last_sequence if store else 0,
+                status="paused" if self._paused else self._run_status,
+                agent_kind=self._current_kind,
+                round_label=self._current_round,
+                pending_steering=len(self._pending),
+                last_consumed_steering=self._last_consumed,
+            )
+
+    def chat(self, text: str) -> str:
+        from vibe_serve.server.inspector import RunInspector
+
+        answer = RunInspector(self).answer(text)
+        self.record(
+            EventType.CHAT,
+            text,
+            status=EventStatus.ANSWERED,
+            data=ChatData(answer=answer),
+        )
+        return answer
+
+    def steer(self, text: str) -> SteeringNote:
+        if not text.strip():
+            raise ValueError("/steer requires guidance text")
+        note = SteeringNote(id=uuid.uuid4().hex, text=text.strip(), created_at=datetime.now(UTC))
+        with self._condition:
+            self._pending.append(note)
+        self.record(
+            EventType.STEERING,
+            note.text,
+            status=EventStatus.PENDING,
+            data=SteeringData(steering_id=note.id),
+        )
+        return note
+
+    def pause_after_call(self) -> None:
+        with self._condition:
+            self._pause_after_call = True
+        self.record(EventType.CONTROL, "/pause", status=EventStatus.PENDING)
+
+    def resume(self) -> None:
+        with self._condition:
+            self._paused = False
+            self._pause_after_call = False
+            self._condition.notify_all()
+        self.record(EventType.CONTROL, "/resume", status=EventStatus.CONSUMED)
+
+    def before_agent(
+        self, kind: str, round_label: str, user_prompt: str, system_prompt: str = ""
+    ) -> str:
+        with self._condition:
+            while self._paused:
+                self._condition.wait()
+            self._current_kind, self._current_round = kind, round_label
+            notes, self._pending = self._pending, []
+            invocation_id = uuid.uuid4().hex
+            self._active_invocation = invocation_id
+
+        if notes:
+            user_prompt += "\n\n## Human steering\n" + "\n".join(f"- {note.text}" for note in notes)
+            for note in notes:
+                self.record(
+                    EventType.STEERING,
+                    note.text,
+                    status=EventStatus.CONSUMED,
+                    agent_kind=kind,
+                    round_label=round_label,
+                    invocation_id=invocation_id,
+                    data=SteeringData(steering_id=note.id),
+                )
+            with self._condition:
+                self._last_consumed = (
+                    f"steering {notes[-1].id[:8]} consumed by {kind} / {round_label}"
+                )
+
+        self.record(
+            EventType.INVOCATION_STARTED,
+            status=EventStatus.ACTIVE,
+            agent_kind=kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+            steering_ids=[note.id for note in notes],
+            data=InvocationStartedData(system_prompt=system_prompt, user_prompt=user_prompt),
+        )
+        return user_prompt
+
+    def after_agent(
+        self, kind: str, round_label: str, *, result: Any = None, error: BaseException | None = None
+    ) -> None:
+        with self._condition:
+            invocation_id = self._active_invocation
+            self._active_invocation = None
+            should_pause = self._pause_after_call
+            if should_pause:
+                self._pause_after_call = False
+                self._paused = True
+
+        self.record(
+            EventType.INVOCATION_FINISHED,
+            status=EventStatus.FAILED if error else EventStatus.COMPLETED,
+            agent_kind=kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+            data=InvocationFinishedData(
+                result=json_value(result), error=repr(error) if error else None
+            ),
+        )
+        if should_pause:
+            self.record(
+                EventType.CONTROL,
+                "/pause",
+                status=EventStatus.CONSUMED,
+                agent_kind=kind,
+                round_label=round_label,
+                invocation_id=invocation_id,
+            )
+
+    def status(self) -> str:
+        with self._condition:
+            state = "paused" if self._paused else self._run_status
+            pending = len(self._pending)
+            kind = self._current_kind or "starting"
+            round_label = self._current_round or "no round yet"
+            consumed = self._last_consumed
+        status = f"{state} · {kind} · {round_label} · {pending} steering note(s) pending"
+        return f"{status} · {consumed}" if consumed else status
+
+    def finish(self, error: BaseException | None = None) -> None:
+        with self._condition:
+            self._run_status = "failed" if error else "completed"
+            self._condition.notify_all()
+        self.record(
+            EventType.RUN_FAILED if error else EventType.RUN_FINISHED,
+            repr(error) if error else "",
+            status=EventStatus.FAILED if error else EventStatus.COMPLETED,
+        )
