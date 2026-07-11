@@ -40,13 +40,13 @@ class InteractiveClientError(RuntimeError):
 
 def _validate_client() -> None:
     """Fail before backend output is captured or the run is started."""
-    node = os.environ.get("VIBESERVE_NODE") or shutil.which("node")
+    runtime = os.environ.get("VIBESERVE_TUI_RUNTIME") or shutil.which("bun")
     entrypoint = PROJECT_ROOT / "clients" / "tui" / "dist" / "index.js"
-    if node is None:
+    if runtime is None:
         raise InteractiveClientError(
-            "cannot start the TUI because Node.js 20+ was not found. "
+            "cannot start the OpenTUI client because Bun was not found. "
             "Use `./vs ...` (recommended) to prepare and launch VibeServe. "
-            "Alternatively, activate Node first or use --headless."
+            "Alternatively, install Bun or use --headless."
         )
     if not entrypoint.is_file():
         raise InteractiveClientError(
@@ -57,15 +57,15 @@ def _validate_client() -> None:
 
 
 def _run_client(socket_path: Path) -> int:
-    node = os.environ.get("VIBESERVE_NODE") or shutil.which("node")
+    runtime = os.environ.get("VIBESERVE_TUI_RUNTIME") or shutil.which("bun")
     entrypoint = PROJECT_ROOT / "clients" / "tui" / "dist" / "index.js"
-    assert node is not None
+    assert runtime is not None
     assert entrypoint.is_file()
     env = os.environ.copy()
     env["VIBESERVE_CONTROL_SOCKET"] = str(socket_path)
     with Path("/dev/tty").open("r+b", buffering=0) as terminal:
         return subprocess.run(
-            [node, str(entrypoint)],
+            [runtime, str(entrypoint)],
             env=env,
             stdin=terminal,
             stdout=terminal,
@@ -138,7 +138,7 @@ class _MessageCapture:
 
 
 def run_interactive(run: Callable[[], Any], *, exp_name: str) -> Any:
-    """Serve supervision state while an Ink client owns the terminal."""
+    """Serve supervision state while an OpenTUI client owns the terminal."""
     del exp_name
     _validate_client()
     supervisor = RunSupervisor()

@@ -11,17 +11,13 @@
     "generate:protocol": "uv run --project ../.. python -m vibe_serve.server.schema src/protocol.schema.json && json2ts -i src/protocol.schema.json -o src/protocol.generated.ts --bannerComment '/* Generated from the Python protocol models. Do not edit. */'",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.check.json",
-    "test": "vitest run --config vitest.config.ts"
+    "test": "bun --bun vitest run --config vitest.config.ts"
   },
   "dependencies": {
-    "ink": "^6.3.1",
-    "ink-text-input": "^6.0.0",
-    "react": "^19.1.1"
+    "@opentui/core": "^0.4.3"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "@types/react": "^19.1.0",
-    "ink-testing-library": "^4.0.0",
     "json-schema-to-typescript": "^15.0.4",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"

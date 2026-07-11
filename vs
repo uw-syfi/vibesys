@@ -16,6 +16,14 @@ for argument in "$@"; do
 done
 
 if [[ "$interactive" == true ]]; then
+  if ! command -v bun >/dev/null 2>&1 && [[ -x "$HOME/.bun/bin/bun" ]]; then
+    export PATH="$HOME/.bun/bin:$PATH"
+  fi
+  if ! command -v bun >/dev/null 2>&1; then
+    echo "vs: Bun is required by the OpenTUI client. Install it from https://bun.sh." >&2
+    exit 1
+  fi
+
   entrypoint="clients/tui/dist/index.js"
   rebuild=false
   if [[ ! -f "$entrypoint" ]]; then
