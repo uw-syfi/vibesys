@@ -1,6 +1,6 @@
 import {createTestRenderer} from '@opentui/core/testing';
 import {afterEach, describe, expect, it} from 'vitest';
-import {createOpenTuiApp, type OpenTuiApp} from './app.js';
+import {createOpenTuiApp, toolOutputPreview, type OpenTuiApp} from './app.js';
 import type {SessionController} from './session-controller.js';
 import {initialSessionState, type SessionState} from './session-model.js';
 
@@ -38,7 +38,7 @@ describe('OpenTUI presentation', () => {
     const testRenderer = await createTestRenderer({width: 80, height: 16});
     const controller = new FakeController({
       ...initialSessionState(),
-      conversation: [{id: 'tool', kind: 'tool', label: 'Bash', content: lines}],
+      conversation: [{id: 'assistant', kind: 'assistant', label: 'Agent', content: lines}],
     });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
@@ -47,6 +47,16 @@ describe('OpenTUI presentation', () => {
     testRenderer.mockInput.pressKey('HOME');
     const frame = await testRenderer.waitForFrame(value => value.includes('tool output line 1'));
     expect(frame).not.toContain('tool output line 50');
+  });
+
+  it('limits tool output without discarding the underlying content', () => {
+    const content = Array.from({length: 20}, (_, index) => `line ${index + 1}`).join('\n');
+    const preview = toolOutputPreview(content);
+
+    expect(preview).toContain('line 12');
+    expect(preview).not.toContain('line 13');
+    expect(preview).toContain('8 more lines hidden');
+    expect(content).toContain('line 20');
   });
 
   it('exits after the model reaches a terminal state', async () => {

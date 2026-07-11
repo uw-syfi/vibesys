@@ -18,6 +18,7 @@ export interface ConversationEntry {
   content: string;
   label?: string;
   tone?: 'normal' | 'success' | 'failure';
+  turnId?: string;
 }
 
 export function initialSessionState(): SessionState {
@@ -75,7 +76,13 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
     const kind = data.channel === 'assistant'
       ? 'assistant'
       : data.channel === 'analysis' ? 'analysis' : 'tool';
-    return {id, kind, content: data.content, label: labelFor(event, data.channel)};
+    return {
+      id,
+      kind,
+      content: data.content,
+      label: labelFor(event, data.channel),
+      turnId: event.invocation_id ?? id,
+    };
   }
   if (data?.kind === 'subprocess_output') {
     return {
@@ -131,9 +138,8 @@ function appendConversation(
   incoming: ConversationEntry,
 ): ConversationEntry[] {
   const last = previous.at(-1);
-  if (last && last.kind === incoming.kind && last.label === incoming.label
-    && (incoming.kind === 'assistant' || incoming.kind === 'analysis'
-      || incoming.kind === 'tool' || incoming.kind === 'subprocess')) {
+  if (last && last.kind === incoming.kind && last.turnId === incoming.turnId
+    && (incoming.kind === 'assistant' || incoming.kind === 'analysis')) {
     return [...previous.slice(0, -1), {...last, content: last.content + incoming.content}];
   }
   return [...previous, incoming].slice(-1_000);

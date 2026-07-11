@@ -11,6 +11,8 @@ import {
 import type {SessionController} from './session-controller.js';
 import {statusText, type ConversationEntry, type SessionState} from './session-model.js';
 
+const MAX_TOOL_OUTPUT_LINES = 12;
+
 export interface OpenTuiApp {
   destroy(): void;
 }
@@ -152,8 +154,11 @@ export function createOpenTuiApp(
         width: '100%',
       }));
     } else {
+      const content = entry.kind === 'tool' || entry.kind === 'subprocess'
+        ? toolOutputPreview(entry.content)
+        : entry.content;
       card.add(new TextRenderable(renderer, {
-        content: entry.content,
+        content,
         fg: palette.content,
         width: '100%',
       }));
@@ -188,6 +193,15 @@ export function createOpenTuiApp(
       markdownStyle.destroy();
     },
   };
+}
+
+export function toolOutputPreview(content: string, maxLines = MAX_TOOL_OUTPUT_LINES): string {
+  const lines = content.split('\n');
+  const hasTrailingNewline = lines.at(-1) === '';
+  if (hasTrailingNewline) lines.pop();
+  if (lines.length <= maxLines) return content;
+  const hidden = lines.length - maxLines;
+  return `${lines.slice(0, maxLines).join('\n')}\n… ${hidden} more line${hidden === 1 ? '' : 's'} hidden`;
 }
 
 function entryPalette(entry: ConversationEntry): {

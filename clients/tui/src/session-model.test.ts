@@ -32,15 +32,41 @@ describe('session event model', () => {
     expect(state.sequence).toBe(4);
     expect(state.terminal).toBe(true);
   });
+
+  it('coalesces streamed assistant chunks but keeps tool turns separate', () => {
+    let state = initialSessionState();
+    state = applyEvent(state, event(1, 'agent_output_chunk', {
+      kind: 'agent_output_chunk', channel: 'assistant', content: 'hello ',
+    }, 'invocation-1'));
+    state = applyEvent(state, event(2, 'agent_output_chunk', {
+      kind: 'agent_output_chunk', channel: 'assistant', content: 'world',
+    }, 'invocation-1'));
+    state = applyEvent(state, event(3, 'agent_output_chunk', {
+      kind: 'agent_output_chunk', channel: 'tool', content: 'first tool',
+    }, 'invocation-1'));
+    state = applyEvent(state, event(4, 'agent_output_chunk', {
+      kind: 'agent_output_chunk', channel: 'tool', content: 'second tool',
+    }, 'invocation-1'));
+
+    expect(state.conversation.map(entry => entry.content)).toEqual([
+      'hello world', 'first tool', 'second tool',
+    ]);
+  });
 });
 
-function event(sequence: number, type: RunEvent['type'], data?: RunEvent['data']): RunEvent {
+function event(
+  sequence: number,
+  type: RunEvent['type'],
+  data?: RunEvent['data'],
+  invocationId?: string,
+): RunEvent {
   return {
     sequence,
     timestamp: '2026-01-01T00:00:00Z',
     type,
     round_label: 'round-1',
     agent_kind: 'judge',
+    ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
     ...(data === undefined ? {} : {data}),
   };
 }
