@@ -56,22 +56,15 @@ def _validate_client() -> None:
         )
 
 
-def _run_client(socket_path: Path) -> int:
+def _start_client(socket_path: Path) -> subprocess.Popen[bytes]:
+    """Start the client while it can still inherit the original TTY descriptors."""
     runtime = os.environ.get("VIBESERVE_TUI_RUNTIME") or shutil.which("bun")
     entrypoint = PROJECT_ROOT / "clients" / "tui" / "dist" / "index.js"
     assert runtime is not None
     assert entrypoint.is_file()
     env = os.environ.copy()
     env["VIBESERVE_CONTROL_SOCKET"] = str(socket_path)
-    with Path("/dev/tty").open("r+b", buffering=0) as terminal:
-        return subprocess.run(
-            [runtime, str(entrypoint)],
-            env=env,
-            stdin=terminal,
-            stdout=terminal,
-            stderr=terminal,
-            check=False,
-        ).returncode
+    return subprocess.Popen([runtime, str(entrypoint)], env=env)
 
 
 class _MessageCapture:
@@ -160,23 +153,18 @@ def run_interactive(run: Callable[[], Any], *, exp_name: str) -> Any:
         with tempfile.TemporaryDirectory(prefix="vibeserve-tui-") as temp_dir:
             socket_path = Path(temp_dir) / "control.sock"
             with SupervisionSocketServer(socket_path, service):
+                try:
+                    client = _start_client(socket_path)
+                except BaseException as exc:
+                    raise InteractiveClientError(f"TUI client failed to launch: {exc}") from exc
                 with _MessageCapture(supervisor):
                     worker.start()
-                    client_error: BaseException | None = None
-                    client_code = 0
-                    try:
-                        client_code = _run_client(socket_path)
-                    except BaseException as exc:
-                        client_error = exc
+                    client_code = client.wait()
                     if worker.is_alive():
                         # A detached presentation client must not leave a
                         # safe-point pause blocking the backend indefinitely.
                         supervisor.resume()
                     worker.join()
-                if client_error is not None:
-                    raise InteractiveClientError(
-                        f"TUI client failed to launch: {client_error}"
-                    ) from client_error
                 if client_code != 0:
                     raise InteractiveClientError(
                         f"TUI client exited unexpectedly with status {client_code}"

@@ -118,7 +118,9 @@ def test_message_capture_converts_direct_output_to_events(tmp_path):
 def test_run_interactive_keeps_python_output_off_terminal(monkeypatch, capsys):
     original_stdout, original_stderr = sys.stdout, sys.stderr
     monkeypatch.setattr("vibe_serve.server.runtime._validate_client", lambda: None)
-    monkeypatch.setattr("vibe_serve.server.runtime._run_client", lambda path: 0)
+    client = Mock()
+    client.wait.return_value = 0
+    monkeypatch.setattr("vibe_serve.server.runtime._start_client", lambda path: client)
 
     def run():
         print("backend output")
@@ -128,6 +130,33 @@ def test_run_interactive_keeps_python_output_off_terminal(monkeypatch, capsys):
     assert sys.stdout is original_stdout
     assert sys.stderr is original_stderr
     assert "backend output" not in capsys.readouterr().out
+
+
+def test_run_interactive_starts_client_before_redirecting_terminal(monkeypatch):
+    order = []
+    client = Mock()
+    client.wait.return_value = 0
+
+    class Capture:
+        def __init__(self, supervisor):
+            pass
+
+        def __enter__(self):
+            order.append("capture")
+
+        def __exit__(self, exc_type, exc, traceback):
+            pass
+
+    monkeypatch.setattr("vibe_serve.server.runtime._validate_client", lambda: None)
+    monkeypatch.setattr("vibe_serve.server.runtime._MessageCapture", Capture)
+    monkeypatch.setattr(
+        "vibe_serve.server.runtime._start_client",
+        lambda path: order.append("client") or client,
+    )
+
+    run_interactive(lambda: None, exp_name="unused")
+
+    assert order == ["client", "capture"]
 
 
 def test_run_interactive_validates_client_before_starting_run(monkeypatch):
