@@ -45,12 +45,14 @@ def _validate_client() -> None:
     if node is None:
         raise InteractiveClientError(
             "cannot start the TUI because Node.js 20+ was not found. "
-            "Run `./vs ...` to prepare the frontend, activate Node first, or use --headless."
+            "Use `./vs ...` (recommended) to prepare and launch VibeServe. "
+            "Alternatively, activate Node first or use --headless."
         )
     if not entrypoint.is_file():
         raise InteractiveClientError(
             "cannot start the TUI because its compiled entrypoint is missing. "
-            "Run `./vs ...` to build it automatically, or use --headless."
+            "Use `./vs ...` (recommended) to build and launch it automatically, "
+            "or use --headless."
         )
 
 

@@ -142,7 +142,7 @@ def test_run_interactive_validates_client_before_starting_run(monkeypatch):
     monkeypatch.setattr("vibe_serve.server.runtime.shutil.which", lambda name: None)
     monkeypatch.delenv("VIBESERVE_NODE", raising=False)
 
-    with pytest.raises(InteractiveClientError, match=r"Run `\./vs"):
+    with pytest.raises(InteractiveClientError, match=r"Use `\./vs .*recommended"):
         run_interactive(run, exp_name="unused")
     assert started is False
 
