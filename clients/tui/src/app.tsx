@@ -1,11 +1,14 @@
-import React, {useCallback, useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {Box, Text, useApp, useInput, useStdout} from 'ink';
 import TextInput from 'ink-text-input';
 import {HELP_TEXT, parseInput} from './commands.js';
-import {SupervisionClient} from './client.js';
 import type {ProtocolResponse, RequestInput, RunEvent, RunSnapshot} from './protocol.js';
 
-type Props = {client: SupervisionClient};
+export interface SupervisionClientLike {
+  request(input: RequestInput): Promise<ProtocolResponse>;
+}
+
+type Props = {client: SupervisionClientLike};
 
 export function App({client}: Props) {
   const {exit} = useApp();

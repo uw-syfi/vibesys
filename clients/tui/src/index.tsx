@@ -1,9 +1,8 @@
-import React from 'react';
 import {render} from 'ink';
 import {App} from './app.js';
 import {SupervisionClient} from './client.js';
 
-const socketPath = process.env.VIBESERVE_CONTROL_SOCKET;
+const socketPath = process.env['VIBESERVE_CONTROL_SOCKET'];
 if (!socketPath) throw new Error('VIBESERVE_CONTROL_SOCKET is required');
 
 const client = await SupervisionClient.connect(socketPath);
