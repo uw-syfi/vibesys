@@ -34,18 +34,31 @@ class RunOutcome:
             self.error = error
 
 
-def _run_client(socket_path: Path) -> int:
+class InteractiveClientError(RuntimeError):
+    """The presentation client could not be started or exited unexpectedly."""
+
+
+def _validate_client() -> None:
+    """Fail before backend output is captured or the run is started."""
     node = os.environ.get("VIBESERVE_NODE") or shutil.which("node")
     entrypoint = PROJECT_ROOT / "clients" / "tui" / "dist" / "index.js"
     if node is None:
-        raise RuntimeError(
-            "Node.js 20+ is required for interactive mode. Install Node, set "
-            "VIBESERVE_NODE, or use --headless."
+        raise InteractiveClientError(
+            "cannot start the TUI because Node.js 20+ was not found. "
+            "Run `./vs ...` to prepare the frontend, activate Node first, or use --headless."
         )
     if not entrypoint.is_file():
-        raise RuntimeError(
-            "The interactive client is not built. Run `pnpm --dir clients/tui build` first."
+        raise InteractiveClientError(
+            "cannot start the TUI because its compiled entrypoint is missing. "
+            "Run `./vs ...` to build it automatically, or use --headless."
         )
+
+
+def _run_client(socket_path: Path) -> int:
+    node = os.environ.get("VIBESERVE_NODE") or shutil.which("node")
+    entrypoint = PROJECT_ROOT / "clients" / "tui" / "dist" / "index.js"
+    assert node is not None
+    assert entrypoint.is_file()
     env = os.environ.copy()
     env["VIBESERVE_CONTROL_SOCKET"] = str(socket_path)
     with Path("/dev/tty").open("r+b", buffering=0) as terminal:
@@ -125,6 +138,7 @@ class _MessageCapture:
 def run_interactive(run: Callable[[], Any], *, exp_name: str) -> Any:
     """Serve supervision state while an Ink client owns the terminal."""
     del exp_name
+    _validate_client()
     supervisor = RunSupervisor()
     service = SupervisionService(supervisor)
     outcome = RunOutcome()
@@ -158,9 +172,13 @@ def run_interactive(run: Callable[[], Any], *, exp_name: str) -> Any:
                         supervisor.resume()
                     worker.join()
                 if client_error is not None:
-                    raise client_error
+                    raise InteractiveClientError(
+                        f"TUI client failed to launch: {client_error}"
+                    ) from client_error
                 if client_code != 0:
-                    raise RuntimeError(f"VibeServe TUI client exited with status {client_code}")
+                    raise InteractiveClientError(
+                        f"TUI client exited unexpectedly with status {client_code}"
+                    )
     finally:
         REGISTRY.deactivate(supervisor)
     if outcome.error is not None:

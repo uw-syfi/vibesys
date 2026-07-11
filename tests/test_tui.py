@@ -8,6 +8,8 @@ import uuid
 from pathlib import Path
 from unittest.mock import Mock
 
+import pytest
+
 from vibe_serve.context import _RunContext
 from vibe_serve.server import (
     EventType,
@@ -115,6 +117,7 @@ def test_message_capture_converts_direct_output_to_events(tmp_path):
 
 def test_run_interactive_keeps_python_output_off_terminal(monkeypatch, capsys):
     original_stdout, original_stderr = sys.stdout, sys.stderr
+    monkeypatch.setattr("vibe_serve.server.runtime._validate_client", lambda: None)
     monkeypatch.setattr("vibe_serve.server.runtime._run_client", lambda path: 0)
 
     def run():
@@ -125,6 +128,23 @@ def test_run_interactive_keeps_python_output_off_terminal(monkeypatch, capsys):
     assert sys.stdout is original_stdout
     assert sys.stderr is original_stderr
     assert "backend output" not in capsys.readouterr().out
+
+
+def test_run_interactive_validates_client_before_starting_run(monkeypatch):
+    from vibe_serve.server.runtime import InteractiveClientError
+
+    started = False
+
+    def run():
+        nonlocal started
+        started = True
+
+    monkeypatch.setattr("vibe_serve.server.runtime.shutil.which", lambda name: None)
+    monkeypatch.delenv("VIBESERVE_NODE", raising=False)
+
+    with pytest.raises(InteractiveClientError, match=r"Run `\./vs"):
+        run_interactive(run, exp_name="unused")
+    assert started is False
 
 
 def test_service_accepts_chat(tmp_path):

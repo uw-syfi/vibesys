@@ -912,8 +912,13 @@ def main() -> None:
     interactive = not args.headless and sys.stdin.isatty() and sys.stdout.isatty()
     if interactive:
         from vibe_serve.server import run_interactive
+        from vibe_serve.server.runtime import InteractiveClientError
 
-        run_interactive(lambda: runner(args), exp_name=args.exp_name)
+        try:
+            run_interactive(lambda: runner(args), exp_name=args.exp_name)
+        except InteractiveClientError as exc:
+            print(f"vibe-serve: {exc}", file=sys.stderr)
+            sys.exit(1)
     else:
         runner(args)
 
