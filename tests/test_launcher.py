@@ -2,7 +2,14 @@ import subprocess
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from vibe_serve.launcher import _monitor, _selected_local_agent_cli, launch
+from vibe_serve.launcher import (
+    _monitor,
+    _report_backend_failure,
+    _selected_local_agent_cli,
+    _terminate_backend,
+    _wait_or_kill,
+    launch,
+)
 
 TARGET_ARGS = ["--input", "examples/model-serving/moonshine-streaming"]
 
@@ -96,3 +103,67 @@ def test_monitor_treats_stuck_backend_termination_as_launcher_cleanup(tmp_path: 
     assert result == 0
     terminate.assert_called_once_with(backend)
     report.assert_not_called()
+
+
+def test_wait_or_kill_forces_a_stuck_process_to_exit():
+    process = Mock()
+    process.wait.side_effect = [subprocess.TimeoutExpired("frontend", 10), 0]
+
+    _wait_or_kill(process)
+
+    process.kill.assert_called_once_with()
+    assert process.wait.call_count == 2
+
+
+def test_terminate_backend_escalates_from_process_group_signal():
+    backend = Mock(pid=123)
+    backend.poll.return_value = None
+    backend.wait.side_effect = [subprocess.TimeoutExpired("backend", 10), 0]
+
+    with patch("vibe_serve.launcher.os.killpg") as killpg:
+        _terminate_backend(backend)
+
+    assert killpg.call_args_list == [
+        ((123, 15),),
+        ((123, 9),),
+    ]
+    assert backend.wait.call_count == 2
+
+
+def test_terminate_backend_ignores_an_already_exited_process():
+    backend = Mock()
+    backend.poll.return_value = 0
+
+    with patch("vibe_serve.launcher.os.killpg") as killpg:
+        _terminate_backend(backend)
+
+    killpg.assert_not_called()
+
+
+def test_terminate_backend_tolerates_a_missing_process_group():
+    backend = Mock(pid=123)
+    backend.poll.return_value = None
+
+    with patch("vibe_serve.launcher.os.killpg", side_effect=ProcessLookupError):
+        _terminate_backend(backend)
+
+    backend.wait.assert_not_called()
+
+
+def test_report_backend_failure_prints_log_tail(tmp_path: Path, capsys):
+    backend = Mock(returncode=7)
+    log_path = tmp_path / "backend.log"
+    log_path.write_text("old\n" + "\n".join(f"line {number}" for number in range(25)))
+
+    _report_backend_failure(backend, log_path)
+
+    error = capsys.readouterr().err
+    assert "backend exited with status 7" in error
+    assert "line 5" in error
+    assert "old" not in error
+
+
+def test_report_backend_failure_tolerates_an_unreadable_log(tmp_path: Path, capsys):
+    _report_backend_failure(Mock(returncode=1), tmp_path / "missing.log")
+
+    assert "backend exited with status 1" in capsys.readouterr().err
