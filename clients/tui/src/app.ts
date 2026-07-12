@@ -20,7 +20,6 @@ export interface OpenTuiApp {
 }
 
 export function createOpenTuiApp(renderer: CliRenderer, controller: SessionController): OpenTuiApp {
-  let exitScheduled = false;
   const expandedPrompts = new Set<string>();
   const root = new BoxRenderable(renderer, {
     id: 'app',
@@ -107,10 +106,6 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
     header.content = `VibeServe · ${statusText(state)}${returnHint}`;
     if (state.view === 'live') renderConversation(state.conversation);
     else renderDetail(state.detailContent);
-    if (!exitScheduled && state.terminal) {
-      exitScheduled = true;
-      setTimeout(() => renderer.destroy(), 100);
-    }
   }
 
   function clearOutput(): void {

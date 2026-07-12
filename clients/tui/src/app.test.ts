@@ -137,13 +137,25 @@ describe('OpenTUI presentation', () => {
     expect(expanded).toContain('collapse');
   });
 
-  it('exits after the model reaches a terminal state', async () => {
+  it('keeps terminal results visible until the operator exits', async () => {
     const testRenderer = await createTestRenderer({width: 80, height: 16});
-    const controller = new FakeController({...initialSessionState(), terminal: true});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      status: 'failed',
+      terminal: true,
+      view: 'error',
+      detailContent: 'Invalid --max-rounds value',
+    });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
-    cleanup.push(() => app.destroy());
+    registerCleanup(testRenderer.renderer, app);
+    let destroyed = false;
+    testRenderer.renderer.once('destroy', () => {
+      destroyed = true;
+    });
 
-    await new Promise<void>(resolve => testRenderer.renderer.once('destroy', resolve));
+    await testRenderer.waitForFrame(value => value.includes('Invalid --max-rounds value'));
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(destroyed).toBe(false);
   });
 });
 
