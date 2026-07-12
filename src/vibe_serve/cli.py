@@ -44,6 +44,7 @@ _MODALITIES = (
     "text_to_speech",
     "speech_to_text",
     "realtime_audio",
+    "kv_store",
 )
 
 _MODAL_PROFILERS = frozenset({ProfilerKind.AUTO, ProfilerKind.TORCH, ProfilerKind.NONE})
