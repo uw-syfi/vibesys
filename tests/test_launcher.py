@@ -7,18 +7,25 @@ from vibe_serve.launcher import _monitor, _selected_local_agent_cli, launch
 TARGET_ARGS = ["--input", "examples/model-serving/moonshine-streaming"]
 
 
-def test_selected_local_agent_cli_uses_configured_default():
-    assert _selected_local_agent_cli(TARGET_ARGS) == "codex"
+def _args_with_config(tmp_path: Path) -> list[str]:
+    config = tmp_path / "agent.toml"
+    config.write_text('[model]\nname = "test-model"\n')
+    return [*TARGET_ARGS, "--config", str(config)]
 
 
-def test_selected_local_agent_cli_honors_override_and_skips_stub():
-    assert _selected_local_agent_cli([*TARGET_ARGS, "--cli-provider", "claude"]) == "claude"
-    assert _selected_local_agent_cli([*TARGET_ARGS, "--stub-agent"]) is None
+def test_selected_local_agent_cli_uses_configured_default(tmp_path: Path):
+    assert _selected_local_agent_cli(_args_with_config(tmp_path)) == "codex"
 
 
-def test_launch_reports_missing_agent_cli_before_starting_children(capsys):
+def test_selected_local_agent_cli_honors_override_and_skips_stub(tmp_path: Path):
+    args = _args_with_config(tmp_path)
+    assert _selected_local_agent_cli([*args, "--cli-provider", "claude"]) == "claude"
+    assert _selected_local_agent_cli([*args, "--stub-agent"]) is None
+
+
+def test_launch_reports_missing_agent_cli_before_starting_children(tmp_path: Path, capsys):
     with patch("vibe_serve.launcher.shutil.which", return_value=None):
-        result = launch(TARGET_ARGS)
+        result = launch(_args_with_config(tmp_path))
 
     assert result == 1
     error = capsys.readouterr().err
