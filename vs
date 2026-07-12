@@ -24,18 +24,6 @@ for argument in "$@"; do
 done
 
 if [[ "$interactive" == true ]]; then
-  nvm_activation_log=""
-  nvm_script="${NVM_DIR:-$HOME/.nvm}/nvm.sh"
-  if [[ -s "$nvm_script" ]]; then
-    nvm_activation_log="$(mktemp -t vibeserve-nvm.XXXXXX)"
-    temporary_files+=("$nvm_activation_log")
-    if ! source "$nvm_script" || ! nvm use node >"$nvm_activation_log" 2>&1; then
-      # A checked-in build can still run with Bun alone. If rebuilding becomes
-      # necessary below, report this activation failure with its useful detail.
-      :
-    fi
-  fi
-
   if ! command -v bun >/dev/null 2>&1 && [[ -x "$HOME/.bun/bin/bun" ]]; then
     export PATH="$HOME/.bun/bin:$PATH"
   fi
@@ -61,13 +49,16 @@ if [[ "$interactive" == true ]]; then
   fi
 
   if [[ "$rebuild" == true ]]; then
+    if ! command -v node >/dev/null 2>&1 && [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
+      # nvm is optional. Load it only as one possible way to satisfy the
+      # frontend rebuild dependency; runtime agent CLIs are checked separately.
+      source "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+      nvm use node >/dev/null 2>&1 || true
+    fi
     if ! command -v node >/dev/null 2>&1; then
-      echo "vs: could not activate Node.js 20+ for the interactive client." >&2
-      if [[ -n "$nvm_activation_log" && -s "$nvm_activation_log" ]]; then
-        sed 's/^/  /' "$nvm_activation_log" >&2
-      else
-        echo "  Install Node.js 20+ or configure nvm's 'node' alias." >&2
-      fi
+      echo "vs: Node.js 20+ is required to rebuild the interactive client." >&2
+      echo "  Install Node.js 20+, activate it with your preferred version manager," >&2
+      echo "  or use a checkout containing an up-to-date clients/tui/dist build." >&2
       exit 1
     fi
 
@@ -99,9 +90,6 @@ if [[ "$interactive" == true ]]; then
       exit 1
     fi
     rm -f "$preparation_log"
-  fi
-  if [[ -n "$nvm_activation_log" ]]; then
-    rm -f "$nvm_activation_log"
   fi
 fi
 

@@ -22,6 +22,16 @@ _BACKEND_EXIT_GRACE_SECONDS = 2.0
 
 
 def launch(argv: list[str]) -> int:
+    agent_cli = _selected_local_agent_cli(argv)
+    if agent_cli is not None and shutil.which(agent_cli) is None:
+        print(
+            f"vibe-serve-launch: agent CLI {agent_cli!r} was not found on PATH.\n"
+            f"  Install {agent_cli!r} and make it available in this shell, choose another\n"
+            "  --cli-provider, or select --agent-backend deepagents.",
+            file=sys.stderr,
+        )
+        return 1
+
     runtime = os.environ.get("VIBESERVE_TUI_RUNTIME") or shutil.which("bun")
     entrypoint = PROJECT_ROOT / "clients" / "tui" / "dist" / "index.js"
     if runtime is None:
@@ -68,6 +78,23 @@ def launch(argv: list[str]) -> int:
                     frontend.terminate()
                     _wait_or_kill(frontend)
                 _terminate_backend(backend)
+
+
+def _selected_local_agent_cli(argv: list[str]) -> str | None:
+    """Return the required host CLI, or ``None`` when this run needs none."""
+    from vibe_serve.cli import _PARSER_BUILDERS, _extract_loop_selection
+    from vibe_serve.config import _load_config
+    from vibe_serve.constants import DEFAULT_AGENT_BACKEND
+
+    loop_kind, remaining = _extract_loop_selection(argv)
+    args = _PARSER_BUILDERS[loop_kind]().parse_args(remaining)
+    if getattr(args, "stub_agent", False) or args.modal or args.docker:
+        return None
+    config = _load_config(args.config)
+    backend = args.agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND
+    if backend != "cli":
+        return None
+    return args.cli_provider or config.agent.cli_provider or "codex"
 
 
 def _wait_until_ready(socket_path: Path, backend: subprocess.Popen[bytes]) -> bool:
