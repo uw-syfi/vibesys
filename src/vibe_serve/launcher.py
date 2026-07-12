@@ -18,6 +18,7 @@ from vibe_serve.constants import PROJECT_ROOT
 
 _READY_TIMEOUT_SECONDS = 30.0
 _SHUTDOWN_TIMEOUT_SECONDS = 10.0
+_BACKEND_EXIT_GRACE_SECONDS = 2.0
 
 
 def launch(argv: list[str]) -> int:
@@ -115,10 +116,15 @@ def _monitor(
         backend_code = backend.poll()
         if frontend_code is not None:
             if backend_code is None:
-                _terminate_backend(backend)
+                try:
+                    backend_code = backend.wait(timeout=_BACKEND_EXIT_GRACE_SECONDS)
+                except subprocess.TimeoutExpired:
+                    _terminate_backend(backend)
+                    backend_code = 0
             if frontend_code != 0:
                 return 130 if frontend_code in (-signal.SIGINT, 130) else frontend_code
-            backend_code = backend.poll()
+            if backend_code not in (None, 0):
+                _report_backend_failure(backend, backend_log_path)
             return backend_code if backend_code not in (None, 0) else 0
         if backend_code is not None:
             if backend_code != 0:

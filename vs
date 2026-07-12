@@ -4,6 +4,14 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$root_dir"
 
+temporary_files=()
+cleanup() {
+  if [[ "${#temporary_files[@]}" -gt 0 ]]; then
+    rm -f "${temporary_files[@]}"
+  fi
+}
+trap cleanup EXIT
+
 interactive=true
 if [[ ! -t 0 || ! -t 1 ]]; then
   interactive=false
@@ -16,6 +24,18 @@ for argument in "$@"; do
 done
 
 if [[ "$interactive" == true ]]; then
+  nvm_activation_log=""
+  nvm_script="${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+  if [[ -s "$nvm_script" ]]; then
+    nvm_activation_log="$(mktemp -t vibeserve-nvm.XXXXXX)"
+    temporary_files+=("$nvm_activation_log")
+    if ! source "$nvm_script" || ! nvm use node >"$nvm_activation_log" 2>&1; then
+      # A checked-in build can still run with Bun alone. If rebuilding becomes
+      # necessary below, report this activation failure with its useful detail.
+      :
+    fi
+  fi
+
   if ! command -v bun >/dev/null 2>&1 && [[ -x "$HOME/.bun/bin/bun" ]]; then
     export PATH="$HOME/.bun/bin:$PATH"
   fi
@@ -41,13 +61,13 @@ if [[ "$interactive" == true ]]; then
   fi
 
   if [[ "$rebuild" == true ]]; then
-    if ! command -v node >/dev/null 2>&1 && [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
-      # nvm is a shell function, so repository launchers must load it explicitly.
-      source "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
-      nvm use node >/dev/null
-    fi
     if ! command -v node >/dev/null 2>&1; then
-      echo "vs: Node.js 20+ is required for the interactive client." >&2
+      echo "vs: could not activate Node.js 20+ for the interactive client." >&2
+      if [[ -n "$nvm_activation_log" && -s "$nvm_activation_log" ]]; then
+        sed 's/^/  /' "$nvm_activation_log" >&2
+      else
+        echo "  Install Node.js 20+ or configure nvm's 'node' alias." >&2
+      fi
       exit 1
     fi
 
@@ -68,7 +88,7 @@ if [[ "$interactive" == true ]]; then
 
     echo "Launching VibeServe..." >&2
     preparation_log="$(mktemp -t vibeserve-prepare.XXXXXX)"
-    trap 'rm -f "$preparation_log"' EXIT
+    temporary_files+=("$preparation_log")
     if ! {
       "${pnpm_command[@]}" --dir clients/tui install --frozen-lockfile &&
         "${pnpm_command[@]}" --dir clients/tui generate:protocol &&
@@ -79,7 +99,9 @@ if [[ "$interactive" == true ]]; then
       exit 1
     fi
     rm -f "$preparation_log"
-    trap - EXIT
+  fi
+  if [[ -n "$nvm_activation_log" ]]; then
+    rm -f "$nvm_activation_log"
   fi
 fi
 
