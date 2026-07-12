@@ -55,7 +55,9 @@ jobs:
           node-version: 24
 
       - name: Enable pnpm
-        run: corepack enable
+        run: |
+          corepack enable
+          corepack install --global pnpm@11.11.0
 
       - name: Set up Bun for OpenTUI
         uses: oven-sh/setup-bun@v2
