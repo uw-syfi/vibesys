@@ -1,10 +1,16 @@
 import json
+import os
+import shutil
 import socket
+import subprocess
+import sys
 import threading
 import time
 import uuid
 from pathlib import Path
 from unittest.mock import Mock
+
+import pytest
 
 from vibe_serve.context import _RunContext
 from vibe_serve.server import (
@@ -87,6 +93,34 @@ def test_general_chat_is_distinct_from_status_query(tmp_path):
     assert event_types == ["server_started", "chat"]
 
 
+def test_bootstrap_events_migrate_to_run_audit_without_replacing_history(tmp_path):
+    logs = tmp_path / "run" / "logs"
+    historical = RunSupervisor()
+    historical.attach(logs)
+    historical.record(EventType.RUN_FINISHED, "previous invocation", status="completed")
+
+    bootstrap = tmp_path / "session"
+    supervisor = RunSupervisor()
+    supervisor.attach(bootstrap)
+    supervisor.record(EventType.SERVER_READY, status="active")
+    supervisor.attach(logs)
+    supervisor.record(EventType.RUN_STARTED, status="active")
+
+    audited = _events(logs / "run-events.jsonl")
+    assert [event["type"] for event in audited] == [
+        "server_started",
+        "run_finished",
+        "server_started",
+        "server_ready",
+        "run_started",
+    ]
+    assert [event.type for event in supervisor.read_events()] == [
+        "server_started",
+        "server_ready",
+        "run_started",
+    ]
+
+
 def test_chat_reports_structured_failed_invocation(tmp_path):
     supervisor = RunSupervisor()
     supervisor.attach(tmp_path)
@@ -160,6 +194,71 @@ def test_socket_subscription_replays_then_streams_new_events(tmp_path):
     assert replay["type"] == "event_batch"
     assert streamed["type"] == "event"
     assert streamed["event"]["type"] == "chat"
+
+
+def test_cli_parse_failure_is_streamed_after_client_attaches():
+    session_dir = Path("/tmp") / f"vs-test-{uuid.uuid4().hex}"
+    session_dir.mkdir()
+    socket_path = session_dir / "control.sock"
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "vibe_serve.cli",
+            "--headless",
+            "--control-socket",
+            str(socket_path),
+            "--not-a-real-option",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(Path.cwd() / "src")},
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not socket_path.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if not socket_path.exists():
+            output, error = process.communicate(timeout=5)
+            pytest.fail(
+                f"backend did not create control socket: stdout={output!r} stderr={error!r}"
+            )
+
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(5)
+            client.connect(str(socket_path))
+            stream = client.makefile("rwb")
+            stream.write(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
+            stream.flush()
+            messages = []
+            while True:
+                line = stream.readline()
+                if not line:
+                    break
+                messages.append(json.loads(line))
+                events = []
+                for message in messages:
+                    if message["type"] == "event":
+                        events.append(message["event"])
+                    elif message["type"] == "event_batch":
+                        events.extend(message["events"])
+                if any(event["type"] == "configuration_failed" for event in events):
+                    break
+            stream.close()
+
+        assert process.wait(timeout=5) == 2
+    finally:
+        if process.poll() is None:
+            process.kill()
+        stdout, stderr = process.communicate(timeout=5)
+        shutil.rmtree(session_dir, ignore_errors=True)
+
+    failures = [event for event in events if event["type"] == "configuration_failed"]
+    assert failures[0]["data"]["code"] == "invalid_arguments"
+    assert "--not-a-real-option" in failures[0]["data"]["message"]
+    assert stdout == ""
+    assert stderr == ""
 
 
 def test_run_context_records_invocation_boundary(tmp_path):

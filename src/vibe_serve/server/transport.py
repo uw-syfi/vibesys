@@ -34,10 +34,13 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 request_id = str(raw.get("request_id", request_id))
                 request = _REQUEST_ADAPTER.validate_python(raw)
                 if isinstance(request, SubscribeRequest):
+                    self.server.client_subscribed.set()  # type: ignore[attr-defined]
                     try:
                         self._stream(request)
                     except (BrokenPipeError, ConnectionResetError):
                         pass
+                    finally:
+                        self.server.client_disconnected.set()  # type: ignore[attr-defined]
                     return
                 response = service.execute(request)
             except (json.JSONDecodeError, TypeError, ValidationError, ValueError) as exc:
@@ -96,11 +99,15 @@ class SupervisionSocketServer:
         self.service = service
         self._server: _UnixServer | None = None
         self._thread: threading.Thread | None = None
+        self._client_subscribed = threading.Event()
+        self._client_disconnected = threading.Event()
 
     def start(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.unlink(missing_ok=True)
         self._server = _UnixServer(self.path, self.service)
+        self._server.client_subscribed = self._client_subscribed  # type: ignore[attr-defined]
+        self._server.client_disconnected = self._client_disconnected  # type: ignore[attr-defined]
         os.chmod(self.path, 0o600)
         self._thread = threading.Thread(
             target=self._server.serve_forever,
@@ -108,6 +115,14 @@ class SupervisionSocketServer:
             daemon=True,
         )
         self._thread.start()
+
+    def wait_for_subscriber(self, timeout: float) -> bool:
+        """Wait until the presentation client has established its event stream."""
+        return self._client_subscribed.wait(timeout)
+
+    def wait_for_subscriber_disconnect(self) -> None:
+        """Keep terminal events queryable until the attached client exits."""
+        self._client_disconnected.wait()
 
     def close(self) -> None:
         if self._server is not None:

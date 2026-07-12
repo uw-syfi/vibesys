@@ -15,6 +15,7 @@ import pytest
 from vibe_serve.domains.base import DomainName, DomainRole
 from vibe_serve.domains.registry import resolve_domain
 from vibe_serve.domains.rendering import render_domain_section
+from vibe_serve.errors import ConfigurationError
 from vibe_serve.profilers import ProfilerKind
 from vibe_serve.prompts import render_template
 
@@ -56,7 +57,7 @@ def test_cli_default_interface_is_inprocess():
 def test_cli_rejects_unknown_interface(interface):
     from vibe_serve.cli import _build_agent_parser
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(ConfigurationError):
         _build_agent_parser().parse_args(
             ["--input", "/x", "--exp-name", "e", "--interface", interface]
         )

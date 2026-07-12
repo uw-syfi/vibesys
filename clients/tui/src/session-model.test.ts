@@ -47,6 +47,27 @@ describe('session event model', () => {
     expect(state.terminal).toBe(true);
   });
 
+  it('shows structured configuration failures in the error view', () => {
+    const state = applyEvent(
+      initialSessionState(),
+      event(1, 'configuration_failed', {
+        kind: 'configuration_failed',
+        code: 'resume_limit_exhausted',
+        stage: 'resume_resolution',
+        message: 'This run has completed 30 rounds.',
+        usage: null,
+        exit_code: 2,
+      }),
+    );
+
+    expect(state.status).toBe('failed');
+    expect(state.terminal).toBe(true);
+    expect(state.view).toBe('error');
+    expect(state.detailContent).toContain('This run has completed 30 rounds.');
+    expect(state.detailContent).toContain('resume_limit_exhausted');
+    expect(state.conversation[0]?.tone).toBe('failure');
+  });
+
   it('coalesces streamed assistant chunks and pairs each tool call with its result', () => {
     let state = initialSessionState();
     state = applyEvent(

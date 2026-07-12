@@ -20,7 +20,9 @@ import argparse
 import json
 import sys
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
+from typing import NoReturn
 
 from vibe_serve.config import Config, _load_config
 from vibe_serve.constants import (
@@ -28,6 +30,7 @@ from vibe_serve.constants import (
     PROJECT_ROOT,
     ComputeBackend,
 )
+from vibe_serve.errors import ConfigurationDiagnostic, ConfigurationError
 from vibe_serve.input_manifest import InputBundle, load_input_bundle
 from vibe_serve.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind
 from vibe_serve.sandbox.run_environment import (
@@ -47,6 +50,43 @@ _MODALITIES = (
 )
 
 _MODAL_PROFILERS = frozenset({ProfilerKind.AUTO, ProfilerKind.TORCH, ProfilerKind.NONE})
+
+
+class _RunArgumentParser(argparse.ArgumentParser):
+    """Argument parser that reports errors through the supervision protocol."""
+
+    def error(self, message: str) -> NoReturn:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="invalid_arguments",
+                stage="argument_parsing",
+                message=message,
+                usage=self.format_usage().strip(),
+            )
+        )
+
+
+@dataclass(frozen=True)
+class CliInvocation:
+    loop_kind: str
+    args: argparse.Namespace
+
+
+def _configuration_error(
+    message: str,
+    *,
+    code: str = "invalid_configuration",
+    stage: str = "semantic_validation",
+    exit_code: int = 2,
+) -> NoReturn:
+    raise ConfigurationError(
+        ConfigurationDiagnostic(
+            code=code,
+            stage=stage,
+            message=message,
+            exit_code=exit_code,
+        )
+    )
 
 
 def _parse_profiler_kind(value: str) -> ProfilerKind:
@@ -106,13 +146,17 @@ def _extract_loop_selection(argv: list[str]) -> tuple[str, list[str]]:
 
 
 def _fail(msg: str) -> None:
-    print(
-        f"vibe-serve: {msg}\n"
-        f"Usage: vibe-serve --outer-loop {{{'|'.join(_OUTER_LOOPS)}}} "
-        f"[loop-specific args...]",
-        file=sys.stderr,
+    raise ConfigurationError(
+        ConfigurationDiagnostic(
+            code="invalid_arguments",
+            stage="argument_parsing",
+            message=msg,
+            usage=(
+                f"Usage: vibe-serve --outer-loop {{{'|'.join(_OUTER_LOOPS)}}} "
+                "[loop-specific args...]"
+            ),
+        )
     )
-    sys.exit(2)
 
 
 # ---------------------------------------------------------------------------
@@ -294,8 +338,7 @@ def load_config_and_skills(
     try:
         config = _load_config(args.config)
     except (ValueError, FileNotFoundError) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        _configuration_error(str(e), code="config_load_failed", stage="config_loading")
 
     backend: ComputeBackend = args.backend or config.backend.name
 
@@ -332,12 +375,16 @@ def _resolve_run_dir(run_dir_arg: str) -> str:
         return run_dir_arg
     exp_env = PROJECT_ROOT / "exp_env"
     if not exp_env.is_dir():
-        print("Error: exp_env/ directory does not exist.", file=sys.stderr)
-        sys.exit(1)
+        _configuration_error(
+            "exp_env/ directory does not exist.", code="resume_not_found", stage="resume_resolution"
+        )
     dirs = sorted([d.name for d in exp_env.iterdir() if d.is_dir()])
     if not dirs:
-        print("Error: no experiment directories found in exp_env/.", file=sys.stderr)
-        sys.exit(1)
+        _configuration_error(
+            "No experiment directories found in exp_env/.",
+            code="resume_not_found",
+            stage="resume_resolution",
+        )
     return dirs[-1]
 
 
@@ -361,7 +408,7 @@ def _apply_common_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _make_parser(prog: str, description: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=prog, description=description)
+    parser = _RunArgumentParser(prog=prog, description=description)
     _apply_common_args(parser)
     return parser
 
@@ -448,26 +495,23 @@ def _build_agent_parser() -> argparse.ArgumentParser:
 def _validate_target_inputs(args: argparse.Namespace) -> None:
     input_arg = getattr(args, "input", None)
     if input_arg is None:
-        print(
+        _configuration_error(
             "Error: missing required target input: --input. "
             "Pass a bundle containing OBJECTIVE.md and vibeserve.input.toml.",
-            file=sys.stderr,
+            code="missing_input",
+            stage="input_loading",
         )
-        sys.exit(2)
     try:
         args.input_bundle = load_input_bundle(input_arg)
     except (FileNotFoundError, ValueError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        sys.exit(2)
+        _configuration_error(str(exc), code="invalid_input", stage="input_loading")
 
 
 def _validate_agent(args: argparse.Namespace) -> None:
     if args.modal and args.profiler not in _MODAL_PROFILERS:
-        print(
+        _configuration_error(
             "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
-            file=sys.stderr,
         )
-        sys.exit(2)
     _validate_target_inputs(args)
 
 
@@ -488,12 +532,30 @@ def _run_agent(args: argparse.Namespace) -> None:
         existing = True
         print(f"Resuming agent run: exp_env/{run_dir_name}/")
         exp_dir = PROJECT_ROOT / "exp_env" / run_dir_name
+        if not exp_dir.is_dir():
+            _configuration_error(
+                f"Run directory does not exist: exp_env/{run_dir_name}",
+                code="resume_not_found",
+                stage="resume_resolution",
+            )
+        from vibe_serve.server.registry import active_supervisor
+
+        supervisor = active_supervisor()
+        if supervisor is not None:
+            supervisor.attach(exp_dir / "logs")
         if args.start_round is None:
             start_round = _detect_resume_round(exp_dir)
             print(f"Auto-detected next round: {start_round}")
         else:
             print(f"Resetting to round {start_round} (discarding later rounds).")
             _prune_rounds_state(exp_dir, keep_up_to=start_round)
+        if start_round > args.max_rounds:
+            _configuration_error(
+                f"This run has completed {start_round - 1} rounds; --max-rounds is a total "
+                f"limit. Choose --max-rounds {start_round} or greater to continue.",
+                code="resume_limit_exhausted",
+                stage="resume_resolution",
+            )
 
     success = run_agent_loop(
         config=config,
@@ -608,24 +670,18 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
 
 def _validate_evolve(args: argparse.Namespace) -> None:
     if args.modal and args.profiler not in _MODAL_PROFILERS:
-        print(
+        _configuration_error(
             "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
-            file=sys.stderr,
         )
-        sys.exit(2)
     _validate_target_inputs(args)
     if args.children_per_generation < 1:
-        print("Error: --children-per-generation must be >= 1.", file=sys.stderr)
-        sys.exit(2)
+        _configuration_error("--children-per-generation must be >= 1.")
     if args.max_generations < 1:
-        print("Error: --max-generations must be >= 1.", file=sys.stderr)
-        sys.exit(2)
+        _configuration_error("--max-generations must be >= 1.")
     if args.selection_temperature <= 0:
-        print("Error: --selection-temperature must be > 0.", file=sys.stderr)
-        sys.exit(2)
+        _configuration_error("--selection-temperature must be > 0.")
     if not (0.0 <= args.frontier_bias <= 1.0):
-        print("Error: --frontier-bias must be in [0, 1].", file=sys.stderr)
-        sys.exit(2)
+        _configuration_error("--frontier-bias must be in [0, 1].")
 
 
 def _run_evolve(args: argparse.Namespace) -> None:
@@ -710,18 +766,14 @@ def _build_openevolve_parser() -> argparse.ArgumentParser:
 
 def _validate_openevolve(args: argparse.Namespace) -> None:
     if args.modal and args.profiler not in _MODAL_PROFILERS:
-        print(
+        _configuration_error(
             "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
-            file=sys.stderr,
         )
-        sys.exit(2)
     _validate_target_inputs(args)
     if args.max_iterations < 1:
-        print("Error: --max-iterations must be >= 1.", file=sys.stderr)
-        sys.exit(2)
+        _configuration_error("--max-iterations must be >= 1.")
     if args.k_inspirations < 0:
-        print("Error: --k-inspirations must be >= 0.", file=sys.stderr)
-        sys.exit(2)
+        _configuration_error("--k-inspirations must be >= 0.")
 
 
 def _run_openevolve(args: argparse.Namespace) -> None:
@@ -794,11 +846,9 @@ def _build_plain_parser() -> argparse.ArgumentParser:
 
 def _validate_plain(args: argparse.Namespace) -> None:
     if args.modal and args.profiler not in _MODAL_PROFILERS:
-        print(
+        _configuration_error(
             "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
-            file=sys.stderr,
         )
-        sys.exit(2)
     _validate_target_inputs(args)
 
 
@@ -908,33 +958,81 @@ _RUNNERS = {
 }
 
 
-def main() -> None:
-    loop_kind, remaining = _extract_loop_selection(sys.argv[1:])
+def parse_cli_invocation(argv: list[str]) -> CliInvocation:
+    """Parse and validate one invocation without printing or exiting."""
+    loop_kind, remaining = _extract_loop_selection(argv)
     args = _PARSER_BUILDERS[loop_kind]().parse_args(remaining)
-    # Resolve validator + runner via globals() so unittest.mock.patch on
-    # ``vibe_serve.cli._{validate,run}_<kind>`` takes effect.
     globals()[_VALIDATORS[loop_kind]](args)
-    runner = globals()[_RUNNERS[loop_kind]]
-    if args.control_socket is not None:
-        from vibe_serve.server.runtime import run_server
+    return CliInvocation(loop_kind=loop_kind, args=args)
 
-        input_path = str(args.input_bundle.root) if args.input_bundle is not None else ""
+
+def _dispatch(argv: list[str]) -> None:
+    invocation = parse_cli_invocation(argv)
+    loop_kind, args = invocation.loop_kind, invocation.args
+    runner = globals()[_RUNNERS[loop_kind]]
+    from vibe_serve.server.events import EventStatus, EventType, RunStartedData
+    from vibe_serve.server.registry import active_supervisor
+
+    supervisor = active_supervisor()
+    if supervisor is not None:
         max_rounds = getattr(args, "max_rounds", getattr(args, "max_iterations", 1))
-        run_server(
-            lambda: runner(args),
-            socket_path=args.control_socket,
-            outer_loop=loop_kind,
-            input_path=input_path,
-            max_rounds=max_rounds,
+        supervisor.record(
+            EventType.RUN_STARTED,
+            status=EventStatus.ACTIVE,
+            data=RunStartedData(
+                outer_loop=loop_kind,
+                input=str(args.input_bundle.root),
+                max_rounds=max_rounds,
+            ),
         )
-        return
-    interactive = not args.headless and sys.stdin.isatty() and sys.stdout.isatty()
+    runner(args)
+
+
+def _control_socket_from_argv(argv: list[str]) -> Path | None:
+    """Read the transport bootstrap flag without parsing run configuration."""
+    for index, token in enumerate(argv):
+        if token.startswith("--control-socket="):
+            value = token.partition("=")[2]
+            return Path(value) if value else None
+        if token == "--control-socket" and index + 1 < len(argv):
+            return Path(argv[index + 1])
+    return None
+
+
+def _render_configuration_error(error: ConfigurationError) -> NoReturn:
+    diagnostic = error.diagnostic
+    print(f"vibe-serve: {diagnostic.message}", file=sys.stderr)
+    if diagnostic.usage:
+        print(diagnostic.usage, file=sys.stderr)
+    raise SystemExit(diagnostic.exit_code)
+
+
+def main() -> None:
+    argv = sys.argv[1:]
+    control_socket = _control_socket_from_argv(argv)
+    interactive = (
+        control_socket is None
+        and "--headless" not in argv
+        and sys.stdin.isatty()
+        and sys.stdout.isatty()
+    )
     if interactive:
         from vibe_serve.launcher import launch
 
-        raise SystemExit(launch(sys.argv[1:]))
-    else:
-        runner(args)
+        raise SystemExit(launch(argv))
+    if control_socket is not None:
+        from vibe_serve.server.runtime import run_server
+
+        try:
+            run_server(lambda: _dispatch(argv), socket_path=control_socket)
+        except ConfigurationError as exc:
+            raise SystemExit(exc.diagnostic.exit_code) from None
+        return
+
+    try:
+        _dispatch(argv)
+    except ConfigurationError as exc:
+        _render_configuration_error(exc)
 
 
 if __name__ == "__main__":

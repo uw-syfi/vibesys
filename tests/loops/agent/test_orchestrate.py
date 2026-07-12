@@ -8,6 +8,7 @@ import pytest
 
 from vibe_serve.agents import AgentRunner
 from vibe_serve.domains.base import DomainName
+from vibe_serve.errors import ConfigurationError
 from vibe_serve.loops.agent import issue_board
 from vibe_serve.loops.agent.loop import run_agent_loop
 from vibe_serve.profilers import ProfilerKind
@@ -704,7 +705,7 @@ def test_cli_rejects_modal_with_nsys_profiler(tmp_path, ref_file):
             "nsys",
         ]
     )
-    with pytest.raises(SystemExit):
+    with pytest.raises(ConfigurationError):
         validate_args(args)
 
 

@@ -36,6 +36,7 @@ class RunSupervisor:
         self._active_invocation: str | None = None
         self._run_status = "starting"
         self._store: EventStore | None = None
+        self._audit_store: EventStore | None = None
         self._pending_events: list[RunEvent] = []
         self.log_dir: Path | None = None
         self._current_kind: str | None = None
@@ -50,13 +51,21 @@ class RunSupervisor:
         log_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir = log_dir
         events_path = log_dir / "run-events.jsonl"
-        store = EventStore(events_path, run_id=log_dir.parent.name)
         with self._condition:
-            self._store = store
-            pending, self._pending_events = self._pending_events, []
+            store = self._store
+            if store is not None and (store.path == events_path or self._audit_store is not None):
+                return
+            if store is None:
+                store = EventStore(events_path, run_id=log_dir.parent.name)
+                self._store = store
+                pending, self._pending_events = self._pending_events, []
+            else:
+                self._audit_store = EventStore(events_path, run_id=log_dir.parent.name)
+                pending = store.read()
         for event in pending:
-            store.append(event)
-        self.record(EventType.SERVER_STARTED, status=EventStatus.ACTIVE)
+            (self._audit_store or store).append(event)
+        if self._audit_store is None:
+            self.record(EventType.SERVER_STARTED, status=EventStatus.ACTIVE)
         with self._condition:
             self._run_status = "running"
 
@@ -100,7 +109,11 @@ class RunSupervisor:
             if store is None:
                 self._pending_events.append(event)
                 return event
-        return store.append(event)
+        recorded = store.append(event)
+        audit_store = self._audit_store
+        if audit_store is not None:
+            audit_store.append(event)
+        return recorded
 
     def read_events(self, after_sequence: int = 0) -> list[RunEvent]:
         store = self._store

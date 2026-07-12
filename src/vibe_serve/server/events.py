@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 class EventType(StrEnum):
     SERVER_STARTED = "server_started"
     SERVER_READY = "server_ready"
+    CONFIGURATION_FAILED = "configuration_failed"
     RUN_STARTED = "run_started"
     RUN_INTERRUPTED = "run_interrupted"
     CHAT = "chat"
@@ -85,6 +86,15 @@ class RunInterruptedData(BaseModel):
     signal: str | None = None
 
 
+class ConfigurationFailedData(BaseModel):
+    kind: Literal["configuration_failed"] = "configuration_failed"
+    code: str
+    stage: str
+    message: str
+    usage: str | None = None
+    exit_code: int
+
+
 class PhaseData(BaseModel):
     kind: Literal["phase"] = "phase"
     phase: str
@@ -135,6 +145,7 @@ EventData = Annotated[
     | ServerReadyData
     | RunStartedData
     | RunInterruptedData
+    | ConfigurationFailedData
     | PhaseData
     | AgentOutputChunkData
     | SubprocessOutputData

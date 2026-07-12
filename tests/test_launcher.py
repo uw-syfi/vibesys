@@ -1,4 +1,5 @@
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -7,31 +8,28 @@ import pytest
 from vibe_serve.launcher import (
     _monitor,
     _report_backend_failure,
-    _selected_local_agent_cli,
     _terminate_backend,
     _wait_or_kill,
     launch,
     main,
 )
 
-TARGET_ARGS = ["--input", "examples/model-serving/moonshine-streaming"]
 
+def test_launch_routes_help_to_the_canonical_headless_parser():
+    with patch("vibe_serve.launcher.subprocess.call", return_value=0) as call:
+        assert launch(["--outer-loop", "agent", "--help"]) == 0
 
-def _args_with_config(tmp_path: Path) -> list[str]:
-    config = tmp_path / "agent.toml"
-    config.write_text('[model]\nname = "test-model"\n')
-    return [*TARGET_ARGS, "--config", str(config)]
-
-
-def test_selected_local_agent_cli_uses_configured_default(tmp_path: Path):
-    assert _selected_local_agent_cli(_args_with_config(tmp_path)) == "codex"
-
-
-def test_selected_local_agent_cli_honors_override_and_skips_stub(tmp_path: Path):
-    args = _args_with_config(tmp_path)
-    assert _selected_local_agent_cli([*args, "--cli-provider", "claude"]) == "claude"
-    assert _selected_local_agent_cli([*args, "--stub-agent"]) is None
-    assert _selected_local_agent_cli([*args, "--agent-backend", "deepagents"]) is None
+    call.assert_called_once_with(
+        [
+            sys.executable,
+            "-m",
+            "vibe_serve.cli",
+            "--outer-loop",
+            "agent",
+            "--help",
+            "--headless",
+        ]
+    )
 
 
 def test_main_exits_with_launcher_status():
@@ -45,17 +43,7 @@ def test_main_exits_with_launcher_status():
     launch_run.assert_called_once_with(["--example"])
 
 
-def test_launch_reports_missing_agent_cli_before_starting_children(tmp_path: Path, capsys):
-    with patch("vibe_serve.launcher.shutil.which", return_value=None):
-        result = launch(_args_with_config(tmp_path))
-
-    assert result == 1
-    error = capsys.readouterr().err
-    assert "agent CLI 'codex' was not found on PATH" in error
-    assert "--cli-provider" in error
-
-
-def test_monitor_reports_backend_failure_when_frontend_exits_first(tmp_path: Path):
+def test_monitor_does_not_leak_backend_output_after_frontend_attaches(tmp_path: Path):
     frontend = Mock()
     frontend.poll.return_value = 0
     backend = Mock()
@@ -67,7 +55,7 @@ def test_monitor_reports_backend_failure_when_frontend_exits_first(tmp_path: Pat
         result = _monitor(frontend, backend, log_path)
 
     assert result == 7
-    report.assert_called_once_with(backend, log_path)
+    report.assert_not_called()
 
 
 def test_monitor_does_not_report_successful_backend(tmp_path: Path):

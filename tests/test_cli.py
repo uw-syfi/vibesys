@@ -10,6 +10,7 @@ import pytest
 
 from vibe_serve.cli import _extract_flag, _extract_loop_selection, _validate_target_inputs, main
 from vibe_serve.domains.base import DomainName
+from vibe_serve.errors import ConfigurationError
 from vibe_serve.profilers import ProfilerKind
 
 TARGET_ARGS = ["--input", "examples/model-serving/Llama-3-8B"]
@@ -60,9 +61,9 @@ def test_extract_flag_missing_returns_none():
 
 
 def test_extract_flag_dangling_exits():
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ConfigurationError) as exc:
         _extract_flag(["--outer-loop"], "--outer-loop")
-    assert exc.value.code == 2
+    assert exc.value.diagnostic.code == "invalid_arguments"
 
 
 # ---------------------------------------------------------------------------
@@ -91,9 +92,9 @@ def test_extract_loop_selection_defaults_to_agent():
 
 
 def test_extract_loop_selection_unknown_outer_loop_exits():
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ConfigurationError) as exc:
         _extract_loop_selection(["--outer-loop", "nope"])
-    assert exc.value.code == 2
+    assert exc.value.diagnostic.stage == "argument_parsing"
 
 
 def test_target_input_defaults_to_none():
@@ -158,19 +159,17 @@ def test_profiler_none_is_valid_with_modal(builder_name, validator_name, tmp_pat
 def test_agent_parser_rejects_invalid_enum_args(argv):
     from vibe_serve.cli import _build_agent_parser
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ConfigurationError) as exc:
         _build_agent_parser().parse_args(argv)
 
-    assert exc.value.code == 2
+    assert exc.value.diagnostic.code == "invalid_arguments"
 
 
 def test_agent_parser_rejects_obsolete_target_flags():
     from vibe_serve.cli import _build_agent_parser
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ConfigurationError):
         _build_agent_parser().parse_args(["--ref", "examples/Llama-3-8B/reference"])
-
-    assert exc.value.code == 2
 
 
 def test_validate_target_inputs_loads_manifest(tmp_path):
@@ -190,10 +189,8 @@ def test_validate_target_inputs_loads_manifest(tmp_path):
 def test_agent_parser_rejects_domain_override_flag():
     from vibe_serve.cli import _build_agent_parser
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ConfigurationError):
         _build_agent_parser().parse_args(["--domain", "llm-serving"])
-
-    assert exc.value.code == 2
 
 
 def test_validate_target_inputs_loads_trusted_benchmark_result_contract(tmp_path):
@@ -214,20 +211,19 @@ def test_validate_target_inputs_loads_trusted_benchmark_result_contract(tmp_path
     assert args.input_bundle.benchmark_result.metric == "ops_per_sec"
 
 
-def test_validate_target_inputs_rejects_missing_input_dir(tmp_path, capsys):
+def test_validate_target_inputs_rejects_missing_input_dir(tmp_path):
     from vibe_serve.cli import _build_agent_parser
 
     missing = tmp_path / "missing"
     args = _build_agent_parser().parse_args(["--input", str(missing)])
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ConfigurationError) as exc:
         _validate_target_inputs(args)
 
-    assert exc.value.code == 2
-    assert "--input path does not exist" in capsys.readouterr().err
+    assert "--input path does not exist" in exc.value.diagnostic.message
 
 
-def test_validate_target_inputs_reports_missing_manifest(tmp_path, capsys):
+def test_validate_target_inputs_reports_missing_manifest(tmp_path):
     from vibe_serve.cli import _build_agent_parser
 
     bundle = tmp_path / "incomplete"
@@ -236,14 +232,13 @@ def test_validate_target_inputs_reports_missing_manifest(tmp_path, capsys):
 
     args = _build_agent_parser().parse_args(["--input", str(bundle)])
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ConfigurationError) as exc:
         _validate_target_inputs(args)
 
-    assert exc.value.code == 2
-    assert "vibeserve.input.toml" in capsys.readouterr().err
+    assert "vibeserve.input.toml" in exc.value.diagnostic.message
 
 
-def test_validate_target_inputs_reports_missing_command(tmp_path, capsys):
+def test_validate_target_inputs_reports_missing_command(tmp_path):
     from vibe_serve.cli import _build_agent_parser
 
     bundle = _write_input_bundle(tmp_path)
@@ -267,23 +262,21 @@ command = ["./tools/bench"]
     )
     args = _build_agent_parser().parse_args(["--input", str(bundle)])
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ConfigurationError) as exc:
         _validate_target_inputs(args)
 
-    assert exc.value.code == 2
-    assert "benchmark.command executable does not exist" in capsys.readouterr().err
+    assert "benchmark.command executable does not exist" in exc.value.diagnostic.message
 
 
-def test_validate_target_inputs_requires_input(capsys):
+def test_validate_target_inputs_requires_input():
     from vibe_serve.cli import _build_agent_parser
 
     args = _build_agent_parser().parse_args([])
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(ConfigurationError) as exc:
         _validate_target_inputs(args)
 
-    assert exc.value.code == 2
-    assert "missing required target input: --input" in capsys.readouterr().err
+    assert "missing required target input: --input" in exc.value.diagnostic.message
 
 
 # ---------------------------------------------------------------------------

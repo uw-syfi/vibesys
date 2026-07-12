@@ -166,6 +166,52 @@
       "title": "CommandAck",
       "type": "object"
     },
+    "ConfigurationFailedData": {
+      "properties": {
+        "kind": {
+          "const": "configuration_failed",
+          "default": "configuration_failed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Usage"
+        },
+        "exit_code": {
+          "title": "Exit Code",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "code",
+        "stage",
+        "message",
+        "exit_code"
+      ],
+      "title": "ConfigurationFailedData",
+      "type": "object"
+    },
     "EventBatchMessage": {
       "additionalProperties": false,
       "properties": {
@@ -224,6 +270,7 @@
       "enum": [
         "server_started",
         "server_ready",
+        "configuration_failed",
         "run_started",
         "run_interrupted",
         "chat",
@@ -785,6 +832,7 @@
                   "agent_output_chunk": "#/$defs/AgentOutputChunkData",
                   "benchmark_result": "#/$defs/BenchmarkResultData",
                   "chat": "#/$defs/ChatData",
+                  "configuration_failed": "#/$defs/ConfigurationFailedData",
                   "invocation_finished": "#/$defs/InvocationFinishedData",
                   "invocation_started": "#/$defs/InvocationStartedData",
                   "judge_result": "#/$defs/JudgeResultData",
@@ -819,6 +867,9 @@
                 },
                 {
                   "$ref": "#/$defs/RunInterruptedData"
+                },
+                {
+                  "$ref": "#/$defs/ConfigurationFailedData"
                 },
                 {
                   "$ref": "#/$defs/PhaseData"

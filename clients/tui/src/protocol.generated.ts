@@ -58,6 +58,7 @@ export type Timestamp8 = string;
 export type EventType =
   | "server_started"
   | "server_ready"
+  | "configuration_failed"
   | "run_started"
   | "run_interrupted"
   | "chat"
@@ -89,6 +90,7 @@ export type Data =
       | ServerReadyData
       | RunStartedData
       | RunInterruptedData
+      | ConfigurationFailedData
       | PhaseData
       | AgentOutputChunkData
       | SubprocessOutputData
@@ -117,26 +119,32 @@ export type MaxRounds = number;
 export type Kind6 = "run_interrupted";
 export type Reason = string;
 export type Signal = string | null;
-export type Kind7 = "phase";
+export type Kind7 = "configuration_failed";
+export type Code = string;
+export type Stage = string;
+export type Message = string;
+export type Usage = string | null;
+export type ExitCode = number;
+export type Kind8 = "phase";
 export type Phase = string;
 export type Attempt = number | null;
-export type Kind8 = "agent_output_chunk";
+export type Kind9 = "agent_output_chunk";
 export type Channel = "assistant" | "analysis" | "tool" | "diagnostic" | "prompt";
 export type Content1 = string;
-export type Kind9 = "subprocess_output";
+export type Kind10 = "subprocess_output";
 export type ProcessId = string;
 export type ProcessKind = string;
 export type Stream1 = "stdout" | "stderr";
 export type Content2 = string;
-export type Kind10 = "judge_result";
+export type Kind11 = "judge_result";
 export type Verdict = "pass" | "fail";
 export type Feedback = string;
 export type Attempt1 = number;
-export type Kind11 = "benchmark_result";
+export type Kind12 = "benchmark_result";
 export type Metric = string;
 export type Value = number;
 export type Unit = string;
-export type Kind12 = "round_finished";
+export type Kind13 = "round_finished";
 export type Attempts = number;
 export type JudgeVerdict = "pass" | "fail";
 export type PerfMetric = number | null;
@@ -152,8 +160,8 @@ export type Type9 = "event_batch";
 export type Events1 = RunEvent[];
 export type Type10 = "protocol_error";
 export type RequestId9 = string | null;
-export type Code = string;
-export type Message = string;
+export type Code1 = string;
+export type Message1 = string;
 
 export interface ProtocolDocument {
   request: Request;
@@ -299,20 +307,29 @@ export interface RunInterruptedData {
   signal?: Signal;
   [k: string]: unknown;
 }
-export interface PhaseData {
+export interface ConfigurationFailedData {
   kind?: Kind7;
+  code: Code;
+  stage: Stage;
+  message: Message;
+  usage?: Usage;
+  exit_code: ExitCode;
+  [k: string]: unknown;
+}
+export interface PhaseData {
+  kind?: Kind8;
   phase: Phase;
   attempt?: Attempt;
   [k: string]: unknown;
 }
 export interface AgentOutputChunkData {
-  kind?: Kind8;
+  kind?: Kind9;
   channel: Channel;
   content: Content1;
   [k: string]: unknown;
 }
 export interface SubprocessOutputData {
-  kind?: Kind9;
+  kind?: Kind10;
   process_id: ProcessId;
   process_kind: ProcessKind;
   stream: Stream1;
@@ -320,21 +337,21 @@ export interface SubprocessOutputData {
   [k: string]: unknown;
 }
 export interface JudgeResultData {
-  kind?: Kind10;
+  kind?: Kind11;
   verdict: Verdict;
   feedback: Feedback;
   attempt: Attempt1;
   [k: string]: unknown;
 }
 export interface BenchmarkResultData {
-  kind?: Kind11;
+  kind?: Kind12;
   metric: Metric;
   value: Value;
   unit: Unit;
   [k: string]: unknown;
 }
 export interface RoundFinishedData {
-  kind?: Kind12;
+  kind?: Kind13;
   attempts: Attempts;
   judge_verdict: JudgeVerdict;
   perf_metric?: PerfMetric;
@@ -358,6 +375,6 @@ export interface EventBatchMessage {
 export interface ProtocolErrorMessage {
   type?: Type10;
   request_id?: RequestId9;
-  code: Code;
-  message: Message;
+  code: Code1;
+  message: Message1;
 }

@@ -70,6 +70,12 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
   if (entry !== null) next.conversation = appendConversation(next.conversation, entry);
 
   if (event.type === 'run_started') next.status = 'running';
+  if (event.type === 'configuration_failed') {
+    next.status = 'failed';
+    next.terminal = true;
+    next.view = 'error';
+    next.detailContent = formatConfigurationFailure(event);
+  }
   if (event.type === 'run_finished') {
     next.status = 'completed';
     next.terminal = true;
@@ -81,9 +87,27 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
   return next;
 }
 
+function formatConfigurationFailure(event: RunEvent): string {
+  const data = event.data;
+  if (data?.kind !== 'configuration_failed') return event.text || 'Configuration failed.';
+  const sections = [data.message];
+  if (data.usage) sections.push(data.usage);
+  sections.push(`Code: ${data.code} · Stage: ${data.stage}`);
+  return sections.join('\n\n');
+}
+
 function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
   const data = event.data;
   const id = String(event.sequence ?? `${event.timestamp}-${event.type}`);
+  if (data?.kind === 'configuration_failed') {
+    return {
+      id,
+      kind: 'result',
+      content: formatConfigurationFailure(event),
+      label: 'Configuration failed',
+      tone: 'failure',
+    };
+  }
   if (data?.kind === 'agent_output_chunk') {
     const kind =
       data.channel === 'assistant'
