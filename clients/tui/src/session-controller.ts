@@ -1,13 +1,13 @@
-import {HELP_TEXT, parseInput} from './commands.js';
 import type {EventSubscription} from './client.js';
+import {HELP_TEXT, parseInput} from './commands.js';
 import type {ProtocolResponse, RequestInput, ServerMessage} from './protocol.js';
 import {
   applyEvent,
   applySnapshot,
   initialSessionState,
+  type SessionState,
   showDetail,
   showLive,
-  type SessionState,
 } from './session-model.js';
 
 export interface SessionController {
@@ -109,10 +109,7 @@ function renderResponse(request: RequestInput, response: ProtocolResponse): stri
   return null;
 }
 
-export function renderRoundHistory(
-  events: ProtocolResponse['events'],
-  now = new Date(),
-): string {
+export function renderRoundHistory(events: ProtocolResponse['events'], now = new Date()): string {
   const rounds = new Map<number, {startedAt: Date; finishedAt?: Date}>();
   for (const event of events ?? []) {
     const match = event.round_label?.match(/^round-(\d+)/);
@@ -132,8 +129,13 @@ export function renderRoundHistory(
   const lines = ['Rounds'];
   for (const [round, timing] of [...rounds.entries()].sort(([a], [b]) => a - b)) {
     const end = timing.finishedAt ?? now;
-    const elapsedSeconds = Math.max(0, Math.floor((end.getTime() - timing.startedAt.getTime()) / 1000));
-    lines.push(`Round ${round} · ${timing.finishedAt ? 'completed' : 'running'} · ${formatDuration(elapsedSeconds)}`);
+    const elapsedSeconds = Math.max(
+      0,
+      Math.floor((end.getTime() - timing.startedAt.getTime()) / 1000),
+    );
+    lines.push(
+      `Round ${round} · ${timing.finishedAt ? 'completed' : 'running'} · ${formatDuration(elapsedSeconds)}`,
+    );
   }
   return lines.join('\n');
 }

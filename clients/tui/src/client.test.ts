@@ -14,60 +14,78 @@ afterEach(async () => {
 
 describe('SupervisionClient', () => {
   it('reassembles a response fragmented across socket chunks', async () => {
-    await withServer(socket => respondToLines(socket, request => {
-      const response = JSON.stringify(successResponse(request['request_id'] as string));
-      const middle = Math.floor(response.length / 2);
-      socket.write(response.slice(0, middle));
-      socket.write(`${response.slice(middle)}\n`);
-    }), async client => {
-      const response = await client.request({type: 'query.snapshot'});
-      expect(response.snapshot?.status).toBe('running');
-    });
+    await withServer(
+      socket =>
+        respondToLines(socket, request => {
+          const response = JSON.stringify(successResponse(request['request_id'] as string));
+          const middle = Math.floor(response.length / 2);
+          socket.write(response.slice(0, middle));
+          socket.write(`${response.slice(middle)}\n`);
+        }),
+      async client => {
+        const response = await client.request({type: 'query.snapshot'});
+        expect(response.snapshot?.status).toBe('running');
+      },
+    );
   });
 
   it('correlates concurrent responses received out of order', async () => {
-    await withServer(socket => {
-      const requests: Array<Record<string, unknown>> = [];
-      respondToLines(socket, request => {
-        requests.push(request);
-        if (requests.length !== 2) return;
-        for (const item of [...requests].reverse()) {
-          const action = item['type'] === 'command.pause' ? 'pause' : 'resume';
-          socket.write(`${JSON.stringify({
-            ...successResponse(item['request_id'] as string),
-            ack: {action, status: action === 'pause' ? 'pending' : 'consumed'},
-          })}\n`);
-        }
-      });
-    }, async client => {
-      const pause = client.request({type: 'command.pause', mode: 'after_current_agent_call'});
-      const resume = client.request({type: 'command.resume'});
-      await expect(pause).resolves.toMatchObject({ack: {action: 'pause'}});
-      await expect(resume).resolves.toMatchObject({ack: {action: 'resume'}});
-    });
+    await withServer(
+      socket => {
+        const requests: Array<Record<string, unknown>> = [];
+        respondToLines(socket, request => {
+          requests.push(request);
+          if (requests.length !== 2) return;
+          for (const item of [...requests].reverse()) {
+            const action = item['type'] === 'command.pause' ? 'pause' : 'resume';
+            socket.write(
+              `${JSON.stringify({
+                ...successResponse(item['request_id'] as string),
+                ack: {action, status: action === 'pause' ? 'pending' : 'consumed'},
+              })}\n`,
+            );
+          }
+        });
+      },
+      async client => {
+        const pause = client.request({type: 'command.pause', mode: 'after_current_agent_call'});
+        const resume = client.request({type: 'command.resume'});
+        await expect(pause).resolves.toMatchObject({ack: {action: 'pause'}});
+        await expect(resume).resolves.toMatchObject({ack: {action: 'resume'}});
+      },
+    );
   });
 
   it('rejects structured backend errors', async () => {
-    await withServer(socket => respondToLines(socket, request => {
-      socket.write(`${JSON.stringify({
-        protocol_version: 1,
-        request_id: request['request_id'],
-        timestamp: new Date().toISOString(),
-        ok: false,
-        error: 'invalid request',
-        events: [],
-      })}\n`);
-    }), async client => {
-      await expect(client.request({type: 'query.snapshot'})).rejects.toThrow('invalid request');
-    });
+    await withServer(
+      socket =>
+        respondToLines(socket, request => {
+          socket.write(
+            `${JSON.stringify({
+              protocol_version: 1,
+              request_id: request['request_id'],
+              timestamp: new Date().toISOString(),
+              ok: false,
+              error: 'invalid request',
+              events: [],
+            })}\n`,
+          );
+        }),
+      async client => {
+        await expect(client.request({type: 'query.snapshot'})).rejects.toThrow('invalid request');
+      },
+    );
   });
 
   it('rejects pending requests when the server disconnects', async () => {
-    await withServer(socket => socket.once('data', () => socket.destroy()), async client => {
-      await expect(client.request({type: 'query.snapshot'})).rejects.toThrow(
-        'Supervision server disconnected',
-      );
-    });
+    await withServer(
+      socket => socket.once('data', () => socket.destroy()),
+      async client => {
+        await expect(client.request({type: 'query.snapshot'})).rejects.toThrow(
+          'Supervision server disconnected',
+        );
+      },
+    );
   });
 });
 
@@ -87,10 +105,7 @@ async function withServer(
   }
 }
 
-function respondToLines(
-  socket: Socket,
-  respond: (request: Record<string, unknown>) => void,
-): void {
+function respondToLines(socket: Socket, respond: (request: Record<string, unknown>) => void): void {
   let buffer = '';
   socket.setEncoding('utf8');
   socket.on('data', chunk => {
@@ -128,6 +143,6 @@ function listen(server: Server, path: string): Promise<void> {
 
 function close(server: Server): Promise<void> {
   return new Promise((resolve, reject) => {
-    server.close(error => error ? reject(error) : resolve());
+    server.close(error => (error ? reject(error) : resolve()));
   });
 }

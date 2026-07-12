@@ -1,26 +1,40 @@
 import {describe, expect, it} from 'vitest';
-import {applyEvent, initialSessionState} from './session-model.js';
 import type {RunEvent} from './protocol.js';
+import {applyEvent, initialSessionState} from './session-model.js';
 
 describe('session event model', () => {
   it('reduces semantic events into a presentation-neutral transcript', () => {
     let state = initialSessionState();
-    state = applyEvent(state, event(1, 'phase_started', {
-      kind: 'phase', phase: 'judge', attempt: 2,
-    }));
-    state = applyEvent(state, event(2, 'agent_output_chunk', {
-      kind: 'agent_output_chunk', channel: 'assistant', content: 'checking accuracy\n',
-    }));
-    state = applyEvent(state, event(3, 'judge_result', {
-      kind: 'judge_result', verdict: 'pass', feedback: '', attempt: 2,
-    }));
+    state = applyEvent(
+      state,
+      event(1, 'phase_started', {
+        kind: 'phase',
+        phase: 'judge',
+        attempt: 2,
+      }),
+    );
+    state = applyEvent(
+      state,
+      event(2, 'agent_output_chunk', {
+        kind: 'agent_output_chunk',
+        channel: 'assistant',
+        content: 'checking accuracy\n',
+      }),
+    );
+    state = applyEvent(
+      state,
+      event(3, 'judge_result', {
+        kind: 'judge_result',
+        verdict: 'pass',
+        feedback: '',
+        attempt: 2,
+      }),
+    );
 
     expect(state.liveContent).toContain('[round-1] judge started');
     expect(state.liveContent).toContain('checking accuracy');
     expect(state.liveContent).toContain('Judge: PASS');
-    expect(state.conversation.map(entry => entry.kind)).toEqual([
-      'status', 'assistant', 'result',
-    ]);
+    expect(state.conversation.map(entry => entry.kind)).toEqual(['status', 'assistant', 'result']);
     expect(state.conversation[1]?.content).toBe('checking accuracy\n');
   });
 
@@ -35,24 +49,84 @@ describe('session event model', () => {
 
   it('coalesces streamed assistant chunks and pairs each tool call with its result', () => {
     let state = initialSessionState();
-    state = applyEvent(state, event(1, 'agent_output_chunk', {
-      kind: 'agent_output_chunk', channel: 'assistant', content: 'hello ',
-    }, 'invocation-1'));
-    state = applyEvent(state, event(2, 'agent_output_chunk', {
-      kind: 'agent_output_chunk', channel: 'assistant', content: 'world',
-    }, 'invocation-1'));
-    state = applyEvent(state, event(3, 'agent_output_chunk', {
-      kind: 'agent_output_chunk', channel: 'tool', content: '→ Bash(command="first")\n',
-    }, 'invocation-1'));
-    state = applyEvent(state, event(4, 'agent_output_chunk', {
-      kind: 'agent_output_chunk', channel: 'tool', content: 'first result',
-    }, 'invocation-1'));
-    state = applyEvent(state, event(5, 'agent_output_chunk', {
-      kind: 'agent_output_chunk', channel: 'tool', content: '→ Bash(command="second")\n',
-    }, 'invocation-1'));
-    state = applyEvent(state, event(6, 'agent_output_chunk', {
-      kind: 'agent_output_chunk', channel: 'tool', content: 'second result',
-    }, 'invocation-1'));
+    state = applyEvent(
+      state,
+      event(
+        1,
+        'agent_output_chunk',
+        {
+          kind: 'agent_output_chunk',
+          channel: 'assistant',
+          content: 'hello ',
+        },
+        'invocation-1',
+      ),
+    );
+    state = applyEvent(
+      state,
+      event(
+        2,
+        'agent_output_chunk',
+        {
+          kind: 'agent_output_chunk',
+          channel: 'assistant',
+          content: 'world',
+        },
+        'invocation-1',
+      ),
+    );
+    state = applyEvent(
+      state,
+      event(
+        3,
+        'agent_output_chunk',
+        {
+          kind: 'agent_output_chunk',
+          channel: 'tool',
+          content: '→ Bash(command="first")\n',
+        },
+        'invocation-1',
+      ),
+    );
+    state = applyEvent(
+      state,
+      event(
+        4,
+        'agent_output_chunk',
+        {
+          kind: 'agent_output_chunk',
+          channel: 'tool',
+          content: 'first result',
+        },
+        'invocation-1',
+      ),
+    );
+    state = applyEvent(
+      state,
+      event(
+        5,
+        'agent_output_chunk',
+        {
+          kind: 'agent_output_chunk',
+          channel: 'tool',
+          content: '→ Bash(command="second")\n',
+        },
+        'invocation-1',
+      ),
+    );
+    state = applyEvent(
+      state,
+      event(
+        6,
+        'agent_output_chunk',
+        {
+          kind: 'agent_output_chunk',
+          channel: 'tool',
+          content: 'second result',
+        },
+        'invocation-1',
+      ),
+    );
 
     expect(state.conversation.map(entry => entry.content)).toEqual([
       'hello world',
@@ -66,14 +140,26 @@ describe('session event model', () => {
   });
 
   it('classifies prompt events as distinct markdown turns', () => {
-    const state = applyEvent(initialSessionState(), event(1, 'agent_output_chunk', {
-      kind: 'agent_output_chunk', channel: 'prompt', content: '# Task\n\nUse `pytest`.',
-    }, 'invocation-1'));
+    const state = applyEvent(
+      initialSessionState(),
+      event(
+        1,
+        'agent_output_chunk',
+        {
+          kind: 'agent_output_chunk',
+          channel: 'prompt',
+          content: '# Task\n\nUse `pytest`.',
+        },
+        'invocation-1',
+      ),
+    );
 
-    expect(state.conversation).toMatchObject([{
-      kind: 'prompt',
-      content: '# Task\n\nUse `pytest`.',
-    }]);
+    expect(state.conversation).toMatchObject([
+      {
+        kind: 'prompt',
+        content: '# Task\n\nUse `pytest`.',
+      },
+    ]);
   });
 });
 

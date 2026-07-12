@@ -74,7 +74,10 @@ jobs:
         run: uv sync --dev
 
       - name: Install TUI dependencies
-        run: pnpm --dir clients/tui install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Check TypeScript formatting and lint
+        run: pnpm check:ts
 
       - name: Test repository launcher
         run: ./vs --headless --help >/dev/null

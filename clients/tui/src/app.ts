@@ -1,16 +1,16 @@
 import {
   BoxRenderable,
+  type CliRenderer,
   InputRenderable,
   InputRenderableEvents,
+  type KeyEvent,
   MarkdownRenderable,
   ScrollBoxRenderable,
   SyntaxStyle,
   TextRenderable,
-  type CliRenderer,
-  type KeyEvent,
 } from '@opentui/core';
 import type {SessionController} from './session-controller.js';
-import {statusText, type ConversationEntry, type SessionState} from './session-model.js';
+import {type ConversationEntry, type SessionState, statusText} from './session-model.js';
 
 const MAX_TOOL_OUTPUT_LINES = 12;
 const MAX_PROMPT_LINES = 12;
@@ -19,20 +19,27 @@ export interface OpenTuiApp {
   destroy(): void;
 }
 
-export function createOpenTuiApp(
-  renderer: CliRenderer,
-  controller: SessionController,
-): OpenTuiApp {
+export function createOpenTuiApp(renderer: CliRenderer, controller: SessionController): OpenTuiApp {
   let exitScheduled = false;
   const expandedPrompts = new Set<string>();
   const root = new BoxRenderable(renderer, {
-    id: 'app', width: '100%', height: '100%', flexDirection: 'column',
+    id: 'app',
+    width: '100%',
+    height: '100%',
+    flexDirection: 'column',
   });
   const header = new TextRenderable(renderer, {
-    id: 'header', height: 1, fg: '#22d3ee', content: 'VibeServe · connecting',
+    id: 'header',
+    height: 1,
+    fg: '#22d3ee',
+    content: 'VibeServe · connecting',
   });
   const output = new BoxRenderable(renderer, {
-    id: 'output', width: '100%', flexDirection: 'column', paddingLeft: 1, paddingRight: 1,
+    id: 'output',
+    width: '100%',
+    flexDirection: 'column',
+    paddingLeft: 1,
+    paddingRight: 1,
   });
   const markdownStyle = SyntaxStyle.fromStyles({
     default: {fg: '#e2e8f0'},
@@ -156,56 +163,69 @@ export function createOpenTuiApp(
       backgroundColor: palette.background,
       ...(entry.kind === 'prompt' ? {onMouseUp: () => togglePrompt(entry.id)} : {}),
     });
-    card.add(new TextRenderable(renderer, {
-      content: entry.label ?? entry.kind,
-      fg: palette.label,
-      height: 1,
-    }));
+    card.add(
+      new TextRenderable(renderer, {
+        content: entry.label ?? entry.kind,
+        fg: palette.label,
+        height: 1,
+      }),
+    );
     if (entry.kind === 'assistant' || entry.kind === 'prompt') {
-      const prompt = entry.kind === 'prompt'
-        ? promptPreview(entry.content, expandedPrompts.has(entry.id))
-        : {content: entry.content, hiddenLines: 0};
-      card.add(new MarkdownRenderable(renderer, {
-        content: prompt.content,
-        syntaxStyle: markdownStyle,
-        conceal: true,
-        streaming: !controller.state.terminal,
-        width: '100%',
-      }));
-      if (entry.kind === 'prompt' && (prompt.hiddenLines > 0 || expandedPrompts.has(entry.id))) {
-        card.add(new TextRenderable(renderer, {
-          content: expandedPrompts.has(entry.id)
-            ? '▴ click or Ctrl+P to collapse'
-            : `▾ ${prompt.hiddenLines} more lines · click or Ctrl+P to expand`,
-          fg: '#60a5fa',
+      const prompt =
+        entry.kind === 'prompt'
+          ? promptPreview(entry.content, expandedPrompts.has(entry.id))
+          : {content: entry.content, hiddenLines: 0};
+      card.add(
+        new MarkdownRenderable(renderer, {
+          content: prompt.content,
+          syntaxStyle: markdownStyle,
+          conceal: true,
+          streaming: !controller.state.terminal,
           width: '100%',
-        }));
+        }),
+      );
+      if (entry.kind === 'prompt' && (prompt.hiddenLines > 0 || expandedPrompts.has(entry.id))) {
+        card.add(
+          new TextRenderable(renderer, {
+            content: expandedPrompts.has(entry.id)
+              ? '▴ click or Ctrl+P to collapse'
+              : `▾ ${prompt.hiddenLines} more lines · click or Ctrl+P to expand`,
+            fg: '#60a5fa',
+            width: '100%',
+          }),
+        );
       }
     } else if (entry.kind === 'tool' && entry.toolCall) {
-      card.add(new TextRenderable(renderer, {
-        content: entry.toolCall.trimEnd(),
-        fg: '#dbeafe',
-        bg: '#1e3a8a',
-        width: '100%',
-      }));
-      if (entry.toolResponse) {
-        card.add(new TextRenderable(renderer, {
-          content: toolOutputPreview(entry.toolResponse),
-          fg: '#a1a1aa',
-          bg: '#18181b',
+      card.add(
+        new TextRenderable(renderer, {
+          content: entry.toolCall.trimEnd(),
+          fg: '#dbeafe',
+          bg: '#1e3a8a',
           width: '100%',
-        }));
+        }),
+      );
+      if (entry.toolResponse) {
+        card.add(
+          new TextRenderable(renderer, {
+            content: toolOutputPreview(entry.toolResponse),
+            fg: '#a1a1aa',
+            bg: '#18181b',
+            width: '100%',
+          }),
+        );
       }
     } else {
-      const content = entry.kind === 'tool' || entry.kind === 'diagnostic'
-        || entry.kind === 'subprocess'
-        ? toolOutputPreview(entry.content)
-        : entry.content;
-      card.add(new TextRenderable(renderer, {
-        content,
-        fg: palette.content,
-        width: '100%',
-      }));
+      const content =
+        entry.kind === 'tool' || entry.kind === 'diagnostic' || entry.kind === 'subprocess'
+          ? toolOutputPreview(entry.content)
+          : entry.content;
+      card.add(
+        new TextRenderable(renderer, {
+          content,
+          fg: palette.content,
+          width: '100%',
+        }),
+      );
     }
     return card;
   }
@@ -278,7 +298,10 @@ export function promptPreview(
 }
 
 function entryPalette(entry: ConversationEntry): {
-  border: string; background: string; label: string; content: string;
+  border: string;
+  background: string;
+  label: string;
+  content: string;
 } {
   if (entry.tone === 'failure') {
     return {border: '#ef4444', background: '#1f1215', label: '#f87171', content: '#fecaca'};

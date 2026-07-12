@@ -14,7 +14,15 @@ export interface SessionState {
 
 export interface ConversationEntry {
   id: string;
-  kind: 'assistant' | 'prompt' | 'analysis' | 'tool' | 'diagnostic' | 'subprocess' | 'status' | 'result';
+  kind:
+    | 'assistant'
+    | 'prompt'
+    | 'analysis'
+    | 'tool'
+    | 'diagnostic'
+    | 'subprocess'
+    | 'status'
+    | 'result';
   content: string;
   label?: string;
   tone?: 'normal' | 'success' | 'failure';
@@ -52,7 +60,7 @@ export function applySnapshot(state: SessionState, snapshot: RunSnapshot): Sessi
 export function applyEvent(state: SessionState, event: RunEvent): SessionState {
   const sequence = event.sequence ?? 0;
   if (sequence > 0 && sequence <= state.sequence) return state;
-  let next = {...state, sequence: Math.max(state.sequence, sequence)};
+  const next = {...state, sequence: Math.max(state.sequence, sequence)};
   if (event.agent_kind) next.agentKind = event.agent_kind;
   if (event.round_label) next.roundLabel = event.round_label;
 
@@ -77,13 +85,16 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
   const data = event.data;
   const id = String(event.sequence ?? `${event.timestamp}-${event.type}`);
   if (data?.kind === 'agent_output_chunk') {
-    const kind = data.channel === 'assistant'
-      ? 'assistant'
-      : data.channel === 'prompt'
-        ? 'prompt'
-        : data.channel === 'analysis'
-          ? 'analysis'
-          : data.channel === 'tool' ? 'tool' : 'diagnostic';
+    const kind =
+      data.channel === 'assistant'
+        ? 'assistant'
+        : data.channel === 'prompt'
+          ? 'prompt'
+          : data.channel === 'analysis'
+            ? 'analysis'
+            : data.channel === 'tool'
+              ? 'tool'
+              : 'diagnostic';
     const invocationId = event.invocation_id ?? undefined;
     return {
       id,
@@ -92,10 +103,9 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
       label: labelFor(event, data.channel),
       turnId: invocationId ?? id,
       ...(invocationId === undefined ? {} : {invocationId}),
-      startsTurn: kind === 'tool' && data.channel === 'tool'
-        && data.content.trimStart().startsWith('→ '),
-      ...(kind === 'tool' && data.channel === 'tool'
-        && data.content.trimStart().startsWith('→ ')
+      startsTurn:
+        kind === 'tool' && data.channel === 'tool' && data.content.trimStart().startsWith('→ '),
+      ...(kind === 'tool' && data.channel === 'tool' && data.content.trimStart().startsWith('→ ')
         ? {toolCall: data.content}
         : {}),
     };
@@ -139,7 +149,13 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
     };
   }
   if (event.type === 'run_failed' || event.type === 'run_interrupted') {
-    return {id, kind: 'result', content: event.text || 'Run interrupted.', label: 'Run failed', tone: 'failure'};
+    return {
+      id,
+      kind: 'result',
+      content: event.text || 'Run interrupted.',
+      label: 'Run failed',
+      tone: 'failure',
+    };
   }
   return null;
 }
@@ -154,22 +170,30 @@ function appendConversation(
   incoming: ConversationEntry,
 ): ConversationEntry[] {
   const last = previous.at(-1);
-  if (last && incoming.kind === 'tool' && last.kind === 'tool'
-    && last.invocationId === incoming.invocationId && !incoming.startsTurn) {
+  if (
+    last &&
+    incoming.kind === 'tool' &&
+    last.kind === 'tool' &&
+    last.invocationId === incoming.invocationId &&
+    !incoming.startsTurn
+  ) {
     const separator = last.content.endsWith('\n') || incoming.content.startsWith('\n') ? '' : '\n';
     return [
       ...previous.slice(0, -1),
       {
         ...last,
         content: last.content + separator + incoming.content,
-        toolResponse: (last.toolResponse ?? '')
-          + (last.toolResponse ? separator : '') + incoming.content,
+        toolResponse:
+          (last.toolResponse ?? '') + (last.toolResponse ? separator : '') + incoming.content,
       },
     ];
   }
-  if (last && last.kind === incoming.kind && last.turnId === incoming.turnId
-    && (incoming.kind === 'assistant' || incoming.kind === 'prompt'
-      || incoming.kind === 'analysis')) {
+  if (
+    last &&
+    last.kind === incoming.kind &&
+    last.turnId === incoming.turnId &&
+    (incoming.kind === 'assistant' || incoming.kind === 'prompt' || incoming.kind === 'analysis')
+  ) {
     return [...previous.slice(0, -1), {...last, content: last.content + incoming.content}];
   }
   return [...previous, incoming].slice(-1_000);

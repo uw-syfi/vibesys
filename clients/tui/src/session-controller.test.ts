@@ -47,16 +47,22 @@ describe('session controller', () => {
 
   it('summarizes completed and running round durations', () => {
     const events = [
-      {...event(1, 'phase_started'), round_label: 'round-1-plan', timestamp: '2026-01-01T00:00:00Z'},
+      {
+        ...event(1, 'phase_started'),
+        round_label: 'round-1-plan',
+        timestamp: '2026-01-01T00:00:00Z',
+      },
       {...event(2, 'round_finished'), round_label: 'round-1', timestamp: '2026-01-01T00:02:05Z'},
-      {...event(3, 'phase_started'), round_label: 'round-2-plan', timestamp: '2026-01-01T00:03:00Z'},
+      {
+        ...event(3, 'phase_started'),
+        round_label: 'round-2-plan',
+        timestamp: '2026-01-01T00:03:00Z',
+      },
     ];
 
-    expect(renderRoundHistory(events, new Date('2026-01-01T00:03:42Z'))).toBe([
-      'Rounds',
-      'Round 1 · completed · 2m 5s',
-      'Round 2 · running · 42s',
-    ].join('\n'));
+    expect(renderRoundHistory(events, new Date('2026-01-01T00:03:42Z'))).toBe(
+      ['Rounds', 'Round 1 · completed · 2m 5s', 'Round 2 · running · 42s'].join('\n'),
+    );
   });
 });
 
@@ -107,8 +113,10 @@ function event(sequence: number, type: RunEvent['type'], content?: string): RunE
     sequence,
     timestamp: '2026-01-01T00:00:00Z',
     type,
-    ...(content === undefined ? {} : {
-      data: {kind: 'agent_output_chunk', channel: 'assistant', content},
-    }),
+    ...(content === undefined
+      ? {}
+      : {
+          data: {kind: 'agent_output_chunk', channel: 'assistant', content},
+        }),
   };
 }

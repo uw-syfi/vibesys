@@ -39,9 +39,12 @@ if [[ "$interactive" == true ]]; then
   elif find \
     clients/tui/src \
     clients/tui/package.json \
-    clients/tui/pnpm-lock.yaml \
     clients/tui/tsconfig.json \
     clients/tui/tsconfig.check.json \
+    package.json \
+    pnpm-lock.yaml \
+    pnpm-workspace.yaml \
+    biome.json \
     src/vibe_serve/server \
     -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.json' -o -name '*.yaml' -o -name '*.py' \) \
     -newer "$entrypoint" -print -quit | grep -q .; then
@@ -81,7 +84,7 @@ if [[ "$interactive" == true ]]; then
     preparation_log="$(mktemp -t vibeserve-prepare.XXXXXX)"
     temporary_files+=("$preparation_log")
     if ! {
-      "${pnpm_command[@]}" --dir clients/tui install --frozen-lockfile &&
+      "${pnpm_command[@]}" install --frozen-lockfile &&
         "${pnpm_command[@]}" --dir clients/tui generate:protocol &&
         "${pnpm_command[@]}" --dir clients/tui build
     } >"$preparation_log" 2>&1; then

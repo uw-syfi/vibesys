@@ -1,11 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {createConnection, type Socket} from 'node:net';
-import type {
-  ProtocolRequest,
-  ProtocolResponse,
-  RequestInput,
-  ServerMessage,
-} from './protocol.js';
+import type {ProtocolRequest, ProtocolResponse, RequestInput, ServerMessage} from './protocol.js';
 
 export interface EventSubscription {
   close(): Promise<void>;
@@ -14,7 +9,10 @@ export interface EventSubscription {
 export class SupervisionClient {
   readonly #socket: Socket;
   readonly #path: string;
-  readonly #pending = new Map<string, {resolve: (value: ProtocolResponse) => void; reject: (error: Error) => void}>();
+  readonly #pending = new Map<
+    string,
+    {resolve: (value: ProtocolResponse) => void; reject: (error: Error) => void}
+  >();
   #buffer = '';
 
   private constructor(socket: Socket, path: string) {
@@ -60,13 +58,15 @@ export class SupervisionClient {
       let closing = false;
       socket.setEncoding('utf8');
       socket.once('connect', () => {
-        socket.write(`${JSON.stringify({
-          protocol_version: 1,
-          request_id: randomUUID(),
-          timestamp: new Date().toISOString(),
-          type: 'subscribe',
-          after_sequence: afterSequence,
-        })}\n`);
+        socket.write(
+          `${JSON.stringify({
+            protocol_version: 1,
+            request_id: randomUUID(),
+            timestamp: new Date().toISOString(),
+            type: 'subscribe',
+            after_sequence: afterSequence,
+          })}\n`,
+        );
       });
       socket.on('data', chunk => {
         buffer += chunk.toString();
@@ -96,9 +96,10 @@ export class SupervisionClient {
           }
         }
       });
-      socket.once('error', error => subscribed ? onDisconnect(error) : reject(error));
+      socket.once('error', error => (subscribed ? onDisconnect(error) : reject(error)));
       socket.once('close', () => {
-        if (subscribed && !closing) onDisconnect(new Error('Supervision event stream disconnected'));
+        if (subscribed && !closing)
+          onDisconnect(new Error('Supervision event stream disconnected'));
         else reject(new Error('Supervision event stream disconnected before subscription'));
       });
     });

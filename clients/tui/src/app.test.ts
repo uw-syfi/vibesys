@@ -1,11 +1,6 @@
 import {createTestRenderer} from '@opentui/core/testing';
 import {afterEach, describe, expect, it} from 'vitest';
-import {
-  createOpenTuiApp,
-  promptPreview,
-  toolOutputPreview,
-  type OpenTuiApp,
-} from './app.js';
+import {createOpenTuiApp, type OpenTuiApp, promptPreview, toolOutputPreview} from './app.js';
 import type {SessionController} from './session-controller.js';
 import {initialSessionState, type SessionState} from './session-model.js';
 
@@ -23,10 +18,14 @@ describe('OpenTUI presentation', () => {
       status: 'running',
       agentKind: 'optimizer',
       roundLabel: 'round 2',
-      conversation: [{
-        id: '1', kind: 'assistant', label: 'optimizer · round 2',
-        content: '## Result\n\nUse `fast_path()`.',
-      }],
+      conversation: [
+        {
+          id: '1',
+          kind: 'assistant',
+          label: 'optimizer · round 2',
+          content: '## Result\n\nUse `fast_path()`.',
+        },
+      ],
     });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
@@ -67,7 +66,9 @@ describe('OpenTUI presentation', () => {
   });
 
   it('uses the native scrollbox for long output', async () => {
-    const lines = Array.from({length: 50}, (_, index) => `tool output line ${index + 1}`).join('\n');
+    const lines = Array.from({length: 50}, (_, index) => `tool output line ${index + 1}`).join(
+      '\n',
+    );
     const testRenderer = await createTestRenderer({width: 80, height: 16});
     const controller = new FakeController({
       ...initialSessionState(),
@@ -96,14 +97,16 @@ describe('OpenTUI presentation', () => {
     const testRenderer = await createTestRenderer({width: 80, height: 16});
     const controller = new FakeController({
       ...initialSessionState(),
-      conversation: [{
-        id: 'tool',
-        kind: 'tool',
-        label: 'implementer · round 1',
-        content: '→ Bash(command="pytest")\n2 passed',
-        toolCall: '→ Bash(command="pytest")\n',
-        toolResponse: '2 passed',
-      }],
+      conversation: [
+        {
+          id: 'tool',
+          kind: 'tool',
+          label: 'implementer · round 1',
+          content: '→ Bash(command="pytest")\n2 passed',
+          toolCall: '→ Bash(command="pytest")\n',
+          toolResponse: '2 passed',
+        },
+      ],
     });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
@@ -161,8 +164,12 @@ class FakeController implements SessionController {
 
   constructor(public state: SessionState) {}
 
-  start(): Promise<void> { return Promise.resolve(); }
-  stop(): Promise<void> { return Promise.resolve(); }
+  start(): Promise<void> {
+    return Promise.resolve();
+  }
+  stop(): Promise<void> {
+    return Promise.resolve();
+  }
   submit(value: string): Promise<void> {
     this.submissions.push(value);
     return Promise.resolve();
