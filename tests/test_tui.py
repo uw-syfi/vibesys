@@ -18,7 +18,13 @@ from vibe_serve.server import (
     RunInspector,
     RunSupervisor,
 )
-from vibe_serve.server.protocol import ChatQuery, EventsQuery, SnapshotQuery, SubscribeRequest
+from vibe_serve.server.protocol import (
+    ChatQuery,
+    EventsQuery,
+    HistoryQuery,
+    SnapshotQuery,
+    SubscribeRequest,
+)
 from vibe_serve.server.schema import ProtocolDocument
 from vibe_serve.server.service import SupervisionService
 from vibe_serve.server.transport import SupervisionSocketServer
@@ -119,6 +125,33 @@ def test_bootstrap_events_migrate_to_run_audit_without_replacing_history(tmp_pat
         "server_ready",
         "run_started",
     ]
+    assert [event.type for event in supervisor.read_history_events()] == [
+        "server_started",
+        "run_finished",
+        "server_started",
+        "server_ready",
+        "run_started",
+    ]
+
+
+def test_history_query_reads_prior_and_current_session_events(tmp_path):
+    logs = tmp_path / "run" / "logs"
+    historical = RunSupervisor()
+    historical.attach(logs)
+    historical.record(EventType.ROUND_FINISHED, status="completed", round_label="round-1")
+
+    supervisor = RunSupervisor()
+    supervisor.attach(tmp_path / "session")
+    supervisor.attach(logs)
+    supervisor.record(EventType.ROUND_FINISHED, status="completed", round_label="round-2")
+
+    response = SupervisionService(supervisor).execute(HistoryQuery())
+
+    assert [event.round_label for event in response.events if event.round_label] == [
+        "round-1",
+        "round-2",
+    ]
+    assert {event.round_label for event in supervisor.read_events()} == {None, "round-2"}
 
 
 def test_chat_reports_structured_failed_invocation(tmp_path):

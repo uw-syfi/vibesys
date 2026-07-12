@@ -119,6 +119,11 @@ class RunSupervisor:
         store = self._store
         return store.read(after_sequence) if store else []
 
+    def read_history_events(self) -> list[RunEvent]:
+        """Return the durable session history, including earlier attachments."""
+        store = self._audit_store or self._store
+        return store.read() if store else []
+
     def wait_for_events(self, after_sequence: int, timeout: float | None = None) -> list[RunEvent]:
         store = self._store
         return store.wait(after_sequence, timeout) if store else []

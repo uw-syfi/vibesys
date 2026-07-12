@@ -48,7 +48,7 @@ class SupervisionService:
             )
         if isinstance(request, HistoryQuery):
             self.supervisor.record(EventType.STATUS_QUERY, "/history")
-            return Response(request_id=request.request_id, events=self.events())
+            return Response(request_id=request.request_id, events=self.history_events())
         if isinstance(request, SnapshotQuery):
             return Response(request_id=request.request_id, snapshot=self.snapshot())
         if isinstance(request, EventsQuery):
@@ -66,6 +66,9 @@ class SupervisionService:
 
     def events(self, after_sequence: int = 0) -> list[RunEvent]:
         return self.supervisor.read_events(after_sequence)
+
+    def history_events(self) -> list[RunEvent]:
+        return self.supervisor.read_history_events()
 
     def wait_for_events(self, after_sequence: int, timeout: float | None = None) -> list[RunEvent]:
         return self.supervisor.wait_for_events(after_sequence, timeout)
