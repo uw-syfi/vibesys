@@ -59,7 +59,11 @@ def _wait_until_listening(port, timeout=10):
 
 
 def _find_redis_server():
-    candidates = [shutil.which("redis-server"), "/opt/homebrew/opt/redis/bin/redis-server", "/usr/bin/redis-server"]
+    candidates = [
+        shutil.which("redis-server"),
+        "/opt/homebrew/opt/redis/bin/redis-server",
+        "/usr/bin/redis-server",
+    ]
     for path in candidates:
         if path and os.path.isfile(path):
             return path
@@ -89,8 +93,19 @@ def _start_oracle():
     """Launch a throwaway Redis oracle and return (client, port)."""
     port = _free_port()
     process = subprocess.Popen(
-        [_find_redis_server(), "--port", str(port), "--loglevel", "warning", "--appendonly", "no", "--save", ""],
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        [
+            _find_redis_server(),
+            "--port",
+            str(port),
+            "--loglevel",
+            "warning",
+            "--appendonly",
+            "no",
+            "--save",
+            "",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
     )
     atexit.register(lambda: (process.terminate(), process.wait()))
     assert _wait_until_listening(port), f"Redis oracle failed to start on {port}"
@@ -131,7 +146,9 @@ def _sequential_phase(oracle, candidate, num_ops, num_keys, seed):
         if expected != actual:
             mismatches += 1
             if mismatches <= 10:
-                print(f"  MISMATCH op[{i}] {op.label} {op.args[0]}: oracle={expected} candidate={actual}")
+                print(
+                    f"  MISMATCH op[{i}] {op.label} {op.args[0]}: oracle={expected} candidate={actual}"
+                )
     return mismatches
 
 
@@ -205,10 +222,14 @@ def _concurrent_phase(oracle, oracle_port, args):
     per_thread = max(1, args.concurrent_ops // args.threads)
 
     with ThreadPoolExecutor(max_workers=args.threads) as pool:
-        inflight = sum(pool.map(
-            lambda tid: _stress_client(args.port, oracle_port, tid, per_thread, args.num_keys, args.seed),
-            range(args.threads),
-        ))
+        inflight = sum(
+            pool.map(
+                lambda tid: _stress_client(
+                    args.port, oracle_port, tid, per_thread, args.num_keys, args.seed
+                ),
+                range(args.threads),
+            )
+        )
 
     candidate_conns = [_client(args.port) for _ in range(args.verify_conns)]
     stress_keys = sorted(oracle.keys("*"))
@@ -216,34 +237,57 @@ def _concurrent_phase(oracle, oracle_port, args):
 
     hash_keys = [f"shared:h:{i}" for i in range(8)]
     with ThreadPoolExecutor(max_workers=args.threads) as pool:
-        fanin_errors = sum(pool.map(
-            lambda tid: _fanin_client(args.port, oracle_port, tid, hash_keys),
-            range(args.threads),
-        ))
+        fanin_errors = sum(
+            pool.map(
+                lambda tid: _fanin_client(args.port, oracle_port, tid, hash_keys),
+                range(args.threads),
+            )
+        )
     fanin = fanin_errors + _reconcile(oracle, candidate_conns, hash_keys, "shared-hash")
 
-    print(f"  concurrent: threads={args.threads} ops={per_thread * args.threads} "
-          f"inflight_mismatches={inflight} reconciled_keys={len(stress_keys)} "
-          f"reconcile_mismatches={stress_recon}")
+    print(
+        f"  concurrent: threads={args.threads} ops={per_thread * args.threads} "
+        f"inflight_mismatches={inflight} reconciled_keys={len(stress_keys)} "
+        f"reconcile_mismatches={stress_recon}"
+    )
     print(f"  shared-hash: keys={len(hash_keys)} mismatches={fanin}")
     return inflight + stress_recon + fanin
 
 
 def main():
     parser = argparse.ArgumentParser(description="KV store accuracy checker")
-    parser.add_argument("--port", type=int, required=True, help="Port of the candidate server (must be already running)")
+    parser.add_argument(
+        "--port",
+        type=int,
+        required=True,
+        help="Port of the candidate server (must be already running)",
+    )
     parser.add_argument("--num-ops", type=int, default=5000, help="Sequential-phase op count.")
     parser.add_argument("--num-keys", type=int, default=200, help="Keyspace size per namespace.")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--threads", type=int, default=16,
-                        help="Concurrent client threads for the concurrency phase (matches the benchmark headline).")
-    parser.add_argument("--concurrent-ops", type=int, default=20000, help="Total ops across all concurrent threads.")
-    parser.add_argument("--verify-conns", type=int, default=8,
-                        help="Fresh candidate connections used to fan reconciliation reads across worker processes.")
-    parser.add_argument("--no-concurrent", action="store_true", help="Run only the sequential phase.")
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=16,
+        help="Concurrent client threads for the concurrency phase (matches the benchmark headline).",
+    )
+    parser.add_argument(
+        "--concurrent-ops", type=int, default=20000, help="Total ops across all concurrent threads."
+    )
+    parser.add_argument(
+        "--verify-conns",
+        type=int,
+        default=8,
+        help="Fresh candidate connections used to fan reconciliation reads across worker processes.",
+    )
+    parser.add_argument(
+        "--no-concurrent", action="store_true", help="Run only the sequential phase."
+    )
     args = parser.parse_args()
 
-    assert _wait_until_listening(args.port, timeout=5), f"Candidate not responding on port {args.port}"
+    assert _wait_until_listening(args.port, timeout=5), (
+        f"Candidate not responding on port {args.port}"
+    )
 
     oracle, oracle_port = _start_oracle()
     candidate = _client(args.port)

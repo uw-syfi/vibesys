@@ -24,19 +24,19 @@ def parse_resp(buf: bytes) -> tuple[list[bytes] | None, int]:
     pos = crlf + 2
     args = []
     for _ in range(num_args):
-        if pos >= len(buf) or buf[pos:pos + 1] != b"$":
+        if pos >= len(buf) or buf[pos : pos + 1] != b"$":
             return None, 0
         crlf = buf.find(b"\r\n", pos)
         if crlf == -1:
             return None, 0
         try:
-            str_len = int(buf[pos + 1:crlf])
+            str_len = int(buf[pos + 1 : crlf])
         except ValueError:
             return None, 0
         pos = crlf + 2
         if pos + str_len + 2 > len(buf):
             return None, 0
-        args.append(buf[pos:pos + str_len])
+        args.append(buf[pos : pos + str_len])
         pos += str_len + 2
     return args, pos
 
