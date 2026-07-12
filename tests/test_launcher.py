@@ -2,6 +2,8 @@ import subprocess
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import pytest
+
 from vibe_serve.launcher import (
     _monitor,
     _report_backend_failure,
@@ -9,6 +11,7 @@ from vibe_serve.launcher import (
     _terminate_backend,
     _wait_or_kill,
     launch,
+    main,
 )
 
 TARGET_ARGS = ["--input", "examples/model-serving/moonshine-streaming"]
@@ -28,6 +31,18 @@ def test_selected_local_agent_cli_honors_override_and_skips_stub(tmp_path: Path)
     args = _args_with_config(tmp_path)
     assert _selected_local_agent_cli([*args, "--cli-provider", "claude"]) == "claude"
     assert _selected_local_agent_cli([*args, "--stub-agent"]) is None
+    assert _selected_local_agent_cli([*args, "--agent-backend", "deepagents"]) is None
+
+
+def test_main_exits_with_launcher_status():
+    with (
+        patch("vibe_serve.launcher.sys.argv", ["vibe-serve", "--example"]),
+        patch("vibe_serve.launcher.launch", return_value=7) as launch_run,
+        pytest.raises(SystemExit, match="7"),
+    ):
+        main()
+
+    launch_run.assert_called_once_with(["--example"])
 
 
 def test_launch_reports_missing_agent_cli_before_starting_children(tmp_path: Path, capsys):
