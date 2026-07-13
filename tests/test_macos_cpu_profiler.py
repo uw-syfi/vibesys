@@ -2,10 +2,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from vibe_serve.macos_cpu_profiler import (
+    Capability,
     DiagnosticCode,
     MacOSProfilerTool,
+    _descendants,
     collect,
     detect_capability,
+    parse_command,
 )
 
 
@@ -48,12 +51,78 @@ def test_functional_time_profiler_selects_instruments():
     assert capability.tool_version == "xctrace version 26.0"
 
 
+def test_detection_reports_unavailable_tools_after_xcode_select_failure():
+    def fail(*_args, **_kwargs):
+        raise OSError("xcode-select unavailable")
+
+    with patch("vibe_serve.macos_cpu_profiler.Path.is_file", return_value=False):
+        capability = detect_capability(system="Darwin", which=lambda _name: None, run=fail)
+    assert capability.tool is MacOSProfilerTool.NONE
+    assert capability.diagnostics[-2:] == (
+        DiagnosticCode.TIME_PROFILER_UNAVAILABLE,
+        DiagnosticCode.SAMPLE_UNAVAILABLE,
+    )
+
+
+def test_descendants_returns_nested_processes_and_ignores_malformed_rows():
+    result = Result(stdout="10 1\n20 10\nmalformed\n30 20\n40 10\n10 30\n")
+    assert _descendants(10, run=lambda *_args, **_kwargs: result) == [20, 40, 30]
+
+
 def test_collection_persists_reproduction_metadata(tmp_path: Path):
     result = collect(["./benchmark"], tmp_path, capability=detect_capability(system="Linux"))
     metadata = Path(result.metadata).read_text()
     assert result.status == "error"
     assert '"diagnostic_only": true' in metadata
     assert '"scored_benchmark": false' in metadata
+
+
+def test_instruments_collection_builds_bounded_launch_command(tmp_path: Path):
+    capability = Capability(
+        MacOSProfilerTool.XCTRACE,
+        "/Applications/Xcode.app/Contents/Developer",
+        "/usr/bin/xctrace",
+        "/usr/bin/sample",
+        "xctrace 26",
+    )
+    with patch(
+        "vibe_serve.macos_cpu_profiler.subprocess.run",
+        return_value=Result(),
+    ) as run:
+        result = collect(
+            ["./benchmark", "--workers", "2"], tmp_path, duration=7, capability=capability
+        )
+
+    assert result.status == "ok"
+    assert result.artifact == str(tmp_path / "time-profile.trace")
+    assert result.command == (
+        "/usr/bin/xctrace",
+        "record",
+        "--template",
+        "Time Profiler",
+        "--time-limit",
+        "7s",
+        "--output",
+        str(tmp_path / "time-profile.trace"),
+        "--launch",
+        "--",
+        "./benchmark",
+        "--workers",
+        "2",
+    )
+    assert run.call_args.kwargs["timeout"] == 37
+
+
+def test_collection_converts_profiler_launch_error_to_diagnostic(tmp_path: Path):
+    capability = Capability(MacOSProfilerTool.XCTRACE, None, "/usr/bin/xctrace", None, None)
+    with patch(
+        "vibe_serve.macos_cpu_profiler.subprocess.run",
+        side_effect=OSError("cannot execute"),
+    ):
+        result = collect(["./benchmark"], tmp_path, capability=capability)
+    assert result.status == "error"
+    assert DiagnosticCode.COLLECTION_FAILED in result.diagnostics
+    assert "cannot execute" in Path(result.metadata).read_text()
 
 
 def test_permission_failure_and_child_target_are_structured(tmp_path: Path):
@@ -84,3 +153,39 @@ def test_permission_failure_and_child_target_are_structured(tmp_path: Path):
         result = collect(["./benchmark"], tmp_path, capability=capability)
     assert result.target_pid == 456
     assert DiagnosticCode.ATTACH_DENIED in result.diagnostics
+
+
+def test_sample_kills_launcher_when_graceful_wait_times_out(tmp_path: Path):
+    capability = Capability(MacOSProfilerTool.SAMPLE, None, None, "/usr/bin/sample", None)
+    process = type(
+        "Process",
+        (),
+        {
+            "pid": 123,
+            "terminate": lambda self: None,
+            "wait": lambda self, timeout: (_ for _ in ()).throw(
+                __import__("subprocess").TimeoutExpired("benchmark", timeout)
+            ),
+            "kill": lambda self: setattr(self, "killed", True),
+            "killed": False,
+        },
+    )()
+    with (
+        patch("vibe_serve.macos_cpu_profiler.subprocess.Popen", return_value=process),
+        patch("vibe_serve.macos_cpu_profiler._descendants", return_value=[]),
+        patch("vibe_serve.macos_cpu_profiler.time.sleep"),
+        patch("vibe_serve.macos_cpu_profiler.subprocess.run", return_value=Result()),
+    ):
+        result = collect(["./benchmark"], tmp_path, capability=capability)
+    assert result.status == "ok"
+    assert result.target_pid == 123
+    assert process.killed
+
+
+def test_parse_command_preserves_quoted_arguments_without_shell_execution():
+    assert parse_command('python bench.py --label "queue run"') == [
+        "python",
+        "bench.py",
+        "--label",
+        "queue run",
+    ]
