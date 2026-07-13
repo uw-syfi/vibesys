@@ -49,6 +49,18 @@ describe('OpenTUI presentation', () => {
     expect(controller.submissions).toEqual(['/help']);
   });
 
+  it('exits on the first Ctrl-C even while the input is focused', async () => {
+    const testRenderer = await createTestRenderer({width: 80, height: 16});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    cleanup.push(() => app.destroy());
+    const destroyed = new Promise<void>(resolve => testRenderer.renderer.once('destroy', resolve));
+
+    testRenderer.mockInput.pressKey('c', {ctrl: true});
+
+    await destroyed;
+  });
+
   it('advertises Escape and returns a non-live view to live output', async () => {
     const testRenderer = await createTestRenderer({width: 100, height: 16});
     const controller = new FakeController({

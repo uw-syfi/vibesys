@@ -226,6 +226,11 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
   }
 
   function onKey(key: KeyEvent): void {
+    if (key.ctrl && key.name === 'c') {
+      key.preventDefault();
+      renderer.destroy();
+      return;
+    }
     if (key.name === 'escape' && controller.state.view !== 'live') {
       controller.live();
       viewport.scrollTo(viewport.scrollHeight);
