@@ -124,7 +124,7 @@ For real-time transcription:
 
 ## Pitfalls
 
-- **Recomputing cross-attention KV each step.** Silent perf disaster (essentially re-encoding each token).
+- **Recomputing cross-attention KV each step.** Silent perf disaster (essentially re-encoding each token). See [`../algorithms/cross-attention-kv-cache.md`](../algorithms/cross-attention-kv-cache.md) for the compute-once context-pool recipe.
 - **Mel-bin mismatch.** Whisper-v3 uses 128 mel bins, earlier use 80 — mismatched extractor silently yields wrong outputs.
 - **Language token omitted.** Whisper needs a language token; missing → wrong-language output with no error.
 - **Feature extraction on CPU.** Log-mel on CPU bottlenecks concurrent streams.
