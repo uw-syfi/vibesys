@@ -26,13 +26,11 @@ from vibe_serve.domains.registry import (
     resolve_domain,
 )
 from vibe_serve.domains.rendering import render_domain_section
-from vibe_serve.input_manifest import load_input_bundle
 from vibe_serve.prompts import render_template
 
 _TEMPLATE_DIR = (
     Path(__file__).resolve().parents[3] / "src" / "vibe_serve" / "loops" / "agent" / "templates"
 )
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _temporary_domain(prompt_dir: Path) -> DomainDefinition:
