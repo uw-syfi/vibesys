@@ -226,8 +226,10 @@ src/vibe_serve/
 │   └── callbacks.py              # LangChain logger (deepagents path)
 └── backends/                     # cuda / metal compute backends
 
-examples/                         # six paper scenarios + nsys/torch profiler skills
-resources/skills/                 # Agent Skills library
+examples/                         # standalone workload bundles
+resources/                        # framework-owned assets exposed to agent runs
+├── profilers/                    # profiler MCP servers and analysis helpers
+└── skills/                       # Agent Skills library
 ```
 
 - **agent**: pre-round → profiler → orchestrator plan → implementer/judge

@@ -208,7 +208,7 @@ class _RunContext:
         if self.profiler_kind in ACTIVE_PROFILER_KINDS:
             definition = profiler_definition(self.profiler_kind)
             self.profiler_support_name = definition.support_name
-            default_support = PROJECT_ROOT / "examples" / "support" / definition.support_name
+            default_support = PROJECT_ROOT / "resources" / "profilers" / definition.kind.value
             if default_support.is_dir():
                 self.profiler_support_path = str(default_support)
         else:
