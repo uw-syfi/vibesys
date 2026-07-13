@@ -281,6 +281,7 @@ def test_cli_parse_failure_is_streamed_after_client_attaches():
             stream.close()
 
         assert process.wait(timeout=5) == 2
+        audited_events = _events(session_dir / "run-events.jsonl")
     finally:
         if process.poll() is None:
             process.kill()
@@ -290,6 +291,8 @@ def test_cli_parse_failure_is_streamed_after_client_attaches():
     failures = [event for event in events if event["type"] == "configuration_failed"]
     assert failures[0]["data"]["code"] == "invalid_arguments"
     assert "--not-a-real-option" in failures[0]["data"]["message"]
+    assert [event["type"] for event in audited_events].count("configuration_failed") == 1
+    assert not any(event["type"] == "run_failed" for event in audited_events)
     assert stdout == ""
     assert stderr == ""
 

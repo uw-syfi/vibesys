@@ -143,8 +143,15 @@ describe('OpenTUI presentation', () => {
       ...initialSessionState(),
       status: 'failed',
       terminal: true,
-      view: 'error',
-      detailContent: 'Invalid --max-rounds value',
+      conversation: [
+        {
+          id: 'configuration-error',
+          kind: 'result',
+          label: 'Configuration failed',
+          content: 'Invalid --max-rounds value',
+          tone: 'failure',
+        },
+      ],
     });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
@@ -153,7 +160,10 @@ describe('OpenTUI presentation', () => {
       destroyed = true;
     });
 
-    await testRenderer.waitForFrame(value => value.includes('Invalid --max-rounds value'));
+    const frame = await testRenderer.waitForFrame(value =>
+      value.includes('Invalid --max-rounds value'),
+    );
+    expect(frame).toContain('Configuration failed');
     await new Promise(resolve => setTimeout(resolve, 150));
     expect(destroyed).toBe(false);
   });

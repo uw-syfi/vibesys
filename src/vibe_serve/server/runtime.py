@@ -71,7 +71,7 @@ def run_server(
                         exit_code=diagnostic.exit_code,
                     ),
                 )
-                supervisor.finish(exc)
+                supervisor.finish(exc, record_event=False)
                 server.wait_for_subscriber_disconnect()
                 raise
             except BaseException as exc:

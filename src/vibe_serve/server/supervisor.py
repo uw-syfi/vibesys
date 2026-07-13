@@ -237,10 +237,12 @@ class RunSupervisor:
             round_label = self._current_round or "no round yet"
         return f"{state} · {kind} · {round_label}"
 
-    def finish(self, error: BaseException | None = None) -> None:
+    def finish(self, error: BaseException | None = None, *, record_event: bool = True) -> None:
         with self._condition:
             self._run_status = "failed" if error else "completed"
             self._condition.notify_all()
+        if not record_event:
+            return
         self.record(
             EventType.RUN_FAILED if error else EventType.RUN_FINISHED,
             repr(error) if error else "",

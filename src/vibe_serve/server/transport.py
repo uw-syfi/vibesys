@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import socketserver
 import threading
 import time
@@ -70,11 +71,21 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         while True:
             events = service.wait_for_events(cursor, timeout=1.0)
             if not events:
+                if self._client_disconnected():
+                    return
                 time.sleep(0.05)
                 continue
             for event in events:
                 self._write_message(EventMessage(event=event))
                 cursor = event.sequence
+
+    def _client_disconnected(self) -> bool:
+        try:
+            return self.connection.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT) == b""
+        except BlockingIOError:
+            return False
+        except OSError:
+            return True
 
     def _write_message(self, message: BaseModel) -> None:
         payload = message.model_dump_json()

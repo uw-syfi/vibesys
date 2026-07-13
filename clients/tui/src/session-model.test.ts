@@ -47,7 +47,7 @@ describe('session event model', () => {
     expect(state.terminal).toBe(true);
   });
 
-  it('shows structured configuration failures in the error view', () => {
+  it('shows structured configuration failures as terminal conversation entries', () => {
     const state = applyEvent(
       initialSessionState(),
       event(1, 'configuration_failed', {
@@ -62,9 +62,10 @@ describe('session event model', () => {
 
     expect(state.status).toBe('failed');
     expect(state.terminal).toBe(true);
-    expect(state.view).toBe('error');
-    expect(state.detailContent).toContain('This run has completed 30 rounds.');
-    expect(state.detailContent).toContain('resume_limit_exhausted');
+    expect(state.view).toBe('live');
+    expect(state.detailContent).toBe('');
+    expect(state.conversation[0]?.content).toContain('This run has completed 30 rounds.');
+    expect(state.conversation[0]?.content).toContain('resume_limit_exhausted');
     expect(state.conversation[0]?.tone).toBe('failure');
   });
 

@@ -73,8 +73,6 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
   if (event.type === 'configuration_failed') {
     next.status = 'failed';
     next.terminal = true;
-    next.view = 'error';
-    next.detailContent = formatConfigurationFailure(event);
   }
   if (event.type === 'run_finished') {
     next.status = 'completed';
