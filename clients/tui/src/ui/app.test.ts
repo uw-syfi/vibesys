@@ -2,7 +2,7 @@ import {createTestRenderer} from '@opentui/core/testing';
 import {afterEach, describe, expect, it} from 'vitest';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
-import {createOpenTuiApp, type OpenTuiApp, promptPreview, toolOutputPreview} from './app.js';
+import {createOpenTuiApp, type OpenTuiApp} from './app.js';
 
 const cleanup: Array<() => void> = [];
 
@@ -95,16 +95,6 @@ describe('OpenTUI presentation', () => {
     expect(frame).not.toContain('tool output line 50');
   });
 
-  it('limits tool output without discarding the underlying content', () => {
-    const content = Array.from({length: 20}, (_, index) => `line ${index + 1}`).join('\n');
-    const preview = toolOutputPreview(content);
-
-    expect(preview).toContain('line 12');
-    expect(preview).not.toContain('line 13');
-    expect(preview).toContain('8 more lines hidden');
-    expect(content).toContain('line 20');
-  });
-
   it('renders a tool call and response as two regions in one card', async () => {
     const testRenderer = await createTestRenderer({width: 80, height: 16});
     const controller = new FakeController({
@@ -130,10 +120,6 @@ describe('OpenTUI presentation', () => {
 
   it('collapses prompts and expands the latest prompt with Ctrl+P', async () => {
     const content = Array.from({length: 20}, (_, index) => `prompt line ${index + 1}`).join('\n');
-    expect(promptPreview(content, false)).toMatchObject({hiddenLines: 8});
-    expect(promptPreview(content, false).content).not.toContain('prompt line 13');
-    expect(promptPreview(content, true).content).toContain('prompt line 20');
-
     const testRenderer = await createTestRenderer({width: 80, height: 20});
     const controller = new FakeController({
       ...initialSessionState(),
