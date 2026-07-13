@@ -11,6 +11,7 @@ class ProfilerKind(StrEnum):
     """Known profiler modes."""
 
     AUTO = "auto"
+    BENCHMARK = "benchmark"
     NONE = "none"
     NSYS = "nsys"
     TORCH = "torch"
@@ -24,7 +25,7 @@ ACTIVE_PROFILER_KINDS: frozenset[ProfilerKind] = frozenset(
 CLI_PROFILER_CHOICES: tuple[ProfilerKind, ...] = tuple(ProfilerKind)
 
 _DOMAIN_ALLOWED_PROFILERS: dict[DomainName, frozenset[ProfilerKind]] = {
-    DomainName.GENERIC: frozenset({ProfilerKind.NONE}),
+    DomainName.GENERIC: frozenset({ProfilerKind.NONE, ProfilerKind.BENCHMARK}),
     DomainName.LLM_SERVING: frozenset(
         {
             ProfilerKind.NONE,
@@ -78,8 +79,8 @@ def resolve_profiler_kind(
 ) -> ProfilerKind:
     """Resolve ``--profiler`` into the effective profiler kind.
 
-    ``auto`` is intentionally domain-aware. Generic workloads default to no
-    profiler; LLM-serving workloads pick the backend profiler unless the run
+    ``auto`` is intentionally domain-aware. Generic workloads default to a
+    benchmark-driven profiler agent; LLM-serving workloads pick the backend profiler unless the run
     environment dictates a remote-safe default such as Modal's torch profiler.
     """
 
@@ -97,7 +98,7 @@ def resolve_profiler_kind(
         return requested_kind
 
     if domain_name is DomainName.GENERIC:
-        return ProfilerKind.NONE
+        return ProfilerKind.BENCHMARK
 
     environment_default = require_profiler_kind(
         environment_default_profiler_kind,

@@ -36,7 +36,7 @@ def _expected_resolved(
             raise ValueError
         return requested
     if domain is DomainName.GENERIC:
-        return ProfilerKind.NONE
+        return ProfilerKind.BENCHMARK
     if environment_default_profiler_kind is ProfilerKind.TORCH:
         return ProfilerKind.TORCH
     if backend_profiler_kind in ACTIVE_PROFILER_KINDS:
@@ -95,8 +95,8 @@ def test_profiler_resolution_invariants(
 
     assert resolved is not ProfilerKind.AUTO
     assert resolved in allowed
-    if domain is DomainName.GENERIC:
-        assert resolved is ProfilerKind.NONE
+    if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
+        assert resolved is ProfilerKind.BENCHMARK
     if requested is not ProfilerKind.AUTO:
         assert resolved is requested
     if (

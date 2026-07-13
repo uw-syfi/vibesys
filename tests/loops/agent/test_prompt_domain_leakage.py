@@ -188,6 +188,16 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             env_kind=context["env_kind"],
             objective=context["objective"],
         ),
+        "profiler_benchmark": render_template(
+            "profiler_prompt_benchmark.j2",
+            template_dir=_TEMPLATE_DIR,
+            profile_focus="queue benchmark hotspots",
+            benchmark_command=context["benchmark_command"],
+            domain_profiler=_domain_section(domain, "profiler", context),
+            runtime_notes=context["runtime_notes"],
+            env_kind=context["env_kind"],
+            objective=context["objective"],
+        ),
         "profiler_torch": render_template(
             "profiler_prompt_torch.j2",
             template_dir=_TEMPLATE_DIR,
