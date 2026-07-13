@@ -127,15 +127,6 @@ def test_standalone_profiler_none_has_no_prompt_template():
         _profiler_prompt_template(ProfilerKind.NONE, "inprocess")
 
 
-def test_generic_profiler_uses_benchmark_prompt_template():
-    from vibe_serve.loops.agent.loop import _profiler_prompt_template
-
-    assert (
-        _profiler_prompt_template(ProfilerKind.BENCHMARK, "inprocess")
-        == "profiler_prompt_benchmark.j2"
-    )
-
-
 def test_standalone_profiler_rejects_unknown_kind():
     from vibe_serve.loops.agent.loop import _profiler_prompt_template
 

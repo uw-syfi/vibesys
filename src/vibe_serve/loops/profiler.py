@@ -31,8 +31,6 @@ def mcp_spec(profiler_kind: ProfilerKind):
     kind = require_profiler_kind(profiler_kind)
     if kind is ProfilerKind.NONE:
         return None
-    if kind is ProfilerKind.BENCHMARK:
-        return None
     try:
         from vibe_serve._agent_cli.base import MCPServerSpec
     except Exception:

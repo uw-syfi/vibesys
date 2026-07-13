@@ -202,7 +202,7 @@ def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
         assert (ctx.workspace / "neuron_profiler").exists() is expected[ProfilerKind.NEURON]
 
 
-def test_run_context_generic_auto_resolves_to_benchmark_without_profiler_support(tmp_path):
+def test_run_context_generic_auto_resolves_to_none_without_profiler_support(tmp_path):
     project_root = tmp_path / "project"
     support_paths = _write_support_dirs(project_root)
     ref = _write_ref(tmp_path)
@@ -228,7 +228,7 @@ def test_run_context_generic_auto_resolves_to_benchmark_without_profiler_support
             environment_hooks=NoopEnvironmentHooks(),
         ) as ctx,
     ):
-        assert ctx.profiler_kind is ProfilerKind.BENCHMARK
+        assert ctx.profiler_kind is ProfilerKind.NONE
         assert ctx.nsys_profiler_path is None
         assert ctx.torch_profiler_path is None
         assert ctx.neuron_profiler_path is None

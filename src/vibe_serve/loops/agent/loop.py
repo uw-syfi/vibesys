@@ -278,7 +278,6 @@ def _profiler_prompt_template(
     if kind is ProfilerKind.TORCH and (interface != "inprocess" or not supports_torch_profiler):
         kind = ProfilerKind.NSYS
     return {
-        ProfilerKind.BENCHMARK: "profiler_prompt_benchmark.j2",
         ProfilerKind.NSYS: "profiler_prompt_nsys.j2",
         ProfilerKind.TORCH: "profiler_prompt_torch.j2",
         ProfilerKind.NEURON: "profiler_prompt_neuron.j2",

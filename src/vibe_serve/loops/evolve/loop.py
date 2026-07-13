@@ -227,12 +227,11 @@ def _run_profiler(
 ) -> ProfilerSummary | None:
     if ctx.profiler_kind is ProfilerKind.NONE:
         return None
-    template = {
-        ProfilerKind.BENCHMARK: "profiler_prompt_benchmark.j2",
-        ProfilerKind.NSYS: "profiler_prompt_nsys.j2",
-        ProfilerKind.TORCH: "profiler_prompt_torch.j2",
-        ProfilerKind.NEURON: "profiler_prompt_neuron.j2",
-    }[ctx.profiler_kind]
+    template = (
+        "profiler_prompt_torch.j2"
+        if ctx.profiler_kind is ProfilerKind.TORCH
+        else "profiler_prompt_nsys.j2"
+    )
     base_prompt = _render(
         template,
         benchmark_command=ctx.profiler_benchmark_command,

@@ -44,7 +44,6 @@ _REPO = Path(__file__).resolve().parent.parent.parent
 
 def test_profiler_mcp_spec_maps_known_kinds_exactly():
     assert mcp_spec(ProfilerKind.NONE) is None
-    assert mcp_spec(ProfilerKind.BENCHMARK) is None
 
     nsys = mcp_spec(ProfilerKind.NSYS)
     assert nsys.name == "vibeserve-nsys-profiler"

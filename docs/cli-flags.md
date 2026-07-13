@@ -14,7 +14,7 @@ Several flags look independent, but they combine into one execution contract:
 | Evaluation interface | `--interface` | Agent loop only. Whether evaluator-owned code invokes the candidate directly or communicates with a service. |
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, or `cpu`. |
 | Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, Docker container, or Modal-backed workflow. |
-| Profiler | `--profiler` | Bottleneck evidence source: portable `benchmark`, hardware-specific `nsys`/`torch`/`neuron`, `none`, or domain-aware `auto`. Generic workloads use `benchmark` under `auto`. |
+| Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, or `auto`. |
 | Domain | `[agent].domain` in `vibeserve.input.toml` | Agent-loop problem-space package, such as `llm-serving` or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--no-skills` | Candidate skill roots and the ablation switch that disables skill loading. |
