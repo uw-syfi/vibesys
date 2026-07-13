@@ -85,7 +85,7 @@ jobs:
       - name: Check generated protocol bindings
         run: |
           pnpm --dir clients/tui generate:protocol
-          git diff --exit-code -- clients/tui/src/protocol.schema.json clients/tui/src/protocol.generated.ts
+          git diff --exit-code -- clients/tui/src/generated/protocol.schema.json clients/tui/src/generated/protocol.generated.ts
 
       - name: Check TypeScript
         run: pnpm --dir clients/tui check

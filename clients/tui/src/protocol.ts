@@ -1,4 +1,4 @@
-import type {ProtocolDocument} from './protocol.generated.js';
+import type {ProtocolDocument} from './generated/protocol.generated.js';
 
 export type ProtocolRequest = ProtocolDocument['request'];
 export type ProtocolResponse = ProtocolDocument['response'];

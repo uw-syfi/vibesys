@@ -1,7 +1,7 @@
 import {CliRenderEvents, createCliRenderer} from '@opentui/core';
-import {createOpenTuiApp} from './app.js';
 import {SupervisionClient} from './client.js';
 import {SocketSessionController} from './session-controller.js';
+import {createOpenTuiApp} from './ui/app.js';
 
 const socketPath = process.env['VIBESERVE_CONTROL_SOCKET'];
 if (!socketPath) throw new Error('VIBESERVE_CONTROL_SOCKET is required');

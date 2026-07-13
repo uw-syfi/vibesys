@@ -7,7 +7,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "generate:protocol": "uv run --project ../.. python -m vibe_serve.server.schema src/protocol.schema.json && json2ts -i src/protocol.schema.json -o src/protocol.generated.ts --bannerComment '/* Generated from the Python protocol models. Do not edit. */'",
+    "generate:protocol": "uv run --project ../.. python -m vibe_serve.server.schema src/generated/protocol.schema.json && json2ts -i src/generated/protocol.schema.json -o src/generated/protocol.generated.ts --bannerComment '/* Generated from the Python protocol models. Do not edit. */'",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.check.json",
     "test": "bun --bun vitest run --config vitest.config.ts"

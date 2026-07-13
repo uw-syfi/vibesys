@@ -9,8 +9,8 @@ import {
   SyntaxStyle,
   TextRenderable,
 } from '@opentui/core';
-import type {SessionController} from './session-controller.js';
-import {type ConversationEntry, type SessionState, statusText} from './session-model.js';
+import type {SessionController} from '../session-controller.js';
+import {type ConversationEntry, type SessionState, statusText} from '../session-model.js';
 
 const MAX_TOOL_OUTPUT_LINES = 12;
 const MAX_PROMPT_LINES = 12;
