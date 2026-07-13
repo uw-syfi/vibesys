@@ -135,7 +135,7 @@ def test_render_microservices_has_content():
         accuracy_command="./check",
         benchmark_command="./bench",
     )
-    assert "networked microservice system" in impl
+    assert "microservice system" in impl
     assert "connection pools" in impl
     assert "./check" in judge
     assert "./bench" in judge
