@@ -594,7 +594,7 @@ def test_loop_skips_profiler_when_profiler_kind_is_none(tmp_path, ref_file):
     assert runner.counters["prof"] == 0
 
 
-def test_loop_generic_auto_profiler_resolves_to_none(tmp_path, ref_file):
+def test_loop_generic_auto_profiler_resolves_to_macos_cpu(tmp_path, ref_file):
     runner = _make_orchestrate_runner(
         pre_decisions=[
             PreRoundDecision(need_profile=True, profile_focus="kernels", reasoning="would help"),
@@ -607,17 +607,18 @@ def test_loop_generic_auto_profiler_resolves_to_none(tmp_path, ref_file):
         ],
     )
 
-    result = _invoke_orchestrate(
-        tmp_path,
-        ref_file,
-        runner,
-        max_rounds=2,
-        domain=DomainName.GENERIC,
-    )
+    with patch("vibe_serve.profilers.platform.system", return_value="Darwin"):
+        result = _invoke_orchestrate(
+            tmp_path,
+            ref_file,
+            runner,
+            max_rounds=2,
+            domain=DomainName.GENERIC,
+        )
 
     assert result is True
     assert runner.counters["orch_pre"] == 1
-    assert runner.counters["prof"] == 0
+    assert runner.counters["prof"] == 1
 
 
 def test_loop_runs_full_max_rounds_budget(tmp_path, ref_file):

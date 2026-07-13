@@ -216,6 +216,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
             "'nsys' for NVIDIA Nsight Systems (needs /proc/driver/nvidia), "
             "'torch' for torch.profiler (works in Modal sandboxes), "
             "'neuron' for AWS neuron-explorer (Trainium/NeuronCores), "
+            "'macos-cpu' for Instruments Time Profiler with a sample fallback, "
             "'auto' picks a domain/backend/environment-appropriate profiler. "
             "Default: auto."
         ),

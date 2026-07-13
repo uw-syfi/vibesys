@@ -57,6 +57,10 @@ def test_profiler_mcp_spec_maps_known_kinds_exactly():
     assert neuron.name == "vibeserve-neuron-profiler"
     assert neuron.args == ["neuron_profiler/server.py"]
 
+    macos = mcp_spec(ProfilerKind.MACOS_CPU)
+    assert macos.name == "vibeserve-macos-cpu-profiler"
+    assert macos.args == ["macos_cpu_profiler/server.py"]
+
 
 def test_profiler_mcp_spec_rejects_unknown_kind():
     with pytest.raises(TypeError, match="ProfilerKind"):

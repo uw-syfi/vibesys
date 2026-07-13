@@ -227,11 +227,10 @@ def _run_profiler(
 ) -> ProfilerSummary | None:
     if ctx.profiler_kind is ProfilerKind.NONE:
         return None
-    template = (
-        "profiler_prompt_torch.j2"
-        if ctx.profiler_kind is ProfilerKind.TORCH
-        else "profiler_prompt_nsys.j2"
-    )
+    template = {
+        ProfilerKind.TORCH: "profiler_prompt_torch.j2",
+        ProfilerKind.MACOS_CPU: "profiler_prompt_macos_cpu.j2",
+    }.get(ctx.profiler_kind, "profiler_prompt_nsys.j2")
     base_prompt = _render(
         template,
         benchmark_command=ctx.profiler_benchmark_command,
