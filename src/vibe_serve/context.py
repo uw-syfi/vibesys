@@ -187,6 +187,7 @@ class _RunContext:
         self.nsys_profiler_path = self._coerce_dir_path(nsys_profiler, "--nsys-profiler")
         self.torch_profiler_path = self._coerce_dir_path(torch_profiler, "--torch-profiler")
         self.neuron_profiler_path = self._coerce_dir_path(neuron_profiler, "--neuron-profiler")
+        self.macos_cpu_profiler_path: str | None = None
 
         self.profiler_kind = resolve_profiler_kind(
             profiler_kind,
@@ -201,6 +202,10 @@ class _RunContext:
             self.torch_profiler_path = None
         if self.profiler_kind is not ProfilerKind.NEURON:
             self.neuron_profiler_path = None
+        if self.profiler_kind is ProfilerKind.MACOS_CPU:
+            default_mp = PROJECT_ROOT / "examples" / "support" / "macos_cpu_profiler"
+            if default_mp.is_dir():
+                self.macos_cpu_profiler_path = str(default_mp)
 
         # Default profiler support paths only for the selected profiler.
         if self.profiler_kind is ProfilerKind.NSYS and self.nsys_profiler_path is None:
@@ -346,6 +351,9 @@ class _RunContext:
             if self.neuron_profiler_path:
                 src = Path(self.neuron_profiler_path)
                 self._copy_excluding_extras(src, self.workspace / "neuron_profiler")
+            if self.macos_cpu_profiler_path:
+                src = Path(self.macos_cpu_profiler_path)
+                self._copy_excluding_extras(src, self.workspace / "macos_cpu_profiler")
 
         # Always ensure profiler harnesses are present in the workspace, even
         # when resuming — the original run may not have had them.
@@ -361,6 +369,10 @@ class _RunContext:
             src = Path(self.neuron_profiler_path)
             if not (self.workspace / "neuron_profiler").exists():
                 self._copy_excluding_extras(src, self.workspace / "neuron_profiler")
+        if existing and self.macos_cpu_profiler_path:
+            src = Path(self.macos_cpu_profiler_path)
+            if not (self.workspace / "macos_cpu_profiler").exists():
+                self._copy_excluding_extras(src, self.workspace / "macos_cpu_profiler")
 
         if git_tracking:
             self._init_git_tracking(existing)
@@ -379,6 +391,7 @@ class _RunContext:
                     nsys_profiler_path=self.nsys_profiler_path,
                     torch_profiler_path=self.torch_profiler_path,
                     neuron_profiler_path=self.neuron_profiler_path,
+                    macos_cpu_profiler_path=self.macos_cpu_profiler_path,
                     environment_bind_mounts=self.environment_patch.bind_mounts,
                     log=self.lprint,
                     project_root=PROJECT_ROOT,

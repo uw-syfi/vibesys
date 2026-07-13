@@ -273,6 +273,7 @@ def _profiler_prompt_template(
         ProfilerKind.NSYS: "profiler_prompt_nsys.j2",
         ProfilerKind.TORCH: "profiler_prompt_torch.j2",
         ProfilerKind.NEURON: "profiler_prompt_neuron.j2",
+        ProfilerKind.MACOS_CPU: "profiler_prompt_macos_cpu.j2",
     }[kind]
 
 

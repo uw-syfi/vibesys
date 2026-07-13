@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import platform
 from enum import StrEnum
 
 from vibe_serve.domains.base import DomainName
@@ -15,16 +16,17 @@ class ProfilerKind(StrEnum):
     NSYS = "nsys"
     TORCH = "torch"
     NEURON = "neuron"
+    MACOS_CPU = "macos-cpu"
 
 
 ACTIVE_PROFILER_KINDS: frozenset[ProfilerKind] = frozenset(
-    {ProfilerKind.NSYS, ProfilerKind.TORCH, ProfilerKind.NEURON}
+    {ProfilerKind.NSYS, ProfilerKind.TORCH, ProfilerKind.NEURON, ProfilerKind.MACOS_CPU}
 )
 
 CLI_PROFILER_CHOICES: tuple[ProfilerKind, ...] = tuple(ProfilerKind)
 
 _DOMAIN_ALLOWED_PROFILERS: dict[DomainName, frozenset[ProfilerKind]] = {
-    DomainName.GENERIC: frozenset({ProfilerKind.NONE}),
+    DomainName.GENERIC: frozenset({ProfilerKind.NONE, ProfilerKind.MACOS_CPU}),
     DomainName.LLM_SERVING: frozenset(
         {
             ProfilerKind.NONE,
@@ -97,7 +99,7 @@ def resolve_profiler_kind(
         return requested_kind
 
     if domain_name is DomainName.GENERIC:
-        return ProfilerKind.NONE
+        return ProfilerKind.MACOS_CPU if platform.system() == "Darwin" else ProfilerKind.NONE
 
     environment_default = require_profiler_kind(
         environment_default_profiler_kind,

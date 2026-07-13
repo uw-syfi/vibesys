@@ -53,6 +53,12 @@ def mcp_spec(profiler_kind: ProfilerKind):
             command="python",
             args=["nsys_profiler/server.py"],
         )
+    if kind is ProfilerKind.MACOS_CPU:
+        return MCPServerSpec(
+            name="vibeserve-macos-cpu-profiler",
+            command="python",
+            args=["macos_cpu_profiler/server.py"],
+        )
     raise AssertionError(f"Unhandled profiler kind: {kind!r}")
 
 

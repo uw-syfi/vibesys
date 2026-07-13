@@ -100,6 +100,7 @@ def _write_support_dirs(project_root):
         ProfilerKind.NSYS: "nsys_profiler",
         ProfilerKind.TORCH: "torch_profiler",
         ProfilerKind.NEURON: "neuron_profiler",
+        ProfilerKind.MACOS_CPU: "macos_cpu_profiler",
     }
     for workspace_name in dirs.values():
         source_dir = project_root / "examples" / "support" / workspace_name
@@ -155,6 +156,7 @@ def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
     support_paths = _write_support_dirs(project_root)
     ref = _write_ref(tmp_path)
 
+    domain = DomainName.GENERIC if selected is ProfilerKind.MACOS_CPU else DomainName.LLM_SERVING
     with (
         patch("vibe_serve.context.PROJECT_ROOT", project_root),
         patch("vibe_serve.context._build_model", return_value="mock-model"),
@@ -167,6 +169,7 @@ def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             profiler_kind=selected,
+            profiler_domain=domain,
             nsys_profiler=support_paths[ProfilerKind.NSYS],
             torch_profiler=support_paths[ProfilerKind.TORCH],
             neuron_profiler=support_paths[ProfilerKind.NEURON],
@@ -178,14 +181,16 @@ def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
             ProfilerKind.NSYS: selected is ProfilerKind.NSYS,
             ProfilerKind.TORCH: selected is ProfilerKind.TORCH,
             ProfilerKind.NEURON: selected is ProfilerKind.NEURON,
+            ProfilerKind.MACOS_CPU: selected is ProfilerKind.MACOS_CPU,
         }
         assert ctx.profiler_kind is selected
         assert (ctx.workspace / "nsys_profiler").exists() is expected[ProfilerKind.NSYS]
         assert (ctx.workspace / "torch_profiler").exists() is expected[ProfilerKind.TORCH]
         assert (ctx.workspace / "neuron_profiler").exists() is expected[ProfilerKind.NEURON]
+        assert (ctx.workspace / "macos_cpu_profiler").exists() is expected[ProfilerKind.MACOS_CPU]
 
 
-def test_run_context_generic_auto_resolves_to_none_without_profiler_support(tmp_path):
+def test_run_context_generic_auto_resolves_to_macos_profiler(tmp_path):
     project_root = tmp_path / "project"
     support_paths = _write_support_dirs(project_root)
     ref = _write_ref(tmp_path)
@@ -195,6 +200,7 @@ def test_run_context_generic_auto_resolves_to_none_without_profiler_support(tmp_
         patch("vibe_serve.context._build_model", return_value="mock-model"),
         patch("vibe_serve.context.build_agent_runner", return_value=MagicMock()),
         patch("vibe_serve.context.backends.get", return_value=_FakeBackend(ProfilerKind.NSYS)),
+        patch("vibe_serve.profilers.platform.system", return_value="Darwin"),
         _RunContext(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="generic-auto-none",
@@ -211,18 +217,20 @@ def test_run_context_generic_auto_resolves_to_none_without_profiler_support(tmp_
             environment_hooks=NoopEnvironmentHooks(),
         ) as ctx,
     ):
-        assert ctx.profiler_kind is ProfilerKind.NONE
+        assert ctx.profiler_kind is ProfilerKind.MACOS_CPU
         assert ctx.nsys_profiler_path is None
         assert ctx.torch_profiler_path is None
         assert ctx.neuron_profiler_path is None
+        assert ctx.macos_cpu_profiler_path == support_paths[ProfilerKind.MACOS_CPU]
         assert not (ctx.workspace / "nsys_profiler").exists()
         assert not (ctx.workspace / "torch_profiler").exists()
         assert not (ctx.workspace / "neuron_profiler").exists()
+        assert (ctx.workspace / "macos_cpu_profiler").exists()
 
 
 @pytest.mark.parametrize(
     "profiler_kind",
-    sorted(ACTIVE_PROFILER_KINDS, key=lambda kind: kind.value),
+    sorted(ACTIVE_PROFILER_KINDS - {ProfilerKind.MACOS_CPU}, key=lambda kind: kind.value),
 )
 def test_run_context_rejects_generic_explicit_active_profilers(tmp_path, profiler_kind):
     ref = _write_ref(tmp_path)

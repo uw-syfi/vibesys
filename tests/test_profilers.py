@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import platform
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -35,13 +37,18 @@ def _expected_resolved(
         if requested not in allowed:
             raise ValueError
         return requested
-    if domain is DomainName.GENERIC:
-        return ProfilerKind.NONE
+    if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
+        return ProfilerKind.MACOS_CPU if platform.system() == "Darwin" else ProfilerKind.NONE
     if environment_default_profiler_kind is ProfilerKind.TORCH:
         return ProfilerKind.TORCH
-    if backend_profiler_kind in ACTIVE_PROFILER_KINDS:
-        return backend_profiler_kind
-    return environment_default_profiler_kind
+    candidate = (
+        backend_profiler_kind
+        if backend_profiler_kind in ACTIVE_PROFILER_KINDS
+        else environment_default_profiler_kind
+    )
+    if candidate not in allowed:
+        raise ValueError
+    return candidate
 
 
 @pytest.mark.parametrize("domain", _DOMAINS)
@@ -91,12 +98,17 @@ def test_profiler_resolution_invariants(
             resolve_profiler_kind(requested, **kwargs)
         return
 
-    resolved = resolve_profiler_kind(requested, **kwargs)
+    try:
+        resolved = resolve_profiler_kind(requested, **kwargs)
+    except ValueError:
+        assert requested is ProfilerKind.AUTO
+        return
 
     assert resolved is not ProfilerKind.AUTO
     assert resolved in allowed
-    if domain is DomainName.GENERIC:
-        assert resolved is ProfilerKind.NONE
+    if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
+        expected = ProfilerKind.MACOS_CPU if platform.system() == "Darwin" else ProfilerKind.NONE
+        assert resolved is expected
     if requested is not ProfilerKind.AUTO:
         assert resolved is requested
     if (

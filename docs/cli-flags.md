@@ -14,7 +14,7 @@ Several flags look independent, but they combine into one execution contract:
 | Evaluation interface | `--interface` | Agent loop only. Whether evaluator-owned code invokes the candidate directly or communicates with a service. |
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, or `cpu`. |
 | Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, Docker container, or Modal-backed workflow. |
-| Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, or `auto`. |
+| Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, `macos-cpu`, or `auto`. |
 | Domain | `[agent].domain` in `vibeserve.input.toml` | Agent-loop problem-space package, such as `llm-serving` or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--no-skills` | Candidate skill roots and the ablation switch that disables skill loading. |
@@ -59,7 +59,7 @@ prompts and input-owned candidate-contract documentation.
 | `cuda` | NVIDIA GPU serving systems. | Local, Docker, Modal. | Selects/reselects a GPU and can monitor contention. | Local/Docker use `nsys`; Modal uses `torch` when `--profiler auto`. |
 | `metal` | Apple Silicon / MPS targets. | Local only. | No device selection or monitor. | Local `auto` resolves through the local runtime default. |
 | `trainium` | AWS Trainium / NeuronCore targets. | Local and Docker; Modal unsupported. | Forwards `/dev/neuron*` in Docker; no per-device selection. | `auto` resolves to `neuron`. |
-| `cpu` | CPU-only service/data-structure targets. | Local only in the current merged code. | No device selection or monitor. | Current agent/evolve `auto` behavior follows runtime defaults; the plain loop has CPU-specific prompt fragments. |
+| `cpu` | CPU-only service/data-structure targets. | Local only in the current merged code. | No device selection or monitor. | Generic workloads on macOS select `macos-cpu`; other systems select no profiler. |
 
 When a backend rejects a runtime environment, it should fail before agent work
 starts with an actionable error.
@@ -83,6 +83,7 @@ Modal is active.
 | `nsys` | NVIDIA Nsight Systems. Requires a CUDA/NVIDIA profiling environment. |
 | `torch` | PyTorch profiler. Used for in-process Python profiling and Modal GPU dispatch. |
 | `neuron` | AWS Neuron profiler for Trainium. |
+| `macos-cpu` | Instruments Time Profiler with a supported `/usr/bin/sample` fallback. |
 
 `--modal --profiler nsys` is rejected by the CLI because Modal runs must use the
 torch profiler path.
@@ -91,6 +92,15 @@ Profiler prompts must match the interface, domain, and backend. In-process
 execution alone does not make the candidate Python or PyTorch-compatible; the
 selected domain must explicitly support Torch profiling. A CPU backend must not
 receive a GPU-kernel workflow.
+
+The macOS backend verifies that the selected developer directory is full Xcode and asks
+`xctrace` for the Time Profiler template; the Command Line Tools shim is not considered
+functional Instruments. Captures are separate diagnostic runs, never scored results.
+They store exact commands, duration, warm-up, OS/CPU/tool data, target PID/topology,
+diagnostics, and the raw `.trace` or `sample` report. Attach failures, including SIP or
+privacy restrictions, are structured diagnostics. Optimized native builds should retain
+debug information; `dsymutil`, `dwarfdump`, `nm`, and `atos` can validate or resolve
+symbols. Reports must state when unavailable Apple hardware counters limit conclusions.
 
 ## Domain and Modality
 
