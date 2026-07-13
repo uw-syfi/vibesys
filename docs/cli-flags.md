@@ -33,7 +33,9 @@ come from the domain and input bundle, not the interface mode.
 | `evolve` | Evolutionary search over candidate implementations. | Uses mutator, judge, and profiler roles. |
 | `openevolve` | MAP-Elites-style evolutionary loop. | Reuses evolve mutator, judge, and profiler prompts. |
 
-Use `vibe-serve --outer-loop <kind> --help` for loop-specific flags.
+From a source checkout, use `./vs` for the commands below. It prepares a current
+interactive client when needed and forwards every argument to `vibe-serve`.
+Use `./vs --outer-loop <kind> --help` for loop-specific flags.
 
 ## Interface
 
@@ -161,7 +163,7 @@ assumptions in a separate design document.
 For those bundles, pass the root once:
 
 ```bash
-vibe-serve --input examples/<target> ...
+./vs --input examples/<target> ...
 ```
 
 The manifest declares the evaluator entrypoints and does not define a candidate
@@ -220,7 +222,7 @@ refreshing it from repository source.
 Default agent loop on local CUDA-compatible host:
 
 ```bash
-vibe-serve \
+./vs \
   --outer-loop agent \
   --backend cuda \
   --interface inprocess \
@@ -230,25 +232,25 @@ vibe-serve \
 Docker CUDA run:
 
 ```bash
-vibe-serve --outer-loop agent --backend cuda --docker ...
+./vs --outer-loop agent --backend cuda --docker ...
 ```
 
 Modal GPU run:
 
 ```bash
-vibe-serve --outer-loop agent --backend cuda --modal --profiler torch ...
+./vs --outer-loop agent --backend cuda --modal --profiler torch ...
 ```
 
 Trainium run:
 
 ```bash
-vibe-serve --outer-loop agent --backend trainium --profiler auto ...
+./vs --outer-loop agent --backend trainium --profiler auto ...
 ```
 
 Over-the-wire service target:
 
 ```bash
-vibe-serve \
+./vs \
   --outer-loop agent \
   --interface service \
   --input examples/<target>
@@ -257,7 +259,7 @@ vibe-serve \
 CPU-only target in the current merged code:
 
 ```bash
-vibe-serve --outer-loop agent --backend cpu --interface service ...
+./vs --outer-loop agent --backend cpu --interface service ...
 ```
 
 Use local execution unless the CPU backend's Docker support is present in your

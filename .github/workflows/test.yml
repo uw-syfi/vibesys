@@ -43,6 +43,59 @@ jobs:
       - name: Check Python lint
         run: ./scripts/check_lint.sh
 
+  tui:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack install --global pnpm@11.11.0
+
+      - name: Set up Bun for OpenTUI
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.9
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install Python dependencies
+        run: uv sync --dev
+
+      - name: Install TUI dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check TypeScript formatting and lint
+        run: pnpm check:ts
+
+      - name: Test repository launcher
+        run: ./vs --headless --help >/dev/null
+
+      - name: Check generated protocol bindings
+        run: |
+          pnpm --dir clients/tui generate:protocol
+          git diff --exit-code -- clients/tui/src/generated/protocol.schema.json clients/tui/src/generated/protocol.generated.ts
+
+      - name: Check TypeScript
+        run: pnpm --dir clients/tui check
+
+      - name: Test TUI
+        run: pnpm --dir clients/tui test
+
+      - name: Build TUI
+        run: pnpm --dir clients/tui build
+
   queue-native:
     runs-on: ubuntu-latest
 

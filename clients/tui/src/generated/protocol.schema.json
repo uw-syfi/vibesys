@@ -1,0 +1,1256 @@
+{
+  "$defs": {
+    "AgentOutputChunkData": {
+      "properties": {
+        "kind": {
+          "const": "agent_output_chunk",
+          "default": "agent_output_chunk",
+          "title": "Kind",
+          "type": "string"
+        },
+        "channel": {
+          "enum": [
+            "assistant",
+            "analysis",
+            "tool",
+            "diagnostic",
+            "prompt"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel",
+        "content"
+      ],
+      "title": "AgentOutputChunkData",
+      "type": "object"
+    },
+    "BenchmarkResultData": {
+      "properties": {
+        "kind": {
+          "const": "benchmark_result",
+          "default": "benchmark_result",
+          "title": "Kind",
+          "type": "string"
+        },
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric",
+        "value",
+        "unit"
+      ],
+      "title": "BenchmarkResultData",
+      "type": "object"
+    },
+    "ChatData": {
+      "properties": {
+        "kind": {
+          "const": "chat",
+          "default": "chat",
+          "title": "Kind",
+          "type": "string"
+        },
+        "answer": {
+          "title": "Answer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "answer"
+      ],
+      "title": "ChatData",
+      "type": "object"
+    },
+    "ChatQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "query.chat",
+          "default": "query.chat",
+          "title": "Type",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "ChatQuery",
+      "type": "object"
+    },
+    "ChatResult": {
+      "additionalProperties": false,
+      "properties": {
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "answer": {
+          "title": "Answer",
+          "type": "string"
+        },
+        "effect": {
+          "const": "none",
+          "default": "none",
+          "title": "Effect",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question",
+        "answer"
+      ],
+      "title": "ChatResult",
+      "type": "object"
+    },
+    "CommandAck": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "pause",
+            "resume"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "consumed"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "status"
+      ],
+      "title": "CommandAck",
+      "type": "object"
+    },
+    "ConfigurationFailedData": {
+      "properties": {
+        "kind": {
+          "const": "configuration_failed",
+          "default": "configuration_failed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Usage"
+        },
+        "exit_code": {
+          "title": "Exit Code",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "code",
+        "stage",
+        "message",
+        "exit_code"
+      ],
+      "title": "ConfigurationFailedData",
+      "type": "object"
+    },
+    "EventBatchMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event_batch",
+          "default": "event_batch",
+          "title": "Type",
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/RunEvent"
+          },
+          "title": "Events",
+          "type": "array"
+        }
+      },
+      "required": [
+        "events"
+      ],
+      "title": "EventBatchMessage",
+      "type": "object"
+    },
+    "EventMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event",
+          "default": "event",
+          "title": "Type",
+          "type": "string"
+        },
+        "event": {
+          "$ref": "#/$defs/RunEvent"
+        }
+      },
+      "required": [
+        "event"
+      ],
+      "title": "EventMessage",
+      "type": "object"
+    },
+    "EventStatus": {
+      "enum": [
+        "active",
+        "answered",
+        "pending",
+        "consumed",
+        "completed",
+        "failed"
+      ],
+      "title": "EventStatus",
+      "type": "string"
+    },
+    "EventType": {
+      "enum": [
+        "server_started",
+        "server_ready",
+        "configuration_failed",
+        "run_started",
+        "run_interrupted",
+        "chat",
+        "status_query",
+        "control",
+        "invocation_started",
+        "invocation_finished",
+        "phase_started",
+        "phase_finished",
+        "agent_output_chunk",
+        "subprocess_output",
+        "judge_result",
+        "benchmark_result",
+        "round_finished",
+        "run_finished",
+        "run_failed",
+        "output"
+      ],
+      "title": "EventType",
+      "type": "string"
+    },
+    "EventsQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "query.events",
+          "default": "query.events",
+          "title": "Type",
+          "type": "string"
+        },
+        "after_sequence": {
+          "default": 0,
+          "minimum": 0,
+          "title": "After Sequence",
+          "type": "integer"
+        },
+        "timeout_ms": {
+          "default": 0,
+          "maximum": 30000,
+          "minimum": 0,
+          "title": "Timeout Ms",
+          "type": "integer"
+        }
+      },
+      "title": "EventsQuery",
+      "type": "object"
+    },
+    "HistoryQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "query.history",
+          "default": "query.history",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "HistoryQuery",
+      "type": "object"
+    },
+    "InvocationFinishedData": {
+      "properties": {
+        "kind": {
+          "const": "invocation_finished",
+          "default": "invocation_finished",
+          "title": "Kind",
+          "type": "string"
+        },
+        "result": {
+          "default": null,
+          "title": "Result"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        }
+      },
+      "title": "InvocationFinishedData",
+      "type": "object"
+    },
+    "InvocationStartedData": {
+      "properties": {
+        "kind": {
+          "const": "invocation_started",
+          "default": "invocation_started",
+          "title": "Kind",
+          "type": "string"
+        },
+        "system_prompt": {
+          "title": "System Prompt",
+          "type": "string"
+        },
+        "user_prompt": {
+          "title": "User Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "system_prompt",
+        "user_prompt"
+      ],
+      "title": "InvocationStartedData",
+      "type": "object"
+    },
+    "JudgeResultData": {
+      "properties": {
+        "kind": {
+          "const": "judge_result",
+          "default": "judge_result",
+          "title": "Kind",
+          "type": "string"
+        },
+        "verdict": {
+          "enum": [
+            "pass",
+            "fail"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "feedback": {
+          "title": "Feedback",
+          "type": "string"
+        },
+        "attempt": {
+          "title": "Attempt",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "verdict",
+        "feedback",
+        "attempt"
+      ],
+      "title": "JudgeResultData",
+      "type": "object"
+    },
+    "OutputData": {
+      "properties": {
+        "kind": {
+          "const": "output",
+          "default": "output",
+          "title": "Kind",
+          "type": "string"
+        },
+        "stream": {
+          "enum": [
+            "stdout",
+            "stderr"
+          ],
+          "title": "Stream",
+          "type": "string"
+        },
+        "source": {
+          "default": "backend",
+          "title": "Source",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stream",
+        "content"
+      ],
+      "title": "OutputData",
+      "type": "object"
+    },
+    "PauseCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "command.pause",
+          "default": "command.pause",
+          "title": "Type",
+          "type": "string"
+        },
+        "mode": {
+          "const": "after_current_agent_call",
+          "default": "after_current_agent_call",
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "title": "PauseCommand",
+      "type": "object"
+    },
+    "PhaseData": {
+      "properties": {
+        "kind": {
+          "const": "phase",
+          "default": "phase",
+          "title": "Kind",
+          "type": "string"
+        },
+        "phase": {
+          "title": "Phase",
+          "type": "string"
+        },
+        "attempt": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempt"
+        }
+      },
+      "required": [
+        "phase"
+      ],
+      "title": "PhaseData",
+      "type": "object"
+    },
+    "ProtocolErrorMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "protocol_error",
+          "default": "protocol_error",
+          "title": "Type",
+          "type": "string"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Id"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ProtocolErrorMessage",
+      "type": "object"
+    },
+    "Response": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "ok": {
+          "default": true,
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "ack": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommandAck"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "chat": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChatResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/RunEvent"
+          },
+          "title": "Events",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id"
+      ],
+      "title": "Response",
+      "type": "object"
+    },
+    "ResumeCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "command.resume",
+          "default": "command.resume",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "ResumeCommand",
+      "type": "object"
+    },
+    "RoundFinishedData": {
+      "properties": {
+        "kind": {
+          "const": "round_finished",
+          "default": "round_finished",
+          "title": "Kind",
+          "type": "string"
+        },
+        "attempts": {
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "judge_verdict": {
+          "enum": [
+            "pass",
+            "fail"
+          ],
+          "title": "Judge Verdict",
+          "type": "string"
+        },
+        "perf_metric": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perf Metric"
+        },
+        "perf_unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Perf Unit"
+        }
+      },
+      "required": [
+        "attempts",
+        "judge_verdict"
+      ],
+      "title": "RoundFinishedData",
+      "type": "object"
+    },
+    "RunEvent": {
+      "additionalProperties": false,
+      "description": "One reproducible human, control, or invocation event.",
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "sequence": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "run_id": {
+          "default": "",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/EventType"
+        },
+        "text": {
+          "default": "",
+          "title": "Text",
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EventStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "round_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Round Label"
+        },
+        "agent_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Kind"
+        },
+        "invocation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Invocation Id"
+        },
+        "data": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "agent_output_chunk": "#/$defs/AgentOutputChunkData",
+                  "benchmark_result": "#/$defs/BenchmarkResultData",
+                  "chat": "#/$defs/ChatData",
+                  "configuration_failed": "#/$defs/ConfigurationFailedData",
+                  "invocation_finished": "#/$defs/InvocationFinishedData",
+                  "invocation_started": "#/$defs/InvocationStartedData",
+                  "judge_result": "#/$defs/JudgeResultData",
+                  "output": "#/$defs/OutputData",
+                  "phase": "#/$defs/PhaseData",
+                  "round_finished": "#/$defs/RoundFinishedData",
+                  "run_interrupted": "#/$defs/RunInterruptedData",
+                  "run_started": "#/$defs/RunStartedData",
+                  "server_ready": "#/$defs/ServerReadyData",
+                  "subprocess_output": "#/$defs/SubprocessOutputData"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ChatData"
+                },
+                {
+                  "$ref": "#/$defs/InvocationStartedData"
+                },
+                {
+                  "$ref": "#/$defs/InvocationFinishedData"
+                },
+                {
+                  "$ref": "#/$defs/OutputData"
+                },
+                {
+                  "$ref": "#/$defs/ServerReadyData"
+                },
+                {
+                  "$ref": "#/$defs/RunStartedData"
+                },
+                {
+                  "$ref": "#/$defs/RunInterruptedData"
+                },
+                {
+                  "$ref": "#/$defs/ConfigurationFailedData"
+                },
+                {
+                  "$ref": "#/$defs/PhaseData"
+                },
+                {
+                  "$ref": "#/$defs/AgentOutputChunkData"
+                },
+                {
+                  "$ref": "#/$defs/SubprocessOutputData"
+                },
+                {
+                  "$ref": "#/$defs/JudgeResultData"
+                },
+                {
+                  "$ref": "#/$defs/BenchmarkResultData"
+                },
+                {
+                  "$ref": "#/$defs/RoundFinishedData"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        }
+      },
+      "required": [
+        "timestamp",
+        "type"
+      ],
+      "title": "RunEvent",
+      "type": "object"
+    },
+    "RunInterruptedData": {
+      "properties": {
+        "kind": {
+          "const": "run_interrupted",
+          "default": "run_interrupted",
+          "title": "Kind",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "signal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signal"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "title": "RunInterruptedData",
+      "type": "object"
+    },
+    "RunSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "agent_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Kind"
+        },
+        "round_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Round Label"
+        }
+      },
+      "required": [
+        "run_id",
+        "sequence",
+        "status"
+      ],
+      "title": "RunSnapshot",
+      "type": "object"
+    },
+    "RunStartedData": {
+      "properties": {
+        "kind": {
+          "const": "run_started",
+          "default": "run_started",
+          "title": "Kind",
+          "type": "string"
+        },
+        "outer_loop": {
+          "title": "Outer Loop",
+          "type": "string"
+        },
+        "input": {
+          "title": "Input",
+          "type": "string"
+        },
+        "max_rounds": {
+          "title": "Max Rounds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "outer_loop",
+        "input",
+        "max_rounds"
+      ],
+      "title": "RunStartedData",
+      "type": "object"
+    },
+    "ServerReadyData": {
+      "properties": {
+        "kind": {
+          "const": "server_ready",
+          "default": "server_ready",
+          "title": "Kind",
+          "type": "string"
+        },
+        "socket_protocol": {
+          "const": "jsonl",
+          "default": "jsonl",
+          "title": "Socket Protocol",
+          "type": "string"
+        }
+      },
+      "title": "ServerReadyData",
+      "type": "object"
+    },
+    "SnapshotQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "query.snapshot",
+          "default": "query.snapshot",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "SnapshotQuery",
+      "type": "object"
+    },
+    "SubprocessOutputData": {
+      "properties": {
+        "kind": {
+          "const": "subprocess_output",
+          "default": "subprocess_output",
+          "title": "Kind",
+          "type": "string"
+        },
+        "process_id": {
+          "title": "Process Id",
+          "type": "string"
+        },
+        "process_kind": {
+          "title": "Process Kind",
+          "type": "string"
+        },
+        "stream": {
+          "enum": [
+            "stdout",
+            "stderr"
+          ],
+          "title": "Stream",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "process_id",
+        "process_kind",
+        "stream",
+        "content"
+      ],
+      "title": "SubprocessOutputData",
+      "type": "object"
+    },
+    "SubscribeRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "subscribe",
+          "default": "subscribe",
+          "title": "Type",
+          "type": "string"
+        },
+        "after_sequence": {
+          "default": 0,
+          "minimum": 0,
+          "title": "After Sequence",
+          "type": "integer"
+        }
+      },
+      "title": "SubscribeRequest",
+      "type": "object"
+    },
+    "SubscribedMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "subscribed",
+          "default": "subscribed",
+          "title": "Type",
+          "type": "string"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "latest_sequence": {
+          "title": "Latest Sequence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "run_id",
+        "latest_sequence"
+      ],
+      "title": "SubscribedMessage",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "request": {
+      "discriminator": {
+        "mapping": {
+          "command.pause": "#/$defs/PauseCommand",
+          "command.resume": "#/$defs/ResumeCommand",
+          "query.chat": "#/$defs/ChatQuery",
+          "query.events": "#/$defs/EventsQuery",
+          "query.history": "#/$defs/HistoryQuery",
+          "query.snapshot": "#/$defs/SnapshotQuery",
+          "subscribe": "#/$defs/SubscribeRequest"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PauseCommand"
+        },
+        {
+          "$ref": "#/$defs/ResumeCommand"
+        },
+        {
+          "$ref": "#/$defs/SnapshotQuery"
+        },
+        {
+          "$ref": "#/$defs/ChatQuery"
+        },
+        {
+          "$ref": "#/$defs/HistoryQuery"
+        },
+        {
+          "$ref": "#/$defs/EventsQuery"
+        },
+        {
+          "$ref": "#/$defs/SubscribeRequest"
+        }
+      ],
+      "title": "Request"
+    },
+    "response": {
+      "$ref": "#/$defs/Response"
+    },
+    "event": {
+      "$ref": "#/$defs/RunEvent"
+    },
+    "snapshot": {
+      "$ref": "#/$defs/RunSnapshot"
+    },
+    "server_message": {
+      "discriminator": {
+        "mapping": {
+          "event": "#/$defs/EventMessage",
+          "event_batch": "#/$defs/EventBatchMessage",
+          "protocol_error": "#/$defs/ProtocolErrorMessage",
+          "subscribed": "#/$defs/SubscribedMessage"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SubscribedMessage"
+        },
+        {
+          "$ref": "#/$defs/EventMessage"
+        },
+        {
+          "$ref": "#/$defs/EventBatchMessage"
+        },
+        {
+          "$ref": "#/$defs/ProtocolErrorMessage"
+        }
+      ],
+      "title": "Server Message"
+    }
+  },
+  "required": [
+    "request",
+    "response",
+    "event",
+    "snapshot",
+    "server_message"
+  ],
+  "title": "ProtocolDocument",
+  "type": "object"
+}

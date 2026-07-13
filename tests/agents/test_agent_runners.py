@@ -34,7 +34,7 @@ def _judge_fallback() -> JudgeResponse:
     )
 
 
-def test_prompt_markdown_renderer_preserves_raw_log_and_truncates_stdout(capsys):
+def test_prompt_markdown_emitter_preserves_raw_log_and_truncates_stdout(capsys):
     log = StringIO()
     prompt = "# Title\n\nUse **markdown** and `code`."
 
@@ -42,20 +42,19 @@ def test_prompt_markdown_renderer_preserves_raw_log_and_truncates_stdout(capsys)
 
     stdout = capsys.readouterr().out
     assert "Title" in stdout
-    assert "# Title" not in stdout
+    assert "# Title" in stdout
     assert "... [17 more chars, see log for full text]" in stdout
     assert log.getvalue() == prompt + "\n"
 
 
-def test_json_renderer_preserves_raw_log_and_pretty_prints_stdout(capsys):
+def test_json_emitter_preserves_raw_log(capsys):
     log = StringIO()
     raw_json = '{"analysis":"ok","items":[1,2]}'
 
     _log_json_and_print(raw_json, log_file=log)
 
     stdout = capsys.readouterr().out
-    assert '{\n  "analysis": "ok",' in stdout
-    assert '"items": [\n    1,\n    2\n  ]' in stdout
+    assert raw_json in stdout
     assert log.getvalue() == raw_json + "\n"
 
 
@@ -301,8 +300,8 @@ class TestCliAgentRunner:
         assert result.analysis == "fallback"
         stdout = capsys.readouterr().out
         assert "Failure" in stdout
-        assert "# Failure" not in stdout
-        assert "**JSON**" not in stdout
+        assert "# Failure" in stdout
+        assert "**JSON**" in stdout
 
     def test_cli_runner_passes_progress_to_logger(self, monkeypatch, tmp_path):
         captured: list = []
@@ -581,7 +580,7 @@ class TestCliAgentRunner:
         input_idx = stdout_before_generate[0].index("--- input ---")
         assert "System Prompt" in stdout_before_generate[0][input_idx:]
         assert "User Prompt" in stdout_before_generate[0][input_idx:]
-        assert "**bold**" not in stdout_before_generate[0][input_idx:]
+        assert "**bold**" in stdout_before_generate[0][input_idx:]
 
     def test_cli_runner_writes_usage_jsonl_on_success(self, monkeypatch, tmp_path):
         """CliAgentRunner appends one JSON record per invoke() to ``<log_dir>/usage.jsonl``."""
@@ -1235,7 +1234,6 @@ class TestAgentLoggerEventHandler:
         )
 
         with (
-            patch.object(logger, "log_text") as mock_text,
             patch.object(logger, "log_tool_call") as mock_tool_call,
             patch.object(logger, "log_tool_result") as mock_tool_result,
         ):
@@ -1244,7 +1242,6 @@ class TestAgentLoggerEventHandler:
             logger.on_tool_result("Bash", stdout="output", exit_code=0)
             logger.on_tool_result("Bash", stderr="boom", exit_code=1)
 
-        mock_text.assert_called_once_with("hello")
         mock_tool_call.assert_called_once_with("Bash", {"command": "ls"})
         assert mock_tool_result.call_count == 2
 

@@ -1,0 +1,14 @@
+{
+  "name": "vibeserve-workspace",
+  "private": true,
+  "packageManager": "pnpm@11.11.0",
+  "scripts": {
+    "format:ts": "biome format --write .",
+    "check:format:ts": "biome format .",
+    "lint:ts": "biome lint .",
+    "check:ts": "biome check ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.3"
+  }
+}

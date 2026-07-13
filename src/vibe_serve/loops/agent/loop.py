@@ -39,6 +39,14 @@ from vibe_serve.schemas import (
     SingleAgentRoundResponse,
     Verdict,
 )
+from vibe_serve.server.events import (
+    BenchmarkResultData,
+    EventStatus,
+    EventType,
+    JudgeResultData,
+    RoundFinishedData,
+    SubprocessOutputData,
+)
 
 # Candidate process boundaries selected by ``--interface``. Language, tooling,
 # and artifact requirements belong to the selected domain and input bundle.
@@ -485,6 +493,20 @@ def _run_judge(
         ),
         round_label=f"round-{round_number}-retry-{retry}-judge",
     )
+    if ctx.supervisor is not None:
+        ctx.supervisor.record(
+            EventType.JUDGE_RESULT,
+            status=(
+                EventStatus.COMPLETED if response.verdict == Verdict.PASS else EventStatus.FAILED
+            ),
+            round_label=f"round-{round_number}-retry-{retry}",
+            agent_kind="judge",
+            data=JudgeResultData(
+                verdict=response.verdict.value,
+                feedback=response.feedback,
+                attempt=retry,
+            ),
+        )
     issue_board.append_judge(progress_path, round_number, retry, response)
     ctx.snapshot_workspace(f"round-{round_number}-retry-{retry}-judge")
     return response
@@ -610,6 +632,12 @@ def _run_framework_accuracy_gate(
         result = ctx.judge_backend.execute(command)
         output = result.output.strip()
         passed = result.exit_code == 0
+        _publish_subprocess_output(
+            ctx,
+            process_id=f"accuracy-{round_number}-{retry}",
+            process_kind="accuracy_checker",
+            content=result.output,
+        )
     except Exception as exc:
         output = f"accuracy command could not be executed: {exc}"
         passed = False
@@ -690,6 +718,12 @@ def _run_framework_benchmark(
             result = ctx.judge_backend.execute(command)
             output = result.output.strip()
             passed = result.exit_code == 0
+            _publish_subprocess_output(
+                ctx,
+                process_id=f"benchmark-{round_number}-{retry}",
+                process_kind="benchmark",
+                content=result.output,
+            )
         except Exception as exc:
             output = f"benchmark command could not be executed: {exc}"
             passed = False
@@ -739,6 +773,17 @@ def _run_framework_benchmark(
     ctx.snapshot_workspace(f"round-{round_number}-retry-{retry}-framework-benchmark")
     if passed:
         ctx.lprint(f"[framework-benchmark] PASS: {result_spec.metric}={metric_value}")
+        if ctx.supervisor is not None and metric_value is not None:
+            ctx.supervisor.record(
+                EventType.BENCHMARK_RESULT,
+                status=EventStatus.COMPLETED,
+                round_label=f"round-{round_number}",
+                data=BenchmarkResultData(
+                    metric=result_spec.metric,
+                    value=metric_value,
+                    unit=result_spec.metric,
+                ),
+            )
         return None, metric_value
 
     feedback = f"Framework benchmark failed.\n{output[-4000:]}"
@@ -754,6 +799,8 @@ def _run_framework_gates(
     retry: int,
     progress_path: Path,
 ) -> tuple[str | None, float | None]:
+    if ctx.agent_runner.backend_name == "stub":
+        return None, None
     feedback = _run_framework_accuracy_gate(
         ctx,
         round_number=round_number,
@@ -1102,6 +1149,18 @@ def run_agent_loop(
                     )
                 )
                 _save_rounds_state(rounds_state_path, records)
+                if ctx.supervisor is not None:
+                    ctx.supervisor.record(
+                        EventType.ROUND_FINISHED,
+                        status=EventStatus.COMPLETED if passed else EventStatus.FAILED,
+                        round_label=f"round-{round_number}",
+                        data=RoundFinishedData(
+                            attempts=retry,
+                            judge_verdict="pass" if passed else "fail",
+                            perf_metric=perf_metric,
+                            perf_unit=perf_unit,
+                        ),
+                    )
 
                 if not passed:
                     issue_board.append_exhaustion_note(
@@ -1137,3 +1196,23 @@ def run_agent_loop(
         return True
     finally:
         ctx.close()
+
+
+def _publish_subprocess_output(
+    ctx: _RunContext,
+    *,
+    process_id: str,
+    process_kind: str,
+    content: str,
+) -> None:
+    if ctx.supervisor is None or not content:
+        return
+    ctx.supervisor.record(
+        EventType.SUBPROCESS_OUTPUT,
+        data=SubprocessOutputData(
+            process_id=process_id,
+            process_kind=process_kind,
+            stream="stdout",
+            content=content,
+        ),
+    )

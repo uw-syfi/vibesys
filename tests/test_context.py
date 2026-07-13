@@ -1,4 +1,5 @@
 import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -20,6 +21,22 @@ def _minimal_copy_context(workspace):
     ctx.backend_impl = MagicMock()
     ctx.lprint = MagicMock()
     return ctx
+
+
+def test_interactive_log_switch_preserves_supervision_stderr(tmp_path):
+    ctx = object.__new__(_RunContext)
+    ctx.log_dir = tmp_path
+    ctx.run_log_file = (tmp_path / "run.log").open("a", encoding="utf-8")
+    ctx.run_log_path = tmp_path / "run.log"
+    ctx._stderr_redirected = False
+    ctx._original_stderr = sys.stderr
+    original_log = ctx.run_log_file
+
+    ctx.switch_log_file("round001")
+
+    assert sys.stderr is ctx._original_stderr
+    original_log.close()
+    ctx.run_log_file.close()
 
 
 def test_input_copy_respects_source_gitignore(tmp_path):

@@ -2,13 +2,9 @@
 
 import json
 import re
-import sys
 import uuid
 
 from pydantic import ValidationError
-from rich.console import Console
-from rich.json import JSON
-from rich.markdown import Markdown
 
 from vibe_serve.agents.callbacks import AgentLogger, TodoDisplay
 from vibe_serve.schemas import (
@@ -143,6 +139,11 @@ def _log_and_print(
     max_len: int | None = None,
 ) -> None:
     """Print to stdout (optionally truncated) and write full text to log_file."""
+    from vibe_serve.server.registry import active_supervisor
+
+    supervisor = active_supervisor()
+    if supervisor is not None:
+        supervisor.publish_agent_output(text + "\n", channel="diagnostic")
     if log_file:
         log_file.write(text + "\n")
         log_file.flush()
@@ -157,21 +158,23 @@ def _log_markdown_and_print(
     text: str,
     log_file=None,
     max_len: int | None = None,
+    *,
+    channel: str = "assistant",
 ) -> None:
-    """Render Markdown to stdout while preserving raw text in logs."""
+    """Emit raw Markdown; presentation clients decide how to render it."""
+    from vibe_serve.server.registry import active_supervisor
+
+    supervisor = active_supervisor()
+    if supervisor is not None:
+        supervisor.publish_agent_output(text + "\n", channel=channel)
     if log_file:
         log_file.write(text + "\n")
         log_file.flush()
-
-    display_text = text
-    truncated_chars = 0
     if max_len is not None and len(text) > max_len:
-        display_text = text[:max_len]
-        truncated_chars = len(text) - max_len
-
-    Console(file=sys.stdout).print(Markdown(display_text))
-    if truncated_chars:
-        print(f"... [{truncated_chars} more chars, see log for full text]")
+        print(text[:max_len])
+        print(f"... [{len(text) - max_len} more chars, see log for full text]")
+    else:
+        print(text)
 
 
 def _log_prompt_markdown_and_print(
@@ -179,8 +182,13 @@ def _log_prompt_markdown_and_print(
     log_file=None,
     max_len: int | None = None,
 ) -> None:
-    """Render prompt Markdown to stdout while preserving raw prompt text in logs."""
-    _log_markdown_and_print(prompt, log_file=log_file, max_len=max_len)
+    """Emit raw prompt Markdown while preserving it in logs."""
+    _log_markdown_and_print(
+        prompt,
+        log_file=log_file,
+        max_len=max_len,
+        channel="prompt",
+    )
 
 
 def _log_json_and_print(
@@ -188,23 +196,8 @@ def _log_json_and_print(
     log_file=None,
     max_len: int | None = None,
 ) -> None:
-    """Render JSON to stdout while preserving raw JSON text in logs."""
-    if log_file:
-        log_file.write(text + "\n")
-        log_file.flush()
-
-    display_text = text
-    truncated_chars = 0
-    if max_len is not None and len(text) > max_len:
-        display_text = text[:max_len]
-        truncated_chars = len(text) - max_len
-
-    try:
-        Console(file=sys.stdout).print(JSON(display_text))
-    except ValueError:
-        print(display_text)
-    if truncated_chars:
-        print(f"... [{truncated_chars} more chars, see log for full text]")
+    """Emit raw JSON; presentation clients decide how to render it."""
+    _log_and_print(text, log_file=log_file, max_len=max_len)
 
 
 # ---------------------------------------------------------------------------

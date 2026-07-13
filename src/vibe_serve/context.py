@@ -130,12 +130,22 @@ class _RunContext:
 
         self.log_dir = self.exp_dir / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        from vibe_serve.server.registry import active_supervisor
+
+        self.supervisor = active_supervisor()
+        if self.supervisor is not None:
+            self.supervisor.attach(self.log_dir)
         run_started = datetime.now().strftime("%Y%m%d-%H%M%S")
         self.run_log_path = self.log_dir / f"run-{run_started}.log"
         self.run_log_file = self.run_log_path.open("a", encoding="utf-8")
 
         self._original_stderr = sys.stderr
-        sys.stderr = _TeeWriter(self._original_stderr, self.run_log_file)
+        # A full-screen TUI owns the terminal. Its thread-aware stream router
+        # suppresses worker writes; replacing it with a process-global tee here
+        # would both corrupt the display and record terminal escape frames.
+        self._stderr_redirected = self.supervisor is None
+        if self._stderr_redirected:
+            sys.stderr = _TeeWriter(self._original_stderr, self.run_log_file)
         self._closed = False
         self._run_environment_stack = ExitStack()
         self._progress_stack: list[AgentProgress] = []
@@ -480,18 +490,31 @@ class _RunContext:
         ``agent_runner.invoke`` unchanged so loop-specific options
         (e.g. ``iteration=`` for plain-loop runner extensions) still work.
         """
-        return self.agent_runner.invoke(
-            kind=kind,
-            workspace=self.workspace,
-            system_prompt=system_prompt,
-            env=self.gpu_env(),
-            user_prompt=user_prompt,
-            response_cls=response_cls,
-            fallback_factory=fallback_factory,
-            round_label=round_label,
-            progress=progress if progress is not None else self.current_progress(),
-            **extra,
-        )
+        supervisor = getattr(self, "supervisor", None)
+        if supervisor is not None:
+            supervisor.before_agent(kind, round_label, user_prompt, system_prompt)
+        result = None
+        error = None
+        try:
+            result = self.agent_runner.invoke(
+                kind=kind,
+                workspace=self.workspace,
+                system_prompt=system_prompt,
+                env=self.gpu_env(),
+                user_prompt=user_prompt,
+                response_cls=response_cls,
+                fallback_factory=fallback_factory,
+                round_label=round_label,
+                progress=progress if progress is not None else self.current_progress(),
+                **extra,
+            )
+            return result
+        except BaseException as exc:
+            error = exc
+            raise
+        finally:
+            if supervisor is not None:
+                supervisor.after_agent(kind, round_label, result=result, error=error)
 
     @staticmethod
     def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
@@ -956,9 +979,9 @@ class _RunContext:
         ``run-<ts>-step3.log``).  Callers that want a different prefix
         (e.g. ``round007``) should pass a string.
 
-        The previous log file is flushed but kept open (the ``_TeeWriter``
-        on stderr still references it).  A new file is opened and both
-        ``run_log_file`` and the stderr tee are updated.
+        The previous log file is flushed but kept open. A new file becomes
+        ``run_log_file``. When stderr logging is enabled, its tee is updated
+        to write to the new file as well.
         """
         self.run_log_file.flush()
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -967,7 +990,8 @@ class _RunContext:
         new_file = new_path.open("a", encoding="utf-8")
         self.run_log_path = new_path
         self.run_log_file = new_file
-        sys.stderr = _TeeWriter(self._original_stderr, new_file)
+        if self._stderr_redirected:
+            sys.stderr = _TeeWriter(self._original_stderr, new_file)
         # Update the agent runner's log file handle so subsequent
         # invoke() calls write to the new step log.
         if hasattr(self, "agent_runner") and hasattr(self.agent_runner, "_run_log_file"):
@@ -1020,7 +1044,8 @@ class _RunContext:
             except Exception as exc:
                 self.lprint(f"[warn] environment hook teardown failed: {exc}")
         self._run_environment_stack.close()
-        sys.stderr = self._original_stderr
+        if self._stderr_redirected:
+            sys.stderr = self._original_stderr
         self.run_log_file.close()
 
     def __enter__(self) -> "_RunContext":
