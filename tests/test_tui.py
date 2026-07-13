@@ -13,6 +13,7 @@ from unittest.mock import Mock
 import pytest
 
 from vibe_serve.context import _RunContext
+from vibe_serve.errors import ConfigurationDiagnostic, ConfigurationError
 from vibe_serve.server import (
     EventType,
     RunInspector,
@@ -25,6 +26,7 @@ from vibe_serve.server.protocol import (
     SnapshotQuery,
     SubscribeRequest,
 )
+from vibe_serve.server.runtime import run_server
 from vibe_serve.server.schema import ProtocolDocument
 from vibe_serve.server.service import SupervisionService
 from vibe_serve.server.transport import SupervisionSocketServer
@@ -295,6 +297,64 @@ def test_cli_parse_failure_is_streamed_after_client_attaches():
     assert not any(event["type"] == "run_failed" for event in audited_events)
     assert stdout == ""
     assert stderr == ""
+
+
+def test_supervision_runtime_streams_configuration_failure_before_exiting():
+    session_dir = Path("/tmp") / f"vs-runtime-test-{uuid.uuid4().hex}"
+    socket_path = session_dir / "control.sock"
+    received_events = []
+
+    def subscribe_until_failure() -> None:
+        deadline = time.monotonic() + 5
+        while not socket_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(5)
+            client.connect(str(socket_path))
+            stream = client.makefile("rwb")
+            stream.write(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
+            stream.flush()
+            while True:
+                message = json.loads(stream.readline())
+                if message["type"] == "event":
+                    received_events.append(message["event"])
+                elif message["type"] == "event_batch":
+                    received_events.extend(message["events"])
+                if any(event["type"] == "configuration_failed" for event in received_events):
+                    break
+            stream.close()
+
+    subscriber = threading.Thread(target=subscribe_until_failure)
+    subscriber.start()
+    failure = ConfigurationError(
+        ConfigurationDiagnostic(
+            code="invalid_arguments",
+            stage="argument_parsing",
+            message="unknown option --bad",
+            usage="usage: vibe-serve ...",
+        )
+    )
+    try:
+        with pytest.raises(ConfigurationError) as raised:
+            run_server(lambda: (_ for _ in ()).throw(failure), socket_path=socket_path)
+        assert raised.value is failure
+        subscriber.join(timeout=5)
+        assert not subscriber.is_alive()
+        configuration_event = next(
+            event for event in received_events if event["type"] == "configuration_failed"
+        )
+        assert configuration_event["data"] == {
+            "kind": "configuration_failed",
+            "code": "invalid_arguments",
+            "stage": "argument_parsing",
+            "message": "unknown option --bad",
+            "usage": "usage: vibe-serve ...",
+            "exit_code": 2,
+        }
+        assert not any(event["type"] == "run_failed" for event in received_events)
+    finally:
+        subscriber.join(timeout=5)
+        shutil.rmtree(session_dir, ignore_errors=True)
 
 
 def test_run_context_records_invocation_boundary(tmp_path):
