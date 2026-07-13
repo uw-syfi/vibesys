@@ -16,6 +16,7 @@ from vibe_serve.domains.base import DomainName, DomainRole
 from vibe_serve.domains.registry import resolve_domain
 from vibe_serve.domains.rendering import render_domain_section
 from vibe_serve.errors import ConfigurationError
+from vibe_serve.loops.agent.loop import _effective_profiler_definition
 from vibe_serve.profilers import ProfilerKind
 from vibe_serve.prompts import render_template
 
@@ -93,7 +94,7 @@ def test_torch_profiler_requires_inprocess_boundary_and_domain_support():
             "inprocess",
             supports_torch_profiler=True,
         )
-        == "profiler_prompt_torch.j2"
+        == "profilers/torch.j2"
     )
     assert (
         _profiler_prompt_template(
@@ -101,7 +102,7 @@ def test_torch_profiler_requires_inprocess_boundary_and_domain_support():
             "inprocess",
             supports_torch_profiler=False,
         )
-        == "profiler_prompt_nsys.j2"
+        == "profilers/nsys.j2"
     )
     assert (
         _profiler_prompt_template(
@@ -109,15 +110,15 @@ def test_torch_profiler_requires_inprocess_boundary_and_domain_support():
             "service",
             supports_torch_profiler=True,
         )
-        == "profiler_prompt_nsys.j2"
+        == "profilers/nsys.j2"
     )
 
 
 def test_non_torch_profilers_do_not_depend_on_interface():
     from vibe_serve.loops.agent.loop import _profiler_prompt_template
 
-    assert _profiler_prompt_template(ProfilerKind.NEURON, "service") == "profiler_prompt_neuron.j2"
-    assert _profiler_prompt_template(ProfilerKind.NSYS, "service") == "profiler_prompt_nsys.j2"
+    assert _profiler_prompt_template(ProfilerKind.NEURON, "service") == "profilers/neuron.j2"
+    assert _profiler_prompt_template(ProfilerKind.NSYS, "service") == "profilers/nsys.j2"
 
 
 def test_standalone_profiler_none_has_no_prompt_template():
@@ -252,6 +253,15 @@ def _render_single_agent(
     profiler_kind: ProfilerKind = ProfilerKind.TORCH,
     supports_torch_profiler: bool = False,
 ) -> str:
+    effective_profiler = (
+        _effective_profiler_definition(
+            profiler_kind,
+            interface,
+            supports_torch_profiler=supports_torch_profiler,
+        )
+        if profiler_kind is not ProfilerKind.NONE
+        else None
+    )
     return render_template(
         "single_agent_round_prompt.j2",
         template_dir=_TEMPLATE_DIR,
@@ -267,6 +277,8 @@ def _render_single_agent(
         objective="OBJ",
         profile_focus="focus",
         profiler_kind=profiler_kind,
+        profiler_support_name=(effective_profiler.support_name if effective_profiler else None),
+        profiler_mcp_name=(effective_profiler.mcp_name if effective_profiler else None),
         supports_torch_profiler=supports_torch_profiler,
         benchmark_command="benchmark",
         accuracy_command="accuracy-checker",

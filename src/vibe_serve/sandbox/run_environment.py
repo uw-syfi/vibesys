@@ -61,10 +61,7 @@ class AgentPaths:
 
     accuracy_command: str | None = None
     benchmark_command: str | None = None
-    nsys_profiler: str | None = None
-    torch_profiler: str | None = None
-    neuron_profiler: str | None = None
-    macos_cpu_profiler: str | None = None
+    profiler_support: str | None = None
 
 
 @dataclass(frozen=True)
@@ -96,10 +93,8 @@ class RunEnvironmentRequest:
     cli_provider: str | None
     accuracy_command: str | None = None
     benchmark_command: str | None = None
-    nsys_profiler_path: str | None = None
-    torch_profiler_path: str | None = None
-    neuron_profiler_path: str | None = None
-    macos_cpu_profiler_path: str | None = None
+    profiler_support_path: str | None = None
+    profiler_support_name: str | None = None
     environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
     log: Callable[[str], None] | None = None
     project_root: Path = PROJECT_ROOT
@@ -184,10 +179,7 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
                 paths=AgentPaths(
                     accuracy_command=request.accuracy_command,
                     benchmark_command=request.benchmark_command,
-                    nsys_profiler=request.nsys_profiler_path,
-                    torch_profiler=request.torch_profiler_path,
-                    neuron_profiler=request.neuron_profiler_path,
-                    macos_cpu_profiler=request.macos_cpu_profiler_path,
+                    profiler_support=request.profiler_support_path,
                 ),
             ),
             stop_on_close=False,
@@ -662,10 +654,7 @@ def _isolated_paths(request: RunEnvironmentRequest) -> AgentPaths:
     return AgentPaths(
         accuracy_command=request.accuracy_command,
         benchmark_command=request.benchmark_command,
-        nsys_profiler="nsys_profiler" if request.nsys_profiler_path else None,
-        torch_profiler="torch_profiler" if request.torch_profiler_path else None,
-        neuron_profiler="neuron_profiler" if request.neuron_profiler_path else None,
-        macos_cpu_profiler=("macos_cpu_profiler" if request.macos_cpu_profiler_path else None),
+        profiler_support=(request.profiler_support_name if request.profiler_support_path else None),
     )
 
 
@@ -747,14 +736,14 @@ def _container_mount_plan(
         if mount.container_path.startswith("/"):
             passthrough_paths.append(mount.container_path)
 
-    if request.nsys_profiler_path:
-        bind_mounts.append((request.nsys_profiler_path, "/workspace/nsys_profiler", True))
-    if request.torch_profiler_path:
-        bind_mounts.append((request.torch_profiler_path, "/workspace/torch_profiler", True))
-    if request.neuron_profiler_path:
-        bind_mounts.append((request.neuron_profiler_path, "/workspace/neuron_profiler", True))
-    if request.macos_cpu_profiler_path:
-        bind_mounts.append((request.macos_cpu_profiler_path, "/workspace/macos_cpu_profiler", True))
+    if request.profiler_support_path and request.profiler_support_name:
+        bind_mounts.append(
+            (
+                request.profiler_support_path,
+                f"/workspace/{request.profiler_support_name}",
+                True,
+            )
+        )
 
     if (
         include_cli_provider_mounts

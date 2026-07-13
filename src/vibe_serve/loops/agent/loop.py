@@ -24,7 +24,11 @@ from vibe_serve.domains.rendering import render_domain_section
 from vibe_serve.input_manifest import BenchmarkResult
 from vibe_serve.loops.agent import issue_board
 from vibe_serve.loops.profiler import invoke_profiler
-from vibe_serve.profilers import ProfilerKind, require_profiler_kind
+from vibe_serve.profilers import (
+    ProfilerKind,
+    profiler_definition,
+    require_profiler_kind,
+)
 from vibe_serve.prompts import render_template
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
@@ -272,17 +276,29 @@ def _profiler_prompt_template(
     supports_torch_profiler: bool = False,
 ) -> str:
     """Pick a profiler prompt compatible with the boundary and domain."""
+    return _effective_profiler_definition(
+        profiler_kind,
+        interface,
+        supports_torch_profiler=supports_torch_profiler,
+    ).prompt_template
+
+
+def _effective_profiler_definition(
+    profiler_kind: ProfilerKind,
+    interface: str,
+    *,
+    supports_torch_profiler: bool = False,
+):
+    """Return the profiler declaration compatible with this agent boundary."""
     kind = require_profiler_kind(profiler_kind)
     if kind is ProfilerKind.NONE:
         raise ValueError("No profiler prompt exists when profiling is disabled.")
-    if kind is ProfilerKind.TORCH and (interface != "inprocess" or not supports_torch_profiler):
-        kind = ProfilerKind.NSYS
-    return {
-        ProfilerKind.NSYS: "profiler_prompt_nsys.j2",
-        ProfilerKind.TORCH: "profiler_prompt_torch.j2",
-        ProfilerKind.NEURON: "profiler_prompt_neuron.j2",
-        ProfilerKind.MACOS_CPU: "profiler_prompt_macos_cpu.j2",
-    }[kind]
+    definition = profiler_definition(kind)
+    if definition.requires_inprocess and interface != "inprocess":
+        definition = profiler_definition(ProfilerKind.NSYS)
+    if definition.requires_domain_torch_support and not supports_torch_profiler:
+        definition = profiler_definition(ProfilerKind.NSYS)
+    return definition
 
 
 def _run_profiler(
@@ -316,6 +332,8 @@ def _run_profiler(
         runtime_notes=ctx.run_environment_view.prompt_notes,
         env_kind=ctx.run_environment_view.env_kind,
         objective=objective,
+        profiler_support_name=profiler_definition(ctx.profiler_kind).support_name,
+        profiler_mcp_name=profiler_definition(ctx.profiler_kind).mcp_name,
     )
     summary = invoke_profiler(
         ctx,
@@ -543,6 +561,15 @@ def _run_single_agent_round(
         DomainRole.PROFILER,
         **_domain_render_context(ctx, modality, interface),
     )
+    effective_profiler = (
+        _effective_profiler_definition(
+            ctx.profiler_kind,
+            interface,
+            supports_torch_profiler=domain_definition.supports_torch_profiler,
+        )
+        if ctx.profiler_kind is not ProfilerKind.NONE
+        else None
+    )
     system_prompt = render_template(
         "single_agent_round_prompt.j2",
         template_dir=_TEMPLATE_DIR,
@@ -558,6 +585,8 @@ def _run_single_agent_round(
         objective=objective,
         profile_focus=profile_focus,
         profiler_kind=ctx.profiler_kind,
+        profiler_support_name=(effective_profiler.support_name if effective_profiler else None),
+        profiler_mcp_name=(effective_profiler.mcp_name if effective_profiler else None),
         supports_torch_profiler=domain_definition.supports_torch_profiler,
         benchmark_command=ctx.judge_benchmark_command,
         accuracy_command=ctx.judge_accuracy_command,
@@ -840,9 +869,6 @@ def run_agent_loop(
     start_round: int = 1,
     existing: bool = False,
     debug: bool = False,
-    nsys_profiler: str | None = None,
-    torch_profiler: str | None = None,
-    neuron_profiler: str | None = None,
     profiler_kind: ProfilerKind = ProfilerKind.AUTO,
     skills_dirs: list[str] | None = None,
     run_environment: RunEnvironmentSpec | None = None,
@@ -903,9 +929,6 @@ def run_agent_loop(
         evaluator_path=evaluator_path,
         existing=existing,
         debug=debug,
-        nsys_profiler=nsys_profiler,
-        torch_profiler=torch_profiler,
-        neuron_profiler=neuron_profiler,
         profiler_kind=profiler_kind,
         profiler_domain=domain_definition.name,
         skills_dirs=skills_dirs,

@@ -178,7 +178,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             domain_orchestrator=_domain_section(domain, "orchestrator", context),
         ),
         "profiler_nsys": render_template(
-            "profiler_prompt_nsys.j2",
+            "profilers/nsys.j2",
             template_dir=_TEMPLATE_DIR,
             profile_focus="queue benchmark hotspots",
             benchmark_command=context["benchmark_command"],
@@ -187,9 +187,11 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             runtime_notes=context["runtime_notes"],
             env_kind=context["env_kind"],
             objective=context["objective"],
+            profiler_support_name="nsys_profiler",
+            profiler_mcp_name="vibeserve-nsys-profiler",
         ),
         "profiler_torch": render_template(
-            "profiler_prompt_torch.j2",
+            "profilers/torch.j2",
             template_dir=_TEMPLATE_DIR,
             profile_focus="queue benchmark hotspots",
             benchmark_command=context["benchmark_command"],
@@ -198,9 +200,11 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             runtime_notes=context["runtime_notes"],
             env_kind=context["env_kind"],
             objective=context["objective"],
+            profiler_support_name="torch_profiler",
+            profiler_mcp_name="vibeserve-torch-profiler",
         ),
         "profiler_neuron": render_template(
-            "profiler_prompt_neuron.j2",
+            "profilers/neuron.j2",
             template_dir=_TEMPLATE_DIR,
             profile_focus="queue benchmark hotspots",
             benchmark_command=context["benchmark_command"],
@@ -209,6 +213,8 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             runtime_notes=context["runtime_notes"],
             env_kind=context["env_kind"],
             objective=context["objective"],
+            profiler_support_name="neuron_profiler",
+            profiler_mcp_name="vibeserve-neuron-profiler",
         ),
     }
 

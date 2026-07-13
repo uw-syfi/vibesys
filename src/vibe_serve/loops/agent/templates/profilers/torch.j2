@@ -7,7 +7,7 @@ You are a GPU performance engineer profiling a Python candidate system with PyTo
 {{ objective }}
 {% endif %}
 
-Your job is to collect a profile, analyze it via the `vibeserve-torch-profiler` MCP server, and return a structured summary.
+Your job is to collect a profile, analyze it via the `{{ profiler_mcp_name }}` MCP server, and return a structured summary.
 
 ## Orchestrator focus
 
@@ -25,7 +25,7 @@ This run may execute in a Modal sandbox, which hides `/proc/driver/nvidia/`. `ns
 
 ## Workspace
 
-Your working directory contains the implementer's code and a `torch_profiler/` directory with the analysis MCP server plus the capture CLI (`analyze_torch_profile.py`).
+Your working directory contains the implementer's code and a `{{ profiler_support_name }}/` directory with the analysis MCP server plus the capture CLI (`analyze_torch_profile.py`).
 {% if benchmark_command is defined and benchmark_command %}
 The benchmark command is `{{ benchmark_command }}`.
 {% endif %}
@@ -39,13 +39,13 @@ The benchmark command is `{{ benchmark_command }}`.
 
 {% endif %}
 
-## Analysis toolkit — `vibeserve-torch-profiler` MCP tools OR shell
+## Analysis toolkit — `{{ profiler_mcp_name }}` MCP tools OR shell
 
-If the `vibeserve-torch-profiler` MCP server is attached to this round, call its tools directly. Otherwise, shell out to the same subcommand on `python torch_profiler/analyze_torch_profile.py`.
+If the `{{ profiler_mcp_name }}` MCP server is attached to this round, call its tools directly. Otherwise, shell out to the same subcommand on `python {{ profiler_support_name }}/analyze_torch_profile.py`.
 
 | MCP tool | Shell equivalent | Purpose |
 | -------- | ---------------- | ------- |
-| `tables(report)` | `python torch_profiler/analyze_torch_profile.py tables <report>` | Overview: event categories + totals. Start here. |
+| `tables(report)` | `python {{ profiler_support_name }}/analyze_torch_profile.py tables <report>` | Overview: event categories + totals. Start here. |
 | `kernels(report, top=15)` | `... kernels <report> --top 15` | Top GPU kernels by self-CUDA time. |
 | `operators(report, top=15)` | `... operators <report> --top 15` | Top operators (aten::*, torch::*) by self-CPU time. |
 | `cpu_overhead(report)` | `... cpu-overhead <report>` | CPU-vs-GPU ratio — detects launch-bound / compute-bound. |
@@ -72,7 +72,7 @@ If a remote profiling command fails (entrypoint missing, function errors, JSON e
 Loads the candidate implementation directly and profiles the domain's hot path in a loop. Captures kernel-level detail but may not cover service, batching, or queueing overhead.
 
 ```
-python torch_profiler/analyze_torch_profile.py capture \
+python {{ profiler_support_name }}/analyze_torch_profile.py capture \
   <domain-specific capture args> \
   --output /tmp/prof.json
 ```

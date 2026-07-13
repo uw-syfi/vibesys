@@ -8,7 +8,7 @@ from vibe_serve.macos_cpu_profiler import collect, detect_capability, parse_comm
 
 
 def build_server() -> FastMCP:
-    mcp = FastMCP("vibeserve-macos-cpu-profiler")
+    mcp = FastMCP("vibeserve-macos_cpu-profiler")
 
     @mcp.tool()
     def capabilities() -> dict:
@@ -26,7 +26,7 @@ def build_server() -> FastMCP:
     @mcp.tool()
     def profile(
         command: str,
-        output_dir: str = "logs/macos-cpu-profile",
+        output_dir: str = "logs/macos_cpu_profile",
         duration: int = 10,
         warmup: float = 1.0,
     ) -> dict:

@@ -108,7 +108,11 @@ modal run main.py::modal_profile -- \
 
 This dispatches to a `@app.function profile_remote(...)` running on the Modal GPU, which wraps the same workload the benchmark exercises in `torch.profiler` and returns the analyzer-compatible JSON.
 
-Use `nsys` via `nsys_profiler/analyze_nsys.py` (or the `vibeserve-nsys-profiler` MCP tools when attached) when it matches the domain and backend. Capture the benchmark path and analyze the report with the MCP tools. Focus on the bottlenecks relevant to the objective.
+Use the selected profiler support package at `nsys_profiler/` (or the
+`vibeserve-nsys-profiler` MCP tools when attached). Inspect its tools before capture,
+profile the benchmark path, preserve the raw artifact, and focus on bottlenecks relevant
+to the objective. Report structured capability or permission failures rather than
+substituting evidence from another profiler.
 
 Profiler focus this round: general bottleneck analysis on the steady-state benchmark path.
 

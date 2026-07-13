@@ -106,6 +106,26 @@ def test_docker_environment_uses_environment_bind_mounts(tmp_path):
     assert "/model" in kwargs["passthrough_paths"]
 
 
+def test_docker_environment_mounts_selected_profiler_support(tmp_path):
+    backend = FakeBackend()
+    env = build_run_environment(RunEnvironmentSpec("docker"))
+    support = tmp_path / "custom-profiler"
+    support.mkdir()
+
+    session = env.open(
+        _request(
+            tmp_path,
+            backend,
+            profiler_support_path=str(support),
+            profiler_support_name="fixture_profiler",
+        )
+    )
+
+    kwargs = backend.calls[0][1]
+    assert (str(support), "/workspace/fixture_profiler", True) in kwargs["bind_mounts"]
+    assert session.view.paths.profiler_support == "fixture_profiler"
+
+
 def test_docker_environment_does_not_infer_model_mount_from_reference_dir(tmp_path):
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
