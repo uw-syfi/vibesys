@@ -12,6 +12,7 @@ from vibe_serve.domains.environment import EnvironmentHooks
 class DomainName(StrEnum):
     LLM_SERVING = "llm-serving"
     GENERIC = "generic"
+    MICROSERVICES = "microservices"
 
 
 class DomainRole(StrEnum):
