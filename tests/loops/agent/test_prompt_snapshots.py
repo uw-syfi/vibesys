@@ -15,7 +15,7 @@ import pytest
 from vibe_serve.domains.base import DomainName
 from vibe_serve.domains.registry import resolve_domain
 from vibe_serve.domains.rendering import render_domain_section
-from vibe_serve.profilers import ProfilerKind
+from vibe_serve.profilers import ProfilerKind, profiler_definition
 from vibe_serve.prompts import render_template
 
 _ROOT = Path(__file__).resolve().parents[3]
@@ -90,6 +90,7 @@ def _render_prompt(domain: DomainName, role: str, context: dict[str, object]) ->
             domain_judge=_domain_section(domain, "judge", context),
         )
     if role == "single_agent":
+        profiler = profiler_definition(ProfilerKind.NSYS)
         return render_template(
             "single_agent_round_prompt.j2",
             template_dir=_TEMPLATE_DIR,
@@ -105,6 +106,8 @@ def _render_prompt(domain: DomainName, role: str, context: dict[str, object]) ->
             feedback=None,
             reference_path=context["reference_path"],
             profiler_kind=ProfilerKind.NSYS,
+            profiler_support_name=profiler.support_name,
+            profiler_mcp_name=profiler.mcp_name,
             profile_focus="",
             domain_single_agent=_domain_section(domain, "single_agent", context),
             domain_profiler=_domain_section(domain, "profiler", context),

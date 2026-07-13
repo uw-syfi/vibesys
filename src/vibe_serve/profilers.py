@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import platform
+from dataclasses import dataclass
 from enum import StrEnum
 
 from vibe_serve.domains.base import DomainName
@@ -16,26 +17,67 @@ class ProfilerKind(StrEnum):
     NSYS = "nsys"
     TORCH = "torch"
     NEURON = "neuron"
-    MACOS_CPU = "macos-cpu"
+    MACOS_CPU = "macos_cpu"
 
 
-ACTIVE_PROFILER_KINDS: frozenset[ProfilerKind] = frozenset(
-    {ProfilerKind.NSYS, ProfilerKind.TORCH, ProfilerKind.NEURON, ProfilerKind.MACOS_CPU}
-)
+@dataclass(frozen=True)
+class ProfilerDefinition:
+    """Behavioral declaration for a runnable profiler.
+
+    Packaging follows ``kind.value`` by convention so adding a profiler does
+    not require path, prompt, or MCP dispatch changes.
+    """
+
+    kind: ProfilerKind
+    domains: frozenset[DomainName]
+    requires_inprocess: bool = False
+    requires_domain_torch_support: bool = False
+
+    @property
+    def support_name(self) -> str:
+        return f"{self.kind.value}_profiler"
+
+    @property
+    def server_path(self) -> str:
+        return f"{self.support_name}/server.py"
+
+    @property
+    def prompt_template(self) -> str:
+        return f"profilers/{self.kind.value}.j2"
+
+    @property
+    def mcp_name(self) -> str:
+        return f"vibeserve-{self.kind.value.replace('_', '-')}-profiler"
+
+
+PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
+    definition.kind: definition
+    for definition in (
+        ProfilerDefinition(ProfilerKind.NSYS, frozenset({DomainName.LLM_SERVING})),
+        ProfilerDefinition(
+            ProfilerKind.TORCH,
+            frozenset({DomainName.LLM_SERVING}),
+            requires_inprocess=True,
+            requires_domain_torch_support=True,
+        ),
+        ProfilerDefinition(ProfilerKind.NEURON, frozenset({DomainName.LLM_SERVING})),
+        ProfilerDefinition(ProfilerKind.MACOS_CPU, frozenset({DomainName.GENERIC})),
+    )
+}
+
+ACTIVE_PROFILER_KINDS: frozenset[ProfilerKind] = frozenset(PROFILER_DEFINITIONS)
 
 CLI_PROFILER_CHOICES: tuple[ProfilerKind, ...] = tuple(ProfilerKind)
 
-_DOMAIN_ALLOWED_PROFILERS: dict[DomainName, frozenset[ProfilerKind]] = {
-    DomainName.GENERIC: frozenset({ProfilerKind.NONE, ProfilerKind.MACOS_CPU}),
-    DomainName.LLM_SERVING: frozenset(
-        {
-            ProfilerKind.NONE,
-            ProfilerKind.NSYS,
-            ProfilerKind.TORCH,
-            ProfilerKind.NEURON,
-        }
-    ),
-}
+
+def profiler_definition(kind: ProfilerKind) -> ProfilerDefinition:
+    """Return the declaration for a runnable profiler kind."""
+
+    kind = require_profiler_kind(kind)
+    try:
+        return PROFILER_DEFINITIONS[kind]
+    except KeyError as exc:
+        raise ValueError(f"Profiler {kind.value!r} is not runnable.") from exc
 
 
 def coerce_profiler_kind(value: str, *, label: str = "profiler") -> ProfilerKind:
@@ -68,7 +110,14 @@ def allowed_profiler_kinds(domain: DomainName) -> frozenset[ProfilerKind]:
     """Profiler kinds allowed by a domain."""
 
     domain_name = require_domain_name(domain)
-    return _DOMAIN_ALLOWED_PROFILERS[domain_name]
+    return frozenset(
+        {ProfilerKind.NONE}
+        | {
+            kind
+            for kind, definition in PROFILER_DEFINITIONS.items()
+            if domain_name in definition.domains
+        }
+    )
 
 
 def resolve_profiler_kind(

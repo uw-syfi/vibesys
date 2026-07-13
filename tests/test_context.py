@@ -130,13 +130,13 @@ def _write_support_dirs(project_root):
 
 
 @pytest.mark.parametrize(
-    ("profiler_kind", "attr", "workspace_name"),
+    ("profiler_kind", "workspace_name"),
     [
-        (ProfilerKind.TORCH, "torch_profiler_path", "torch_profiler"),
-        (ProfilerKind.NEURON, "neuron_profiler_path", "neuron_profiler"),
+        (ProfilerKind.TORCH, "torch_profiler"),
+        (ProfilerKind.NEURON, "neuron_profiler"),
     ],
 )
-def test_run_context_defaults_profiler_support_paths(tmp_path, profiler_kind, attr, workspace_name):
+def test_run_context_defaults_profiler_support_paths(tmp_path, profiler_kind, workspace_name):
     project_root = tmp_path / "project"
     source_dir = project_root / "examples" / "support" / workspace_name
     source_dir.mkdir(parents=True)
@@ -160,7 +160,7 @@ def test_run_context_defaults_profiler_support_paths(tmp_path, profiler_kind, at
             run_environment=RunEnvironmentSpec("local"),
         ) as ctx,
     ):
-        assert getattr(ctx, attr) == str(source_dir)
+        assert ctx.profiler_support_path == str(source_dir)
         assert (ctx.workspace / workspace_name / "server.py").is_file()
 
 
@@ -170,7 +170,7 @@ def test_run_context_defaults_profiler_support_paths(tmp_path, profiler_kind, at
 )
 def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
     project_root = tmp_path / "project"
-    support_paths = _write_support_dirs(project_root)
+    _write_support_dirs(project_root)
     ref = _write_ref(tmp_path)
 
     domain = DomainName.GENERIC if selected is ProfilerKind.MACOS_CPU else DomainName.LLM_SERVING
@@ -187,9 +187,6 @@ def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
             benchmark_command="uv run python benchmark/benchmark.py",
             profiler_kind=selected,
             profiler_domain=domain,
-            nsys_profiler=support_paths[ProfilerKind.NSYS],
-            torch_profiler=support_paths[ProfilerKind.TORCH],
-            neuron_profiler=support_paths[ProfilerKind.NEURON],
             skills_dirs=[],
             run_environment=RunEnvironmentSpec("local"),
         ) as ctx,
@@ -226,19 +223,13 @@ def test_run_context_generic_auto_resolves_to_macos_profiler(tmp_path):
             benchmark_command="uv run python benchmark/benchmark.py",
             profiler_kind=ProfilerKind.AUTO,
             profiler_domain=DomainName.GENERIC,
-            nsys_profiler=support_paths[ProfilerKind.NSYS],
-            torch_profiler=support_paths[ProfilerKind.TORCH],
-            neuron_profiler=support_paths[ProfilerKind.NEURON],
             skills_dirs=[],
             run_environment=RunEnvironmentSpec("local"),
             environment_hooks=NoopEnvironmentHooks(),
         ) as ctx,
     ):
         assert ctx.profiler_kind is ProfilerKind.MACOS_CPU
-        assert ctx.nsys_profiler_path is None
-        assert ctx.torch_profiler_path is None
-        assert ctx.neuron_profiler_path is None
-        assert ctx.macos_cpu_profiler_path == support_paths[ProfilerKind.MACOS_CPU]
+        assert ctx.profiler_support_path == support_paths[ProfilerKind.MACOS_CPU]
         assert not (ctx.workspace / "nsys_profiler").exists()
         assert not (ctx.workspace / "torch_profiler").exists()
         assert not (ctx.workspace / "neuron_profiler").exists()
@@ -295,7 +286,7 @@ def test_run_context_llm_auto_uses_backend_profiler_and_defaults_support_dir(tmp
         ) as ctx,
     ):
         assert ctx.profiler_kind is ProfilerKind.NSYS
-        assert ctx.nsys_profiler_path == support_paths[ProfilerKind.NSYS]
+        assert ctx.profiler_support_path == support_paths[ProfilerKind.NSYS]
         assert (ctx.workspace / "nsys_profiler" / "server.py").is_file()
         assert not (ctx.workspace / "torch_profiler").exists()
         assert not (ctx.workspace / "neuron_profiler").exists()

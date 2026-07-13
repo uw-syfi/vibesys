@@ -16,7 +16,7 @@ and decides what to do with the returned summary.
 
 from __future__ import annotations
 
-from vibe_serve.profilers import ProfilerKind, require_profiler_kind
+from vibe_serve.profilers import ProfilerKind, profiler_definition, require_profiler_kind
 from vibe_serve.schemas import ProfilerSummary
 
 
@@ -35,31 +35,12 @@ def mcp_spec(profiler_kind: ProfilerKind):
         from vibe_serve._agent_cli.base import MCPServerSpec
     except Exception:
         return None
-    if kind is ProfilerKind.TORCH:
-        return MCPServerSpec(
-            name="vibeserve-torch-profiler",
-            command="python",
-            args=["torch_profiler/server.py"],
-        )
-    if kind is ProfilerKind.NEURON:
-        return MCPServerSpec(
-            name="vibeserve-neuron-profiler",
-            command="python",
-            args=["neuron_profiler/server.py"],
-        )
-    if kind is ProfilerKind.NSYS:
-        return MCPServerSpec(
-            name="vibeserve-nsys-profiler",
-            command="python",
-            args=["nsys_profiler/server.py"],
-        )
-    if kind is ProfilerKind.MACOS_CPU:
-        return MCPServerSpec(
-            name="vibeserve-macos-cpu-profiler",
-            command="python",
-            args=["macos_cpu_profiler/server.py"],
-        )
-    raise AssertionError(f"Unhandled profiler kind: {kind!r}")
+    definition = profiler_definition(kind)
+    return MCPServerSpec(
+        name=definition.mcp_name,
+        command="python",
+        args=[definition.server_path],
+    )
 
 
 def invoke_profiler(

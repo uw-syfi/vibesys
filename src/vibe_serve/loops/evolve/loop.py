@@ -43,7 +43,7 @@ from vibe_serve.loops.evolve.population import (
     Population,
 )
 from vibe_serve.loops.profiler import invoke_profiler
-from vibe_serve.profilers import ProfilerKind
+from vibe_serve.profilers import ProfilerKind, profiler_definition
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -227,10 +227,8 @@ def _run_profiler(
 ) -> ProfilerSummary | None:
     if ctx.profiler_kind is ProfilerKind.NONE:
         return None
-    template = {
-        ProfilerKind.TORCH: "profiler_prompt_torch.j2",
-        ProfilerKind.MACOS_CPU: "profiler_prompt_macos_cpu.j2",
-    }.get(ctx.profiler_kind, "profiler_prompt_nsys.j2")
+    definition = profiler_definition(ctx.profiler_kind)
+    template = definition.prompt_template
     base_prompt = _render(
         template,
         benchmark_command=ctx.profiler_benchmark_command,
@@ -239,6 +237,8 @@ def _run_profiler(
         env_kind=ctx.run_environment_view.env_kind,
         objective=objective,
         profile_focus="Measure the headline metric for this candidate; rank top kernel-level bottlenecks.",
+        profiler_support_name=definition.support_name,
+        profiler_mcp_name=definition.mcp_name,
     )
     if objectives:
         addendum = _PARETO_PROFILER_ADDENDUM.format(
@@ -283,9 +283,6 @@ def run_evolve_loop(
     ),
     existing: bool = False,
     debug: bool = False,
-    nsys_profiler: str | None = None,
-    torch_profiler: str | None = None,
-    neuron_profiler: str | None = None,
     profiler_kind: ProfilerKind = ProfilerKind.AUTO,
     skills_dirs: list[str] | None = None,
     run_environment: RunEnvironmentSpec | None = None,
@@ -320,9 +317,6 @@ def run_evolve_loop(
         evaluator_path=evaluator_path,
         existing=existing,
         debug=debug,
-        nsys_profiler=nsys_profiler,
-        torch_profiler=torch_profiler,
-        neuron_profiler=neuron_profiler,
         profiler_kind=profiler_kind,
         skills_dirs=skills_dirs,
         run_environment=run_environment,

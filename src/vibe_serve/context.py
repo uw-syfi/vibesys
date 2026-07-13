@@ -30,7 +30,12 @@ from vibe_serve.domains.environment import (
 )
 from vibe_serve.input_project import materialize_input_project
 from vibe_serve.llm_client import _build_model
-from vibe_serve.profilers import ProfilerKind, resolve_profiler_kind
+from vibe_serve.profilers import (
+    ACTIVE_PROFILER_KINDS,
+    ProfilerKind,
+    profiler_definition,
+    resolve_profiler_kind,
+)
 from vibe_serve.sandbox.run_environment import (
     RunEnvironmentRequest,
     RunEnvironmentSpec,
@@ -108,9 +113,6 @@ class _RunContext:
         evaluator_path: Path | None = None,
         existing: bool = False,
         debug: bool = False,
-        nsys_profiler: str | None = None,
-        torch_profiler: str | None = None,
-        neuron_profiler: str | None = None,
         profiler_kind: ProfilerKind = ProfilerKind.AUTO,
         profiler_domain: DomainName = DomainName.LLM_SERVING,
         skills_dirs: list[str] | None = None,
@@ -194,11 +196,6 @@ class _RunContext:
         self.evaluator_path = self._coerce_dir(evaluator_path, "evaluator.source")
         self.accuracy_command = accuracy_command
         self.benchmark_command = benchmark_command
-        self.nsys_profiler_path = self._coerce_dir_path(nsys_profiler, "--nsys-profiler")
-        self.torch_profiler_path = self._coerce_dir_path(torch_profiler, "--torch-profiler")
-        self.neuron_profiler_path = self._coerce_dir_path(neuron_profiler, "--neuron-profiler")
-        self.macos_cpu_profiler_path: str | None = None
-
         self.profiler_kind = resolve_profiler_kind(
             profiler_kind,
             domain=profiler_domain,
@@ -206,32 +203,16 @@ class _RunContext:
             environment_default_profiler_kind=self.run_environment.default_profiler_kind,
         )
 
-        if self.profiler_kind is not ProfilerKind.NSYS:
-            self.nsys_profiler_path = None
-        if self.profiler_kind is not ProfilerKind.TORCH:
-            self.torch_profiler_path = None
-        if self.profiler_kind is not ProfilerKind.NEURON:
-            self.neuron_profiler_path = None
-        if self.profiler_kind is ProfilerKind.MACOS_CPU:
-            default_mp = PROJECT_ROOT / "examples" / "support" / "macos_cpu_profiler"
-            if default_mp.is_dir():
-                self.macos_cpu_profiler_path = str(default_mp)
-
-        # Default profiler support paths only for the selected profiler.
-        if self.profiler_kind is ProfilerKind.NSYS and self.nsys_profiler_path is None:
-            default_np = PROJECT_ROOT / "examples" / "support" / "nsys_profiler"
-            if default_np.is_dir():
-                self.nsys_profiler_path = str(default_np)
-
-        if self.profiler_kind is ProfilerKind.TORCH and self.torch_profiler_path is None:
-            default_tp = PROJECT_ROOT / "examples" / "support" / "torch_profiler"
-            if default_tp.is_dir():
-                self.torch_profiler_path = str(default_tp)
-
-        if self.profiler_kind is ProfilerKind.NEURON and self.neuron_profiler_path is None:
-            default_np = PROJECT_ROOT / "examples" / "support" / "neuron_profiler"
-            if default_np.is_dir():
-                self.neuron_profiler_path = str(default_np)
+        self.profiler_support_path: str | None = None
+        self.profiler_support_name: str | None = None
+        if self.profiler_kind in ACTIVE_PROFILER_KINDS:
+            definition = profiler_definition(self.profiler_kind)
+            self.profiler_support_name = definition.support_name
+            default_support = PROJECT_ROOT / "examples" / "support" / definition.support_name
+            if default_support.is_dir():
+                self.profiler_support_path = str(default_support)
+        else:
+            self.profiler_support_path = None
 
         skill_source_paths = self._coerce_skills_dirs(skills_dirs)
         self._skill_source_paths: list[Path] = skill_source_paths
@@ -352,37 +333,17 @@ class _RunContext:
                     log=self.lprint,
                 )
 
-            if self.nsys_profiler_path:
-                src = Path(self.nsys_profiler_path)
-                self._copy_excluding_extras(src, self.workspace / "nsys_profiler")
-            if self.torch_profiler_path:
-                src = Path(self.torch_profiler_path)
-                self._copy_excluding_extras(src, self.workspace / "torch_profiler")
-            if self.neuron_profiler_path:
-                src = Path(self.neuron_profiler_path)
-                self._copy_excluding_extras(src, self.workspace / "neuron_profiler")
-            if self.macos_cpu_profiler_path:
-                src = Path(self.macos_cpu_profiler_path)
-                self._copy_excluding_extras(src, self.workspace / "macos_cpu_profiler")
+            if self.profiler_support_path and self.profiler_support_name:
+                src = Path(self.profiler_support_path)
+                self._copy_excluding_extras(src, self.workspace / self.profiler_support_name)
 
         # Always ensure profiler harnesses are present in the workspace, even
         # when resuming — the original run may not have had them.
-        if existing and self.nsys_profiler_path:
-            src = Path(self.nsys_profiler_path)
-            if not (self.workspace / "nsys_profiler").exists():
-                self._copy_excluding_extras(src, self.workspace / "nsys_profiler")
-        if existing and self.torch_profiler_path:
-            src = Path(self.torch_profiler_path)
-            if not (self.workspace / "torch_profiler").exists():
-                self._copy_excluding_extras(src, self.workspace / "torch_profiler")
-        if existing and self.neuron_profiler_path:
-            src = Path(self.neuron_profiler_path)
-            if not (self.workspace / "neuron_profiler").exists():
-                self._copy_excluding_extras(src, self.workspace / "neuron_profiler")
-        if existing and self.macos_cpu_profiler_path:
-            src = Path(self.macos_cpu_profiler_path)
-            if not (self.workspace / "macos_cpu_profiler").exists():
-                self._copy_excluding_extras(src, self.workspace / "macos_cpu_profiler")
+        if existing and self.profiler_support_path and self.profiler_support_name:
+            src = Path(self.profiler_support_path)
+            destination = self.workspace / self.profiler_support_name
+            if not destination.exists():
+                self._copy_excluding_extras(src, destination)
 
         if git_tracking:
             self._init_git_tracking(existing)
@@ -398,10 +359,8 @@ class _RunContext:
                     cli_provider=self._cli_provider,
                     accuracy_command=self.accuracy_command,
                     benchmark_command=self.benchmark_command,
-                    nsys_profiler_path=self.nsys_profiler_path,
-                    torch_profiler_path=self.torch_profiler_path,
-                    neuron_profiler_path=self.neuron_profiler_path,
-                    macos_cpu_profiler_path=self.macos_cpu_profiler_path,
+                    profiler_support_path=self.profiler_support_path,
+                    profiler_support_name=self.profiler_support_name,
                     environment_bind_mounts=self.environment_patch.bind_mounts,
                     log=self.lprint,
                     project_root=PROJECT_ROOT,
@@ -966,14 +925,9 @@ class _RunContext:
         return self.run_environment_view.paths.benchmark_command
 
     @property
-    def profiler_nsys_profiler_path(self) -> str | None:
-        """Return the nsys_profiler path as seen by the profiler agent."""
-        return self.run_environment_view.paths.nsys_profiler
-
-    @property
-    def profiler_torch_profiler_path(self) -> str | None:
-        """Return the torch_profiler path as seen by the profiler agent."""
-        return self.run_environment_view.paths.torch_profiler
+    def profiler_support_agent_path(self) -> str | None:
+        """Return the selected profiler support path as seen by its agent."""
+        return self.run_environment_view.paths.profiler_support
 
     @property
     def profiler_benchmark_command(self) -> str | None:

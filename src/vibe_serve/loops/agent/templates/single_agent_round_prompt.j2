@@ -82,7 +82,11 @@ Use `torch.profiler` via `torch_profiler/analyze_torch_profile.py` (or the `vibe
 Capture in-process only if the profiler harness matches the domain's artifact contract. Otherwise run the benchmark and report the objective's headline metric without fabricating profiler data.
 {% endif %}
 {% else %}
-Use `nsys` via `nsys_profiler/analyze_nsys.py` (or the `vibeserve-nsys-profiler` MCP tools when attached) when it matches the domain and backend. Capture the benchmark path and analyze the report with the MCP tools. Focus on the bottlenecks relevant to the objective.
+Use the selected profiler support package at `{{ profiler_support_name }}/` (or the
+`{{ profiler_mcp_name }}` MCP tools when attached). Inspect its tools before capture,
+profile the benchmark path, preserve the raw artifact, and focus on bottlenecks relevant
+to the objective. Report structured capability or permission failures rather than
+substituting evidence from another profiler.
 {% endif %}
 
 Profiler focus this round: {{ profile_focus or "general bottleneck analysis on the steady-state benchmark path" }}.

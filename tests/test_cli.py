@@ -107,7 +107,19 @@ def test_target_input_defaults_to_none():
     assert not hasattr(args, "acc_checker")
     assert not hasattr(args, "bench")
     assert args.profiler is ProfilerKind.AUTO
+    assert not hasattr(args, "profiler_support")
     assert not hasattr(args, "domain")
+
+
+@pytest.mark.parametrize(
+    "obsolete_flag",
+    ["--profiler-support", "--nsys-profiler", "--torch-profiler", "--neuron-profiler"],
+)
+def test_profiler_support_override_flags_are_rejected(obsolete_flag):
+    from vibe_serve.cli import _build_agent_parser
+
+    with pytest.raises(ConfigurationError, match="unrecognized arguments"):
+        _build_agent_parser().parse_args([obsolete_flag, "support"])
 
 
 @pytest.mark.parametrize(

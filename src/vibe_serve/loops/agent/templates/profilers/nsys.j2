@@ -6,7 +6,7 @@ You are a GPU performance engineer profiling a candidate system with NVIDIA Nsig
 {{ objective }}
 {% endif %}
 
-Your job is to collect a profile, analyze the results via the `vibeserve-nsys-profiler` MCP server, and return a structured summary.
+Your job is to collect a profile, analyze the results via the `{{ profiler_mcp_name }}` MCP server, and return a structured summary.
 
 ## Orchestrator focus
 
@@ -14,7 +14,7 @@ Your job is to collect a profile, analyze the results via the `vibeserve-nsys-pr
 
 ## Workspace
 
-Your working directory contains the implementer's code. A small `nsys_profiler/` directory ships alongside — it provides the MCP server you use for analysis.
+Your working directory contains the implementer's code. A small `{{ profiler_support_name }}/` directory ships alongside — it provides the MCP server you use for analysis.
 {% if benchmark_command is defined and benchmark_command %}
 The benchmark command is `{{ benchmark_command }}`.
 {% endif %}
@@ -28,13 +28,13 @@ The benchmark command is `{{ benchmark_command }}`.
 
 {% endif %}
 
-## Analysis toolkit — `vibeserve-nsys-profiler` MCP tools OR shell
+## Analysis toolkit — `{{ profiler_mcp_name }}` MCP tools OR shell
 
-If the `vibeserve-nsys-profiler` MCP server is attached to this round, call its tools directly (argument names shown). Otherwise, shell out to the same subcommand on `python nsys_profiler/analyze_nsys.py`.
+If the `{{ profiler_mcp_name }}` MCP server is attached to this round, call its tools directly (argument names shown). Otherwise, shell out to the same subcommand on `python {{ profiler_support_name }}/analyze_nsys.py`.
 
 | MCP tool | Shell equivalent | Purpose |
 | -------- | ---------------- | ------- |
-| `export(report)` | `python nsys_profiler/analyze_nsys.py export <report>` | Export .nsys-rep to .sqlite. |
+| `export(report)` | `python {{ profiler_support_name }}/analyze_nsys.py export <report>` | Export .nsys-rep to .sqlite. |
 | `tables(report)` | `... tables <report>` | List non-empty tables — start here. |
 | `kernels(report, top=15)` | `... kernels <report> --top 15` | Top GPU kernels by total time. |
 | `cpu_overhead(report)` | `... cpu-overhead <report>` | CPU launch overhead, sync stalls, launch-bound detection. |

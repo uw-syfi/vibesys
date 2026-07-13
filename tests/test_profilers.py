@@ -9,6 +9,8 @@ from hypothesis import strategies as st
 from vibe_serve.domains.base import DomainName
 from vibe_serve.profilers import (
     ACTIVE_PROFILER_KINDS,
+    PROFILER_DEFINITIONS,
+    ProfilerDefinition,
     ProfilerKind,
     allowed_profiler_kinds,
     coerce_profiler_kind,
@@ -23,6 +25,25 @@ _ENVIRONMENT_DEFAULTS = (
     *sorted(ACTIVE_PROFILER_KINDS, key=lambda kind: kind.value),
 )
 _PROFILER_VALUES = frozenset(kind.value for kind in ProfilerKind)
+
+
+def test_profiler_definitions_derive_uniform_packaging_names():
+    assert frozenset(PROFILER_DEFINITIONS) == ACTIVE_PROFILER_KINDS
+    for kind, definition in PROFILER_DEFINITIONS.items():
+        assert definition.support_name == f"{kind.value}_profiler"
+        assert definition.server_path == f"{kind.value}_profiler/server.py"
+        assert definition.prompt_template == f"profilers/{kind.value}.j2"
+        assert definition.mcp_name == f"vibeserve-{kind.value.replace('_', '-')}-profiler"
+
+
+def test_profiler_definition_needs_no_path_or_dispatch_declaration():
+    definition = ProfilerDefinition(
+        kind=ProfilerKind.NSYS,
+        domains=frozenset({DomainName.GENERIC}),
+    )
+
+    assert definition.server_path == "nsys_profiler/server.py"
+    assert definition.prompt_template == "profilers/nsys.j2"
 
 
 def _expected_resolved(

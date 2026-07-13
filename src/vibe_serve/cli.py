@@ -188,24 +188,6 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Path to agent TOML config file (default: agent.toml)",
     )
     parser.add_argument(
-        "--nsys-profiler",
-        type=Path,
-        default=None,
-        help="Path to directory containing nsys analysis script (analyze_nsys.py). Enables nsys profiling between agent rounds.",
-    )
-    parser.add_argument(
-        "--torch-profiler",
-        type=Path,
-        default=None,
-        help="Path to directory containing torch.profiler analysis script (analyze_torch_profile.py). Used when --profiler=torch.",
-    )
-    parser.add_argument(
-        "--neuron-profiler",
-        type=Path,
-        default=None,
-        help="Path to directory containing the neuron-explorer analysis script (analyze_neuron.py). Used when --profiler=neuron (default for --backend trainium).",
-    )
-    parser.add_argument(
         "--profiler",
         type=_parse_profiler_kind,
         choices=CLI_PROFILER_CHOICES,
@@ -216,7 +198,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
             "'nsys' for NVIDIA Nsight Systems (needs /proc/driver/nvidia), "
             "'torch' for torch.profiler (works in Modal sandboxes), "
             "'neuron' for AWS neuron-explorer (Trainium/NeuronCores), "
-            "'macos-cpu' for Instruments Time Profiler with a sample fallback, "
+            "'macos_cpu' for Instruments Time Profiler with a sample fallback, "
             "'auto' picks a domain/backend/environment-appropriate profiler. "
             "Default: auto."
         ),
@@ -573,9 +555,6 @@ def _run_agent(args: argparse.Namespace) -> None:
         start_round=start_round,
         existing=existing,
         debug=args.debug,
-        nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
-        torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
-        neuron_profiler=str(args.neuron_profiler) if args.neuron_profiler else None,
         profiler_kind=args.profiler,
         skills_dirs=skills,
         run_environment=run_environment_spec_from_args(args),
@@ -721,9 +700,6 @@ def _run_evolve(args: argparse.Namespace) -> None:
         seed=args.seed,
         existing=existing,
         debug=args.debug,
-        nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
-        torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
-        neuron_profiler=str(args.neuron_profiler) if args.neuron_profiler else None,
         profiler_kind=args.profiler,
         skills_dirs=skills,
         run_environment=run_environment_spec_from_args(args),
@@ -806,9 +782,6 @@ def _run_openevolve(args: argparse.Namespace) -> None:
         seed=args.seed,
         existing=existing,
         debug=args.debug,
-        nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
-        torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
-        neuron_profiler=str(args.neuron_profiler) if args.neuron_profiler else None,
         profiler_kind=args.profiler,
         skills_dirs=skills,
         run_environment=run_environment_spec_from_args(args),
@@ -914,9 +887,6 @@ def _run_plain(args: argparse.Namespace) -> None:
         existing=existing,
         resume_state=resume_state,
         debug=args.debug,
-        nsys_profiler=str(args.nsys_profiler) if args.nsys_profiler else None,
-        torch_profiler=str(args.torch_profiler) if args.torch_profiler else None,
-        neuron_profiler=str(args.neuron_profiler) if args.neuron_profiler else None,
         profiler_kind=args.profiler,
         skills_dirs=skills,
         run_environment=run_environment_spec_from_args(args),
