@@ -48,6 +48,7 @@ def test_registered_domains_present():
     names = registered_domains()
     assert "llm-serving" in names
     assert "generic" in names
+    assert "microservices" in names
     assert "README" not in names  # the authoring guide is not a domain
 
 
@@ -57,6 +58,14 @@ def test_resolve_registered_name():
     assert d.prompt_dir.is_dir()
     assert d.prompt_dir.name == "templates"
     assert d.prompt_dir.parent.name == "llm_serving"
+
+
+def test_resolve_microservices_domain():
+    d = resolve_domain(DomainName.MICROSERVICES)
+    assert d.name is DomainName.MICROSERVICES
+    assert d.prompt_dir.is_dir()
+    assert d.prompt_dir.name == "templates"
+    assert d.prompt_dir.parent.name == "microservices"
 
 
 def test_resolve_path_is_not_supported(tmp_path: Path):
@@ -70,11 +79,13 @@ def test_resolve_path_is_not_supported(tmp_path: Path):
 def test_registered_domains_carry_environment_hooks():
     assert isinstance(DOMAINS[DomainName.LLM_SERVING].environment_hooks, LLMServingEnvironmentHooks)
     assert isinstance(DOMAINS[DomainName.GENERIC].environment_hooks, NoopEnvironmentHooks)
+    assert isinstance(DOMAINS[DomainName.MICROSERVICES].environment_hooks, NoopEnvironmentHooks)
 
 
 def test_domains_declare_torch_profiler_compatibility():
     assert DOMAINS[DomainName.LLM_SERVING].supports_torch_profiler
     assert not DOMAINS[DomainName.GENERIC].supports_torch_profiler
+    assert not DOMAINS[DomainName.MICROSERVICES].supports_torch_profiler
 
 
 def test_resolve_unknown_raises():
@@ -111,6 +122,21 @@ def test_render_llm_serving_has_content():
     assert impl == impl.strip("\n")
     # the body keeps its own ## sub-headings (not treated as role delimiters)
     assert "## Required:" in impl
+
+
+def test_render_microservices_has_content():
+    d = resolve_domain(DomainName.MICROSERVICES)
+    impl = render_domain_section(d, DomainRole.IMPLEMENTER, interface="service")
+    judge = render_domain_section(
+        d,
+        DomainRole.JUDGE,
+        accuracy_command="./check",
+        benchmark_command="./bench",
+    )
+    assert "microservice system" in impl
+    assert "connection pools" in impl
+    assert "./check" in judge
+    assert "./bench" in judge
 
 
 def test_role_file_keeps_markdown_headings(tmp_path: Path):

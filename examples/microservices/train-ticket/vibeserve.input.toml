@@ -1,7 +1,7 @@
 version = 1
 
 [agent]
-domain = "generic"
+domain = "microservices"
 
 [accuracy]
 command = ["uv", "run", "python", "accuracy_checker/checker.py"]
