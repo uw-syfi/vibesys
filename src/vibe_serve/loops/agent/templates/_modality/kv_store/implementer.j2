@@ -1,0 +1,18 @@
+You are building an in-memory key-value store server that speaks the Redis RESP2 wire protocol.
+
+## Required interface
+
+Your server must:
+- Listen on the given TCP port speaking Redis RESP2
+- Support commands: GET, SET, DEL, HSET, HMSET, HGETALL, PING, FLUSHDB, DBSIZE, COMMAND, HELLO, CLIENT
+- The HELLO command should return `+OK\r\n` (signals RESP2-only to clients)
+- Ship a `./run.sh <port>` launcher the judge and profiler can use to start the server
+
+## Constraints
+
+- Non-persistent (in-memory only) and single-node (no replication).
+- `reference/seed_server.py` is a reference baseline, not a required starting point.
+
+## Accuracy-checker compatibility
+
+The accuracy checker (`accuracy_checker/checker.py --port <port>`) drives the same deterministic operation sequence against your server and a Redis oracle. Every response must match byte-for-byte. The checker uses `redis-py` with `protocol=2`.
