@@ -3,7 +3,7 @@ Llama 3.1 8B Instruct MLX 8-bit input bundle.
 Use:
 
 ```bash
-vibe-serve --input examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit
+vibe-sys --input examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit
 ```
 
 This bundle targets `mlx-community/Meta-Llama-3.1-8B-Instruct-8bit`,

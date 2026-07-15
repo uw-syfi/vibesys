@@ -16,11 +16,11 @@ from reference import KVStoreFactory
 
 def _load_candidate():
     try:
-        from main import VibeServeKVStore
+        from main import VibeSysKVStore
 
-        return VibeServeKVStore
+        return VibeSysKVStore
     except ImportError as exc:
-        raise RuntimeError("Could not import VibeServeKVStore from main.py") from exc
+        raise RuntimeError("Could not import VibeSysKVStore from main.py") from exc
 
 
 def _run_put(store, key, value):
@@ -121,7 +121,7 @@ def _collect_history(store, clients, ops, key_space, read_ratio, seed):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Correctness checker for VibeServe KV store.")
+    parser = argparse.ArgumentParser(description="Correctness checker for VibeSys KV store.")
     parser.add_argument("--clients", type=int, default=4)
     parser.add_argument("--ops", type=int, default=3000)
     parser.add_argument("--key-space", type=int, default=16)

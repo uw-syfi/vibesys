@@ -9,13 +9,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibe_serve.cli import main
-from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND
-from vibe_serve.context import _RunContext
-from vibe_serve.domains.environment import NoopEnvironmentHooks
-from vibe_serve.input_manifest import load_input_bundle
-from vibe_serve.profilers import ProfilerKind
-from vibe_serve.sandbox.run_environment import RunEnvironmentSpec
+from vibe_sys.cli import main
+from vibe_sys.constants import DEFAULT_COMPUTE_BACKEND
+from vibe_sys.context import _RunContext
+from vibe_sys.domains.environment import NoopEnvironmentHooks
+from vibe_sys.input_manifest import load_input_bundle
+from vibe_sys.profilers import ProfilerKind
+from vibe_sys.sandbox.run_environment import RunEnvironmentSpec
 
 
 class _FakeBackend:
@@ -36,7 +36,7 @@ def _write_bundle(project_root: Path, manifest_blocks: str = "") -> Path:
     bundle = project_root / "examples" / "data-structures" / "queue-spsc"
     bundle.mkdir(parents=True)
     (bundle / "OBJECTIVE.md").write_text("Build a queue.\n")
-    (bundle / "vibeserve.input.toml").write_text(
+    (bundle / "vibesys.input.toml").write_text(
         f"""
 version = 1
 
@@ -62,10 +62,10 @@ def _init_git_repo(path: Path) -> None:
 @contextmanager
 def _patched_context_dependencies(project_root: Path):
     with (
-        patch("vibe_serve.context.PROJECT_ROOT", project_root),
-        patch("vibe_serve.context._build_model", return_value="mock-model"),
-        patch("vibe_serve.context.build_agent_runner", return_value=MagicMock()),
-        patch("vibe_serve.context.backends.get", return_value=_FakeBackend()),
+        patch("vibe_sys.context.PROJECT_ROOT", project_root),
+        patch("vibe_sys.context._build_model", return_value="mock-model"),
+        patch("vibe_sys.context.build_agent_runner", return_value=MagicMock()),
+        patch("vibe_sys.context.backends.get", return_value=_FakeBackend()),
     ):
         yield
 
@@ -88,7 +88,7 @@ def _make_context(input_dir: Path, seed: Path | None = None, **kwargs) -> _RunCo
 
 def test_all_repo_example_input_bundles_are_valid():
     project_root = Path(__file__).parents[1]
-    manifests = sorted((project_root / "examples").glob("**/vibeserve.input.toml"))
+    manifests = sorted((project_root / "examples").glob("**/vibesys.input.toml"))
 
     assert manifests
     for manifest in manifests:
@@ -397,10 +397,10 @@ def test_resume_does_not_refresh_workspace_from_seed(tmp_path):
 @pytest.mark.parametrize(
     ("outer_loop", "runner_path"),
     [
-        ("agent", "vibe_serve.loops.agent.loop.run_agent_loop"),
-        ("evolve", "vibe_serve.loops.evolve.loop.run_evolve_loop"),
-        ("openevolve", "vibe_serve.loops.openevolve.loop.run_openevolve_loop"),
-        ("plain", "vibe_serve.loops.plain.loop.run_plain_loop"),
+        ("agent", "vibe_sys.loops.agent.loop.run_agent_loop"),
+        ("evolve", "vibe_sys.loops.evolve.loop.run_evolve_loop"),
+        ("openevolve", "vibe_sys.loops.openevolve.loop.run_openevolve_loop"),
+        ("plain", "vibe_sys.loops.plain.loop.run_plain_loop"),
     ],
 )
 def test_cli_forwards_workspace_sources_to_every_outer_loop(tmp_path, outer_loop, runner_path):
@@ -414,13 +414,13 @@ def test_cli_forwards_workspace_sources_to_every_outer_loop(tmp_path, outer_loop
         '[workspace]\nseed = "../../starters/queue"\n\n'
         '[evaluator]\nsource = "../../evaluators/queue"',
     )
-    argv = ["vibe-serve", "--outer-loop", outer_loop, "--input", str(bundle)]
+    argv = ["vibe-sys", "--outer-loop", outer_loop, "--input", str(bundle)]
 
     with (
         patch("sys.argv", argv),
-        patch("vibe_serve.input_manifest.PROJECT_ROOT", project_root),
+        patch("vibe_sys.input_manifest.PROJECT_ROOT", project_root),
         patch(
-            "vibe_serve.cli.load_config_and_skills",
+            "vibe_sys.cli.load_config_and_skills",
             return_value=(
                 {"model": {"name": "claude-sonnet-4-6"}},
                 None,

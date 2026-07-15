@@ -14,9 +14,9 @@ from reference import KVStoreFactory
 
 def _load_candidate():
     try:
-        from main import VibeServeKVStore
+        from main import VibeSysKVStore
 
-        return VibeServeKVStore
+        return VibeSysKVStore
     except ImportError:
         return None
 

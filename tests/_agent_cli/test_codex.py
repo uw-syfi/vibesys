@@ -1,6 +1,6 @@
 """Unit tests for the Codex provider's command construction and JSONL parser.
 
-These tests exercise :mod:`vibe_serve._agent_cli.codex` without spawning the real
+These tests exercise :mod:`vibe_sys._agent_cli.codex` without spawning the real
 ``codex`` binary. They cover the three correctness fixes:
 
 1. ``_get_command`` / ``_get_resume_command`` include ``--skip-git-repo-check``
@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
-from vibe_serve._agent_cli.codex import CodexCodingAgent, CodexGenerationSession
+from vibe_sys._agent_cli.codex import CodexCodingAgent, CodexGenerationSession
 
 
 def _agent() -> CodexCodingAgent:
@@ -194,7 +194,7 @@ class TestProcessStdout:
                     "type": "item.completed",
                     "item": {
                         "type": "mcp_tool_call",
-                        "server": "vibeserve_issues",
+                        "server": "vibesys_issues",
                         "tool": "list_issues",
                         "arguments": {"cap": 1},
                         "result": "[]",
@@ -205,7 +205,7 @@ class TestProcessStdout:
         handler.on_tool_call.assert_called_once_with(
             "mcp_tool_call",
             {
-                "server": "vibeserve_issues",
+                "server": "vibesys_issues",
                 "tool": "list_issues",
                 "arguments": {"cap": 1},
                 "result": "[]",

@@ -97,7 +97,7 @@ modal run main.py::modal_profile -- \
 This dispatches to a `@app.function profile_remote(...)` running on the Modal GPU, which wraps the same workload the benchmark exercises in `torch.profiler` and returns the analyzer-compatible JSON.
 
 Use the selected profiler support package at `nsys_profiler/` (or the
-`vibeserve-nsys-profiler` MCP tools when attached). Inspect its tools before capture,
+`vibesys-nsys-profiler` MCP tools when attached). Inspect its tools before capture,
 profile the benchmark path, preserve the raw artifact, and focus on bottlenecks relevant
 to the objective. Report structured capability or permission failures rather than
 substituting evidence from another profiler.

@@ -18,7 +18,7 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "vibe-serve",
+    "vibe-sys",
     "vs-feature-flags",
     "vs-issue-board",
 ]
@@ -4604,7 +4604,7 @@ wheels = [
 ]
 
 [[package]]
-name = "vibe-serve"
+name = "vibe-sys"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

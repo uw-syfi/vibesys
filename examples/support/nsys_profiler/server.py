@@ -53,7 +53,7 @@ def build_server() -> FastMCP:
     Exposed separately so unit tests can introspect registered tools
     without spawning a stdio loop.
     """
-    mcp = FastMCP("vibeserve-nsys-profiler")
+    mcp = FastMCP("vibesys-nsys-profiler")
 
     @mcp.tool()
     def export(report: str) -> str:
@@ -144,7 +144,7 @@ def build_server() -> FastMCP:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="vibeserve-nsys-mcp",
+        prog="vibesys-nsys-mcp",
         description="Stdio MCP server exposing nsys profile analyses.",
     )
     parser.parse_args(argv)

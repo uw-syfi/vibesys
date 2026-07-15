@@ -2,10 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from vibe_serve.features import FEATURES, FeatureFlag, is_feature_enabled
+from vibe_sys.features import FEATURES, FeatureFlag, is_feature_enabled
 
 
-def test_vibeserve_declares_example_feature():
+def test_vibesys_declares_example_feature():
     assert list(FeatureFlag) == [FeatureFlag.EXAMPLE_FEATURE]
     assert FeatureFlag.EXAMPLE_FEATURE.value == "example_feature"
     assert FEATURES.definitions[FeatureFlag.EXAMPLE_FEATURE].description

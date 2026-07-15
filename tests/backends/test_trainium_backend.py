@@ -7,12 +7,12 @@ import argparse
 import pytest
 from deepagents.backends import LocalShellBackend
 
-from vibe_serve import backends
-from vibe_serve.backends import SandboxKind
-from vibe_serve.backends.trainium import TrainiumBackend
-from vibe_serve.cli import _add_common_args
-from vibe_serve.constants import ComputeBackend
-from vibe_serve.profilers import ProfilerKind
+from vibe_sys import backends
+from vibe_sys.backends import SandboxKind
+from vibe_sys.backends.trainium import TrainiumBackend
+from vibe_sys.cli import _add_common_args
+from vibe_sys.constants import ComputeBackend
+from vibe_sys.profilers import ProfilerKind
 
 
 def _make_backend(tmp_path, devices=("/dev/neuron0",)) -> TrainiumBackend:

@@ -2,9 +2,9 @@ import io
 import re
 from unittest.mock import MagicMock
 
-from vibe_serve.agents.callbacks import AgentLogger
-from vibe_serve.agents.progress import RoundProgress
-from vibe_serve.constants import _DIM, _GREEN, _RED, _RESET
+from vibe_sys.agents.callbacks import AgentLogger
+from vibe_sys.agents.progress import RoundProgress
+from vibe_sys.constants import _DIM, _GREEN, _RED, _RESET
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
@@ -440,18 +440,18 @@ class TestOnChatModelStart:
 
 class TestFormatTokenCount:
     def test_zero(self):
-        from vibe_serve.agents.callbacks import _format_token_count
+        from vibe_sys.agents.callbacks import _format_token_count
 
         assert _format_token_count(0) == "0"
 
     def test_under_thousand(self):
-        from vibe_serve.agents.callbacks import _format_token_count
+        from vibe_sys.agents.callbacks import _format_token_count
 
         assert _format_token_count(523) == "523"
         assert _format_token_count(999) == "999"
 
     def test_thousands_boundary(self):
-        from vibe_serve.agents.callbacks import _format_token_count
+        from vibe_sys.agents.callbacks import _format_token_count
 
         assert _format_token_count(1000) == "1k"
         assert _format_token_count(20_100) == "20k"
@@ -459,7 +459,7 @@ class TestFormatTokenCount:
         assert _format_token_count(999_999) == "999k"
 
     def test_millions(self):
-        from vibe_serve.agents.callbacks import _format_token_count
+        from vibe_sys.agents.callbacks import _format_token_count
 
         assert _format_token_count(1_000_000) == "1.0M"
         assert _format_token_count(1_200_000) == "1.2M"
@@ -468,39 +468,39 @@ class TestFormatTokenCount:
 
 class TestDefaultContextWindowLookup:
     def test_claude_4_6_resolves_to_1m(self):
-        from vibe_serve.agents.callbacks import _default_context_window_lookup
+        from vibe_sys.agents.callbacks import _default_context_window_lookup
 
         assert _default_context_window_lookup("claude-opus-4-6") == 1_000_000
         assert _default_context_window_lookup("claude-sonnet-4-6") == 1_000_000
 
     def test_older_claude_falls_back_to_200k(self):
         # Regression guard: claude- fallback comes after the 4-6 entries
-        from vibe_serve.agents.callbacks import _default_context_window_lookup
+        from vibe_sys.agents.callbacks import _default_context_window_lookup
 
         assert _default_context_window_lookup("claude-haiku-4-5") == 200_000
         assert _default_context_window_lookup("claude-sonnet-4-5") == 200_000
         assert _default_context_window_lookup("claude-opus-4-1") == 200_000
 
     def test_gemini(self):
-        from vibe_serve.agents.callbacks import _default_context_window_lookup
+        from vibe_sys.agents.callbacks import _default_context_window_lookup
 
         assert _default_context_window_lookup("gemini-2.5-flash") == 1_048_576
         assert _default_context_window_lookup("gemini-3-pro") == 1_048_576
 
     def test_gemma(self):
-        from vibe_serve.agents.callbacks import _default_context_window_lookup
+        from vibe_sys.agents.callbacks import _default_context_window_lookup
 
         assert _default_context_window_lookup("gemma-2") == 8_192
 
     def test_gpt5_4_resolves_to_1m(self):
         # Regression guard: gpt-5.4 entry must come before gpt-5
-        from vibe_serve.agents.callbacks import _default_context_window_lookup
+        from vibe_sys.agents.callbacks import _default_context_window_lookup
 
         assert _default_context_window_lookup("gpt-5.4") == 1_050_000
         assert _default_context_window_lookup("gpt-5.4-pro") == 1_050_000
 
     def test_gpt5_family_falls_back_to_400k(self):
-        from vibe_serve.agents.callbacks import _default_context_window_lookup
+        from vibe_sys.agents.callbacks import _default_context_window_lookup
 
         assert _default_context_window_lookup("gpt-5") == 400_000
         assert _default_context_window_lookup("gpt-5-mini") == 400_000
@@ -508,7 +508,7 @@ class TestDefaultContextWindowLookup:
         assert _default_context_window_lookup("gpt-5.2") == 400_000
 
     def test_gpt4_and_o_series(self):
-        from vibe_serve.agents.callbacks import _default_context_window_lookup
+        from vibe_sys.agents.callbacks import _default_context_window_lookup
 
         assert _default_context_window_lookup("gpt-4o") == 128_000
         assert _default_context_window_lookup("gpt-4-turbo") == 128_000
@@ -517,12 +517,12 @@ class TestDefaultContextWindowLookup:
         assert _default_context_window_lookup("o4-mini") == 200_000
 
     def test_unknown_model_returns_none(self):
-        from vibe_serve.agents.callbacks import _default_context_window_lookup
+        from vibe_sys.agents.callbacks import _default_context_window_lookup
 
         assert _default_context_window_lookup("unknown-model-xyz") is None
 
     def test_none_model_name_returns_none(self):
-        from vibe_serve.agents.callbacks import _default_context_window_lookup
+        from vibe_sys.agents.callbacks import _default_context_window_lookup
 
         assert _default_context_window_lookup(None) is None
 
@@ -622,7 +622,7 @@ class TestPrefixFormat:
         assert "0/999k" in out, out
 
     def test_default_lookup_used_when_not_injected(self):
-        from vibe_serve.agents.callbacks import _default_context_window_lookup
+        from vibe_sys.agents.callbacks import _default_context_window_lookup
 
         logger = AgentLogger(agent_label="Test", model_name="gpt-5.4")
         assert logger._context_window_lookup is _default_context_window_lookup
@@ -630,7 +630,7 @@ class TestPrefixFormat:
 
     def test_elapsed_time_advances(self, capsys, monkeypatch):
         # Fake time.monotonic so we can verify the elapsed value reaches the prefix
-        from vibe_serve.agents import callbacks
+        from vibe_sys.agents import callbacks
 
         ticks = iter([1000.0, 1308.2])
         monkeypatch.setattr(callbacks.time, "monotonic", lambda: next(ticks))
@@ -688,7 +688,7 @@ class TestUsageMetadataExtraction:
 class TestUpdateUsagePublicHook:
     """Tests for the CLI-backend ``update_usage`` hook.
 
-    ``AgentLogger.on_usage`` routes per-turn usage dicts from ``vibe_serve._agent_cli``
+    ``AgentLogger.on_usage`` routes per-turn usage dicts from ``vibe_sys._agent_cli``
     into this method so the agent prefix stays in sync with the underlying CLI
     tool's token counts — mirroring how the deepagents path updates
     ``_input_tokens`` from ``on_llm_end``.

@@ -3,7 +3,7 @@ Llama-3-8B input bundle.
 Use:
 
 ```bash
-vibe-serve --input examples/model-serving/Llama-3-8B
+vibe-sys --input examples/model-serving/Llama-3-8B
 ```
 
 Each folder contains scripts plus a short README.

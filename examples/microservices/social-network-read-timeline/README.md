@@ -2,10 +2,10 @@
 
 Closes issues #48.
 
-VibeServe use:
+VibeSys use:
 
 ```bash
-vibe-serve --input examples/microservices/social-network-read-timeline
+vibe-sys --input examples/microservices/social-network-read-timeline
 ```
 
 **Target:** DeathStarBench socialNetwork: Go microservices stack deployed via Docker Compose. 
@@ -202,7 +202,7 @@ The benchmark emits one JSON line per metric, followed by a summary line:
 {"metric":"memory_mb","value":812.3}
 ```
 
-`p50_ms` is the primary metric VibeServe uses to evaluate candidates. `user_timeline_thrift_p50_ms` and `home_timeline_thrift_p50_ms` are intermediate latencies (nginx to first Thrift service hop).
+`p50_ms` is the primary metric VibeSys uses to evaluate candidates. `user_timeline_thrift_p50_ms` and `home_timeline_thrift_p50_ms` are intermediate latencies (nginx to first Thrift service hop).
 
 ## Rebuilding
 

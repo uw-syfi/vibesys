@@ -3,7 +3,7 @@
 Reusable JSON-backed issue board utilities for small agent workflows.
 
 `vs-issue-board` owns the generic issue tracker pieces that do not depend on
-VibeServe: the persistent issue store, typed issue models, create-policy
+VibeSys: the persistent issue store, typed issue models, create-policy
 helpers, text formatting helpers, and a stdio MCP server. Applications can use
 it directly, then add their own rendering, prompts, LangChain wrappers, or loop
 orchestration around it.
@@ -113,12 +113,12 @@ Useful options:
 ## Ownership Boundary
 
 Keep generic behavior in this package when it can be reused without importing
-VibeServe. Examples: persistence, issue lifecycle state, type validation,
+VibeSys. Examples: persistence, issue lifecycle state, type validation,
 formatting, create policies, and MCP access.
 
 Keep application-specific behavior outside the package. Examples: prompt text,
 loop scheduling, markdown report rendering, LangChain `@tool` adapters, and
-VibeServe-specific CLI wiring.
+VibeSys-specific CLI wiring.
 
 ## Testing
 
@@ -130,10 +130,10 @@ uv run pytest libs/vs-issue-board/tests
 
 When moving code into this package, move or add the tests that define that
 generic behavior here too. App-level compatibility tests can stay in the app
-test tree when they verify old import paths or VibeServe integration wiring.
+test tree when they verify old import paths or VibeSys integration wiring.
 
 For the full repository gate, include package coverage with the app coverage:
 
 ```bash
-uv run python -m pytest -v --cov=vibe_serve --cov=vs_issue_board --cov-report=term-missing --cov-report=xml --cov-fail-under=75
+uv run python -m pytest -v --cov=vibe_sys --cov=vs_issue_board --cov-report=term-missing --cov-report=xml --cov-fail-under=75
 ```

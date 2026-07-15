@@ -4,11 +4,11 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from vibe_serve.macos_cpu_profiler import collect, detect_capability, parse_command
+from vibe_sys.macos_cpu_profiler import collect, detect_capability, parse_command
 
 
 def build_server() -> FastMCP:
-    mcp = FastMCP("vibeserve-macos_cpu-profiler")
+    mcp = FastMCP("vibesys-macos_cpu-profiler")
 
     @mcp.tool()
     def capabilities() -> dict:

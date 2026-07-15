@@ -3,9 +3,9 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vibe-serve"
+name = "vibe-sys"
 version = "0.1.0"
-description = "AI agent system for generating bespoke LLM serving systems"
+description = "AI agent framework for generating bespoke systems from application, workload, and hardware requirements"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -31,16 +31,16 @@ dependencies = [
 ]
 
 [project.scripts]
-vibe-serve = "vibe_serve.cli:main"
-vibe-serve-launch = "vibe_serve.launcher:main"
-vibe-serve-issue-mcp = "vs_issue_board.mcp:main"
+vibe-sys = "vibe_sys.cli:main"
+vibe-sys-launch = "vibe_sys.launcher:main"
+vibe-sys-issue-mcp = "vs_issue_board.mcp:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["vibe_serve*"]
+include = ["vibe_sys*"]
 
 [tool.setuptools.package-data]
-vibe_serve = ["templates/*.j2", "templates/_backend/*/*.j2", "domains/README.md", "domains/*/templates/*.md", "loops/agent/templates/*.j2", "loops/agent/templates/_modality/*/*.j2", "loops/evolve/templates/*.j2", "loops/plain/templates/*.j2", "loops/plain/templates/*/*.j2"]
+vibe_sys = ["templates/*.j2", "templates/_backend/*/*.j2", "domains/README.md", "domains/*/templates/*.md", "loops/agent/templates/*.j2", "loops/agent/templates/_modality/*/*.j2", "loops/evolve/templates/*.j2", "loops/plain/templates/*.j2", "loops/plain/templates/*/*.j2"]
 
 [dependency-groups]
 dev = [

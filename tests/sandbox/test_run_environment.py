@@ -5,9 +5,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from vibe_serve.backends import SandboxKind
-from vibe_serve.domains.environment import EnvironmentBindMount
-from vibe_serve.sandbox.run_environment import (
+from vibe_sys.backends import SandboxKind
+from vibe_sys.domains.environment import EnvironmentBindMount
+from vibe_sys.sandbox.run_environment import (
     RunEnvironmentRequest,
     RunEnvironmentSpec,
     build_run_environment,
@@ -198,13 +198,13 @@ def test_modal_environment_prompt_notes_describe_modal_dispatch(tmp_path):
     assert "GPU" in notes
     # Tell the agent where to look up volume names rather than baking them in.
     assert "meta.json" in notes
-    # No hardcoded model IDs or vibeserve-internal volume names should leak
+    # No hardcoded model IDs or vibesys-internal volume names should leak
     # into the runtime-notes block.
     forbidden = (
         "yuhuili",
         "Llama-3",
-        "vibeserve-model-meta-llama",
-        "vibeserve-model-yuhuili",
+        "vibesys-model-meta-llama",
+        "vibesys-model-yuhuili",
     )
     for token in forbidden:
         assert token not in notes, f"prompt_notes leaks task-specific token {token!r}"
@@ -247,11 +247,11 @@ def test_modal_environment_per_run_namespace_prefix_unique(tmp_path):
     notes_a = env.open(req_a).view.prompt_notes
     notes_b = env.open(req_b).view.prompt_notes
 
-    # Each run's prefix is `vibeserve-<exp-dir-name-sanitized>`.
-    assert "vibeserve-20260429-100000-runa" in notes_a
-    assert "vibeserve-20260429-100100-runb" in notes_b
-    assert "vibeserve-20260429-100000-runa" not in notes_b
-    assert "vibeserve-20260429-100100-runb" not in notes_a
+    # Each run's prefix is `vibesys-<exp-dir-name-sanitized>`.
+    assert "vibesys-20260429-100000-runa" in notes_a
+    assert "vibesys-20260429-100100-runb" in notes_b
+    assert "vibesys-20260429-100000-runa" not in notes_b
+    assert "vibesys-20260429-100100-runb" not in notes_a
 
 
 def test_modal_environment_runtime_notes_describe_profile_contract(tmp_path):
@@ -302,7 +302,7 @@ def test_docker_remove_workspace_child_quotes_path(tmp_path, monkeypatch):
         result.stderr = b""
         return result
 
-    monkeypatch.setattr("vibe_serve.sandbox.run_environment.subprocess.run", fake_run)
+    monkeypatch.setattr("vibe_sys.sandbox.run_environment.subprocess.run", fake_run)
 
     ok = env.remove_workspace_child(
         tmp_path,

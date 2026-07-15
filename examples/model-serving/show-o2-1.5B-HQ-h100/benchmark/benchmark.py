@@ -25,7 +25,7 @@ from statistics import mean
 import httpx
 
 PROMPT_POOL = [
-    "a small red robot holding a handwritten sign that says VibeServe",
+    "a small red robot holding a handwritten sign that says VibeSys",
     "a studio product photo of a ceramic mug shaped like a rocket",
     "a watercolor landscape with a lighthouse at sunrise",
     "a close-up macro photo of a translucent blue mechanical keyboard switch",

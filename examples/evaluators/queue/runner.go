@@ -17,7 +17,7 @@ var (
 
 func nativeRunnerPath() (string, error) {
 	runnerOnce.Do(func() {
-		if configured := os.Getenv("VIBESERVE_QUEUE_NATIVE_RUNNER"); configured != "" {
+		if configured := os.Getenv("VIBESYS_QUEUE_NATIVE_RUNNER"); configured != "" {
 			runnerPath, runnerErr = filepath.Abs(configured)
 			if runnerErr == nil {
 				runnerErr = validateRunnerExecutable(runnerPath)
@@ -40,7 +40,7 @@ func nativeRunnerPath() (string, error) {
 		digest := sha256.Sum256([]byte(source))
 		target := filepath.Join(
 			os.TempDir(),
-			fmt.Sprintf("vibeserve-queue-native-%x", digest[:8]),
+			fmt.Sprintf("vibesys-queue-native-%x", digest[:8]),
 		)
 		command := exec.Command(
 			"cargo",
@@ -65,7 +65,7 @@ func nativeRunnerPath() (string, error) {
 			)
 			return
 		}
-		runnerPath = filepath.Join(target, "release", "vibeserve-queue-native-runner")
+		runnerPath = filepath.Join(target, "release", "vibesys-queue-native-runner")
 		runnerErr = validateRunnerExecutable(runnerPath)
 	})
 	return runnerPath, runnerErr

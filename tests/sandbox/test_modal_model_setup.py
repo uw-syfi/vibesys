@@ -7,18 +7,18 @@ import pytest
 
 class TestVolumeNameFor:
     def test_sanitizes_slash_and_case(self):
-        from vibe_serve.sandbox.modal_model_setup import _volume_name_for
+        from vibe_sys.sandbox.modal_model_setup import _volume_name_for
 
         assert (
             _volume_name_for("meta-llama/Llama-3.1-8B-Instruct")
-            == "vibeserve-model-meta-llama-llama-3-1-8b-instruct"
+            == "vibesys-model-meta-llama-llama-3-1-8b-instruct"
         )
 
     def test_handles_colons_and_underscores(self):
-        from vibe_serve.sandbox.modal_model_setup import _volume_name_for
+        from vibe_sys.sandbox.modal_model_setup import _volume_name_for
 
         assert (
-            _volume_name_for("openai/whisper_large-v3") == "vibeserve-model-openai-whisper-large-v3"
+            _volume_name_for("openai/whisper_large-v3") == "vibesys-model-openai-whisper-large-v3"
         )
 
 
@@ -55,7 +55,7 @@ def mock_modal(monkeypatch):
 
 class TestEnsureModelVolume:
     def test_skips_upload_when_sentinel_present(self, mock_modal):
-        from vibe_serve.sandbox.modal_model_setup import (
+        from vibe_sys.sandbox.modal_model_setup import (
             _READY_SENTINEL,
             ensure_model_volume,
         )
@@ -68,37 +68,37 @@ class TestEnsureModelVolume:
         logs: list[str] = []
         name = ensure_model_volume("meta-llama/Llama-3.1-8B-Instruct", log=logs.append)
 
-        assert name == "vibeserve-model-meta-llama-llama-3-1-8b-instruct"
+        assert name == "vibesys-model-meta-llama-llama-3-1-8b-instruct"
         # App.run was never entered because we skipped the upload.
         mock_modal["app"].run.assert_not_called()
         assert any("ready" in line for line in logs)
 
     def test_triggers_upload_when_volume_empty(self, mock_modal):
-        from vibe_serve.sandbox.modal_model_setup import ensure_model_volume
+        from vibe_sys.sandbox.modal_model_setup import ensure_model_volume
 
         mock_modal["volume"].listdir.return_value = []
 
         logs: list[str] = []
         name = ensure_model_volume("openai/whisper-large-v3", log=logs.append)
 
-        assert name == "vibeserve-model-openai-whisper-large-v3"
+        assert name == "vibesys-model-openai-whisper-large-v3"
         mock_modal["app"].run.assert_called_once()
         assert any("populating" in line for line in logs)
 
     def test_triggers_upload_when_listdir_raises(self, mock_modal):
-        from vibe_serve.sandbox.modal_model_setup import ensure_model_volume
+        from vibe_sys.sandbox.modal_model_setup import ensure_model_volume
 
         mock_modal["volume"].listdir.side_effect = RuntimeError("not found")
 
         name = ensure_model_volume("meta-llama/Llama-3.1-8B-Instruct", log=lambda *_: None)
 
-        assert name.startswith("vibeserve-model-")
+        assert name.startswith("vibesys-model-")
         mock_modal["app"].run.assert_called_once()
 
     def test_forwards_hf_token_as_secret(self, mock_modal):
         import modal
 
-        from vibe_serve.sandbox.modal_model_setup import ensure_model_volume
+        from vibe_sys.sandbox.modal_model_setup import ensure_model_volume
 
         mock_modal["volume"].listdir.return_value = []
 
@@ -109,7 +109,7 @@ class TestEnsureModelVolume:
     def test_reads_hf_token_from_env(self, mock_modal, monkeypatch):
         import modal
 
-        from vibe_serve.sandbox.modal_model_setup import ensure_model_volume
+        from vibe_sys.sandbox.modal_model_setup import ensure_model_volume
 
         mock_modal["volume"].listdir.return_value = []
         monkeypatch.setenv("HF_TOKEN", "from_env")

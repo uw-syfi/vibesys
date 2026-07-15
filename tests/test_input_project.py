@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from vibe_serve.input_project import (
+from vibe_sys.input_project import (
     InputProjectError,
     discover_input_project,
     materialize_input_project,

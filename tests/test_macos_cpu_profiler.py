@@ -1,7 +1,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from vibe_serve.macos_cpu_profiler import (
+from vibe_sys.macos_cpu_profiler import (
     Capability,
     DiagnosticCode,
     MacOSProfilerTool,
@@ -55,7 +55,7 @@ def test_detection_reports_unavailable_tools_after_xcode_select_failure():
     def fail(*_args, **_kwargs):
         raise OSError("xcode-select unavailable")
 
-    with patch("vibe_serve.macos_cpu_profiler.Path.is_file", return_value=False):
+    with patch("vibe_sys.macos_cpu_profiler.Path.is_file", return_value=False):
         capability = detect_capability(system="Darwin", which=lambda _name: None, run=fail)
     assert capability.tool is MacOSProfilerTool.NONE
     assert capability.diagnostics[-2:] == (
@@ -86,7 +86,7 @@ def test_instruments_collection_builds_bounded_launch_command(tmp_path: Path):
         "xctrace 26",
     )
     with patch(
-        "vibe_serve.macos_cpu_profiler.subprocess.run",
+        "vibe_sys.macos_cpu_profiler.subprocess.run",
         return_value=Result(),
     ) as run:
         result = collect(
@@ -116,7 +116,7 @@ def test_instruments_collection_builds_bounded_launch_command(tmp_path: Path):
 def test_collection_converts_profiler_launch_error_to_diagnostic(tmp_path: Path):
     capability = Capability(MacOSProfilerTool.XCTRACE, None, "/usr/bin/xctrace", None, None)
     with patch(
-        "vibe_serve.macos_cpu_profiler.subprocess.run",
+        "vibe_sys.macos_cpu_profiler.subprocess.run",
         side_effect=OSError("cannot execute"),
     ):
         result = collect(["./benchmark"], tmp_path, capability=capability)
@@ -142,11 +142,11 @@ def test_permission_failure_and_child_target_are_structured(tmp_path: Path):
         },
     )()
     with (
-        patch("vibe_serve.macos_cpu_profiler.subprocess.Popen", return_value=process),
-        patch("vibe_serve.macos_cpu_profiler._descendants", return_value=[456]),
-        patch("vibe_serve.macos_cpu_profiler.time.sleep"),
+        patch("vibe_sys.macos_cpu_profiler.subprocess.Popen", return_value=process),
+        patch("vibe_sys.macos_cpu_profiler._descendants", return_value=[456]),
+        patch("vibe_sys.macos_cpu_profiler.time.sleep"),
         patch(
-            "vibe_serve.macos_cpu_profiler.subprocess.run",
+            "vibe_sys.macos_cpu_profiler.subprocess.run",
             return_value=Result(1, stderr="Operation not permitted"),
         ),
     ):
@@ -171,10 +171,10 @@ def test_sample_kills_launcher_when_graceful_wait_times_out(tmp_path: Path):
         },
     )()
     with (
-        patch("vibe_serve.macos_cpu_profiler.subprocess.Popen", return_value=process),
-        patch("vibe_serve.macos_cpu_profiler._descendants", return_value=[]),
-        patch("vibe_serve.macos_cpu_profiler.time.sleep"),
-        patch("vibe_serve.macos_cpu_profiler.subprocess.run", return_value=Result()),
+        patch("vibe_sys.macos_cpu_profiler.subprocess.Popen", return_value=process),
+        patch("vibe_sys.macos_cpu_profiler._descendants", return_value=[]),
+        patch("vibe_sys.macos_cpu_profiler.time.sleep"),
+        patch("vibe_sys.macos_cpu_profiler.subprocess.run", return_value=Result()),
     ):
         result = collect(["./benchmark"], tmp_path, capability=capability)
     assert result.status == "ok"

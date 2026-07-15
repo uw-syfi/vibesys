@@ -7,13 +7,13 @@ path.
 
 ## Architecture Boundaries
 
-- Put framework behavior under `src/vibe_serve/`.
+- Put framework behavior under `src/vibe_sys/`.
 - Put reusable standalone libraries under `libs/`.
 - Put prompt, loop, and domain behavior in the package that owns that surface.
 - Put long-form serving knowledge under `resources/skills/`, not in framework
   code or prompt skeletons.
 - Keep example targets in the standard bundle shape: `OBJECTIVE.md`,
-  `vibeserve.input.toml`, optional `reference/`, evaluator source directories,
+  `vibesys.input.toml`, optional `reference/`, evaluator source directories,
   and `README.md`. Evaluator commands are declared by the manifest and may be
   problem-specific.
 - Put nontrivial candidate-facing APIs, ABIs, ownership rules, and service
@@ -56,8 +56,8 @@ path.
 - Do not blindly accept regenerated snapshots.
 - Keep `SKILL.md` router files concise. Put technical depth in linked reference
   files and keep those files scoped to one topic.
-- Do not add VibeServe routing metadata to skill frontmatter; use
-  `.vibeserve.toml` sidecars.
+- Do not add VibeSys routing metadata to skill frontmatter; use
+  `.vibesys.toml` sidecars.
 
 ## Tests And Checks
 

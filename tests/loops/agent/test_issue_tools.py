@@ -1,6 +1,6 @@
 """Tests for the issue-tracker tools (list/get/search/create)."""
 
-from vibe_serve.loops.plain.tools import build_issue_tools
+from vibe_sys.loops.plain.tools import build_issue_tools
 from vs_issue_board import IssueBoard, IssueStatus, IssueType
 
 

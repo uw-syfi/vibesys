@@ -2,14 +2,14 @@
 
 The spec builder is the only issue-tracker-specific piece of the MCP path —
 everything else (file format, file path, install/uninstall) lives in
-``vibe_serve/_agent_cli/``. These tests verify that the per-phase policy params
+``vibe_sys/_agent_cli/``. These tests verify that the per-phase policy params
 are encoded correctly into the spec's command-line args list.
 """
 
 from __future__ import annotations
 
-from vibe_serve._agent_cli.base import MCPServerSpec
-from vibe_serve.loops.plain.mcp_config import build_issue_mcp_spec
+from vibe_sys._agent_cli.base import MCPServerSpec
+from vibe_sys.loops.plain.mcp_config import build_issue_mcp_spec
 from vs_issue_board import IssueType
 
 
@@ -22,7 +22,7 @@ def test_build_judge_spec_has_correct_shape():
         allowed_types={IssueType.BUG},
     )
     assert isinstance(spec, MCPServerSpec)
-    assert spec.name == "vibeserve-issues"
+    assert spec.name == "vibesys-issues"
     assert spec.command == "python"
     # Args are forwarded to the standalone server's argparse CLI.
     assert spec.args == [

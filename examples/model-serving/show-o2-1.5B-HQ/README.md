@@ -3,7 +3,7 @@ Show-o2 1.5B HQ input bundle.
 Use:
 
 ```bash
-vibe-serve --input examples/model-serving/show-o2-1.5B-HQ
+vibe-sys --input examples/model-serving/show-o2-1.5B-HQ
 ```
 
 This bundle targets `showlab/show-o2-1.5B-HQ`, a Show-o2 text-to-image

@@ -41,7 +41,7 @@ def _capture(fn, **kwargs) -> str:
 
 def build_server() -> FastMCP:
     """Construct the FastMCP instance with torch-profiler analysis tools."""
-    mcp = FastMCP("vibeserve-torch-profiler")
+    mcp = FastMCP("vibesys-torch-profiler")
 
     @mcp.tool()
     def tables(report: str) -> str:
@@ -101,7 +101,7 @@ def build_server() -> FastMCP:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="vibeserve-torch-mcp",
+        prog="vibesys-torch-mcp",
         description="Stdio MCP server exposing torch.profiler analyses.",
     )
     parser.parse_args(argv)

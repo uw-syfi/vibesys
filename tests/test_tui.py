@@ -12,24 +12,24 @@ from unittest.mock import Mock
 
 import pytest
 
-from vibe_serve.context import _RunContext
-from vibe_serve.errors import ConfigurationDiagnostic, ConfigurationError
-from vibe_serve.server import (
+from vibe_sys.context import _RunContext
+from vibe_sys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibe_sys.server import (
     EventType,
     RunInspector,
     RunSupervisor,
 )
-from vibe_serve.server.protocol import (
+from vibe_sys.server.protocol import (
     ChatQuery,
     EventsQuery,
     HistoryQuery,
     SnapshotQuery,
     SubscribeRequest,
 )
-from vibe_serve.server.runtime import run_server
-from vibe_serve.server.schema import ProtocolDocument
-from vibe_serve.server.service import SupervisionService
-from vibe_serve.server.transport import SupervisionSocketServer
+from vibe_sys.server.runtime import run_server
+from vibe_sys.server.schema import ProtocolDocument
+from vibe_sys.server.service import SupervisionService
+from vibe_sys.server.transport import SupervisionSocketServer
 
 
 def _events(path):
@@ -182,7 +182,7 @@ def test_socket_transport_supports_multiple_clients_and_event_replay(tmp_path):
     supervisor = RunSupervisor()
     supervisor.attach(tmp_path / "logs")
     service = SupervisionService(supervisor)
-    socket_path = Path("/tmp") / f"vibeserve-test-{uuid.uuid4().hex}.sock"
+    socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"
 
     with SupervisionSocketServer(socket_path, service):
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as first:
@@ -210,7 +210,7 @@ def test_socket_subscription_replays_then_streams_new_events(tmp_path):
     supervisor = RunSupervisor()
     supervisor.attach(tmp_path / "logs")
     service = SupervisionService(supervisor)
-    socket_path = Path("/tmp") / f"vibeserve-test-{uuid.uuid4().hex}.sock"
+    socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"
 
     with SupervisionSocketServer(socket_path, service):
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -239,7 +239,7 @@ def test_cli_parse_failure_is_streamed_after_client_attaches():
         [
             sys.executable,
             "-m",
-            "vibe_serve.cli",
+            "vibe_sys.cli",
             "--headless",
             "--control-socket",
             str(socket_path),
@@ -331,7 +331,7 @@ def test_supervision_runtime_streams_configuration_failure_before_exiting():
             code="invalid_arguments",
             stage="argument_parsing",
             message="unknown option --bad",
-            usage="usage: vibe-serve ...",
+            usage="usage: vibe-sys ...",
         )
     )
     try:
@@ -348,7 +348,7 @@ def test_supervision_runtime_streams_configuration_failure_before_exiting():
             "code": "invalid_arguments",
             "stage": "argument_parsing",
             "message": "unknown option --bad",
-            "usage": "usage: vibe-serve ...",
+            "usage": "usage: vibe-sys ...",
             "exit_code": 2,
         }
         assert not any(event["type"] == "run_failed" for event in received_events)

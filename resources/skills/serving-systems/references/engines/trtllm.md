@@ -5,7 +5,7 @@ Short reference into `repos/TensorRT-LLM/`. Two runtimes — know which you're t
 ## Setup
 
 ```bash
-export SERVE_REPOS=<vibe-serve-root>/skills/serving-systems/repos
+export SERVE_REPOS=<vibe-sys-root>/skills/serving-systems/repos
 ```
 
 If `$SERVE_REPOS/TensorRT-LLM/` is missing (e.g. running inside a fresh agent sandbox where the submodule isn't mounted), fetch only the pinned commit this skill was authored against — the paths and line numbers in the tables below assume it:
@@ -18,7 +18,7 @@ git fetch --depth 1 origin 0d2bea7c3c99b734a8e09c4c767820e03136a15b
 git checkout -q FETCH_HEAD
 ```
 
-(From the vibe-serve repo root the equivalent is `git submodule update --init skills/serving-systems/repos/TensorRT-LLM`.)
+(From the vibe-sys repo root the equivalent is `git submodule update --init skills/serving-systems/repos/TensorRT-LLM`.)
 
 ## Runtimes
 

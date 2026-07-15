@@ -59,7 +59,7 @@ survives restarts so you compile each bucket once, ever:
 export NEURON_COMPILE_CACHE_URL=/opt/neuron-compile-cache   # dir or s3://...
 ```
 
-VibeServe's trainium backend sets this and bind-mounts a host cache, so warm
+VibeSys's trainium backend sets this and bind-mounts a host cache, so warm
 buckets are instant across rounds. Treat a cache miss on the hot path as a bug.
 
 ## Device, dtype, weights

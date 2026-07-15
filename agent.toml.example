@@ -21,9 +21,9 @@ name = "claude-sonnet-4-6"
 # Selects which agent backend the simple loop drives. The default is
 # "deepagents", which uses langchain + deepagents and supports Docker
 # sandboxing. Setting backend = "cli" instead drives an external coding-agent
-# CLI (Claude Code, Gemini, Codex, or Opencode) via vibe_serve/_agent_cli.
+# CLI (Claude Code, Gemini, Codex, or Opencode) via vibe_sys/_agent_cli.
 #
-# CLI flags --agent-backend / --cli-provider on `vibeserve-loop` override
+# CLI flags --agent-backend / --cli-provider on `vibesys-loop` override
 # these values.
 # backend = "deepagents"      # or "cli"
 # cli_provider = "claude"     # required when backend = "cli";
@@ -31,7 +31,7 @@ name = "claude-sonnet-4-6"
 # cli_timeout = 1800          # per-iteration timeout in seconds (default: no timeout)
 
 # [feature_flags]
-# VibeServe feature flags are declared in src/vibe_serve/features.py.
+# VibeSys feature flags are declared in src/vibe_sys/features.py.
 
 # [backend]
 # Hardware/runtime backend the serving stack targets. Supported values:
@@ -41,9 +41,9 @@ name = "claude-sonnet-4-6"
 #   "metal" — Apple Silicon via MPS / MLX (local execution only;
 #             --docker and --modal are unavailable). The curriculum
 #             templates are still CUDA-flavoured, so use this with
-#             `vibeserve-loop` / ad-hoc workflows rather than
-#             `vibeserve-curriculum`.
+#             `vibesys-loop` / ad-hoc workflows rather than
+#             `vibesys-curriculum`.
 #
-# CLI flag --backend on `vibeserve-loop` / `vibeserve-curriculum` overrides
+# CLI flag --backend on `vibesys-loop` / `vibesys-curriculum` overrides
 # this value.
 # name = "cuda"

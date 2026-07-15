@@ -5,11 +5,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibe_serve.context import _RunContext
-from vibe_serve.domains.base import DomainName
-from vibe_serve.domains.environment import NoopEnvironmentHooks
-from vibe_serve.profilers import ACTIVE_PROFILER_KINDS, ProfilerKind
-from vibe_serve.sandbox.run_environment import RunEnvironmentSpec
+from vibe_sys.context import _RunContext
+from vibe_sys.domains.base import DomainName
+from vibe_sys.domains.environment import NoopEnvironmentHooks
+from vibe_sys.profilers import ACTIVE_PROFILER_KINDS, ProfilerKind
+from vibe_sys.sandbox.run_environment import RunEnvironmentSpec
 
 
 def _minimal_copy_context(workspace):
@@ -145,10 +145,10 @@ def test_run_context_defaults_profiler_support_paths(tmp_path, profiler_kind, wo
     ref = _write_ref(tmp_path)
 
     with (
-        patch("vibe_serve.context.PROJECT_ROOT", project_root),
-        patch("vibe_serve.context._build_model", return_value="mock-model"),
-        patch("vibe_serve.context.build_agent_runner", return_value=MagicMock()),
-        patch("vibe_serve.context.backends.get", return_value=_FakeBackend()),
+        patch("vibe_sys.context.PROJECT_ROOT", project_root),
+        patch("vibe_sys.context._build_model", return_value="mock-model"),
+        patch("vibe_sys.context.build_agent_runner", return_value=MagicMock()),
+        patch("vibe_sys.context.backends.get", return_value=_FakeBackend()),
         _RunContext(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name=f"{profiler_kind}-defaults",
@@ -175,10 +175,10 @@ def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
 
     domain = DomainName.GENERIC if selected is ProfilerKind.MACOS_CPU else DomainName.LLM_SERVING
     with (
-        patch("vibe_serve.context.PROJECT_ROOT", project_root),
-        patch("vibe_serve.context._build_model", return_value="mock-model"),
-        patch("vibe_serve.context.build_agent_runner", return_value=MagicMock()),
-        patch("vibe_serve.context.backends.get", return_value=_FakeBackend()),
+        patch("vibe_sys.context.PROJECT_ROOT", project_root),
+        patch("vibe_sys.context._build_model", return_value="mock-model"),
+        patch("vibe_sys.context.build_agent_runner", return_value=MagicMock()),
+        patch("vibe_sys.context.backends.get", return_value=_FakeBackend()),
         _RunContext(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name=f"{selected.value}-support",
@@ -210,11 +210,11 @@ def test_run_context_generic_auto_resolves_to_macos_profiler(tmp_path):
     ref = _write_ref(tmp_path)
 
     with (
-        patch("vibe_serve.context.PROJECT_ROOT", project_root),
-        patch("vibe_serve.context._build_model", return_value="mock-model"),
-        patch("vibe_serve.context.build_agent_runner", return_value=MagicMock()),
-        patch("vibe_serve.context.backends.get", return_value=_FakeBackend(ProfilerKind.NSYS)),
-        patch("vibe_serve.profilers.platform.system", return_value="Darwin"),
+        patch("vibe_sys.context.PROJECT_ROOT", project_root),
+        patch("vibe_sys.context._build_model", return_value="mock-model"),
+        patch("vibe_sys.context.build_agent_runner", return_value=MagicMock()),
+        patch("vibe_sys.context.backends.get", return_value=_FakeBackend(ProfilerKind.NSYS)),
+        patch("vibe_sys.profilers.platform.system", return_value="Darwin"),
         _RunContext(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="generic-auto-none",
@@ -244,9 +244,9 @@ def test_run_context_rejects_generic_explicit_active_profilers(tmp_path, profile
     ref = _write_ref(tmp_path)
 
     with (
-        patch("vibe_serve.context._build_model", return_value="mock-model"),
-        patch("vibe_serve.context.build_agent_runner", return_value=MagicMock()),
-        patch("vibe_serve.context.backends.get", return_value=_FakeBackend(profiler_kind)),
+        patch("vibe_sys.context._build_model", return_value="mock-model"),
+        patch("vibe_sys.context.build_agent_runner", return_value=MagicMock()),
+        patch("vibe_sys.context.backends.get", return_value=_FakeBackend(profiler_kind)),
         pytest.raises(ValueError, match="not supported for domain 'generic'"),
     ):
         _RunContext(
@@ -269,10 +269,10 @@ def test_run_context_llm_auto_uses_backend_profiler_and_defaults_support_dir(tmp
     ref = _write_ref(tmp_path)
 
     with (
-        patch("vibe_serve.context.PROJECT_ROOT", project_root),
-        patch("vibe_serve.context._build_model", return_value="mock-model"),
-        patch("vibe_serve.context.build_agent_runner", return_value=MagicMock()),
-        patch("vibe_serve.context.backends.get", return_value=_FakeBackend(ProfilerKind.NSYS)),
+        patch("vibe_sys.context.PROJECT_ROOT", project_root),
+        patch("vibe_sys.context._build_model", return_value="mock-model"),
+        patch("vibe_sys.context.build_agent_runner", return_value=MagicMock()),
+        patch("vibe_sys.context.backends.get", return_value=_FakeBackend(ProfilerKind.NSYS)),
         _RunContext(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="llm-auto-nsys",
@@ -299,10 +299,10 @@ def test_run_context_noop_environment_hooks_do_not_require_model_artifacts(tmp_p
     (ref_dir / "reference.py").write_text("pass\n")
 
     with (
-        patch("vibe_serve.context.PROJECT_ROOT", project_root),
-        patch("vibe_serve.context._build_model", return_value="mock-model"),
-        patch("vibe_serve.context.build_agent_runner", return_value=MagicMock()),
-        patch("vibe_serve.context.backends.get", return_value=_FakeBackend()),
+        patch("vibe_sys.context.PROJECT_ROOT", project_root),
+        patch("vibe_sys.context._build_model", return_value="mock-model"),
+        patch("vibe_sys.context.build_agent_runner", return_value=MagicMock()),
+        patch("vibe_sys.context.backends.get", return_value=_FakeBackend()),
         _RunContext(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="generic-reference-dir",
@@ -348,10 +348,10 @@ def test_run_context_materializes_input_project_path_dependencies(tmp_path):
     )
 
     with (
-        patch("vibe_serve.context.PROJECT_ROOT", project_root),
-        patch("vibe_serve.context._build_model", return_value="mock-model"),
-        patch("vibe_serve.context.build_agent_runner", return_value=MagicMock()),
-        patch("vibe_serve.context.backends.get", return_value=_FakeBackend()),
+        patch("vibe_sys.context.PROJECT_ROOT", project_root),
+        patch("vibe_sys.context._build_model", return_value="mock-model"),
+        patch("vibe_sys.context.build_agent_runner", return_value=MagicMock()),
+        patch("vibe_sys.context.backends.get", return_value=_FakeBackend()),
         _RunContext(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="input-local-package",

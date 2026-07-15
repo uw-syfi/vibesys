@@ -1,4 +1,4 @@
-"""Unit tests for vibe_serve.loops.evolve.population.
+"""Unit tests for vibe_sys.loops.evolve.population.
 
 Pure-logic tests — no agent runner, no _RunContext, no GPU. The
 ``Population`` and ``Individual`` classes are intentionally free of
@@ -13,7 +13,7 @@ from collections import Counter
 
 import pytest
 
-from vibe_serve.loops.evolve.population import (
+from vibe_sys.loops.evolve.population import (
     Individual,
     Objective,
     Population,

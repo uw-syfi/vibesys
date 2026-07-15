@@ -1,13 +1,13 @@
 ---
 name: vs-init
-description: Create or update a VibeServe LLM model-serving example bundle for a new Hugging Face model, hardware target, and optimization workload. Use when the user wants to add an example under examples/model-serving, scaffold reference/accuracy_checker/benchmark inputs, adapt existing checker and HTTP benchmark scripts, or start an optimization run from a natural-language workload goal without adding new reusable framework code.
+description: Create or update a VibeSys LLM model-serving example bundle for a new Hugging Face model, hardware target, and optimization workload. Use when the user wants to add an example under examples/model-serving, scaffold reference/accuracy_checker/benchmark inputs, adapt existing checker and HTTP benchmark scripts, or start an optimization run from a natural-language workload goal without adding new reusable framework code.
 ---
 
 # VS Init
 
 ## Goal
 
-Create a new `examples/model-serving/<name>/` input bundle using today's VibeServe conventions. Prefer copying and adapting the closest existing example over inventing shared infrastructure.
+Create a new `examples/model-serving/<name>/` input bundle using today's VibeSys conventions. Prefer copying and adapting the closest existing example over inventing shared infrastructure.
 
 The user should only need to provide:
 
@@ -45,7 +45,7 @@ Always infer the model/workload modality and a bundle slug, then ask the user to
    - `reference/README.md`, `reference/meta.json`, `reference/config.json` if applicable, `reference/reference.py`
    - `accuracy_checker/README.md`, `accuracy_checker/checker.py`
    - `benchmark/README.md`, `benchmark/benchmark.py`
-7. Preserve the existing VibeServe contract:
+7. Preserve the existing VibeSys contract:
    - Reference path is passed with `--ref examples/model-serving/<slug>/reference`.
    - Accuracy checker path is passed with `--acc-checker examples/model-serving/<slug>/accuracy_checker`.
    - Benchmark path is passed with `--bench examples/model-serving/<slug>/benchmark`.
@@ -116,7 +116,7 @@ For normal Hugging Face text-generation models, make `reference/meta.json` the s
 }
 ```
 
-Use `revision` when the user gives one or reproducibility matters. VibeServe already knows how to use `meta.json` to materialize model weights in `reference/model`.
+Use `revision` when the user gives one or reproducibility matters. VibeSys already knows how to use `meta.json` to materialize model weights in `reference/model`.
 
 For generic causal LMs, adapt `reference/reference.py` from `Llama-3-8B` unless the model requires custom code. Use `AutoTokenizer` and `AutoModelForCausalLM`. Set `trust_remote_code=True` only when the model requires it or the user explicitly accepts it.
 
@@ -199,4 +199,4 @@ End with:
 - The new bundle path.
 - The source example copied/adapted.
 - The optimization goal captured in `OBJECTIVE.md`.
-- The exact `vibeserve` command to start optimizing, using the bundle's `--ref`, `--acc-checker`, and `--bench` paths.
+- The exact `vibesys` command to start optimizing, using the bundle's `--ref`, `--acc-checker`, and `--bench` paths.

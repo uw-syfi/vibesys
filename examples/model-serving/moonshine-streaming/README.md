@@ -3,7 +3,7 @@ moonshine-streaming-medium input bundle.
 Use:
 
 ```bash
-vibe-serve --input examples/model-serving/moonshine-streaming
+vibe-sys --input examples/model-serving/moonshine-streaming
 ```
 
 Each folder contains scripts plus a short README.

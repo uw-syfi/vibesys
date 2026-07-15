@@ -1,5 +1,5 @@
-from vibe_serve.agents.stub_runner import StubAgentRunner
-from vibe_serve.schemas import (
+from vibe_sys.agents.stub_runner import StubAgentRunner
+from vibe_sys.schemas import (
     ImplementerResponse,
     JudgeResponse,
     OrchestratorPlan,

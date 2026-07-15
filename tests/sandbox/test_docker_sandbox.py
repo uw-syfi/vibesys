@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from vibe_serve.sandbox.docker_sandbox import DockerSandbox
+from vibe_sys.sandbox.docker_sandbox import DockerSandbox
 
 
 @pytest.fixture()
@@ -61,10 +61,10 @@ class TestStart:
         assert "nvcr.io/nvidia/pytorch:25.04-py3" in cmd
         assert "sleep" in cmd
         assert "infinity" in cmd
-        # Container should be named with vibeserve prefix
+        # Container should be named with vibesys prefix
         assert "--name" in cmd
         name_idx = cmd.index("--name")
-        assert cmd[name_idx + 1].startswith("vibeserve-")
+        assert cmd[name_idx + 1].startswith("vibesys-")
         assert docker_run_call.kwargs["timeout"] == 120
 
     @patch("subprocess.run")
@@ -335,8 +335,8 @@ class TestIdProperty:
         )
         sandbox.start()
 
-        assert sandbox.id.startswith("vibeserve-")
-        assert len(sandbox.id) > len("vibeserve-")
+        assert sandbox.id.startswith("vibesys-")
+        assert len(sandbox.id) > len("vibesys-")
 
 
 class TestUploadFiles:
@@ -467,7 +467,7 @@ class TestCleanupOnExit:
     @pytest.fixture(autouse=True)
     def _clear_live_containers(self):
         """Isolate the global _live_containers registry between tests."""
-        from vibe_serve.sandbox.docker_sandbox import _live_containers
+        from vibe_sys.sandbox.docker_sandbox import _live_containers
 
         _live_containers.clear()
         yield
@@ -475,7 +475,7 @@ class TestCleanupOnExit:
 
     @patch("subprocess.run")
     def test_live_containers_tracked(self, mock_run, sandbox):
-        from vibe_serve.sandbox.docker_sandbox import _live_containers
+        from vibe_sys.sandbox.docker_sandbox import _live_containers
 
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123\n", stderr=""
@@ -489,7 +489,7 @@ class TestCleanupOnExit:
 
     @patch("subprocess.run")
     def test_cleanup_containers_stops_all(self, mock_run, sandbox):
-        from vibe_serve.sandbox.docker_sandbox import _cleanup_containers, _live_containers
+        from vibe_sys.sandbox.docker_sandbox import _cleanup_containers, _live_containers
 
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="container_xyz\n", stderr=""

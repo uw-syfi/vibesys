@@ -1,6 +1,6 @@
 # CLI Flags and Supported Combinations
 
-This document is the canonical map for VibeServe's CLI flag axes. Update it in
+This document is the canonical map for VibeSys's CLI flag axes. Update it in
 the same PR whenever a flag, backend, domain, loop, runtime environment, or
 profiler behavior changes.
 
@@ -15,7 +15,7 @@ Several flags look independent, but they combine into one execution contract:
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, or `cpu`. |
 | Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, Docker container, or Modal-backed workflow. |
 | Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, `macos_cpu`, or `auto`. |
-| Domain | `[agent].domain` in `vibeserve.input.toml` | Agent-loop problem-space package, such as `llm-serving` or `generic`. |
+| Domain | `[agent].domain` in `vibesys.input.toml` | Agent-loop problem-space package, such as `llm-serving` or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--no-skills` | Candidate skill roots and the ablation switch that disables skill loading. |
 | Target inputs | `--input` | Target bundle directory with manifest-declared correctness and benchmark commands. |
@@ -29,12 +29,12 @@ come from the domain and input bundle, not the interface mode.
 | Value | Behavior | Notes |
 | --- | --- | --- |
 | `agent` | Orchestrator-driven loop with implementer, judge, and profiler roles. | Default. Supports `--interface` and `--inner-loop`. |
-| `plain` | Issue-board loop with deterministic issue draining and perf evaluation. | Uses backend prompt fragments from `src/vibe_serve/templates/_backend/`. |
+| `plain` | Issue-board loop with deterministic issue draining and perf evaluation. | Uses backend prompt fragments from `src/vibe_sys/templates/_backend/`. |
 | `evolve` | Evolutionary search over candidate implementations. | Uses mutator, judge, and profiler roles. |
 | `openevolve` | MAP-Elites-style evolutionary loop. | Reuses evolve mutator, judge, and profiler prompts. |
 
 From a source checkout, use `./vs` for the commands below. It prepares a current
-interactive client when needed and forwards every argument to `vibe-serve`.
+interactive client when needed and forwards every argument to `vibe-sys`.
 Use `./vs --outer-loop <kind> --help` for loop-specific flags.
 
 ## Interface
@@ -106,7 +106,7 @@ symbols. Reports must state when unavailable Apple hardware counters limit concl
 
 ## Domain and Modality
 
-`[agent].domain` in `vibeserve.input.toml` supplies cross-cutting problem-space
+`[agent].domain` in `vibesys.input.toml` supplies cross-cutting problem-space
 context for the agent loop. Registered domains include:
 
 | Domain | Meaning |
@@ -129,8 +129,8 @@ direct-call or service boundary.
 directory containing `SKILL.md`, or at a parent tree containing multiple skills.
 The default candidate root is `resources/skills/`.
 
-Before a run starts, VibeServe discovers each `SKILL.md` under the candidate
-roots and validates its frontmatter. Optional `.vibeserve.toml` sidecars can
+Before a run starts, VibeSys discovers each `SKILL.md` under the candidate
+roots and validates its frontmatter. Optional `.vibesys.toml` sidecars can
 declare backend applicability for a skill subtree:
 
 ```toml
@@ -148,7 +148,7 @@ Effective skill loading is:
   discovered skills;
 - `--no-skills` disables all skill loading, including backend-scoped skills.
 
-See [Skill Metadata](skill-metadata.md) for the VibeServe-specific metadata
+See [Skill Metadata](skill-metadata.md) for the VibeSys-specific metadata
 contract and validation rules.
 
 ## Target Inputs
@@ -158,7 +158,7 @@ Most examples use the standard bundle layout:
 ```text
 examples/<target>/
 ├── OBJECTIVE.md
-├── vibeserve.input.toml
+├── vibesys.input.toml
 ├── reference/
 ├── accuracy_checker/
 └── benchmark/
@@ -203,11 +203,11 @@ metric = "requests_per_second"
 ```
 
 Those command arrays are bundle-specific. They may point at Python, shell, Go,
-Rust, C++, or any other evaluator entrypoint, and VibeServe does not require
-standard wrapper filenames. VibeServe copies the input bundle into the
+Rust, C++, or any other evaluator entrypoint, and VibeSys does not require
+standard wrapper filenames. VibeSys copies the input bundle into the
 experiment workspace and tells agents to run the manifest commands. The
 optional `benchmark.result` block opts a single-metric benchmark into trusted
-framework scoring: VibeServe appends `json_argument`, reads the resulting JSON,
+framework scoring: VibeSys appends `json_argument`, reads the resulting JSON,
 and requires exactly one numeric field named by `metric`. Omit it for
 multi-profile or multi-objective benchmarks whose result cannot be represented
 by one scalar. Named profiles and benchmark parameter schemas are not part of
@@ -215,13 +215,13 @@ manifest version 1.
 
 The optional `workspace.seed` path is relative to the input manifest and must
 resolve inside the repository's `examples/starters/` directory. On a fresh run,
-VibeServe copies non-ignored seed files first and then copies the input bundle.
+VibeSys copies non-ignored seed files first and then copies the input bundle.
 Any top-level path supplied by both sources is rejected instead of being
 overwritten. The resulting files are ordinary candidate workspace files: agents
 may edit or delete them, and resumed runs never refresh them from the seed.
 
 The optional `evaluator.source` path is relative to the input manifest and must
-resolve inside `examples/evaluators/`. On a fresh run, VibeServe copies it to
+resolve inside `examples/evaluators/`. On a fresh run, VibeSys copies it to
 `_evaluator/<source-name>`. This is a separate, evaluator-owned input: Git-backed
 integrity checks reject accuracy and benchmark gates after it is modified.
 Resumed runs keep the evaluator snapshot from the original run instead of

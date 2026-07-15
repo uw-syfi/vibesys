@@ -13,7 +13,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Check a Show-o2 HTTP server returns a PNG image.")
     parser.add_argument("--url", default="http://localhost:8000", help="Server base URL")
     parser.add_argument("--endpoint", default="/v1/images/generations", help="Endpoint path")
-    parser.add_argument("--prompt", default="a readable sign that says VibeServe", help="Prompt")
+    parser.add_argument("--prompt", default="a readable sign that says VibeSys", help="Prompt")
     parser.add_argument("--steps", type=int, default=4, help="Diffusion inference steps")
     parser.add_argument("--guidance-scale", type=float, default=5.0, help="Guidance scale")
     parser.add_argument("--timeout", type=float, default=600.0, help="Request timeout")
