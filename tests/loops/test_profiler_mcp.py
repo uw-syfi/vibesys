@@ -18,7 +18,7 @@ from vibe_serve.loops.profiler import mcp_spec
 from vibe_serve.profilers import ProfilerKind
 
 
-# The servers live under examples/ (co-located with the analysis scripts) so
+# The servers live under resources/ (co-located with the analysis scripts) so
 # importing them by file path keeps the tests decoupled from sys.path state.
 def _load_module(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, str(path))
@@ -71,7 +71,7 @@ def test_profiler_mcp_spec_rejects_unknown_kind():
 def nsys_server_mod():
     return _load_module(
         "_nsys_server",
-        _REPO / "examples" / "support" / "nsys_profiler" / "server.py",
+        _REPO / "resources" / "profilers" / "nsys" / "server.py",
     )
 
 
@@ -79,7 +79,7 @@ def nsys_server_mod():
 def torch_server_mod():
     return _load_module(
         "_torch_server",
-        _REPO / "examples" / "support" / "torch_profiler" / "server.py",
+        _REPO / "resources" / "profilers" / "torch" / "server.py",
     )
 
 

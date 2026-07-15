@@ -27,7 +27,7 @@ underscores to dashes, so `macos_cpu` produces `vibeserve-macos-cpu-profiler`.
 
 ## Implement the support package
 
-Create `examples/support/<kind>_profiler/server.py`. The MCP server should expose tools for
+Create `resources/profilers/<kind>/server.py`. The MCP server should expose tools for
 capability detection, diagnostic collection, and useful report analysis. Tool results must
 use structured diagnostics for unavailable tools, permissions, or unsupported facilities.
 
