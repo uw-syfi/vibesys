@@ -4,11 +4,8 @@ import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
 import {visibleRoundNumber} from '../session-model.js';
 
-const ROUND_MARKER: Record<RoundSummary['status'], string> = {
-  active: '●',
-  completed: '✓',
-  failed: '×',
-};
+const ACTIVE_ROUND_COLOR = '#22c55e';
+const DEFAULT_ROUND_COLOR = '#cbd5e1';
 
 export class RoundStripView {
   readonly output: BoxRenderable;
@@ -51,7 +48,10 @@ export class RoundStripView {
       flexDirection: 'row',
     });
     const selected = visibleRoundNumber(state);
-    for (const round of state.rounds.slice(-8)) row.add(this.#renderRound(round, selected));
+    const runningRound = latestActiveRoundNumber(state.rounds);
+    for (const round of state.rounds.slice(-8)) {
+      row.add(this.#renderRound(round, {selected, runningRound}));
+    }
     this.output.add(row);
   }
 
@@ -62,14 +62,27 @@ export class RoundStripView {
     }
   }
 
-  #renderRound(round: RoundSummary, selected: number | null): TextRenderable {
+  #renderRound(
+    round: RoundSummary,
+    viewState: {selected: number | null; runningRound: number | null},
+  ): TextRenderable {
+    const {selected, runningRound} = viewState;
     const isSelected = round.number === selected;
-    const label = `${isSelected ? '[' : ' '} ${round.number}${ROUND_MARKER[round.status]} ${isSelected ? ']' : ' '}`;
+    const isRunning = round.number === runningRound;
     return new TextRenderable(this.renderer, {
-      content: label,
-      fg: isSelected ? '#f8fafc' : '#cbd5e1',
+      content: this.#roundLabel(round, selected),
+      fg: isRunning ? ACTIVE_ROUND_COLOR : DEFAULT_ROUND_COLOR,
       ...(isSelected ? {bg: '#0f172a'} : {}),
       onMouseUp: () => this.controller.selectRound(round.number),
     });
   }
+
+  #roundLabel(round: RoundSummary, selected: number | null): string {
+    const isSelected = round.number === selected;
+    return `${isSelected ? '[' : ' '} r${round.number} ${isSelected ? ']' : ' '}`;
+  }
+}
+
+function latestActiveRoundNumber(rounds: RoundSummary[]): number | null {
+  return [...rounds].reverse().find(round => round.status === 'active')?.number ?? null;
 }

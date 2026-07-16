@@ -48,6 +48,31 @@ describe('OpenTUI presentation', () => {
     expect(frame).toContain('Type a question or /help');
   });
 
+  it('renders quiet round labels without status text or symbols', async () => {
+    const testRenderer = await createTestRenderer({width: 100, height: 18});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      rounds: [
+        {number: 1, status: 'completed'},
+        {number: 2, status: 'active'},
+        {number: 3, status: 'failed'},
+      ],
+      conversation: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    const frame = await testRenderer.waitForFrame(value => value.includes('r2'));
+
+    expect(frame).toContain('r1');
+    expect(frame).toContain('r2');
+    expect(frame).toContain('r3');
+    expect(frame).not.toMatch(/[◐◓◑◒]/);
+    expect(frame).not.toContain('done');
+    expect(frame).not.toContain(':run');
+    expect(frame).not.toContain('fail');
+  });
+
   it('submits typed commands when Enter is pressed', async () => {
     const testRenderer = await createTestRenderer({width: 80, height: 16});
     const controller = new FakeController(initialSessionState());
