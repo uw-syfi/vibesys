@@ -1,5 +1,6 @@
 import type {EventSubscription} from './client.js';
 import {HELP_TEXT, parseInput} from './commands.js';
+import {renderPerformanceCurve} from './performance-chart.js';
 import type {ProtocolResponse, RequestInput, ServerMessage} from './protocol.js';
 import {
   applyEvent,
@@ -107,7 +108,7 @@ export class SocketSessionController implements SessionController {
     if (!parsed.request) return;
     try {
       const response = await this.client.request(parsed.request);
-      const rendered = renderResponse(parsed.request, response);
+      const rendered = renderResponse(parsed.request, response, parsed.responseView);
       if (rendered !== null) this.#setState(showDetail(this.#state, rendered));
     } catch (error) {
       this.#setState(showDetail(this.#state, String(error), 'error'));
@@ -132,9 +133,16 @@ export class SocketSessionController implements SessionController {
   }
 }
 
-function renderResponse(request: RequestInput, response: ProtocolResponse): string | null {
+function renderResponse(
+  request: RequestInput,
+  response: ProtocolResponse,
+  responseView?: 'history' | 'perf',
+): string | null {
   if (response.ack) return `${response.ack.action}: ${response.ack.status}`;
   if (response.chat) return `you: ${response.chat.question}\nvibesys: ${response.chat.answer}`;
+  if (request.type === 'query.history' && responseView === 'perf') {
+    return renderPerformanceCurve(response.events ?? []);
+  }
   if (request.type === 'query.history') return renderRoundHistory(response.events ?? []);
   return null;
 }

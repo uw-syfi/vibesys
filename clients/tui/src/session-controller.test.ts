@@ -68,6 +68,38 @@ describe('session controller', () => {
       ].join('\n'),
     );
   });
+
+  it('renders a performance curve from the perf command', async () => {
+    const transport = new FakeTransport([
+      {
+        ...event(1, 'benchmark_result'),
+        round_label: 'round-1',
+        data: {
+          kind: 'benchmark_result',
+          metric: 'total_ops_per_sec',
+          value: 1200,
+          unit: 'ops/s',
+        },
+      },
+      {
+        ...event(2, 'benchmark_result'),
+        round_label: 'round-2',
+        data: {
+          kind: 'benchmark_result',
+          metric: 'total_ops_per_sec',
+          value: 2400,
+          unit: 'ops/s',
+        },
+      },
+    ]);
+    const controller = new SocketSessionController(transport);
+
+    await controller.submit('/perf');
+
+    expect(transport.requests).toEqual([{type: 'query.history'}]);
+    expect(controller.state.overlay?.content).toContain('Performance · total_ops_per_sec');
+    expect(controller.state.overlay?.content).toContain('best r2 2.4k ops/s');
+  });
 });
 
 class FakeTransport implements SupervisionTransport {
@@ -76,6 +108,8 @@ class FakeTransport implements SupervisionTransport {
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
 
+  constructor(private readonly responseEvents: RunEvent[] = []) {}
+
   request(input: RequestInput): Promise<ProtocolResponse> {
     this.requests.push(input);
     return Promise.resolve({
@@ -83,7 +117,7 @@ class FakeTransport implements SupervisionTransport {
       request_id: 'request',
       timestamp: '2026-01-01T00:00:00Z',
       ok: true,
-      events: [],
+      events: this.responseEvents,
       snapshot: {run_id: 'run', status: 'running', sequence: 12},
     });
   }
