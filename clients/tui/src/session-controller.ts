@@ -6,6 +6,11 @@ import {
   applySnapshot,
   initialSessionState,
   type SessionState,
+  selectNextAgent,
+  selectNextRound,
+  selectPreviousAgent,
+  selectPreviousRound,
+  selectRound,
   showDetail,
   showLive,
 } from './session-model.js';
@@ -16,6 +21,11 @@ export interface SessionController {
   stop(): Promise<void>;
   submit(value: string): Promise<void>;
   live(): void;
+  selectNextAgent(): void;
+  selectPreviousAgent(): void;
+  selectNextRound(): void;
+  selectPreviousRound(): void;
+  selectRound(roundNumber: number): void;
   subscribe(listener: (state: SessionState) => void): () => void;
 }
 
@@ -68,6 +78,26 @@ export class SocketSessionController implements SessionController {
     this.#setState(showLive(this.#state));
   }
 
+  selectNextAgent(): void {
+    this.#setState(selectNextAgent(this.#state));
+  }
+
+  selectPreviousAgent(): void {
+    this.#setState(selectPreviousAgent(this.#state));
+  }
+
+  selectNextRound(): void {
+    this.#setState(selectNextRound(this.#state));
+  }
+
+  selectPreviousRound(): void {
+    this.#setState(selectPreviousRound(this.#state));
+  }
+
+  selectRound(roundNumber: number): void {
+    this.#setState(selectRound(this.#state, roundNumber));
+  }
+
   async submit(value: string): Promise<void> {
     const parsed = parseInput(value.trim());
     if (parsed.error) return this.#setState(showDetail(this.#state, parsed.error, 'error'));
@@ -110,7 +140,15 @@ function renderResponse(request: RequestInput, response: ProtocolResponse): stri
 }
 
 export function renderRoundHistory(events: ProtocolResponse['events'], now = new Date()): string {
-  const rounds = new Map<number, {startedAt: Date; finishedAt?: Date}>();
+  const rounds = new Map<
+    number,
+    {
+      startedAt: Date;
+      finishedAt?: Date;
+      status: 'running' | 'completed' | 'failed';
+      phases: Set<string>;
+    }
+  >();
   for (const event of events ?? []) {
     const match = event.round_label?.match(/^round-(\d+)/);
     if (!match) continue;
@@ -118,11 +156,25 @@ export function renderRoundHistory(events: ProtocolResponse['events'], now = new
     const timestamp = new Date(event.timestamp);
     const current = rounds.get(round);
     if (!current || timestamp < current.startedAt) {
-      rounds.set(round, {...current, startedAt: timestamp});
+      rounds.set(round, {
+        phases: current?.phases ?? new Set(),
+        status: current?.status ?? 'running',
+        ...(current?.finishedAt ? {finishedAt: current.finishedAt} : {}),
+        startedAt: timestamp,
+      });
+    }
+    const updated = rounds.get(round);
+    if (updated && event.agent_kind) updated.phases.add(event.agent_kind);
+    if (updated && (event.type === 'run_failed' || event.type === 'run_interrupted')) {
+      updated.status = 'failed';
+      updated.finishedAt = timestamp;
     }
     if (event.type === 'round_finished') {
       const updated = rounds.get(round);
-      if (updated) updated.finishedAt = timestamp;
+      if (updated) {
+        updated.finishedAt = timestamp;
+        updated.status = event.status === 'failed' ? 'failed' : 'completed';
+      }
     }
   }
   if (rounds.size === 0) return 'No rounds have started yet.';
@@ -133,9 +185,8 @@ export function renderRoundHistory(events: ProtocolResponse['events'], now = new
       0,
       Math.floor((end.getTime() - timing.startedAt.getTime()) / 1000),
     );
-    lines.push(
-      `Round ${round} · ${timing.finishedAt ? 'completed' : 'running'} · ${formatDuration(elapsedSeconds)}`,
-    );
+    const phases = [...timing.phases].join(' -> ') || 'no agent phases yet';
+    lines.push(`Round ${round} · ${timing.status} · ${formatDuration(elapsedSeconds)} · ${phases}`);
   }
   return lines.join('\n');
 }

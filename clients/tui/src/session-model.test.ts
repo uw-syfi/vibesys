@@ -1,6 +1,14 @@
 import {describe, expect, it} from 'vitest';
 import type {RunEvent} from './protocol.js';
-import {applyEvent, initialSessionState} from './session-model.js';
+import {
+  applyEvent,
+  initialSessionState,
+  selectNextAgent,
+  selectNextRound,
+  selectRound,
+  visibleConversation,
+  visiblePhases,
+} from './session-model.js';
 
 describe('session event model', () => {
   it('reduces semantic events into a presentation-neutral transcript', () => {
@@ -62,8 +70,7 @@ describe('session event model', () => {
 
     expect(state.status).toBe('failed');
     expect(state.terminal).toBe(true);
-    expect(state.view).toBe('live');
-    expect(state.detailContent).toBe('');
+    expect(state.overlay).toBeNull();
     expect(state.conversation[0]?.content).toContain('This run has completed 30 rounds.');
     expect(state.conversation[0]?.content).toContain('resume_limit_exhausted');
     expect(state.conversation[0]?.tone).toBe('failure');
@@ -183,6 +190,99 @@ describe('session event model', () => {
       },
     ]);
   });
+
+  it('derives round-scoped agent flow from run and phase events', () => {
+    let state = applyEvent(
+      initialSessionState(),
+      event(1, 'run_started', {
+        kind: 'run_started',
+        outer_loop: 'agent',
+        input: 'examples/kv-store',
+        max_rounds: 5,
+      }),
+    );
+    expect(state.phases).toEqual([]);
+
+    state = applyEvent(state, {
+      ...event(2, 'phase_started', {kind: 'phase', phase: 'orchestrator', attempt: null}),
+      agent_kind: 'orchestrator',
+    });
+    state = applyEvent(state, {
+      ...event(3, 'phase_finished', {kind: 'phase', phase: 'orchestrator', attempt: null}),
+      agent_kind: 'orchestrator',
+    });
+
+    expect(state.rounds).toMatchObject([{number: 1, status: 'active'}]);
+    expect(visiblePhases(state).map(phase => `${phase.kind}:${phase.status}`)).toEqual([
+      'orchestrator:completed',
+      'implementer:pending',
+      'judge:pending',
+      'profiler:pending',
+    ]);
+    expect(visiblePhases(state)[0]).toMatchObject({
+      kind: 'orchestrator',
+      status: 'completed',
+      roundNumber: 1,
+      roundLabel: 'round-1',
+    });
+  });
+
+  it('filters conversation entries by selected round and agent', () => {
+    let state = initialSessionState();
+    state = applyEvent(
+      state,
+      event(
+        1,
+        'agent_output_chunk',
+        {
+          kind: 'agent_output_chunk',
+          channel: 'assistant',
+          content: 'judge output',
+        },
+        'judge-1',
+      ),
+    );
+    state = applyEvent(state, {
+      ...event(
+        2,
+        'agent_output_chunk',
+        {
+          kind: 'agent_output_chunk',
+          channel: 'assistant',
+          content: 'profiler output',
+        },
+        'profiler-1',
+      ),
+      agent_kind: 'profiler',
+    });
+    state = applyEvent(state, {
+      ...event(
+        3,
+        'agent_output_chunk',
+        {
+          kind: 'agent_output_chunk',
+          channel: 'assistant',
+          content: 'round two judge output',
+        },
+        'judge-2',
+      ),
+      round_label: 'round-2',
+    });
+
+    state = selectNextAgent(state);
+    expect(state.selectedAgentKind).toBe('judge');
+    expect(visibleConversation(state).map(entry => entry.content)).toEqual([
+      'round two judge output',
+    ]);
+    state = selectNextRound(state);
+    state = selectNextAgent(state);
+    expect(visibleConversation(state).map(entry => entry.content)).toEqual(['judge output']);
+
+    state = selectRound(state, 2);
+    expect(visibleConversation(state).map(entry => entry.content)).toEqual([
+      'round two judge output',
+    ]);
+  });
 });
 
 function event(
@@ -196,7 +296,7 @@ function event(
     timestamp: '2026-01-01T00:00:00Z',
     type,
     round_label: 'round-1',
-    agent_kind: 'judge',
+    ...(type === 'run_started' ? {} : {agent_kind: 'judge'}),
     ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
     ...(data === undefined ? {} : {data}),
   };

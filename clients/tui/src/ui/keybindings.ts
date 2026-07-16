@@ -3,6 +3,10 @@ import type {SessionController} from '../session-controller.js';
 
 export interface KeybindingActions {
   toggleLatestPrompt(): void;
+  selectNextAgent(): void;
+  selectPreviousAgent(): void;
+  selectNextRound(): void;
+  selectPreviousRound(): void;
 }
 
 export function bindKeybindings(
@@ -17,7 +21,7 @@ export function bindKeybindings(
       renderer.destroy();
       return;
     }
-    if (key.name === 'escape' && controller.state.view !== 'live') {
+    if (key.name === 'escape' && controller.state.overlay !== null) {
       controller.live();
       viewport.scrollTo(viewport.scrollHeight);
       key.preventDefault();
@@ -30,6 +34,25 @@ export function bindKeybindings(
     }
     if (key.ctrl && key.name === 'l') {
       controller.live();
+      viewport.scrollTo(viewport.scrollHeight);
+      key.preventDefault();
+      return;
+    }
+    if (key.name === 'tab') {
+      if (key.shift) actions.selectPreviousAgent();
+      else actions.selectNextAgent();
+      viewport.scrollTo(viewport.scrollHeight);
+      key.preventDefault();
+      return;
+    }
+    if (key.name === ']') {
+      actions.selectNextRound();
+      viewport.scrollTo(viewport.scrollHeight);
+      key.preventDefault();
+      return;
+    }
+    if (key.name === '[') {
+      actions.selectPreviousRound();
       viewport.scrollTo(viewport.scrollHeight);
       key.preventDefault();
       return;

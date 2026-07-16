@@ -353,9 +353,13 @@ def _resolve_run_dir(run_dir_arg: str) -> str:
     """Resolve a run directory name.
 
     If *run_dir_arg* is ``"latest"``, find the most recent experiment
-    directory in ``exp_env/``. Otherwise return *run_dir_arg* as-is.
+    directory in ``exp_env/``. Otherwise accept either a bare run directory
+    name or a path whose final parent is ``exp_env``.
     """
     if run_dir_arg != "latest":
+        run_dir_path = Path(run_dir_arg)
+        if run_dir_path.parent.name == "exp_env":
+            return run_dir_path.name
         return run_dir_arg
     exp_env = PROJECT_ROOT / "exp_env"
     if not exp_env.is_dir():
@@ -370,6 +374,66 @@ def _resolve_run_dir(run_dir_arg: str) -> str:
             stage="resume_resolution",
         )
     return dirs[-1]
+
+
+def _resume_exp_dir(run_dir_name: str) -> Path:
+    return PROJECT_ROOT / "exp_env" / run_dir_name
+
+
+def _infer_resume_input(exp_dir: Path) -> Path:
+    events_path = exp_dir / "logs" / "run-events.jsonl"
+    if not events_path.is_file():
+        _configuration_error(
+            f"Cannot infer --input because resume metadata is missing: {events_path}",
+            code="resume_input_not_found",
+            stage="resume_resolution",
+        )
+
+    for line_number, line in enumerate(events_path.read_text().splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as exc:
+            _configuration_error(
+                f"Cannot infer --input because {events_path}:{line_number} is invalid JSON: {exc}",
+                code="resume_input_invalid",
+                stage="resume_resolution",
+            )
+        if event.get("type") != "run_started":
+            continue
+        data = event.get("data")
+        if not isinstance(data, dict):
+            break
+        input_path = data.get("input")
+        if isinstance(input_path, str) and input_path:
+            return Path(input_path)
+        break
+
+    _configuration_error(
+        f"Cannot infer --input because no run_started input was found in {events_path}",
+        code="resume_input_not_found",
+        stage="resume_resolution",
+    )
+
+
+def _resolve_resume_args(args: argparse.Namespace) -> None:
+    if args.resume is None:
+        return
+
+    run_dir_name = _resolve_run_dir(args.resume)
+    args.resume = run_dir_name
+    if args.input is not None:
+        return
+
+    exp_dir = _resume_exp_dir(run_dir_name)
+    if not exp_dir.is_dir():
+        _configuration_error(
+            f"Run directory does not exist: exp_env/{run_dir_name}",
+            code="resume_not_found",
+            stage="resume_resolution",
+        )
+    args.input = _infer_resume_input(exp_dir)
 
 
 def _apply_common_args(parser: argparse.ArgumentParser) -> None:
@@ -934,6 +998,7 @@ def parse_cli_invocation(argv: list[str]) -> CliInvocation:
     """Parse and validate one invocation without printing or exiting."""
     loop_kind, remaining = _extract_loop_selection(argv)
     args = _PARSER_BUILDERS[loop_kind]().parse_args(remaining)
+    _resolve_resume_args(args)
     globals()[_VALIDATORS[loop_kind]](args)
     return CliInvocation(loop_kind=loop_kind, args=args)
 

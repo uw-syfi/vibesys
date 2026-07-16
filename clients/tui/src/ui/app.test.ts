@@ -18,11 +18,20 @@ describe('OpenTUI presentation', () => {
       status: 'running',
       agentKind: 'optimizer',
       roundLabel: 'round 2',
+      phases: [
+        {
+          kind: 'optimizer',
+          status: 'active',
+          roundNumber: null,
+          roundLabel: 'round 2',
+        },
+      ],
       conversation: [
         {
           id: '1',
           kind: 'assistant',
           label: 'optimizer · round 2',
+          agentKind: 'optimizer',
           content: '## Result\n\nUse `fast_path()`.',
         },
       ],
@@ -32,9 +41,36 @@ describe('OpenTUI presentation', () => {
 
     const frame = await testRenderer.waitForFrame(value => value.includes('fast_path()'));
     expect(frame).toContain('running · optimizer · round 2');
+    expect(frame).toContain('Rounds');
+    expect(frame).toContain('● optimizer');
     expect(frame).toContain('Result');
     expect(frame).toContain('Ask or command');
     expect(frame).toContain('Type a question or /help');
+  });
+
+  it('renders quiet round labels without status text or symbols', async () => {
+    const testRenderer = await createTestRenderer({width: 100, height: 18});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      rounds: [
+        {number: 1, status: 'completed'},
+        {number: 2, status: 'active'},
+        {number: 3, status: 'failed'},
+      ],
+      conversation: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    const frame = await testRenderer.waitForFrame(value => value.includes('r2'));
+
+    expect(frame).toContain('r1');
+    expect(frame).toContain('r2');
+    expect(frame).toContain('r3');
+    expect(frame).not.toMatch(/[◐◓◑◒]/);
+    expect(frame).not.toContain('done');
+    expect(frame).not.toContain(':run');
+    expect(frame).not.toContain('fail');
   });
 
   it('submits typed commands when Enter is pressed', async () => {
@@ -65,15 +101,18 @@ describe('OpenTUI presentation', () => {
     const testRenderer = await createTestRenderer({width: 100, height: 16});
     const controller = new FakeController({
       ...initialSessionState(),
-      view: 'help',
-      detailContent: 'Available commands',
+      overlay: {kind: 'help', content: 'Available commands'},
+      conversation: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
     });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
 
-    await testRenderer.waitForFrame(value => value.includes('Esc: back to live'));
+    const overlay = await testRenderer.waitForFrame(value => value.includes('Esc: close dialog'));
+    expect(overlay).toContain('Available commands');
+    expect(overlay).toContain('Rounds');
+    expect(overlay).toContain('Agents');
     testRenderer.mockInput.pressKey('ESCAPE');
-    await testRenderer.waitForFrame(value => !value.includes('Esc: back to live'));
+    await testRenderer.waitForFrame(value => !value.includes('Esc: close dialog'));
     expect(controller.liveCalls).toBe(1);
   });
 
@@ -115,7 +154,7 @@ describe('OpenTUI presentation', () => {
 
     const frame = await testRenderer.waitForFrame(value => value.includes('2 passed'));
     expect(frame).toContain('→ Bash(command="pytest")');
-    expect(frame.match(/╭/g)).toHaveLength(3);
+    expect(frame.match(/╭/g)).toHaveLength(5);
   });
 
   it('collapses prompts and expands the latest prompt with Ctrl+P', async () => {
@@ -133,6 +172,46 @@ describe('OpenTUI presentation', () => {
     testRenderer.mockInput.pressKey('p', {ctrl: true});
     const expanded = await testRenderer.waitForFrame(value => value.includes('prompt line 20'));
     expect(expanded).toContain('collapse');
+  });
+
+  it('selects an agent with Tab and filters the transcript', async () => {
+    const testRenderer = await createTestRenderer({width: 100, height: 20});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      phases: [
+        {kind: 'implementer', status: 'completed', roundNumber: 1, roundLabel: 'round-1'},
+        {kind: 'judge', status: 'active', roundNumber: 1, roundLabel: 'round-1'},
+      ],
+      rounds: [{number: 1, status: 'active'}],
+      conversation: [
+        {
+          id: 'implementer',
+          kind: 'assistant',
+          label: 'implementer · round 1',
+          agentKind: 'implementer',
+          roundNumber: 1,
+          content: 'edited files',
+        },
+        {
+          id: 'judge',
+          kind: 'assistant',
+          label: 'judge · round 1',
+          agentKind: 'judge',
+          roundNumber: 1,
+          content: 'checking behavior',
+        },
+      ],
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    await testRenderer.waitForFrame(value => value.includes('checking behavior'));
+    testRenderer.mockInput.pressKey('TAB');
+    const filtered = await testRenderer.waitForFrame(value =>
+      value.includes('selected implementer'),
+    );
+    expect(filtered).toContain('edited files');
+    expect(filtered).not.toContain('checking behavior');
   });
 
   it('keeps terminal results visible until the operator exits', async () => {
@@ -196,7 +275,36 @@ class FakeController implements SessionController {
   }
   live(): void {
     this.liveCalls += 1;
-    this.state = {...this.state, view: 'live'};
+    this.state = {...this.state, overlay: null, selectedRound: null, selectedAgentKind: null};
+    for (const listener of this.#listeners) listener(this.state);
+  }
+  selectNextAgent(): void {
+    const current = this.state.selectedAgentKind;
+    const visibleRound =
+      this.state.selectedRound ??
+      this.state.rounds.find(round => round.status === 'active')?.number ??
+      null;
+    const phases = this.state.phases.filter(phase => phase.roundNumber === visibleRound);
+    const index = current === null ? -1 : phases.findIndex(phase => phase.kind === current);
+    const next = phases[(index + 1 + phases.length) % phases.length];
+    this.state = {...this.state, selectedAgentKind: next?.kind ?? null, overlay: null};
+    for (const listener of this.#listeners) listener(this.state);
+  }
+  selectPreviousAgent(): void {
+    this.selectNextAgent();
+  }
+  selectNextRound(): void {
+    const index = this.state.rounds.findIndex(round => round.number === this.state.selectedRound);
+    const next =
+      this.state.rounds[(index + 1 + this.state.rounds.length) % this.state.rounds.length];
+    this.state = {...this.state, selectedRound: next?.number ?? null, selectedAgentKind: null};
+    for (const listener of this.#listeners) listener(this.state);
+  }
+  selectPreviousRound(): void {
+    this.selectNextRound();
+  }
+  selectRound(roundNumber: number): void {
+    this.state = {...this.state, selectedRound: roundNumber, selectedAgentKind: null};
     for (const listener of this.#listeners) listener(this.state);
   }
 
