@@ -14,6 +14,7 @@ from vibesys.profilers import (
     ProfilerKind,
     allowed_profiler_kinds,
     coerce_profiler_kind,
+    preflight_profiler_kind,
     resolve_profiler_kind,
 )
 
@@ -59,7 +60,12 @@ def _expected_resolved(
             raise ValueError
         return requested
     if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
-        return ProfilerKind.MACOS_CPU if platform.system() == "Darwin" else ProfilerKind.NONE
+        system = platform.system()
+        if system == "Darwin":
+            return ProfilerKind.MACOS_CPU
+        if system == "Linux":
+            return ProfilerKind.LINUX_CPU
+        return ProfilerKind.NONE
     if allowed == frozenset({ProfilerKind.NONE}):
         return ProfilerKind.NONE
     if environment_default_profiler_kind is ProfilerKind.TORCH:
@@ -98,6 +104,20 @@ def test_profiler_auto_resolution_exhaustive(
         assert resolve_profiler_kind(requested, **kwargs) is expected
 
 
+def test_generic_auto_uses_none_when_host_has_no_native_cpu_profiler(monkeypatch):
+    monkeypatch.setattr(platform, "system", lambda: "FreeBSD")
+
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.GENERIC,
+            backend_profiler_kind=ProfilerKind.LINUX_CPU,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+        )
+        is ProfilerKind.NONE
+    )
+
+
 @given(
     domain=st.sampled_from(_DOMAINS),
     requested=st.sampled_from(_REQUESTED),
@@ -130,7 +150,13 @@ def test_profiler_resolution_invariants(
     assert resolved is not ProfilerKind.AUTO
     assert resolved in allowed
     if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
-        expected = ProfilerKind.MACOS_CPU if platform.system() == "Darwin" else ProfilerKind.NONE
+        system = platform.system()
+        if system == "Darwin":
+            expected = ProfilerKind.MACOS_CPU
+        elif system == "Linux":
+            expected = ProfilerKind.LINUX_CPU
+        else:
+            expected = ProfilerKind.NONE
         assert resolved is expected
     if requested is not ProfilerKind.AUTO:
         assert resolved is requested
@@ -161,3 +187,50 @@ def test_resolver_rejects_unparsed_backend_profiler_metadata(backend_profiler_ki
             backend_profiler_kind=backend_profiler_kind,
             environment_default_profiler_kind=ProfilerKind.NSYS,
         )
+
+
+def test_linux_cpu_preflight_fails_when_perf_is_unavailable(monkeypatch):
+    from vibesys.linux_cpu_profiler import Capability, DiagnosticCode, LinuxProfilerTool
+
+    monkeypatch.setattr(
+        "vibesys.linux_cpu_profiler.detect_capability",
+        lambda: Capability(
+            LinuxProfilerTool.NONE,
+            None,
+            None,
+            3,
+            0,
+            (
+                DiagnosticCode.PERF_EVENT_PARANOID_RESTRICTIVE,
+                DiagnosticCode.PERF_UNAVAILABLE,
+            ),
+        ),
+    )
+
+    result = preflight_profiler_kind(ProfilerKind.LINUX_CPU)
+
+    assert not result.usable
+    assert result.diagnostics == ("perf_event_paranoid_restrictive", "perf_unavailable")
+    assert "perf_path=missing" in result.details
+    assert "perf_unavailable" in result.error_message()
+
+
+def test_linux_cpu_preflight_accepts_perf_with_nonblocking_symbol_restrictions(monkeypatch):
+    from vibesys.linux_cpu_profiler import Capability, DiagnosticCode, LinuxProfilerTool
+
+    monkeypatch.setattr(
+        "vibesys.linux_cpu_profiler.detect_capability",
+        lambda: Capability(
+            LinuxProfilerTool.PERF,
+            "/usr/bin/perf",
+            "perf version 6.8",
+            1,
+            1,
+            (DiagnosticCode.KERNEL_SYMBOLS_RESTRICTED,),
+        ),
+    )
+
+    result = preflight_profiler_kind(ProfilerKind.LINUX_CPU)
+
+    assert result.usable
+    assert result.diagnostics == ("kernel_symbols_restricted",)

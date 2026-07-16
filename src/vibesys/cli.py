@@ -199,6 +199,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
             "'torch' for torch.profiler (works in Modal sandboxes), "
             "'neuron' for AWS neuron-explorer (Trainium/NeuronCores), "
             "'macos_cpu' for Instruments Time Profiler with a sample fallback, "
+            "'linux_cpu' for Linux perf on native CPU workloads, "
             "'auto' picks a domain/backend/environment-appropriate profiler. "
             "Default: auto."
         ),

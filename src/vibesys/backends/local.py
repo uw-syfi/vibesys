@@ -37,8 +37,6 @@ _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 class LocalBackend:
     """No-device backend (Metal / CPU) — hardware hooks are no-ops."""
 
-    profiler_kind = ProfilerKind.TORCH
-
     def __init__(
         self,
         name: ComputeBackend,
@@ -47,9 +45,11 @@ class LocalBackend:
         log: Callable[[str], None] | None = None,
         image: str | None = None,
         unavailable_reason: str,
+        profiler_kind: ProfilerKind = ProfilerKind.TORCH,
         supports_docker: bool = False,
     ) -> None:
         self.name = name
+        self.profiler_kind = profiler_kind
         self.log_dir = Path(log_dir)
         self._lprint = log or print
         self.image = image
@@ -134,6 +134,7 @@ def metal_backend(
         log_dir,
         log=log,
         image=image,
+        profiler_kind=ProfilerKind.TORCH,
         unavailable_reason=(
             "Docker on macOS can't access Metal/MPS, and Modal does not offer Apple GPUs"
         ),
@@ -152,6 +153,7 @@ def cpu_backend(
         log_dir,
         log=log,
         image=image or _DEFAULT_CPU_IMAGE,
+        profiler_kind=ProfilerKind.LINUX_CPU,
         unavailable_reason="Modal CPU execution is not wired up for this backend",
         supports_docker=True,
     )
