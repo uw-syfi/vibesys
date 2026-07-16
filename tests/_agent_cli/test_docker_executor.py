@@ -4,7 +4,7 @@ import io
 
 from agentshim.executor import CallbackCommandStreamSink, CommandRequest
 
-from vibe_sys.agents.docker_executor import DockerCommandExecutor, DockerCommandHandle
+from vibesys.agents.docker_executor import DockerCommandExecutor, DockerCommandHandle
 
 
 class _WritableStdin:
@@ -52,7 +52,7 @@ def test_docker_executor_runs_command_request_and_streams_to_sink(monkeypatch):
         popen_calls.append((cmd, kwargs))
         return process
 
-    monkeypatch.setattr("vibe_sys.agents.docker_executor.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("vibesys.agents.docker_executor.subprocess.Popen", fake_popen)
     stdout: list[str] = []
     stderr: list[str] = []
     started: list[DockerCommandHandle] = []

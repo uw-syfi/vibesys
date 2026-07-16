@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from vibe_sys.loops.profiler import mcp_spec
-from vibe_sys.profilers import ProfilerKind
+from vibesys.loops.profiler import mcp_spec
+from vibesys.profilers import ProfilerKind
 
 
 # The servers live under resources/ (co-located with the analysis scripts) so

@@ -5,9 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibe_sys.agents import AgentRunner
-from vibe_sys.loops.openevolve.loop import run_openevolve_loop
-from vibe_sys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
+from vibesys.agents import AgentRunner
+from vibesys.loops.openevolve.loop import run_openevolve_loop
+from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
 
 
 @pytest.fixture()
@@ -57,10 +57,10 @@ def test_openevolve_uses_candidate_progress_for_agent_calls(tmp_path, ref_file):
     runner = _make_runner(captured_progress)
 
     with (
-        patch("vibe_sys.context._build_model", return_value="mock-model"),
-        patch("vibe_sys.backends.cuda.LocalShellBackend"),
-        patch("vibe_sys.context.build_agent_runner", return_value=runner),
-        patch("vibe_sys.context.PROJECT_ROOT", tmp_path),
+        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.backends.cuda.LocalShellBackend"),
+        patch("vibesys.context.build_agent_runner", return_value=runner),
+        patch("vibesys.context.PROJECT_ROOT", tmp_path),
     ):
         result = run_openevolve_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},

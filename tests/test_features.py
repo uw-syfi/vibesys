@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from vibe_sys.features import FEATURES, FeatureFlag, is_feature_enabled
+from vibesys.features import FEATURES, FeatureFlag, is_feature_enabled
 
 
 def test_vibesys_declares_example_feature():

@@ -7,9 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from vibe_sys.cli import load_config_and_skills
-from vibe_sys.constants import PROJECT_ROOT, ComputeBackend
-from vibe_sys.skills import (
+from vibesys.cli import load_config_and_skills
+from vibesys.constants import PROJECT_ROOT, ComputeBackend
+from vibesys.skills import (
     SkillMetadataError,
     discover_sidecar_rules,
     discover_skill_dirs,
@@ -130,7 +130,7 @@ def test_conflicting_same_specificity_rules_fail(tmp_path):
             backends=(ComputeBackend.CUDA,),
         )
     ]
-    from vibe_sys.skills import effective_skill_metadata
+    from vibesys.skills import effective_skill_metadata
 
     with pytest.raises(SkillMetadataError, match="conflicting VibeSys rules"):
         effective_skill_metadata(skill_dir, duplicate_rules)

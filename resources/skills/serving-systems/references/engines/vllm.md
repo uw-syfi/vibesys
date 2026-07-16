@@ -5,7 +5,7 @@ Short reference pointing into `repos/vllm/` for common vLLM development tasks. T
 ## Setup
 
 ```bash
-export SERVE_REPOS=<vibe-sys-root>/skills/serving-systems/repos
+export SERVE_REPOS=<vibesys-root>/skills/serving-systems/repos
 # or substitute $SERVE_REPOS inline in commands below.
 ```
 
@@ -19,7 +19,7 @@ git fetch --depth 1 origin 0210024ae796446a121f96d2d31053668ac0fd85
 git checkout -q FETCH_HEAD
 ```
 
-(From the vibe-sys repo root the equivalent is `git submodule update --init skills/serving-systems/repos/vllm`.)
+(From the vibesys repo root the equivalent is `git submodule update --init skills/serving-systems/repos/vllm`.)
 
 ## Directory map
 

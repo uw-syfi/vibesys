@@ -7,7 +7,7 @@ path.
 
 ## Architecture Boundaries
 
-- Put framework behavior under `src/vibe_sys/`.
+- Put framework behavior under `src/vibesys/`.
 - Put reusable standalone libraries under `libs/`.
 - Put prompt, loop, and domain behavior in the package that owns that surface.
 - Put long-form serving knowledge under `resources/skills/`, not in framework

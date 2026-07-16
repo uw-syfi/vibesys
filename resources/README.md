@@ -1,7 +1,7 @@
 # Resources
 
 This directory contains assets that VibeSys owns and exposes to agents or
-their execution environments, but that are not part of the `vibe_sys` Python
+their execution environments, but that are not part of the `vibesys` Python
 package and are not standalone example workloads.
 
 Resources may be copied into an agent workspace, mounted or linked read-only,
@@ -17,6 +17,6 @@ including:
 - `skills/`: bundled Agent Skills and reference material exposed to agents.
 
 Keep application behavior and packaged prompt templates under
-`src/vibe_sys/`, reusable Python libraries under `libs/`, standalone workload
+`src/vibesys/`, reusable Python libraries under `libs/`, standalone workload
 bundles under `examples/`, and outputs produced by a run in its artifact or log
 directories.

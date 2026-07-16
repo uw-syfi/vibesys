@@ -2,7 +2,7 @@
 
 import json
 
-from vibe_sys.loops.plain.loop import (
+from vibesys.loops.plain.loop import (
     PlainLoopState,
     _determine_resume_point,
     _load_state,

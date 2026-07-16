@@ -29,12 +29,12 @@ come from the domain and input bundle, not the interface mode.
 | Value | Behavior | Notes |
 | --- | --- | --- |
 | `agent` | Orchestrator-driven loop with implementer, judge, and profiler roles. | Default. Supports `--interface` and `--inner-loop`. |
-| `plain` | Issue-board loop with deterministic issue draining and perf evaluation. | Uses backend prompt fragments from `src/vibe_sys/templates/_backend/`. |
+| `plain` | Issue-board loop with deterministic issue draining and perf evaluation. | Uses backend prompt fragments from `src/vibesys/templates/_backend/`. |
 | `evolve` | Evolutionary search over candidate implementations. | Uses mutator, judge, and profiler roles. |
 | `openevolve` | MAP-Elites-style evolutionary loop. | Reuses evolve mutator, judge, and profiler prompts. |
 
 From a source checkout, use `./vs` for the commands below. It prepares a current
-interactive client when needed and forwards every argument to `vibe-sys`.
+interactive client when needed and forwards every argument to `vibesys`.
 Use `./vs --outer-loop <kind> --help` for loop-specific flags.
 
 ## Interface

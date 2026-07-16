@@ -1,4 +1,4 @@
-# vibe-sys-skills
+# vibesys-skills
 
 Agent skills for LLM / multimodal **serving-system development**. For use with Claude Code, Cursor, Codex, Gemini CLI, and other tools that understand the Agent Skills format.
 
@@ -38,7 +38,7 @@ This collection assumes existing kernel libraries. Writing new CUDA / Triton / C
 ## Setup
 
 The vibesys agent CLIs auto-load this skill from `skills/serving-systems/`
-via the `--skills-dir` flag (default in `vibe_sys/cli_common.py`),
+via the `--skills-dir` flag (default in `vibesys/cli_common.py`),
 copying the skill tree into each workspace's `.claude/skills/` so the
 in-workspace coding agent picks it up.
 
@@ -50,13 +50,13 @@ git submodule update --init skills/serving-systems/repos
 ```
 
 `update-repos.sh` is the upstream sparse-checkout helper, kept for parity
-with the source `vibe-sys-skills` repo; the submodule flow above is the
+with the source `vibesys-skills` repo; the submodule flow above is the
 one used here.
 
 ## Directory structure
 
 ```
-vibe-sys-skills/
+vibesys-skills/
 ├── README.md, CLAUDE.md          # overview + guidance for skill authors
 ├── update-repos.sh               # upstream sparse-checkout helper (parity)
 │

@@ -20,11 +20,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from vibe_sys._agent_cli.base import MCPServerSpec
-from vibe_sys._agent_cli.claude import ClaudeCodeCodingAgent
-from vibe_sys._agent_cli.codex import CodexCodingAgent
-from vibe_sys._agent_cli.gemini import GeminiCodingAgent
-from vibe_sys._agent_cli.opencode import OpencodeCodingAgent
+from vibesys._agent_cli.base import MCPServerSpec
+from vibesys._agent_cli.claude import ClaudeCodeCodingAgent
+from vibesys._agent_cli.codex import CodexCodingAgent
+from vibesys._agent_cli.gemini import GeminiCodingAgent
+from vibesys._agent_cli.opencode import OpencodeCodingAgent
 
 
 def _spec() -> MCPServerSpec:
@@ -308,7 +308,7 @@ class TestCodexMCP:
 def test_base_class_default_install_uninstall_are_noop(tmp_path: Path):
     """A subclass that doesn't override should silently do nothing."""
 
-    from vibe_sys._agent_cli.base import CodingAgent
+    from vibesys._agent_cli.base import CodingAgent
 
     class DummyAgent(CodingAgent):
         def generate(self, prompt, cwd=None, timeout=None, silent=False):

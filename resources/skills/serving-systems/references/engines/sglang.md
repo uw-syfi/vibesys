@@ -5,7 +5,7 @@ Short reference into `repos/sglang/`. Depends on the `skills/serving-systems/rep
 ## Setup
 
 ```bash
-export SERVE_REPOS=<vibe-sys-root>/skills/serving-systems/repos
+export SERVE_REPOS=<vibesys-root>/skills/serving-systems/repos
 # or substitute $SERVE_REPOS inline below.
 ```
 
@@ -19,7 +19,7 @@ git fetch --depth 1 origin 04b1caf75b3c6f043a979ddce21d43ed07c217a6
 git checkout -q FETCH_HEAD
 ```
 
-(From the vibe-sys repo root the equivalent is `git submodule update --init skills/serving-systems/repos/sglang`.)
+(From the vibesys repo root the equivalent is `git submodule update --init skills/serving-systems/repos/sglang`.)
 
 ## Directory map
 

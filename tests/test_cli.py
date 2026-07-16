@@ -8,10 +8,10 @@ from unittest.mock import patch
 
 import pytest
 
-from vibe_sys.cli import _extract_flag, _extract_loop_selection, _validate_target_inputs, main
-from vibe_sys.domains.base import DomainName
-from vibe_sys.errors import ConfigurationError
-from vibe_sys.profilers import ProfilerKind
+from vibesys.cli import _extract_flag, _extract_loop_selection, _validate_target_inputs, main
+from vibesys.domains.base import DomainName
+from vibesys.errors import ConfigurationError
+from vibesys.profilers import ProfilerKind
 
 TARGET_ARGS = ["--input", "examples/model-serving/Llama-3-8B"]
 
@@ -98,7 +98,7 @@ def test_extract_loop_selection_unknown_outer_loop_exits():
 
 
 def test_target_input_defaults_to_none():
-    from vibe_sys.cli import _build_agent_parser
+    from vibesys.cli import _build_agent_parser
 
     args = _build_agent_parser().parse_args([])
 
@@ -116,7 +116,7 @@ def test_target_input_defaults_to_none():
     ["--profiler-support", "--nsys-profiler", "--torch-profiler", "--neuron-profiler"],
 )
 def test_profiler_support_override_flags_are_rejected(obsolete_flag):
-    from vibe_sys.cli import _build_agent_parser
+    from vibesys.cli import _build_agent_parser
 
     with pytest.raises(ConfigurationError, match="unrecognized arguments"):
         _build_agent_parser().parse_args([obsolete_flag, "support"])
@@ -132,7 +132,7 @@ def test_profiler_support_override_flags_are_rejected(obsolete_flag):
     ],
 )
 def test_input_arg_is_available_on_all_loop_parsers(builder_name):
-    import vibe_sys.cli as cli
+    import vibesys.cli as cli
 
     parser = getattr(cli, builder_name)()
     args = parser.parse_args(["--input", "examples/data-structures/queue-spsc"])
@@ -150,7 +150,7 @@ def test_input_arg_is_available_on_all_loop_parsers(builder_name):
     ],
 )
 def test_profiler_none_is_valid_with_modal(builder_name, validator_name, tmp_path):
-    import vibe_sys.cli as cli
+    import vibesys.cli as cli
 
     bundle = _write_input_bundle(tmp_path)
     parser = getattr(cli, builder_name)()
@@ -169,7 +169,7 @@ def test_profiler_none_is_valid_with_modal(builder_name, validator_name, tmp_pat
     ],
 )
 def test_agent_parser_rejects_invalid_enum_args(argv):
-    from vibe_sys.cli import _build_agent_parser
+    from vibesys.cli import _build_agent_parser
 
     with pytest.raises(ConfigurationError) as exc:
         _build_agent_parser().parse_args(argv)
@@ -178,14 +178,14 @@ def test_agent_parser_rejects_invalid_enum_args(argv):
 
 
 def test_agent_parser_rejects_obsolete_target_flags():
-    from vibe_sys.cli import _build_agent_parser
+    from vibesys.cli import _build_agent_parser
 
     with pytest.raises(ConfigurationError):
         _build_agent_parser().parse_args(["--ref", "examples/Llama-3-8B/reference"])
 
 
 def test_validate_target_inputs_loads_manifest(tmp_path):
-    from vibe_sys.cli import _build_agent_parser
+    from vibesys.cli import _build_agent_parser
 
     bundle = _write_input_bundle(tmp_path)
     args = _build_agent_parser().parse_args(["--input", str(bundle)])
@@ -199,14 +199,14 @@ def test_validate_target_inputs_loads_manifest(tmp_path):
 
 
 def test_agent_parser_rejects_domain_override_flag():
-    from vibe_sys.cli import _build_agent_parser
+    from vibesys.cli import _build_agent_parser
 
     with pytest.raises(ConfigurationError):
         _build_agent_parser().parse_args(["--domain", "llm-serving"])
 
 
 def test_validate_target_inputs_loads_trusted_benchmark_result_contract(tmp_path):
-    from vibe_sys.cli import _build_agent_parser
+    from vibesys.cli import _build_agent_parser
 
     bundle = _write_input_bundle(tmp_path)
     manifest = bundle / "vibesys.input.toml"
@@ -224,7 +224,7 @@ def test_validate_target_inputs_loads_trusted_benchmark_result_contract(tmp_path
 
 
 def test_validate_target_inputs_rejects_missing_input_dir(tmp_path):
-    from vibe_sys.cli import _build_agent_parser
+    from vibesys.cli import _build_agent_parser
 
     missing = tmp_path / "missing"
     args = _build_agent_parser().parse_args(["--input", str(missing)])
@@ -236,7 +236,7 @@ def test_validate_target_inputs_rejects_missing_input_dir(tmp_path):
 
 
 def test_validate_target_inputs_reports_missing_manifest(tmp_path):
-    from vibe_sys.cli import _build_agent_parser
+    from vibesys.cli import _build_agent_parser
 
     bundle = tmp_path / "incomplete"
     bundle.mkdir()
@@ -251,7 +251,7 @@ def test_validate_target_inputs_reports_missing_manifest(tmp_path):
 
 
 def test_validate_target_inputs_reports_missing_command(tmp_path):
-    from vibe_sys.cli import _build_agent_parser
+    from vibesys.cli import _build_agent_parser
 
     bundle = _write_input_bundle(tmp_path)
     tools = bundle / "tools"
@@ -281,7 +281,7 @@ command = ["./tools/bench"]
 
 
 def test_validate_target_inputs_requires_input():
-    from vibe_sys.cli import _build_agent_parser
+    from vibesys.cli import _build_agent_parser
 
     args = _build_agent_parser().parse_args([])
 
@@ -305,8 +305,8 @@ def test_validate_target_inputs_requires_input():
     ],
 )
 def test_main_routes_to_runner(loop_name: str, runner_attr: str):
-    argv = ["vibe-sys", "--outer-loop", loop_name, "--exp-name", "x", *TARGET_ARGS]
-    with patch.object(sys, "argv", argv), patch(f"vibe_sys.cli.{runner_attr}") as runner:
+    argv = ["vibesys", "--outer-loop", loop_name, "--exp-name", "x", *TARGET_ARGS]
+    with patch.object(sys, "argv", argv), patch(f"vibesys.cli.{runner_attr}") as runner:
         main()
         runner.assert_called_once()
         args = runner.call_args.args[0]
@@ -316,7 +316,7 @@ def test_main_routes_to_runner(loop_name: str, runner_attr: str):
 
 def test_main_wraps_tty_run_in_tui():
     argv = [
-        "vibe-sys",
+        "vibesys",
         "--outer-loop",
         "agent",
         "--exp-name",
@@ -327,8 +327,8 @@ def test_main_wraps_tty_run_in_tui():
         patch.object(sys, "argv", argv),
         patch.object(sys.stdin, "isatty", return_value=True),
         patch.object(sys.stdout, "isatty", return_value=True),
-        patch("vibe_sys.cli._run_agent") as runner,
-        patch("vibe_sys.launcher.launch", return_value=0) as launch,
+        patch("vibesys.cli._run_agent") as runner,
+        patch("vibesys.launcher.launch", return_value=0) as launch,
     ):
         with pytest.raises(SystemExit) as exc:
             main()
@@ -340,7 +340,7 @@ def test_main_wraps_tty_run_in_tui():
 
 def test_main_headless_skips_tui():
     argv = [
-        "vibe-sys",
+        "vibesys",
         "--outer-loop",
         "agent",
         "--headless",
@@ -348,8 +348,8 @@ def test_main_headless_skips_tui():
     ]
     with (
         patch.object(sys, "argv", argv),
-        patch("vibe_sys.cli._run_agent") as runner,
-        patch("vibe_sys.launcher.launch") as launch,
+        patch("vibesys.cli._run_agent") as runner,
+        patch("vibesys.launcher.launch") as launch,
     ):
         main()
     runner.assert_called_once()

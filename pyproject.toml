@@ -3,7 +3,7 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vibe-sys"
+name = "vibesys"
 version = "0.1.0"
 description = "AI agent framework for generating bespoke systems from application, workload, and hardware requirements"
 readme = "README.md"
@@ -31,16 +31,16 @@ dependencies = [
 ]
 
 [project.scripts]
-vibe-sys = "vibe_sys.cli:main"
-vibe-sys-launch = "vibe_sys.launcher:main"
-vibe-sys-issue-mcp = "vs_issue_board.mcp:main"
+vibesys = "vibesys.cli:main"
+vibesys-launch = "vibesys.launcher:main"
+vibesys-issue-mcp = "vs_issue_board.mcp:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["vibe_sys*"]
+include = ["vibesys*"]
 
 [tool.setuptools.package-data]
-vibe_sys = ["templates/*.j2", "templates/_backend/*/*.j2", "domains/README.md", "domains/*/templates/*.md", "loops/agent/templates/*.j2", "loops/agent/templates/_modality/*/*.j2", "loops/evolve/templates/*.j2", "loops/plain/templates/*.j2", "loops/plain/templates/*/*.j2"]
+vibesys = ["templates/*.j2", "templates/_backend/*/*.j2", "domains/README.md", "domains/*/templates/*.md", "loops/agent/templates/*.j2", "loops/agent/templates/_modality/*/*.j2", "loops/evolve/templates/*.j2", "loops/plain/templates/*.j2", "loops/plain/templates/*/*.j2"]
 
 [dependency-groups]
 dev = [

@@ -45,7 +45,7 @@ if [[ "$interactive" == true ]]; then
     pnpm-lock.yaml \
     pnpm-workspace.yaml \
     biome.json \
-    src/vibe_sys/server \
+    src/vibesys/server \
     -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.json' -o -name '*.yaml' -o -name '*.py' \) \
     -newer "$entrypoint" -print -quit | grep -q .; then
     rebuild=true
@@ -97,6 +97,6 @@ if [[ "$interactive" == true ]]; then
 fi
 
 if [[ "$interactive" == true ]]; then
-  exec uv run vibe-sys-launch "$@"
+  exec uv run vibesys-launch "$@"
 fi
-exec uv run vibe-sys "$@"
+exec uv run vibesys "$@"

@@ -12,24 +12,24 @@ from pathlib import Path
 
 import pytest
 
-from vibe_sys.domains.base import (
+from vibesys.domains.base import (
     DOMAIN_ROLES,
     DomainDefinition,
     DomainName,
     DomainRole,
 )
-from vibe_sys.domains.environment import NoopEnvironmentHooks
-from vibe_sys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
-from vibe_sys.domains.registry import (
+from vibesys.domains.environment import NoopEnvironmentHooks
+from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
+from vibesys.domains.registry import (
     DOMAINS,
     registered_domains,
     resolve_domain,
 )
-from vibe_sys.domains.rendering import render_domain_section
-from vibe_sys.prompts import render_template
+from vibesys.domains.rendering import render_domain_section
+from vibesys.prompts import render_template
 
 _TEMPLATE_DIR = (
-    Path(__file__).resolve().parents[3] / "src" / "vibe_sys" / "loops" / "agent" / "templates"
+    Path(__file__).resolve().parents[3] / "src" / "vibesys" / "loops" / "agent" / "templates"
 )
 
 

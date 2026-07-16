@@ -81,7 +81,7 @@ cp agent.toml.example agent.toml
 A separate entry point exposes the issue MCP server used by the plain loop:
 
 ```bash
-vibe-sys-issue-mcp                         # serves issues.json over MCP
+vibesys-issue-mcp                         # serves issues.json over MCP
 ```
 
 ## Domains — pointing vibesys at your problem space
@@ -106,7 +106,7 @@ such as `implementer.md`, `judge.md`, and optionally `single_agent.md`; those
 files drop into the prompts at labelled points. Omit `single_agent.md` and it's
 derived from `implementer.md` plus `judge.md`.
 
-Full authoring guide: [`src/vibe_sys/domains/README.md`](src/vibe_sys/domains/README.md).
+Full authoring guide: [`src/vibesys/domains/README.md`](src/vibesys/domains/README.md).
 
 ## Interface: how the artifact is evaluated
 
@@ -182,7 +182,7 @@ cli_provider = "codex"        # which coding-agent harness to drive
 
 Provider credentials live in `.env` — see `.env.example`. The CLI flags `--agent-backend` / `--cli-provider` / `--backend` override these.
 
-The config is validated against a typed schema on load (`vibe_sys/config.py`): unknown sections or keys, unknown providers/backends, and missing required fields are rejected with an error rather than silently ignored.
+The config is validated against a typed schema on load (`vibesys/config.py`): unknown sections or keys, unknown providers/backends, and missing required fields are rejected with an error rather than silently ignored.
 
 ## Skills library
 
@@ -217,8 +217,8 @@ Resume any run with `--resume` (defaults to "latest"):
 ## Repository layout
 
 ```
-src/vibe_sys/
-├── cli.py                        # single entry point: `vibe-sys`
+src/vibesys/
+├── cli.py                        # single entry point: `vibesys`
 ├── context.py                    # _RunContext: lifecycle + ctx.invoke()
 ├── agent_runner.py               # invoke wrappers + structured-response extraction
 ├── prompts.py                    # Jinja + backend-fragment renderer

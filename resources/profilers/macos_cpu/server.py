@@ -4,7 +4,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from vibe_sys.macos_cpu_profiler import collect, detect_capability, parse_command
+from vibesys.macos_cpu_profiler import collect, detect_capability, parse_command
 
 
 def build_server() -> FastMCP:

@@ -21,7 +21,7 @@ name = "claude-sonnet-4-6"
 # Selects which agent backend the simple loop drives. The default is
 # "deepagents", which uses langchain + deepagents and supports Docker
 # sandboxing. Setting backend = "cli" instead drives an external coding-agent
-# CLI (Claude Code, Gemini, Codex, or Opencode) via vibe_sys/_agent_cli.
+# CLI (Claude Code, Gemini, Codex, or Opencode) via vibesys/_agent_cli.
 #
 # CLI flags --agent-backend / --cli-provider on `vibesys-loop` override
 # these values.
@@ -31,7 +31,7 @@ name = "claude-sonnet-4-6"
 # cli_timeout = 1800          # per-iteration timeout in seconds (default: no timeout)
 
 # [feature_flags]
-# VibeSys feature flags are declared in src/vibe_sys/features.py.
+# VibeSys feature flags are declared in src/vibesys/features.py.
 
 # [backend]
 # Hardware/runtime backend the serving stack targets. Supported values:

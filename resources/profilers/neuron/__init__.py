@@ -1,1 +1,1 @@
-"""Neuron (AWS Trainium/Inferentia) profiling harness for vibe-sys."""
+"""Neuron (AWS Trainium/Inferentia) profiling harness for vibesys."""

@@ -7,7 +7,7 @@ scenarios without requiring actual agent execution.
 import time
 from typing import Any
 
-from vibe_sys._agent_cli.base import CodingAgent
+from vibesys._agent_cli.base import CodingAgent
 
 HEALTH_VERDICT_HEALTHY = (
     "<health_verdict>healthy</health_verdict>\n"

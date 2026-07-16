@@ -8,7 +8,7 @@ model on a NeuronCore via the AWS Neuron SDK, BF16, `/dev/neuron0`).
 Use:
 
 ```bash
-vibe-sys --input examples/model-serving/Llama-3-8B-trn2
+vibesys --input examples/model-serving/Llama-3-8B-trn2
 ```
 - `--backend trainium --docker` (Neuron DLC container; profiler is
   `neuron-explorer`, selected automatically)

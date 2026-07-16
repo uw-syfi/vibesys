@@ -7,7 +7,7 @@ starts its MCP server, renders its prompt, and records the returned `ProfilerSum
 ## Declare a profiler
 
 Add a uniform identifier to `ProfilerKind` and a `ProfilerDefinition` to the typed registry
-in `vibe_sys.profilers`. Definitions contain behavioral policy that cannot be inferred,
+in `vibesys.profilers`. Definitions contain behavioral policy that cannot be inferred,
 such as supported domains or interface constraints. Keep backend, environment, and
 platform `auto` selection in `resolve_profiler_kind` rather than the packaging definition.
 
@@ -38,7 +38,7 @@ necessary.
 
 ## Add the profiler prompt
 
-Create `src/vibe_sys/loops/agent/templates/profilers/<kind>.j2`. Explain how the
+Create `src/vibesys/loops/agent/templates/profilers/<kind>.j2`. Explain how the
 agent should collect and interpret evidence, which limitations it must report, and how it
 should produce the shared `ProfilerSummary`. The agent and evolve loops resolve this prompt
 by convention.

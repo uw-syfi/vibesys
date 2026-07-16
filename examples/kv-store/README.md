@@ -26,7 +26,7 @@ Verify the harness end-to-end against the seed: `examples/kv-store/run_test.sh`.
 ## Run
 
 ```bash
-vibe-sys --outer-loop agent \
+vibesys --outer-loop agent \
   --input examples/kv-store \
   --exp-name kv-store-opt \
   --backend cpu \

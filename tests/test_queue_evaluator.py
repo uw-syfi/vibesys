@@ -35,7 +35,7 @@ def _materialize_linearizable_input(
     input_name: str,
     workspace: Path,
 ) -> Path:
-    from vibe_sys.input_manifest import load_input_bundle
+    from vibesys.input_manifest import load_input_bundle
 
     input_dir = project_root / "examples" / "data-structures" / input_name
     bundle = load_input_bundle(input_dir, project_root=project_root)
@@ -104,7 +104,7 @@ def test_linearizable_queue_manifests_invoke_go_evaluator_directly():
 
 
 def test_linearizable_queue_inputs_use_shared_editable_rust_starter():
-    from vibe_sys.input_manifest import load_input_bundle
+    from vibesys.input_manifest import load_input_bundle
 
     project_root = Path(__file__).parents[1]
     root = project_root / "examples" / "data-structures"

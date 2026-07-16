@@ -3,8 +3,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibe_sys.config import Config
-from vibe_sys.llm_client import _build_model
+from vibesys.config import Config
+from vibesys.llm_client import _build_model
 
 
 def _make_config(

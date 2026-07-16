@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from vibe_sys.config import _load_config, _load_dotenv_file
-from vibe_sys.features import FeatureFlag
+from vibesys.config import _load_config, _load_dotenv_file
+from vibesys.features import FeatureFlag
 
 
 class TestLoadConfigValid:

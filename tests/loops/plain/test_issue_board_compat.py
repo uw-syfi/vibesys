@@ -1,7 +1,7 @@
 """Compatibility tests for old VibeSys issue-board import paths."""
 
-from vibe_sys.loops.plain import issue_board as compat
-from vibe_sys.loops.plain import mcp_server, tool_impl
+from vibesys.loops.plain import issue_board as compat
+from vibesys.loops.plain import mcp_server, tool_impl
 from vs_issue_board import (
     CreateIssuePolicy,
     Issue,

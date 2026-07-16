@@ -1,4 +1,4 @@
-"""Tests for vibe_sys.loops.agent — orchestrator-driven build loop."""
+"""Tests for vibesys.loops.agent — orchestrator-driven build loop."""
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -6,13 +6,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibe_sys.agents import AgentRunner
-from vibe_sys.domains.base import DomainName
-from vibe_sys.errors import ConfigurationError
-from vibe_sys.loops.agent import issue_board
-from vibe_sys.loops.agent.loop import run_agent_loop
-from vibe_sys.profilers import ProfilerKind
-from vibe_sys.schemas import (
+from vibesys.agents import AgentRunner
+from vibesys.domains.base import DomainName
+from vibesys.errors import ConfigurationError
+from vibesys.loops.agent import issue_board
+from vibesys.loops.agent.loop import run_agent_loop
+from vibesys.profilers import ProfilerKind
+from vibesys.schemas import (
     ImplementerResponse,
     JudgeResponse,
     OrchestratorPlan,
@@ -138,12 +138,12 @@ def _invoke_orchestrate(tmp_path, ref_file, runner, **kwargs):
     )
     defaults.update(kwargs)
     with (
-        patch("vibe_sys.context._build_model", return_value="mock-model"),
-        patch("vibe_sys.backends.cuda.LocalShellBackend"),
-        patch("vibe_sys.context.build_agent_runner", return_value=runner),
-        patch("vibe_sys.context.PROJECT_ROOT", tmp_path),
+        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.backends.cuda.LocalShellBackend"),
+        patch("vibesys.context.build_agent_runner", return_value=runner),
+        patch("vibesys.context.PROJECT_ROOT", tmp_path),
         patch(
-            "vibe_sys.loops.agent.loop._run_framework_accuracy_gate",
+            "vibesys.loops.agent.loop._run_framework_accuracy_gate",
             side_effect=accuracy_gate_results,
             return_value=None,
         ),
@@ -242,7 +242,7 @@ def test_progress_append_implementer_and_judge(tmp_path):
 
 
 def test_framework_accuracy_gate_runs_manifest_command_and_records_pass(tmp_path):
-    from vibe_sys.loops.agent.loop import _run_framework_accuracy_gate
+    from vibesys.loops.agent.loop import _run_framework_accuracy_gate
 
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
@@ -267,7 +267,7 @@ def test_framework_accuracy_gate_runs_manifest_command_and_records_pass(tmp_path
 
 
 def test_framework_accuracy_gate_rejects_checker_failure(tmp_path):
-    from vibe_sys.loops.agent.loop import _run_framework_accuracy_gate
+    from vibesys.loops.agent.loop import _run_framework_accuracy_gate
 
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
@@ -286,7 +286,7 @@ def test_framework_accuracy_gate_rejects_checker_failure(tmp_path):
 
 
 def test_framework_accuracy_gate_rejects_evaluator_changes_without_execution(tmp_path):
-    from vibe_sys.loops.agent.loop import _run_framework_accuracy_gate
+    from vibesys.loops.agent.loop import _run_framework_accuracy_gate
 
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = ["_input_libs/checker.go"]
@@ -304,7 +304,7 @@ def test_framework_accuracy_gate_rejects_evaluator_changes_without_execution(tmp
 
 
 def test_framework_accuracy_gate_rejects_changes_during_execution(tmp_path):
-    from vibe_sys.loops.agent.loop import _run_framework_accuracy_gate
+    from vibesys.loops.agent.loop import _run_framework_accuracy_gate
 
     ctx = MagicMock()
     ctx.trusted_input_changes.side_effect = [[], ["_input_libs/checker.go"]]
@@ -322,8 +322,8 @@ def test_framework_accuracy_gate_rejects_changes_during_execution(tmp_path):
 
 
 def test_framework_benchmark_extracts_declared_metric(tmp_path):
-    from vibe_sys.input_manifest import BenchmarkResult
-    from vibe_sys.loops.agent.loop import (
+    from vibesys.input_manifest import BenchmarkResult
+    from vibesys.loops.agent.loop import (
         _FRAMEWORK_BENCHMARK_MARKER,
         _run_framework_benchmark,
     )
@@ -358,8 +358,8 @@ def test_framework_benchmark_extracts_declared_metric(tmp_path):
 
 
 def test_framework_benchmark_rejects_ambiguous_metric(tmp_path):
-    from vibe_sys.input_manifest import BenchmarkResult
-    from vibe_sys.loops.agent.loop import (
+    from vibesys.input_manifest import BenchmarkResult
+    from vibesys.loops.agent.loop import (
         _FRAMEWORK_BENCHMARK_MARKER,
         _run_framework_benchmark,
     )
@@ -607,7 +607,7 @@ def test_loop_generic_auto_profiler_resolves_to_macos_cpu(tmp_path, ref_file):
         ],
     )
 
-    with patch("vibe_sys.profilers.platform.system", return_value="Darwin"):
+    with patch("vibesys.profilers.platform.system", return_value="Darwin"):
         result = _invoke_orchestrate(
             tmp_path,
             ref_file,
@@ -656,8 +656,8 @@ def test_loop_max_rounds_terminates(tmp_path, ref_file):
 
 
 def test_cli_loads_objective_md_from_ref_parent(tmp_path):
-    from vibe_sys.cli import _load_objective
-    from vibe_sys.input_manifest import load_input_bundle
+    from vibesys.cli import _load_objective
+    from vibesys.input_manifest import load_input_bundle
 
     bundle = tmp_path / "modelA"
     bundle.mkdir()
@@ -674,7 +674,7 @@ def test_cli_loads_objective_md_from_ref_parent(tmp_path):
 
 
 def test_cli_missing_objective_md_errors(tmp_path):
-    from vibe_sys.input_manifest import load_input_bundle
+    from vibesys.input_manifest import load_input_bundle
 
     bundle = tmp_path / "modelB"
     bundle.mkdir()
@@ -691,7 +691,7 @@ def test_cli_missing_objective_md_errors(tmp_path):
 
 def test_cli_rejects_modal_with_nsys_profiler(tmp_path, ref_file):
     """--modal only supports torch profiler."""
-    from vibe_sys.cli import _build_agent_parser, _validate_agent
+    from vibesys.cli import _build_agent_parser, _validate_agent
 
     parser = _build_agent_parser()
     validate_args = _validate_agent
@@ -721,7 +721,7 @@ def test_cli_rejects_modal_with_nsys_profiler(tmp_path, ref_file):
 
 
 def test_ensure_roadmap_seeds_header_when_missing(tmp_path):
-    from vibe_sys.loops.agent import issue_board
+    from vibesys.loops.agent import issue_board
 
     p = tmp_path / "roadmap.md"
     assert not p.exists()
@@ -737,7 +737,7 @@ def test_ensure_roadmap_seeds_header_when_missing(tmp_path):
 
 
 def test_ensure_roadmap_does_not_overwrite_existing(tmp_path):
-    from vibe_sys.loops.agent import issue_board
+    from vibesys.loops.agent import issue_board
 
     p = tmp_path / "roadmap.md"
     p.write_text("# my custom plan\n")
@@ -746,7 +746,7 @@ def test_ensure_roadmap_does_not_overwrite_existing(tmp_path):
 
 
 def test_read_roadmap_returns_text(tmp_path):
-    from vibe_sys.loops.agent import issue_board
+    from vibesys.loops.agent import issue_board
 
     p = tmp_path / "roadmap.md"
     p.write_text("hello\n")
@@ -754,7 +754,7 @@ def test_read_roadmap_returns_text(tmp_path):
 
 
 def test_read_roadmap_missing_returns_empty(tmp_path):
-    from vibe_sys.loops.agent import issue_board
+    from vibesys.loops.agent import issue_board
 
     p = tmp_path / "nope.md"
     assert issue_board.read_roadmap(p) == ""
@@ -762,7 +762,7 @@ def test_read_roadmap_missing_returns_empty(tmp_path):
 
 def _record(round_number: int, perf: float | None, unit: str = "tok/s"):
     """Build a _RoundRecord shorthand for plateau tests."""
-    from vibe_sys.loops.agent.loop import _RoundRecord
+    from vibesys.loops.agent.loop import _RoundRecord
 
     return _RoundRecord(
         round_number=round_number,
@@ -774,7 +774,7 @@ def _record(round_number: int, perf: float | None, unit: str = "tok/s"):
 
 
 def test_detect_plateau_returns_none_when_too_few_rounds():
-    from vibe_sys.loops.agent.loop import _detect_plateau
+    from vibesys.loops.agent.loop import _detect_plateau
 
     # Two rounds is below the 3-round minimum streak.
     records = [_record(1, 40.0), _record(2, 41.0)]
@@ -782,7 +782,7 @@ def test_detect_plateau_returns_none_when_too_few_rounds():
 
 
 def test_detect_plateau_fires_on_flat_perf_streak():
-    from vibe_sys.loops.agent.loop import _detect_plateau
+    from vibesys.loops.agent.loop import _detect_plateau
 
     # 41.0 vs 41.5 is ~1.2% spread — well under the 5% threshold.
     records = [_record(1, 41.0), _record(2, 41.5), _record(3, 41.2)]
@@ -793,7 +793,7 @@ def test_detect_plateau_fires_on_flat_perf_streak():
 
 
 def test_detect_plateau_skips_when_perf_diverges():
-    from vibe_sys.loops.agent.loop import _detect_plateau
+    from vibesys.loops.agent.loop import _detect_plateau
 
     # 41.0 vs 116.0 is ~64% spread — clearly off-plateau.
     records = [_record(1, 41.0), _record(2, 116.0), _record(3, 114.5)]
@@ -803,7 +803,7 @@ def test_detect_plateau_skips_when_perf_diverges():
 def test_detect_plateau_ignores_rounds_without_perf():
     """Rounds where the profiler skipped or the round failed (perf=None) must
     not interrupt the streak — only valid measurements count."""
-    from vibe_sys.loops.agent.loop import _detect_plateau
+    from vibesys.loops.agent.loop import _detect_plateau
 
     records = [
         _record(1, 41.0),
@@ -819,7 +819,7 @@ def test_detect_plateau_ignores_rounds_without_perf():
 def test_detect_plateau_streak_must_be_recent():
     """A plateau early in the run that's followed by a clear win must NOT
     fire a warning on the next round — only the *last N* matter."""
-    from vibe_sys.loops.agent.loop import _detect_plateau
+    from vibesys.loops.agent.loop import _detect_plateau
 
     records = [
         _record(1, 41.0),  # plateau

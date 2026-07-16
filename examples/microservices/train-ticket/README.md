@@ -1,7 +1,7 @@
 # Train Ticket Scripts
 
 Standalone accuracy and benchmark scripts for a running Train Ticket deployment.
-These scripts can be run directly and do not require a full `vibe-sys --input`
+These scripts can be run directly and do not require a full `vibesys --input`
 optimization run.
 
 Expected target for a gateway/proxy deployment:

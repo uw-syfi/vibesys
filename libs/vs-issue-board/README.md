@@ -135,5 +135,5 @@ test tree when they verify old import paths or VibeSys integration wiring.
 For the full repository gate, include package coverage with the app coverage:
 
 ```bash
-uv run python -m pytest -v --cov=vibe_sys --cov=vs_issue_board --cov-report=term-missing --cov-report=xml --cov-fail-under=75
+uv run python -m pytest -v --cov=vibesys --cov=vs_issue_board --cov-report=term-missing --cov-report=xml --cov-fail-under=75
 ```

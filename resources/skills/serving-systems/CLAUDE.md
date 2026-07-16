@@ -1,4 +1,4 @@
-# CLAUDE.md — authoring guide for vibe-sys-skills
+# CLAUDE.md — authoring guide for vibesys-skills
 
 This file is loaded automatically when Claude works inside this repo. It captures the conventions every reference document here should follow, so new / edited content stays coherent with the collection.
 
@@ -126,7 +126,7 @@ This is how axis-crossing knowledge lives — not in the directory tree.
 Repos live at `skills/serving-systems/repos/{vllm,sglang,TensorRT-LLM}/` (git submodules). Reference files cite paths via:
 
 ```
-$SERVE_REPOS = <vibe-sys-root>/skills/serving-systems/repos
+$SERVE_REPOS = <vibesys-root>/skills/serving-systems/repos
 ```
 
 Example grep recipe:
@@ -137,7 +137,7 @@ rg "register.*backend" $SERVE_REPOS/vllm/vllm/v1/attention/backends/
 
 Tell the reader to export `SERVE_REPOS=$(git rev-parse --show-toplevel)/skills/serving-systems/repos` or substitute inline.
 
-The `repos/` directory is **excluded** from agent materialization (see `src/vibe_sys/agents/cli_runner.py::_materialize_skills`); reference paths into it are advisory grep recipes, not runtime imports.
+The `repos/` directory is **excluded** from agent materialization (see `src/vibesys/agents/cli_runner.py::_materialize_skills`); reference paths into it are advisory grep recipes, not runtime imports.
 
 ## What not to include
 

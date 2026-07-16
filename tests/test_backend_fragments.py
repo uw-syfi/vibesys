@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from vibe_sys.constants import ComputeBackend
-from vibe_sys.prompts import (
+from vibesys.constants import ComputeBackend
+from vibesys.prompts import (
     _FRAGMENT_IMPLS,
     _build_env,
     get_backend_fragment,

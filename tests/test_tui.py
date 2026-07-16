@@ -12,24 +12,24 @@ from unittest.mock import Mock
 
 import pytest
 
-from vibe_sys.context import _RunContext
-from vibe_sys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibe_sys.server import (
+from vibesys.context import _RunContext
+from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.server import (
     EventType,
     RunInspector,
     RunSupervisor,
 )
-from vibe_sys.server.protocol import (
+from vibesys.server.protocol import (
     ChatQuery,
     EventsQuery,
     HistoryQuery,
     SnapshotQuery,
     SubscribeRequest,
 )
-from vibe_sys.server.runtime import run_server
-from vibe_sys.server.schema import ProtocolDocument
-from vibe_sys.server.service import SupervisionService
-from vibe_sys.server.transport import SupervisionSocketServer
+from vibesys.server.runtime import run_server
+from vibesys.server.schema import ProtocolDocument
+from vibesys.server.service import SupervisionService
+from vibesys.server.transport import SupervisionSocketServer
 
 
 def _events(path):
@@ -239,7 +239,7 @@ def test_cli_parse_failure_is_streamed_after_client_attaches():
         [
             sys.executable,
             "-m",
-            "vibe_sys.cli",
+            "vibesys.cli",
             "--headless",
             "--control-socket",
             str(socket_path),
@@ -331,7 +331,7 @@ def test_supervision_runtime_streams_configuration_failure_before_exiting():
             code="invalid_arguments",
             stage="argument_parsing",
             message="unknown option --bad",
-            usage="usage: vibe-sys ...",
+            usage="usage: vibesys ...",
         )
     )
     try:
@@ -348,7 +348,7 @@ def test_supervision_runtime_streams_configuration_failure_before_exiting():
             "code": "invalid_arguments",
             "stage": "argument_parsing",
             "message": "unknown option --bad",
-            "usage": "usage: vibe-sys ...",
+            "usage": "usage: vibesys ...",
             "exit_code": 2,
         }
         assert not any(event["type"] == "run_failed" for event in received_events)

@@ -6,8 +6,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibe_sys.domains.base import DomainName
-from vibe_sys.profilers import (
+from vibesys.domains.base import DomainName
+from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
     PROFILER_DEFINITIONS,
     ProfilerDefinition,
