@@ -11,12 +11,26 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
-_BENCHMARK_PATH = _ROOT / "examples" / "kv-store" / "benchmark" / "benchmark.py"
-_SPEC = importlib.util.spec_from_file_location("kv_store_benchmark", _BENCHMARK_PATH)
-assert _SPEC is not None and _SPEC.loader is not None
-benchmark = importlib.util.module_from_spec(_SPEC)
-sys.modules[_SPEC.name] = benchmark
-_SPEC.loader.exec_module(benchmark)
+_KV_STORE = _ROOT / "examples" / "kv-store"
+if str(_KV_STORE) not in sys.path:
+    sys.path.insert(0, str(_KV_STORE))
+
+from evaluator_support import (  # noqa: E402
+    lifecycle,
+    procfs_cpu,
+    validity,
+    ycsb,
+)
+
+
+def _load_benchmark():
+    path = _KV_STORE / "benchmark" / "benchmark.py"
+    spec = importlib.util.spec_from_file_location("kv_store_benchmark", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _write_proc_stat(
@@ -84,8 +98,8 @@ def test_process_group_snapshot_aggregates_all_processes(tmp_path):
     )
     _write_proc_stat(tmp_path, 12, parent=1, group=12, starttime=102, user_ticks=99, system_ticks=1)
 
-    assert benchmark._server_processes(6380, process_group=10, proc_root=tmp_path) == {10, 11}
-    assert benchmark._cpu_snapshot(6380, process_group=10, proc_root=tmp_path) == {
+    assert procfs_cpu.server_processes(6380, process_group=10, proc_root=tmp_path) == {10, 11}
+    assert procfs_cpu.cpu_snapshot(6380, process_group=10, proc_root=tmp_path) == {
         (10, 100): 12,
         (11, 101): 23,
     }
@@ -110,13 +124,13 @@ def test_listener_discovery_handles_shared_socket_and_descendant(tmp_path):
         (tmp_path / str(pid) / "fd").mkdir()
     os.symlink("socket:[12345]", tmp_path / "20" / "fd" / "3")
 
-    assert benchmark._listener_pids(6380, tmp_path) == {20}
-    assert benchmark._server_processes(6380, proc_root=tmp_path) == {20, 21}
+    assert procfs_cpu.listener_pids(6380, tmp_path) == {20}
+    assert procfs_cpu.server_processes(6380, proc_root=tmp_path) == {20, 21}
 
 
 def test_cpu_delta_rejects_pid_reuse_or_membership_change():
-    assert benchmark._cpu_delta_seconds({(1, 10): 4}, {(1, 11): 8}) is None
-    assert benchmark._cpu_delta_seconds({(1, 10): 4}, {(1, 10): 4}) is None
+    assert procfs_cpu.cpu_delta_seconds({(1, 10): 4}, {(1, 11): 8}) is None
+    assert procfs_cpu.cpu_delta_seconds({(1, 10): 4}, {(1, 10): 4}) is None
 
 
 def test_candidate_lifecycle_launches_and_reaps_process_group(tmp_path):
@@ -134,8 +148,9 @@ def test_candidate_lifecycle_launches_and_reaps_process_group(tmp_path):
     )
     launcher.chmod(0o755)
 
-    with benchmark.candidate_server(workspace=tmp_path) as candidate:
-        assert candidate is not None
+    with lifecycle.candidate_server(workspace=tmp_path) as candidate:
+        assert candidate.pid is not None
+        assert candidate.process_group is not None
         os.kill(candidate.pid, 0)
         pid = candidate.pid
 
@@ -143,8 +158,15 @@ def test_candidate_lifecycle_launches_and_reaps_process_group(tmp_path):
         os.kill(pid, 0)
 
 
+def test_external_port_yields_resolved_target_without_ownership():
+    with lifecycle.candidate_server(workspace=Path("/tmp"), port=6380) as candidate:
+        assert candidate.port == 6380
+        assert candidate.process_group is None
+        assert candidate.pid is None
+
+
 def test_validity_threshold_boundaries():
-    checks, reasons = benchmark._evaluate_validity(
+    checks, reasons = validity.evaluate_validity(
         throughput=10000.0,
         cpu_per_op=10.0,
         rounds=[_valid_round()],
@@ -186,12 +208,13 @@ def test_validity_rejects_each_invalid_gate(overrides, failed_check):
         "max_saturation_gain_pct": 10.0,
     }
     arguments.update(overrides)
-    checks, reasons = benchmark._evaluate_validity(**arguments)
+    checks, reasons = validity.evaluate_validity(**arguments)
     assert checks[failed_check] is False
     assert reasons
 
 
 def test_worst_latency_uses_all_rounds():
+    benchmark = _load_benchmark()
     rounds = [
         {"lat": {"READ": {"p99": 500.0}}},
         {"lat": {"READ": {"p99": 1200.0}}},
@@ -208,7 +231,7 @@ def test_safe_extract_rejects_traversal(tmp_path):
     archive.seek(0)
     with tarfile.open(fileobj=archive, mode="r:gz") as tar:
         with pytest.raises(ValueError, match="unsafe YCSB archive path"):
-            benchmark._safe_extract(tar, tmp_path)
+            ycsb.safe_extract(tar, tmp_path)
 
 
 def test_safe_extract_rejects_links(tmp_path):
@@ -221,41 +244,36 @@ def test_safe_extract_rejects_links(tmp_path):
     archive.seek(0)
     with tarfile.open(fileobj=archive, mode="r:gz") as tar:
         with pytest.raises(ValueError, match="unsupported YCSB archive member"):
-            benchmark._safe_extract(tar, tmp_path)
+            ycsb.safe_extract(tar, tmp_path)
 
 
 def test_ycsb_install_is_verified_atomic_and_reused(tmp_path, monkeypatch):
     archive = _ycsb_archive()
     cache = tmp_path / ".cache"
     home = cache / "ycsb-redis-binding-0.17.0"
-    monkeypatch.setattr(benchmark, "YCSB_CACHE", cache)
-    monkeypatch.setattr(benchmark, "YCSB_HOME", home)
-    monkeypatch.setattr(benchmark, "YCSB_SHA256", hashlib.sha256(archive).hexdigest())
-    monkeypatch.setattr(benchmark.urllib.request, "urlopen", lambda _: io.BytesIO(archive))
+    sha = hashlib.sha256(archive).hexdigest()
+    monkeypatch.setattr(ycsb.urllib.request, "urlopen", lambda _: io.BytesIO(archive))
     home.mkdir(parents=True)
     (home / "partial").write_text("incomplete")
 
-    benchmark._ensure_ycsb()
+    ycsb.ensure_ycsb(cache=cache, home=home, sha256=sha)
 
     assert (home / "bin" / "ycsb.sh").is_file()
     assert not (home / "partial").exists()
     monkeypatch.setattr(
-        benchmark.urllib.request,
+        ycsb.urllib.request,
         "urlopen",
         lambda _: pytest.fail("verified cache should be reused"),
     )
-    benchmark._ensure_ycsb()
+    ycsb.ensure_ycsb(cache=cache, home=home, sha256=sha)
 
 
 def test_ycsb_checksum_failure_does_not_install(tmp_path, monkeypatch):
     archive = _ycsb_archive()
     cache = tmp_path / ".cache"
     home = cache / "ycsb-redis-binding-0.17.0"
-    monkeypatch.setattr(benchmark, "YCSB_CACHE", cache)
-    monkeypatch.setattr(benchmark, "YCSB_HOME", home)
-    monkeypatch.setattr(benchmark, "YCSB_SHA256", "0" * 64)
-    monkeypatch.setattr(benchmark.urllib.request, "urlopen", lambda _: io.BytesIO(archive))
+    monkeypatch.setattr(ycsb.urllib.request, "urlopen", lambda _: io.BytesIO(archive))
 
     with pytest.raises(RuntimeError, match="checksum mismatch"):
-        benchmark._ensure_ycsb()
+        ycsb.ensure_ycsb(cache=cache, home=home, sha256="0" * 64)
     assert not home.exists()

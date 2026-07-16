@@ -5,38 +5,30 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
-import socket
 import subprocess
-import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from .net import free_port, wait_until_listening
+
 
 @dataclass(frozen=True)
-class CandidateServer:
-    """One evaluator-launched candidate service."""
+class CandidateTarget:
+    """Resolved candidate endpoint for an evaluator invocation.
+
+    ``process_group`` is set when the evaluator owns the launcher process group.
+    External ``--port`` mode leaves it ``None`` so CPU accounting falls back to
+    listener discovery.
+    """
 
     port: int
-    pid: int
-    process_group: int
+    process_group: int | None = None
+    pid: int | None = None
 
 
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
-def _wait_until_listening(port: int, timeout: float) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
-                return True
-        except OSError:
-            time.sleep(0.05)
-    return False
+# Backwards-compatible alias used by older call sites / docs.
+CandidateServer = CandidateTarget
 
 
 def _terminate_group(process: subprocess.Popen[bytes], process_group: int) -> None:
@@ -59,19 +51,18 @@ def candidate_server(
     workspace: Path,
     port: int | None = None,
     startup_timeout: float = 5.0,
-) -> Iterator[CandidateServer | None]:
+) -> Iterator[CandidateTarget]:
     """Yield an external server or launch and clean up ``./run.sh``.
 
-    When ``port`` is supplied, lifecycle ownership stays with the caller and
-    ``None`` is yielded. Otherwise the evaluator starts the candidate in a new
-    process group and yields its identity for trusted CPU accounting.
+    When ``port`` is supplied, lifecycle ownership stays with the caller.
+    Otherwise the evaluator starts the candidate in a new process group.
     """
 
     if port is not None:
-        yield None
+        yield CandidateTarget(port=port)
         return
 
-    selected_port = _free_port()
+    selected_port = free_port()
     launcher = workspace / "run.sh"
     if not launcher.is_file():
         raise FileNotFoundError(f"candidate launcher not found: {launcher}")
@@ -85,19 +76,19 @@ def candidate_server(
         start_new_session=True,
     )
     process_group = os.getpgid(process.pid)
-    server = CandidateServer(
+    target = CandidateTarget(
         port=selected_port,
         pid=process.pid,
         process_group=process_group,
     )
     try:
-        if not _wait_until_listening(selected_port, startup_timeout):
+        if not wait_until_listening(selected_port, startup_timeout):
             return_code = process.poll()
             detail = f" (launcher exited {return_code})" if return_code is not None else ""
             raise RuntimeError(
                 f"candidate did not listen on port {selected_port} within "
                 f"{startup_timeout:.1f}s{detail}"
             )
-        yield server
+        yield target
     finally:
         _terminate_group(process, process_group)

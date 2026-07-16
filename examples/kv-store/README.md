@@ -53,11 +53,13 @@ process group and clean it up afterward.
 Rounds are scored by `ops_per_cpu_sec` (operations per second of server CPU,
 sampled externally from `/proc`) — a client-saturation-immune efficiency metric,
 with `throughput_ops_per_sec` and READ/UPDATE p99 as gates. The benchmark drives
-the server from several client JVMs (`--client-procs`) to reach saturation and can
-isolate per-op-type server cost (`--probe-per-op`); see `benchmark/benchmark.py`.
-Generic Linux `--profiler auto` currently resolves to no separate framework
-profiler; the benchmark's CPU evidence remains available, and `perf` can be used
-manually when host policy permits.
+the server from several client JVMs (`--client-procs`) to reach saturation.
+Optional diagnostics (`--probe-per-op`, `--field-count`, `--field-length`) live
+on the same CLI but are not part of the scored path; see
+`evaluator_support/` and `benchmark/benchmark.py`. Generic Linux
+`--profiler auto` currently resolves to no separate framework profiler; the
+benchmark's CPU evidence remains available, and `perf` can be used manually when
+host policy permits.
 
 ## Files
 
@@ -67,8 +69,8 @@ examples/kv-store/
 ├── CANDIDATE_CONTRACT.md          # Normative protocol and lifecycle contract
 ├── vibeserve.input.toml           # Manifest: domain, checker, benchmark commands
 ├── run_test.sh                    # Standalone end-to-end test against the seed
-├── evaluator_support/             # Trusted candidate lifecycle helpers
+├── evaluator_support/             # Trusted helpers (lifecycle, procfs CPU, YCSB, validity)
 ├── reference/seed_server.py       # Seed baseline / RESP2 reference
 ├── accuracy_checker/checker.py    # Correctness: candidate vs Redis oracle
-└── benchmark/benchmark.py         # Performance: YCSB wrapper (fetches ycsb/ on first run)
+└── benchmark/benchmark.py         # Scored YCSB orchestration (fetches YCSB on first run)
 ```

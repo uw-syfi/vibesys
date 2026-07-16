@@ -26,11 +26,10 @@ The normative service, RESP2, concurrency, and lifecycle requirements are in
   a latency reference only.
 - The benchmark drives the server from several independent client JVMs
   (`--client-procs`) and validates the load plateau with a higher-client-count
-  probe. `server_cpu_cores` remains a diagnostic. The benchmark can isolate
-  per-op-type server cost (`--probe-per-op`) so a read- or update-specific
-  optimization is attributable. Record shape is tunable
-  (`--field-count`/`--field-length`); Workload A stores each record as a
-  **hash** (HSET / HGETALL).
+  probe. `server_cpu_cores` remains a diagnostic. Optional non-scoring
+  diagnostics (`--probe-per-op`, `--field-count`/`--field-length`) can attribute
+  per-op CPU or enlarge records; Workload A stores each record as a **hash**
+  (HSET / HGETALL).
 
 ## Agent guidance
 
