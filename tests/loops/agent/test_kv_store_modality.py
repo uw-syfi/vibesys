@@ -22,7 +22,7 @@ def test_kv_store_input_bundle_loads():
     bundle = load_input_bundle(_PROJECT_ROOT / "examples" / "kv-store", project_root=_PROJECT_ROOT)
     assert bundle.domain.value == "generic"
     assert bundle.benchmark_result is not None
-    assert bundle.benchmark_result.metric == "throughput_ops_per_sec"
+    assert bundle.benchmark_result.metric == "ops_per_cpu_sec"
 
 
 def test_kv_store_judge_prompt_mentions_resp2_not_http():

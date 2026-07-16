@@ -41,6 +41,12 @@ vibe-serve --outer-loop agent \
 may implement it in any language. Each round is a git commit in
 `exp_env/<name>/workspace/`; only rounds that pass the accuracy checker advance.
 
+Rounds are scored by `ops_per_cpu_sec` (operations per second of server CPU,
+sampled externally from `/proc`) — a client-saturation-immune efficiency metric,
+with `throughput_ops_per_sec` and READ/UPDATE p99 as gates. The benchmark drives
+the server from several client JVMs (`--client-procs`) to reach saturation and can
+isolate per-op-type server cost (`--probe-per-op`); see `benchmark/benchmark.py`.
+
 ## Files
 
 ```
