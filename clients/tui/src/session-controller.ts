@@ -5,12 +5,12 @@ import {
   applyEvent,
   applySnapshot,
   initialSessionState,
+  type SessionState,
   selectNextAgent,
   selectNextRound,
   selectPreviousAgent,
   selectPreviousRound,
   selectRound,
-  type SessionState,
   showDetail,
   showLive,
 } from './session-model.js';

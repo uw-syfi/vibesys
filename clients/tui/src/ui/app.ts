@@ -1,12 +1,12 @@
 import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} from '@opentui/core';
 import type {SessionController} from '../session-controller.js';
 import {type SessionState, statusText} from '../session-model.js';
-import {ConversationView} from './conversation.js';
 import {AgentMapView} from './agent-map.js';
+import {ConversationView} from './conversation.js';
 import {createInputPanel} from './input.js';
 import {bindKeybindings} from './keybindings.js';
-import {RoundStripView} from './round-strip.js';
 import {OverlayView} from './overlay.js';
+import {RoundStripView} from './round-strip.js';
 import {createMarkdownStyle} from './styles.js';
 
 export interface OpenTuiApp {

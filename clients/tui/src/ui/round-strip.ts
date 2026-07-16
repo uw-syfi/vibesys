@@ -1,6 +1,6 @@
 import {BoxRenderable, type CliRenderer, TextRenderable} from '@opentui/core';
-import type {SessionController} from '../session-controller.js';
 import type {RoundSummary} from '../run-map.js';
+import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
 import {visibleRoundNumber} from '../session-model.js';
 

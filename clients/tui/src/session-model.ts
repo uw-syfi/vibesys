@@ -1,11 +1,11 @@
 import type {RunEvent, RunSnapshot} from './protocol.js';
 import {
+  type AgentPhase,
   applyRunMapEvent,
+  type RoundSummary,
   roundNumberFromLabel,
   visiblePhases as visibleRunMapPhases,
   visibleRoundNumber as visibleRunMapRoundNumber,
-  type AgentPhase,
-  type RoundSummary,
 } from './run-map.js';
 
 export interface SessionState {
