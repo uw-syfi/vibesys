@@ -150,6 +150,9 @@ def resolve_profiler_kind(
     if domain_name is DomainName.GENERIC:
         return ProfilerKind.MACOS_CPU if platform.system() == "Darwin" else ProfilerKind.NONE
 
+    if allowed == frozenset({ProfilerKind.NONE}):
+        return ProfilerKind.NONE
+
     environment_default = require_profiler_kind(
         environment_default_profiler_kind,
         label="environment default profiler",

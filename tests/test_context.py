@@ -119,14 +119,11 @@ def _write_support_dirs(project_root):
         ProfilerKind.NEURON: "neuron_profiler",
         ProfilerKind.MACOS_CPU: "macos_cpu_profiler",
     }
-    for workspace_name in dirs.values():
-        source_dir = project_root / "examples" / "support" / workspace_name
+    for kind in dirs:
+        source_dir = project_root / "resources" / "profilers" / kind.value
         source_dir.mkdir(parents=True)
         (source_dir / "server.py").write_text("pass\n")
-    return {
-        kind: str(project_root / "examples" / "support" / workspace_name)
-        for kind, workspace_name in dirs.items()
-    }
+    return {kind: str(project_root / "resources" / "profilers" / kind.value) for kind in dirs}
 
 
 @pytest.mark.parametrize(
@@ -138,7 +135,7 @@ def _write_support_dirs(project_root):
 )
 def test_run_context_defaults_profiler_support_paths(tmp_path, profiler_kind, workspace_name):
     project_root = tmp_path / "project"
-    source_dir = project_root / "examples" / "support" / workspace_name
+    source_dir = project_root / "resources" / "profilers" / profiler_kind.value
     source_dir.mkdir(parents=True)
     (source_dir / "server.py").write_text("pass\n")
 

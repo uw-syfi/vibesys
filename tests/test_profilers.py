@@ -60,6 +60,8 @@ def _expected_resolved(
         return requested
     if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
         return ProfilerKind.MACOS_CPU if platform.system() == "Darwin" else ProfilerKind.NONE
+    if allowed == frozenset({ProfilerKind.NONE}):
+        return ProfilerKind.NONE
     if environment_default_profiler_kind is ProfilerKind.TORCH:
         return ProfilerKind.TORCH
     candidate = (
