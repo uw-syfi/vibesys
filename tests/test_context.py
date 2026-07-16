@@ -8,7 +8,8 @@ import pytest
 from vibesys.context import _RunContext
 from vibesys.domains.base import DomainName
 from vibesys.domains.environment import NoopEnvironmentHooks
-from vibesys.profilers import ACTIVE_PROFILER_KINDS, ProfilerKind
+from vibesys.errors import ConfigurationError
+from vibesys.profilers import ACTIVE_PROFILER_KINDS, ProfilerKind, ProfilerPreflightResult
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
 
 
@@ -102,6 +103,14 @@ class _FakeBackend:
 
     def make_monitor(self, _log_dir):
         return None
+
+
+@pytest.fixture(autouse=True)
+def _native_profiler_preflight_ok(monkeypatch):
+    monkeypatch.setattr(
+        "vibesys.context.preflight_profiler_kind",
+        lambda kind: ProfilerPreflightResult(kind, True),
+    )
 
 
 def _write_ref(tmp_path):
@@ -272,6 +281,42 @@ def test_run_context_generic_auto_resolves_to_linux_profiler(tmp_path):
         assert not (ctx.workspace / "neuron_profiler").exists()
         assert not (ctx.workspace / "macos_cpu_profiler").exists()
         assert (ctx.workspace / "linux_cpu_profiler").exists()
+
+
+def test_run_context_fails_fast_when_resolved_profiler_is_unusable(tmp_path):
+    project_root = tmp_path / "project"
+    _write_support_dirs(project_root)
+    ref = _write_ref(tmp_path)
+
+    def fail_preflight(kind):
+        return ProfilerPreflightResult(
+            kind,
+            False,
+            ("perf_unavailable", "perf_event_paranoid_restrictive"),
+            ("perf_path=missing", "perf_event_paranoid=3"),
+        )
+
+    with (
+        patch("vibesys.context.PROJECT_ROOT", project_root),
+        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
+        patch("vibesys.context.backends.get", return_value=_FakeBackend(ProfilerKind.NSYS)),
+        patch("vibesys.profilers.platform.system", return_value="Linux"),
+        patch("vibesys.context.preflight_profiler_kind", side_effect=fail_preflight),
+        pytest.raises(ConfigurationError, match="Resolved profiler 'linux_cpu' is not usable"),
+    ):
+        _RunContext(
+            config={"model": {"name": "claude-sonnet-4-6"}},
+            exp_name="generic-auto-linux-unusable",
+            input_path=str(ref.parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
+            profiler_kind=ProfilerKind.AUTO,
+            profiler_domain=DomainName.GENERIC,
+            skills_dirs=[],
+            run_environment=RunEnvironmentSpec("local"),
+            environment_hooks=NoopEnvironmentHooks(),
+        )
 
 
 @pytest.mark.parametrize(

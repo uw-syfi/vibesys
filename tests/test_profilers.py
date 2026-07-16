@@ -14,6 +14,7 @@ from vibesys.profilers import (
     ProfilerKind,
     allowed_profiler_kinds,
     coerce_profiler_kind,
+    preflight_profiler_kind,
     resolve_profiler_kind,
 )
 
@@ -186,3 +187,50 @@ def test_resolver_rejects_unparsed_backend_profiler_metadata(backend_profiler_ki
             backend_profiler_kind=backend_profiler_kind,
             environment_default_profiler_kind=ProfilerKind.NSYS,
         )
+
+
+def test_linux_cpu_preflight_fails_when_perf_is_unavailable(monkeypatch):
+    from vibesys.linux_cpu_profiler import Capability, DiagnosticCode, LinuxProfilerTool
+
+    monkeypatch.setattr(
+        "vibesys.linux_cpu_profiler.detect_capability",
+        lambda: Capability(
+            LinuxProfilerTool.NONE,
+            None,
+            None,
+            3,
+            0,
+            (
+                DiagnosticCode.PERF_EVENT_PARANOID_RESTRICTIVE,
+                DiagnosticCode.PERF_UNAVAILABLE,
+            ),
+        ),
+    )
+
+    result = preflight_profiler_kind(ProfilerKind.LINUX_CPU)
+
+    assert not result.usable
+    assert result.diagnostics == ("perf_event_paranoid_restrictive", "perf_unavailable")
+    assert "perf_path=missing" in result.details
+    assert "perf_unavailable" in result.error_message()
+
+
+def test_linux_cpu_preflight_accepts_perf_with_nonblocking_symbol_restrictions(monkeypatch):
+    from vibesys.linux_cpu_profiler import Capability, DiagnosticCode, LinuxProfilerTool
+
+    monkeypatch.setattr(
+        "vibesys.linux_cpu_profiler.detect_capability",
+        lambda: Capability(
+            LinuxProfilerTool.PERF,
+            "/usr/bin/perf",
+            "perf version 6.8",
+            1,
+            1,
+            (DiagnosticCode.KERNEL_SYMBOLS_RESTRICTED,),
+        ),
+    )
+
+    result = preflight_profiler_kind(ProfilerKind.LINUX_CPU)
+
+    assert result.usable
+    assert result.diagnostics == ("kernel_symbols_restricted",)

@@ -28,11 +28,13 @@ from vibesys.domains.environment import (
     EnvironmentHooks,
     NoopEnvironmentHooks,
 )
+from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.input_project import materialize_input_project
 from vibesys.llm_client import _build_model
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
     ProfilerKind,
+    preflight_profiler_kind,
     profiler_definition,
     resolve_profiler_kind,
 )
@@ -202,6 +204,15 @@ class _RunContext:
             backend_profiler_kind=getattr(self.backend_impl, "profiler_kind", None),
             environment_default_profiler_kind=self.run_environment.default_profiler_kind,
         )
+        profiler_preflight = preflight_profiler_kind(self.profiler_kind)
+        if not profiler_preflight.usable:
+            raise ConfigurationError(
+                ConfigurationDiagnostic(
+                    code="profiler_preflight_failed",
+                    stage="profiler_preflight",
+                    message=profiler_preflight.error_message(),
+                )
+            )
 
         self.profiler_support_path: str | None = None
         self.profiler_support_name: str | None = None
