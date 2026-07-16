@@ -28,7 +28,8 @@ cp agent.toml.example agent.toml            # no API key needed for --cli-provid
 The benchmark downloads a checksum-pinned YCSB 0.17.0 Redis binding into the
 workspace `.cache/` on first run.
 
-Verify the harness end-to-end against the seed: `examples/kv-store/run_test.sh`.
+Verify the harness end-to-end against the seed: `examples/kv-store/run_test.sh`
+(CI-tolerant gates; scored thresholds stay in `vibeserve.input.toml`).
 
 ## Run
 
