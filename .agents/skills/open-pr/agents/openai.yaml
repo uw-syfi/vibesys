@@ -1,4 +1,4 @@
 interface:
   display_name: "Open PR"
-  short_description: "Open VibeServe pull requests"
-  default_prompt: "Use $open-pr to prepare, push, and open a VibeServe pull request for the current changes."
+  short_description: "Open VibeSys pull requests"
+  default_prompt: "Use $open-pr to prepare, push, and open a VibeSys pull request for the current changes."

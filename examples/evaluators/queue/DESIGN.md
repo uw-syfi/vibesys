@@ -2,7 +2,7 @@
 
 This document describes the v1 architecture for the linearizable queue inputs:
 `queue-spsc`, `queue-mpsc`, and `queue-mpmc`. It explains the trust boundary and
-the split between VibeServe, the Go checker, the Rust native runner, and the
+the split between VibeSys, the Go checker, the Rust native runner, and the
 candidate shared library.
 
 The exact candidate function contract is specified separately in
@@ -35,7 +35,7 @@ The exact candidate function contract is specified separately in
 ## Components
 
 ```text
-VibeServe agent loop
+VibeSys agent loop
   |
   | materializes workspace seed and immutable evaluator input
   | runs manifest accuracy and benchmark commands
@@ -62,7 +62,7 @@ The source is organized as follows:
 | `native_runner/src/protocol.rs` | Correctness worker and per-lane socket protocol |
 | `native_runner/src/probe.rs` | ABI edge-case and copying-lifetime probes |
 | `native_runner/src/benchmark.rs` | Native timed producer and consumer threads |
-| `include/vibeserve_queue_abi.h` | Candidate ABI declarations |
+| `include/vibesys_queue_abi.h` | Candidate ABI declarations |
 | `examples/starters/queue-rs` | Shared untrusted Rust starter candidate |
 
 Go owns the correctness model because Porcupine is a mature Go implementation.
@@ -82,13 +82,13 @@ seed = "../../starters/queue-rs"
 source = "../../evaluators/queue"
 ```
 
-VibeServe copies this seed into a fresh workspace before copying the input
+VibeSys copies this seed into a fresh workspace before copying the input
 bundle. The starter, `Cargo.toml`, `Makefile`, and generated
 `queue-candidate.so` are candidate-owned and may be replaced by the agent.
 
-VibeServe copies the evaluator source to `_evaluator/queue` on a fresh run.
+VibeSys copies the evaluator source to `_evaluator/queue` on a fresh run.
 The evaluator is not refreshed on resume, so the run keeps the same verification
-logic. VibeServe records the initial workspace commit and rejects framework
+logic. VibeSys records the initial workspace commit and rejects framework
 accuracy or benchmark gates when evaluator-owned paths have changed. Those
 paths include the objective, manifest, reference/checker directories, benchmark
 directories, and `_evaluator`.
@@ -258,7 +258,7 @@ inconsistent attempt totals. An odd number of repetitions is required, and
 `total_ops_per_sec` is taken from the median repetition while all samples are
 retained.
 
-For manifests with `[benchmark.result]`, VibeServe runs the immutable benchmark
+For manifests with `[benchmark.result]`, VibeSys runs the immutable benchmark
 command and accepts only one finite numeric field with the declared name.
 SPSC, MPSC, and MPMC declare `total_ops_per_sec`.
 
@@ -266,7 +266,7 @@ SPSC, MPSC, and MPMC declare `total_ops_per_sec`.
 
 | Component | Status | Rationale |
 | --- | --- | --- |
-| VibeServe framework gate | Trusted | Chooses immutable commands, checks evaluator paths, extracts the score |
+| VibeSys framework gate | Trusted | Chooses immutable commands, checks evaluator paths, extracts the score |
 | Go evaluator and Porcupine | Trusted | Own histories, queue model, correctness verdict, repetitions, and result validation |
 | Rust native runner | Trusted | Owns C ABI adaptation, probes, timed threads, counters, payload checks, and output JSON |
 | ABI document/header | Trusted contract | Defines the candidate behavior being evaluated |

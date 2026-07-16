@@ -7,9 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from vibe_serve.cli import load_config_and_skills
-from vibe_serve.constants import PROJECT_ROOT, ComputeBackend
-from vibe_serve.skills import (
+from vibesys.cli import load_config_and_skills
+from vibesys.constants import PROJECT_ROOT, ComputeBackend
+from vibesys.skills import (
     SkillMetadataError,
     discover_sidecar_rules,
     discover_skill_dirs,
@@ -54,7 +54,7 @@ def _write_skill(root: Path, name: str) -> Path:
 
 def _write_sidecar(root: Path, content: str) -> Path:
     root.mkdir(parents=True, exist_ok=True)
-    path = root / ".vibeserve.toml"
+    path = root / ".vibesys.toml"
     path.write_text(content, encoding="utf-8")
     return path
 
@@ -130,9 +130,9 @@ def test_conflicting_same_specificity_rules_fail(tmp_path):
             backends=(ComputeBackend.CUDA,),
         )
     ]
-    from vibe_serve.skills import effective_skill_metadata
+    from vibesys.skills import effective_skill_metadata
 
-    with pytest.raises(SkillMetadataError, match="conflicting VibeServe rules"):
+    with pytest.raises(SkillMetadataError, match="conflicting VibeSys rules"):
         effective_skill_metadata(skill_dir, duplicate_rules)
 
 
@@ -167,7 +167,7 @@ def test_invalid_sidecar_metadata_fails_with_sidecar_path(tmp_path, content, mes
     with pytest.raises(SkillMetadataError) as exc:
         load_sidecar_rules(sidecar)
 
-    assert ".vibeserve.toml" in str(exc.value)
+    assert ".vibesys.toml" in str(exc.value)
     assert message in str(exc.value)
 
 

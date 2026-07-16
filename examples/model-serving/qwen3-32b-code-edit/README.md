@@ -14,7 +14,7 @@ CodeEditorBench's "code debug" rows hand the model an `incorrect_solutions` (the
 
 ```
 qwen3-32b-code-edit/
-├── OBJECTIVE.md                       # the goal handed to vibeserve-orchestrate
+├── OBJECTIVE.md                       # the goal handed to vibesys-orchestrate
 ├── README.md                          # this file
 ├── benchmark/
 │   ├── benchmark.py                   # /v1/completions driver, single-batch

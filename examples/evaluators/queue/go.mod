@@ -1,4 +1,4 @@
-module vibe-serve/queue-evaluator
+module vibesys/queue-evaluator
 
 go 1.21
 

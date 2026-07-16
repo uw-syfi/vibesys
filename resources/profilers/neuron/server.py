@@ -36,7 +36,7 @@ def _capture(fn, **kwargs) -> str:
 
 
 def build_server() -> FastMCP:
-    mcp = FastMCP("vibeserve-neuron-profiler")
+    mcp = FastMCP("vibesys-neuron-profiler")
 
     @mcp.tool()
     def capture(workload: str, out_dir: str = "/tmp/neuronprof", timeout: int = 1800) -> str:
@@ -92,7 +92,7 @@ def build_server() -> FastMCP:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="vibeserve-neuron-mcp",
+        prog="vibesys-neuron-mcp",
         description="Stdio MCP server exposing neuron-explorer profile analyses.",
     )
     parser.parse_args(argv)

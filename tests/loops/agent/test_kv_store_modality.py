@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vibe_serve.cli import _MODALITIES
-from vibe_serve.input_manifest import load_input_bundle
-from vibe_serve.prompts import render_template
+from vibesys.cli import _MODALITIES
+from vibesys.input_manifest import load_input_bundle
+from vibesys.prompts import render_template
 
 _TEMPLATE_DIR = (
-    Path(__file__).resolve().parents[3] / "src" / "vibe_serve" / "loops" / "agent" / "templates"
+    Path(__file__).resolve().parents[3] / "src" / "vibesys" / "loops" / "agent" / "templates"
 )
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 

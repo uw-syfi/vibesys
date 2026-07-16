@@ -1,4 +1,4 @@
-module vibe-serve/kvstore-porcupine-checker
+module vibesys/kvstore-porcupine-checker
 
 go 1.21
 

@@ -10,9 +10,9 @@ this contract; evaluator implementation details are described separately in
 Candidates must provide a shared library named `queue-candidate.so` in the
 workspace root. The library may be implemented in any language or combination
 of languages that exports the C ABI declared in
-`include/vibeserve_queue_abi.h`.
+`include/vibesys_queue_abi.h`.
 
-The queue uses VibeServe's `inprocess` execution mode: the evaluator loads and
+The queue uses VibeSys's `inprocess` execution mode: the evaluator loads and
 invokes the library directly inside an evaluator-owned Rust process. The
 candidate does not implement a network service. Process isolation used between
 trusted evaluator components is not part of the candidate interface.

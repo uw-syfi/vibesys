@@ -1,4 +1,4 @@
-#include "vibeserve_queue_abi.h"
+#include "vibesys_queue_abi.h"
 
 #include <pthread.h>
 #include <stdlib.h>

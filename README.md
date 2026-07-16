@@ -1,8 +1,12 @@
-# VibeServe: Can AI Agents Build Bespoke LLM Serving Systems?
+# VibeSys: Generating Bespoke Systems with AI Agents
 
 [![arXiv](https://img.shields.io/badge/arXiv-2605.06068-b31b1b.svg)](https://arxiv.org/abs/2605.06068)
 
-**An agentic loop that synthesizes bespoke LLM serving systems — one per (model, hardware, workload) target — instead of forcing every deployment through a single general-purpose runtime.**
+**An agentic framework that generates bespoke systems from application requirements, workload characteristics, and the underlying hardware.**
+
+One of VibeSys's first initiatives is **VibeServe**, which asks whether AI agents
+can generate a bespoke LLM serving system for each model, workload, and hardware
+target. The figures, blog post, and paper below document that initiative.
 
 <p align="center">
   <img src="docs/figures/idea.png" width="85%" alt="Generic serving today vs. VibeServe's per-target bespoke systems">
@@ -10,14 +14,26 @@
 
 ## Updates
 
-- **2026-05** — Blog post: [Let AI Agents Write Your Serving Stack with VibeServe](https://syfi.cs.washington.edu/blog/2026-05-12-introducing-vibeserve/).
+- **2026-05** — VibeServe blog post: [Let AI Agents Write Your Serving Stack with VibeServe](https://syfi.cs.washington.edu/blog/2026-05-12-introducing-vibeserve/).
 - **2026-05** — Paper released on arXiv: [2605.06068](https://arxiv.org/abs/2605.06068).
 
 ## Introduction
 
-VibeServe explores a new approach to LLM serving: instead of relying on one general-purpose runtime to support every model, workload, and hardware target, we use AI agents to generate bespoke serving systems for each deployment scenario. The project asks whether long-horizon coding agents can synthesize complete LLM serving stacks end-to-end, including scheduling, caching, runtime logic, correctness checks, and performance optimizations tailored to a specific target.
+VibeSys explores a broader approach to systems development: use application
+requirements, workload characteristics, and hardware capabilities as the inputs
+to an agentic search process that creates a purpose-built system. Each target
+defines its own implementation contract, correctness checks, and performance
+benchmark, allowing VibeSys to work across domains rather than assuming a single
+runtime, programming language, or deployment shape.
 
-The system is organized as a multi-agent optimization loop. An outer loop plans the search over system designs using persistent state such as issues, memory, and git history, while an inner loop implements candidate systems, validates correctness against a reference implementation, and measures performance on the target benchmark. Across standard and non-standard serving scenarios, VibeServe matches highly optimized systems like vLLM in mainstream deployments and achieves substantial gains in specialized settings involving predicted-output decoding, hybrid prompt caching, streaming ASR, constrained JSON decoding, multimodal inference, and Apple Silicon deployment.
+The framework is organized as a multi-agent optimization loop. An outer loop
+plans the search over system designs using persistent state such as issues,
+memory, and git history, while an inner loop implements candidates, validates
+correctness against target-specific requirements, and measures performance on
+the target workload and hardware. VibeServe is the first substantial initiative
+built on this approach; its serving-focused results include predicted-output
+decoding, hybrid prompt caching, streaming ASR, constrained JSON decoding,
+multimodal inference, and Apple Silicon deployment.
 
 ## Architecture
 
@@ -65,10 +81,10 @@ cp agent.toml.example agent.toml
 A separate entry point exposes the issue MCP server used by the plain loop:
 
 ```bash
-vibe-serve-issue-mcp                         # serves issues.json over MCP
+vibesys-issue-mcp                         # serves issues.json over MCP
 ```
 
-## Domains — pointing vibeserve at your problem space
+## Domains — pointing vibesys at your problem space
 
 A **domain** is the bundle of cross-cutting context the agents need for whatever
 you're building: the background knowledge the implementer must read, and the
@@ -76,7 +92,7 @@ correctness/performance/integrity gates the judge enforces. It answers *"what
 kind of system is this, and what does 'good' mean here?"* — kept separate from
 the neutral prompt skeleton and from the per-task I/O contract (`--modality`).
 
-Each input bundle declares its domain in `vibeserve.input.toml`:
+Each input bundle declares its domain in `vibesys.input.toml`:
 
 ```toml
 [agent]
@@ -90,7 +106,7 @@ such as `implementer.md`, `judge.md`, and optionally `single_agent.md`; those
 files drop into the prompts at labelled points. Omit `single_agent.md` and it's
 derived from `implementer.md` plus `judge.md`.
 
-Full authoring guide: [`src/vibe_serve/domains/README.md`](src/vibe_serve/domains/README.md).
+Full authoring guide: [`src/vibesys/domains/README.md`](src/vibesys/domains/README.md).
 
 ## Interface: how the artifact is evaluated
 
@@ -122,7 +138,7 @@ Each evaluation target lives under `examples/<name>/`:
 ```
 examples/<name>/
 ├── OBJECTIVE.md          # free-form deployment goal (model + hardware + workload + interface)
-├── vibeserve.input.toml  # manifest-declared domain, checker, benchmark, and optional inputs
+├── vibesys.input.toml  # manifest-declared domain, checker, benchmark, and optional inputs
 ├── reference/            # reference HuggingFace Transformers implementation
 │   ├── reference.py
 │   ├── config.json
@@ -166,7 +182,7 @@ cli_provider = "codex"        # which coding-agent harness to drive
 
 Provider credentials live in `.env` — see `.env.example`. The CLI flags `--agent-backend` / `--cli-provider` / `--backend` override these.
 
-The config is validated against a typed schema on load (`vibe_serve/config.py`): unknown sections or keys, unknown providers/backends, and missing required fields are rejected with an error rather than silently ignored.
+The config is validated against a typed schema on load (`vibesys/config.py`): unknown sections or keys, unknown providers/backends, and missing required fields are rejected with an error rather than silently ignored.
 
 ## Skills library
 
@@ -201,8 +217,8 @@ Resume any run with `--resume` (defaults to "latest"):
 ## Repository layout
 
 ```
-src/vibe_serve/
-├── cli.py                        # single entry point: `vibe-serve`
+src/vibesys/
+├── cli.py                        # single entry point: `vibesys`
 ├── context.py                    # _RunContext: lifecycle + ctx.invoke()
 ├── agent_runner.py               # invoke wrappers + structured-response extraction
 ├── prompts.py                    # Jinja + backend-fragment renderer
@@ -256,7 +272,7 @@ uv run pytest -k orchestrator                       # by keyword
 
 ## Citation
 
-If you use VibeServe in your research, please cite:
+If you use the VibeServe initiative in your research, please cite:
 
 ```bibtex
 @misc{kamahori2026vibeserveaiagentsbuild,

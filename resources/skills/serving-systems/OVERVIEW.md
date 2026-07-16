@@ -1,4 +1,4 @@
-# vibe-serve-skills: overview
+# vibesys-skills: overview
 
 Serving an LLM well is almost entirely a performance-engineering problem. The model is fixed; the job is to squeeze it through the hardware at the lowest $/token and the lowest p99 latency. This file is the "read this first" guide: a short primer on the performance foundations, then a map of the skill collection organized by the questions an engineer actually asks.
 

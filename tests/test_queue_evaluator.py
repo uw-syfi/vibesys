@@ -35,7 +35,7 @@ def _materialize_linearizable_input(
     input_name: str,
     workspace: Path,
 ) -> Path:
-    from vibe_serve.input_manifest import load_input_bundle
+    from vibesys.input_manifest import load_input_bundle
 
     input_dir = project_root / "examples" / "data-structures" / input_name
     bundle = load_input_bundle(input_dir, project_root=project_root)
@@ -54,7 +54,7 @@ def test_linearizable_queue_manifests_invoke_go_evaluator_directly():
     root = Path(__file__).parents[1] / "examples" / "data-structures"
 
     for input_name, scenario in LINEARIZABLE_QUEUE_INPUTS.items():
-        manifest = tomllib.loads((root / input_name / "vibeserve.input.toml").read_text())
+        manifest = tomllib.loads((root / input_name / "vibesys.input.toml").read_text())
         operations, trials = LINEARIZABLE_ACCURACY_SETTINGS[input_name]
         expected_suffixes = {
             "accuracy": [
@@ -96,7 +96,7 @@ def test_linearizable_queue_manifests_invoke_go_evaluator_directly():
     evaluator = root.parents[0] / "evaluators" / "queue"
     assert (evaluator / "DESIGN.md").exists()
     assert (evaluator / "CANDIDATE_CONTRACT.md").exists()
-    assert (evaluator / "include" / "vibeserve_queue_abi.h").exists()
+    assert (evaluator / "include" / "vibesys_queue_abi.h").exists()
     assert not (evaluator / "QUEUE_PROTOCOL.md").exists()
     old_core = root.parents[0] / "libs" / "queue-input-core"
     assert not (old_core / "pyproject.toml").exists()
@@ -104,7 +104,7 @@ def test_linearizable_queue_manifests_invoke_go_evaluator_directly():
 
 
 def test_linearizable_queue_inputs_use_shared_editable_rust_starter():
-    from vibe_serve.input_manifest import load_input_bundle
+    from vibesys.input_manifest import load_input_bundle
 
     project_root = Path(__file__).parents[1]
     root = project_root / "examples" / "data-structures"
@@ -147,7 +147,7 @@ def test_materialized_rust_starter_builds_and_passes_accuracy(tmp_path, input_na
     )
     assert "cargo build --release --locked" in rebuilt.stdout
 
-    manifest = tomllib.loads((workspace / "vibeserve.input.toml").read_text())
+    manifest = tomllib.loads((workspace / "vibesys.input.toml").read_text())
     accuracy = [
         *manifest["accuracy"]["command"],
         "--capacity",
@@ -184,7 +184,7 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):
     )
     assert (workspace / "_evaluator" / "queue" / "DESIGN.md").is_file()
     subprocess.run(["make"], cwd=workspace, check=True)
-    manifest = tomllib.loads((input_dir / "vibeserve.input.toml").read_text())
+    manifest = tomllib.loads((input_dir / "vibesys.input.toml").read_text())
 
     accuracy = [
         *manifest["accuracy"]["command"],

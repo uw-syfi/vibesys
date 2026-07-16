@@ -1,13 +1,13 @@
 ---
 name: open-pr
-description: Prepare and open VibeServe pull requests from local repo changes. Use when the user asks to create, open, publish, submit, or draft a PR for this repository, including tasks that need branch hygiene, targeted validation, PR intent reflection, PR template completion, commit/push, or GitHub pull request creation.
+description: Prepare and open VibeSys pull requests from local repo changes. Use when the user asks to create, open, publish, submit, or draft a PR for this repository, including tasks that need branch hygiene, targeted validation, PR intent reflection, PR template completion, commit/push, or GitHub pull request creation.
 ---
 
 # Open PR
 
 ## Overview
 
-Open a pull request for VibeServe changes without losing user work. Keep the scope narrow, recover the intended reason for the change, use the repository PR template, and make verification explicit.
+Open a pull request for VibeSys changes without losing user work. Keep the scope narrow, recover the intended reason for the change, use the repository PR template, and make verification explicit.
 
 ## Workflow
 
@@ -75,7 +75,7 @@ Use this repository's template headings exactly:
 
 Keep the title concrete and behavior-oriented. Avoid generic titles such as "Update files" or "Fix tests."
 
-## VibeServe Review Notes
+## VibeSys Review Notes
 
 - Mention changes to external contracts: manifests, metadata, feature flags, CLI flags, evaluator interfaces, model-serving example bundle shape, prompt output, or skill routing.
 - For prompt changes, include the snapshot diff or state that snapshots were not applicable.

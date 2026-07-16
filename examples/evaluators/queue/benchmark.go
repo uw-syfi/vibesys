@@ -50,7 +50,7 @@ func runNativeBenchmark(config benchmarkConfig) (benchmarkResult, error) {
 	if err != nil {
 		return benchmarkResult{}, err
 	}
-	output, err := os.CreateTemp("", "vibeserve-queue-benchmark-*.json")
+	output, err := os.CreateTemp("", "vibesys-queue-benchmark-*.json")
 	if err != nil {
 		return benchmarkResult{}, fmt.Errorf("create native benchmark result file: %w", err)
 	}

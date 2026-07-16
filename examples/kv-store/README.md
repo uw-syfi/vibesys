@@ -1,6 +1,6 @@
-# KV Store Target for VibeServe
+# KV Store Target for VibeSys
 
-A non-persistent, in-memory KV store optimized by VibeServe's multi-agent loop.
+A non-persistent, in-memory KV store optimized by VibeSys's multi-agent loop.
 The agent starts from a minimal Python RESP2 server (~10k ops/sec), gated by
 correctness (candidate vs a real Redis oracle) and scored by real YCSB.
 
@@ -26,7 +26,7 @@ Verify the harness end-to-end against the seed: `examples/kv-store/run_test.sh`.
 ## Run
 
 ```bash
-vibe-serve --outer-loop agent \
+vibesys --outer-loop agent \
   --input examples/kv-store \
   --exp-name kv-store-opt \
   --backend cpu \
@@ -46,7 +46,7 @@ may implement it in any language. Each round is a git commit in
 ```
 examples/kv-store/
 ├── OBJECTIVE.md                   # Target spec (read by the orchestrator)
-├── vibeserve.input.toml           # Manifest: domain, checker, benchmark commands
+├── vibesys.input.toml             # Manifest: domain, checker, benchmark commands
 ├── run_test.sh                    # Standalone end-to-end test against the seed
 ├── reference/seed_server.py       # Seed baseline / RESP2 reference
 ├── accuracy_checker/checker.py    # Correctness: candidate vs Redis oracle

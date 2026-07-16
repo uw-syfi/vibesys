@@ -12,14 +12,14 @@ from pathlib import Path
 
 import pytest
 
-from vibe_serve.domains.base import DomainName
-from vibe_serve.domains.registry import resolve_domain
-from vibe_serve.domains.rendering import render_domain_section
-from vibe_serve.profilers import ProfilerKind
-from vibe_serve.prompts import render_template
+from vibesys.domains.base import DomainName
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
+from vibesys.profilers import ProfilerKind
+from vibesys.prompts import render_template
 
 _TEMPLATE_DIR = (
-    Path(__file__).resolve().parents[3] / "src" / "vibe_serve" / "loops" / "agent" / "templates"
+    Path(__file__).resolve().parents[3] / "src" / "vibesys" / "loops" / "agent" / "templates"
 )
 
 
@@ -188,7 +188,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             env_kind=context["env_kind"],
             objective=context["objective"],
             profiler_support_name="nsys_profiler",
-            profiler_mcp_name="vibeserve-nsys-profiler",
+            profiler_mcp_name="vibesys-nsys-profiler",
         ),
         "profiler_torch": render_template(
             "profilers/torch.j2",
@@ -201,7 +201,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             env_kind=context["env_kind"],
             objective=context["objective"],
             profiler_support_name="torch_profiler",
-            profiler_mcp_name="vibeserve-torch-profiler",
+            profiler_mcp_name="vibesys-torch-profiler",
         ),
         "profiler_neuron": render_template(
             "profilers/neuron.j2",
@@ -214,7 +214,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             env_kind=context["env_kind"],
             objective=context["objective"],
             profiler_support_name="neuron_profiler",
-            profiler_mcp_name="vibeserve-neuron-profiler",
+            profiler_mcp_name="vibesys-neuron-profiler",
         ),
     }
 

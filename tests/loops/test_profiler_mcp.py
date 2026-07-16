@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from vibe_serve.loops.profiler import mcp_spec
-from vibe_serve.profilers import ProfilerKind
+from vibesys.loops.profiler import mcp_spec
+from vibesys.profilers import ProfilerKind
 
 
 # The servers live under resources/ (co-located with the analysis scripts) so
@@ -46,19 +46,19 @@ def test_profiler_mcp_spec_maps_known_kinds_exactly():
     assert mcp_spec(ProfilerKind.NONE) is None
 
     nsys = mcp_spec(ProfilerKind.NSYS)
-    assert nsys.name == "vibeserve-nsys-profiler"
+    assert nsys.name == "vibesys-nsys-profiler"
     assert nsys.args == ["nsys_profiler/server.py"]
 
     torch = mcp_spec(ProfilerKind.TORCH)
-    assert torch.name == "vibeserve-torch-profiler"
+    assert torch.name == "vibesys-torch-profiler"
     assert torch.args == ["torch_profiler/server.py"]
 
     neuron = mcp_spec(ProfilerKind.NEURON)
-    assert neuron.name == "vibeserve-neuron-profiler"
+    assert neuron.name == "vibesys-neuron-profiler"
     assert neuron.args == ["neuron_profiler/server.py"]
 
     macos = mcp_spec(ProfilerKind.MACOS_CPU)
-    assert macos.name == "vibeserve-macos-cpu-profiler"
+    assert macos.name == "vibesys-macos-cpu-profiler"
     assert macos.args == ["macos_cpu_profiler/server.py"]
 
 

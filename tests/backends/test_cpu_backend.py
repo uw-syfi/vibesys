@@ -7,13 +7,13 @@ import argparse
 import pytest
 from deepagents.backends import LocalShellBackend
 
-from vibe_serve import backends
-from vibe_serve.backends import SandboxKind
-from vibe_serve.backends.local import LocalBackend
-from vibe_serve.cli import _add_common_args
-from vibe_serve.constants import ComputeBackend
-from vibe_serve.profilers import ProfilerKind
-from vibe_serve.sandbox.docker_sandbox import DockerSandbox
+from vibesys import backends
+from vibesys.backends import SandboxKind
+from vibesys.backends.local import LocalBackend
+from vibesys.cli import _add_common_args
+from vibesys.constants import ComputeBackend
+from vibesys.profilers import ProfilerKind
+from vibesys.sandbox.docker_sandbox import DockerSandbox
 
 
 def _make_backend(tmp_path) -> LocalBackend:

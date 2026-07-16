@@ -6,8 +6,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibe_serve.domains.base import DomainName
-from vibe_serve.profilers import (
+from vibesys.domains.base import DomainName
+from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
     PROFILER_DEFINITIONS,
     ProfilerDefinition,
@@ -33,7 +33,7 @@ def test_profiler_definitions_derive_uniform_packaging_names():
         assert definition.support_name == f"{kind.value}_profiler"
         assert definition.server_path == f"{kind.value}_profiler/server.py"
         assert definition.prompt_template == f"profilers/{kind.value}.j2"
-        assert definition.mcp_name == f"vibeserve-{kind.value.replace('_', '-')}-profiler"
+        assert definition.mcp_name == f"vibesys-{kind.value.replace('_', '-')}-profiler"
 
 
 def test_profiler_definition_needs_no_path_or_dispatch_declaration():

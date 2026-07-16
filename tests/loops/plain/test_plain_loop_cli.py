@@ -4,9 +4,9 @@ from unittest.mock import patch
 
 import pytest
 
-from vibe_serve.cli import _build_plain_parser as build_parser
-from vibe_serve.cli import main
-from vibe_serve.loops.plain.loop import PlainLoopState
+from vibesys.cli import _build_plain_parser as build_parser
+from vibesys.cli import main
+from vibesys.loops.plain.loop import PlainLoopState
 
 TARGET_ARGS = [
     "--input",
@@ -71,19 +71,19 @@ class TestBuildParser:
 
 
 class TestMain:
-    _BASE_ARGV = ["vibe-serve", "--outer-loop", "plain", *TARGET_ARGS]
+    _BASE_ARGV = ["vibesys", "--outer-loop", "plain", *TARGET_ARGS]
 
     def _patch_run(self, return_value: bool):
         return patch(
-            "vibe_serve.loops.plain.loop.run_plain_loop",
+            "vibesys.loops.plain.loop.run_plain_loop",
             return_value=return_value,
         )
 
     def _patch_config(self):
-        from vibe_serve.constants import DEFAULT_COMPUTE_BACKEND
+        from vibesys.constants import DEFAULT_COMPUTE_BACKEND
 
         return patch(
-            "vibe_serve.cli.load_config_and_skills",
+            "vibesys.cli.load_config_and_skills",
             return_value=(
                 {"model": {"name": "claude-sonnet-4-6"}},
                 None,
@@ -119,7 +119,7 @@ class TestMain:
             with (
                 self._patch_config(),
                 patch(
-                    "vibe_serve.loops.plain.loop.run_plain_loop",
+                    "vibesys.loops.plain.loop.run_plain_loop",
                     return_value=True,
                 ) as mock_run,
             ):
@@ -143,11 +143,11 @@ class TestMain:
             with (
                 self._patch_config(),
                 patch(
-                    "vibe_serve.cli._resolve_run_dir",
+                    "vibesys.cli._resolve_run_dir",
                     return_value="fake-run-dir",
                 ),
                 patch(
-                    "vibe_serve.loops.plain.loop.run_plain_loop",
+                    "vibesys.loops.plain.loop.run_plain_loop",
                     return_value=True,
                 ) as mock_run,
             ):
@@ -173,7 +173,7 @@ class TestMain:
             with (
                 self._patch_config(),
                 patch(
-                    "vibe_serve.loops.plain.loop.run_plain_loop",
+                    "vibesys.loops.plain.loop.run_plain_loop",
                     return_value=True,
                 ) as mock_run,
             ):
@@ -187,7 +187,7 @@ class TestMain:
             with (
                 self._patch_config(),
                 patch(
-                    "vibe_serve.loops.plain.loop.run_plain_loop",
+                    "vibesys.loops.plain.loop.run_plain_loop",
                     return_value=True,
                 ) as mock_run,
             ):
@@ -212,7 +212,7 @@ class TestMain:
             with (
                 self._patch_config(),
                 patch(
-                    "vibe_serve.loops.plain.loop.run_plain_loop",
+                    "vibesys.loops.plain.loop.run_plain_loop",
                     return_value=True,
                 ) as mock_run,
             ):

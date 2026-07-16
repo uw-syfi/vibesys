@@ -1,27 +1,27 @@
 # Extending Profilers
 
-VibeServe profiler implementations expose evidence-gathering tools to the profiler agent.
+VibeSys profiler implementations expose evidence-gathering tools to the profiler agent.
 The framework selects a profiler, copies its bundled support package into the workspace,
 starts its MCP server, renders its prompt, and records the returned `ProfilerSummary`.
 
 ## Declare a profiler
 
 Add a uniform identifier to `ProfilerKind` and a `ProfilerDefinition` to the typed registry
-in `vibe_serve.profilers`. Definitions contain behavioral policy that cannot be inferred,
+in `vibesys.profilers`. Definitions contain behavioral policy that cannot be inferred,
 such as supported domains or interface constraints. Keep backend, environment, and
 platform `auto` selection in `resolve_profiler_kind` rather than the packaging definition.
 
-The identifier is used without transformation. For a kind named `perf`, VibeServe derives:
+The identifier is used without transformation. For a kind named `perf`, VibeSys derives:
 
 | Resource | Derived name |
 | --- | --- |
 | Workspace support directory | `perf_profiler/` |
 | MCP entrypoint | `perf_profiler/server.py` |
-| MCP server name | `vibeserve-perf-profiler` |
+| MCP server name | `vibesys-perf-profiler` |
 | Agent prompt | `profilers/perf.j2` |
 
 Filesystem and Python identifiers retain underscores. MCP server identifiers normalize
-underscores to dashes, so `macos_cpu` produces `vibeserve-macos-cpu-profiler`.
+underscores to dashes, so `macos_cpu` produces `vibesys-macos-cpu-profiler`.
 
 `auto` and `none` are modes, not runnable profiler definitions.
 
@@ -38,7 +38,7 @@ necessary.
 
 ## Add the profiler prompt
 
-Create `src/vibe_serve/loops/agent/templates/profilers/<kind>.j2`. Explain how the
+Create `src/vibesys/loops/agent/templates/profilers/<kind>.j2`. Explain how the
 agent should collect and interpret evidence, which limitations it must report, and how it
 should produce the shared `ProfilerSummary`. The agent and evolve loops resolve this prompt
 by convention.

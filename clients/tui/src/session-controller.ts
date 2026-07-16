@@ -104,7 +104,7 @@ export class SocketSessionController implements SessionController {
 
 function renderResponse(request: RequestInput, response: ProtocolResponse): string | null {
   if (response.ack) return `${response.ack.action}: ${response.ack.status}`;
-  if (response.chat) return `you: ${response.chat.question}\nvibeserve: ${response.chat.answer}`;
+  if (response.chat) return `you: ${response.chat.question}\nvibesys: ${response.chat.answer}`;
   if (request.type === 'query.history') return renderRoundHistory(response.events ?? []);
   return null;
 }

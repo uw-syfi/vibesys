@@ -11,7 +11,7 @@ benchmark driver for a concurrent key-value store workload.
 
 Notes:
 - Use `--use-reference` to validate the bundled reference implementation.
-- Omit `--use-reference` to check a candidate `main.py` exposing `VibeServeKVStore`.
+- Omit `--use-reference` to check a candidate `main.py` exposing `VibeSysKVStore`.
 - The checker records a concurrent operation history before validating linearizability.
 - Linearizability is checked with [Porcupine](https://github.com/anishathalye/porcupine).
 - Go must be installed locally to run the checker.

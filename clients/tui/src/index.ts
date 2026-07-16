@@ -3,8 +3,8 @@ import {SupervisionClient} from './client.js';
 import {SocketSessionController} from './session-controller.js';
 import {createOpenTuiApp} from './ui/app.js';
 
-const socketPath = process.env['VIBESERVE_CONTROL_SOCKET'];
-if (!socketPath) throw new Error('VIBESERVE_CONTROL_SOCKET is required');
+const socketPath = process.env['VIBESYS_CONTROL_SOCKET'];
+if (!socketPath) throw new Error('VIBESYS_CONTROL_SOCKET is required');
 
 const client = await SupervisionClient.connect(socketPath);
 const renderer = await createCliRenderer({exitOnCtrlC: true});

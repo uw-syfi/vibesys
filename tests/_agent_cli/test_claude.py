@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from vibe_serve._agent_cli.claude import ClaudeCodeCodingAgent, ClaudeGenerationSession
+from vibesys._agent_cli.claude import ClaudeCodeCodingAgent, ClaudeGenerationSession
 
 
 class _MockCommandExecutor:

@@ -1,8 +1,8 @@
 from unittest.mock import MagicMock
 
-from vibe_serve.agents.progress import CandidateProgress, RoundProgress
-from vibe_serve.context import _RunContext
-from vibe_serve.schemas import JudgeResponse, Verdict
+from vibesys.agents.progress import CandidateProgress, RoundProgress
+from vibesys.context import _RunContext
+from vibesys.schemas import JudgeResponse, Verdict
 
 
 def _judge_fallback() -> JudgeResponse:

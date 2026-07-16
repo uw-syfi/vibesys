@@ -1,6 +1,6 @@
 """Minimal Python RESP server — single-threaded asyncio, Python dict.
 
-This is the seed implementation that VibeServe's agent will iterate on.
+This is the seed implementation that VibeSys's agent will iterate on.
 Speaks a subset of Redis RESP2: string ops (GET, SET, DEL) and hash ops
 (HSET, HMSET, HGETALL) needed by YCSB.
 """

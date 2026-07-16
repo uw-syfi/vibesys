@@ -12,14 +12,14 @@ from pathlib import Path
 
 import pytest
 
-from vibe_serve.domains.base import DomainName
-from vibe_serve.domains.registry import resolve_domain
-from vibe_serve.domains.rendering import render_domain_section
-from vibe_serve.profilers import ProfilerKind, profiler_definition
-from vibe_serve.prompts import render_template
+from vibesys.domains.base import DomainName
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
+from vibesys.profilers import ProfilerKind, profiler_definition
+from vibesys.prompts import render_template
 
 _ROOT = Path(__file__).resolve().parents[3]
-_TEMPLATE_DIR = _ROOT / "src" / "vibe_serve" / "loops" / "agent" / "templates"
+_TEMPLATE_DIR = _ROOT / "src" / "vibesys" / "loops" / "agent" / "templates"
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "prompt_snapshots"
 
 _ROLES = ("implementer", "judge", "single_agent", "orchestrator")

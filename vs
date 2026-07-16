@@ -45,7 +45,7 @@ if [[ "$interactive" == true ]]; then
     pnpm-lock.yaml \
     pnpm-workspace.yaml \
     biome.json \
-    src/vibe_serve/server \
+    src/vibesys/server \
     -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.json' -o -name '*.yaml' -o -name '*.py' \) \
     -newer "$entrypoint" -print -quit | grep -q .; then
     rebuild=true
@@ -80,8 +80,8 @@ if [[ "$interactive" == true ]]; then
       exit 1
     fi
 
-    echo "Launching VibeServe..." >&2
-    preparation_log="$(mktemp -t vibeserve-prepare.XXXXXX)"
+    echo "Launching VibeSys..." >&2
+    preparation_log="$(mktemp -t vibesys-prepare.XXXXXX)"
     temporary_files+=("$preparation_log")
     if ! {
       "${pnpm_command[@]}" install --frozen-lockfile &&
@@ -97,6 +97,6 @@ if [[ "$interactive" == true ]]; then
 fi
 
 if [[ "$interactive" == true ]]; then
-  exec uv run vibe-serve-launch "$@"
+  exec uv run vibesys-launch "$@"
 fi
-exec uv run vibe-serve "$@"
+exec uv run vibesys "$@"

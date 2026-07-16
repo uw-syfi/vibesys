@@ -10,7 +10,7 @@ python benchmark.py \
   --collect-server-timings \
   --save-images-dir /tmp/show_o2_images \
   --postprocess-mode native \
-  --prompt "a small red robot holding a handwritten sign that says VibeServe" \
+  --prompt "a small red robot holding a handwritten sign that says VibeSys" \
   --request-seed 1234 \
   --fixed-request-seed \
   --num-requests 5 \

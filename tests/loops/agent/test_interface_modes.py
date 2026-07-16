@@ -12,21 +12,21 @@ from pathlib import Path
 
 import pytest
 
-from vibe_serve.domains.base import DomainName, DomainRole
-from vibe_serve.domains.registry import resolve_domain
-from vibe_serve.domains.rendering import render_domain_section
-from vibe_serve.errors import ConfigurationError
-from vibe_serve.loops.agent.loop import _effective_profiler_definition
-from vibe_serve.profilers import ProfilerKind
-from vibe_serve.prompts import render_template
+from vibesys.domains.base import DomainName, DomainRole
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
+from vibesys.errors import ConfigurationError
+from vibesys.loops.agent.loop import _effective_profiler_definition
+from vibesys.profilers import ProfilerKind
+from vibesys.prompts import render_template
 
 _TEMPLATE_DIR = (
-    Path(__file__).resolve().parents[3] / "src" / "vibe_serve" / "loops" / "agent" / "templates"
+    Path(__file__).resolve().parents[3] / "src" / "vibesys" / "loops" / "agent" / "templates"
 )
 
 
 def test_domain_module_has_no_language_axis():
-    import vibe_serve.domains.base as domain
+    import vibesys.domains.base as domain
 
     assert not hasattr(domain, "DEFAULT_LANGUAGE")
     assert not hasattr(domain, "LANGUAGE_DIR")
@@ -38,7 +38,7 @@ def test_no_language_pack_directory():
 
 
 def test_cli_exposes_only_process_boundary_modes():
-    from vibe_serve.cli import _build_agent_parser
+    from vibesys.cli import _build_agent_parser
 
     parser = _build_agent_parser()
     action = next(action for action in parser._actions if action.dest == "interface")
@@ -48,7 +48,7 @@ def test_cli_exposes_only_process_boundary_modes():
 
 
 def test_cli_default_interface_is_inprocess():
-    from vibe_serve.cli import _build_agent_parser
+    from vibesys.cli import _build_agent_parser
 
     args = _build_agent_parser().parse_args(["--input", "/x", "--exp-name", "e"])
     assert args.interface == "inprocess"
@@ -56,7 +56,7 @@ def test_cli_default_interface_is_inprocess():
 
 @pytest.mark.parametrize("interface", ["native", "rust"])
 def test_cli_rejects_unknown_interface(interface):
-    from vibe_serve.cli import _build_agent_parser
+    from vibesys.cli import _build_agent_parser
 
     with pytest.raises(ConfigurationError):
         _build_agent_parser().parse_args(
@@ -65,7 +65,7 @@ def test_cli_rejects_unknown_interface(interface):
 
 
 def test_loop_constants_and_rejects_unknown_interface():
-    from vibe_serve.loops.agent.loop import (
+    from vibesys.loops.agent.loop import (
         _INTERFACES,
         DEFAULT_INTERFACE,
         run_agent_loop,
@@ -86,7 +86,7 @@ def test_loop_constants_and_rejects_unknown_interface():
 
 
 def test_torch_profiler_requires_inprocess_boundary_and_domain_support():
-    from vibe_serve.loops.agent.loop import _profiler_prompt_template
+    from vibesys.loops.agent.loop import _profiler_prompt_template
 
     assert (
         _profiler_prompt_template(
@@ -115,21 +115,21 @@ def test_torch_profiler_requires_inprocess_boundary_and_domain_support():
 
 
 def test_non_torch_profilers_do_not_depend_on_interface():
-    from vibe_serve.loops.agent.loop import _profiler_prompt_template
+    from vibesys.loops.agent.loop import _profiler_prompt_template
 
     assert _profiler_prompt_template(ProfilerKind.NEURON, "service") == "profilers/neuron.j2"
     assert _profiler_prompt_template(ProfilerKind.NSYS, "service") == "profilers/nsys.j2"
 
 
 def test_standalone_profiler_none_has_no_prompt_template():
-    from vibe_serve.loops.agent.loop import _profiler_prompt_template
+    from vibesys.loops.agent.loop import _profiler_prompt_template
 
     with pytest.raises(ValueError, match="disabled"):
         _profiler_prompt_template(ProfilerKind.NONE, "inprocess")
 
 
 def test_standalone_profiler_rejects_unknown_kind():
-    from vibe_serve.loops.agent.loop import _profiler_prompt_template
+    from vibesys.loops.agent.loop import _profiler_prompt_template
 
     with pytest.raises(TypeError, match="ProfilerKind"):
         _profiler_prompt_template("bogus", "inprocess")

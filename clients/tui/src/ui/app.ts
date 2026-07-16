@@ -21,7 +21,7 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
     id: 'header',
     height: 1,
     fg: '#22d3ee',
-    content: 'VibeServe · connecting',
+    content: 'VibeSys · connecting',
   });
   const viewport = new ScrollBoxRenderable(renderer, {
     id: 'viewport',
@@ -55,7 +55,7 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
 
   const render = (state: SessionState): void => {
     const returnHint = state.view === 'live' ? '' : ' · Esc: back to live';
-    header.content = `VibeServe · ${statusText(state)}${returnHint}`;
+    header.content = `VibeSys · ${statusText(state)}${returnHint}`;
     conversation.render(state);
   };
   const unbindKeys = bindKeybindings(renderer, controller, viewport, {
