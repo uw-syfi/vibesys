@@ -53,6 +53,10 @@ def _err(msg: str) -> bytes:
     return b"-ERR " + msg.encode() + b"\r\n"
 
 
+def _wrongtype() -> bytes:
+    return b"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
+
+
 def _int(n: int) -> bytes:
     return b":" + str(n).encode() + b"\r\n"
 
@@ -79,16 +83,18 @@ def handle_command(args: list[bytes]) -> bytes:
     cmd = args[0].upper()
 
     if cmd == b"SET":
-        if len(args) < 3:
+        if len(args) != 3:
             return _err("wrong number of arguments for 'set' command")
         data[args[1]] = args[2]
         return _ok()
 
     elif cmd == b"GET":
-        if len(args) < 2:
+        if len(args) != 2:
             return _err("wrong number of arguments for 'get' command")
         val = data.get(args[1])
-        if not isinstance(val, bytes):
+        if isinstance(val, dict):
+            return _wrongtype()
+        if val is None:
             return _NULL
         return _bulk(val)
 
@@ -101,14 +107,19 @@ def handle_command(args: list[bytes]) -> bytes:
     elif cmd == b"HSET" or cmd == b"HMSET":
         if len(args) < 4 or len(args) % 2 != 0:
             return _err(f"wrong number of arguments for '{cmd.decode().lower()}' command")
+        existing = data.get(args[1])
+        if isinstance(existing, bytes):
+            return _wrongtype()
         created = _hset(args[1], args, 2)
         return _ok() if cmd == b"HMSET" else _int(created)
 
     elif cmd == b"HGETALL":
-        if len(args) < 2:
+        if len(args) != 2:
             return _err("wrong number of arguments for 'hgetall' command")
         h = data.get(args[1])
-        if not isinstance(h, dict):
+        if isinstance(h, bytes):
+            return _wrongtype()
+        if h is None:
             return b"*0\r\n"
         parts = []
         for k, v in h.items():
@@ -117,14 +128,26 @@ def handle_command(args: list[bytes]) -> bytes:
         return b"*" + str(len(parts)).encode() + b"\r\n" + b"".join(parts)
 
     elif cmd == b"DBSIZE":
+        if len(args) != 1:
+            return _err("wrong number of arguments for 'dbsize' command")
         return _int(len(data))
 
     elif cmd == b"FLUSHDB" or cmd == b"FLUSHALL":
+        if len(args) != 1:
+            return _err(f"wrong number of arguments for '{cmd.decode().lower()}' command")
         data.clear()
         return _ok()
 
-    elif cmd in (b"PING", b"COMMAND", b"CLIENT", b"HELLO"):
-        return b"+PONG\r\n" if cmd == b"PING" else _ok()
+    elif cmd == b"PING":
+        if len(args) != 1:
+            return _err("wrong number of arguments for 'ping' command")
+        return b"+PONG\r\n"
+
+    elif cmd == b"COMMAND" or cmd == b"HELLO":
+        return b"*0\r\n"
+
+    elif cmd == b"CLIENT":
+        return _ok()
 
     else:
         return _err(f"unknown command '{cmd.decode()}'")

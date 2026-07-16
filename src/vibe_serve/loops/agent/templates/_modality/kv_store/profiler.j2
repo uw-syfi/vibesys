@@ -5,8 +5,10 @@ A CPU-bound TCP server; key axes are **throughput** (ops/sec), **p99 latency** (
 ## How to profile
 
 1. Start the server: `./run.sh 6380 &`
-2. Find its PID: `PID=$(lsof -ti tcp:6380 -s tcp:LISTEN)`
-3. Drive load in the background: `uv run python {{ bench_path }}/benchmark.py --port 6380 &`
+2. Record the launch PID and inspect all processes in its process group; the
+   scored benchmark accounts for the complete stable group, not one PID.
+3. Drive load in the background by appending `--port 6380` to
+   `{{ benchmark_command }}` so the diagnostic run uses the already-running server.
 4. Sample it:
    - Python: `py-spy record -o /tmp/profile.svg --pid $PID --duration 10`
    - Native (C / Rust / Go): `perf record -p $PID -g -- sleep 10 && perf report`
@@ -22,4 +24,6 @@ the measurement pick the optimization, not a prior.
 
 ## Performance metric
 
-Headline is **ops/sec** from YCSB Workload A. Set `perf_metric` from the benchmark's machine-readable `PERF_METRIC: <n> ops/sec` line (not the human-readable throughput text); `perf_unit` is `ops/sec`.
+Headline metric is `ops_per_cpu_sec` from the benchmark JSON (maximize). The
+trusted framework owns the scored run; profiling numbers are diagnostic and
+must not replace that score.

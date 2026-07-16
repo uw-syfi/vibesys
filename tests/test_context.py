@@ -48,6 +48,13 @@ def test_input_copy_respects_source_gitignore(tmp_path):
     (source / "build").mkdir()
     (source / "build" / "cache").write_text("stale")
     subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+    (source / ".git" / "info" / "exclude").write_text("/candidate/\n/benchmark/ycsb/\n")
+    (source / "candidate").mkdir()
+    (source / "candidate" / "run.sh").write_text("stale optimized candidate\n")
+    (source / "benchmark").mkdir()
+    (source / "benchmark" / "benchmark.py").write_text("print('tracked evaluator')\n")
+    (source / "benchmark" / "ycsb").mkdir()
+    (source / "benchmark" / "ycsb" / "download").write_text("stale download\n")
 
     destination = tmp_path / "workspace"
     ctx = _minimal_copy_context(destination)
@@ -56,6 +63,9 @@ def test_input_copy_respects_source_gitignore(tmp_path):
     assert (destination / "main.rs").is_file()
     assert not (destination / "candidate.so").exists()
     assert not (destination / "build").exists()
+    assert not (destination / "candidate").exists()
+    assert (destination / "benchmark" / "benchmark.py").is_file()
+    assert not (destination / "benchmark" / "ycsb").exists()
 
 
 def test_trusted_input_changes_compare_against_initial_commit(tmp_path):

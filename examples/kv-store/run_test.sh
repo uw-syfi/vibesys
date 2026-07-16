@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
-# End-to-end test: starts the seed server, runs checker + benchmark, cleans up.
-set -e
+# End-to-end smoke test. Each trusted evaluator owns candidate lifecycle.
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-PYTHON="${PYTHON:-python3}"
-PORT=6399
-
-cleanup() { kill $SERVER_PID 2>/dev/null || true; }
-trap cleanup EXIT
-
-$PYTHON reference/seed_server.py $PORT &
-SERVER_PID=$!
-sleep 0.5
+OUTPUT_JSON="$(mktemp)"
+trap 'rm -f "$OUTPUT_JSON"' EXIT
 
 echo "=== ACCURACY CHECK ==="
-$PYTHON accuracy_checker/checker.py --port $PORT
+uv run python accuracy_checker/checker.py
 
 echo ""
 echo "=== BENCHMARK ==="
-$PYTHON benchmark/benchmark.py --port $PORT --num-keys 500 --duration 2 --repeats 1 --no-warmup
+uv run python benchmark/benchmark.py \
+  --num-keys 500 \
+  --duration 2 \
+  --repeats 1 \
+  --no-warmup \
+  --client-procs 1 \
+  --saturation-probe-client-procs 1 \
+  --max-saturation-gain-pct 100 \
+  --output-json "$OUTPUT_JSON"

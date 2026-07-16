@@ -13,6 +13,9 @@ Do all three before returning. The framework records the structured response bel
 
 {{ objective }}
 {% endif %}
+{% if modality %}
+{% include "_modality/" ~ modality ~ "/single_agent.j2" ignore missing %}
+{% endif %}
 
 {% if runtime_notes %}
 ## Runtime environment

@@ -11,7 +11,17 @@ timeout_seconds = 120
 # --client-procs drives the server from several independent YCSB JVMs so the run
 # reaches server saturation instead of a single-client CPU ceiling (a fast server
 # saturates one client long before itself). Tune upward on many-core hosts.
-command = ["uv", "run", "python", "benchmark/benchmark.py", "--client-procs", "4"]
+# The 10k throughput floor is a conservative collapse guard for the supported
+# evaluator class; recalibrate it before changing evaluator hardware.
+command = [
+  "uv", "run", "python", "benchmark/benchmark.py",
+  "--client-procs", "4",
+  "--min-throughput-ops-per-sec", "10000",
+  "--max-read-p99-ms", "1.0",
+  "--max-update-p99-ms", "1.0",
+  "--saturation-probe-client-procs", "8",
+  "--max-saturation-gain-pct", "10.0",
+]
 timeout_seconds = 300
 
 [benchmark.result]
