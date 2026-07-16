@@ -1,0 +1,15 @@
+## Modality: KV store (Redis RESP2 compatible)
+
+Read `CANDIDATE_CONTRACT.md` first. Implement a real, shared, binary-safe RESP2
+store launched by `./run.sh <port>`; this is not HTTP and has no `/health`
+endpoint.
+
+Run `{{ accuracy_command }}` before declaring PASS. It owns candidate startup
+and checks command semantics, raw framing, pipelines, wrong types, and
+concurrency. Then run `{{ benchmark_command }}` with its JSON output option.
+The framework accepts only a valid `ops_per_cpu_sec` score after the benchmark's
+throughput, READ/UPDATE p99, CPU-accounting, and saturation gates pass.
+
+Reject canned replies and fixed-sequence implementations: novel keys and values
+must round-trip, overwrites must be visible across connections, and every worker
+must observe one shared store.

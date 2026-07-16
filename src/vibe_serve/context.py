@@ -299,6 +299,7 @@ class _RunContext:
                     input_dir,
                     self.workspace,
                     extra_excludes=self.environment_patch.copy_excludes,
+                    respect_source_gitignore=True,
                     reject_collisions=True,
                 )
             else:
@@ -306,6 +307,7 @@ class _RunContext:
                     input_dir,
                     self.workspace,
                     extra_excludes=self.environment_patch.copy_excludes,
+                    respect_source_gitignore=True,
                 )
 
             if self.evaluator_path is not None:
@@ -646,6 +648,14 @@ class _RunContext:
     def _source_gitignored_paths(src: Path) -> frozenset[tuple[str, ...]]:
         """Return untracked paths ignored by Git below ``src``."""
 
+        repository = subprocess.run(
+            ["git", "-C", str(src), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            check=False,
+        )
+        if repository.returncode != 0:
+            return frozenset()
+
         result = subprocess.run(
             [
                 "git",
@@ -750,10 +760,12 @@ class _RunContext:
 
     _TRUSTED_INPUT_PATHS: tuple[str, ...] = (
         "OBJECTIVE.md",
+        "CANDIDATE_CONTRACT.md",
         "vibeserve.input.toml",
         "reference",
         "accuracy_checker",
         "benchmark",
+        "evaluator_support",
         "_input_libs",
         "_evaluator",
     )
