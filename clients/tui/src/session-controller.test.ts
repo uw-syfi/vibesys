@@ -14,9 +14,9 @@ describe('session controller', () => {
 
     await controller.submit('/help');
 
-    expect(controller.state.view).toBe('help');
-    expect(controller.state.detailContent).toContain('/history');
-    expect(controller.state.detailContent).toContain('Planned');
+    expect(controller.state.overlay?.kind).toBe('help');
+    expect(controller.state.overlay?.content).toContain('/history');
+    expect(controller.state.overlay?.content).toContain('Planned');
     expect(transport.requests).toEqual([]);
   });
 
@@ -42,7 +42,7 @@ describe('session controller', () => {
     transport.disconnect(new Error('closed'));
 
     expect(controller.state.status).toBe('completed');
-    expect(controller.state.view).toBe('live');
+    expect(controller.state.overlay).toBeNull();
   });
 
   it('summarizes completed and running round durations', () => {
@@ -61,7 +61,11 @@ describe('session controller', () => {
     ];
 
     expect(renderRoundHistory(events, new Date('2026-01-01T00:03:42Z'))).toBe(
-      ['Rounds', 'Round 1 · completed · 2m 5s', 'Round 2 · running · 42s'].join('\n'),
+      [
+        'Rounds',
+        'Round 1 · completed · 2m 5s · no agent phases yet',
+        'Round 2 · running · 42s · no agent phases yet',
+      ].join('\n'),
     );
   });
 });

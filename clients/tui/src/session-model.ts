@@ -1,15 +1,32 @@
 import type {RunEvent, RunSnapshot} from './protocol.js';
+import {
+  applyRunMapEvent,
+  roundNumberFromLabel,
+  visiblePhases as visibleRunMapPhases,
+  visibleRoundNumber as visibleRunMapRoundNumber,
+  type AgentPhase,
+  type RoundSummary,
+} from './run-map.js';
 
 export interface SessionState {
   sequence: number;
   status: string;
   agentKind: string | null;
   roundLabel: string | null;
+  outerLoop: string | null;
+  rounds: RoundSummary[];
+  phases: AgentPhase[];
+  selectedRound: number | null;
+  selectedAgentKind: string | null;
   liveContent: string;
   conversation: ConversationEntry[];
-  detailContent: string;
-  view: 'live' | 'detail' | 'help' | 'error';
+  overlay: OverlayPanel | null;
   terminal: boolean;
+}
+
+export interface OverlayPanel {
+  kind: 'detail' | 'help' | 'error';
+  content: string;
 }
 
 export interface ConversationEntry {
@@ -26,6 +43,9 @@ export interface ConversationEntry {
   content: string;
   label?: string;
   tone?: 'normal' | 'success' | 'failure';
+  agentKind?: string;
+  roundLabel?: string;
+  roundNumber?: number;
   turnId?: string;
   invocationId?: string;
   startsTurn?: boolean;
@@ -39,10 +59,14 @@ export function initialSessionState(): SessionState {
     status: 'connecting',
     agentKind: null,
     roundLabel: null,
+    outerLoop: null,
+    rounds: [],
+    phases: [],
+    selectedRound: null,
+    selectedAgentKind: null,
     liveContent: 'Waiting for run events…',
     conversation: [],
-    detailContent: '',
-    view: 'live',
+    overlay: null,
     terminal: false,
   };
 }
@@ -63,13 +87,22 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
   const next = {...state, sequence: Math.max(state.sequence, sequence)};
   if (event.agent_kind) next.agentKind = event.agent_kind;
   if (event.round_label) next.roundLabel = event.round_label;
+  const runMap = applyRunMapEvent(
+    {outerLoop: next.outerLoop, rounds: next.rounds, phases: next.phases},
+    event,
+  );
+  next.outerLoop = runMap.outerLoop;
+  next.rounds = runMap.rounds;
+  next.phases = runMap.phases;
 
   const line = renderEventForTranscript(event);
   if (line !== null) next.liveContent = appendTranscript(next.liveContent, line);
   const entry = eventToConversationEntry(event);
   if (entry !== null) next.conversation = appendConversation(next.conversation, entry);
 
-  if (event.type === 'run_started') next.status = 'running';
+  if (event.type === 'run_started') {
+    next.status = 'running';
+  }
   if (event.type === 'configuration_failed') {
     next.status = 'failed';
     next.terminal = true;
@@ -85,6 +118,54 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
   return next;
 }
 
+export function selectNextAgent(state: SessionState): SessionState {
+  const phases = visiblePhases(state);
+  if (phases.length === 0) return state;
+  const current = state.selectedAgentKind;
+  const index = current === null ? -1 : phases.findIndex(phase => phase.kind === current);
+  const next = phases[(index + 1 + phases.length) % phases.length];
+  return {...state, selectedAgentKind: next?.kind ?? null, overlay: null};
+}
+
+export function selectPreviousAgent(state: SessionState): SessionState {
+  const phases = visiblePhases(state);
+  if (phases.length === 0) return state;
+  const current = state.selectedAgentKind;
+  const index = current === null ? 0 : phases.findIndex(phase => phase.kind === current);
+  const previous = phases[(index - 1 + phases.length) % phases.length];
+  return {...state, selectedAgentKind: previous?.kind ?? null, overlay: null};
+}
+
+export function selectNextRound(state: SessionState): SessionState {
+  if (state.rounds.length === 0) return state;
+  const visible = visibleRoundNumber(state);
+  const index = visible === null ? -1 : state.rounds.findIndex(round => round.number === visible);
+  const next = state.rounds[(index + 1 + state.rounds.length) % state.rounds.length];
+  return {...state, selectedRound: next?.number ?? null, selectedAgentKind: null, overlay: null};
+}
+
+export function selectPreviousRound(state: SessionState): SessionState {
+  if (state.rounds.length === 0) return state;
+  const visible = visibleRoundNumber(state);
+  const index = visible === null ? 0 : state.rounds.findIndex(round => round.number === visible);
+  const previous = state.rounds[(index - 1 + state.rounds.length) % state.rounds.length];
+  return {
+    ...state,
+    selectedRound: previous?.number ?? null,
+    selectedAgentKind: null,
+    overlay: null,
+  };
+}
+
+export function selectRound(state: SessionState, roundNumber: number): SessionState {
+  if (!state.rounds.some(round => round.number === roundNumber)) return state;
+  return {...state, selectedRound: roundNumber, selectedAgentKind: null, overlay: null};
+}
+
+export function clearAgentSelection(state: SessionState): SessionState {
+  return {...state, selectedAgentKind: null, overlay: null};
+}
+
 function formatConfigurationFailure(event: RunEvent): string {
   const data = event.data;
   if (data?.kind !== 'configuration_failed') return event.text || 'Configuration failed.';
@@ -97,6 +178,13 @@ function formatConfigurationFailure(event: RunEvent): string {
 function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
   const data = event.data;
   const id = String(event.sequence ?? `${event.timestamp}-${event.type}`);
+  const agentKind = event.agent_kind ? {agentKind: event.agent_kind} : {};
+  const roundLabel = event.round_label ? {roundLabel: event.round_label} : {};
+  const roundNumber = roundNumberFromLabel(event.round_label);
+  const roundFields = {
+    ...roundLabel,
+    ...(roundNumber === null ? {} : {roundNumber}),
+  };
   if (data?.kind === 'configuration_failed') {
     return {
       id,
@@ -123,6 +211,8 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
       kind,
       content: data.content,
       label: labelFor(event, data.channel),
+      ...agentKind,
+      ...roundFields,
       turnId: invocationId ?? id,
       ...(invocationId === undefined ? {} : {invocationId}),
       startsTurn:
@@ -138,10 +228,19 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
       kind: 'subprocess',
       content: data.content,
       label: `${data.process_kind} · ${data.stream}`,
+      ...agentKind,
+      ...roundFields,
     };
   }
   if (event.type === 'phase_started') {
-    return {id, kind: 'status', content: 'started', label: labelFor(event, 'phase')};
+    return {
+      id,
+      kind: 'status',
+      content: 'started',
+      label: labelFor(event, 'phase'),
+      ...agentKind,
+      ...roundFields,
+    };
   }
   if (data?.kind === 'judge_result') {
     return {
@@ -150,6 +249,8 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
       content: data.feedback || `Judge returned ${data.verdict}.`,
       label: `Judge · ${data.verdict.toUpperCase()}`,
       tone: data.verdict === 'pass' ? 'success' : 'failure',
+      ...agentKind,
+      ...roundFields,
     };
   }
   if (data?.kind === 'benchmark_result') {
@@ -159,6 +260,8 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
       content: `${data.metric}: ${data.value} ${data.unit}`,
       label: 'Benchmark',
       tone: 'success',
+      ...agentKind,
+      ...roundFields,
     };
   }
   if (data?.kind === 'round_finished') {
@@ -168,6 +271,8 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
       content: `${data.attempts} attempt(s)`,
       label: `${event.round_label ?? 'Round'} · ${data.judge_verdict.toUpperCase()}`,
       tone: data.judge_verdict === 'pass' ? 'success' : 'failure',
+      ...agentKind,
+      ...roundFields,
     };
   }
   if (event.type === 'run_failed' || event.type === 'run_interrupted') {
@@ -177,6 +282,8 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
       content: event.text || 'Run interrupted.',
       label: 'Run failed',
       tone: 'failure',
+      ...agentKind,
+      ...roundFields,
     };
   }
   return null;
@@ -222,19 +329,38 @@ function appendConversation(
 }
 
 export function showLive(state: SessionState): SessionState {
-  return {...state, view: 'live'};
+  return {...state, overlay: null, selectedRound: null, selectedAgentKind: null};
 }
 
 export function showDetail(
   state: SessionState,
-  detailContent: string,
-  view: SessionState['view'] = 'detail',
+  content: string,
+  kind: OverlayPanel['kind'] = 'detail',
 ): SessionState {
-  return {...state, detailContent, view};
+  return {...state, overlay: {kind, content}};
 }
 
 export function statusText(state: SessionState): string {
   return `${state.status} · ${state.agentKind ?? 'starting'} · ${state.roundLabel ?? 'no round yet'}`;
+}
+
+export function visibleConversation(state: SessionState): ConversationEntry[] {
+  const roundNumber = visibleRoundNumber(state);
+  return state.conversation.filter(entry => {
+    if (roundNumber !== null && entry.roundNumber !== roundNumber) return false;
+    if (state.selectedAgentKind !== null && entry.agentKind !== state.selectedAgentKind) {
+      return false;
+    }
+    return true;
+  });
+}
+
+export function visiblePhases(state: SessionState): AgentPhase[] {
+  return visibleRunMapPhases(state.phases, visibleRoundNumber(state));
+}
+
+export function visibleRoundNumber(state: SessionState): number | null {
+  return visibleRunMapRoundNumber(state.rounds, state.selectedRound);
 }
 
 function renderEventForTranscript(event: RunEvent): string | null {
