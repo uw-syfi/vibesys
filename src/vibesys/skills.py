@@ -179,6 +179,14 @@ def load_sidecar_rules(sidecar_path: Path) -> list[SkillRule]:
     return rules
 
 
+def _is_in_hidden_dir(path: Path, root: Path) -> bool:
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return False
+    return any(part.startswith(".") for part in relative.parts[:-1])
+
+
 def discover_skill_dirs(root: Path) -> list[Path]:
     """Return skill directories under *root*.
 
@@ -186,7 +194,7 @@ def discover_skill_dirs(root: Path) -> list[Path]:
     """
     if (root / "SKILL.md").is_file():
         return [root]
-    return sorted({p.parent for p in root.rglob("SKILL.md")})
+    return sorted({p.parent for p in root.rglob("SKILL.md") if not _is_in_hidden_dir(p, root)})
 
 
 def discover_sidecar_rules(root: Path) -> list[SkillRule]:
@@ -194,6 +202,7 @@ def discover_sidecar_rules(root: Path) -> list[SkillRule]:
     return [
         rule
         for sidecar_path in sorted(root.rglob(SIDECAR_NAME))
+        if not _is_in_hidden_dir(sidecar_path, root)
         for rule in load_sidecar_rules(sidecar_path)
     ]
 

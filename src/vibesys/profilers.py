@@ -18,6 +18,7 @@ class ProfilerKind(StrEnum):
     TORCH = "torch"
     NEURON = "neuron"
     MACOS_CPU = "macos_cpu"
+    LINUX_CPU = "linux_cpu"
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,7 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
         ),
         ProfilerDefinition(ProfilerKind.NEURON, frozenset({DomainName.LLM_SERVING})),
         ProfilerDefinition(ProfilerKind.MACOS_CPU, frozenset({DomainName.GENERIC})),
+        ProfilerDefinition(ProfilerKind.LINUX_CPU, frozenset({DomainName.GENERIC})),
     )
 }
 
@@ -129,9 +131,10 @@ def resolve_profiler_kind(
 ) -> ProfilerKind:
     """Resolve ``--profiler`` into the effective profiler kind.
 
-    ``auto`` is intentionally domain-aware. Generic workloads default to no
-    profiler; LLM-serving workloads pick the backend profiler unless the run
-    environment dictates a remote-safe default such as Modal's torch profiler.
+    ``auto`` is intentionally domain-aware. Generic workloads pick a native CPU
+    profiler when the host platform has one; LLM-serving workloads pick the
+    backend profiler unless the run environment dictates a remote-safe default
+    such as Modal's torch profiler.
     """
 
     requested_kind = require_profiler_kind(requested, label="requested profiler")
@@ -148,7 +151,12 @@ def resolve_profiler_kind(
         return requested_kind
 
     if domain_name is DomainName.GENERIC:
-        return ProfilerKind.MACOS_CPU if platform.system() == "Darwin" else ProfilerKind.NONE
+        system = platform.system()
+        if system == "Darwin":
+            return ProfilerKind.MACOS_CPU
+        if system == "Linux":
+            return ProfilerKind.LINUX_CPU
+        return ProfilerKind.NONE
 
     if allowed == frozenset({ProfilerKind.NONE}):
         return ProfilerKind.NONE

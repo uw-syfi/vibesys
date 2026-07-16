@@ -145,6 +145,17 @@ def test_duplicate_skill_dirs_are_deduped(tmp_path):
     assert [Path(s).name for s in skills] == ["portable"]
 
 
+def test_discovery_ignores_hidden_skill_directories(tmp_path):
+    root = tmp_path / "skills"
+    visible = _write_skill(root, "portable")
+    hidden = root / ".claude" / "skills" / "foreign"
+    hidden.mkdir(parents=True)
+    hidden.joinpath("SKILL.md").write_text("# upstream skill without frontmatter\n")
+
+    assert discover_skill_dirs(root) == [visible]
+    assert resolve_skill_source_dirs([root], backend=ComputeBackend.CUDA) == [str(visible)]
+
+
 @pytest.mark.parametrize(
     ("content", "message"),
     [

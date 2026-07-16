@@ -59,7 +59,12 @@ def _expected_resolved(
             raise ValueError
         return requested
     if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
-        return ProfilerKind.MACOS_CPU if platform.system() == "Darwin" else ProfilerKind.NONE
+        system = platform.system()
+        if system == "Darwin":
+            return ProfilerKind.MACOS_CPU
+        if system == "Linux":
+            return ProfilerKind.LINUX_CPU
+        return ProfilerKind.NONE
     if allowed == frozenset({ProfilerKind.NONE}):
         return ProfilerKind.NONE
     if environment_default_profiler_kind is ProfilerKind.TORCH:
@@ -130,7 +135,13 @@ def test_profiler_resolution_invariants(
     assert resolved is not ProfilerKind.AUTO
     assert resolved in allowed
     if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
-        expected = ProfilerKind.MACOS_CPU if platform.system() == "Darwin" else ProfilerKind.NONE
+        system = platform.system()
+        if system == "Darwin":
+            expected = ProfilerKind.MACOS_CPU
+        elif system == "Linux":
+            expected = ProfilerKind.LINUX_CPU
+        else:
+            expected = ProfilerKind.NONE
         assert resolved is expected
     if requested is not ProfilerKind.AUTO:
         assert resolved is requested

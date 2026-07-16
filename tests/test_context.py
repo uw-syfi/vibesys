@@ -118,6 +118,7 @@ def _write_support_dirs(project_root):
         ProfilerKind.TORCH: "torch_profiler",
         ProfilerKind.NEURON: "neuron_profiler",
         ProfilerKind.MACOS_CPU: "macos_cpu_profiler",
+        ProfilerKind.LINUX_CPU: "linux_cpu_profiler",
     }
     for kind in dirs:
         source_dir = project_root / "resources" / "profilers" / kind.value
@@ -170,7 +171,11 @@ def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
     _write_support_dirs(project_root)
     ref = _write_ref(tmp_path)
 
-    domain = DomainName.GENERIC if selected is ProfilerKind.MACOS_CPU else DomainName.LLM_SERVING
+    domain = (
+        DomainName.GENERIC
+        if selected in {ProfilerKind.MACOS_CPU, ProfilerKind.LINUX_CPU}
+        else DomainName.LLM_SERVING
+    )
     with (
         patch("vibesys.context.PROJECT_ROOT", project_root),
         patch("vibesys.context._build_model", return_value="mock-model"),
@@ -193,12 +198,14 @@ def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
             ProfilerKind.TORCH: selected is ProfilerKind.TORCH,
             ProfilerKind.NEURON: selected is ProfilerKind.NEURON,
             ProfilerKind.MACOS_CPU: selected is ProfilerKind.MACOS_CPU,
+            ProfilerKind.LINUX_CPU: selected is ProfilerKind.LINUX_CPU,
         }
         assert ctx.profiler_kind is selected
         assert (ctx.workspace / "nsys_profiler").exists() is expected[ProfilerKind.NSYS]
         assert (ctx.workspace / "torch_profiler").exists() is expected[ProfilerKind.TORCH]
         assert (ctx.workspace / "neuron_profiler").exists() is expected[ProfilerKind.NEURON]
         assert (ctx.workspace / "macos_cpu_profiler").exists() is expected[ProfilerKind.MACOS_CPU]
+        assert (ctx.workspace / "linux_cpu_profiler").exists() is expected[ProfilerKind.LINUX_CPU]
 
 
 def test_run_context_generic_auto_resolves_to_macos_profiler(tmp_path):
@@ -231,11 +238,48 @@ def test_run_context_generic_auto_resolves_to_macos_profiler(tmp_path):
         assert not (ctx.workspace / "torch_profiler").exists()
         assert not (ctx.workspace / "neuron_profiler").exists()
         assert (ctx.workspace / "macos_cpu_profiler").exists()
+        assert not (ctx.workspace / "linux_cpu_profiler").exists()
+
+
+def test_run_context_generic_auto_resolves_to_linux_profiler(tmp_path):
+    project_root = tmp_path / "project"
+    support_paths = _write_support_dirs(project_root)
+    ref = _write_ref(tmp_path)
+
+    with (
+        patch("vibesys.context.PROJECT_ROOT", project_root),
+        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
+        patch("vibesys.context.backends.get", return_value=_FakeBackend(ProfilerKind.NSYS)),
+        patch("vibesys.profilers.platform.system", return_value="Linux"),
+        _RunContext(
+            config={"model": {"name": "claude-sonnet-4-6"}},
+            exp_name="generic-auto-linux",
+            input_path=str(ref.parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
+            profiler_kind=ProfilerKind.AUTO,
+            profiler_domain=DomainName.GENERIC,
+            skills_dirs=[],
+            run_environment=RunEnvironmentSpec("local"),
+            environment_hooks=NoopEnvironmentHooks(),
+        ) as ctx,
+    ):
+        assert ctx.profiler_kind is ProfilerKind.LINUX_CPU
+        assert ctx.profiler_support_path == support_paths[ProfilerKind.LINUX_CPU]
+        assert not (ctx.workspace / "nsys_profiler").exists()
+        assert not (ctx.workspace / "torch_profiler").exists()
+        assert not (ctx.workspace / "neuron_profiler").exists()
+        assert not (ctx.workspace / "macos_cpu_profiler").exists()
+        assert (ctx.workspace / "linux_cpu_profiler").exists()
 
 
 @pytest.mark.parametrize(
     "profiler_kind",
-    sorted(ACTIVE_PROFILER_KINDS - {ProfilerKind.MACOS_CPU}, key=lambda kind: kind.value),
+    sorted(
+        ACTIVE_PROFILER_KINDS - {ProfilerKind.MACOS_CPU, ProfilerKind.LINUX_CPU},
+        key=lambda kind: kind.value,
+    ),
 )
 def test_run_context_rejects_generic_explicit_active_profilers(tmp_path, profiler_kind):
     ref = _write_ref(tmp_path)
