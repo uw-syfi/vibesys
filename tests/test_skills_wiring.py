@@ -11,6 +11,7 @@ from vibesys.cli import load_config_and_skills
 from vibesys.constants import PROJECT_ROOT, ComputeBackend
 from vibesys.skills import (
     SkillMetadataError,
+    _is_in_hidden_dir,
     discover_sidecar_rules,
     discover_skill_dirs,
     load_sidecar_rules,
@@ -154,6 +155,10 @@ def test_discovery_ignores_hidden_skill_directories(tmp_path):
 
     assert discover_skill_dirs(root) == [visible]
     assert resolve_skill_source_dirs([root], backend=ComputeBackend.CUDA) == [str(visible)]
+
+
+def test_hidden_dir_check_treats_external_paths_as_visible(tmp_path):
+    assert not _is_in_hidden_dir(tmp_path / "other" / ".hidden" / "SKILL.md", tmp_path / "skills")
 
 
 @pytest.mark.parametrize(
