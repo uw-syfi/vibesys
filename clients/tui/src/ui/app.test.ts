@@ -50,11 +50,17 @@ describe('OpenTUI presentation', () => {
 
   it('renders quiet round labels without status text or symbols', async () => {
     const testRenderer = await createTestRenderer({width: 100, height: 18});
+    const activeStartedAt = new Date(Date.now() - 65_000).toISOString();
     const controller = new FakeController({
       ...initialSessionState(),
       rounds: [
         {number: 1, status: 'completed'},
-        {number: 2, status: 'active'},
+        {
+          number: 2,
+          status: 'active',
+          startedAt: activeStartedAt,
+          activeAgentStarts: {'judge:judge-1': activeStartedAt},
+        },
         {number: 3, status: 'failed'},
       ],
       conversation: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
@@ -66,6 +72,7 @@ describe('OpenTUI presentation', () => {
 
     expect(frame).toContain('r1');
     expect(frame).toContain('r2');
+    expect(frame).toMatch(/r2\s+1m\s+\d+s/);
     expect(frame).toContain('r3');
     expect(frame).not.toMatch(/[◐◓◑◒]/);
     expect(frame).not.toContain('done');

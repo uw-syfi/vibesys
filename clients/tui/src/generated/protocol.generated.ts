@@ -1,7 +1,14 @@
 /* Generated from the Python protocol models. Do not edit. */
 
 export type Request =
-  PauseCommand | ResumeCommand | SnapshotQuery | ChatQuery | HistoryQuery | EventsQuery | SubscribeRequest;
+  | PauseCommand
+  | ResumeCommand
+  | SnapshotQuery
+  | ChatQuery
+  | HistoryQuery
+  | PerformanceQuery
+  | EventsQuery
+  | SubscribeRequest;
 export type ProtocolVersion = 1;
 export type RequestId = string;
 export type Timestamp = string;
@@ -27,17 +34,21 @@ export type Type4 = "query.history";
 export type ProtocolVersion5 = 1;
 export type RequestId5 = string;
 export type Timestamp5 = string;
-export type Type5 = "query.events";
-export type AfterSequence = number;
-export type TimeoutMs = number;
+export type Type5 = "query.performance";
 export type ProtocolVersion6 = 1;
 export type RequestId6 = string;
 export type Timestamp6 = string;
-export type Type6 = "subscribe";
-export type AfterSequence1 = number;
+export type Type6 = "query.events";
+export type AfterSequence = number;
+export type TimeoutMs = number;
 export type ProtocolVersion7 = 1;
 export type RequestId7 = string;
 export type Timestamp7 = string;
+export type Type7 = "subscribe";
+export type AfterSequence1 = number;
+export type ProtocolVersion8 = 1;
+export type RequestId8 = string;
+export type Timestamp8 = string;
 export type Ok = boolean;
 export type Error = string | null;
 export type Action = "pause" | "resume";
@@ -45,16 +56,16 @@ export type Status = "pending" | "consumed";
 export type Question = string;
 export type Answer = string;
 export type Effect = "none";
-export type ProtocolVersion8 = 1;
+export type ProtocolVersion9 = 1;
 export type RunId = string;
 export type Sequence = number;
 export type Status1 = string;
 export type AgentKind = string | null;
 export type RoundLabel = string | null;
-export type ProtocolVersion9 = 1;
+export type ProtocolVersion10 = 1;
 export type Sequence1 = number;
 export type RunId1 = string;
-export type Timestamp8 = string;
+export type Timestamp9 = string;
 export type EventType =
   | "server_started"
   | "server_ready"
@@ -150,16 +161,22 @@ export type JudgeVerdict = "pass" | "fail";
 export type PerfMetric = number | null;
 export type PerfUnit = string | null;
 export type Events = RunEvent[];
+export type Round = number;
+export type PerfMetric1 = number;
+export type PerfUnit1 = string;
+export type Passed = boolean;
+export type ProfileSkipped = boolean;
+export type Performance = PerformanceRound[];
 export type ServerMessage = SubscribedMessage | EventMessage | EventBatchMessage | ProtocolErrorMessage;
-export type Type7 = "subscribed";
-export type RequestId8 = string;
+export type Type8 = "subscribed";
+export type RequestId9 = string;
 export type RunId2 = string;
 export type LatestSequence = number;
-export type Type8 = "event";
-export type Type9 = "event_batch";
+export type Type9 = "event";
+export type Type10 = "event_batch";
 export type Events1 = RunEvent[];
-export type Type10 = "protocol_error";
-export type RequestId9 = string | null;
+export type Type11 = "protocol_error";
+export type RequestId10 = string | null;
 export type Code1 = string;
 export type Message1 = string;
 
@@ -203,31 +220,38 @@ export interface HistoryQuery {
   timestamp?: Timestamp4;
   type?: Type4;
 }
-export interface EventsQuery {
+export interface PerformanceQuery {
   protocol_version?: ProtocolVersion5;
   request_id?: RequestId5;
   timestamp?: Timestamp5;
   type?: Type5;
-  after_sequence?: AfterSequence;
-  timeout_ms?: TimeoutMs;
 }
-export interface SubscribeRequest {
+export interface EventsQuery {
   protocol_version?: ProtocolVersion6;
   request_id?: RequestId6;
   timestamp?: Timestamp6;
   type?: Type6;
+  after_sequence?: AfterSequence;
+  timeout_ms?: TimeoutMs;
+}
+export interface SubscribeRequest {
+  protocol_version?: ProtocolVersion7;
+  request_id?: RequestId7;
+  timestamp?: Timestamp7;
+  type?: Type7;
   after_sequence?: AfterSequence1;
 }
 export interface Response {
-  protocol_version?: ProtocolVersion7;
-  request_id: RequestId7;
-  timestamp?: Timestamp7;
+  protocol_version?: ProtocolVersion8;
+  request_id: RequestId8;
+  timestamp?: Timestamp8;
   ok?: Ok;
   error?: Error;
   ack?: CommandAck | null;
   chat?: ChatResult | null;
   snapshot?: RunSnapshot | null;
   events?: Events;
+  performance?: Performance;
 }
 export interface CommandAck {
   action: Action;
@@ -239,7 +263,7 @@ export interface ChatResult {
   effect?: Effect;
 }
 export interface RunSnapshot {
-  protocol_version?: ProtocolVersion8;
+  protocol_version?: ProtocolVersion9;
   run_id: RunId;
   sequence: Sequence;
   status: Status1;
@@ -250,10 +274,10 @@ export interface RunSnapshot {
  * One reproducible human, control, or invocation event.
  */
 export interface RunEvent {
-  protocol_version?: ProtocolVersion9;
+  protocol_version?: ProtocolVersion10;
   sequence?: Sequence1;
   run_id?: RunId1;
-  timestamp: Timestamp8;
+  timestamp: Timestamp9;
   type: EventType;
   text?: Text1;
   status?: EventStatus | null;
@@ -358,23 +382,30 @@ export interface RoundFinishedData {
   perf_unit?: PerfUnit;
   [k: string]: unknown;
 }
+export interface PerformanceRound {
+  round: Round;
+  perf_metric: PerfMetric1;
+  perf_unit: PerfUnit1;
+  passed: Passed;
+  profile_skipped?: ProfileSkipped;
+}
 export interface SubscribedMessage {
-  type?: Type7;
-  request_id: RequestId8;
+  type?: Type8;
+  request_id: RequestId9;
   run_id: RunId2;
   latest_sequence: LatestSequence;
 }
 export interface EventMessage {
-  type?: Type8;
+  type?: Type9;
   event: RunEvent;
 }
 export interface EventBatchMessage {
-  type?: Type9;
+  type?: Type10;
   events: Events1;
 }
 export interface ProtocolErrorMessage {
-  type?: Type10;
-  request_id?: RequestId9;
+  type?: Type11;
+  request_id?: RequestId10;
   code: Code1;
   message: Message1;
 }

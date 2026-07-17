@@ -1,9 +1,16 @@
 import type {RunEvent} from './protocol.js';
+import {
+  activeTimingElapsedMs,
+  closeActiveAgentTimings,
+  finishAgentTiming,
+  type RoundTimingState,
+  startAgentTiming,
+} from './round-timing.js';
 
 export type AgentPhaseStatus = 'pending' | 'active' | 'completed' | 'failed';
 export type RoundStatus = 'active' | 'completed' | 'failed';
 
-export interface RoundSummary {
+export interface RoundSummary extends RoundTimingState {
   number: number;
   status: RoundStatus;
   startedAt?: string;
@@ -84,19 +91,22 @@ function applyPhaseEvent(state: RunMapState, event: RunEvent): AgentPhase[] {
 function applyRoundEvent(rounds: RoundSummary[], event: RunEvent): RoundSummary[] {
   const number = roundNumberFromLabel(event.round_label);
   if (number === null) return rounds;
+  const existing = rounds.find(round => round.number === number);
   const status =
     event.type === 'round_finished'
       ? event.status === 'failed'
         ? 'failed'
         : 'completed'
       : 'active';
-  return upsertRound(rounds, {
+  const patch: RoundSummary = {
     number,
     status,
     ...(event.type === 'round_finished'
       ? {finishedAt: event.timestamp}
       : {startedAt: event.timestamp}),
-  });
+  };
+  const round = existing ? mergeRound(existing, patch) : patch;
+  return replaceRound(rounds, updateRoundAgentElapsed(round, event));
 }
 
 function seedExpectedPhases(
@@ -147,21 +157,49 @@ function upsertPhase(phases: AgentPhase[], patch: AgentPhase): AgentPhase[] {
   );
 }
 
-function upsertRound(rounds: RoundSummary[], patch: RoundSummary): RoundSummary[] {
-  const existing = rounds.findIndex(round => round.number === patch.number);
-  if (existing === -1) return [...rounds, patch].sort((a, b) => a.number - b.number);
-  return rounds.map((round, index) =>
-    index === existing
-      ? {
-          ...round,
-          ...patch,
-          ...((patch.startedAt ?? round.startedAt)
-            ? {startedAt: patch.startedAt ?? round.startedAt}
-            : {}),
-          ...((patch.finishedAt ?? round.finishedAt)
-            ? {finishedAt: patch.finishedAt ?? round.finishedAt}
-            : {}),
-        }
-      : round,
-  );
+function replaceRound(rounds: RoundSummary[], round: RoundSummary): RoundSummary[] {
+  const existing = rounds.findIndex(item => item.number === round.number);
+  if (existing === -1) return [...rounds, round].sort((a, b) => a.number - b.number);
+  return rounds.map((item, index) => (index === existing ? round : item));
+}
+
+function mergeRound(round: RoundSummary, patch: RoundSummary): RoundSummary {
+  const startedAt = earliestTimestamp(round.startedAt, patch.startedAt);
+  return {
+    ...round,
+    ...patch,
+    ...(startedAt ? {startedAt} : {}),
+    ...((patch.finishedAt ?? round.finishedAt)
+      ? {finishedAt: patch.finishedAt ?? round.finishedAt}
+      : {}),
+    ...((patch.agentIntervals ?? round.agentIntervals)
+      ? {agentIntervals: patch.agentIntervals ?? round.agentIntervals}
+      : {}),
+    ...((patch.activeAgentStarts ?? round.activeAgentStarts)
+      ? {activeAgentStarts: patch.activeAgentStarts ?? round.activeAgentStarts}
+      : {}),
+  };
+}
+
+function earliestTimestamp(
+  left: string | undefined,
+  right: string | undefined,
+): string | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return new Date(right).getTime() < new Date(left).getTime() ? right : left;
+}
+
+function updateRoundAgentElapsed(round: RoundSummary, event: RunEvent): RoundSummary {
+  if (event.type !== 'phase_started' && event.type !== 'phase_finished') {
+    if (event.type !== 'round_finished') return round;
+    return closeActiveAgentTimings(round, event.timestamp);
+  }
+  return event.type === 'phase_started'
+    ? startAgentTiming(round, event)
+    : finishAgentTiming(round, event);
+}
+
+export function roundAgentElapsedMs(round: RoundSummary, now = new Date()): number {
+  return activeTimingElapsedMs(round, now);
 }

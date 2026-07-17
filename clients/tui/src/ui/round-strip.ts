@@ -1,5 +1,6 @@
 import {BoxRenderable, type CliRenderer, TextRenderable} from '@opentui/core';
-import type {RoundSummary} from '../run-map.js';
+import {hasActiveAgentTiming} from '../round-timing.js';
+import {type RoundSummary, roundAgentElapsedMs} from '../run-map.js';
 import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
 import {visibleRoundNumber} from '../session-model.js';
@@ -10,6 +11,12 @@ const DEFAULT_ROUND_COLOR = '#cbd5e1';
 export class RoundStripView {
   readonly output: BoxRenderable;
   #renderedState: SessionState | null = null;
+  #elapsedTimer: ReturnType<typeof setInterval> | null = null;
+  #runningRound: {
+    round: RoundSummary;
+    selected: number | null;
+    text: TextRenderable;
+  } | null = null;
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -53,9 +60,16 @@ export class RoundStripView {
       row.add(this.#renderRound(round, {selected, runningRound}));
     }
     this.output.add(row);
+    this.#syncElapsedTimer();
+  }
+
+  destroy(): void {
+    this.#stopElapsedTimer();
   }
 
   #clear(): void {
+    this.#runningRound = null;
+    this.#stopElapsedTimer();
     for (const child of [...this.output.getChildren()]) {
       this.output.remove(child);
       child.destroyRecursively();
@@ -69,20 +83,49 @@ export class RoundStripView {
     const {selected, runningRound} = viewState;
     const isSelected = round.number === selected;
     const isRunning = round.number === runningRound;
-    return new TextRenderable(this.renderer, {
+    const text = new TextRenderable(this.renderer, {
       content: this.#roundLabel(round, selected),
       fg: isRunning ? ACTIVE_ROUND_COLOR : DEFAULT_ROUND_COLOR,
       ...(isSelected ? {bg: '#0f172a'} : {}),
       onMouseUp: () => this.controller.selectRound(round.number),
     });
+    if (isRunning && hasActiveAgentTiming(round)) this.#runningRound = {round, selected, text};
+    return text;
   }
 
   #roundLabel(round: RoundSummary, selected: number | null): string {
     const isSelected = round.number === selected;
-    return `${isSelected ? '[' : ' '} r${round.number} ${isSelected ? ']' : ' '}`;
+    const elapsed =
+      round.status === 'active' ? ` ${formatElapsed(roundAgentElapsedMs(round))}` : '';
+    return `${isSelected ? '[' : ' '} r${round.number}${elapsed} ${isSelected ? ']' : ' '}`;
+  }
+
+  #syncElapsedTimer(): void {
+    if (this.#runningRound === null || this.#elapsedTimer !== null) return;
+    this.#elapsedTimer = setInterval(() => {
+      if (this.#runningRound === null) return;
+      const {round, selected, text} = this.#runningRound;
+      text.content = this.#roundLabel(round, selected);
+    }, 1000);
+  }
+
+  #stopElapsedTimer(): void {
+    if (this.#elapsedTimer === null) return;
+    clearInterval(this.#elapsedTimer);
+    this.#elapsedTimer = null;
   }
 }
 
 function latestActiveRoundNumber(rounds: RoundSummary[]): number | null {
   return [...rounds].reverse().find(round => round.status === 'active')?.number ?? null;
+}
+
+function formatElapsed(elapsedMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
 }

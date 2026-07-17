@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from vibesys.server.events import EventType, RunEvent
 from vibesys.server.inspector import RunInspector
 from vibesys.server.protocol import (
@@ -11,6 +13,8 @@ from vibesys.server.protocol import (
     EventsQuery,
     HistoryQuery,
     PauseCommand,
+    PerformanceQuery,
+    PerformanceRound,
     ProtocolRequest,
     Response,
     ResumeCommand,
@@ -49,6 +53,9 @@ class SupervisionService:
         if isinstance(request, HistoryQuery):
             self.supervisor.record(EventType.STATUS_QUERY, "/history")
             return Response(request_id=request.request_id, events=self.history_events())
+        if isinstance(request, PerformanceQuery):
+            self.supervisor.record(EventType.STATUS_QUERY, "/perf")
+            return Response(request_id=request.request_id, performance=self.performance_rounds())
         if isinstance(request, SnapshotQuery):
             return Response(request_id=request.request_id, snapshot=self.snapshot())
         if isinstance(request, EventsQuery):
@@ -69,6 +76,30 @@ class SupervisionService:
 
     def history_events(self) -> list[RunEvent]:
         return self.supervisor.read_history_events()
+
+    def performance_rounds(self) -> list[PerformanceRound]:
+        log_dir = self.supervisor.log_dir
+        if log_dir is None:
+            return []
+        rounds_path = log_dir / "rounds.json"
+        if not rounds_path.is_file():
+            return []
+        rounds: list[PerformanceRound] = []
+        for item in json.loads(rounds_path.read_text(encoding="utf-8")):
+            metric = item.get("perf_metric")
+            unit = item.get("perf_unit")
+            if not isinstance(metric, int | float) or not isinstance(unit, str) or not unit:
+                continue
+            rounds.append(
+                PerformanceRound(
+                    round=int(item["round"]),
+                    perf_metric=float(metric),
+                    perf_unit=unit,
+                    passed=bool(item.get("passed", False)),
+                    profile_skipped=bool(item.get("profile_skipped", False)),
+                )
+            )
+        return rounds
 
     def wait_for_events(self, after_sequence: int, timeout: float | None = None) -> list[RunEvent]:
         return self.supervisor.wait_for_events(after_sequence, timeout)
