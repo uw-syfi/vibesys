@@ -1,4 +1,4 @@
-import type {RunEvent} from './protocol.js';
+import type {ProtocolResponse, RunEvent} from './protocol.js';
 import {roundNumberFromLabel} from './run-map.js';
 
 interface PerfPoint {
@@ -11,8 +11,11 @@ interface PerfPoint {
 const PLOT_HEIGHT = 8;
 const PLOT_WIDTH = 48;
 
-export function renderPerformanceCurve(events: RunEvent[] | undefined): string {
-  const points = performancePoints(events);
+export function renderPerformanceCurve(
+  performance: ProtocolResponse['performance'] | undefined,
+  events?: RunEvent[],
+): string {
+  const points = performancePoints(performance, events);
   if (points.length === 0) return 'No performance data yet.';
 
   const metric = latestMetric(points);
@@ -50,8 +53,19 @@ export function renderPerformanceCurve(events: RunEvent[] | undefined): string {
   return lines.join('\n');
 }
 
-function performancePoints(events: RunEvent[] | undefined): PerfPoint[] {
+function performancePoints(
+  performance: ProtocolResponse['performance'] | undefined,
+  events: RunEvent[] | undefined,
+): PerfPoint[] {
   const byRound = new Map<number, PerfPoint>();
+  for (const round of performance ?? []) {
+    byRound.set(round.round, {
+      round: round.round,
+      metric: round.perf_unit,
+      value: round.perf_metric,
+      unit: round.perf_unit,
+    });
+  }
   for (const event of events ?? []) {
     const round = roundNumberFromLabel(event.round_label);
     if (round === null) continue;

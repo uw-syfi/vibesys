@@ -5,7 +5,7 @@ describe('parseInput', () => {
   it('only accepts the intentionally small command surface', () => {
     expect(parseInput('/history').request?.type).toBe('query.history');
     expect(parseInput('/perf')).toMatchObject({
-      request: {type: 'query.history'},
+      request: {type: 'query.performance'},
       responseView: 'perf',
     });
     expect(parseInput('what is happening?').error).toContain('Unknown command');

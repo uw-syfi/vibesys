@@ -513,6 +513,68 @@
       "title": "PauseCommand",
       "type": "object"
     },
+    "PerformanceQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "query.performance",
+          "default": "query.performance",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "PerformanceQuery",
+      "type": "object"
+    },
+    "PerformanceRound": {
+      "additionalProperties": false,
+      "properties": {
+        "round": {
+          "title": "Round",
+          "type": "integer"
+        },
+        "perf_metric": {
+          "title": "Perf Metric",
+          "type": "number"
+        },
+        "perf_unit": {
+          "title": "Perf Unit",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "profile_skipped": {
+          "default": false,
+          "title": "Profile Skipped",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "round",
+        "perf_metric",
+        "perf_unit",
+        "passed"
+      ],
+      "title": "PerformanceRound",
+      "type": "object"
+    },
     "PhaseData": {
       "properties": {
         "kind": {
@@ -654,6 +716,13 @@
             "$ref": "#/$defs/RunEvent"
           },
           "title": "Events",
+          "type": "array"
+        },
+        "performance": {
+          "items": {
+            "$ref": "#/$defs/PerformanceRound"
+          },
+          "title": "Performance",
           "type": "array"
         }
       },
@@ -1178,6 +1247,7 @@
           "query.chat": "#/$defs/ChatQuery",
           "query.events": "#/$defs/EventsQuery",
           "query.history": "#/$defs/HistoryQuery",
+          "query.performance": "#/$defs/PerformanceQuery",
           "query.snapshot": "#/$defs/SnapshotQuery",
           "subscribe": "#/$defs/SubscribeRequest"
         },
@@ -1198,6 +1268,9 @@
         },
         {
           "$ref": "#/$defs/HistoryQuery"
+        },
+        {
+          "$ref": "#/$defs/PerformanceQuery"
         },
         {
           "$ref": "#/$defs/EventsQuery"

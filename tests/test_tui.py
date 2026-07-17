@@ -23,6 +23,7 @@ from vibesys.server.protocol import (
     ChatQuery,
     EventsQuery,
     HistoryQuery,
+    PerformanceQuery,
     SnapshotQuery,
     SubscribeRequest,
 )
@@ -154,6 +155,46 @@ def test_history_query_reads_prior_and_current_session_events(tmp_path):
         "round-2",
     ]
     assert {event.round_label for event in supervisor.read_events()} == {None, "round-2"}
+
+
+def test_performance_query_reads_rounds_json(tmp_path):
+    logs = tmp_path / "run" / "logs"
+    logs.mkdir(parents=True)
+    (logs / "rounds.json").write_text(
+        json.dumps(
+            [
+                {
+                    "round": 1,
+                    "perf_metric": 1200.0,
+                    "perf_unit": "total_ops_per_sec",
+                    "passed": True,
+                    "profile_skipped": False,
+                },
+                {
+                    "round": 2,
+                    "perf_metric": None,
+                    "perf_unit": None,
+                    "passed": False,
+                    "profile_skipped": True,
+                },
+                {
+                    "round": 3,
+                    "perf_metric": 2400.0,
+                    "perf_unit": "total_ops_per_sec",
+                    "passed": True,
+                    "profile_skipped": False,
+                },
+            ]
+        )
+    )
+    supervisor = RunSupervisor()
+    supervisor.attach(logs)
+
+    response = SupervisionService(supervisor).execute(PerformanceQuery())
+
+    assert [round.round for round in response.performance] == [1, 3]
+    assert response.performance[1].perf_metric == 2400.0
+    assert response.performance[1].perf_unit == "total_ops_per_sec"
 
 
 def test_chat_reports_structured_failed_invocation(tmp_path):

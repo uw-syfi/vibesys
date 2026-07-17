@@ -24,6 +24,6 @@ export const HELP_TEXT = [
 export function parseInput(text: string): ParsedInput {
   if (text === '/help') return {localView: 'help'};
   if (text === '/history') return {request: {type: 'query.history'}, responseView: 'history'};
-  if (text === '/perf') return {request: {type: 'query.history'}, responseView: 'perf'};
+  if (text === '/perf') return {request: {type: 'query.performance'}, responseView: 'perf'};
   return {error: `Unknown command: ${text || '(empty)'}. Use /help.`};
 }
