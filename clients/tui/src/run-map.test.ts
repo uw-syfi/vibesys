@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import type {RunEvent} from './protocol.js';
-import {applyRunMapEvent, roundAgentElapsedMs, type RunMapState} from './run-map.js';
+import {applyRunMapEvent, type RunMapState, roundAgentElapsedMs} from './run-map.js';
 
 describe('run map round timing', () => {
   it('stops counting when an agent phase finishes', () => {
