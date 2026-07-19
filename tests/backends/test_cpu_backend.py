@@ -8,10 +8,10 @@ import pytest
 from deepagents.backends import LocalShellBackend
 
 from vibesys import backends
-from vibesys.__main__ import _add_common_args
 from vibesys.backends import SandboxKind
 from vibesys.backends.local import LocalBackend
 from vibesys.constants import ComputeBackend
+from vibesys.main import _add_common_args
 from vibesys.profilers import ProfilerKind
 from vibesys.sandbox.docker_sandbox import DockerSandbox
 

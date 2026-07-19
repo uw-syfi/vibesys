@@ -9,11 +9,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibesys.__main__ import main
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND
 from vibesys.context import _RunContext
 from vibesys.domains.environment import NoopEnvironmentHooks
 from vibesys.input_manifest import load_input_bundle
+from vibesys.main import main
 from vibesys.profilers import ProfilerKind
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
 
@@ -420,7 +420,7 @@ def test_cli_forwards_workspace_sources_to_every_outer_loop(tmp_path, outer_loop
         patch("sys.argv", argv),
         patch("vibesys.input_manifest.PROJECT_ROOT", project_root),
         patch(
-            "vibesys.__main__.load_config_and_skills",
+            "vibesys.main.load_config_and_skills",
             return_value=(
                 {"model": {"name": "claude-sonnet-4-6"}},
                 None,
