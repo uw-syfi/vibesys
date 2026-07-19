@@ -1,0 +1,18 @@
+# Multi-objective (Pareto-frontier) configuration for the evolve loop.
+#
+# Presence of this file next to OBJECTIVE.md switches the run into Pareto mode:
+# candidates are selected by non-domination across the axes below instead of a
+# single scalar. Each `name` MUST exactly match a top-level field emitted by
+# benchmark/benchmark.py --output-json (the profiler reads them verbatim into
+# ProfilerSummary.metrics). A missing/misnamed field drops the candidate from
+# the frontier and silently degrades the run to scalar softmax.
+
+# Primary axis — also drives perf_metric / best() / the scalar fallback.
+[[objective]]
+name = "aggregate_throughput"   # output tok/s, from benchmark JSON
+direction = "max"
+
+# Latency axis — p99 end-to-end request latency under the fixed saturating load.
+[[objective]]
+name = "p99_latency_ms"         # milliseconds, from benchmark JSON
+direction = "min"
