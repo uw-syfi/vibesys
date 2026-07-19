@@ -169,6 +169,30 @@ class TestWrap:
         assert ws_bind > last_ro
 
 
+class TestSharedAbstraction:
+    """Both OS backends implement the one ``WorkspaceSandbox`` contract."""
+
+    def test_backends_subclass_workspace_sandbox(self):
+        assert issubclass(hostsandbox.HostSandbox, hostsandbox.WorkspaceSandbox)
+        assert issubclass(hostsandbox.SeatbeltSandbox, hostsandbox.WorkspaceSandbox)
+
+    def test_base_is_abstract(self):
+        with pytest.raises(TypeError):
+            hostsandbox.WorkspaceSandbox(workspace=Path("/x"))
+
+    def test_backends_share_fields_and_wrap(self):
+        host = hostsandbox.HostSandbox(
+            workspace=Path("/x"), bwrap_path="/usr/bin/bwrap", read_paths=(Path("/opt"),)
+        )
+        seat = hostsandbox.SeatbeltSandbox(
+            workspace=Path("/x"), sandbox_exec_path="/usr/bin/sandbox-exec"
+        )
+        for sb in (host, seat):
+            assert isinstance(sb, hostsandbox.WorkspaceSandbox)
+            assert sb.workspace == Path("/x")
+            assert sb.wrap(["agent"])[-1] == "agent"
+
+
 class TestInstallRoot:
     """Regression for a real breakage caught by running codex under the sandbox:
     an npm-packaged CLI must be able to reach its sibling platform binary."""

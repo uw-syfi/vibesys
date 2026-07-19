@@ -52,6 +52,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -214,13 +215,31 @@ def _parse_allow(env: dict[str, str]) -> list[Path]:
 
 
 @dataclass(frozen=True)
-class HostSandbox:
-    """A bubblewrap confinement policy for a single run workspace."""
+class WorkspaceSandbox(ABC):
+    """A host confinement policy for a single run workspace.
 
-    bwrap_path: str
+    Both OS backends are built by :func:`build` from the same inputs — the
+    workspace plus the read/write allowlists computed by :func:`_collect_paths`
+    — and expose the same ``wrap(argv) -> argv`` contract consumed at the agent
+    launch chokepoint (:meth:`CLICodingAgent.generate`). Subclasses differ only
+    in the OS mechanism they emit: :class:`HostSandbox` a bubblewrap namespace,
+    :class:`SeatbeltSandbox` a ``sandbox-exec`` profile.
+    """
+
     workspace: Path
     read_paths: tuple[Path, ...] = ()
     write_paths: tuple[Path, ...] = ()
+
+    @abstractmethod
+    def wrap(self, argv: list[str]) -> list[str]:
+        """Return *argv* rewritten to run confined to :attr:`workspace`."""
+
+
+@dataclass(frozen=True)
+class HostSandbox(WorkspaceSandbox):
+    """A bubblewrap confinement policy for a single run workspace."""
+
+    bwrap_path: str = field(kw_only=True)
     system_read_roots: tuple[str, ...] = _SYSTEM_READ_ROOTS
     gpu_device_nodes: tuple[Path, ...] = field(default_factory=tuple)
 
@@ -288,7 +307,7 @@ def _sbpl_string(value: str) -> str:
 
 
 @dataclass(frozen=True)
-class SeatbeltSandbox:
+class SeatbeltSandbox(WorkspaceSandbox):
     """A macOS Seatbelt (``sandbox-exec``) confinement policy for a workspace.
 
     macOS confinement follows the model that Codex's own Seatbelt sandbox uses,
@@ -308,10 +327,7 @@ class SeatbeltSandbox:
     if full read-confinement is required.
     """
 
-    sandbox_exec_path: str
-    workspace: Path
-    read_paths: tuple[Path, ...] = ()
-    write_paths: tuple[Path, ...] = ()
+    sandbox_exec_path: str = field(kw_only=True)
     system_read_roots: tuple[str, ...] = _MACOS_SYSTEM_READ_ROOTS
 
     def blind_roots(self) -> list[Path]:
@@ -385,10 +401,6 @@ class SeatbeltSandbox:
         return [self.sandbox_exec_path, "-p", self.profile(), *argv]
 
 
-AgentSandbox = HostSandbox | SeatbeltSandbox
-"""Either host confinement backend; both implement ``wrap(argv) -> argv``."""
-
-
 def _collect_paths(
     workspace: Path,
     env: dict[str, str],
@@ -428,7 +440,7 @@ def build(
     env: dict[str, str],
     binary_path: str | None = None,
     log: Callable[[str], None] | None = None,
-) -> AgentSandbox | None:
+) -> WorkspaceSandbox | None:
     """Build a host confinement policy for *workspace*, or ``None`` if not enforced.
 
     Dispatches to the Linux (bubblewrap) or macOS (Seatbelt) backend by platform.

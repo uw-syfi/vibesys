@@ -13,7 +13,7 @@ from agentshim.utils import get_interactive_env
 from loguru import logger
 
 from .base import CodingAgent
-from .hostsandbox import AgentSandbox
+from .hostsandbox import WorkspaceSandbox
 
 
 class CLIGenerationSession:
@@ -166,9 +166,9 @@ class CLICodingAgent(CodingAgent):
         self.session_id: str | None = None
         # Host-path filesystem confinement. Left ``None`` here (unconfined,
         # legacy behavior); the CLI runner installs a platform-specific
-        # :data:`AgentSandbox` on the host execution path. Container executors
+        # :class:`WorkspaceSandbox` on the host execution path. Container executors
         # leave it ``None`` because they are already externally sandboxed.
-        self.sandbox: AgentSandbox | None = None
+        self.sandbox: WorkspaceSandbox | None = None
 
     @abstractmethod
     def _get_command(self, prompt: str) -> list[str]:
