@@ -27,6 +27,7 @@ import shutil
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from vibesys.agents.progress import RoundProgress
 from vibesys.config import Config, as_config
@@ -88,7 +89,7 @@ def _save_state(log_dir: Path, state: PlainLoopState) -> None:
     os.replace(tmp, target)
 
 
-def _load_state(log_dir: Path) -> PlainLoopState | None:
+def _load_state(log_dir: Path) -> PlainLoopState | None:  # pyright: ignore[reportUnusedFunction]
     path = log_dir / "state.json"
     if not path.is_file():
         return None
@@ -265,7 +266,7 @@ def _sync_workspace_files(
 # ---------------------------------------------------------------------------
 
 
-def _latest_judge_review(issue: Issue) -> dict | None:
+def _latest_judge_review(issue: Issue) -> dict[str, Any] | None:
     """Return the most recent judge FAIL review on this issue, or ``None``.
 
     Walks ``issue.history`` in reverse looking for a status-transition

@@ -27,6 +27,7 @@ import os
 import re
 import unicodedata
 from pathlib import Path
+from typing import Any
 
 from vs_issue_board import (
     Issue,
@@ -117,7 +118,7 @@ def _render_event_bullet(evt: IssueEvent) -> str:
     return f"- `{evt.timestamp}` **{evt.actor}** {evt.action}{iter_part}{note_part}"
 
 
-def _render_implementer_payload(payload: dict) -> str:
+def _render_implementer_payload(payload: dict[str, Any]) -> str:
     """Render an IssueImplementerResponse payload as a markdown section body."""
     lines: list[str] = []
     summary = payload.get("summary", "").strip()
@@ -137,7 +138,7 @@ def _render_implementer_payload(payload: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _render_judge_payload(payload: dict) -> str:
+def _render_judge_payload(payload: dict[str, Any]) -> str:
     """Render an IssueJudgeResponse payload as a markdown section body."""
     lines: list[str] = []
     verdict = payload.get("verdict", "")

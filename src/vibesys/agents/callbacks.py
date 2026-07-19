@@ -3,12 +3,13 @@ import sys
 import time
 import traceback
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TextIO
 
 from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import BaseMessage
 
 from vibesys.agents.progress import AgentProgress
-from vibesys.constants import _DIM, _GREEN, _RESET, _YELLOW
+from vibesys.constants import _DIM, _GREEN, _RESET, _YELLOW  # pyright: ignore[reportPrivateUsage]
 from vibesys.server.events import AgentOutputChannel
 
 ContextWindowLookup = Callable[[str | None], int | None]
@@ -77,11 +78,11 @@ _STATUS_INDICATORS = {
 class TodoDisplay:
     """Renders a persistent todo list box using ANSI cursor control."""
 
-    def __init__(self, file=None):
+    def __init__(self, file: TextIO | None = None):
         self._file = file or sys.stdout
         self._prev_lines = 0
 
-    def update(self, todos: list[dict]) -> None:
+    def update(self, todos: list[dict[str, Any]]) -> None:
         if not todos:
             return
         # Build box lines
@@ -127,7 +128,7 @@ class AgentLogger(BaseCallbackHandler):
     def __init__(
         self,
         max_result_len: int | None = 500,
-        log_file=None,
+        log_file: TextIO | None = None,
         model_name: str | None = None,
         agent_label: str | None = None,
         progress: AgentProgress | None = None,
@@ -146,7 +147,7 @@ class AgentLogger(BaseCallbackHandler):
         # Most recent usage dict from the cli backend (see ``update_usage``).
         # The deepagents path doesn't populate this — it drives ``_input_tokens``
         # directly via ``on_llm_end``.
-        self._latest_usage: dict | None = None
+        self._latest_usage: dict[str, Any] | None = None
         self._context_window_lookup = context_window_lookup or _default_context_window_lookup
         self._context_window = self._context_window_lookup(model_name)
 
@@ -175,7 +176,9 @@ class AgentLogger(BaseCallbackHandler):
 
     # --- LLM call context (log-file only) ---
 
-    def on_chat_model_start(self, serialized, messages, **kwargs):
+    def on_chat_model_start(
+        self, serialized: dict[str, Any], messages: list[list[BaseMessage]], **kwargs: Any
+    ) -> None:
         if not self._log_file:
             return
         self._call_count += 1
@@ -217,7 +220,7 @@ class AgentLogger(BaseCallbackHandler):
 
     # --- LLM token streaming ---
 
-    def on_llm_new_token(self, token, **kwargs):
+    def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
         if token:
             self._publish(token, "assistant")
             if not self._streaming and self._agent_label:
@@ -225,7 +228,7 @@ class AgentLogger(BaseCallbackHandler):
             self._print(token, end="", flush=True)
             self._streaming = True
 
-    def on_llm_end(self, response, **kwargs):
+    def on_llm_end(self, response: Any, **kwargs: Any) -> None:
         was_streaming = self._streaming
         if self._streaming:
             self._print()
@@ -275,15 +278,22 @@ class AgentLogger(BaseCallbackHandler):
 
     # --- Tool execution ---
 
-    def on_tool_start(self, serialized, input_str, *, inputs=None, **kwargs):
+    def on_tool_start(
+        self,
+        serialized: dict[str, Any],
+        input_str: str,
+        *,
+        inputs: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
         pass  # tool call already logged in on_llm_end
 
-    def on_tool_end(self, output, **kwargs):
+    def on_tool_end(self, output: Any, **kwargs: Any) -> None:
         content = output.content if hasattr(output, "content") else str(output)
         name = getattr(output, "name", None) or "unknown"
         self._print_tool_result(name, content)
 
-    def on_tool_error(self, error, **kwargs):
+    def on_tool_error(self, error: Any, **kwargs: Any) -> None:
         self._print(f"Tool error: {error!r}")
         if isinstance(error, BaseException):
             tb = traceback.format_exception(type(error), error, error.__traceback__)
@@ -313,7 +323,7 @@ class AgentLogger(BaseCallbackHandler):
         }
     )
 
-    def _print_tool_call(self, name: str, args: dict):
+    def _print_tool_call(self, name: str, args: dict[str, Any]):
         self._publish(f"→ {name}({json.dumps(args, default=str)})\n", "tool")
         is_code_tool = name in self._CODE_CHANGE_TOOLS
 
@@ -370,7 +380,7 @@ class AgentLogger(BaseCallbackHandler):
         for line in preview.split("\n"):
             self._print_stdout(f"  {line}")
 
-    def _print(self, *args, **kwargs):
+    def _print(self, *args: Any, **kwargs: Any) -> None:
         """Write to both stdout and log file.
 
         Flushes the log file after each write so operators tailing
@@ -384,11 +394,11 @@ class AgentLogger(BaseCallbackHandler):
             print(*args, file=self._log_file, **kwargs)
             self._log_file.flush()
 
-    def _print_stdout(self, *args, **kwargs):
+    def _print_stdout(self, *args: Any, **kwargs: Any) -> None:
         """Write to stdout only."""
         print(*args, file=self._output, **kwargs)
 
-    def _print_log(self, *args, **kwargs):
+    def _print_log(self, *args: Any, **kwargs: Any) -> None:
         """Write to log file only."""
         if self._log_file:
             print(*args, file=self._log_file, **kwargs)
@@ -433,7 +443,7 @@ class AgentLogger(BaseCallbackHandler):
     def on_usage(self, usage: dict[str, Any]) -> None:
         self.update_usage(usage)
 
-    def update_usage(self, usage: dict | None) -> None:
+    def update_usage(self, usage: dict[str, Any] | None) -> None:
         """Refresh token tracking from a CLI provider's per-turn usage dict.
 
         Mirrors the deepagents path (:meth:`on_llm_end`): we overwrite, not
@@ -464,7 +474,7 @@ class AgentLogger(BaseCallbackHandler):
         self._publish(text, "assistant")
         self._print(f"{self._format_prefix()}{text}")
 
-    def log_tool_call(self, name: str, args: dict) -> None:
+    def log_tool_call(self, name: str, args: dict[str, Any]) -> None:
         """Format a tool invocation the same way the deepagents path does."""
         self._print_tool_call(name, args)
 

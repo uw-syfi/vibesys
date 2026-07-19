@@ -23,9 +23,9 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
-from vibesys.config import Config, _load_config
+from vibesys.config import Config, _load_config  # pyright: ignore[reportPrivateUsage]
 from vibesys.constants import (
     KNOWN_COMPUTE_BACKENDS,
     PROJECT_ROOT,
@@ -39,6 +39,9 @@ from vibesys.sandbox.run_environment import (
     make_run_environment_spec,
 )
 from vibesys.skills import DEFAULT_SKILL_ROOTS, resolve_skill_source_dirs
+
+if TYPE_CHECKING:
+    from vibesys.loops.evolve.population import Objective
 
 _OUTER_LOOPS = ("agent", "plain", "evolve")
 _MODALITIES = (
@@ -624,7 +627,7 @@ def _validate_target_inputs(args: argparse.Namespace) -> None:
         _configuration_error(str(exc), code="invalid_input", stage="input_loading")
 
 
-def _validate_agent(args: argparse.Namespace) -> None:
+def _validate_agent(args: argparse.Namespace) -> None:  # pyright: ignore[reportUnusedFunction]
     if args.modal and args.profiler not in _MODAL_PROFILERS:
         _configuration_error(
             "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
@@ -632,7 +635,7 @@ def _validate_agent(args: argparse.Namespace) -> None:
     _validate_target_inputs(args)
 
 
-def _run_agent(args: argparse.Namespace) -> None:
+def _run_agent(args: argparse.Namespace) -> None:  # pyright: ignore[reportUnusedFunction]
     config, skills, backend = load_config_and_skills(args)
     from vibesys.loops.agent.loop import run_agent_loop
 
@@ -731,7 +734,7 @@ def _parse_cli_objective(spec: str):
     return Objective(name=name, direction=direction)
 
 
-def _load_objectives_toml(input_path: Path) -> list:
+def _load_objectives_toml(input_path: Path) -> list[Objective]:
     """Read ``objectives.toml`` from the input bundle if present."""
     from vibesys.loops.evolve.population import Objective
 
@@ -753,7 +756,7 @@ def _load_objectives_toml(input_path: Path) -> list:
     return objectives
 
 
-def _resolve_objectives(args: argparse.Namespace) -> list:
+def _resolve_objectives(args: argparse.Namespace) -> list[Objective]:
     if args.objective:
         return list(args.objective)
     return _load_objectives_toml(args.input_bundle.root)
@@ -782,7 +785,7 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _validate_evolve(args: argparse.Namespace) -> None:
+def _validate_evolve(args: argparse.Namespace) -> None:  # pyright: ignore[reportUnusedFunction]
     if args.modal and args.profiler not in _MODAL_PROFILERS:
         _configuration_error(
             "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
@@ -798,7 +801,7 @@ def _validate_evolve(args: argparse.Namespace) -> None:
         _configuration_error("--frontier-bias must be in [0, 1].")
 
 
-def _run_evolve(args: argparse.Namespace) -> None:
+def _run_evolve(args: argparse.Namespace) -> None:  # pyright: ignore[reportUnusedFunction]
     config, skills, backend = load_config_and_skills(args)
     from vibesys.loops.evolve.loop import run_evolve_loop
 
@@ -875,7 +878,7 @@ def _build_plain_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _validate_plain(args: argparse.Namespace) -> None:
+def _validate_plain(args: argparse.Namespace) -> None:  # pyright: ignore[reportUnusedFunction]
     if args.modal and args.profiler not in _MODAL_PROFILERS:
         _configuration_error(
             "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
@@ -883,11 +886,11 @@ def _validate_plain(args: argparse.Namespace) -> None:
     _validate_target_inputs(args)
 
 
-def _run_plain(args: argparse.Namespace) -> None:
+def _run_plain(args: argparse.Namespace) -> None:  # pyright: ignore[reportUnusedFunction]
     config, skills, backend = load_config_and_skills(args)
     from vibesys.loops.plain.loop import (
         PlainLoopState,
-        _load_state,
+        _load_state,  # pyright: ignore[reportPrivateUsage]
         run_plain_loop,
     )
 

@@ -67,7 +67,7 @@ _jinja_env = Environment(
 )
 
 
-def _render(name: str, **kwargs) -> str:
+def _render(name: str, **kwargs: object) -> str:
     return _jinja_env.get_template(name).render(**kwargs)
 
 

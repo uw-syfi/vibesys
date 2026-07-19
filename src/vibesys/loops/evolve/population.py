@@ -33,6 +33,7 @@ import math
 import random
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Objective spec + dominance
@@ -126,11 +127,11 @@ class Individual:
     summary: str = ""
     feedback: str = ""
 
-    def to_json(self) -> dict:
+    def to_json(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_json(cls, data: dict) -> Individual:
+    def from_json(cls, data: dict[str, Any]) -> Individual:
         return cls(
             id=int(data["id"]),
             generation=int(data["generation"]),

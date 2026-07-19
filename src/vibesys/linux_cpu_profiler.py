@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 
 class LinuxProfilerTool(StrEnum):
@@ -409,7 +410,7 @@ def _format_summary(
     )
 
 
-def summarize(output_dir: Path) -> dict:
+def summarize(output_dir: Path) -> dict[str, Any]:
     """Read persisted artifacts and return a bounded machine-readable summary."""
 
     metadata_path = output_dir / "metadata.json"

@@ -1,12 +1,15 @@
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentshim.events import AgentEventHandler
 from agentshim.opencode import OpencodeGenerationSession
 
 from .base import MCPServerSpec
 from .cli_agent import CLICodingAgent
+
+if TYPE_CHECKING:
+    from agentshim.executor import CommandExecutor
 
 OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
 
@@ -19,7 +22,7 @@ class OpencodeCodingAgent(CLICodingAgent):
         model: str | None = None,
         event_handler: AgentEventHandler | None = None,
         *,
-        executor=None,
+        executor: "CommandExecutor | None" = None,
     ):
         """Initialize the Opencode coding agent.
 
@@ -53,7 +56,7 @@ class OpencodeCodingAgent(CLICodingAgent):
 
         return cmd
 
-    def _create_session(
+    def _create_session(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         cmd: list[str],
         cwd: str | None = None,

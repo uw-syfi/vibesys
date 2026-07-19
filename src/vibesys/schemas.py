@@ -22,6 +22,7 @@ schemas in without dragging in the rest of the agent runtime.
 """
 
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -110,7 +111,9 @@ class PerfMetrics(BaseModel):
     """Top-level metrics container. Supports single or multi-load runs."""
 
     load_levels: list[LoadLevelMetrics] = Field(description="One entry per load level tested.")
-    extra: dict = Field(default_factory=dict, description="Extensible — gpu_mem, batch_stats, etc.")
+    extra: dict[str, Any] = Field(
+        default_factory=dict, description="Extensible — gpu_mem, batch_stats, etc."
+    )
 
 
 class PerfEvalResponse(BaseModel):

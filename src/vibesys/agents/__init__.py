@@ -9,7 +9,7 @@ runner classes are imported, so the public API of this package is::
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_AGENT_BACKEND
@@ -27,8 +27,8 @@ __all__ = [
     "AgentProgress",
     "AgentRunner",
     "CandidateProgress",
-    "CliAgentRunner",
-    "DeepAgentsRunner",
+    "CliAgentRunner",  # pyright: ignore[reportUnsupportedDunderAll] — provided lazily via __getattr__
+    "DeepAgentsRunner",  # pyright: ignore[reportUnsupportedDunderAll] — provided lazily via __getattr__
     "RoundProgress",
     "build_agent_runner",
 ]
@@ -56,7 +56,7 @@ def build_agent_runner(
     skill_source_dirs: list[Path],
     model: Any,
     model_name: str,
-    run_log_file,
+    run_log_file: TextIO | None,
     use_docker: bool,
     use_modal: bool = False,
     log_dir: Path | None = None,

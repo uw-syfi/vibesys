@@ -16,7 +16,7 @@ import os
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -222,7 +222,7 @@ class Config(_Strict):
         return parse_feature_flag_overrides(value, FeatureFlag)
 
 
-def as_config(config: "Config | Mapping") -> "Config":
+def as_config(config: "Config | Mapping[str, Any]") -> "Config":
     """Coerce a mapping to a validated :class:`Config`; pass through instances.
 
     The loop entrypoints accept either a parsed :class:`Config` (the normal CLI
@@ -258,7 +258,7 @@ def _apply_vertex_env_overrides(config: Config) -> None:
         vx.region = env_region
 
 
-def _load_config(path: Path) -> Config:
+def _load_config(path: Path) -> Config:  # pyright: ignore[reportUnusedFunction]
     """Load, validate, and env-override a TOML agent config file."""
     _load_dotenv_file()
     path = Path(path)

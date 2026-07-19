@@ -1,10 +1,14 @@
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agentshim.codex import CodexGenerationSession
 from agentshim.events import AgentEventHandler
 
 from .base import MCPServerSpec
 from .cli_agent import CLICodingAgent
+
+if TYPE_CHECKING:
+    from agentshim.executor import CommandExecutor
 
 
 def _toml_str(value: str) -> str:
@@ -26,7 +30,7 @@ class CodexCodingAgent(CLICodingAgent):
         model: str | None = None,
         event_handler: AgentEventHandler | None = None,
         *,
-        executor=None,
+        executor: "CommandExecutor | None" = None,
     ):
         """Initialize the Codex coding agent.
 
@@ -99,7 +103,13 @@ class CodexCodingAgent(CLICodingAgent):
             cmd.extend(self.extra_config_args)
         return cmd
 
-    def _create_session(self, cmd, cwd=None, timeout=None, silent=False):
+    def _create_session(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self,
+        cmd: list[str],
+        cwd: str | None = None,
+        timeout: int | None = None,
+        silent: bool = False,
+    ) -> CodexGenerationSession:
         return CodexGenerationSession(
             binary_name=self.binary_name,
             env=self.env,
@@ -113,7 +123,7 @@ class CodexCodingAgent(CLICodingAgent):
             executor=self.executor,
         )
 
-    def _extract_session_id(self, session: CodexGenerationSession) -> str | None:
+    def _extract_session_id(self, session: CodexGenerationSession) -> str | None:  # pyright: ignore[reportIncompatibleMethodOverride]
         return session.session_id
 
     def install_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:

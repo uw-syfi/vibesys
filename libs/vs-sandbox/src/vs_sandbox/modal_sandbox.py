@@ -28,7 +28,7 @@ import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import TypeVar, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 import modal
 from deepagents.backends.protocol import (
@@ -39,6 +39,9 @@ from deepagents.backends.protocol import (
 )
 from deepagents.backends.sandbox import BaseSandbox
 from modal.volume import AbstractVolumeUploadContextManager
+
+if TYPE_CHECKING:
+    from types import FrameType
 
 # Global registry of live sandboxes for cleanup on exit / SIGINT.
 _live_sandboxes: dict[str, ModalSandbox] = {}
@@ -150,7 +153,7 @@ atexit.register(_cleanup_sandboxes)
 _original_sigint = signal.getsignal(signal.SIGINT)
 
 
-def _sigint_handler(signum, frame):
+def _sigint_handler(signum: int, frame: FrameType | None) -> None:
     signal.signal(signal.SIGINT, _original_sigint)
     _cleanup_sandboxes()
     if callable(_original_sigint):
@@ -341,7 +344,7 @@ class ModalSandbox(BaseSandbox):
         ).run_commands(f"rm -rf {self._CONTAINER_ROOT} && mkdir {self._CONTAINER_ROOT}")
 
         # _workspace_volume is created by start() before _create_container().
-        volumes: dict[str | os.PathLike, modal.Volume | modal.CloudBucketMount] = {
+        volumes: dict[str | os.PathLike[str], modal.Volume | modal.CloudBucketMount] = {
             self._CONTAINER_ROOT: self._workspace_volume  # pyright: ignore[reportOptionalMemberAccess,reportAssignmentType]
         }
         if self._model_volume_name:
@@ -892,5 +895,5 @@ class ModalSandbox(BaseSandbox):
         self.start()
         return self
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, *exc: object) -> None:
         self.stop()
