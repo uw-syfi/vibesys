@@ -13,6 +13,7 @@ from agentshim.utils import get_interactive_env
 from loguru import logger
 
 from .base import CodingAgent
+from .hostsandbox import HostSandbox
 
 
 class CLIGenerationSession:
@@ -163,6 +164,11 @@ class CLICodingAgent(CodingAgent):
         self.executor.check_binary(self.binary_path, self.env, timeout=10)
         self.logger = logger.bind(agent_prefix=self._log_prefix)
         self.session_id: str | None = None
+        # Host-path filesystem confinement. Left ``None`` here (unconfined,
+        # legacy behavior); the CLI runner installs a :class:`HostSandbox` on
+        # the host execution path. Container executors leave it ``None`` because
+        # they are already externally sandboxed.
+        self.sandbox: HostSandbox | None = None
 
     @abstractmethod
     def _get_command(self, prompt: str) -> list[str]:
@@ -238,6 +244,14 @@ class CLICodingAgent(CodingAgent):
             cmd = self._get_resume_command(prompt, self.session_id)
         if cmd is None:
             cmd = self._get_command(prompt)
+
+        # Confine the agent to its workspace at the OS level. Only applies on the
+        # host path (a real ``cwd`` plus an installed sandbox policy); container
+        # executors pass ``cwd=None`` and leave ``self.sandbox`` unset because
+        # they are already externally sandboxed. bwrap re-establishes the working
+        # directory inside the namespace via ``--chdir``.
+        if self.sandbox is not None and cwd is not None:
+            cmd = self.sandbox.wrap(cmd)
 
         session = self._create_session(cmd, cwd, timeout, silent)
         # Expose the session to callers (e.g. ``CliAgentRunner.invoke``
