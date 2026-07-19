@@ -350,6 +350,26 @@ def test_stub_agent_can_run_without_agent_toml(tmp_path):
     assert skills is None
 
 
+def test_missing_config_reports_configuration_error(tmp_path):
+    from vibesys.cli import _build_agent_parser
+
+    bundle = _write_input_bundle(tmp_path)
+    args = _build_agent_parser().parse_args(
+        [
+            "--input",
+            str(bundle),
+            "--config",
+            str(tmp_path / "missing-agent.toml"),
+        ]
+    )
+
+    with pytest.raises(ConfigurationError) as exc:
+        load_config_and_skills(args)
+
+    assert exc.value.diagnostic.code == "config_load_failed"
+    assert exc.value.diagnostic.stage == "config_loading"
+
+
 def test_resume_without_input_infers_original_input(monkeypatch, tmp_path):
     import vibesys.cli as cli
 
@@ -474,3 +494,72 @@ def test_main_headless_skips_tui():
         main()
     runner.assert_called_once()
     launch.assert_not_called()
+
+
+def test_launch_interactive_client_uses_local_launcher(monkeypatch, tmp_path):
+    import vibesys.cli as cli
+
+    launcher = tmp_path / "clients" / "tui" / "dist" / "launcher.js"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("console.log('launcher')\n")
+    calls: list[tuple[list[str], dict[str, str]]] = []
+
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
+    monkeypatch.setattr(
+        cli.subprocess,
+        "call",
+        lambda command, env: calls.append((command, env)) or 0,
+    )
+
+    assert cli._launch_interactive_client(["--stub-agent"]) == 0
+    assert len(calls) == 1
+    assert calls[0][0] == ["/usr/bin/node", str(launcher), "--stub-agent"]
+    assert calls[0][1]["VIBESYS_PYTHON"] == sys.executable
+
+
+def test_launch_interactive_client_reports_missing_node(monkeypatch, tmp_path, capsys):
+    import vibesys.cli as cli
+
+    launcher = tmp_path / "clients" / "tui" / "dist" / "launcher.js"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("console.log('launcher')\n")
+
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cli.shutil, "which", lambda _name: None)
+
+    assert cli._launch_interactive_client([]) == 1
+    assert "Node.js 20+ is required" in capsys.readouterr().err
+
+
+def test_launch_interactive_client_uses_installed_launcher(monkeypatch, tmp_path):
+    import vibesys.cli as cli
+
+    calls: list[tuple[list[str], dict[str, str]]] = []
+
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        cli.shutil,
+        "which",
+        lambda name: "/usr/local/bin/vibesys-tui" if name == "vibesys-tui" else None,
+    )
+    monkeypatch.setattr(
+        cli.subprocess,
+        "call",
+        lambda command, env: calls.append((command, env)) or 7,
+    )
+
+    assert cli._launch_interactive_client(["--max-rounds", "1"]) == 7
+    assert len(calls) == 1
+    assert calls[0][0] == ["/usr/local/bin/vibesys-tui", "--max-rounds", "1"]
+    assert calls[0][1]["VIBESYS_PYTHON"] == sys.executable
+
+
+def test_launch_interactive_client_reports_missing_launcher(monkeypatch, tmp_path, capsys):
+    import vibesys.cli as cli
+
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cli.shutil, "which", lambda _name: None)
+
+    assert cli._launch_interactive_client([]) == 1
+    assert "interactive client is not available" in capsys.readouterr().err
