@@ -1,3 +1,16 @@
+<div align="center">
+
+<pre>
+VV     VV  III  BBBBBB   EEEEEEE   SSSSSS  YY    YY   SSSSSS
+VV     VV  III  BB   BB  EE       SS    SS  YY    YY  SS    SS
+ VV   VV   III  BBBBBB   EEEEE     SSSS      YY  YY    SSSS
+  VV VV    III  BB   BB  EE           SSSS     YYYY        SSSS
+   VVV     III  BB   BB  EE       SS    SS      YY     SS    SS
+    V      III  BBBBBB   EEEEEEE   SSSSSS       YY      SSSSSS
+</pre>
+
+</div>
+
 # VibeSys: Generating Bespoke Systems with AI Agents
 
 [![arXiv](https://img.shields.io/badge/arXiv-2605.06068-b31b1b.svg)](https://arxiv.org/abs/2605.06068)
