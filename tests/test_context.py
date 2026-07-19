@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibesys.context import _RunContext
+from vibesys.context import _RunContext, setup_exp_dir
 from vibesys.domains.base import DomainName
 from vibesys.domains.environment import NoopEnvironmentHooks
 from vibesys.profilers import ACTIVE_PROFILER_KINDS, ProfilerKind
@@ -21,6 +21,17 @@ def _minimal_copy_context(workspace):
     ctx.backend_impl = MagicMock()
     ctx.lprint = MagicMock()
     return ctx
+
+
+def test_setup_exp_dir_uses_unique_names_for_concurrent_default_runs(tmp_path):
+    first = setup_exp_dir("test", project_root=tmp_path)
+    second = setup_exp_dir("test", project_root=tmp_path)
+
+    assert first != second
+    assert first.name.endswith("-test")
+    assert second.name.endswith("-test")
+    assert (first / ".git").is_dir()
+    assert (second / ".git").is_dir()
 
 
 def test_interactive_log_switch_preserves_supervision_stderr(tmp_path):

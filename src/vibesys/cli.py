@@ -18,6 +18,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
+import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -51,6 +54,8 @@ _MODALITIES = (
 )
 
 _MODAL_PROFILERS = frozenset({ProfilerKind.AUTO, ProfilerKind.TORCH, ProfilerKind.NONE})
+_STUB_AGENT_DEFAULT_INPUT = PROJECT_ROOT / "examples" / "data-structures" / "queue-spsc"
+_STUB_AGENT_DEFAULT_CONFIG_TEXT = '[model]\nname = "gpt-5.5"\n'
 
 
 class _RunArgumentParser(argparse.ArgumentParser):
@@ -318,10 +323,13 @@ def load_config_and_skills(
     args: argparse.Namespace,
 ) -> tuple[Config, list[str] | None, ComputeBackend]:
     """Load config from args.config, process skills_dir, and resolve the backend."""
-    try:
-        config = _load_config(args.config)
-    except (ValueError, FileNotFoundError) as e:
-        _configuration_error(str(e), code="config_load_failed", stage="config_loading")
+    if getattr(args, "stub_agent", False) and not Path(args.config).is_file():
+        config = Config.model_validate(tomllib.loads(_STUB_AGENT_DEFAULT_CONFIG_TEXT))
+    else:
+        try:
+            config = _load_config(args.config)
+        except (ValueError, FileNotFoundError) as e:
+            _configuration_error(str(e), code="config_load_failed", stage="config_loading")
 
     backend: ComputeBackend = args.backend or config.backend.name
 
@@ -335,6 +343,20 @@ def load_config_and_skills(
         )
         skills = resolve_skill_source_dirs(raw_skills, backend=backend)
     return config, skills, backend
+
+
+def _prepare_stub_agent_smoke_defaults(argv: list[str]) -> list[str]:
+    if "--stub-agent" not in argv or any(
+        token == "--input" or token.startswith("--input=") for token in argv
+    ):
+        return argv
+    return [
+        "--input",
+        str(_STUB_AGENT_DEFAULT_INPUT),
+        "--exp-name",
+        f"stub-smoke-{os.getpid()}",
+        *argv,
+    ]
 
 
 def run_environment_spec_from_args(args: argparse.Namespace) -> RunEnvironmentSpec:
@@ -931,6 +953,7 @@ _RUNNERS = {
 
 def parse_cli_invocation(argv: list[str]) -> CliInvocation:
     """Parse and validate one invocation without printing or exiting."""
+    argv = _prepare_stub_agent_smoke_defaults(argv)
     loop_kind, remaining = _extract_loop_selection(argv)
     args = _PARSER_BUILDERS[loop_kind]().parse_args(remaining)
     globals()[_VALIDATORS[loop_kind]](args)
@@ -970,6 +993,30 @@ def _control_socket_from_argv(argv: list[str]) -> Path | None:
     return None
 
 
+def _launch_interactive_client(argv: list[str]) -> int:
+    env = os.environ.copy()
+    env["VIBESYS_PYTHON"] = sys.executable
+
+    local_launcher = PROJECT_ROOT / "clients" / "tui" / "dist" / "launcher.js"
+    if local_launcher.is_file():
+        node = shutil.which("node")
+        if node is None:
+            print("vibesys: Node.js 20+ is required by the interactive client.", file=sys.stderr)
+            return 1
+        return subprocess.call([node, str(local_launcher), *argv], env=env)
+
+    installed_launcher = shutil.which("vibesys-tui")
+    if installed_launcher is not None:
+        return subprocess.call([installed_launcher, *argv], env=env)
+
+    print(
+        "vibesys: interactive client is not available; run `./vs ...` from a source checkout "
+        "or install the @vibesys/tui npm package.",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def _render_configuration_error(error: ConfigurationError) -> NoReturn:
     diagnostic = error.diagnostic
     print(f"vibesys: {diagnostic.message}", file=sys.stderr)
@@ -988,9 +1035,7 @@ def main() -> None:
         and sys.stdout.isatty()
     )
     if interactive:
-        from vibesys.launcher import launch
-
-        raise SystemExit(launch(argv))
+        raise SystemExit(_launch_interactive_client(argv))
     if control_socket is not None:
         from vibesys.server.runtime import run_server
 

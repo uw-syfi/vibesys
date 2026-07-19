@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import uuid
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from datetime import datetime
@@ -53,13 +54,13 @@ def setup_exp_dir(
     if existing:
         exp_dir = project_root / "exp_env" / exp_name
     else:
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        exp_dir = project_root / "exp_env" / f"{timestamp}-{exp_name}"
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        exp_dir = project_root / "exp_env" / f"{timestamp}-{uuid.uuid4().hex[:8]}-{exp_name}"
     if existing:
         if not exp_dir.is_dir():
             raise FileNotFoundError(f"Experiment directory not found: {exp_dir}")
         return exp_dir
-    exp_dir.mkdir(parents=True, exist_ok=True)
+    exp_dir.mkdir(parents=True, exist_ok=False)
     if not (exp_dir / ".git").is_dir():
         subprocess.run(
             ["git", "init"],

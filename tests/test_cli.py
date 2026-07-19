@@ -8,7 +8,14 @@ from unittest.mock import patch
 
 import pytest
 
-from vibesys.cli import _extract_flag, _extract_loop_selection, _validate_target_inputs, main
+from vibesys.cli import (
+    _extract_flag,
+    _extract_loop_selection,
+    _prepare_stub_agent_smoke_defaults,
+    _validate_target_inputs,
+    load_config_and_skills,
+    main,
+)
 from vibesys.domains.base import DomainName
 from vibesys.errors import ConfigurationError
 from vibesys.profilers import ProfilerKind
@@ -291,6 +298,43 @@ def test_validate_target_inputs_requires_input():
     assert "missing required target input: --input" in exc.value.diagnostic.message
 
 
+def test_stub_agent_smoke_defaults_supply_input_and_unique_exp_name():
+    argv = _prepare_stub_agent_smoke_defaults(["--stub-agent", "--max-rounds", "1"])
+
+    assert argv[:2] == ["--input", str(Path("examples/data-structures/queue-spsc").resolve())]
+    assert argv[2] == "--exp-name"
+    assert argv[3].startswith("stub-smoke-")
+    assert argv[-2:] == ["--max-rounds", "1"]
+
+
+def test_stub_agent_smoke_defaults_preserve_explicit_input():
+    argv = ["--stub-agent", "--input", "examples/kv-store"]
+
+    assert _prepare_stub_agent_smoke_defaults(argv) == argv
+
+
+def test_stub_agent_can_run_without_agent_toml(tmp_path):
+    from vibesys.cli import _build_agent_parser
+
+    bundle = _write_input_bundle(tmp_path)
+    args = _build_agent_parser().parse_args(
+        [
+            "--stub-agent",
+            "--input",
+            str(bundle),
+            "--config",
+            str(tmp_path / "missing-agent.toml"),
+            "--no-skills",
+        ]
+    )
+    _validate_target_inputs(args)
+
+    config, skills, _ = load_config_and_skills(args)
+
+    assert config.model.name == "gpt-5.5"
+    assert skills is None
+
+
 # ---------------------------------------------------------------------------
 # main() routes to the right runner
 # ---------------------------------------------------------------------------
@@ -328,7 +372,7 @@ def test_main_wraps_tty_run_in_tui():
         patch.object(sys.stdin, "isatty", return_value=True),
         patch.object(sys.stdout, "isatty", return_value=True),
         patch("vibesys.cli._run_agent") as runner,
-        patch("vibesys.launcher.launch", return_value=0) as launch,
+        patch("vibesys.cli._launch_interactive_client", return_value=0) as launch,
     ):
         with pytest.raises(SystemExit) as exc:
             main()
@@ -349,7 +393,7 @@ def test_main_headless_skips_tui():
     with (
         patch.object(sys, "argv", argv),
         patch("vibesys.cli._run_agent") as runner,
-        patch("vibesys.launcher.launch") as launch,
+        patch("vibesys.cli._launch_interactive_client") as launch,
     ):
         main()
     runner.assert_called_once()

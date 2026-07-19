@@ -1,15 +1,24 @@
 {
   "name": "@vibesys/tui",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "engines": {
     "node": ">=20"
   },
+  "bin": {
+    "vibesys-tui": "./dist/launcher.js"
+  },
+  "files": [
+    "dist",
+    "package.json",
+    "README.md"
+  ],
   "scripts": {
     "generate:protocol": "uv run --project ../.. python -m vibesys.server.schema src/generated/protocol.schema.json && json2ts -i src/generated/protocol.schema.json -o src/generated/protocol.generated.ts --bannerComment '/* Generated from the Python protocol models. Do not edit. */'",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.check.json",
+    "prepack": "pnpm run build",
     "test": "bun --bun vitest run --config vitest.config.ts"
   },
   "dependencies": {
