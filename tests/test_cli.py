@@ -505,7 +505,9 @@ def test_launch_interactive_client_uses_local_launcher(monkeypatch, tmp_path):
     calls: list[tuple[list[str], dict[str, str]]] = []
 
     monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
+    monkeypatch.setattr(
+        cli.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None
+    )
     monkeypatch.setattr(
         cli.subprocess,
         "call",
