@@ -29,6 +29,7 @@ from typing import Any, TypeVar
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 
+from vibesys._agent_cli import hostsandbox
 from vibesys._agent_cli.base import CodingAgent, MCPServerSpec
 from vibesys._agent_cli.claude import ClaudeCodeCodingAgent
 from vibesys._agent_cli.codex import CodexCodingAgent
@@ -276,6 +277,16 @@ class CliAgentRunner:
             self._agents[kind] = agent
         else:
             agent = self._provider_cls(model=self._model, event_handler=logger)
+            # Host execution path: confine the agent to its workspace at the OS
+            # level so it cannot read or modify sibling runs or unrelated host
+            # files (issue #149). Container executors above are already
+            # externally sandboxed and deliberately skip this.
+            agent.sandbox = hostsandbox.build(
+                Path(workspace),
+                env=agent.env,
+                binary_path=getattr(agent, "binary_path", None),
+                log=lambda msg: _log_and_print(msg, self._run_log_file),
+            )
             self._agents[kind] = agent
 
         # Layer GPU env vars on top of the captured interactive env so the
