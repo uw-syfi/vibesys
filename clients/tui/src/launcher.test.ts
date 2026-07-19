@@ -92,14 +92,16 @@ process.exit(0);
     const backend = await writeExecutable(
       'fake-backend.mjs',
       `
-process.exit(process.argv.includes('validate') ? 0 : 9);
+process.exit(
+  process.argv.includes('validate') && process.argv.includes('examples/kv-store') ? 0 : 9,
+);
 `,
     );
 
     process.env['VIBESYS_PYTHON'] = backend;
     process.env['VIBESYS_TUI_RUNTIME'] = join(tempDir, 'missing-runtime');
 
-    await expect(launch(['validate'])).resolves.toBe(0);
+    await expect(launch(['validate', 'examples/kv-store'])).resolves.toBe(0);
   });
 });
 

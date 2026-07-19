@@ -482,27 +482,19 @@ def _make_parser(prog: str, description: str) -> argparse.ArgumentParser:
 
 
 # ---------------------------------------------------------------------------
-# Repository validation command
+# Input-bundle validation command
 # ---------------------------------------------------------------------------
 
 
 def _build_validate_parser() -> argparse.ArgumentParser:
     parser = _RunArgumentParser(
         prog="vibesys validate",
-        description=(
-            "Validate the repository's agent configuration and input-bundle "
-            "harness contract without starting an optimization run."
-        ),
+        description="Validate an input-bundle harness contract without starting a run.",
     )
     parser.add_argument(
-        "--config",
+        "input_bundle",
         type=Path,
-        default=None,
-        help="Path to agent TOML config (default: ./agent.toml).",
-    )
-    parser.add_argument(
-        "--input",
-        type=Path,
+        nargs="?",
         default=None,
         help="Path to the input bundle (default: current directory).",
     )
@@ -510,22 +502,10 @@ def _build_validate_parser() -> argparse.ArgumentParser:
 
 
 def _run_validate(argv: list[str]) -> None:
-    """Validate repo-local configuration and harness files, then report readiness."""
+    """Validate one input-bundle contract, then report its resolved paths."""
 
     args = _build_validate_parser().parse_args(argv)
-    repository = Path.cwd().resolve()
-    config_path = (args.config or repository / "agent.toml").expanduser().resolve()
-    input_path = (args.input or repository).expanduser().resolve()
-
-    try:
-        _load_config(config_path)
-    except (FileNotFoundError, ValueError) as exc:
-        _configuration_error(
-            f"Validation failed for agent config {config_path}: {exc}",
-            code="validation_failed",
-            stage="repository_validation",
-            exit_code=1,
-        )
+    input_path = (args.input_bundle or Path.cwd()).expanduser().resolve()
 
     try:
         bundle = load_input_bundle(input_path)
@@ -533,13 +513,11 @@ def _run_validate(argv: list[str]) -> None:
         _configuration_error(
             f"Validation failed for input bundle {input_path}: {exc}",
             code="validation_failed",
-            stage="repository_validation",
+            stage="input_validation",
             exit_code=1,
         )
 
-    print("VibeSys validation passed: repository is ready for a run.")
-    print(f"  repository: {repository}")
-    print(f"  agent config: {config_path}")
+    print("VibeSys validation passed: input bundle is valid.")
     print(f"  input bundle: {bundle.root}")
     print(f"  objective: {bundle.objective_path}")
     print(f"  accuracy command: {bundle.accuracy_command_display}")

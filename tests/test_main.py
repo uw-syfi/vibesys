@@ -53,12 +53,6 @@ command = ["uv", "run", "python", "benchmark/benchmark.py"]
     return bundle
 
 
-def _write_agent_config(directory: Path) -> Path:
-    config = directory / "agent.toml"
-    config.write_text('[model]\nname = "gpt-5.4"\n')
-    return config
-
-
 def _write_resume_event(
     exp_dir: Path, input_path: Path, *, event_type: str = "run_started"
 ) -> None:
@@ -389,9 +383,8 @@ def test_missing_config_reports_configuration_error(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_validate_command_defaults_to_current_repository(monkeypatch, tmp_path, capsys):
+def test_validate_command_defaults_to_current_input_bundle(monkeypatch, tmp_path, capsys):
     bundle = _write_input_bundle(tmp_path)
-    _write_agent_config(bundle)
     monkeypatch.chdir(bundle)
     monkeypatch.setattr(sys, "argv", ["vibesys", "validate"])
 
@@ -399,45 +392,37 @@ def test_validate_command_defaults_to_current_repository(monkeypatch, tmp_path, 
 
     output = capsys.readouterr().out
     assert "VibeSys validation passed" in output
-    assert f"agent config: {bundle / 'agent.toml'}" in output
     assert f"input bundle: {bundle}" in output
     assert "accuracy command: uv run python accuracy_checker/checker.py" in output
     assert "benchmark command: uv run python benchmark/benchmark.py" in output
 
 
-def test_validate_command_accepts_explicit_config_and_input(tmp_path, capsys):
+def test_validate_command_accepts_input_bundle_path(tmp_path, capsys):
     bundle = _write_input_bundle(tmp_path)
-    config = _write_agent_config(tmp_path)
-    argv = [
-        "vibesys",
-        "validate",
-        "--config",
-        str(config),
-        "--input",
-        str(bundle),
-    ]
+    argv = ["vibesys", "validate", str(bundle)]
 
     with patch.object(sys, "argv", argv):
         main()
 
     output = capsys.readouterr().out
-    assert "repository is ready for a run" in output
-    assert f"agent config: {config}" in output
+    assert "input bundle is valid" in output
     assert f"objective: {bundle / 'OBJECTIVE.md'}" in output
 
 
-def test_all_example_input_bundles_pass_validate(
-    repo_root: Path, example_input_bundles: tuple[Path, ...], capsys
-):
+def test_validate_command_rejects_run_input_flag(tmp_path, capsys):
+    bundle = _write_input_bundle(tmp_path)
+    argv = ["vibesys", "validate", "--input", str(bundle)]
+
+    with patch.object(sys, "argv", argv), pytest.raises(SystemExit) as exc:
+        main()
+
+    assert exc.value.code == 2
+    assert "unrecognized arguments" in capsys.readouterr().err
+
+
+def test_all_example_input_bundles_pass_validate(example_input_bundles: tuple[Path, ...], capsys):
     for input_bundle in example_input_bundles:
-        argv = [
-            "vibesys",
-            "validate",
-            "--config",
-            str(repo_root / "agent.toml.example"),
-            "--input",
-            str(input_bundle),
-        ]
+        argv = ["vibesys", "validate", str(input_bundle)]
         with patch.object(sys, "argv", argv):
             main()
 
@@ -445,26 +430,10 @@ def test_all_example_input_bundles_pass_validate(
     assert output.count("VibeSys validation passed") == len(example_input_bundles)
 
 
-def test_validate_command_reports_invalid_agent_config(tmp_path, capsys):
-    bundle = _write_input_bundle(tmp_path)
-    config = tmp_path / "agent.toml"
-    config.write_text("[model]\nprovider = 'openai'\n")
-    argv = ["vibesys", "validate", "--config", str(config), "--input", str(bundle)]
-
-    with patch.object(sys, "argv", argv), pytest.raises(SystemExit) as exc:
-        main()
-
-    assert exc.value.code == 1
-    error = capsys.readouterr().err
-    assert "Validation failed for agent config" in error
-    assert "model.name" in error
-
-
 def test_validate_command_reports_invalid_harness_without_running_agent(tmp_path, capsys):
     bundle = _write_input_bundle(tmp_path)
     (bundle / "OBJECTIVE.md").unlink()
-    config = _write_agent_config(tmp_path)
-    argv = ["vibesys", "validate", "--config", str(config), "--input", str(bundle)]
+    argv = ["vibesys", "validate", str(bundle)]
 
     with (
         patch.object(sys, "argv", argv),
