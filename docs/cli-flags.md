@@ -10,7 +10,7 @@ Several flags look independent, but they combine into one execution contract:
 
 | Axis | Flag | Meaning |
 | --- | --- | --- |
-| Search loop | `--outer-loop` | Which outer-loop policy runs: `agent`, `plain`, `evolve`, or `openevolve`. |
+| Search loop | `--outer-loop` | Which outer-loop policy runs: `agent`, `plain`, or `evolve`. |
 | Evaluation interface | `--interface` | Agent loop only. Whether evaluator-owned code invokes the candidate directly or communicates with a service. |
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, or `cpu`. |
 | Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, Docker container, or Modal-backed workflow. |
@@ -31,7 +31,6 @@ come from the domain and input bundle, not the interface mode.
 | `agent` | Orchestrator-driven loop with implementer, judge, and profiler roles. | Default. Supports `--interface` and `--inner-loop`. |
 | `plain` | Issue-board loop with deterministic issue draining and perf evaluation. | Uses backend prompt fragments from `src/vibesys/templates/_backend/`. |
 | `evolve` | Evolutionary search over candidate implementations. | Uses mutator, judge, and profiler roles. |
-| `openevolve` | MAP-Elites-style evolutionary loop. | Reuses evolve mutator, judge, and profiler prompts. |
 
 From a source checkout, use `./vs` for the commands below. It prepares a current
 interactive client when needed and forwards every argument to the TypeScript

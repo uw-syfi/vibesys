@@ -397,7 +397,6 @@ def test_resume_does_not_refresh_workspace_from_seed(tmp_path):
     [
         ("agent", "vibesys.loops.agent.loop.run_agent_loop"),
         ("evolve", "vibesys.loops.evolve.loop.run_evolve_loop"),
-        ("openevolve", "vibesys.loops.openevolve.loop.run_openevolve_loop"),
         ("plain", "vibesys.loops.plain.loop.run_plain_loop"),
     ],
 )

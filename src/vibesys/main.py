@@ -40,7 +40,7 @@ from vibesys.sandbox.run_environment import (
 )
 from vibesys.skills import DEFAULT_SKILL_ROOTS, resolve_skill_source_dirs
 
-_OUTER_LOOPS = ("agent", "plain", "evolve", "openevolve")
+_OUTER_LOOPS = ("agent", "plain", "evolve")
 _MODALITIES = (
     "text_generation",
     "image_generation",
@@ -856,83 +856,6 @@ def _run_evolve(args: argparse.Namespace) -> None:
 
 
 # ===========================================================================
-# openevolve loop  (--outer-loop openevolve)
-# ===========================================================================
-
-
-def _build_openevolve_parser() -> argparse.ArgumentParser:
-    parser = _make_parser(
-        prog="vibesys --outer-loop openevolve",
-        description=(
-            "Run the OpenEvolve-style MAP-Elites search loop: behavioral "
-            "feature binning + cell-uniform parent selection."
-        ),
-    )
-    parser.add_argument("--max-iterations", type=int, default=16)
-    parser.add_argument("--k-inspirations", type=int, default=3)
-    parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--modality", default="text_generation", choices=_MODALITIES)
-    return parser
-
-
-def _validate_openevolve(args: argparse.Namespace) -> None:
-    if args.modal and args.profiler not in _MODAL_PROFILERS:
-        _configuration_error(
-            "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
-        )
-    _validate_target_inputs(args)
-    if args.max_iterations < 1:
-        _configuration_error("--max-iterations must be >= 1.")
-    if args.k_inspirations < 0:
-        _configuration_error("--k-inspirations must be >= 0.")
-
-
-def _run_openevolve(args: argparse.Namespace) -> None:
-    config, skills, backend = load_config_and_skills(args)
-    from vibesys.loops.openevolve.loop import run_openevolve_loop
-
-    bundle: InputBundle = args.input_bundle
-    objective = _load_objective(bundle)
-
-    existing = False
-    exp_name = args.exp_name
-    if args.resume is not None:
-        run_dir_name = _resolve_run_dir(args.resume)
-        exp_name = run_dir_name
-        existing = True
-        print(f"Resuming openevolve run: exp_env/{run_dir_name}/")
-
-    success = run_openevolve_loop(
-        config=config,
-        exp_name=exp_name,
-        input_path=str(bundle.root),
-        accuracy_command=bundle.accuracy_command_display,
-        benchmark_command=bundle.benchmark_command_display,
-        workspace_seed=bundle.workspace_seed_path,
-        evaluator_path=bundle.evaluator_path,
-        objective=objective,
-        max_iterations=args.max_iterations,
-        k_inspirations=args.k_inspirations,
-        seed=args.seed,
-        existing=existing,
-        debug=args.debug,
-        profiler_kind=args.profiler,
-        skills_dirs=skills,
-        run_environment=run_environment_spec_from_args(args),
-        agent_backend=args.agent_backend,
-        cli_provider=args.cli_provider,
-        backend=backend,
-        modality=args.modality,
-    )
-
-    if success:
-        print(f"\nOpenEvolve loop completed {args.max_iterations} rounds.")
-    else:
-        print("\nOpenEvolve loop stopped early (exception or KeyboardInterrupt).")
-        sys.exit(1)
-
-
-# ===========================================================================
 # plain loop  (--outer-loop plain)
 # ===========================================================================
 
@@ -1045,21 +968,18 @@ _PARSER_BUILDERS = {
     "agent": _build_agent_parser,
     "plain": _build_plain_parser,
     "evolve": _build_evolve_parser,
-    "openevolve": _build_openevolve_parser,
 }
 
 _VALIDATORS = {
     "agent": "_validate_agent",
     "plain": "_validate_plain",
     "evolve": "_validate_evolve",
-    "openevolve": "_validate_openevolve",
 }
 
 _RUNNERS = {
     "agent": "_run_agent",
     "plain": "_run_plain",
     "evolve": "_run_evolve",
-    "openevolve": "_run_openevolve",
 }
 
 
