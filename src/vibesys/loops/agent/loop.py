@@ -117,11 +117,14 @@ def _save_rounds_state(path: Path, records: list[_RoundRecord]) -> None:
 
 def _best_round(records: list[_RoundRecord]) -> _RoundRecord | None:
     best: _RoundRecord | None = None
+    best_metric = float("-inf")
     for r in records:
-        if r.perf_metric is None or not r.passed:
+        metric = r.perf_metric
+        if metric is None or not r.passed:
             continue
-        if best is None or r.perf_metric > best.perf_metric:
+        if best is None or metric > best_metric:
             best = r
+            best_metric = metric
     return best
 
 
@@ -163,7 +166,7 @@ def _detect_plateau(
     if len(same_unit) < min_streak:
         return None
     tail = same_unit[-min_streak:]
-    perfs = [r.perf_metric for r in tail]
+    perfs = [r.perf_metric for r in tail if r.perf_metric is not None]
     hi = max(perfs)
     lo = min(perfs)
     if hi <= 0:
@@ -1203,7 +1206,12 @@ def run_agent_loop(
                     carry.exhaustion_info = None
                     if perf_metric is not None:
                         best = _best_round(records[:-1])
-                        if best is None or perf_metric > best.perf_metric:
+                        # _best_round only returns rounds with a metric.
+                        if (
+                            best is None
+                            or best.perf_metric is None
+                            or perf_metric > best.perf_metric
+                        ):
                             carry.regression_info = None
                         else:
                             carry.regression_info = (

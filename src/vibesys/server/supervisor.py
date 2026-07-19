@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from vibesys.server.events import (
+    AgentOutputChannel,
     AgentOutputChunkData,
     ChatData,
     EventData,
@@ -18,6 +19,7 @@ from vibesys.server.events import (
     InvocationFinishedData,
     InvocationStartedData,
     OutputData,
+    OutputStream,
     PhaseData,
     RunEvent,
     json_value,
@@ -69,7 +71,7 @@ class RunSupervisor:
         with self._condition:
             self._run_status = "running"
 
-    def publish_output(self, stream: str, content: str, source: str = "backend") -> None:
+    def publish_output(self, stream: OutputStream, content: str, source: str = "backend") -> None:
         if not content:
             return
         self.record(
@@ -81,7 +83,7 @@ class RunSupervisor:
         self,
         content: str,
         *,
-        channel: str = "assistant",
+        channel: AgentOutputChannel = "assistant",
         agent_kind: str | None = None,
         invocation_id: str | None = None,
     ) -> None:

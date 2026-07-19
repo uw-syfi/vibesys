@@ -102,7 +102,7 @@ class DockerSandbox(BaseSandbox):
         passthrough_paths: list[str] | None = None,
         log_path: str | Path | None = None,
         extra_init_commands: list[str] | None = None,
-        setup_fns: list[Callable[[DockerSandbox], None]] | None = None,
+        setup_fns: list[Callable[[BaseSandbox], None]] | None = None,
     ) -> None:
         """Initialize Docker sandbox configuration.
 
@@ -157,7 +157,7 @@ class DockerSandbox(BaseSandbox):
         self._container_id: str | None = None
         self._logger = self._setup_logger(log_path)
         self._extra_init_commands: list[str] = list(extra_init_commands or [])
-        self._setup_fns: list[Callable[[DockerSandbox], None]] = list(setup_fns or [])
+        self._setup_fns: list[Callable[[BaseSandbox], None]] = list(setup_fns or [])
 
         # Container paths outside /workspace that _vpath must not rewrite.
         self._passthrough_prefixes: list[str] = list(passthrough_paths or [])

@@ -19,6 +19,7 @@ from vibesys.schemas import (
     ProfilerResponse,
     Verdict,
 )
+from vibesys.server.events import AgentOutputChannel
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -159,7 +160,7 @@ def _log_markdown_and_print(
     log_file=None,
     max_len: int | None = None,
     *,
-    channel: str = "assistant",
+    channel: AgentOutputChannel = "assistant",
 ) -> None:
     """Emit raw Markdown; presentation clients decide how to render it."""
     from vibesys.server.registry import active_supervisor

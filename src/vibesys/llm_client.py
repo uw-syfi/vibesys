@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from pydantic import SecretStr
+
 from vibesys.config import Config, ThinkingCfg
 from vibesys.constants import _ANTHROPIC_PREFIXES, _GOOGLE_PREFIXES, _OPENAI_PREFIXES
 
@@ -81,17 +83,15 @@ def _build_openai_compatible_model(model_name: str, config: Config):
     from langchain_openai import ChatOpenAI
 
     oc = config.providers.openai_compatible
-    base_url = oc.base_url if oc else None
-    if not base_url:
+    if oc is None or not oc.base_url:
         raise ValueError(
             "openai-compatible provider requires 'base_url' (e.g. 'http://localhost:8000/v1')"
         )
-    api_key = oc.api_key
 
     return ChatOpenAI(
         model=model_name,
-        base_url=base_url,
-        api_key=api_key,
+        base_url=oc.base_url,
+        api_key=SecretStr(oc.api_key),
     )
 
 

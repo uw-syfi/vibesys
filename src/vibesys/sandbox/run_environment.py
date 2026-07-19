@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.backends.sandbox import BaseSandbox
 
 from vibesys.backends import SandboxKind
@@ -101,7 +102,7 @@ class RunEnvironmentRequest:
 
 
 class RunEnvironmentSession(Protocol):
-    sandbox: BaseSandbox
+    sandbox: SandboxBackendProtocol
     view: RunEnvironmentView
 
     def __enter__(self) -> RunEnvironmentSession: ...
@@ -138,7 +139,7 @@ class _NoopWorkspaceRecovery:
 
 @dataclass
 class _DefaultRunEnvironmentSession:
-    sandbox: BaseSandbox
+    sandbox: SandboxBackendProtocol
     view: RunEnvironmentView
     stop_on_close: bool = False
     _closed: bool = False
@@ -154,14 +155,14 @@ class _DefaultRunEnvironmentSession:
             return
         self._closed = True
         if self.stop_on_close and hasattr(self.sandbox, "stop"):
-            self.sandbox.stop()
+            self.sandbox.stop()  # pyright: ignore[reportAttributeAccessIssue]
 
 
 class LocalEnvironment(_NoopWorkspaceRecovery):
-    isolated = False
-    materialize_local_model_weights = True
-    default_profiler_kind = ProfilerKind.NSYS
-    backend_image = None
+    isolated: bool = False
+    materialize_local_model_weights: bool = True
+    default_profiler_kind: ProfilerKind = ProfilerKind.NSYS
+    backend_image: str | None = None
 
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
         sandbox = request.backend.make_sandbox(
@@ -224,7 +225,8 @@ class DockerEnvironment:
         log = request.log or (lambda _: None)
         label = getattr(request.backend, "image", self.config.image or "<backend-default>")
         log(f"[docker] starting container with image {label}")
-        sandbox.start()
+        # DOCKER-kind sandboxes always implement start().
+        sandbox.start()  # pyright: ignore[reportAttributeAccessIssue]
 
         return _DefaultRunEnvironmentSession(
             sandbox=sandbox,
@@ -370,7 +372,8 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             "[modal] starting local Docker editor; GPU work will dispatch "
             "to Modal via `modal run main.py::<function>`"
         )
-        sandbox.start()
+        # DOCKER-kind sandboxes always implement start().
+        sandbox.start()  # pyright: ignore[reportAttributeAccessIssue]
 
         app_name = _modal_app_name(request.workspace, fallback=self.config.app)
         return _DefaultRunEnvironmentSession(
@@ -793,7 +796,7 @@ def _symlink_setup_fns(symlinks: list[tuple[str, str]]) -> list[SetupFn]:
         for cmd in symlink_cmds:
             sb.execute(cmd)
         if hasattr(sb, "save_symlink_commands"):
-            sb.save_symlink_commands(symlink_cmds)
+            sb.save_symlink_commands(symlink_cmds)  # pyright: ignore[reportAttributeAccessIssue]
 
     return [install_symlinks]
 

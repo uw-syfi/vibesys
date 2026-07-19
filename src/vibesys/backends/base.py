@@ -20,6 +20,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.backends.sandbox import BaseSandbox
 
 from vibesys.constants import ComputeBackend
@@ -76,7 +77,7 @@ class ComputeBackendImpl(Protocol):
         extra_init_commands: list[str],
         setup_fns: list[SetupFn] | None = None,
         modal_options: ModalOptions | None = None,
-    ) -> BaseSandbox:
+    ) -> SandboxBackendProtocol:
         """Construct (do not start) a sandbox configured for this backend.
 
         ``setup_fns`` are invoked by the sandbox at the end of every

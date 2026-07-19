@@ -27,7 +27,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from deepagents.backends import LocalShellBackend
-from deepagents.backends.sandbox import BaseSandbox
+from deepagents.backends.protocol import SandboxBackendProtocol
 
 from vibesys.backends.base import (
     ContentionMonitor,
@@ -117,7 +117,7 @@ class TrainiumBackend:
         extra_init_commands: list[str] | None = None,
         setup_fns: list[SetupFn] | None = None,
         modal_options: ModalOptions | None = None,
-    ) -> BaseSandbox:
+    ) -> SandboxBackendProtocol:
         bind_mounts = list(bind_mounts or [])
         passthrough_paths = list(passthrough_paths or [])
         extra_env = dict(extra_env or {})

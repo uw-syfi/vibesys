@@ -194,15 +194,14 @@ class Population:
         Ties broken by latest id (most recent wins).
         """
         best: Individual | None = None
+        best_metric = float("-inf")
         for ind in self.passed:
-            if ind.perf_metric is None:
+            metric = ind.perf_metric
+            if metric is None:
                 continue
-            if (
-                best is None
-                or ind.perf_metric > best.perf_metric
-                or (ind.perf_metric == best.perf_metric and ind.id > best.id)
-            ):
+            if best is None or metric > best_metric or (metric == best_metric and ind.id > best.id):
                 best = ind
+                best_metric = metric
         return best
 
     # -- frontier ------------------------------------------------------------
@@ -266,7 +265,7 @@ class Population:
             return None
         if len(ranked) == 1:
             return ranked[0]
-        perfs = [i.perf_metric for i in ranked]
+        perfs = [i.perf_metric for i in ranked if i.perf_metric is not None]
         lo, hi = min(perfs), max(perfs)
         if hi - lo < 1e-12:
             return rng.choice(ranked)
@@ -325,11 +324,17 @@ class Population:
             # Backfill from non-frontier if the frontier is smaller than k_top.
             if len(top) < k_top:
                 non_front = [i for i in pool if i.id not in front_ids and i.perf_metric is not None]
-                non_front.sort(key=lambda i: i.perf_metric, reverse=True)
+                non_front.sort(
+                    key=lambda i: i.perf_metric if i.perf_metric is not None else float("-inf"),
+                    reverse=True,
+                )
                 top.extend(non_front[: k_top - len(top)])
         else:
             ranked = [i for i in pool if i.perf_metric is not None]
-            ranked.sort(key=lambda i: i.perf_metric, reverse=True)
+            ranked.sort(
+                key=lambda i: i.perf_metric if i.perf_metric is not None else float("-inf"),
+                reverse=True,
+            )
             top = ranked[:k_top]
 
         top_ids = {i.id for i in top}

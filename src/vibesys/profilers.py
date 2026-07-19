@@ -194,7 +194,7 @@ def resolve_profiler_kind(
     # environment's torch default over a local CUDA backend's nsys preference.
     if environment_default is ProfilerKind.TORCH:
         candidate = ProfilerKind.TORCH
-    elif backend_profiler in ACTIVE_PROFILER_KINDS:
+    elif backend_profiler is not None and backend_profiler in ACTIVE_PROFILER_KINDS:
         candidate = backend_profiler
     else:
         candidate = environment_default

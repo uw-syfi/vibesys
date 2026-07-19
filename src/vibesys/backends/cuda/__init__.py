@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from deepagents.backends import LocalShellBackend
-from deepagents.backends.sandbox import BaseSandbox
+from deepagents.backends.protocol import SandboxBackendProtocol
 
 from vibesys.backends.base import (
     ContentionMonitor,
@@ -61,7 +61,7 @@ class CudaBackend:
         # (kind, sandbox) tuples — kind is recorded at registration time so
         # ``reselect_device`` can dispatch without isinstance checks against
         # cross-package types (which break test mocking).
-        self._sandboxes: list[tuple[SandboxKind, BaseSandbox]] = []
+        self._sandboxes: list[tuple[SandboxKind, SandboxBackendProtocol]] = []
 
     # -- ComputeBackendImpl protocol ---------------------------------------------
 
@@ -77,7 +77,7 @@ class CudaBackend:
         extra_init_commands: list[str] | None = None,
         setup_fns: list[SetupFn] | None = None,
         modal_options: ModalOptions | None = None,
-    ) -> BaseSandbox:
+    ) -> SandboxBackendProtocol:
         """Construct a sandbox configured for CUDA execution."""
         bind_mounts = bind_mounts or []
         passthrough_paths = passthrough_paths or []
@@ -171,16 +171,19 @@ class CudaBackend:
         )
         self._save_gpu_metadata(new_gpu)
 
+        # Kind-dispatched pokes at sandbox internals: DOCKER entries are
+        # always DockerSandbox (stop/start/_gpus), LOCAL entries are always
+        # LocalShellBackend (_env).
         for kind, sb in self._sandboxes:
             if kind is SandboxKind.DOCKER:
-                sb.stop()
-                sb._gpus = self._docker_gpu_spec()
-                sb.start()  # re-runs setup_fns
+                sb.stop()  # pyright: ignore[reportAttributeAccessIssue]
+                sb._gpus = self._docker_gpu_spec()  # pyright: ignore[reportAttributeAccessIssue]
+                sb.start()  # re-runs setup_fns  # pyright: ignore[reportAttributeAccessIssue]
             elif kind is SandboxKind.LOCAL:
                 env = getattr(sb, "_env", None)
                 if env is None:
                     env = {}
-                    sb._env = env
+                    sb._env = env  # pyright: ignore[reportAttributeAccessIssue]
                 env["CUDA_VISIBLE_DEVICES"] = str(new_gpu.index)
             # SandboxKind.MODAL: remote GPU, nothing to restart.
 

@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .hostsandbox import WorkspaceSandbox
+
 
 @dataclass
 class MCPServerSpec:
@@ -31,6 +33,17 @@ class CodingAgent(ABC):
     """Abstract base class for coding agents."""
 
     event_handler: Any | None = None
+
+    # Declared (not assigned) here: every concrete provider sets these in its
+    # ``__init__``.  ``env`` is the subprocess environment the CLI is spawned
+    # with; ``executor`` is the agentshim ``CommandExecutor`` (host, docker,
+    # or modal) that runs the CLI binary.
+    env: dict[str, str]
+    executor: Any
+
+    # Optional OS-level confinement for host execution (issue #149); set by
+    # the cli runner on the host path, left as None under container executors.
+    sandbox: WorkspaceSandbox | None
 
     @abstractmethod
     def generate(

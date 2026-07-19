@@ -28,7 +28,7 @@ import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import TypeVar
+from typing import TypeVar, cast
 
 import modal
 from deepagents.backends.protocol import (
@@ -38,6 +38,7 @@ from deepagents.backends.protocol import (
     WriteResult,
 )
 from deepagents.backends.sandbox import BaseSandbox
+from modal.volume import AbstractVolumeUploadContextManager
 
 # Global registry of live sandboxes for cleanup on exit / SIGINT.
 _live_sandboxes: dict[str, ModalSandbox] = {}
@@ -188,7 +189,7 @@ class ModalSandbox(BaseSandbox):
         extra_writable_volumes: dict[str, str] | None = None,
         log_path: str | Path | None = None,
         extra_init_commands: list[str] | None = None,
-        setup_fns: list[Callable[[ModalSandbox], None]] | None = None,
+        setup_fns: list[Callable[[BaseSandbox], None]] | None = None,
         app_name: str = "vibesys",
         enable_fallback_restart: bool = True,
         max_restart_attempts: int = 2,
@@ -339,7 +340,10 @@ class ModalSandbox(BaseSandbox):
             add_python=None,
         ).run_commands(f"rm -rf {self._CONTAINER_ROOT} && mkdir {self._CONTAINER_ROOT}")
 
-        volumes: dict[str, modal.Volume] = {self._CONTAINER_ROOT: self._workspace_volume}
+        # _workspace_volume is created by start() before _create_container().
+        volumes: dict[str | os.PathLike, modal.Volume | modal.CloudBucketMount] = {
+            self._CONTAINER_ROOT: self._workspace_volume  # pyright: ignore[reportOptionalMemberAccess,reportAssignmentType]
+        }
         if self._model_volume_name:
             model_vol = modal.Volume.from_name(self._model_volume_name).read_only()
             volumes["/model"] = model_vol
@@ -371,7 +375,7 @@ class ModalSandbox(BaseSandbox):
             idle_timeout=self._idle_timeout,
             workdir=self._CONTAINER_ROOT,
             volumes=volumes,
-            env=self._env or None,
+            env=cast("dict[str, str | None] | None", self._env or None),
         )
         self._sandbox_id = self._sandbox.object_id
         _live_sandboxes[self._sandbox_id] = self
@@ -514,7 +518,12 @@ class ModalSandbox(BaseSandbox):
         }
     )
 
-    def _put_workspace_directory(self, batch: object, local_root: Path, remote_root: str) -> None:
+    def _put_workspace_directory(
+        self,
+        batch: AbstractVolumeUploadContextManager,
+        local_root: Path,
+        remote_root: str,
+    ) -> None:
         """Upload workspace files while skipping local-only runtime trees."""
         remote_base = PurePosixPath(remote_root)
         for path in local_root.rglob("*"):
@@ -527,7 +536,7 @@ class ModalSandbox(BaseSandbox):
 
     def _put_bind_mount_directory(
         self,
-        batch: object,
+        batch: AbstractVolumeUploadContextManager,
         local_root: Path,
         remote_root: str,
         tempdirs: list[tempfile.TemporaryDirectory[str]],
@@ -608,8 +617,10 @@ class ModalSandbox(BaseSandbox):
         effective_timeout = timeout if timeout is not None else self._default_timeout
         self._log(f"exec (timeout={effective_timeout}s): {command[:500]}")
 
+        # The closures passed to _run_with_fallback re-read self._sandbox on
+        # every call (a restart swaps it); None is ruled out at method entry.
         def _do_exec() -> tuple[str, str, int]:
-            proc = self._sandbox.exec(
+            proc = self._sandbox.exec(  # pyright: ignore[reportOptionalMemberAccess]
                 "bash",
                 "-c",
                 command,
@@ -665,13 +676,15 @@ class ModalSandbox(BaseSandbox):
         container_path = self._vpath(file_path)
         parent = str(Path(container_path).parent)
 
+        # Closure re-reads self._sandbox on every call (a restart swaps it);
+        # None is ruled out at method entry.
         def _do_write() -> None:
-            fs = self._sandbox.filesystem
+            fs = self._sandbox.filesystem  # pyright: ignore[reportOptionalMemberAccess]
             try:
-                fs.make_directory(parent, parents=True)
+                fs.make_directory(parent, parents=True)  # pyright: ignore[reportCallIssue]
             except TypeError:
                 # Older Modal SDKs: make_directory may not accept parents=
-                self._sandbox.exec(
+                self._sandbox.exec(  # pyright: ignore[reportOptionalMemberAccess]
                     "bash",
                     "-c",
                     f"mkdir -p {parent}",
@@ -704,8 +717,8 @@ class ModalSandbox(BaseSandbox):
             ) -> None:
                 # Re-read fs on each call so post-restart we get the new
                 # sandbox's filesystem handle, not a stale reference.
-                fs = self._sandbox.filesystem
-                self._sandbox.exec(
+                fs = self._sandbox.filesystem  # pyright: ignore[reportOptionalMemberAccess]
+                self._sandbox.exec(  # pyright: ignore[reportOptionalMemberAccess]
                     "bash",
                     "-c",
                     f"mkdir -p {_parent}",
@@ -732,7 +745,8 @@ class ModalSandbox(BaseSandbox):
             container_path = self._vpath(path)
             try:
                 content = self._run_with_fallback(
-                    lambda p=container_path: self._sandbox.filesystem.read_bytes(p),
+                    # Re-reads self._sandbox so a restart is picked up.
+                    lambda p=container_path: self._sandbox.filesystem.read_bytes(p),  # pyright: ignore[reportOptionalMemberAccess]
                     label=f"download {path}",
                 )
                 results.append(FileDownloadResponse(path=path, content=content))
@@ -841,7 +855,8 @@ class ModalSandbox(BaseSandbox):
             self._log(f"workspace tarball size: {size_out.strip()} bytes")
 
             data = _retry_transient(
-                lambda: self._sandbox.filesystem.read_bytes(tar_remote),
+                # Re-reads self._sandbox so a restart is picked up.
+                lambda: self._sandbox.filesystem.read_bytes(tar_remote),  # pyright: ignore[reportOptionalMemberAccess]
                 log=self._log,
                 label="workspace tar download",
             )

@@ -47,6 +47,7 @@ dev = [
     "diff-cover",
     "hypothesis",
     "matplotlib>=3.10.8",
+    "pyright>=1.1.411",
     "pytest",
     "pytest-cov",
     "ruff>=0.6",
@@ -70,6 +71,17 @@ src = ["src", "tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W"]
 ignore = ["E501"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+pythonVersion = "3.11"
+include = ["src", "libs/vs-feature-flags/src", "libs/vs-issue-board/src", "libs/vs-sandbox/src"]
+executionEnvironments = [
+    { root = "libs/vs-feature-flags/src" },
+    { root = "libs/vs-issue-board/src" },
+    { root = "libs/vs-sandbox/src" },
+    { root = "src" },
+]
 
 [tool.uv]
 package = true

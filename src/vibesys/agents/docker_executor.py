@@ -8,7 +8,7 @@ import subprocess
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from agentshim.executor import CommandRequest, CommandResult, CommandStreamSink
 
@@ -124,7 +124,11 @@ class DockerCommandExecutor:
         except subprocess.TimeoutExpired:
             self._kill_process_group(process)
             process.wait()
-            raise subprocess.TimeoutExpired(list(request.argv), request.timeout) from None
+            # TimeoutExpired is only raised by the wait(timeout=...) branch,
+            # so request.timeout is non-None on this path.
+            raise subprocess.TimeoutExpired(
+                list(request.argv), cast(float, request.timeout)
+            ) from None
         finally:
             if process.poll() is None:
                 self._kill_process_group(process)

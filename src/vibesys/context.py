@@ -7,10 +7,11 @@ import shutil
 import subprocess
 import sys
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Any, overload
 
 from vibesys import backends
 from vibesys.agent_runner import _log_and_print
@@ -461,7 +462,7 @@ class _RunContext:
         system_prompt: str,
         user_prompt: str,
         response_cls,
-        fallback_factory=None,
+        fallback_factory: Callable[[], Any] | None = None,
         round_label: str = "",
         progress: AgentProgress | None = None,
         **extra,
@@ -487,7 +488,9 @@ class _RunContext:
                 env=self.gpu_env(),
                 user_prompt=user_prompt,
                 response_cls=response_cls,
-                fallback_factory=fallback_factory,
+                # Every live call site supplies a factory; the None default
+                # is a legacy convenience.
+                fallback_factory=fallback_factory,  # pyright: ignore[reportArgumentType]
                 round_label=round_label,
                 progress=progress if progress is not None else self.current_progress(),
                 **extra,
@@ -510,6 +513,12 @@ class _RunContext:
         if not p.is_dir():
             raise ValueError(f"{label} path is not a directory: {raw}")
         return p
+
+    @overload
+    def _coerce_dir_path(self, raw: str, label: str) -> str: ...
+
+    @overload
+    def _coerce_dir_path(self, raw: None, label: str) -> None: ...
 
     def _coerce_dir_path(self, raw: str | None, label: str) -> str | None:
         path = self._coerce_dir(raw, label)
@@ -695,7 +704,7 @@ class _RunContext:
         # run end — so this is safe to run on every snapshot.
         if hasattr(self.implementer_backend, "_download_workspace"):
             try:
-                self.implementer_backend._download_workspace()
+                self.implementer_backend._download_workspace()  # pyright: ignore[reportAttributeAccessIssue]
             except Exception as exc:
                 self.lprint(f"[warn] modal workspace sync to host failed: {exc}")
 
@@ -974,7 +983,7 @@ class _RunContext:
         # Update the agent runner's log file handle so subsequent
         # invoke() calls write to the new step log.
         if hasattr(self, "agent_runner") and hasattr(self.agent_runner, "_run_log_file"):
-            self.agent_runner._run_log_file = new_file
+            self.agent_runner._run_log_file = new_file  # pyright: ignore[reportAttributeAccessIssue]
 
     def reselect_gpu(self) -> None:
         """Delegate mid-run device rebalance to the backend.
