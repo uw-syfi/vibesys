@@ -12,6 +12,14 @@ Describe the high-level design. Call out important implementation choices,
 tradeoffs, boundaries, and any behavior that reviewers should inspect closely.
 -->
 
+### Architecture
+
+<!--
+Describe the ownership model and major components involved in the solution.
+For nontrivial control flow or cross-boundary changes, include a Mermaid diagram
+or equivalent sketch that shows how the pieces interact.
+-->
+
 ## Verification
 
 <!--
