@@ -426,19 +426,15 @@ def test_validate_command_accepts_explicit_config_and_input(tmp_path, capsys):
     assert f"objective: {bundle / 'OBJECTIVE.md'}" in output
 
 
-def test_all_example_input_bundles_pass_validate(capsys):
-    project_root = Path(__file__).parents[1]
-    input_bundles = sorted(
-        manifest.parent for manifest in (project_root / "examples").glob("**/vibesys.input.toml")
-    )
-
-    assert input_bundles
-    for input_bundle in input_bundles:
+def test_all_example_input_bundles_pass_validate(
+    repo_root: Path, example_input_bundles: tuple[Path, ...], capsys
+):
+    for input_bundle in example_input_bundles:
         argv = [
             "vibesys",
             "validate",
             "--config",
-            str(project_root / "agent.toml.example"),
+            str(repo_root / "agent.toml.example"),
             "--input",
             str(input_bundle),
         ]
@@ -446,7 +442,7 @@ def test_all_example_input_bundles_pass_validate(capsys):
             main()
 
     output = capsys.readouterr().out
-    assert output.count("VibeSys validation passed") == len(input_bundles)
+    assert output.count("VibeSys validation passed") == len(example_input_bundles)
 
 
 def test_validate_command_reports_invalid_agent_config(tmp_path, capsys):
