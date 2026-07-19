@@ -15,6 +15,7 @@ from vibesys.cli import (
     _validate_target_inputs,
     load_config_and_skills,
     main,
+    parse_cli_invocation,
 )
 from vibesys.domains.base import DomainName
 from vibesys.errors import ConfigurationError
@@ -42,6 +43,20 @@ command = ["uv", "run", "python", "benchmark/benchmark.py"]
 """.lstrip()
     )
     return bundle
+
+
+def _write_resume_event(
+    exp_dir: Path, input_path: Path, *, event_type: str = "run_started"
+) -> None:
+    logs = exp_dir / "logs"
+    logs.mkdir(parents=True)
+    content = (
+        '{"type": "server_started", "data": null}\n'
+        f'{{"type": "{event_type}", "data": '
+        f'{{"kind": "run_started", "outer_loop": "agent", "input": "{input_path}", '
+        '"max_rounds": 2}}\n'
+    )
+    (logs / "run-events.jsonl").write_text(content)
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +348,67 @@ def test_stub_agent_can_run_without_agent_toml(tmp_path):
 
     assert config.model.name == "gpt-5.5"
     assert skills is None
+
+
+def test_resume_without_input_infers_original_input(monkeypatch, tmp_path):
+    import vibesys.cli as cli
+
+    bundle = _write_input_bundle(tmp_path)
+    run_dir = tmp_path / "exp_env" / "20260716-180256-test"
+    _write_resume_event(run_dir, bundle)
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    invocation = parse_cli_invocation(["--outer-loop", "agent", "--resume", "20260716-180256-test"])
+
+    assert invocation.args.resume == "20260716-180256-test"
+    assert invocation.args.input == bundle
+    assert invocation.args.input_bundle.root == bundle.resolve()
+
+
+def test_resume_accepts_exp_env_path_without_input(monkeypatch, tmp_path):
+    import vibesys.cli as cli
+
+    bundle = _write_input_bundle(tmp_path)
+    run_dir = tmp_path / "exp_env" / "20260716-180256-test"
+    _write_resume_event(run_dir, bundle)
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    invocation = parse_cli_invocation(
+        ["--outer-loop", "agent", "--resume", str(run_dir.relative_to(tmp_path))]
+    )
+
+    assert invocation.args.resume == "20260716-180256-test"
+    assert invocation.args.input_bundle.root == bundle.resolve()
+
+
+def test_resume_latest_without_input_uses_latest_run_metadata(monkeypatch, tmp_path):
+    import vibesys.cli as cli
+
+    older_bundle = _write_input_bundle(tmp_path / "older")
+    latest_bundle = _write_input_bundle(tmp_path / "latest")
+    older = tmp_path / "exp_env" / "20260716-100000-test"
+    latest = tmp_path / "exp_env" / "20260716-180256-test"
+    _write_resume_event(older, older_bundle)
+    _write_resume_event(latest, latest_bundle)
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    invocation = parse_cli_invocation(["--outer-loop", "agent", "--resume"])
+
+    assert invocation.args.resume == "20260716-180256-test"
+    assert invocation.args.input_bundle.root == latest_bundle.resolve()
+
+
+def test_resume_without_input_reports_missing_metadata(monkeypatch, tmp_path):
+    import vibesys.cli as cli
+
+    (tmp_path / "exp_env" / "20260716-180256-test" / "logs").mkdir(parents=True)
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    with pytest.raises(ConfigurationError) as exc:
+        parse_cli_invocation(["--outer-loop", "agent", "--resume", "20260716-180256-test"])
+
+    assert exc.value.diagnostic.code == "resume_input_not_found"
+    assert exc.value.diagnostic.stage == "resume_resolution"
 
 
 # ---------------------------------------------------------------------------

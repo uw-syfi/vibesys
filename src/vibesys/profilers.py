@@ -18,6 +18,7 @@ class ProfilerKind(StrEnum):
     TORCH = "torch"
     NEURON = "neuron"
     MACOS_CPU = "macos_cpu"
+    LINUX_CPU = "linux_cpu"
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,25 @@ class ProfilerDefinition:
         return f"vibesys-{self.kind.value.replace('_', '-')}-profiler"
 
 
+@dataclass(frozen=True)
+class ProfilerPreflightResult:
+    """Result of cheap host checks for a resolved profiler."""
+
+    kind: ProfilerKind
+    usable: bool
+    diagnostics: tuple[str, ...] = ()
+    details: tuple[str, ...] = ()
+
+    def error_message(self) -> str:
+        diagnostic_text = ", ".join(self.diagnostics) or "unknown"
+        detail_text = "; ".join(self.details)
+        suffix = f" ({detail_text})" if detail_text else ""
+        return (
+            f"Resolved profiler {self.kind.value!r} is not usable on this host: "
+            f"{diagnostic_text}{suffix}."
+        )
+
+
 PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
     definition.kind: definition
     for definition in (
@@ -62,6 +82,7 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
         ),
         ProfilerDefinition(ProfilerKind.NEURON, frozenset({DomainName.LLM_SERVING})),
         ProfilerDefinition(ProfilerKind.MACOS_CPU, frozenset({DomainName.GENERIC})),
+        ProfilerDefinition(ProfilerKind.LINUX_CPU, frozenset({DomainName.GENERIC})),
     )
 }
 
@@ -129,9 +150,10 @@ def resolve_profiler_kind(
 ) -> ProfilerKind:
     """Resolve ``--profiler`` into the effective profiler kind.
 
-    ``auto`` is intentionally domain-aware. Generic workloads default to no
-    profiler; LLM-serving workloads pick the backend profiler unless the run
-    environment dictates a remote-safe default such as Modal's torch profiler.
+    ``auto`` is intentionally domain-aware. Generic workloads pick a native CPU
+    profiler when the host platform has one; LLM-serving workloads pick the
+    backend profiler unless the run environment dictates a remote-safe default
+    such as Modal's torch profiler.
     """
 
     requested_kind = require_profiler_kind(requested, label="requested profiler")
@@ -148,7 +170,12 @@ def resolve_profiler_kind(
         return requested_kind
 
     if domain_name is DomainName.GENERIC:
-        return ProfilerKind.MACOS_CPU if platform.system() == "Darwin" else ProfilerKind.NONE
+        system = platform.system()
+        if system == "Darwin":
+            return ProfilerKind.MACOS_CPU
+        if system == "Linux":
+            return ProfilerKind.LINUX_CPU
+        return ProfilerKind.NONE
 
     if allowed == frozenset({ProfilerKind.NONE}):
         return ProfilerKind.NONE
@@ -179,3 +206,55 @@ def resolve_profiler_kind(
             f"{domain_name.value!r}; allowed: {allowed_values}."
         )
     return candidate
+
+
+def preflight_profiler_kind(kind: ProfilerKind) -> ProfilerPreflightResult:
+    """Run cheap local checks for a resolved profiler.
+
+    Most profiler kinds are validated by their backend/runtime setup. Native CPU
+    profilers run on the local host, so check their command availability before
+    the optimization loop starts.
+    """
+
+    resolved = require_profiler_kind(kind)
+    if resolved is ProfilerKind.NONE:
+        return ProfilerPreflightResult(resolved, True)
+    if resolved is ProfilerKind.LINUX_CPU:
+        from vibesys.linux_cpu_profiler import (  # noqa: PLC0415
+            DiagnosticCode,
+            LinuxProfilerTool,
+            detect_capability,
+        )
+
+        capability = detect_capability()
+        blocking = {
+            DiagnosticCode.NOT_LINUX,
+            DiagnosticCode.PERF_UNAVAILABLE,
+            DiagnosticCode.PERF_STAT_UNAVAILABLE,
+        }
+        diagnostics = tuple(item.value for item in capability.diagnostics)
+        usable = capability.tool is LinuxProfilerTool.PERF and not any(
+            item in blocking for item in capability.diagnostics
+        )
+        details = (
+            f"perf_path={capability.perf_path or 'missing'}",
+            f"perf_event_paranoid={capability.perf_event_paranoid}",
+            f"kptr_restrict={capability.kptr_restrict}",
+        )
+        return ProfilerPreflightResult(resolved, usable, diagnostics, details)
+    if resolved is ProfilerKind.MACOS_CPU:
+        from vibesys.macos_cpu_profiler import (  # noqa: PLC0415
+            MacOSProfilerTool,
+            detect_capability,
+        )
+
+        capability = detect_capability()
+        diagnostics = tuple(item.value for item in capability.diagnostics)
+        usable = capability.tool is not MacOSProfilerTool.NONE
+        details = (
+            f"xcode_path={capability.xcode_path or 'missing'}",
+            f"xctrace_path={capability.xctrace_path or 'missing'}",
+            f"sample_path={capability.sample_path or 'missing'}",
+        )
+        return ProfilerPreflightResult(resolved, usable, diagnostics, details)
+    return ProfilerPreflightResult(resolved, True)

@@ -39,7 +39,7 @@ where = ["src"]
 include = ["vibesys*"]
 
 [tool.setuptools.package-data]
-vibesys = ["templates/*.j2", "templates/_backend/*/*.j2", "domains/README.md", "domains/*/templates/*.md", "loops/agent/templates/*.j2", "loops/agent/templates/_modality/*/*.j2", "loops/evolve/templates/*.j2", "loops/plain/templates/*.j2", "loops/plain/templates/*/*.j2"]
+vibesys = ["templates/*.j2", "templates/_backend/*/*.j2", "domains/README.md", "domains/*/templates/*.md", "loops/agent/templates/*.j2", "loops/agent/templates/profilers/*.j2", "loops/agent/templates/_modality/*/*.j2", "loops/evolve/templates/*.j2", "loops/plain/templates/*.j2", "loops/plain/templates/*/*.j2"]
 
 [dependency-groups]
 dev = [

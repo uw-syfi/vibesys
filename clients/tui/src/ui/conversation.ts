@@ -7,6 +7,7 @@ import {
 } from '@opentui/core';
 import type {SessionController} from '../session-controller.js';
 import type {ConversationEntry, SessionState} from '../session-model.js';
+import {visibleConversation} from '../session-model.js';
 import {promptPreview, toolOutputPreview} from './previews.js';
 import {entryPalette} from './styles.js';
 
@@ -30,8 +31,7 @@ export class ConversationView {
   }
 
   render(state: SessionState): void {
-    if (state.view === 'live') this.#renderConversation(state.conversation);
-    else this.#renderDetail(state.detailContent);
+    this.#renderConversation(visibleConversation(state));
   }
 
   toggleLatestPrompt(): void {
@@ -46,12 +46,6 @@ export class ConversationView {
       this.output.remove(child);
       child.destroyRecursively();
     }
-  }
-
-  #renderDetail(content: string): void {
-    this.#renderedConversation = [];
-    this.#clear();
-    this.output.add(new TextRenderable(this.renderer, {content, fg: '#e2e8f0', width: '100%'}));
   }
 
   #renderConversation(entries: ConversationEntry[]): void {

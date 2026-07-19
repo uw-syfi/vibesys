@@ -11,7 +11,7 @@ from vibesys.domains.base import DomainName
 from vibesys.errors import ConfigurationError
 from vibesys.loops.agent import issue_board
 from vibesys.loops.agent.loop import run_agent_loop
-from vibesys.profilers import ProfilerKind
+from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.schemas import (
     ImplementerResponse,
     JudgeResponse,
@@ -607,7 +607,13 @@ def test_loop_generic_auto_profiler_resolves_to_macos_cpu(tmp_path, ref_file):
         ],
     )
 
-    with patch("vibesys.profilers.platform.system", return_value="Darwin"):
+    with (
+        patch("vibesys.profilers.platform.system", return_value="Darwin"),
+        patch(
+            "vibesys.context.preflight_profiler_kind",
+            lambda kind: ProfilerPreflightResult(kind, True),
+        ),
+    ):
         result = _invoke_orchestrate(
             tmp_path,
             ref_file,

@@ -45,6 +45,10 @@ class HistoryQuery(Request):
     type: Literal["query.history"] = "query.history"
 
 
+class PerformanceQuery(Request):
+    type: Literal["query.performance"] = "query.performance"
+
+
 class EventsQuery(Request):
     type: Literal["query.events"] = "query.events"
     after_sequence: int = Field(default=0, ge=0)
@@ -62,6 +66,7 @@ ProtocolRequest = Annotated[
     | SnapshotQuery
     | ChatQuery
     | HistoryQuery
+    | PerformanceQuery
     | EventsQuery
     | SubscribeRequest,
     Field(discriminator="type"),
@@ -88,6 +93,14 @@ class ChatResult(ProtocolModel):
     effect: Literal["none"] = "none"
 
 
+class PerformanceRound(ProtocolModel):
+    round: int
+    perf_metric: float
+    perf_unit: str
+    passed: bool
+    profile_skipped: bool = False
+
+
 class Response(ProtocolModel):
     protocol_version: Literal[1] = PROTOCOL_VERSION
     request_id: str
@@ -98,6 +111,7 @@ class Response(ProtocolModel):
     chat: ChatResult | None = None
     snapshot: RunSnapshot | None = None
     events: list[RunEvent] = Field(default_factory=list)
+    performance: list[PerformanceRound] = Field(default_factory=list)
 
 
 class SubscribedMessage(ProtocolModel):
