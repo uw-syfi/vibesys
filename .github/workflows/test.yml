@@ -171,6 +171,38 @@ jobs:
           name: coverage-xml
           path: coverage.xml
 
+  # Exercises the real Linux workspace-confinement boundary (issue #149). The
+  # main `test` job skips these (no bubblewrap), so this job installs it and
+  # forces the tests to run — VIBESYS_REQUIRE_SANDBOX_TESTS=1 turns a missing or
+  # broken sandbox into a failure instead of a silent skip.
+  sandbox-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor;
+          # relax it so bwrap can create the namespace on the runner.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run workspace-confinement tests
+        env:
+          VIBESYS_REQUIRE_SANDBOX_TESTS: "1"
+        run: uv run python -m pytest tests/_agent_cli/test_hostsandbox.py -v
+
   patch-coverage:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'

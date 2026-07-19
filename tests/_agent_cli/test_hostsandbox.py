@@ -49,9 +49,16 @@ def _bwrap_works() -> bool:
     return proc.returncode == 0
 
 
+# CI sets ``VIBESYS_REQUIRE_SANDBOX_TESTS=1`` so the real-confinement tests must
+# run instead of silently skipping. If the sandbox stack is then unavailable the
+# tests fail (build() returns None → assertions trip), which is the whole point:
+# a broken or absent sandbox in CI should be loud, not invisible.
+_REQUIRE_SANDBOX_TESTS = os.environ.get("VIBESYS_REQUIRE_SANDBOX_TESTS") == "1"
+
 requires_sandbox = pytest.mark.skipif(
-    not _bwrap_works(),
-    reason="requires a working bwrap + user-namespace stack",
+    not _REQUIRE_SANDBOX_TESTS and not _bwrap_works(),
+    reason="requires a working bwrap + user-namespace stack "
+    "(set VIBESYS_REQUIRE_SANDBOX_TESTS=1 to force)",
 )
 
 
