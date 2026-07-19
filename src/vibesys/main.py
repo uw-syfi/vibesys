@@ -482,6 +482,77 @@ def _make_parser(prog: str, description: str) -> argparse.ArgumentParser:
 
 
 # ---------------------------------------------------------------------------
+# Repository validation command
+# ---------------------------------------------------------------------------
+
+
+def _build_validate_parser() -> argparse.ArgumentParser:
+    parser = _RunArgumentParser(
+        prog="vibesys validate",
+        description=(
+            "Validate the repository's agent configuration and input-bundle "
+            "harness contract without starting an optimization run."
+        ),
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Path to agent TOML config (default: ./agent.toml).",
+    )
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help="Path to the input bundle (default: current directory).",
+    )
+    return parser
+
+
+def _run_validate(argv: list[str]) -> None:
+    """Validate repo-local configuration and harness files, then report readiness."""
+
+    args = _build_validate_parser().parse_args(argv)
+    repository = Path.cwd().resolve()
+    config_path = (args.config or repository / "agent.toml").expanduser().resolve()
+    input_path = (args.input or repository).expanduser().resolve()
+
+    try:
+        _load_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        _configuration_error(
+            f"Validation failed for agent config {config_path}: {exc}",
+            code="validation_failed",
+            stage="repository_validation",
+            exit_code=1,
+        )
+
+    try:
+        bundle = load_input_bundle(input_path)
+    except (FileNotFoundError, ValueError) as exc:
+        _configuration_error(
+            f"Validation failed for input bundle {input_path}: {exc}",
+            code="validation_failed",
+            stage="repository_validation",
+            exit_code=1,
+        )
+
+    print("VibeSys validation passed: repository is ready for a run.")
+    print(f"  repository: {repository}")
+    print(f"  agent config: {config_path}")
+    print(f"  input bundle: {bundle.root}")
+    print(f"  objective: {bundle.objective_path}")
+    print(f"  accuracy command: {bundle.accuracy_command_display}")
+    print(f"  benchmark command: {bundle.benchmark_command_display}")
+    if bundle.workspace_seed_path is not None:
+        print(f"  workspace seed: {bundle.workspace_seed_path}")
+    if bundle.evaluator_path is not None:
+        print(f"  evaluator source: {bundle.evaluator_path}")
+    if bundle.benchmark_result is not None:
+        print(f"  benchmark metric: {bundle.benchmark_result.metric}")
+
+
+# ---------------------------------------------------------------------------
 # Shared input-bundle discovery
 # ---------------------------------------------------------------------------
 
@@ -1025,6 +1096,10 @@ def parse_cli_invocation(argv: list[str]) -> CliInvocation:
 
 
 def _dispatch(argv: list[str]) -> None:
+    if argv and argv[0] == "validate":
+        _run_validate(argv[1:])
+        return
+
     invocation = parse_cli_invocation(argv)
     loop_kind, args = invocation.loop_kind, invocation.args
     runner = globals()[_RUNNERS[loop_kind]]

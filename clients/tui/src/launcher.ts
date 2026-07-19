@@ -14,14 +14,16 @@ const SHUTDOWN_TIMEOUT_MS = 10_000;
 const BACKEND_EXIT_GRACE_MS = 2_000;
 
 export async function launch(argv: string[]): Promise<number> {
-  if (argv.some(argument => argument === '-h' || argument === '--help')) {
-    const backend = resolveBackendCommand();
-    if (!backend) return reportMissingPython();
-    return runToCompletion(backend.command, [...backend.args, ...argv, '--headless']);
-  }
-
   const backend = resolveBackendCommand();
   if (!backend) return reportMissingPython();
+
+  if (argv[0] === 'validate') {
+    return runToCompletion(backend.command, [...backend.args, ...argv]);
+  }
+
+  if (argv.some(argument => argument === '-h' || argument === '--help')) {
+    return runToCompletion(backend.command, [...backend.args, ...argv, '--headless']);
+  }
 
   const runtime = process.env['VIBESYS_TUI_RUNTIME'] ?? 'bun';
   if (!(await executableExists(runtime))) {

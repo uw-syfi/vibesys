@@ -86,6 +86,21 @@ process.exit(0);
     await expect(launch(['--stub-agent'])).resolves.toBe(0);
     await access(backendTerminated);
   });
+
+  it('runs validation directly without starting the interactive client', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'vs-launcher-test-'));
+    const backend = await writeExecutable(
+      'fake-backend.mjs',
+      `
+process.exit(process.argv.includes('validate') ? 0 : 9);
+`,
+    );
+
+    process.env['VIBESYS_PYTHON'] = backend;
+    process.env['VIBESYS_TUI_RUNTIME'] = join(tempDir, 'missing-runtime');
+
+    await expect(launch(['validate'])).resolves.toBe(0);
+  });
 });
 
 async function writeExecutable(name: string, source: string): Promise<string> {
