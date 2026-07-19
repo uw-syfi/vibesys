@@ -27,7 +27,7 @@ The foundations (roofline, prefill vs decode, batching-for-intensity, launch ove
 | **Hardware** | The roofline ridge point shifts (H100 ~295 FLOP/byte ≠ H200 ≠ B200 ≠ MI300 ≠ Apple). Kernel library availability differs — FlashInfer / DeepGEMM / DeepEP are NVIDIA-only today. NVLink / Infinity-Fabric / NVL72 / none set different parallelism ceilings. Precision support differs (FP4 is Blackwell+; FP8 is Hopper+; AMD's FP8 story is newer; Apple has unified memory + INT4/INT8). |
 | **Workload** | Long-context RAG stresses KV capacity and prefix-cache hit rate. High-QPS short-form stresses scheduler / launch overhead more than raw kernel speed. Agent-style branching stresses prefix sharing and concurrent decode over divergent suffixes. Multi-turn conversations shift the TTFT / TPOT weighting. Each of these pushes different levers. |
 
-Treat this collection as a set of tools and the tradeoffs between them, **not** a recipe book. The compatibility tables in each `algorithms/*/SKILL.md` and the per-engine pointers exist precisely because the same technique applies differently across these axes. When a recipe doesn't seem to fit your setting, go back to the fundamentals in Part 1 and re-derive which bottleneck you're actually solving for.
+Treat this collection as a set of tools and the tradeoffs between them, **not** a recipe book. The compatibility tables in each `references/algorithms/*.md` note and the per-engine pointers exist precisely because the same technique applies differently across these axes. When a recipe doesn't seem to fit your setting, go back to the fundamentals in Part 1 and re-derive which bottleneck you're actually solving for.
 
 ### Principal techniques, not exhaustive
 
@@ -40,8 +40,8 @@ What the skills capture is the *pattern* and the *decision* behind each techniqu
 When a skill doesn't quite fit your situation:
 
 - Re-read the **fundamentals in Part 1** and re-derive which bottleneck you're actually solving for.
-- Check the **compatibility tables** in each `algorithms/*` skill for how the axes combine.
-- Look at the **engine pointers** in `engines/*` for how production systems actually implemented it — that's often the clearest source of truth.
+- Check the **compatibility tables** in each `references/algorithms/*.md` note for how the axes combine.
+- Look at the **engine pointers** in `references/engines/*` for how production systems actually implemented it — that's often the clearest source of truth.
 - Use the **profiler** ([`tooling/profiler/`](references/tooling/profiler.md)) before and after every change to confirm the technique is helping the bottleneck you think it's helping.
 
 ## Part 1 — Performance foundations

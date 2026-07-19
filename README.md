@@ -154,7 +154,7 @@ workspace, optional trusted evaluator source, and optional benchmark result
 metric.
 
 `OBJECTIVE.md` is read at the start of every run and must live next to the
-`reference/` directory (sibling, not inside). See `examples/model-serving/Llama-3-8B/`, `examples/model-serving/moonshine-streaming/`, `examples/model-serving/qwen3-32b-code-edit/`, `examples/model-serving/olmo-hybrid-prefix-caching/`, `examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit/`, `examples/model-serving/show-o2-1.5B-HQ-h100/`, and `examples/model-serving/show-o2-1.5B-HQ-macbook/` for the paper scenarios.
+`reference/` directory (sibling, not inside). See `examples/model-serving/Llama-3-8B/`, `examples/model-serving/moonshine-streaming/`, `examples/model-serving/qwen3-32b-code-edit/`, `examples/model-serving/olmo-hybrid-prefix-caching/`, `examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit/`, `examples/model-serving/show-o2-1.5B-HQ-h100/`, and `examples/model-serving/show-o2-1.5B-HQ-macbook/` for the paper scenarios. Additional bundles live alongside them, including `examples/model-serving/show-o2-1.5B-HQ/` (the original Show-o2 bundle) and `examples/model-serving/Llama-3-8B-trn2/` (the Llama-3-8B bundle retargeted to AWS Trainium).
 
 For multi-objective evolutionary runs, drop an `objectives.toml` next to `OBJECTIVE.md` (or pass `--objective name:max|min` flags) — see `./vs --outer-loop evolve --help`.
 
@@ -233,10 +233,7 @@ src/vibesys/
 │   └── profiler.py               # shared Performance Evaluator helper
 │
 ├── sandbox/                      # execution-environment policy
-│   ├── docker_sandbox.py
-│   ├── modal_sandbox.py
-│   ├── modal_model_setup.py
-│   └── run_environment.py
+│   └── run_environment.py        # (Docker/Modal backends: libs/vs-sandbox)
 │
 ├── agents/                       # coding-agent harness abstraction
 │   └── callbacks.py              # LangChain logger (deepagents path)
