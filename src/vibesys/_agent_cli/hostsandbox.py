@@ -85,9 +85,12 @@ _MACOS_SYSTEM_READ_ROOTS: tuple[str, ...] = (
     "/bin",
     "/sbin",
     "/System",
+    # The dyld shared cache lives under the Preboot Cryptexes tree on
+    # Apple Silicon; without read access here every dynamically linked binary
+    # (including /bin/sh) aborts during dyld startup under (deny default).
+    "/System/Volumes/Preboot/Cryptexes",
     "/Library",
-    "/private/var/db/dyld",  # dyld shared cache
-    "/private/var/db/timezone",
+    "/private/var/db",  # dyld cache, timezone, and other launch-time state
     "/private/etc",
     "/etc",
     "/dev",
@@ -319,6 +322,11 @@ class SeatbeltSandbox:
             "(allow iokit-open)",  # Metal / GPU access for benchmarks
             # Network stays open so the agent can reach its model provider.
             "(allow network*)",
+            # Allow stat()/metadata on any path so dyld and command-line tools
+            # can resolve paths at startup. This grants metadata only, not file
+            # contents or directory enumeration, so sibling *contents* and
+            # listings stay denied by (deny default).
+            "(allow file-read-metadata)",
         ]
 
         # Read-only system + toolchain locations (metadata + contents).

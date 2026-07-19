@@ -406,6 +406,16 @@ def test_seatbelt_blocks_escape_but_allows_workspace(tmp_path_factory):
     agent, workspace, sibling = _escape_probe(tmp_path_factory)
     agent.sandbox = hostsandbox.build(workspace, env=agent.env, binary_path=agent.binary_path)
     assert isinstance(agent.sandbox, hostsandbox.SeatbeltSandbox)
+
+    # Sanity-check that the profile lets an ordinary binary launch at all before
+    # asserting on the escape. A dyld-startup denial shows up as an abort with no
+    # stderr, so surface sandbox-exec's own output to make such failures legible.
+    probe = subprocess.run(agent.sandbox.wrap(["/usr/bin/true"]), capture_output=True, text=True)
+    assert probe.returncode == 0, (
+        f"profile blocks a trivial launch (rc={probe.returncode}); "
+        f"stderr={probe.stderr!r}\n--- profile ---\n{agent.sandbox.profile()}"
+    )
+
     out = agent.generate("stay in the workspace", cwd=str(workspace), silent=True)
 
     assert "READ_OK" not in out and "SECRET=leak" not in out
