@@ -1,4 +1,4 @@
-"""Tests for the unified ``vibesys`` CLI dispatcher."""
+"""Tests for the Python backend entry point."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from vibesys.cli import (
+from vibesys.__main__ import (
     _extract_flag,
     _extract_loop_selection,
     _prepare_stub_agent_smoke_defaults,
@@ -120,7 +120,7 @@ def test_extract_loop_selection_unknown_outer_loop_exits():
 
 
 def test_target_input_defaults_to_none():
-    from vibesys.cli import _build_agent_parser
+    from vibesys.__main__ import _build_agent_parser
 
     args = _build_agent_parser().parse_args([])
 
@@ -138,7 +138,7 @@ def test_target_input_defaults_to_none():
     ["--profiler-support", "--nsys-profiler", "--torch-profiler", "--neuron-profiler"],
 )
 def test_profiler_support_override_flags_are_rejected(obsolete_flag):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.__main__ import _build_agent_parser
 
     with pytest.raises(ConfigurationError, match="unrecognized arguments"):
         _build_agent_parser().parse_args([obsolete_flag, "support"])
@@ -154,7 +154,7 @@ def test_profiler_support_override_flags_are_rejected(obsolete_flag):
     ],
 )
 def test_input_arg_is_available_on_all_loop_parsers(builder_name):
-    import vibesys.cli as cli
+    import vibesys.__main__ as cli
 
     parser = getattr(cli, builder_name)()
     args = parser.parse_args(["--input", "examples/data-structures/queue-spsc"])
@@ -172,7 +172,7 @@ def test_input_arg_is_available_on_all_loop_parsers(builder_name):
     ],
 )
 def test_profiler_none_is_valid_with_modal(builder_name, validator_name, tmp_path):
-    import vibesys.cli as cli
+    import vibesys.__main__ as cli
 
     bundle = _write_input_bundle(tmp_path)
     parser = getattr(cli, builder_name)()
@@ -191,7 +191,7 @@ def test_profiler_none_is_valid_with_modal(builder_name, validator_name, tmp_pat
     ],
 )
 def test_agent_parser_rejects_invalid_enum_args(argv):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.__main__ import _build_agent_parser
 
     with pytest.raises(ConfigurationError) as exc:
         _build_agent_parser().parse_args(argv)
@@ -200,14 +200,14 @@ def test_agent_parser_rejects_invalid_enum_args(argv):
 
 
 def test_agent_parser_rejects_obsolete_target_flags():
-    from vibesys.cli import _build_agent_parser
+    from vibesys.__main__ import _build_agent_parser
 
     with pytest.raises(ConfigurationError):
         _build_agent_parser().parse_args(["--ref", "examples/Llama-3-8B/reference"])
 
 
 def test_validate_target_inputs_loads_manifest(tmp_path):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.__main__ import _build_agent_parser
 
     bundle = _write_input_bundle(tmp_path)
     args = _build_agent_parser().parse_args(["--input", str(bundle)])
@@ -221,14 +221,14 @@ def test_validate_target_inputs_loads_manifest(tmp_path):
 
 
 def test_agent_parser_rejects_domain_override_flag():
-    from vibesys.cli import _build_agent_parser
+    from vibesys.__main__ import _build_agent_parser
 
     with pytest.raises(ConfigurationError):
         _build_agent_parser().parse_args(["--domain", "llm-serving"])
 
 
 def test_validate_target_inputs_loads_trusted_benchmark_result_contract(tmp_path):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.__main__ import _build_agent_parser
 
     bundle = _write_input_bundle(tmp_path)
     manifest = bundle / "vibesys.input.toml"
@@ -246,7 +246,7 @@ def test_validate_target_inputs_loads_trusted_benchmark_result_contract(tmp_path
 
 
 def test_validate_target_inputs_rejects_missing_input_dir(tmp_path):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.__main__ import _build_agent_parser
 
     missing = tmp_path / "missing"
     args = _build_agent_parser().parse_args(["--input", str(missing)])
@@ -258,7 +258,7 @@ def test_validate_target_inputs_rejects_missing_input_dir(tmp_path):
 
 
 def test_validate_target_inputs_reports_missing_manifest(tmp_path):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.__main__ import _build_agent_parser
 
     bundle = tmp_path / "incomplete"
     bundle.mkdir()
@@ -273,7 +273,7 @@ def test_validate_target_inputs_reports_missing_manifest(tmp_path):
 
 
 def test_validate_target_inputs_reports_missing_command(tmp_path):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.__main__ import _build_agent_parser
 
     bundle = _write_input_bundle(tmp_path)
     tools = bundle / "tools"
@@ -303,7 +303,7 @@ command = ["./tools/bench"]
 
 
 def test_validate_target_inputs_requires_input():
-    from vibesys.cli import _build_agent_parser
+    from vibesys.__main__ import _build_agent_parser
 
     args = _build_agent_parser().parse_args([])
 
@@ -329,7 +329,7 @@ def test_stub_agent_smoke_defaults_preserve_explicit_input():
 
 
 def test_stub_agent_can_run_without_agent_toml(tmp_path):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.__main__ import _build_agent_parser
 
     bundle = _write_input_bundle(tmp_path)
     args = _build_agent_parser().parse_args(
@@ -351,7 +351,7 @@ def test_stub_agent_can_run_without_agent_toml(tmp_path):
 
 
 def test_missing_config_reports_configuration_error(tmp_path):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.__main__ import _build_agent_parser
 
     bundle = _write_input_bundle(tmp_path)
     args = _build_agent_parser().parse_args(
@@ -371,7 +371,7 @@ def test_missing_config_reports_configuration_error(tmp_path):
 
 
 def test_resume_without_input_infers_original_input(monkeypatch, tmp_path):
-    import vibesys.cli as cli
+    import vibesys.__main__ as cli
 
     bundle = _write_input_bundle(tmp_path)
     run_dir = tmp_path / "exp_env" / "20260716-180256-test"
@@ -386,7 +386,7 @@ def test_resume_without_input_infers_original_input(monkeypatch, tmp_path):
 
 
 def test_resume_accepts_exp_env_path_without_input(monkeypatch, tmp_path):
-    import vibesys.cli as cli
+    import vibesys.__main__ as cli
 
     bundle = _write_input_bundle(tmp_path)
     run_dir = tmp_path / "exp_env" / "20260716-180256-test"
@@ -402,7 +402,7 @@ def test_resume_accepts_exp_env_path_without_input(monkeypatch, tmp_path):
 
 
 def test_resume_latest_without_input_uses_latest_run_metadata(monkeypatch, tmp_path):
-    import vibesys.cli as cli
+    import vibesys.__main__ as cli
 
     older_bundle = _write_input_bundle(tmp_path / "older")
     latest_bundle = _write_input_bundle(tmp_path / "latest")
@@ -419,7 +419,7 @@ def test_resume_latest_without_input_uses_latest_run_metadata(monkeypatch, tmp_p
 
 
 def test_resume_without_input_reports_missing_metadata(monkeypatch, tmp_path):
-    import vibesys.cli as cli
+    import vibesys.__main__ as cli
 
     (tmp_path / "exp_env" / "20260716-180256-test" / "logs").mkdir(parents=True)
     monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
@@ -446,7 +446,7 @@ def test_resume_without_input_reports_missing_metadata(monkeypatch, tmp_path):
 )
 def test_main_routes_to_runner(loop_name: str, runner_attr: str):
     argv = ["vibesys", "--outer-loop", loop_name, "--exp-name", "x", *TARGET_ARGS]
-    with patch.object(sys, "argv", argv), patch(f"vibesys.cli.{runner_attr}") as runner:
+    with patch.object(sys, "argv", argv), patch(f"vibesys.__main__.{runner_attr}") as runner:
         main()
         runner.assert_called_once()
         args = runner.call_args.args[0]
@@ -467,7 +467,7 @@ def test_main_tty_run_stays_in_python_cli():
         patch.object(sys, "argv", argv),
         patch.object(sys.stdin, "isatty", return_value=True),
         patch.object(sys.stdout, "isatty", return_value=True),
-        patch("vibesys.cli._run_agent") as runner,
+        patch("vibesys.__main__._run_agent") as runner,
     ):
         main()
 
@@ -484,7 +484,7 @@ def test_main_headless_skips_tui():
     ]
     with (
         patch.object(sys, "argv", argv),
-        patch("vibesys.cli._run_agent") as runner,
+        patch("vibesys.__main__._run_agent") as runner,
     ):
         main()
     runner.assert_called_once()

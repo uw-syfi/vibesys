@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from vibesys.cli import load_config_and_skills
+from vibesys.__main__ import load_config_and_skills
 from vibesys.constants import PROJECT_ROOT, ComputeBackend
 from vibesys.skills import (
     SkillMetadataError,

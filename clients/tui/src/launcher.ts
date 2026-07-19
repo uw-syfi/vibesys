@@ -93,9 +93,9 @@ interface BackendCommand {
 
 function resolveBackendCommand(): BackendCommand | undefined {
   const configuredPython = process.env['VIBESYS_PYTHON'];
-  if (configuredPython) return {command: configuredPython, args: ['-m', 'vibesys.cli']};
-  if (commandExistsSync('python3')) return {command: 'python3', args: ['-m', 'vibesys.cli']};
-  if (commandExistsSync('python')) return {command: 'python', args: ['-m', 'vibesys.cli']};
+  if (configuredPython) return {command: configuredPython, args: ['-m', 'vibesys']};
+  if (commandExistsSync('python3')) return {command: 'python3', args: ['-m', 'vibesys']};
+  if (commandExistsSync('python')) return {command: 'python', args: ['-m', 'vibesys']};
   return undefined;
 }
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vibesys.cli import _MODALITIES
+from vibesys.__main__ import _MODALITIES
 from vibesys.input_manifest import load_input_bundle
 from vibesys.prompts import render_template
 

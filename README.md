@@ -218,7 +218,7 @@ Resume any run with `--resume` (defaults to "latest"):
 
 ```
 src/vibesys/
-├── cli.py                        # Python backend entry point for TS launcher
+├── __main__.py                   # Python backend entry point for TS launcher
 ├── context.py                    # _RunContext: lifecycle + ctx.invoke()
 ├── agent_runner.py               # invoke wrappers + structured-response extraction
 ├── prompts.py                    # Jinja + backend-fragment renderer

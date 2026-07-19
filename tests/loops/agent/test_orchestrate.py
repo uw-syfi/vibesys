@@ -662,7 +662,7 @@ def test_loop_max_rounds_terminates(tmp_path, ref_file):
 
 
 def test_cli_loads_objective_md_from_ref_parent(tmp_path):
-    from vibesys.cli import _load_objective
+    from vibesys.__main__ import _load_objective
     from vibesys.input_manifest import load_input_bundle
 
     bundle = tmp_path / "modelA"
@@ -697,7 +697,7 @@ def test_cli_missing_objective_md_errors(tmp_path):
 
 def test_cli_rejects_modal_with_nsys_profiler(tmp_path, ref_file):
     """--modal only supports torch profiler."""
-    from vibesys.cli import _build_agent_parser, _validate_agent
+    from vibesys.__main__ import _build_agent_parser, _validate_agent
 
     parser = _build_agent_parser()
     validate_args = _validate_agent
