@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from vibesys.cli import load_config_and_skills
 from vibesys.constants import PROJECT_ROOT, ComputeBackend
+from vibesys.main import load_config_and_skills
 from vibesys.skills import (
     SkillMetadataError,
     _is_in_hidden_dir,

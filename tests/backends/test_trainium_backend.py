@@ -10,8 +10,8 @@ from deepagents.backends import LocalShellBackend
 from vibesys import backends
 from vibesys.backends import SandboxKind
 from vibesys.backends.trainium import TrainiumBackend
-from vibesys.cli import _add_common_args
 from vibesys.constants import ComputeBackend
+from vibesys.main import _add_common_args
 from vibesys.profilers import ProfilerKind
 
 

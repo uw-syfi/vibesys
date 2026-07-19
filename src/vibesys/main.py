@@ -1,4 +1,4 @@
-"""Unified ``vibesys`` CLI.
+"""Python backend entry point for VibeSys runs.
 
 The loop is picked by ``--outer-loop {agent, plain, evolve}``:
 
@@ -10,14 +10,15 @@ The loop is picked by ``--outer-loop {agent, plain, evolve}``:
              and the implementer drains one issue at a time.
   "evolve" — population-based evolutionary search.
 
-Each kind has its own ``_build_<kind>_parser`` and ``_run_<kind>``
-function, sharing common args via :func:`_apply_common_args`.
+The TypeScript launcher owns interactive orchestration. This module owns
+Python-side argument parsing, validation, server supervision, and loop dispatch.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -51,6 +52,8 @@ _MODALITIES = (
 )
 
 _MODAL_PROFILERS = frozenset({ProfilerKind.AUTO, ProfilerKind.TORCH, ProfilerKind.NONE})
+_STUB_AGENT_DEFAULT_INPUT = PROJECT_ROOT / "examples" / "data-structures" / "queue-spsc"
+_STUB_AGENT_DEFAULT_CONFIG_TEXT = '[model]\nname = "gpt-5.5"\n'
 
 
 class _RunArgumentParser(argparse.ArgumentParser):
@@ -319,10 +322,13 @@ def load_config_and_skills(
     args: argparse.Namespace,
 ) -> tuple[Config, list[str] | None, ComputeBackend]:
     """Load config from args.config, process skills_dir, and resolve the backend."""
-    try:
-        config = _load_config(args.config)
-    except (ValueError, FileNotFoundError) as e:
-        _configuration_error(str(e), code="config_load_failed", stage="config_loading")
+    if getattr(args, "stub_agent", False) and not Path(args.config).is_file():
+        config = Config.model_validate(tomllib.loads(_STUB_AGENT_DEFAULT_CONFIG_TEXT))
+    else:
+        try:
+            config = _load_config(args.config)
+        except (ValueError, FileNotFoundError) as e:
+            _configuration_error(str(e), code="config_load_failed", stage="config_loading")
 
     backend: ComputeBackend = args.backend or config.backend.name
 
@@ -336,6 +342,20 @@ def load_config_and_skills(
         )
         skills = resolve_skill_source_dirs(raw_skills, backend=backend)
     return config, skills, backend
+
+
+def _prepare_stub_agent_smoke_defaults(argv: list[str]) -> list[str]:
+    if "--stub-agent" not in argv or any(
+        token == "--input" or token.startswith("--input=") for token in argv
+    ):
+        return argv
+    return [
+        "--input",
+        str(_STUB_AGENT_DEFAULT_INPUT),
+        "--exp-name",
+        f"stub-smoke-{os.getpid()}",
+        *argv,
+    ]
 
 
 def run_environment_spec_from_args(args: argparse.Namespace) -> RunEnvironmentSpec:
@@ -996,6 +1016,7 @@ _RUNNERS = {
 
 def parse_cli_invocation(argv: list[str]) -> CliInvocation:
     """Parse and validate one invocation without printing or exiting."""
+    argv = _prepare_stub_agent_smoke_defaults(argv)
     loop_kind, remaining = _extract_loop_selection(argv)
     args = _PARSER_BUILDERS[loop_kind]().parse_args(remaining)
     _resolve_resume_args(args)
@@ -1047,16 +1068,6 @@ def _render_configuration_error(error: ConfigurationError) -> NoReturn:
 def main() -> None:
     argv = sys.argv[1:]
     control_socket = _control_socket_from_argv(argv)
-    interactive = (
-        control_socket is None
-        and "--headless" not in argv
-        and sys.stdin.isatty()
-        and sys.stdout.isatty()
-    )
-    if interactive:
-        from vibesys.launcher import launch
-
-        raise SystemExit(launch(argv))
     if control_socket is not None:
         from vibesys.server.runtime import run_server
 

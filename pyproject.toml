@@ -31,8 +31,6 @@ dependencies = [
 ]
 
 [project.scripts]
-vibesys = "vibesys.cli:main"
-vibesys-launch = "vibesys.launcher:main"
 vibesys-issue-mcp = "vs_issue_board.mcp:main"
 
 [tool.setuptools.packages.find]

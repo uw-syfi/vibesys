@@ -4,9 +4,9 @@ from unittest.mock import patch
 
 import pytest
 
-from vibesys.cli import _build_plain_parser as build_parser
-from vibesys.cli import main
 from vibesys.loops.plain.loop import PlainLoopState
+from vibesys.main import _build_plain_parser as build_parser
+from vibesys.main import main
 
 TARGET_ARGS = [
     "--input",
@@ -83,7 +83,7 @@ class TestMain:
         from vibesys.constants import DEFAULT_COMPUTE_BACKEND
 
         return patch(
-            "vibesys.cli.load_config_and_skills",
+            "vibesys.main.load_config_and_skills",
             return_value=(
                 {"model": {"name": "claude-sonnet-4-6"}},
                 None,
@@ -143,7 +143,7 @@ class TestMain:
             with (
                 self._patch_config(),
                 patch(
-                    "vibesys.cli._resolve_run_dir",
+                    "vibesys.main._resolve_run_dir",
                     return_value="fake-run-dir",
                 ),
                 patch(

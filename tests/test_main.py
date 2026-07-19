@@ -1,4 +1,4 @@
-"""Tests for the unified ``vibesys`` CLI dispatcher."""
+"""Tests for the Python backend entry point."""
 
 from __future__ import annotations
 
@@ -8,15 +8,25 @@ from unittest.mock import patch
 
 import pytest
 
-from vibesys.cli import (
+from vibesys.domains.base import DomainName
+from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.main import (
+    _control_socket_from_argv,
+    _detect_resume_round,
     _extract_flag,
     _extract_loop_selection,
+    _infer_resume_input,
+    _load_objectives_toml,
+    _parse_cli_objective,
+    _prepare_stub_agent_smoke_defaults,
+    _prune_rounds_state,
+    _render_configuration_error,
+    _resolve_run_dir,
     _validate_target_inputs,
+    load_config_and_skills,
     main,
     parse_cli_invocation,
 )
-from vibesys.domains.base import DomainName
-from vibesys.errors import ConfigurationError
 from vibesys.profilers import ProfilerKind
 
 TARGET_ARGS = ["--input", "examples/model-serving/Llama-3-8B"]
@@ -118,7 +128,7 @@ def test_extract_loop_selection_unknown_outer_loop_exits():
 
 
 def test_target_input_defaults_to_none():
-    from vibesys.cli import _build_agent_parser
+    from vibesys.main import _build_agent_parser
 
     args = _build_agent_parser().parse_args([])
 
@@ -136,7 +146,7 @@ def test_target_input_defaults_to_none():
     ["--profiler-support", "--nsys-profiler", "--torch-profiler", "--neuron-profiler"],
 )
 def test_profiler_support_override_flags_are_rejected(obsolete_flag):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.main import _build_agent_parser
 
     with pytest.raises(ConfigurationError, match="unrecognized arguments"):
         _build_agent_parser().parse_args([obsolete_flag, "support"])
@@ -152,7 +162,7 @@ def test_profiler_support_override_flags_are_rejected(obsolete_flag):
     ],
 )
 def test_input_arg_is_available_on_all_loop_parsers(builder_name):
-    import vibesys.cli as cli
+    import vibesys.main as cli
 
     parser = getattr(cli, builder_name)()
     args = parser.parse_args(["--input", "examples/data-structures/queue-spsc"])
@@ -170,7 +180,7 @@ def test_input_arg_is_available_on_all_loop_parsers(builder_name):
     ],
 )
 def test_profiler_none_is_valid_with_modal(builder_name, validator_name, tmp_path):
-    import vibesys.cli as cli
+    import vibesys.main as cli
 
     bundle = _write_input_bundle(tmp_path)
     parser = getattr(cli, builder_name)()
@@ -189,7 +199,7 @@ def test_profiler_none_is_valid_with_modal(builder_name, validator_name, tmp_pat
     ],
 )
 def test_agent_parser_rejects_invalid_enum_args(argv):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.main import _build_agent_parser
 
     with pytest.raises(ConfigurationError) as exc:
         _build_agent_parser().parse_args(argv)
@@ -198,14 +208,14 @@ def test_agent_parser_rejects_invalid_enum_args(argv):
 
 
 def test_agent_parser_rejects_obsolete_target_flags():
-    from vibesys.cli import _build_agent_parser
+    from vibesys.main import _build_agent_parser
 
     with pytest.raises(ConfigurationError):
         _build_agent_parser().parse_args(["--ref", "examples/Llama-3-8B/reference"])
 
 
 def test_validate_target_inputs_loads_manifest(tmp_path):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.main import _build_agent_parser
 
     bundle = _write_input_bundle(tmp_path)
     args = _build_agent_parser().parse_args(["--input", str(bundle)])
@@ -219,14 +229,14 @@ def test_validate_target_inputs_loads_manifest(tmp_path):
 
 
 def test_agent_parser_rejects_domain_override_flag():
-    from vibesys.cli import _build_agent_parser
+    from vibesys.main import _build_agent_parser
 
     with pytest.raises(ConfigurationError):
         _build_agent_parser().parse_args(["--domain", "llm-serving"])
 
 
 def test_validate_target_inputs_loads_trusted_benchmark_result_contract(tmp_path):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.main import _build_agent_parser
 
     bundle = _write_input_bundle(tmp_path)
     manifest = bundle / "vibesys.input.toml"
@@ -244,7 +254,7 @@ def test_validate_target_inputs_loads_trusted_benchmark_result_contract(tmp_path
 
 
 def test_validate_target_inputs_rejects_missing_input_dir(tmp_path):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.main import _build_agent_parser
 
     missing = tmp_path / "missing"
     args = _build_agent_parser().parse_args(["--input", str(missing)])
@@ -256,7 +266,7 @@ def test_validate_target_inputs_rejects_missing_input_dir(tmp_path):
 
 
 def test_validate_target_inputs_reports_missing_manifest(tmp_path):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.main import _build_agent_parser
 
     bundle = tmp_path / "incomplete"
     bundle.mkdir()
@@ -271,7 +281,7 @@ def test_validate_target_inputs_reports_missing_manifest(tmp_path):
 
 
 def test_validate_target_inputs_reports_missing_command(tmp_path):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.main import _build_agent_parser
 
     bundle = _write_input_bundle(tmp_path)
     tools = bundle / "tools"
@@ -301,7 +311,7 @@ command = ["./tools/bench"]
 
 
 def test_validate_target_inputs_requires_input():
-    from vibesys.cli import _build_agent_parser
+    from vibesys.main import _build_agent_parser
 
     args = _build_agent_parser().parse_args([])
 
@@ -311,8 +321,65 @@ def test_validate_target_inputs_requires_input():
     assert "missing required target input: --input" in exc.value.diagnostic.message
 
 
+def test_stub_agent_smoke_defaults_supply_input_and_unique_exp_name():
+    argv = _prepare_stub_agent_smoke_defaults(["--stub-agent", "--max-rounds", "1"])
+
+    assert argv[:2] == ["--input", str(Path("examples/data-structures/queue-spsc").resolve())]
+    assert argv[2] == "--exp-name"
+    assert argv[3].startswith("stub-smoke-")
+    assert argv[-2:] == ["--max-rounds", "1"]
+
+
+def test_stub_agent_smoke_defaults_preserve_explicit_input():
+    argv = ["--stub-agent", "--input", "examples/kv-store"]
+
+    assert _prepare_stub_agent_smoke_defaults(argv) == argv
+
+
+def test_stub_agent_can_run_without_agent_toml(tmp_path):
+    from vibesys.main import _build_agent_parser
+
+    bundle = _write_input_bundle(tmp_path)
+    args = _build_agent_parser().parse_args(
+        [
+            "--stub-agent",
+            "--input",
+            str(bundle),
+            "--config",
+            str(tmp_path / "missing-agent.toml"),
+            "--no-skills",
+        ]
+    )
+    _validate_target_inputs(args)
+
+    config, skills, _ = load_config_and_skills(args)
+
+    assert config.model.name == "gpt-5.5"
+    assert skills is None
+
+
+def test_missing_config_reports_configuration_error(tmp_path):
+    from vibesys.main import _build_agent_parser
+
+    bundle = _write_input_bundle(tmp_path)
+    args = _build_agent_parser().parse_args(
+        [
+            "--input",
+            str(bundle),
+            "--config",
+            str(tmp_path / "missing-agent.toml"),
+        ]
+    )
+
+    with pytest.raises(ConfigurationError) as exc:
+        load_config_and_skills(args)
+
+    assert exc.value.diagnostic.code == "config_load_failed"
+    assert exc.value.diagnostic.stage == "config_loading"
+
+
 def test_resume_without_input_infers_original_input(monkeypatch, tmp_path):
-    import vibesys.cli as cli
+    import vibesys.main as cli
 
     bundle = _write_input_bundle(tmp_path)
     run_dir = tmp_path / "exp_env" / "20260716-180256-test"
@@ -327,7 +394,7 @@ def test_resume_without_input_infers_original_input(monkeypatch, tmp_path):
 
 
 def test_resume_accepts_exp_env_path_without_input(monkeypatch, tmp_path):
-    import vibesys.cli as cli
+    import vibesys.main as cli
 
     bundle = _write_input_bundle(tmp_path)
     run_dir = tmp_path / "exp_env" / "20260716-180256-test"
@@ -343,7 +410,7 @@ def test_resume_accepts_exp_env_path_without_input(monkeypatch, tmp_path):
 
 
 def test_resume_latest_without_input_uses_latest_run_metadata(monkeypatch, tmp_path):
-    import vibesys.cli as cli
+    import vibesys.main as cli
 
     older_bundle = _write_input_bundle(tmp_path / "older")
     latest_bundle = _write_input_bundle(tmp_path / "latest")
@@ -359,8 +426,31 @@ def test_resume_latest_without_input_uses_latest_run_metadata(monkeypatch, tmp_p
     assert invocation.args.input_bundle.root == latest_bundle.resolve()
 
 
+def test_resume_latest_reports_missing_exp_env(monkeypatch, tmp_path):
+    import vibesys.main as cli
+
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    with pytest.raises(ConfigurationError) as exc:
+        _resolve_run_dir("latest")
+
+    assert exc.value.diagnostic.code == "resume_not_found"
+
+
+def test_resume_latest_reports_empty_exp_env(monkeypatch, tmp_path):
+    import vibesys.main as cli
+
+    (tmp_path / "exp_env").mkdir()
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    with pytest.raises(ConfigurationError) as exc:
+        _resolve_run_dir("latest")
+
+    assert exc.value.diagnostic.code == "resume_not_found"
+
+
 def test_resume_without_input_reports_missing_metadata(monkeypatch, tmp_path):
-    import vibesys.cli as cli
+    import vibesys.main as cli
 
     (tmp_path / "exp_env" / "20260716-180256-test" / "logs").mkdir(parents=True)
     monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
@@ -370,6 +460,127 @@ def test_resume_without_input_reports_missing_metadata(monkeypatch, tmp_path):
 
     assert exc.value.diagnostic.code == "resume_input_not_found"
     assert exc.value.diagnostic.stage == "resume_resolution"
+
+
+def test_resume_input_ignores_blank_and_non_run_events(tmp_path):
+    bundle = _write_input_bundle(tmp_path)
+    run_dir = tmp_path / "exp_env" / "run"
+    logs = run_dir / "logs"
+    logs.mkdir(parents=True)
+    (logs / "run-events.jsonl").write_text(
+        "\n"
+        '{"type": "server_started", "data": null}\n'
+        f'{{"type": "run_started", "data": {{"input": "{bundle}"}}}}\n'
+    )
+
+    assert _infer_resume_input(run_dir) == bundle
+
+
+def test_resume_input_reports_invalid_json(tmp_path):
+    run_dir = tmp_path / "exp_env" / "run"
+    logs = run_dir / "logs"
+    logs.mkdir(parents=True)
+    (logs / "run-events.jsonl").write_text("{not-json}\n")
+
+    with pytest.raises(ConfigurationError) as exc:
+        _infer_resume_input(run_dir)
+
+    assert exc.value.diagnostic.code == "resume_input_invalid"
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {"type": "run_started", "data": None},
+        {"type": "run_started", "data": {}},
+    ],
+)
+def test_resume_input_reports_missing_input_in_run_started(tmp_path, event):
+    import json
+
+    run_dir = tmp_path / "exp_env" / "run"
+    logs = run_dir / "logs"
+    logs.mkdir(parents=True)
+    (logs / "run-events.jsonl").write_text(json.dumps(event) + "\n")
+
+    with pytest.raises(ConfigurationError) as exc:
+        _infer_resume_input(run_dir)
+
+    assert exc.value.diagnostic.code == "resume_input_not_found"
+
+
+def test_resume_round_defaults_when_rounds_json_missing_or_invalid(tmp_path):
+    exp_dir = tmp_path / "run"
+
+    assert _detect_resume_round(exp_dir) == 1
+
+    logs = exp_dir / "logs"
+    logs.mkdir(parents=True)
+    (logs / "rounds.json").write_text("not-json")
+
+    assert _detect_resume_round(exp_dir) == 1
+
+
+def test_resume_round_counts_round_entries_and_prunes_later_rounds(tmp_path):
+    rounds_json = tmp_path / "run" / "logs" / "rounds.json"
+    rounds_json.parent.mkdir(parents=True)
+    rounds_json.write_text('[{"round": 1}, {"round": 2}, {"round": 3}]')
+
+    assert _detect_resume_round(tmp_path / "run") == 4
+
+    _prune_rounds_state(tmp_path / "run", keep_up_to=3)
+
+    assert rounds_json.read_text() == '[\n  {\n    "round": 1\n  },\n  {\n    "round": 2\n  }\n]'
+
+
+@pytest.mark.parametrize(
+    "spec,message",
+    [
+        ("latency", "must be 'name:max' or 'name:min'"),
+        (":max", "metric name is empty"),
+        ("latency:avg", "direction must be 'max' or 'min'"),
+    ],
+)
+def test_parse_cli_objective_rejects_malformed_specs(spec, message):
+    with pytest.raises(Exception) as exc:
+        _parse_cli_objective(spec)
+
+    assert message in str(exc.value)
+
+
+def test_load_objectives_toml_reports_malformed_entries(tmp_path):
+    (tmp_path / "objectives.toml").write_text(
+        """
+[[objective]]
+name = "latency"
+direction = "avg"
+""".lstrip()
+    )
+
+    with pytest.raises(ValueError, match="Malformed entry"):
+        _load_objectives_toml(tmp_path)
+
+
+def test_control_socket_from_argv_handles_empty_equals_and_space_form():
+    assert _control_socket_from_argv(["--control-socket="]) is None
+    assert _control_socket_from_argv(["--control-socket", "/tmp/vs.sock"]) == Path("/tmp/vs.sock")
+
+
+def test_render_configuration_error_prints_usage(capsys):
+    diagnostic = ConfigurationError(
+        diagnostic=ConfigurationDiagnostic(
+            code="invalid_arguments",
+            stage="argument_parsing",
+            message="bad args",
+            usage="usage: vibesys ...",
+        )
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        _render_configuration_error(diagnostic)
+
+    assert exc.value.code == 2
+    assert "bad args" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +598,7 @@ def test_resume_without_input_reports_missing_metadata(monkeypatch, tmp_path):
 )
 def test_main_routes_to_runner(loop_name: str, runner_attr: str):
     argv = ["vibesys", "--outer-loop", loop_name, "--exp-name", "x", *TARGET_ARGS]
-    with patch.object(sys, "argv", argv), patch(f"vibesys.cli.{runner_attr}") as runner:
+    with patch.object(sys, "argv", argv), patch(f"vibesys.main.{runner_attr}") as runner:
         main()
         runner.assert_called_once()
         args = runner.call_args.args[0]
@@ -395,7 +606,7 @@ def test_main_routes_to_runner(loop_name: str, runner_attr: str):
         assert args.input_bundle.root.name == "Llama-3-8B"
 
 
-def test_main_wraps_tty_run_in_tui():
+def test_main_tty_run_stays_in_python_cli():
     argv = [
         "vibesys",
         "--outer-loop",
@@ -408,15 +619,11 @@ def test_main_wraps_tty_run_in_tui():
         patch.object(sys, "argv", argv),
         patch.object(sys.stdin, "isatty", return_value=True),
         patch.object(sys.stdout, "isatty", return_value=True),
-        patch("vibesys.cli._run_agent") as runner,
-        patch("vibesys.launcher.launch", return_value=0) as launch,
+        patch("vibesys.main._run_agent") as runner,
     ):
-        with pytest.raises(SystemExit) as exc:
-            main()
+        main()
 
-    assert exc.value.code == 0
-    runner.assert_not_called()
-    launch.assert_called_once_with(argv[1:])
+    runner.assert_called_once()
 
 
 def test_main_headless_skips_tui():
@@ -429,9 +636,7 @@ def test_main_headless_skips_tui():
     ]
     with (
         patch.object(sys, "argv", argv),
-        patch("vibesys.cli._run_agent") as runner,
-        patch("vibesys.launcher.launch") as launch,
+        patch("vibesys.main._run_agent") as runner,
     ):
         main()
     runner.assert_called_once()
-    launch.assert_not_called()

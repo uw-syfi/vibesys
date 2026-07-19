@@ -32,6 +32,24 @@ if [[ "$interactive" == true ]]; then
     exit 1
   fi
 
+  if ! command -v node >/dev/null 2>&1 && [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
+    # nvm is optional. Load it only as one possible way to satisfy the
+    # frontend rebuild and launcher dependency; runtime agent CLIs are checked
+    # separately.
+    source "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+    nvm use node >/dev/null 2>&1 || true
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    echo "vs: Node.js 20+ is required by the interactive client." >&2
+    exit 1
+  fi
+
+  node_major="$(node --version | sed -E 's/^v([0-9]+).*/\1/')"
+  if [[ "$node_major" -lt 20 ]]; then
+    echo "vs: Node.js 20+ is required; found $(node --version)." >&2
+    exit 1
+  fi
+
   entrypoint="clients/tui/dist/index.js"
   rebuild=false
   if [[ ! -f "$entrypoint" ]]; then
@@ -52,25 +70,6 @@ if [[ "$interactive" == true ]]; then
   fi
 
   if [[ "$rebuild" == true ]]; then
-    if ! command -v node >/dev/null 2>&1 && [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
-      # nvm is optional. Load it only as one possible way to satisfy the
-      # frontend rebuild dependency; runtime agent CLIs are checked separately.
-      source "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
-      nvm use node >/dev/null 2>&1 || true
-    fi
-    if ! command -v node >/dev/null 2>&1; then
-      echo "vs: Node.js 20+ is required to rebuild the interactive client." >&2
-      echo "  Install Node.js 20+, activate it with your preferred version manager," >&2
-      echo "  or use a checkout containing an up-to-date clients/tui/dist build." >&2
-      exit 1
-    fi
-
-    node_major="$(node --version | sed -E 's/^v([0-9]+).*/\1/')"
-    if [[ "$node_major" -lt 20 ]]; then
-      echo "vs: Node.js 20+ is required; found $(node --version)." >&2
-      exit 1
-    fi
-
     if command -v pnpm >/dev/null 2>&1; then
       pnpm_command=(pnpm)
     elif command -v corepack >/dev/null 2>&1; then
@@ -97,6 +96,7 @@ if [[ "$interactive" == true ]]; then
 fi
 
 if [[ "$interactive" == true ]]; then
-  exec uv run vibesys-launch "$@"
+  python_executable="$(uv run python -c 'import sys; print(sys.executable)')"
+  exec env VIBESYS_PYTHON="$python_executable" node clients/tui/dist/launcher.js "$@"
 fi
-exec uv run vibesys "$@"
+exec uv run python -m vibesys "$@"

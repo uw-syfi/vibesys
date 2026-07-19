@@ -38,7 +38,7 @@ def test_no_language_pack_directory():
 
 
 def test_cli_exposes_only_process_boundary_modes():
-    from vibesys.cli import _build_agent_parser
+    from vibesys.main import _build_agent_parser
 
     parser = _build_agent_parser()
     action = next(action for action in parser._actions if action.dest == "interface")
@@ -48,7 +48,7 @@ def test_cli_exposes_only_process_boundary_modes():
 
 
 def test_cli_default_interface_is_inprocess():
-    from vibesys.cli import _build_agent_parser
+    from vibesys.main import _build_agent_parser
 
     args = _build_agent_parser().parse_args(["--input", "/x", "--exp-name", "e"])
     assert args.interface == "inprocess"
@@ -56,7 +56,7 @@ def test_cli_default_interface_is_inprocess():
 
 @pytest.mark.parametrize("interface", ["native", "rust"])
 def test_cli_rejects_unknown_interface(interface):
-    from vibesys.cli import _build_agent_parser
+    from vibesys.main import _build_agent_parser
 
     with pytest.raises(ConfigurationError):
         _build_agent_parser().parse_args(

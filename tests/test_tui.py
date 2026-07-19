@@ -280,7 +280,7 @@ def test_cli_parse_failure_is_streamed_after_client_attaches():
         [
             sys.executable,
             "-m",
-            "vibesys.cli",
+            "vibesys",
             "--headless",
             "--control-socket",
             str(socket_path),
