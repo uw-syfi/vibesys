@@ -311,8 +311,12 @@ class SeatbeltSandbox:
             "(version 1)",
             "(deny default)",
             # Launching, threading, and the basic services a CLI needs.
-            "(allow process-exec)",
+            "(allow process-exec*)",
             "(allow process-fork)",
+            # Map code-signed executable pages. Without this, Apple-Silicon code
+            # signing enforcement aborts every dynamically linked binary (dyld)
+            # with SIGABRT and no stderr before it can run.
+            "(allow file-map-executable)",
             "(allow signal (target self))",
             "(allow sysctl-read)",
             "(allow mach-lookup)",
