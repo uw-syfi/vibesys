@@ -35,7 +35,7 @@ from jinja2 import Environment, FileSystemLoader
 from vibesys.agents.progress import CandidateProgress
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
-from vibesys.context import _RunContext, create_run_context
+from vibesys.context import create_run_context
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.loops.evolve.population import (
     Individual,
@@ -44,6 +44,7 @@ from vibesys.loops.evolve.population import (
 )
 from vibesys.loops.profiler import invoke_profiler
 from vibesys.profilers import ProfilerKind, profiler_definition
+from vibesys.run import LoopContext
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -75,7 +76,7 @@ def _render(name: str, **kwargs) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _discard_working_tree(ctx: _RunContext) -> None:
+def _discard_working_tree(ctx: LoopContext) -> None:
     """Drop any uncommitted changes left by a failed mutation attempt."""
     try:
         ctx.git.run(["git", "checkout", "HEAD", "--", "."], check=False)
@@ -96,7 +97,7 @@ def _discard_working_tree(ctx: _RunContext) -> None:
 
 
 def _run_mutator(
-    ctx: _RunContext,
+    ctx: LoopContext,
     *,
     generation: int,
     child_idx: int,
@@ -137,7 +138,7 @@ def _run_mutator(
 
 
 def _run_judge(
-    ctx: _RunContext,
+    ctx: LoopContext,
     *,
     generation: int,
     child_idx: int,
@@ -190,7 +191,7 @@ def _format_objectives_for_profiler(objectives: list[Objective]) -> str:
 
 
 def _run_profiler(
-    ctx: _RunContext,
+    ctx: LoopContext,
     *,
     generation: int,
     child_idx: int,

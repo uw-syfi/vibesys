@@ -282,7 +282,6 @@ class TestReselectGpu:
             run_log_path=tmp_path / "run.log",
         )
         ctx.log_dir.mkdir(parents=True, exist_ok=True)
-        ctx.gpu_monitor = None
         ctx._docker_symlinks = []
 
         # Real CudaBackend so reselect_gpu's delegation hits the actual logic;
@@ -290,6 +289,11 @@ class TestReselectGpu:
         backend_impl = CudaBackend(log_dir=ctx.log_dir, log=lambda _msg: None)
         backend_impl.selected_device = selected_gpu
         ctx.backend_impl = backend_impl
+
+        # gpu_env / reselect_gpu / gpu_monitor delegate to the device lease.
+        from vibesys.run import DeviceLease
+
+        ctx.device = DeviceLease(backend_impl, log_dir=ctx.log_dir)
 
         # Sandboxes — DockerSandbox spec'd MagicMock so isinstance checks
         # in reselect_device route through the docker branch.  Register with
