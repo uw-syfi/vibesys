@@ -1,10 +1,8 @@
-"""Shared run context: _RunContext, setup_exp_dir, and _TeeWriter."""
+"""Shared run context: ``_RunContext``, ``create_run_context``, and ``setup_exp_dir``."""
 
 import json
-import os
 import shutil
 import subprocess
-import sys
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
@@ -14,7 +12,6 @@ from pathlib import Path
 from typing import Any, overload
 
 from vibesys import backends
-from vibesys.agent_runner import _log_and_print
 from vibesys.agents import build_agent_runner
 from vibesys.agents.progress import AgentProgress
 from vibesys.config import Config, as_config
@@ -31,7 +28,6 @@ from vibesys.domains.environment import (
     NoopEnvironmentHooks,
 )
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.input_project import materialize_input_project
 from vibesys.llm_client import _build_model
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
@@ -40,7 +36,7 @@ from vibesys.profilers import (
     profiler_definition,
     resolve_profiler_kind,
 )
-from vibesys.run import GitTracker, RunCommands, RunPaths
+from vibesys.run import GitTracker, RunCommands, RunLogger, RunPaths, Workspace
 from vibesys.sandbox.run_environment import (
     RunEnvironmentRequest,
     RunEnvironmentSpec,
@@ -75,22 +71,305 @@ def setup_exp_dir(
     return exp_dir
 
 
-class _TeeWriter:
-    def __init__(self, primary, secondary):
-        self._primary = primary
-        self._secondary = secondary
+def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
+    if raw is None:
+        return None
+    p = Path(raw).expanduser().resolve()
+    if not p.exists():
+        raise ValueError(f"{label} path does not exist: {raw}")
+    if not p.is_dir():
+        raise ValueError(f"{label} path is not a directory: {raw}")
+    return p
 
-    def write(self, text):
-        self._primary.write(text)
-        self._secondary.write(text)
-        return len(text)
 
-    def flush(self):
-        self._primary.flush()
-        self._secondary.flush()
+@overload
+def _coerce_dir_path(raw: str, label: str) -> str: ...
 
-    def isatty(self):
-        return False
+
+@overload
+def _coerce_dir_path(raw: None, label: str) -> None: ...
+
+
+def _coerce_dir_path(raw: str | None, label: str) -> str | None:
+    path = _coerce_dir(raw, label)
+    return str(path) if path is not None else None
+
+
+def _coerce_skills_dirs(raw_dirs: list[str] | None) -> list[Path]:
+    if not raw_dirs:
+        return []
+    result: list[Path] = []
+    for raw in raw_dirs:
+        p = Path(raw).expanduser()
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
+        p = p.resolve()
+        if not p.exists():
+            raise ValueError(f"--skills-dir path does not exist: {raw}")
+        if not p.is_dir():
+            raise ValueError(f"--skills-dir path is not a directory: {raw}")
+        result.append(p)
+    return result
+
+
+def create_run_context(
+    config: Config,
+    exp_name: str,
+    input_path: str,
+    accuracy_command: str,
+    benchmark_command: str,
+    workspace_seed: Path | None = None,
+    evaluator_path: Path | None = None,
+    existing: bool = False,
+    debug: bool = False,
+    profiler_kind: ProfilerKind = ProfilerKind.AUTO,
+    profiler_domain: DomainName = DomainName.LLM_SERVING,
+    skills_dirs: list[str] | None = None,
+    run_environment: RunEnvironmentSpec | None = None,
+    git_tracking: bool = False,
+    agent_backend: str | None = None,
+    cli_provider: str | None = None,
+    backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
+    environment_hooks: EnvironmentHooks | None = None,
+) -> "_RunContext":
+    """Build a fully wired :class:`_RunContext`.
+
+    All construction side effects live here — run directory and log
+    bootstrap, workspace materialization, backend/model construction,
+    profiler resolution, git tracking init, run-environment session open,
+    and agent-runner build.  ``_RunContext.__init__`` itself only assigns
+    the assembled components.
+    """
+    config = as_config(config)
+    run_environment_spec = run_environment or make_run_environment_spec()
+    environment = build_run_environment(run_environment_spec)
+
+    exp_dir = setup_exp_dir(exp_name, PROJECT_ROOT, existing)
+
+    log_dir = exp_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    from vibesys.server.registry import active_supervisor
+
+    supervisor = active_supervisor()
+    if supervisor is not None:
+        supervisor.attach(log_dir)
+    # A full-screen TUI owns the terminal. Its thread-aware stream router
+    # suppresses worker writes; replacing it with a process-global tee here
+    # would both corrupt the display and record terminal escape frames.
+    logger = RunLogger(log_dir, redirect_stderr=supervisor is None)
+    paths = RunPaths(
+        exp_dir=exp_dir,
+        log_dir=log_dir,
+        workspace=exp_dir / "workspace",
+        run_log_path=logger.path,
+    )
+
+    # Construct the platform backend (image + GPU spec come from it).
+    backend_impl = backends.get(
+        backend,
+        log_dir=log_dir,
+        log=logger.lprint,
+        image=environment.backend_image,
+    )
+    # Resolve agent backend + cli provider early so Docker setup can
+    # add provider-specific bind mounts and init commands.
+    resolved_backend = agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND
+    resolved_cli_provider = cli_provider or config.agent.cli_provider or "codex"
+
+    model = _build_model(config)
+    model_name = config.model.name
+
+    input_path_str = _coerce_dir_path(input_path, "--input")
+    workspace_seed_path = _coerce_dir(workspace_seed, "workspace.seed")
+    evaluator_source = _coerce_dir(evaluator_path, "evaluator.source")
+    resolved_profiler_kind = resolve_profiler_kind(
+        profiler_kind,
+        domain=profiler_domain,
+        backend_profiler_kind=getattr(backend_impl, "profiler_kind", None),
+        environment_default_profiler_kind=environment.default_profiler_kind,
+    )
+    profiler_preflight = preflight_profiler_kind(resolved_profiler_kind)
+    if not profiler_preflight.usable:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="profiler_preflight_failed",
+                stage="profiler_preflight",
+                message=profiler_preflight.error_message(),
+            )
+        )
+
+    profiler_support_path: str | None = None
+    profiler_support_name: str | None = None
+    if resolved_profiler_kind in ACTIVE_PROFILER_KINDS:
+        definition = profiler_definition(resolved_profiler_kind)
+        profiler_support_name = definition.support_name
+        default_support = PROJECT_ROOT / "resources" / "profilers" / definition.kind.value
+        if default_support.is_dir():
+            profiler_support_path = str(default_support)
+
+    skill_source_paths = _coerce_skills_dirs(skills_dirs)
+
+    input_dir = Path(input_path_str)
+    ref_dir: Path | None = input_dir / "reference"
+    if ref_dir.exists():
+        if not ref_dir.is_dir():
+            raise ValueError(f"reference path is not a directory: {ref_dir}")
+        reference_py = sorted(ref_dir.glob("*.py"))
+        ref_name = f"reference/{reference_py[0].name}" if len(reference_py) == 1 else "reference"
+    else:
+        ref_dir = None
+        ref_name = "."
+
+    environment_reference = ref_dir or (input_dir / "reference")
+    input_project_dir = input_dir if (input_dir / "pyproject.toml").is_file() else None
+
+    workspace_files = Workspace(
+        paths.workspace,
+        run_environment=environment,
+        backend=backend_impl,
+        log=logger.lprint,
+        project_root=PROJECT_ROOT,
+    )
+    workspace_files.create()
+
+    # Fix ownership of workspace files that may have been created as root
+    # by a previous Docker run, so the agent can write to them.
+    if existing:
+        workspace_files.repair()
+
+    hooks = environment_hooks or NoopEnvironmentHooks()
+    environment_context = EnvironmentContext(
+        reference_path=environment_reference,
+        workspace=workspace_files.root,
+        run_environment=environment,
+        project_root=PROJECT_ROOT,
+        log=logger.lprint,
+    )
+    environment_patch = hooks.prepare(environment_context)
+
+    # When resuming an existing run, the plan skips full workspace file
+    # setup — the workspace already contains reference files, skills, etc.
+    # from the previous run.  Only skills are refreshed and profiler
+    # harnesses ensured; see Workspace.plan_setup.
+    plan = workspace_files.plan_setup(
+        existing=existing,
+        seed=workspace_seed_path,
+        input_dir=input_dir,
+        evaluator_source=evaluator_source,
+        skill_sources=skill_source_paths,
+        input_project_dir=input_project_dir,
+        profiler_support_path=profiler_support_path,
+        profiler_support_name=profiler_support_name,
+        extra_input_excludes=environment_patch.copy_excludes,
+    )
+    workspace_files.setup(plan, existing=existing)
+
+    git = GitTracker(
+        workspace_files.root,
+        log=logger.lprint,
+        excluded_dirs=workspace_files.excluded_dirs,
+    )
+    if git_tracking:
+        git.init(existing)
+
+    run_environment_stack = ExitStack()
+    session = run_environment_stack.enter_context(
+        environment.open(
+            RunEnvironmentRequest(
+                log_dir=log_dir,
+                workspace=workspace_files.root,
+                ref_dir=ref_dir,
+                backend=backend_impl,
+                agent_backend=resolved_backend,
+                cli_provider=resolved_cli_provider,
+                accuracy_command=accuracy_command,
+                benchmark_command=benchmark_command,
+                profiler_support_path=profiler_support_path,
+                profiler_support_name=profiler_support_name,
+                environment_bind_mounts=environment_patch.bind_mounts,
+                log=logger.lprint,
+                project_root=PROJECT_ROOT,
+            )
+        )
+    )
+    # Snapshot the agent-facing commands once the session is open; the
+    # view's paths are fixed for the session lifetime.
+    commands = RunCommands(
+        judge_accuracy_command=session.view.paths.accuracy_command,
+        judge_benchmark_command=session.view.paths.benchmark_command,
+        profiler_support_agent_path=session.view.paths.profiler_support,
+        profiler_benchmark_command=session.view.paths.benchmark_command,
+    )
+
+    # Start backend-specific background monitoring (CUDA: nvidia-smi).
+    gpu_monitor = backend_impl.make_monitor(log_dir)
+    if gpu_monitor is not None:
+        gpu_monitor.start()
+
+    # Build the backend-agnostic agent runner. Loops invoke this instead
+    # of calling create_deep_agent / vibesys._agent_cli directly. The cli
+    # backend is rejected if --docker is set; build_agent_runner raises
+    # SystemExit with a clear message in that case.
+    agent_runner = build_agent_runner(
+        config,
+        agent_backend=agent_backend,
+        cli_provider=cli_provider,
+        backends={
+            "implementer": session.sandbox,
+            "judge": session.sandbox,
+            # Perf eval reuses the implementer's backend today (loop.py:564),
+            # so the runner picks the same one when kind="perf_eval".
+            "perf_eval": session.sandbox,
+            # Profiler also reuses the implementer's backend — it needs
+            # shell access to start/stop the server and run nsys.
+            "profiler": session.sandbox,
+            # Orchestrator (orchestrate loop) inspects the workspace
+            # and writes plans — reuse the implementer's backend for
+            # file access.
+            "orchestrator": session.sandbox,
+        },
+        skills=[src.name for src in skill_source_paths],
+        skill_source_dirs=skill_source_paths,
+        model=model,
+        model_name=model_name,
+        run_log_file=logger.file,
+        use_docker=(session.view.cli_sandboxed and not session.view.cli_modal_sandboxed),
+        use_modal=session.view.cli_modal_sandboxed,
+        log_dir=log_dir,
+    )
+
+    return _RunContext(
+        backend=backend,
+        run_environment=environment,
+        supervisor=supervisor,
+        logger=logger,
+        paths=paths,
+        debug=debug,
+        git_tracking=git_tracking,
+        backend_impl=backend_impl,
+        model=model,
+        model_name=model_name,
+        input_path=input_path_str,
+        workspace_seed_path=workspace_seed_path,
+        evaluator_path=evaluator_source,
+        accuracy_command=accuracy_command,
+        benchmark_command=benchmark_command,
+        profiler_kind=resolved_profiler_kind,
+        profiler_support_path=profiler_support_path,
+        profiler_support_name=profiler_support_name,
+        skill_source_paths=skill_source_paths,
+        ref_name=ref_name,
+        environment_hooks=hooks,
+        environment_context=environment_context,
+        environment_patch=environment_patch,
+        workspace_files=workspace_files,
+        git=git,
+        run_environment_stack=run_environment_stack,
+        run_environment_session=session,
+        commands=commands,
+        gpu_monitor=gpu_monitor,
+        agent_runner=agent_runner,
+    )
 
 
 class _RunContext:
@@ -100,354 +379,88 @@ class _RunContext:
 
         loop -> _RunContext -> RunEnvironment -> ComputeBackendImpl.make_sandbox -> Sandbox
 
-    It creates the run directory, log files, unified workspace, model, compute
-    backend, copied helper inputs, git/snapshot tracking, run-environment
-    session, agent runner, and GPU monitor. Environment-specific setup should stay in
-    ``vibesys.sandbox.run_environment``; this class should only ask the selected
-    run environment for policy decisions and the opened sandbox session.
+    Instances are assembled by :func:`create_run_context`, which owns every
+    construction side effect (run directory, log files, unified workspace,
+    model, compute backend, copied helper inputs, git/snapshot tracking,
+    run-environment session, agent runner, GPU monitor).  Environment-specific
+    setup should stay in ``vibesys.sandbox.run_environment``; this class only
+    asks the selected run environment for policy decisions and the opened
+    sandbox session.
     """
 
     def __init__(
         self,
-        config: Config,
-        exp_name: str,
-        input_path: str,
+        *,
+        backend: ComputeBackend,
+        run_environment,
+        supervisor,
+        logger: RunLogger,
+        paths: RunPaths,
+        debug: bool,
+        git_tracking: bool,
+        backend_impl,
+        model,
+        model_name: str,
+        input_path: str | None,
+        workspace_seed_path: Path | None,
+        evaluator_path: Path | None,
         accuracy_command: str,
         benchmark_command: str,
-        workspace_seed: Path | None = None,
-        evaluator_path: Path | None = None,
-        existing: bool = False,
-        debug: bool = False,
-        profiler_kind: ProfilerKind = ProfilerKind.AUTO,
-        profiler_domain: DomainName = DomainName.LLM_SERVING,
-        skills_dirs: list[str] | None = None,
-        run_environment: RunEnvironmentSpec | None = None,
-        git_tracking: bool = False,
-        agent_backend: str | None = None,
-        cli_provider: str | None = None,
-        backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
-        environment_hooks: EnvironmentHooks | None = None,
+        profiler_kind: ProfilerKind,
+        profiler_support_path: str | None,
+        profiler_support_name: str | None,
+        skill_source_paths: list[Path],
+        ref_name: str,
+        environment_hooks: EnvironmentHooks,
+        environment_context: EnvironmentContext,
+        environment_patch,
+        workspace_files: Workspace,
+        git: GitTracker,
+        run_environment_stack: ExitStack,
+        run_environment_session,
+        commands: RunCommands,
+        gpu_monitor,
+        agent_runner,
     ):
-        config = as_config(config)
-        self.backend: ComputeBackend = backend
-        run_environment = run_environment or make_run_environment_spec()
-        self.run_environment = build_run_environment(run_environment)
-
-        exp_dir = setup_exp_dir(exp_name, PROJECT_ROOT, existing)
-
-        log_dir = exp_dir / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        from vibesys.server.registry import active_supervisor
-
-        self.supervisor = active_supervisor()
-        if self.supervisor is not None:
-            self.supervisor.attach(log_dir)
-        run_started = datetime.now().strftime("%Y%m%d-%H%M%S")
-        self._paths = RunPaths(
-            exp_dir=exp_dir,
-            log_dir=log_dir,
-            workspace=exp_dir / "workspace",
-            run_log_path=log_dir / f"run-{run_started}.log",
-        )
-        self.run_log_file = self.run_log_path.open("a", encoding="utf-8")
-
-        self._original_stderr = sys.stderr
-        # A full-screen TUI owns the terminal. Its thread-aware stream router
-        # suppresses worker writes; replacing it with a process-global tee here
-        # would both corrupt the display and record terminal escape frames.
-        self._stderr_redirected = self.supervisor is None
-        if self._stderr_redirected:
-            sys.stderr = _TeeWriter(self._original_stderr, self.run_log_file)
-        self._closed = False
-        self._run_environment_stack = ExitStack()
-        self._progress_stack: list[AgentProgress] = []
-
-        # Dirs excluded from workspace copy, git tracking, and the
-        # Modal-side tar download. ``_auth`` and ``_opt_vibesys`` are
-        # our own "bind-mount redirect" dirs under --modal (host auth +
-        # vibesys pkg uploaded into /workspace/_auth and
-        # /workspace/_opt_vibesys respectively) — not implementer
-        # output, and we never want them in git history. ``_mounts`` is
-        # the Docker ancestor-mount redirect dir for the same reason.
-        # ``.cache`` holds any HF-download fallback (drafter, etc.).
-        self.EXCLUDED_WORKSPACE_DIRS = {
-            ".claude",
-            "__pycache__",
-            ".git",
-            "repos",
-            "_auth",
-            "_opt_vibesys",
-            "_mounts",
-            ".cache",
-            ".venv",
-            "exp_env",
-            "target",
-        }
+        self.backend = backend
+        self.run_environment = run_environment
+        self.supervisor = supervisor
+        self.logger = logger
+        self._paths = paths
         self.debug = debug
         self.git_tracking = git_tracking
-
-        # Construct the platform backend (image + GPU spec come from it).
-        self.backend_impl = backends.get(
-            self.backend,
-            log_dir=self.log_dir,
-            log=lambda msg: self.lprint(msg),
-            image=self.run_environment.backend_image,
-        )
-        # Resolve agent backend + cli provider early so Docker setup can
-        # add provider-specific bind mounts and init commands.
-        self._resolved_backend = agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND
-        self._cli_provider = cli_provider or config.agent.cli_provider or "codex"
-
-        self.model = _build_model(config)
-        self.model_name = config.model.name
-
-        self.input_path = self._coerce_dir_path(input_path, "--input")
-        self.workspace_seed_path = self._coerce_dir(workspace_seed, "workspace.seed")
-        self.evaluator_path = self._coerce_dir(evaluator_path, "evaluator.source")
+        self.backend_impl = backend_impl
+        self.model = model
+        self.model_name = model_name
+        self.input_path = input_path
+        self.workspace_seed_path = workspace_seed_path
+        self.evaluator_path = evaluator_path
         self.accuracy_command = accuracy_command
         self.benchmark_command = benchmark_command
-        self.profiler_kind = resolve_profiler_kind(
-            profiler_kind,
-            domain=profiler_domain,
-            backend_profiler_kind=getattr(self.backend_impl, "profiler_kind", None),
-            environment_default_profiler_kind=self.run_environment.default_profiler_kind,
-        )
-        profiler_preflight = preflight_profiler_kind(self.profiler_kind)
-        if not profiler_preflight.usable:
-            raise ConfigurationError(
-                ConfigurationDiagnostic(
-                    code="profiler_preflight_failed",
-                    stage="profiler_preflight",
-                    message=profiler_preflight.error_message(),
-                )
-            )
-
-        self.profiler_support_path: str | None = None
-        self.profiler_support_name: str | None = None
-        if self.profiler_kind in ACTIVE_PROFILER_KINDS:
-            definition = profiler_definition(self.profiler_kind)
-            self.profiler_support_name = definition.support_name
-            default_support = PROJECT_ROOT / "resources" / "profilers" / definition.kind.value
-            if default_support.is_dir():
-                self.profiler_support_path = str(default_support)
-        else:
-            self.profiler_support_path = None
-
-        skill_source_paths = self._coerce_skills_dirs(skills_dirs)
-        self._skill_source_paths: list[Path] = skill_source_paths
-
-        input_dir = Path(self.input_path)
-        ref_dir: Path | None = input_dir / "reference"
-        if ref_dir.exists():
-            if not ref_dir.is_dir():
-                raise ValueError(f"reference path is not a directory: {ref_dir}")
-            reference_py = sorted(ref_dir.glob("*.py"))
-            self.ref_name = (
-                f"reference/{reference_py[0].name}" if len(reference_py) == 1 else "reference"
-            )
-        else:
-            ref_dir = None
-            self.ref_name = "."
-
-        environment_reference = ref_dir or (input_dir / "reference")
-        input_project_dir = input_dir if (input_dir / "pyproject.toml").is_file() else None
-
-        self.workspace.mkdir(parents=True, exist_ok=True)
-
-        # When resuming an existing run, skip workspace file setup — the
-        # workspaces already contain reference files, skills, etc. from the
-        # previous run.  Only re-initialize backends and logging.
-        self.skills_for_agents: list[str] = [src.name for src in skill_source_paths]
-
-        # Fix ownership of workspace files that may have been created as root
-        # by a previous Docker run, so the agent can write to them.
-        if existing:
-            self.run_environment.repair_workspace(
-                self.workspace,
-                backend=self.backend_impl,
-                log=self.lprint,
-            )
-
-        self.environment_hooks = environment_hooks or NoopEnvironmentHooks()
-        self.environment_context = EnvironmentContext(
-            reference_path=environment_reference,
-            workspace=self.workspace,
-            run_environment=self.run_environment,
-            project_root=PROJECT_ROOT,
-            log=self.lprint,
-        )
-        self.environment_patch = self.environment_hooks.prepare(self.environment_context)
-
-        # Always refresh skills into the workspace (even on --resume). Skill
-        # source is tiny (MB) and copying is cheap; without this, an
-        # interrupted run leaves stale skills from the previous CLI version
-        # in the host workspace, which Modal then uploads verbatim into the
-        # fresh sandbox volume at start, and codex-cli fails to load them
-        # (e.g. skill description exceeds a newer CLI's length limit).
-        # Mirrors _materialize_skills destinations inside cli_runner.
-        _cli_skill_dirs = (
-            ".agents/skills",
-            ".claude/skills",
-            ".gemini/skills",
-            ".cursor/skills",
-            ".opencode/skills",
-        )
-        for src in skill_source_paths:
-            rel = src.name
-            if (self.workspace / rel).exists():
-                self._copy_excluding_extras(src, self.workspace / rel)
-            for cli_rel in _cli_skill_dirs:
-                cli_target = self.workspace / cli_rel / rel
-                if cli_target.exists():
-                    self._copy_excluding_extras(src, cli_target)
-
-        if not existing:
-            for excluded in self.EXCLUDED_WORKSPACE_DIRS:
-                d = self.workspace / excluded
-                if d.exists():
-                    shutil.rmtree(d)
-
-            if self.workspace_seed_path is not None:
-                self._copy_excluding_extras(
-                    self.workspace_seed_path,
-                    self.workspace,
-                    respect_source_gitignore=True,
-                )
-                self._copy_excluding_extras(
-                    input_dir,
-                    self.workspace,
-                    extra_excludes=self.environment_patch.copy_excludes,
-                    reject_collisions=True,
-                )
-            else:
-                self._copy_excluding_extras(
-                    input_dir,
-                    self.workspace,
-                    extra_excludes=self.environment_patch.copy_excludes,
-                )
-
-            if self.evaluator_path is not None:
-                evaluator_root = self.workspace / "_evaluator"
-                if evaluator_root.exists() or evaluator_root.is_symlink():
-                    raise ValueError(
-                        "_evaluator is reserved for the manifest-declared evaluator source"
-                    )
-                self._copy_excluding_extras(
-                    self.evaluator_path,
-                    evaluator_root / self.evaluator_path.name,
-                    respect_source_gitignore=True,
-                )
-
-            for src in skill_source_paths:
-                rel = src.name
-                self._copy_excluding_extras(src, self.workspace / rel)
-
-            if input_project_dir is not None:
-                materialize_input_project(
-                    input_project_dir,
-                    self.workspace,
-                    project_root=PROJECT_ROOT,
-                    copy_dir=self._copy_excluding_extras,
-                    log=self.lprint,
-                )
-
-            if self.profiler_support_path and self.profiler_support_name:
-                src = Path(self.profiler_support_path)
-                self._copy_excluding_extras(src, self.workspace / self.profiler_support_name)
-
-        # Always ensure profiler harnesses are present in the workspace, even
-        # when resuming — the original run may not have had them.
-        if existing and self.profiler_support_path and self.profiler_support_name:
-            src = Path(self.profiler_support_path)
-            destination = self.workspace / self.profiler_support_name
-            if not destination.exists():
-                self._copy_excluding_extras(src, destination)
-
-        # Git snapshot tracking over the workspace. The tracker is always
-        # constructed (construction is side-effect free), so loops can call
-        # e.g. ``ctx.git.current_sha()`` unconditionally; ``init`` only runs
-        # when --git-tracking is enabled.
-        self.git = GitTracker(
-            self.workspace,
-            log=self.lprint,
-            excluded_dirs=self.EXCLUDED_WORKSPACE_DIRS,
-        )
-        if git_tracking:
-            self.git.init(existing)
-
-        self.run_environment_session = self._run_environment_stack.enter_context(
-            self.run_environment.open(
-                RunEnvironmentRequest(
-                    log_dir=self.log_dir,
-                    workspace=self.workspace,
-                    ref_dir=ref_dir,
-                    backend=self.backend_impl,
-                    agent_backend=self._resolved_backend,
-                    cli_provider=self._cli_provider,
-                    accuracy_command=self.accuracy_command,
-                    benchmark_command=self.benchmark_command,
-                    profiler_support_path=self.profiler_support_path,
-                    profiler_support_name=self.profiler_support_name,
-                    environment_bind_mounts=self.environment_patch.bind_mounts,
-                    log=self.lprint,
-                    project_root=PROJECT_ROOT,
-                )
-            )
-        )
-        self.run_environment_view = self.run_environment_session.view
-        # Snapshot the agent-facing commands once the session is open; the
-        # view's paths are fixed for the session lifetime.
-        self.commands = RunCommands(
-            judge_accuracy_command=self.run_environment_view.paths.accuracy_command,
-            judge_benchmark_command=self.run_environment_view.paths.benchmark_command,
-            profiler_support_agent_path=self.run_environment_view.paths.profiler_support,
-            profiler_benchmark_command=self.run_environment_view.paths.benchmark_command,
-        )
-        self.implementer_backend = self.run_environment_session.sandbox
-        self.judge_backend = self.run_environment_session.sandbox
-
+        self.profiler_kind = profiler_kind
+        self.profiler_support_path = profiler_support_path
+        self.profiler_support_name = profiler_support_name
+        self._skill_source_paths = skill_source_paths
+        self.skills_for_agents = [src.name for src in skill_source_paths]
+        self.ref_name = ref_name
+        self.environment_hooks = environment_hooks
+        self.environment_context = environment_context
+        self.environment_patch = environment_patch
+        self.workspace_files = workspace_files
+        self.EXCLUDED_WORKSPACE_DIRS = workspace_files.excluded_dirs
+        self.git = git
+        self._run_environment_stack = run_environment_stack
+        self.run_environment_session = run_environment_session
+        self.run_environment_view = run_environment_session.view
+        self.implementer_backend = run_environment_session.sandbox
+        self.judge_backend = run_environment_session.sandbox
+        self.commands = commands
         # Expose the picked device for legacy callers (gpu monitor tests etc).
-        self.selected_gpu = getattr(self.backend_impl, "selected_device", None)
-
-        # Start backend-specific background monitoring (CUDA: nvidia-smi).
-        self.gpu_monitor = self.backend_impl.make_monitor(self.log_dir)
-        if self.gpu_monitor is not None:
-            self.gpu_monitor.start()
-
-        # Build the backend-agnostic agent runner. Loops invoke this instead
-        # of calling create_deep_agent / vibesys._agent_cli directly. The cli
-        # backend is rejected if --docker is set; build_agent_runner raises
-        # SystemExit with a clear message in that case.
-        self.agent_runner = build_agent_runner(
-            config,
-            agent_backend=agent_backend,
-            cli_provider=cli_provider,
-            backends={
-                "implementer": self.implementer_backend,
-                "judge": self.judge_backend,
-                # Perf eval reuses the implementer's backend today (loop.py:564),
-                # so the runner picks the same one when kind="perf_eval".
-                "perf_eval": self.implementer_backend,
-                # Profiler also reuses the implementer's backend — it needs
-                # shell access to start/stop the server and run nsys.
-                "profiler": self.implementer_backend,
-                # Orchestrator (orchestrate loop) inspects the workspace
-                # and writes plans — reuse the implementer's backend for
-                # file access.
-                "orchestrator": self.implementer_backend,
-            },
-            skills=self.skills_for_agents,
-            skill_source_dirs=self._skill_source_paths,
-            model=self.model,
-            model_name=self.model_name,
-            run_log_file=self.run_log_file,
-            use_docker=(
-                self.run_environment_view.cli_sandboxed
-                and not self.run_environment_view.cli_modal_sandboxed
-            ),
-            use_modal=self.run_environment_view.cli_modal_sandboxed,
-            log_dir=self.log_dir,
-        )
+        self.selected_gpu = getattr(backend_impl, "selected_device", None)
+        self.gpu_monitor = gpu_monitor
+        self.agent_runner = agent_runner
+        self._closed = False
+        self._progress_stack: list[AgentProgress] = []
 
     # -- path passthroughs ----------------------------------------------------
     # Canonical values live in the frozen ``RunPaths`` record; these
@@ -468,6 +481,11 @@ class _RunContext:
     @property
     def run_log_path(self) -> Path:
         return self._paths.run_log_path
+
+    @property
+    def run_log_file(self):
+        """The current open log file handle (owned by ``RunLogger``)."""
+        return self.logger.file
 
     def gpu_env(self) -> dict[str, str]:
         """Env vars to inject into the host-running cli agent runner.
@@ -545,192 +563,6 @@ class _RunContext:
             if supervisor is not None:
                 supervisor.after_agent(kind, round_label, result=result, error=error)
 
-    @staticmethod
-    def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
-        if raw is None:
-            return None
-        p = Path(raw).expanduser().resolve()
-        if not p.exists():
-            raise ValueError(f"{label} path does not exist: {raw}")
-        if not p.is_dir():
-            raise ValueError(f"{label} path is not a directory: {raw}")
-        return p
-
-    @overload
-    def _coerce_dir_path(self, raw: str, label: str) -> str: ...
-
-    @overload
-    def _coerce_dir_path(self, raw: None, label: str) -> None: ...
-
-    def _coerce_dir_path(self, raw: str | None, label: str) -> str | None:
-        path = self._coerce_dir(raw, label)
-        return str(path) if path is not None else None
-
-    def _coerce_skills_dirs(self, raw_dirs: list[str] | None) -> list[Path]:
-        if not raw_dirs:
-            return []
-        result: list[Path] = []
-        for raw in raw_dirs:
-            p = Path(raw).expanduser()
-            if not p.is_absolute():
-                p = PROJECT_ROOT / p
-            p = p.resolve()
-            if not p.exists():
-                raise ValueError(f"--skills-dir path does not exist: {raw}")
-            if not p.is_dir():
-                raise ValueError(f"--skills-dir path is not a directory: {raw}")
-            result.append(p)
-        return result
-
-    @staticmethod
-    def _remove_external_symlinks(root: Path) -> None:
-        """Remove symlinks pointing outside *root* (Docker bind mounts replace them)."""
-        resolved_root = root.resolve()
-        for path in list(root.rglob("*")):
-            if path.is_symlink():
-                target = path.resolve()
-                try:
-                    target.relative_to(resolved_root)
-                except ValueError:
-                    path.unlink()
-
-    @staticmethod
-    def _replace_external_symlinks(root: Path) -> None:
-        """Replace symlinks pointing outside *root* with `<name>.symlink_target` files."""
-        resolved_root = root.resolve()
-        for path in list(root.rglob("*")):
-            if path.is_symlink():
-                target = path.resolve()
-                try:
-                    target.relative_to(resolved_root)
-                except ValueError:
-                    # Symlink points outside root — replace it
-                    marker = path.parent / f"{path.name}.symlink_target"
-                    path.unlink()
-                    marker.write_text(str(target))
-
-    def _copy_excluding_extras(
-        self,
-        src: Path,
-        dst: Path,
-        *,
-        extra_excludes: frozenset[str] = frozenset(),
-        respect_source_gitignore: bool = False,
-        reject_collisions: bool = False,
-    ) -> None:
-        skip = self.EXCLUDED_WORKSPACE_DIRS | {"_mounts"} | set(extra_excludes)
-        ignored_paths = (
-            self._source_gitignored_paths(src) if respect_source_gitignore else frozenset()
-        )
-        resolved_src = src.resolve()
-
-        def _is_ignored(path: Path) -> bool:
-            if not ignored_paths:
-                return False
-            relative_parts = path.absolute().relative_to(resolved_src).parts
-            return any(
-                relative_parts[:index] in ignored_paths
-                for index in range(1, len(relative_parts) + 1)
-            )
-
-        def _ignore(directory: str, names: list[str]) -> list[str]:
-            parent = Path(directory)
-            return [name for name in names if name in skip or _is_ignored(parent / name)]
-
-        children = [
-            child for child in src.iterdir() if child.name not in skip and not _is_ignored(child)
-        ]
-
-        if reject_collisions:
-            collisions = sorted(
-                child.name
-                for child in children
-                if (dst / child.name).exists() or (dst / child.name).is_symlink()
-            )
-            if collisions:
-                paths = ", ".join(collisions)
-                raise ValueError(f"workspace seed and input bundle contain the same paths: {paths}")
-
-        if dst.exists() and not reject_collisions:
-            # Remove children individually so we can skip mount points and
-            # tolerate permission errors (e.g. root-owned dirs left by Docker).
-            for child in list(dst.iterdir()):
-                if child.name in skip:
-                    continue
-                try:
-                    if child.is_dir() and not child.is_symlink():
-                        shutil.rmtree(child)
-                    else:
-                        child.unlink()
-                except PermissionError:
-                    if not self.run_environment.remove_workspace_child(
-                        dst,
-                        child.name,
-                        backend=self.backend_impl,
-                    ):
-                        self.lprint(
-                            f"[warn] _copy_excluding_extras: could not "
-                            f"remove {child.name} from {dst}"
-                        )
-        dst.mkdir(parents=True, exist_ok=True)
-        for child in children:
-            child_dst = dst / child.name
-            if child_dst.exists() or child_dst.is_symlink():
-                # Stale leftover — try once more to remove before copying
-                try:
-                    if child_dst.is_dir() and not child_dst.is_symlink():
-                        shutil.rmtree(child_dst)
-                    else:
-                        child_dst.unlink()
-                except PermissionError:
-                    self.lprint(
-                        f"[warn] _copy_excluding_extras: {child.name} in "
-                        f"{dst} is stale and could not be replaced"
-                    )
-                    continue
-            try:
-                if child.is_symlink():
-                    os.symlink(os.readlink(child), child_dst)
-                elif child.is_dir():
-                    shutil.copytree(child, child_dst, symlinks=True, ignore=_ignore)
-                else:
-                    shutil.copy2(child, child_dst)
-            except PermissionError:
-                self.lprint(f"[warn] _copy_excluding_extras: could not copy {child.name} to {dst}")
-        if self.run_environment.isolated:
-            # In containerized mode, external symlinks become bind mounts
-            # (Docker) or volume uploads (Modal). Remove the broken symlinks
-            # so the mount point / volume path can host the resolved contents.
-            self._remove_external_symlinks(dst)
-        else:
-            self._replace_external_symlinks(dst)
-
-    @staticmethod
-    def _source_gitignored_paths(src: Path) -> frozenset[tuple[str, ...]]:
-        """Return untracked paths ignored by Git below ``src``."""
-
-        result = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(src),
-                "ls-files",
-                "--others",
-                "--ignored",
-                "--exclude-standard",
-                "--directory",
-                "-z",
-            ],
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            detail = result.stderr.decode(errors="replace").strip()
-            raise RuntimeError(f"could not evaluate Git ignores for workspace.seed: {detail}")
-        return frozenset(
-            Path(os.fsdecode(raw).rstrip("/")).parts for raw in result.stdout.split(b"\0") if raw
-        )
-
     def wait_for_debug(self, step: str) -> None:
         if self.debug:
             input(f"\n[debug] {step}. Press Enter to continue...")
@@ -763,7 +595,7 @@ class _RunContext:
             symlinks=True,
             ignore=lambda _, names: [n for n in names if n in self.EXCLUDED_WORKSPACE_DIRS],
         )
-        self._replace_external_symlinks(dst)
+        self.workspace_files.replace_external_symlinks(dst)
 
     def trusted_input_changes(self) -> list[str]:
         """Return evaluator-owned paths changed since workspace initialization."""
@@ -797,30 +629,12 @@ class _RunContext:
         return self.commands.profiler_benchmark_command
 
     def lprint(self, text: str) -> None:
-        _log_and_print(text, self.run_log_file)
+        self.logger.lprint(text)
 
     def switch_log_file(self, label: int | str) -> None:
-        """Switch to a per-phase log file (``run-<datetime>-<label>.log``).
-
-        *label* is stringified into the file name.  Integer labels get a
-        ``step`` prefix for backward compatibility with the curriculum
-        loop's step-number usage (e.g. ``switch_log_file(3)`` →
-        ``run-<ts>-step3.log``).  Callers that want a different prefix
-        (e.g. ``round007``) should pass a string.
-
-        The previous log file is flushed but kept open. A new file becomes
-        ``run_log_file``. When stderr logging is enabled, its tee is updated
-        to write to the new file as well.
-        """
-        self.run_log_file.flush()
-        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        suffix = f"step{label}" if isinstance(label, int) else label
-        new_path = self.log_dir / f"run-{ts}-{suffix}.log"
-        new_file = new_path.open("a", encoding="utf-8")
-        self._paths = replace(self._paths, run_log_path=new_path)
-        self.run_log_file = new_file
-        if self._stderr_redirected:
-            sys.stderr = _TeeWriter(self._original_stderr, new_file)
+        """Switch to a per-phase log file — see :meth:`RunLogger.switch`."""
+        new_file = self.logger.switch(label)
+        self._paths = replace(self._paths, run_log_path=self.logger.path)
         # Update the agent runner's log file handle so subsequent
         # invoke() calls write to the new step log.
         if hasattr(self, "agent_runner") and hasattr(self.agent_runner, "_run_log_file"):
@@ -873,9 +687,7 @@ class _RunContext:
             except Exception as exc:
                 self.lprint(f"[warn] environment hook teardown failed: {exc}")
         self._run_environment_stack.close()
-        if self._stderr_redirected:
-            sys.stderr = self._original_stderr
-        self.run_log_file.close()
+        self.logger.close()
 
     def __enter__(self) -> "_RunContext":
         return self

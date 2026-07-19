@@ -10,11 +10,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND
-from vibesys.context import _RunContext
+from vibesys.context import _RunContext, create_run_context
 from vibesys.domains.environment import NoopEnvironmentHooks
 from vibesys.input_manifest import load_input_bundle
 from vibesys.main import main
 from vibesys.profilers import ProfilerKind
+from vibesys.run import Workspace
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
 
 
@@ -71,7 +72,7 @@ def _patched_context_dependencies(project_root: Path):
 
 
 def _make_context(input_dir: Path, seed: Path | None = None, **kwargs) -> _RunContext:
-    return _RunContext(
+    return create_run_context(
         config={"model": {"name": "claude-sonnet-4-6"}},
         exp_name=kwargs.pop("exp_name", "workspace-seed"),
         input_path=str(input_dir),
@@ -329,15 +330,18 @@ def test_input_collision_is_rejected_before_overlay(tmp_path):
     (input_dir / "input-only.txt").write_text("input\n")
     (input_dir / "shared").write_text("input collision\n")
 
-    ctx = object.__new__(_RunContext)
-    ctx.EXCLUDED_WORKSPACE_DIRS = set()
-    ctx.run_environment = MagicMock(isolated=False)
-    ctx.backend_impl = MagicMock()
-    ctx.lprint = MagicMock()
-    ctx._copy_excluding_extras(seed, workspace)
+    workspace_files = Workspace(
+        workspace,
+        run_environment=MagicMock(isolated=False),
+        backend=MagicMock(),
+        log=MagicMock(),
+        project_root=tmp_path,
+        excluded_dirs=set(),
+    )
+    workspace_files.copy_dir(seed, workspace)
 
     with pytest.raises(ValueError, match="same paths: shared"):
-        ctx._copy_excluding_extras(input_dir, workspace, reject_collisions=True)
+        workspace_files.copy_dir(input_dir, workspace, reject_collisions=True)
 
     assert (workspace / "shared" / "seed.txt").read_text() == "seed\n"
     assert not (workspace / "input-only.txt").exists()

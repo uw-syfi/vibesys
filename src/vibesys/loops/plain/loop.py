@@ -31,7 +31,7 @@ from pathlib import Path
 from vibesys.agents.progress import RoundProgress
 from vibesys.config import Config, as_config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
-from vibesys.context import _RunContext
+from vibesys.context import _RunContext, create_run_context
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.loops.plain.render import render_all
 from vibesys.loops.plain.runner_ext import PlainLoopAgentRunner
@@ -373,7 +373,7 @@ def run_plain_loop(
     git_tracking = True
     run_environment = run_environment or make_run_environment_spec()
 
-    with _RunContext(
+    with create_run_context(
         config=config,
         exp_name=exp_name,
         input_path=input_path,
