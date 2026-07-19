@@ -118,7 +118,7 @@ If you could not run the benchmark this round, set `perf_metric: null` rather th
 
 The framework will record your structured response into `progress.md` for you. Read `progress.md` and `roadmap.md` first to understand prior rounds; do NOT duplicate the framework's audit block manually.
 
-Maintain a live todo list with your todo/plan tool while you work: record your plan as todo items before making changes, and update each item's status as you complete it. The operator's UI mirrors this list as live run progress.
+Maintain a live todo list with your todo/plan tool while you work: record your plan as todo items before making changes, and update each item's status as you complete it.
 
 ## Output
 
