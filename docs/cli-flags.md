@@ -65,6 +65,29 @@ benchmark-result contract. A valid bundle exits with status 0; an invalid bundle
 prints the failing contract and exits with status 1. Command-line usage errors
 exit with status 2. Validation does not execute the checker or benchmark.
 
+## Cross-Loop Run Flags
+
+Beyond the axes above, every outer loop accepts run-management and
+agent-harness flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--exp-name` | Experiment name; each run creates a directory under `exp_env/`. |
+| `--config` | Path to the agent TOML config file (default: `agent.toml`). |
+| `--agent-backend` | Coding-agent backend: `cli` (default) or `deepagents`. Overrides `[agent].backend` in `agent.toml`. |
+| `--cli-provider` | Which coding-agent CLI to drive when `--agent-backend cli`: `claude`, `gemini`, `codex`, or `opencode`. Overrides `[agent].cli_provider`. |
+| `--resume [RUN_DIR]` | Resume a previous run (default: latest). |
+| `--headless` | Disable the interactive client even when attached to a terminal. |
+| `--debug` | Pause for Enter at each step in loop mode. |
+| `--git-tracking` | Track workspace versions via git commits instead of directory snapshots. |
+| `--modal-gpu`, `--modal-model-volume`, `--modal-app` | Modal dispatch details: default GPU spec, pre-existing model-weights Volume, and App name. |
+
+Loop-specific flags — for example the agent loop's `--max-rounds`,
+`--max-retries-per-round`, and `--inner-loop`, the evolve loop's
+`--max-generations`, `--children-per-generation`, and `--objective`, the
+openevolve loop's `--max-iterations`, or the plain loop's
+`--max-attempts-per-issue` — are listed by `./vs --outer-loop <kind> --help`.
+
 ## Interface
 
 `--interface` applies to the agent loop.

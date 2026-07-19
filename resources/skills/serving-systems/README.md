@@ -17,36 +17,40 @@ Skills are organized by **abstraction layer** with explicit extensibility axes.
 | [`frameworks/`](references/frameworks/) | programming framework | PyTorch / MLX / (future JAX) idioms for serving. |
 | [`backends/`](references/backends/) | software backend library | How to **use** existing kernel libraries — FlashInfer, FlashAttention, Triton kernels, CUDA graph. Kernel *implementation* is out of scope; see agent-gpu-skills. |
 | [`hardware/`](references/hardware/) | hardware platform | Hopper / Blackwell / MI300 / Apple Silicon specifics — precision, collectives, tuning. |
-| [`engines/`](references/engines/) | reference system | Source-code lookup into vLLM, SGLang, TensorRT-LLM. Short SKILL.md + "where's X" grep tables. |
+| [`engines/`](references/engines/) | reference system | Source-code lookup into vLLM, SGLang, TensorRT-LLM. Short notes + "where's X" grep tables. |
 | [`tooling/`](references/tooling/) | orthogonal workflow | FastAPI serving, accuracy checking, serving benchmarks, profiling, I/O handling. |
 
 ## Extensibility
 
-Each tier is designed so new entries drop in as folders:
+Each tier is designed so new entries drop in as reference files:
 
-- **Add a model** → new folder under `models/` describing arch + features it needs.
-- **Add hardware** → new folder under `hardware/` with precision / collective / profiler notes.
-- **Add a framework or backend** → new folder under `frameworks/` or `backends/`.
-- **Add an engine** → new folder under `engines/` with "where's X" tables.
+- **Add a model** → new note under `references/models/` describing arch + features it needs.
+- **Add hardware** → new note under `references/hardware/` with precision / collective / profiler notes.
+- **Add a framework or backend** → new note under `references/frameworks/` or `references/backends/`.
+- **Add an engine** → new note under `references/engines/` with "where's X" tables.
 
-Because axes are not fully orthogonal (FlashInfer is CUDA-only, MLX is Apple-only, MLA needs a MLA-capable backend), each `algorithms/` skill ends with a compatibility matrix (`algorithm × {backend, hardware, engine}`) so cross-axis constraints are captured where they belong.
+Because axes are not fully orthogonal (FlashInfer is CUDA-only, MLX is Apple-only, MLA needs a MLA-capable backend), each `references/algorithms/` note ends with a compatibility matrix (`algorithm × {backend, hardware, engine}`) so cross-axis constraints are captured where they belong.
 
 ## Kernel-level boundary
 
-This collection assumes existing kernel libraries. Writing new CUDA / Triton / CUTLASS kernels is **out of scope** — those skills live in [agent-gpu-skills](https://github.com/slowlyC/agent-gpu-skills). Each `backends/*` skill ends with a pointer back to the relevant gpu-skills entry.
+This collection assumes existing kernel libraries. Writing new CUDA / Triton / CUTLASS kernels is **out of scope** — those skills live in [agent-gpu-skills](https://github.com/slowlyC/agent-gpu-skills). Each `references/backends/*` note ends with a pointer back to the relevant gpu-skills entry.
 
 ## Setup
 
-The vibesys agent CLIs auto-load this skill from `skills/serving-systems/`
-via the `--skills-dir` flag (default in `vibesys/cli_common.py`),
-copying the skill tree into each workspace's `.claude/skills/` so the
-in-workspace coding agent picks it up.
+Inside an agent workspace, this collection appears as the `serving-systems/`
+skill under the per-CLI skill-discovery paths (`.claude/skills/`,
+`.agents/skills/`, …); every path in this document is relative to that skill
+root. The vibesys agent CLIs copy it there automatically — in the VibeSys
+repo checkout, the collection lives at `resources/skills/serving-systems/`
+and is picked up via the `--skills-dir` flag (default candidate root
+`resources/skills/`, defined in `src/vibesys/skills.py`).
 
 The reference engines (`repos/{vllm,sglang,TensorRT-LLM}/`) are tracked as
-git submodules — initialize with:
+git submodules and are not copied into workspaces — from the repo checkout,
+initialize with:
 
 ```bash
-git submodule update --init skills/serving-systems/repos
+git submodule update --init resources/skills/serving-systems/repos
 ```
 
 `update-repos.sh` is the upstream sparse-checkout helper, kept for parity
@@ -56,27 +60,33 @@ one used here.
 ## Directory structure
 
 ```
-vibesys-skills/
-├── README.md, CLAUDE.md          # overview + guidance for skill authors
+serving-systems/
+├── SKILL.md                      # the single skill; routes to references/
+├── README.md, OVERVIEW.md,       # repo docs + guidance for skill authors
+│   CLAUDE.md
 ├── update-repos.sh               # upstream sparse-checkout helper (parity)
-│
-├── models/                       text-dense, text-moe, ssm-hybrid,
-│                                 vision-language, speech-language,
-│                                 image-generation, video-generation,
-│                                 speech-generation, omni-multimodal
-├── algorithms/                   attention-variants, async-scheduling,
-│                                 continuous-batching, paged-attention,
-│                                 radix-prefix-caching, heterogeneous-kv-cache,
-│                                 chunked-prefill, speculative-decoding,
-│                                 disaggregated-serving, moe-routing-dispatch,
-│                                 quantization-schemes, parallelism,
-│                                 structured-output, batched-sampling
-├── frameworks/                   pytorch, triton, mlx
-├── backends/                     flashinfer, flashattention, sdpa,
-│                                 triton-kernels, cuda-graph
-├── hardware/                     nvidia, amd-mi300, apple-silicon
-├── engines/                      vllm, sglang, trtllm
-├── tooling/                      fastapi-serving, openai-api,
+├── references/
+│   ├── models/                   text-dense, text-moe, ssm-hybrid,
+│   │                             vision-language, speech-language,
+│   │                             image-generation, video-generation,
+│   │                             speech-generation, omni-multimodal
+│   ├── algorithms/               attention-variants, async-scheduling,
+│   │                             continuous-batching, paged-attention,
+│   │                             radix-prefix-caching, heterogeneous-kv-cache,
+│   │                             chunked-prefill, speculative-decoding,
+│   │                             disaggregated-serving, moe-routing-dispatch,
+│   │                             quantization-schemes, parallelism,
+│   │                             structured-output, batched-sampling
+│   ├── frameworks/               pytorch, triton, mlx, neuron-pytorch,
+│   │                             neuron-flash-attention, nxd-inference,
+│   │                             nxd-kv-cache
+│   ├── backends/                 flashinfer, flashattention, sdpa,
+│   │                             triton-kernels, cuda-graph,
+│   │                             attention-backend-comparison
+│   ├── hardware/                 nvidia, amd-mi300, apple-silicon,
+│   │                             aws-trainium
+│   ├── engines/                  vllm, sglang, trtllm
+│   └── tooling/                  fastapi-serving, openai-api,
 │                                 accuracy-checker, serving-benchmark,
 │                                 profiler, io-handling, lora-serving
 └── repos/                        vllm, sglang, TensorRT-LLM (git submodules)
