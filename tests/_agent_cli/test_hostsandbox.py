@@ -50,15 +50,19 @@ def _bwrap_works() -> bool:
 
 
 # CI sets ``VIBESYS_REQUIRE_SANDBOX_TESTS=1`` so the real-confinement tests must
-# run instead of silently skipping. If the sandbox stack is then unavailable the
-# tests fail (build() returns None → assertions trip), which is the whole point:
-# a broken or absent sandbox in CI should be loud, not invisible.
+# run instead of silently skipping. If the backend is then unavailable the tests
+# fail (build() returns None → assertions trip), which is the whole point: a
+# broken or absent sandbox in CI should be loud, not invisible. The force is
+# scoped to the backend's own platform so the Linux CI job does not try to run
+# the macOS test (and vice versa).
 _REQUIRE_SANDBOX_TESTS = os.environ.get("VIBESYS_REQUIRE_SANDBOX_TESTS") == "1"
+_FORCE_LINUX = _REQUIRE_SANDBOX_TESTS and sys.platform.startswith("linux")
+_FORCE_MACOS = _REQUIRE_SANDBOX_TESTS and sys.platform == "darwin"
 
 requires_sandbox = pytest.mark.skipif(
-    not _REQUIRE_SANDBOX_TESTS and not _bwrap_works(),
+    not (_FORCE_LINUX or _bwrap_works()),
     reason="requires a working bwrap + user-namespace stack "
-    "(set VIBESYS_REQUIRE_SANDBOX_TESTS=1 to force)",
+    "(set VIBESYS_REQUIRE_SANDBOX_TESTS=1 on Linux to force)",
 )
 
 
@@ -390,8 +394,8 @@ def _seatbelt_works() -> bool:
 
 
 requires_seatbelt = pytest.mark.skipif(
-    not _seatbelt_works(),
-    reason="requires macOS sandbox-exec",
+    not (_FORCE_MACOS or _seatbelt_works()),
+    reason="requires macOS sandbox-exec (set VIBESYS_REQUIRE_SANDBOX_TESTS=1 on macOS to force)",
 )
 
 

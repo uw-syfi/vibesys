@@ -203,6 +203,30 @@ jobs:
           VIBESYS_REQUIRE_SANDBOX_TESTS: "1"
         run: uv run python -m pytest tests/_agent_cli/test_hostsandbox.py -v
 
+  # macOS counterpart of sandbox-linux: exercises the Seatbelt confinement
+  # boundary on a real macOS host. sandbox-exec ships with macOS, so no install
+  # step is needed; VIBESYS_REQUIRE_SANDBOX_TESTS=1 forces the Seatbelt test to
+  # run (and fail loudly) rather than skip.
+  sandbox-macos:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run workspace-confinement tests
+        env:
+          VIBESYS_REQUIRE_SANDBOX_TESTS: "1"
+        run: uv run python -m pytest tests/_agent_cli/test_hostsandbox.py -v
+
   patch-coverage:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
