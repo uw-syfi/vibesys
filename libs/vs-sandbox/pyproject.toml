@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vs-sandbox"
+version = "0.1.0"
+description = "Reusable Docker and Modal sandbox backends for agent workspaces"
+requires-python = ">=3.11"
+dependencies = [
+    "deepagents",
+    "modal>=1.4.2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["vs_sandbox*"]
+
+[tool.setuptools.package-data]
+vs_sandbox = ["py.typed"]

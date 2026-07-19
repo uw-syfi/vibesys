@@ -13,7 +13,7 @@ from vibesys.backends.local import LocalBackend
 from vibesys.constants import ComputeBackend
 from vibesys.main import _add_common_args
 from vibesys.profilers import ProfilerKind
-from vibesys.sandbox.docker_sandbox import DockerSandbox
+from vs_sandbox.docker_sandbox import DockerSandbox
 
 
 def _make_backend(tmp_path) -> LocalBackend:

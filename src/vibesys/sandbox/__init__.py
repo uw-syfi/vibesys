@@ -3,7 +3,8 @@
 Modules:
   - ``run_environment``    — top-level RunEnvironmentSpec / RunEnvironment;
                               bridges CLI args to a sandbox factory.
-  - ``docker_sandbox``     — ``DockerSandbox`` (BaseSandbox subclass).
-  - ``modal_sandbox``      — ``ModalSandbox`` (BaseSandbox subclass).
-  - ``modal_model_setup``  — Modal Volume + weight staging for Modal runs.
+
+The sandbox backends themselves (``DockerSandbox``, ``ModalSandbox``, and
+Modal Volume weight staging) live in the ``vs_sandbox`` package under
+``libs/vs-sandbox``.
 """

@@ -28,6 +28,7 @@ dependencies = [
     "modal>=1.4.2",
     "vs-feature-flags",
     "vs-issue-board",
+    "vs-sandbox",
 ]
 
 [project.scripts]
@@ -57,14 +58,14 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "libs/vs-feature-flags/tests", "libs/vs-issue-board/tests"]
+testpaths = ["tests", "libs/vs-feature-flags/tests", "libs/vs-issue-board/tests", "libs/vs-sandbox/tests"]
 addopts = "-ra"
 pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests"]
+src = ["src", "tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W"]
@@ -81,3 +82,4 @@ members = ["libs/*"]
 agentshim = { git = "https://github.com/vic-lsh/agentshim.git", rev = "codex/executor-injection" }
 vs-feature-flags = { workspace = true }
 vs-issue-board = { workspace = true }
+vs-sandbox = { workspace = true }
