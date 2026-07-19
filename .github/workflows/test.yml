@@ -162,7 +162,7 @@ jobs:
         run: uv sync --dev
 
       - name: Run tests
-        run: uv run python -m pytest -v --cov=vibesys --cov=vs_issue_board --cov-report=term-missing --cov-report=xml --cov-fail-under=75
+        run: uv run python -m pytest -v --cov=vibesys --cov=vs_issue_board --cov=vs_sandbox --cov-report=term-missing --cov-report=xml --cov-fail-under=75
 
       - name: Upload coverage report
         if: matrix.python-version == '3.11'

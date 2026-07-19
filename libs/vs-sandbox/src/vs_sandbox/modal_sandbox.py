@@ -223,7 +223,7 @@ class ModalSandbox(BaseSandbox):
                 for auxiliary weights like EAGLE draft models
                 (``/draft_model``).  Volumes are looked up lazily and must
                 exist in Modal; populate them via
-                ``vibesys.sandbox.modal_model_setup.ensure_model_volume``
+                ``vs_sandbox.modal_model_setup.ensure_model_volume``
                 before starting the sandbox.
             extra_writable_volumes: Additional ``mountpoint -> volume_name``
                 entries mounted read-write. Used for persistent CLI auth
