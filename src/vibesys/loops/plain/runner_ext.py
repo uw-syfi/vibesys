@@ -72,11 +72,12 @@ class PlainLoopAgentRunner:
         self,
         *,
         kind: str,
+        response_cls: type[T],
         iteration: int | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
         tools: list[BaseTool] | None = None,
         **kwargs: Any,
-    ) -> T:  # pyright: ignore[reportInvalidTypeVarUse]
+    ) -> T:
         if kind in ("judge", "perf_eval"):
             if iteration is None:
                 raise ValueError(
@@ -102,6 +103,7 @@ class PlainLoopAgentRunner:
         # implementer (and any other phase) passes through unmodified.
         return self._inner.invoke(
             kind=kind,
+            response_cls=response_cls,
             mcp_servers=mcp_servers,
             tools=tools,
             **kwargs,

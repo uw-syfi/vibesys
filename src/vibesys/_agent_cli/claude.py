@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from agentshim.executor import CommandExecutor
 
 
-class ClaudeCodeCodingAgent(CLICodingAgent):
+class ClaudeCodeCodingAgent(CLICodingAgent[ClaudeGenerationSession]):
     """Coding agent implementation using the Claude Code CLI tool."""
 
     def __init__(
@@ -74,10 +74,10 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
             cmd.extend(["--model", self.model])
         return cmd
 
-    def _extract_session_id(self, session: ClaudeGenerationSession) -> str | None:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def _extract_session_id(self, session: ClaudeGenerationSession) -> str | None:
         return session.session_id
 
-    def _create_session(  # pyright: ignore[reportIncompatibleMethodOverride]
+    def _create_session(
         self,
         cmd: list[str],
         cwd: str | None = None,

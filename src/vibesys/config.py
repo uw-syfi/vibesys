@@ -1,7 +1,7 @@
 """Typed, schema-driven configuration for ``agent.toml``.
 
 The whole config is described by the :class:`Config` pydantic model and its
-nested sections. ``_load_config`` parses the TOML, validates it against that
+nested sections. ``load_config`` parses the TOML, validates it against that
 schema (fail-fast: missing required fields, unknown providers/backends, wrong
 types, **and unknown keys** all raise), applies environment-variable overrides,
 and returns a typed :class:`Config`. Consumers use attribute access
@@ -258,7 +258,7 @@ def _apply_vertex_env_overrides(config: Config) -> None:
         vx.region = env_region
 
 
-def _load_config(path: Path) -> Config:  # pyright: ignore[reportUnusedFunction]
+def load_config(path: Path) -> Config:
     """Load, validate, and env-override a TOML agent config file."""
     _load_dotenv_file()
     path = Path(path)

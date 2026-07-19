@@ -1,7 +1,7 @@
 """Deepagents implementation of :class:`AgentRunner`.
 
 Wraps ``deepagents.create_deep_agent`` and the existing
-``vibesys.agent_runner._run_typed_agent`` plumbing — no behavior
+``vibesys.agent_runner.run_typed_agent`` plumbing — no behavior
 change vs. what the simple loop did before this abstraction landed.
 """
 
@@ -21,9 +21,9 @@ from pydantic import BaseModel
 
 from vibesys._agent_cli.base import MCPServerSpec
 from vibesys.agent_runner import (
-    _DEFAULT_MAX_TEXT_LEN,  # pyright: ignore[reportPrivateUsage]
-    _log_agent_config,  # pyright: ignore[reportPrivateUsage]
-    _run_typed_agent,  # pyright: ignore[reportPrivateUsage]
+    DEFAULT_MAX_TEXT_LEN,
+    log_agent_config,
+    run_typed_agent,
 )
 from vibesys.agents.callbacks import AgentLogger
 from vibesys.agents.progress import AgentProgress
@@ -89,7 +89,7 @@ class DeepAgentsRunner:
             checkpointer=checkpointer,
             tools=tools,
         )
-        _log_agent_config(agent, label, self._run_log_file)
+        log_agent_config(agent, label, self._run_log_file)
 
         callbacks: list[BaseCallbackHandler] = [
             AgentLogger(
@@ -100,7 +100,7 @@ class DeepAgentsRunner:
             )
         ]
 
-        return _run_typed_agent(
+        return run_typed_agent(
             agent,
             user_prompt,
             response_cls=response_cls,
@@ -110,5 +110,5 @@ class DeepAgentsRunner:
             thread_id=thread_id,
             round_label=round_label,
             log_file=self._run_log_file,
-            max_text_len=_DEFAULT_MAX_TEXT_LEN,
+            max_text_len=DEFAULT_MAX_TEXT_LEN,
         )

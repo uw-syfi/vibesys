@@ -22,7 +22,7 @@ def _toml_array(values: list[str]) -> str:
     return "[" + ",".join(_toml_str(v) for v in values) + "]"
 
 
-class CodexCodingAgent(CLICodingAgent):
+class CodexCodingAgent(CLICodingAgent[CodexGenerationSession]):
     """Coding agent implementation using the Codex CLI tool."""
 
     def __init__(
@@ -103,7 +103,7 @@ class CodexCodingAgent(CLICodingAgent):
             cmd.extend(self.extra_config_args)
         return cmd
 
-    def _create_session(  # pyright: ignore[reportIncompatibleMethodOverride]
+    def _create_session(
         self,
         cmd: list[str],
         cwd: str | None = None,
@@ -123,7 +123,7 @@ class CodexCodingAgent(CLICodingAgent):
             executor=self.executor,
         )
 
-    def _extract_session_id(self, session: CodexGenerationSession) -> str | None:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def _extract_session_id(self, session: CodexGenerationSession) -> str | None:
         return session.session_id
 
     def install_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:

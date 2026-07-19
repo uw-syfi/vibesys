@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from vibesys.config import _load_config, _load_dotenv_file
+from vibesys.config import _load_dotenv_file, load_config
 from vibesys.features import FeatureFlag
 
 
@@ -36,7 +36,7 @@ region = "us-east5"
 
 [providers.google-genai]
 """)
-        config = _load_config(cfg_file)
+        config = load_config(cfg_file)
         assert config.model.name == "claude-sonnet-4-6"
         assert config.model.provider == "vertex-ai"
         assert config.thinking.level == "medium"
@@ -48,7 +48,7 @@ region = "us-east5"
     def test_minimal_config(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
-        config = _load_config(cfg_file)
+        config = load_config(cfg_file)
         assert config.model.name == "claude-sonnet-4-6"
         assert config.model.provider is None
         assert config.thinking.level is None
@@ -63,17 +63,17 @@ class TestLoadConfigErrors:
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text("[model]\nprovider = 'vertex-ai'\n")
         with pytest.raises(ValueError, match="name"):
-            _load_config(cfg_file)
+            load_config(cfg_file)
 
     def test_missing_file(self):
         with pytest.raises(FileNotFoundError):
-            _load_config(Path("/nonexistent/agent.toml"))
+            load_config(Path("/nonexistent/agent.toml"))
 
     def test_invalid_toml(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text("not valid toml [[[")
         with pytest.raises(tomllib.TOMLDecodeError):
-            _load_config(cfg_file)
+            load_config(cfg_file)
 
     def test_unknown_provider(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
@@ -83,7 +83,7 @@ name = "claude-sonnet-4-6"
 provider = "bedrock"
 """)
         with pytest.raises(ValueError, match="bedrock"):
-            _load_config(cfg_file)
+            load_config(cfg_file)
 
     def test_unknown_feature_flag(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
@@ -95,7 +95,7 @@ name = "claude-sonnet-4-6"
 new_loop = true
 """)
         with pytest.raises(ValueError, match="Unknown feature flag 'new_loop'"):
-            _load_config(cfg_file)
+            load_config(cfg_file)
 
 
 class TestLoadConfigFeatureFlags:
@@ -108,7 +108,7 @@ name = "claude-sonnet-4-6"
 [feature_flags]
 example_feature = true
 """)
-        config = _load_config(cfg_file)
+        config = load_config(cfg_file)
 
         assert config.feature_flags == {FeatureFlag.EXAMPLE_FEATURE: True}
 
@@ -120,19 +120,19 @@ class TestLoadConfigStrict:
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n\n[bogus]\nx = 1\n')
         with pytest.raises(ValueError, match="bogus"):
-            _load_config(cfg_file)
+            load_config(cfg_file)
 
     def test_unknown_key_in_known_section_rejected(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n\n[agent]\ncli_modle = "x"\n')
         with pytest.raises(ValueError, match="cli_modle"):
-            _load_config(cfg_file)
+            load_config(cfg_file)
 
     def test_unknown_backend_rejected(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n\n[backend]\nname = "tpu"\n')
         with pytest.raises(ValueError, match="tpu"):
-            _load_config(cfg_file)
+            load_config(cfg_file)
 
     def test_removed_cli_model_key_rejected(self, tmp_path):
         # [agent].cli_model was removed in favour of [model].name driving the
@@ -143,14 +143,14 @@ class TestLoadConfigStrict:
             '[model]\nname = "gpt-5.4"\n\n[agent]\ncli_provider = "codex"\ncli_model = "gpt-5-codex"\n'
         )
         with pytest.raises(ValueError, match="cli_model"):
-            _load_config(cfg_file)
+            load_config(cfg_file)
 
 
 class TestLoadConfigProviderDefault:
     def test_missing_provider_defaults_to_none(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
-        config = _load_config(cfg_file)
+        config = load_config(cfg_file)
         assert config.model.provider is None
 
 
@@ -170,7 +170,7 @@ provider = "vertex-ai"
             "VERTEX_REGION": "us-central1",
         }
         with patch.dict("os.environ", env, clear=False):
-            config = _load_config(cfg_file)
+            config = load_config(cfg_file)
         vx = config.providers.vertex_ai
         assert vx.json_path == "/env/key.json"
         assert vx.project == "env-project"
@@ -194,7 +194,7 @@ region = "us-east5"
             "VERTEX_REGION": "us-central1",
         }
         with patch.dict("os.environ", env, clear=False):
-            config = _load_config(cfg_file)
+            config = load_config(cfg_file)
         vx = config.providers.vertex_ai
         assert vx.json_path == "/env/key.json"
         assert vx.project == "env-project"
@@ -251,7 +251,7 @@ name = "gemini-2.5-pro"
 level = "high"
 budget = 2048
 """)
-        config = _load_config(cfg_file)
+        config = load_config(cfg_file)
         assert config.thinking.level == "high"
         assert config.thinking.budget == 2048
 
@@ -259,7 +259,7 @@ budget = 2048
 class TestLoadConfigAgentSection:
     def test_agent_section_preserved(self, tmp_path):
         # The [agent] table drives build_agent_runner (cli_timeout, backend,
-        # cli_provider). _load_config must carry it through; the previous
+        # cli_provider). load_config must carry it through; the previous
         # allowlist loader silently dropped it.
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text("""\
@@ -271,7 +271,7 @@ backend = "cli"
 cli_provider = "claude"
 cli_timeout = 1800
 """)
-        config = _load_config(cfg_file)
+        config = load_config(cfg_file)
         assert config.agent.cli_timeout == 1800
         assert config.agent.backend == "cli"
         assert config.agent.cli_provider == "claude"
@@ -279,7 +279,7 @@ cli_timeout = 1800
     def test_agent_section_defaults_to_empty(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
-        config = _load_config(cfg_file)
+        config = load_config(cfg_file)
         assert config.agent.backend is None
         assert config.agent.cli_provider is None
         assert config.agent.cli_timeout is None
@@ -304,7 +304,7 @@ rate = 8
 duration = 20
 max_tokens = 256
 """)
-        config = _load_config(cfg_file)
+        config = load_config(cfg_file)
         levels = config.perf_eval.load_levels
         assert levels is not None
         assert [lvl.rate for lvl in levels] == [1, 8]
@@ -313,5 +313,5 @@ max_tokens = 256
     def test_perf_eval_defaults_to_none(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
-        config = _load_config(cfg_file)
+        config = load_config(cfg_file)
         assert config.perf_eval.load_levels is None

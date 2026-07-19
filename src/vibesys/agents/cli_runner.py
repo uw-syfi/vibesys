@@ -13,7 +13,7 @@ Docker command routing and per-invocation MCP install/uninstall. Each
 3. Passes :class:`AgentLogger` as the CLI event handler so on-screen output
    matches the deepagents path.
 4. Calls ``agent.generate(prompt, cwd=workspace, …)``.
-5. Reuses :func:`vibesys.agent_runner._parse_typed_response_text`
+5. Reuses :func:`vibesys.agent_runner.parse_typed_response_text`
    to coerce the returned string back into the requested Pydantic model.
 """
 
@@ -36,12 +36,12 @@ from vibesys._agent_cli.codex import CodexCodingAgent
 from vibesys._agent_cli.gemini import GeminiCodingAgent
 from vibesys._agent_cli.opencode import OpencodeCodingAgent
 from vibesys.agent_runner import (
-    _DEFAULT_MAX_TEXT_LEN,  # pyright: ignore[reportPrivateUsage]
-    _log_and_print,  # pyright: ignore[reportPrivateUsage]
-    _log_json_and_print,  # pyright: ignore[reportPrivateUsage]
-    _log_markdown_and_print,  # pyright: ignore[reportPrivateUsage]
-    _log_prompt_markdown_and_print,  # pyright: ignore[reportPrivateUsage]
-    _parse_typed_response_text,  # pyright: ignore[reportPrivateUsage]
+    DEFAULT_MAX_TEXT_LEN,
+    log_and_print,
+    log_json_and_print,
+    log_markdown_and_print,
+    log_prompt_markdown_and_print,
+    parse_typed_response_text,
 )
 from vibesys.agents.callbacks import AgentLogger
 from vibesys.agents.progress import AgentProgress
@@ -146,7 +146,7 @@ def _materialize_skills(
                 shutil.copytree(src_skill, dest, symlinks=True, ignore=skip_ignore)
             except OSError as exc:
                 if log_file is not None:
-                    _log_and_print(
+                    log_and_print(
                         f"[skills] failed to materialize {src_skill} -> "
                         f"{dest}: {type(exc).__name__}: {exc}",
                         log_file,
@@ -302,7 +302,7 @@ class CliAgentRunner:
                 Path(workspace),
                 env=agent.env,
                 binary_path=getattr(agent, "binary_path", None),
-                log=lambda msg: _log_and_print(msg, self._run_log_file),
+                log=lambda msg: log_and_print(msg, self._run_log_file),
             )
             self._agents[kind] = agent
 
@@ -322,20 +322,20 @@ class CliAgentRunner:
 
         # 6. Log the round header so the run log structure mirrors the
         #    deepagents path.
-        _log_and_print(
+        log_and_print(
             f"\n=== {label} ROUND START: {round_label} ===",
             self._run_log_file,
         )
-        _log_and_print(
+        log_and_print(
             f"backend: cli, provider: {self._provider}, model: {self._model_name}, "
             f"cwd: {workspace}",
             self._run_log_file,
         )
-        _log_and_print("--- input ---", self._run_log_file)
-        _log_prompt_markdown_and_print(
+        log_and_print("--- input ---", self._run_log_file)
+        log_prompt_markdown_and_print(
             combined_prompt,
             self._run_log_file,
-            max_len=_DEFAULT_MAX_TEXT_LEN,
+            max_len=DEFAULT_MAX_TEXT_LEN,
         )
 
         # 7. Run the agent. Wrap exceptions to surface them in the run log
@@ -352,14 +352,14 @@ class CliAgentRunner:
                 silent=True,
             )
         except Exception as exc:
-            _log_and_print(
+            log_and_print(
                 f"\n=== {label} ROUND ERROR: {round_label} ===",
                 self._run_log_file,
             )
-            _log_and_print(
+            log_and_print(
                 f"{type(exc).__name__}: {exc}",
                 self._run_log_file,
-                max_len=_DEFAULT_MAX_TEXT_LEN,
+                max_len=DEFAULT_MAX_TEXT_LEN,
             )
             raise
         finally:
@@ -369,32 +369,32 @@ class CliAgentRunner:
 
         # 8. Parse the structured response, falling back if the CLI tool
         #    didn't produce parseable JSON.
-        parsed = _parse_typed_response_text(text, response_cls)
+        parsed = parse_typed_response_text(text, response_cls)
         if parsed is None:
-            _log_and_print(
+            log_and_print(
                 f"\n=== {label} ROUND OUTPUT (missing response) ===",
                 self._run_log_file,
             )
-            _log_and_print(
+            log_and_print(
                 f"No structured response received from {label.lower()}.",
                 self._run_log_file,
             )
             if text:
-                _log_and_print(
+                log_and_print(
                     f"\n=== {label} ROUND OUTPUT (raw output) ===",
                     self._run_log_file,
                 )
-                _log_markdown_and_print(text, self._run_log_file, max_len=_DEFAULT_MAX_TEXT_LEN)
+                log_markdown_and_print(text, self._run_log_file, max_len=DEFAULT_MAX_TEXT_LEN)
             return fallback_factory()
 
-        _log_and_print(
+        log_and_print(
             f"\n=== {label} ROUND OUTPUT ===",
             self._run_log_file,
         )
-        _log_json_and_print(
+        log_json_and_print(
             parsed.model_dump_json(indent=2),
             self._run_log_file,
-            max_len=_DEFAULT_MAX_TEXT_LEN,
+            max_len=DEFAULT_MAX_TEXT_LEN,
         )
         return parsed
 
@@ -435,7 +435,7 @@ class CliAgentRunner:
             with target.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(record) + "\n")
         except OSError as exc:
-            _log_and_print(
+            log_and_print(
                 f"[usage] failed to append {target}: {type(exc).__name__}: {exc}",
                 self._run_log_file,
             )

@@ -29,7 +29,7 @@ from vibesys.backends.base import (
 )
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
-from vs_sandbox.docker_sandbox import DockerSandbox
+from vs_sandbox import DockerSandbox
 
 _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 

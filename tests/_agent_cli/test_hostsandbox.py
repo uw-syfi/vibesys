@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from vibesys._agent_cli import hostsandbox
-from vibesys._agent_cli.cli_agent import CLICodingAgent
+from vibesys._agent_cli.cli_agent import CLICodingAgent, CLIGenerationSession
 
 # ---------------------------------------------------------------------------
 # Real-sandbox availability probe
@@ -335,7 +335,7 @@ class TestSeatbeltProfile:
 # ---------------------------------------------------------------------------
 
 
-class _StubAgent(CLICodingAgent):
+class _StubAgent(CLICodingAgent[CLIGenerationSession]):
     """A concrete CLICodingAgent that runs a fixed script, skipping binary
     detection — mirrors the pattern in ``test_codex.py``."""
 
@@ -357,6 +357,26 @@ class _StubAgent(CLICodingAgent):
 
     def _get_command(self, prompt: str) -> list[str]:
         return [self._script]
+
+    def _create_session(
+        self,
+        cmd: list[str],
+        cwd: str | None = None,
+        timeout: int | None = None,
+        silent: bool = False,
+    ) -> CLIGenerationSession:
+        return CLIGenerationSession(
+            binary_name=self.binary_name,
+            env=self.env,
+            log_prefix=self._log_prefix,
+            cmd=cmd,
+            logger=self.logger,
+            cwd=cwd,
+            timeout=timeout,
+            silent=silent,
+            event_handler=self.event_handler,
+            executor=self.executor,
+        )
 
 
 def _escape_probe(tmp_path_factory) -> tuple[_StubAgent, Path, Path]:

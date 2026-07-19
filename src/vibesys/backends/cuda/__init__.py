@@ -26,8 +26,7 @@ from vibesys.backends.cuda.gpu_monitor import (
 )
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
-from vs_sandbox.docker_sandbox import DockerSandbox
-from vs_sandbox.modal_sandbox import ModalSandbox
+from vs_sandbox import DockerSandbox, ModalSandbox
 
 # Default container image for the cuda backend.  Carries CUDA toolkit + PyTorch.
 _DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"

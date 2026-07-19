@@ -21,11 +21,12 @@ import json
 import os
 import sys
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
-from vibesys.config import Config, _load_config  # pyright: ignore[reportPrivateUsage]
+from vibesys.config import Config, load_config
 from vibesys.constants import (
     KNOWN_COMPUTE_BACKENDS,
     PROJECT_ROOT,
@@ -329,7 +330,7 @@ def load_config_and_skills(
         config = Config.model_validate(tomllib.loads(_STUB_AGENT_DEFAULT_CONFIG_TEXT))
     else:
         try:
-            config = _load_config(args.config)
+            config = load_config(args.config)
         except (ValueError, FileNotFoundError) as e:
             _configuration_error(str(e), code="config_load_failed", stage="config_loading")
 
@@ -627,15 +628,17 @@ def _validate_target_inputs(args: argparse.Namespace) -> None:
         _configuration_error(str(exc), code="invalid_input", stage="input_loading")
 
 
-def _validate_agent(args: argparse.Namespace) -> None:  # pyright: ignore[reportUnusedFunction]
+def _validate_agent(args: argparse.Namespace) -> None:
     if args.modal and args.profiler not in _MODAL_PROFILERS:
         _configuration_error(
             "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
         )
+    if args.max_retries_per_round < 1:
+        _configuration_error("Error: --max-retries-per-round must be >= 1.")
     _validate_target_inputs(args)
 
 
-def _run_agent(args: argparse.Namespace) -> None:  # pyright: ignore[reportUnusedFunction]
+def _run_agent(args: argparse.Namespace) -> None:
     config, skills, backend = load_config_and_skills(args)
     from vibesys.loops.agent.loop import run_agent_loop
 
@@ -785,7 +788,7 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _validate_evolve(args: argparse.Namespace) -> None:  # pyright: ignore[reportUnusedFunction]
+def _validate_evolve(args: argparse.Namespace) -> None:
     if args.modal and args.profiler not in _MODAL_PROFILERS:
         _configuration_error(
             "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
@@ -801,7 +804,7 @@ def _validate_evolve(args: argparse.Namespace) -> None:  # pyright: ignore[repor
         _configuration_error("--frontier-bias must be in [0, 1].")
 
 
-def _run_evolve(args: argparse.Namespace) -> None:  # pyright: ignore[reportUnusedFunction]
+def _run_evolve(args: argparse.Namespace) -> None:
     config, skills, backend = load_config_and_skills(args)
     from vibesys.loops.evolve.loop import run_evolve_loop
 
@@ -878,7 +881,7 @@ def _build_plain_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _validate_plain(args: argparse.Namespace) -> None:  # pyright: ignore[reportUnusedFunction]
+def _validate_plain(args: argparse.Namespace) -> None:
     if args.modal and args.profiler not in _MODAL_PROFILERS:
         _configuration_error(
             "Error: --modal only supports --profiler=torch, --profiler=auto, or --profiler=none.",
@@ -886,11 +889,11 @@ def _validate_plain(args: argparse.Namespace) -> None:  # pyright: ignore[report
     _validate_target_inputs(args)
 
 
-def _run_plain(args: argparse.Namespace) -> None:  # pyright: ignore[reportUnusedFunction]
+def _run_plain(args: argparse.Namespace) -> None:
     config, skills, backend = load_config_and_skills(args)
     from vibesys.loops.plain.loop import (
         PlainLoopState,
-        _load_state,  # pyright: ignore[reportPrivateUsage]
+        load_state,
         run_plain_loop,
     )
 
@@ -915,7 +918,7 @@ def _run_plain(args: argparse.Namespace) -> None:  # pyright: ignore[reportUnuse
                 bootstrap_done=True,
             )
         else:
-            resume_state = _load_state(log_dir)
+            resume_state = load_state(log_dir)
             if resume_state is not None:
                 print(
                     f"Auto-detected state: round {resume_state.round_idx + 1}, "
@@ -967,22 +970,19 @@ def _run_plain(args: argparse.Namespace) -> None:  # pyright: ignore[reportUnuse
 # ===========================================================================
 
 
-_PARSER_BUILDERS = {
-    "agent": _build_agent_parser,
-    "plain": _build_plain_parser,
-    "evolve": _build_evolve_parser,
-}
+@dataclass(frozen=True)
+class _LoopCommand:
+    """Typed dispatch record for one ``--outer-loop`` kind."""
 
-_VALIDATORS = {
-    "agent": "_validate_agent",
-    "plain": "_validate_plain",
-    "evolve": "_validate_evolve",
-}
+    build_parser: Callable[[], argparse.ArgumentParser]
+    validate: Callable[[argparse.Namespace], None]
+    run: Callable[[argparse.Namespace], None]
 
-_RUNNERS = {
-    "agent": "_run_agent",
-    "plain": "_run_plain",
-    "evolve": "_run_evolve",
+
+_LOOP_COMMANDS: dict[str, _LoopCommand] = {
+    "agent": _LoopCommand(_build_agent_parser, _validate_agent, _run_agent),
+    "plain": _LoopCommand(_build_plain_parser, _validate_plain, _run_plain),
+    "evolve": _LoopCommand(_build_evolve_parser, _validate_evolve, _run_evolve),
 }
 
 
@@ -990,9 +990,10 @@ def parse_cli_invocation(argv: list[str]) -> CliInvocation:
     """Parse and validate one invocation without printing or exiting."""
     argv = _prepare_stub_agent_smoke_defaults(argv)
     loop_kind, remaining = _extract_loop_selection(argv)
-    args = _PARSER_BUILDERS[loop_kind]().parse_args(remaining)
+    command = _LOOP_COMMANDS[loop_kind]
+    args = command.build_parser().parse_args(remaining)
     _resolve_resume_args(args)
-    globals()[_VALIDATORS[loop_kind]](args)
+    command.validate(args)
     return CliInvocation(loop_kind=loop_kind, args=args)
 
 
@@ -1003,7 +1004,7 @@ def _dispatch(argv: list[str]) -> None:
 
     invocation = parse_cli_invocation(argv)
     loop_kind, args = invocation.loop_kind, invocation.args
-    runner = globals()[_RUNNERS[loop_kind]]
+    runner = _LOOP_COMMANDS[loop_kind].run
     from vibesys.server.events import EventStatus, EventType, RunStartedData
     from vibesys.server.registry import active_supervisor
 

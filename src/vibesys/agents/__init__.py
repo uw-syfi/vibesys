@@ -9,7 +9,7 @@ runner classes are imported, so the public API of this package is::
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TYPE_CHECKING, Any, TextIO
 
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_AGENT_BACKEND
@@ -23,18 +23,24 @@ from .progress import AgentProgress, CandidateProgress, RoundProgress
 # concrete runners import back from ``vibesys.agent_runner``. Importing
 # them eagerly here turned the cycle into an ImportError on the first entry
 # point that hits ``agent_runner`` first (e.g. the ``vibesys`` script).
+# The ``TYPE_CHECKING`` imports let pyright resolve the lazily provided
+# names statically without triggering the runtime cycle.
+if TYPE_CHECKING:
+    from .cli_runner import CliAgentRunner
+    from .deepagents_runner import DeepAgentsRunner
+
 __all__ = [
     "AgentProgress",
     "AgentRunner",
     "CandidateProgress",
-    "CliAgentRunner",  # pyright: ignore[reportUnsupportedDunderAll] — provided lazily via __getattr__
-    "DeepAgentsRunner",  # pyright: ignore[reportUnsupportedDunderAll] — provided lazily via __getattr__
+    "CliAgentRunner",
+    "DeepAgentsRunner",
     "RoundProgress",
     "build_agent_runner",
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name == "CliAgentRunner":
         from .cli_runner import CliAgentRunner
 
@@ -77,7 +83,7 @@ def build_agent_runner(
         skill_source_dirs: Absolute source paths of skill directories — the
             cli runner copies these into the workspace's ``.claude/skills/``
             on each invoke.
-        model: Result of :func:`vibesys.llm_client._build_model` — only
+        model: Result of :func:`vibesys.llm_client.build_model` — only
             used by the deepagents path. The cli path uses ``model_name``.
         model_name: Bare model id (e.g. ``"claude-sonnet-4-6"``) — used both
             for the cli runner and for the deepagents ``AgentLogger`` prefix.
@@ -142,7 +148,7 @@ def build_agent_runner(
         timeout = agent_cfg.cli_timeout
         # The CLI tool runs [model].name, same as the deepagents backend —
         # it's the single source of truth for the model. model.name is a
-        # required field (and always validated by _build_model), so it is
+        # required field (and always validated by build_model), so it is
         # always a non-empty string here.
         from .cli_runner import CliAgentRunner
 

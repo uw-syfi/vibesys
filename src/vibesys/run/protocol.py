@@ -7,14 +7,19 @@ concrete class, which keeps the facade's construction internals out of the
 loops' contract.
 """
 
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
+
+from pydantic import BaseModel
 
 from vibesys.agents.progress import AgentProgress
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
 from vibesys.run.git_tracker import GitTracker
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class LoopContext(Protocol):
@@ -66,12 +71,12 @@ class LoopContext(Protocol):
         kind: str,
         system_prompt: str,
         user_prompt: str,
-        response_cls: Any,
-        fallback_factory: Any = None,
+        response_cls: type[T],
+        fallback_factory: Callable[[], T],
         round_label: str = "",
         progress: AgentProgress | None = None,
         **extra: Any,
-    ) -> Any: ...
+    ) -> T: ...
 
     def progress(self, progress: AgentProgress) -> AbstractContextManager[None]: ...
 

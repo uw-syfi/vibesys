@@ -64,7 +64,7 @@ def _init_git_repo(path: Path) -> None:
 def _patched_context_dependencies(project_root: Path):
     with (
         patch("vibesys.context.PROJECT_ROOT", project_root),
-        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.context.build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend()),
     ):

@@ -396,7 +396,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         meta_path = request.ref_dir / "meta.json"
         if not meta_path.exists():
             return
-        from vs_sandbox.modal_model_setup import ensure_model_volume
+        from vs_sandbox import ensure_model_volume
 
         meta = json.loads(meta_path.read_text())
         model_id = meta.get("model_id")
@@ -433,7 +433,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         draft_meta_path = request.ref_dir / "draft_meta.json"
         if not draft_meta_path.exists():
             return None
-        from vs_sandbox.modal_model_setup import ensure_model_volume
+        from vs_sandbox import ensure_model_volume
 
         draft_meta = json.loads(draft_meta_path.read_text())
         draft_model_id = draft_meta.get("model_id")

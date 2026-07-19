@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from agentshim.executor import CommandExecutor
 
 
-class GeminiCodingAgent(CLICodingAgent):
+class GeminiCodingAgent(CLICodingAgent[GeminiGenerationSession]):
     """Coding agent implementation using the Gemini CLI tool."""
 
     def __init__(
@@ -60,7 +60,7 @@ class GeminiCodingAgent(CLICodingAgent):
 
         return cmd
 
-    def _create_session(  # pyright: ignore[reportIncompatibleMethodOverride]
+    def _create_session(
         self,
         cmd: list[str],
         cwd: str | None = None,

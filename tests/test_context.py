@@ -184,7 +184,7 @@ def test_run_context_defaults_profiler_support_paths(tmp_path, profiler_kind, wo
 
     with (
         patch("vibesys.context.PROJECT_ROOT", project_root),
-        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.context.build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend()),
         create_run_context(
@@ -218,7 +218,7 @@ def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
     )
     with (
         patch("vibesys.context.PROJECT_ROOT", project_root),
-        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.context.build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend()),
         create_run_context(
@@ -255,7 +255,7 @@ def test_run_context_generic_auto_resolves_to_macos_profiler(tmp_path):
 
     with (
         patch("vibesys.context.PROJECT_ROOT", project_root),
-        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.context.build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend(ProfilerKind.NSYS)),
         patch("vibesys.profilers.platform.system", return_value="Darwin"),
@@ -288,7 +288,7 @@ def test_run_context_generic_auto_resolves_to_linux_profiler(tmp_path):
 
     with (
         patch("vibesys.context.PROJECT_ROOT", project_root),
-        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.context.build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend(ProfilerKind.NSYS)),
         patch("vibesys.profilers.platform.system", return_value="Linux"),
@@ -329,7 +329,7 @@ def test_run_context_fails_fast_when_resolved_profiler_is_unusable(tmp_path):
 
     with (
         patch("vibesys.context.PROJECT_ROOT", project_root),
-        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.context.build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend(ProfilerKind.NSYS)),
         patch("vibesys.profilers.platform.system", return_value="Linux"),
@@ -361,7 +361,7 @@ def test_run_context_rejects_generic_explicit_active_profilers(tmp_path, profile
     ref = _write_ref(tmp_path)
 
     with (
-        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.context.build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend(profiler_kind)),
         pytest.raises(ValueError, match="not supported for domain 'generic'"),
@@ -387,7 +387,7 @@ def test_run_context_llm_auto_uses_backend_profiler_and_defaults_support_dir(tmp
 
     with (
         patch("vibesys.context.PROJECT_ROOT", project_root),
-        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.context.build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend(ProfilerKind.NSYS)),
         create_run_context(
@@ -417,7 +417,7 @@ def test_run_context_noop_environment_hooks_do_not_require_model_artifacts(tmp_p
 
     with (
         patch("vibesys.context.PROJECT_ROOT", project_root),
-        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.context.build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend()),
         create_run_context(
@@ -466,7 +466,7 @@ def test_run_context_materializes_input_project_path_dependencies(tmp_path):
 
     with (
         patch("vibesys.context.PROJECT_ROOT", project_root),
-        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.context.build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend()),
         create_run_context(

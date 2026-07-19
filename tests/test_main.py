@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -28,6 +28,23 @@ from vibesys.main import (
     parse_cli_invocation,
 )
 from vibesys.profilers import ProfilerKind
+
+
+def _patch_loop_runner(loop_name: str, runner: Mock):
+    """Swap the dispatch entry's ``run`` function for *runner*.
+
+    ``_LOOP_COMMANDS`` holds direct function references, so patching the
+    module-level function name no longer affects dispatch — patch the
+    command record instead.
+    """
+    import dataclasses
+
+    import vibesys.main as cli
+
+    command = cli._LOOP_COMMANDS[loop_name]
+    patched = dataclasses.replace(command, run=runner)
+    return patch.dict(cli._LOOP_COMMANDS, {loop_name: patched})
+
 
 TARGET_ARGS = ["--input", "examples/model-serving/Llama-3-8B"]
 
@@ -433,9 +450,10 @@ def test_validate_command_reports_invalid_harness_without_running_agent(tmp_path
     (bundle / "OBJECTIVE.md").unlink()
     argv = ["vibesys", "validate", str(bundle)]
 
+    runner = Mock()
     with (
         patch.object(sys, "argv", argv),
-        patch("vibesys.main._run_agent") as runner,
+        _patch_loop_runner("agent", runner),
         pytest.raises(SystemExit) as exc,
     ):
         main()
@@ -657,17 +675,11 @@ def test_render_configuration_error_prints_usage(capsys):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "loop_name,runner_attr",
-    [
-        ("agent", "_run_agent"),
-        ("evolve", "_run_evolve"),
-        ("plain", "_run_plain"),
-    ],
-)
-def test_main_routes_to_runner(loop_name: str, runner_attr: str):
+@pytest.mark.parametrize("loop_name", ["agent", "evolve", "plain"])
+def test_main_routes_to_runner(loop_name: str):
     argv = ["vibesys", "--outer-loop", loop_name, "--exp-name", "x", *TARGET_ARGS]
-    with patch.object(sys, "argv", argv), patch(f"vibesys.main.{runner_attr}") as runner:
+    runner = Mock()
+    with patch.object(sys, "argv", argv), _patch_loop_runner(loop_name, runner):
         main()
         runner.assert_called_once()
         args = runner.call_args.args[0]
@@ -684,11 +696,12 @@ def test_main_tty_run_stays_in_python_cli():
         "x",
         *TARGET_ARGS,
     ]
+    runner = Mock()
     with (
         patch.object(sys, "argv", argv),
         patch.object(sys.stdin, "isatty", return_value=True),
         patch.object(sys.stdout, "isatty", return_value=True),
-        patch("vibesys.main._run_agent") as runner,
+        _patch_loop_runner("agent", runner),
     ):
         main()
 
@@ -703,9 +716,10 @@ def test_main_headless_skips_tui():
         "--headless",
         *TARGET_ARGS,
     ]
+    runner = Mock()
     with (
         patch.object(sys, "argv", argv),
-        patch("vibesys.main._run_agent") as runner,
+        _patch_loop_runner("agent", runner),
     ):
         main()
     runner.assert_called_once()

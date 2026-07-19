@@ -271,7 +271,7 @@ class TestReselectGpu:
         from vibesys.backends.cuda import CudaBackend
         from vibesys.context import _RunContext
         from vibesys.run import RunPaths
-        from vs_sandbox.docker_sandbox import DockerSandbox
+        from vs_sandbox import DockerSandbox
 
         ctx = object.__new__(_RunContext)
         ctx.selected_gpu = selected_gpu

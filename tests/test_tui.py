@@ -420,6 +420,7 @@ def test_run_context_records_invocation_boundary(tmp_path):
         system_prompt="system",
         user_prompt="original",
         response_cls=dict,
+        fallback_factory=dict,
         round_label="round 6 attempt 2",
     )
 

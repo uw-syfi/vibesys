@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 
-from vibesys.agent_runner import _log_and_print  # pyright: ignore[reportPrivateUsage]
+from vibesys.agent_runner import log_and_print
 
 
 class _TeeWriter:
@@ -45,7 +45,7 @@ class RunLogger:
             sys.stderr = _TeeWriter(self._original_stderr, self.file)
 
     def lprint(self, text: str) -> None:
-        _log_and_print(text, self.file)
+        log_and_print(text, self.file)
 
     def switch(self, label: int | str):
         """Switch to a per-phase log file (``run-<datetime>-<label>.log``).

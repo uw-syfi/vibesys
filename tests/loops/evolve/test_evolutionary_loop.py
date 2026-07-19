@@ -118,7 +118,7 @@ def _invoke_loop(tmp_path, ref_file, runner, **kwargs):
     )
     defaults.update(kwargs)
     with (
-        patch("vibesys.context._build_model", return_value="mock-model"),
+        patch("vibesys.context.build_model", return_value="mock-model"),
         patch("vibesys.backends.cuda.LocalShellBackend"),
         patch("vibesys.context.build_agent_runner", return_value=runner),
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
