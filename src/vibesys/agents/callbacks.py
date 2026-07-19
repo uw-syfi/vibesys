@@ -8,6 +8,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 
 from vibesys.agents.progress import AgentProgress
+from vibesys.agents.todos import todos_from_tool_call
 from vibesys.render.format import format_status_prefix
 from vibesys.render.sink import output_sink
 from vibesys.server.events import AgentOutputChannel, AgentStatusData
@@ -269,6 +270,9 @@ class AgentLogger(BaseCallbackHandler):
 
     def _emit_tool_call(self, name: str, args: dict[str, Any]):
         output_sink().tool_call(name, args, status=self._status())
+        todos = todos_from_tool_call(name, args)
+        if todos is not None:
+            output_sink().todo_update(todos)
         is_code_tool = name in self._CODE_CHANGE_TOOLS
 
         # Log file: skip code content args for file-writing tools
