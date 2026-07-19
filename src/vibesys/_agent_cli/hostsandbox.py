@@ -291,12 +291,21 @@ def _sbpl_string(value: str) -> str:
 class SeatbeltSandbox:
     """A macOS Seatbelt (``sandbox-exec``) confinement policy for a workspace.
 
-    The generated profile is ``(deny default)`` with an explicit allowlist:
-    read-only on system/toolchain roots, read-write on the workspace, the
-    agent's own config dirs, and ``/private/tmp``. The workspace's parent and
-    sibling runs are *not* in the allowlist, so reads (directory enumeration and
-    file access) and writes outside the workspace are denied — this is what
-    blocks discovery of sibling runs.
+    macOS confinement follows the model that Codex's own Seatbelt sandbox uses,
+    because it is the one that reliably launches Apple-Silicon toolchains:
+    **reads are allowed broadly** (a ``(deny default)`` read policy makes dyld
+    and code-signing abort every dynamically linked binary), while **writes are
+    denied by default** and permitted only on the workspace, the agent's config
+    dirs, and ``/tmp``. On top of that, the workspace's run-container tree — the
+    directory that holds sibling runs — is explicitly denied for both read and
+    write, with the workspace itself carved back out. That blocks the concrete
+    escape from issue #149 (discovering/using a sibling run) and all writes
+    outside the workspace.
+
+    This is a weaker guarantee than the Linux bubblewrap backend, which hides the
+    entire host outside the workspace: on macOS, reads of unrelated host files
+    outside the run-container tree are still permitted. Use ``--docker`` on macOS
+    if full read-confinement is required.
     """
 
     sandbox_exec_path: str
@@ -305,17 +314,34 @@ class SeatbeltSandbox:
     write_paths: tuple[Path, ...] = ()
     system_read_roots: tuple[str, ...] = _MACOS_SYSTEM_READ_ROOTS
 
+    def blind_roots(self) -> list[Path]:
+        """Ancestor dirs of the workspace to deny (read+write) to hide siblings.
+
+        Returns the workspace's parent and grandparent (the run and run-container
+        dirs in the ``exp_env/<run>/workspace`` layout), skipping the filesystem
+        root and any system location so the deny can never blind the toolchain.
+        """
+        roots: list[Path] = []
+        for anc in list(self.workspace.parents)[:2]:
+            if anc == anc.parent:  # filesystem root
+                continue
+            s = str(anc)
+            if any(s == r or s.startswith(r + "/") for r in self.system_read_roots):
+                continue
+            roots.append(anc)
+        return roots
+
     def profile(self) -> str:
         """Render the SBPL profile text for this policy."""
+        ws = _sbpl_string(str(self.workspace))
         lines = [
             "(version 1)",
             "(deny default)",
             # Launching, threading, and the basic services a CLI needs.
             "(allow process-exec*)",
             "(allow process-fork)",
-            # Map code-signed executable pages. Without this, Apple-Silicon code
-            # signing enforcement aborts every dynamically linked binary (dyld)
-            # with SIGABRT and no stderr before it can run.
+            # Map code-signed executable pages — without this, Apple-Silicon code
+            # signing aborts every dynamically linked binary (dyld) at startup.
             "(allow file-map-executable)",
             "(allow signal (target self))",
             "(allow sysctl-read)",
@@ -326,26 +352,27 @@ class SeatbeltSandbox:
             "(allow iokit-open)",  # Metal / GPU access for benchmarks
             # Network stays open so the agent can reach its model provider.
             "(allow network*)",
-            # Allow stat()/metadata on any path so dyld and command-line tools
-            # can resolve paths at startup. This grants metadata only, not file
-            # contents or directory enumeration, so sibling *contents* and
-            # listings stay denied by (deny default).
-            "(allow file-read-metadata)",
+            # Reads are allowed broadly so dyld/code-signing/toolchain work.
+            "(allow file-read*)",
         ]
 
-        # Read-only system + toolchain locations (metadata + contents).
-        read_roots = list(self.system_read_roots) + [str(p) for p in self.read_paths]
-        lines.append("(allow file-read* file-read-metadata")
-        lines += [f"    (subpath {_sbpl_string(r)})" for r in read_roots]
-        lines.append(")")
-
-        # Read-write: the workspace (the one project path the agent may modify),
-        # the agent's own config/auth dirs, and scratch tmp.
+        # Writes are denied by default; permit them only on the workspace, the
+        # agent's own config/auth dirs, and scratch tmp.
         write_roots = [str(self.workspace)] + [str(p) for p in self.write_paths]
         write_roots += ["/private/tmp", "/private/var/tmp"]
-        lines.append("(allow file*")
+        lines.append("(allow file-write*")
         lines += [f"    (subpath {_sbpl_string(w)})" for w in write_roots]
         lines.append(")")
+
+        # Blind the sibling-run area: deny read+write on the run-container tree,
+        # then carve the workspace back out. The most-specific (last) matching
+        # rule wins in SBPL, so workspace access survives the deny.
+        blind = self.blind_roots()
+        if blind:
+            lines.append("(deny file-read* file-write*")
+            lines += [f"    (subpath {_sbpl_string(str(r))})" for r in blind]
+            lines.append(")")
+            lines.append(f"(allow file-read* file-write* (subpath {ws}))")
 
         return "\n".join(lines) + "\n"
 

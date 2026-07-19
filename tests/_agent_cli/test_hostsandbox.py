@@ -240,22 +240,47 @@ class TestSeatbeltProfile:
             write_paths=(Path("/home/u/.codex"),),
         )
 
-    def test_profile_denies_by_default_and_allows_workspace(self, tmp_path):
+    def test_profile_write_confines_but_reads_broadly(self, tmp_path):
         prof = self._sandbox(tmp_path).profile()
         assert prof.startswith("(version 1)\n(deny default)")
-        # Workspace is read-write; toolchain is read-only; network stays open.
+        # Reads are broad (so the toolchain launches); the workspace is writable;
+        # executable mapping and network are permitted.
+        assert "(allow file-read*)" in prof
+        assert "(allow file-map-executable)" in prof
+        assert "(allow file-write*" in prof
         assert f'(subpath "{tmp_path}")' in prof
-        assert '(subpath "/opt/toolchain")' in prof
         assert "(allow network*)" in prof
 
-    def test_profile_does_not_grant_workspace_parent(self, tmp_path):
-        """The sibling-run parent must not appear as an allowed subpath."""
+    def test_profile_blinds_sibling_run_area(self, tmp_path):
+        """The run-container tree is denied (read+write); the workspace is carved
+        back out so sibling runs are hidden but the workspace still works."""
         workspace = tmp_path / "exp_env" / "run-A" / "workspace"
-        prof = self._sandbox(workspace).profile()
-        # The exact workspace subpath is granted, but its parent is not.
-        assert f'(subpath "{workspace}")' in prof
-        parent = workspace.parent
-        assert f'(subpath "{parent}")' not in prof
+        workspace.mkdir(parents=True)
+        sb = self._sandbox(workspace)
+        prof = sb.profile()
+        # The run and run-container dirs are denied...
+        assert "(deny file-read* file-write*" in prof
+        blind = {str(r) for r in sb.blind_roots()}
+        assert str(workspace.parent) in blind  # exp_env/run-A
+        assert str(workspace.parent.parent) in blind  # exp_env
+        for r in blind:
+            assert f'(subpath "{r}")' in prof
+        # ...and the workspace itself is re-allowed after the deny.
+        deny_idx = prof.index("(deny file-read* file-write*")
+        reallow = f'(allow file-read* file-write* (subpath "{workspace}"))'
+        assert reallow in prof
+        assert prof.index(reallow) > deny_idx
+
+    def test_blind_roots_skip_system_dirs(self, tmp_path):
+        """A shallow workspace must never blind the filesystem root or a system
+        dir (that would break the toolchain)."""
+        sb = hostsandbox.SeatbeltSandbox(
+            sandbox_exec_path="/usr/bin/sandbox-exec", workspace=Path("/tmp/ws")
+        )
+        # parent is /tmp, grandparent is / — root is skipped; no system root leaks.
+        for r in sb.blind_roots():
+            assert r != Path("/")
+            assert not str(r).startswith("/usr")
 
     def test_wrap_shape(self, tmp_path):
         sb = self._sandbox(tmp_path)
