@@ -157,7 +157,6 @@ def test_profiler_support_override_flags_are_rejected(obsolete_flag):
     [
         "_build_agent_parser",
         "_build_evolve_parser",
-        "_build_openevolve_parser",
         "_build_plain_parser",
     ],
 )
@@ -175,7 +174,6 @@ def test_input_arg_is_available_on_all_loop_parsers(builder_name):
     [
         ("_build_agent_parser", "_validate_agent"),
         ("_build_evolve_parser", "_validate_evolve"),
-        ("_build_openevolve_parser", "_validate_openevolve"),
         ("_build_plain_parser", "_validate_plain"),
     ],
 )

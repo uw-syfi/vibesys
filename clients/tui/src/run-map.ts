@@ -123,7 +123,7 @@ function seedExpectedPhases(
 function expectedRoles(outerLoop: string): string[] {
   if (outerLoop === 'agent') return ['orchestrator', 'implementer', 'judge', 'profiler'];
   if (outerLoop === 'plain') return ['implementer', 'judge', 'perf_eval'];
-  if (outerLoop === 'evolve' || outerLoop === 'openevolve') {
+  if (outerLoop === 'evolve') {
     return ['implementer', 'judge', 'profiler'];
   }
   return [];
