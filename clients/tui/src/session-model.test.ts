@@ -7,8 +7,10 @@ import {
   selectNextRound,
   selectRound,
   statusText,
+  toggleTodos,
   visibleConversation,
   visiblePhases,
+  visibleTodos,
 } from './session-model.js';
 
 describe('session event model', () => {
@@ -245,7 +247,7 @@ describe('session event model', () => {
     expect(state.conversation[0]?.toolCall).toBe('→ Bash(command="ls")\n');
   });
 
-  it('stores todo updates as data instead of transcript text', () => {
+  it('stores todo updates as per-phase data instead of transcript text', () => {
     const state = applyEvent(
       initialSessionState(),
       event(1, 'todo_update', {
@@ -257,12 +259,97 @@ describe('session event model', () => {
       }),
     );
 
-    expect(state.todos).toEqual([
-      {content: 'Set up project', status: 'completed'},
-      {content: 'Add tests', status: 'pending'},
+    expect(state.todoPhases).toEqual([
+      {
+        agentKind: 'judge',
+        roundNumber: 1,
+        items: [
+          {content: 'Set up project', status: 'completed'},
+          {content: 'Add tests', status: 'pending'},
+        ],
+      },
     ]);
     expect(state.conversation).toHaveLength(0);
     expect(state.liveContent).toBe('Waiting for run events…');
+  });
+
+  it('keeps each phase’s todo list separate so agents never clobber each other', () => {
+    let state = initialSessionState();
+    state = applyEvent(state, {
+      sequence: 1,
+      timestamp: '2026-01-01T00:00:00Z',
+      type: 'todo_update',
+      agent_kind: 'implementer',
+      round_label: 'round-1',
+      data: {kind: 'todo_update', todos: [{content: 'Edit files', status: 'in_progress'}]},
+    });
+    state = applyEvent(state, {
+      sequence: 2,
+      timestamp: '2026-01-01T00:01:00Z',
+      type: 'todo_update',
+      agent_kind: 'judge',
+      round_label: 'round-1',
+      data: {kind: 'todo_update', todos: [{content: 'Check behavior', status: 'pending'}]},
+    });
+    state = applyEvent(state, {
+      sequence: 3,
+      timestamp: '2026-01-01T00:02:00Z',
+      type: 'todo_update',
+      agent_kind: 'implementer',
+      round_label: 'round-2',
+      data: {kind: 'todo_update', todos: [{content: 'Fix regression', status: 'pending'}]},
+    });
+
+    // Live view follows the currently active agent (round-2 implementer).
+    expect(visibleTodos(state)).toEqual([{content: 'Fix regression', status: 'pending'}]);
+    // Selecting a past agent shows that phase's final list, not the latest one.
+    const withAgent = {...state, selectedRound: 1, selectedAgentKind: 'implementer'};
+    expect(visibleTodos(withAgent)).toEqual([{content: 'Edit files', status: 'in_progress'}]);
+    // Selecting only a round shows the round's most recently updated list.
+    const withRound = {...state, selectedRound: 1};
+    expect(visibleTodos(withRound)).toEqual([{content: 'Check behavior', status: 'pending'}]);
+  });
+
+  it('hides todos when the active phase has not emitted any', () => {
+    let state = initialSessionState();
+    state = applyEvent(state, {
+      sequence: 1,
+      timestamp: '2026-01-01T00:00:00Z',
+      type: 'todo_update',
+      agent_kind: 'implementer',
+      round_label: 'round-1',
+      data: {kind: 'todo_update', todos: [{content: 'Edit files', status: 'completed'}]},
+    });
+    // The judge phase starts without emitting todos; the implementer's
+    // leftovers must not linger in the live view.
+    state = applyEvent(state, {
+      sequence: 2,
+      timestamp: '2026-01-01T00:01:00Z',
+      type: 'phase_started',
+      agent_kind: 'judge',
+      round_label: 'round-1',
+    });
+
+    expect(visibleTodos(state)).toEqual([]);
+  });
+
+  it('preserves unknown todo statuses for the renderer to degrade', () => {
+    const state = applyEvent(
+      initialSessionState(),
+      event(1, 'todo_update', {
+        kind: 'todo_update',
+        todos: [{content: 'Mystery step', status: 'deferred'}],
+      }),
+    );
+
+    expect(state.todoPhases[0]?.items).toEqual([{content: 'Mystery step', status: 'deferred'}]);
+  });
+
+  it('toggles the todo strip between collapsed and expanded', () => {
+    const state = initialSessionState();
+    expect(state.todosExpanded).toBe(false);
+    expect(toggleTodos(state).todosExpanded).toBe(true);
+    expect(toggleTodos(toggleTodos(state)).todosExpanded).toBe(false);
   });
 
   it('feeds usage updates into the status token meter', () => {

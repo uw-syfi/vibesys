@@ -7,6 +7,7 @@ export interface KeybindingActions {
   selectPreviousAgent(): void;
   selectNextRound(): void;
   selectPreviousRound(): void;
+  toggleTodos(): void;
 }
 
 export function bindKeybindings(
@@ -29,6 +30,11 @@ export function bindKeybindings(
     }
     if (key.ctrl && key.name === 'p') {
       actions.toggleLatestPrompt();
+      key.preventDefault();
+      return;
+    }
+    if (key.ctrl && key.name === 't') {
+      actions.toggleTodos();
       key.preventDefault();
       return;
     }

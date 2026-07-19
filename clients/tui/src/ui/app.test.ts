@@ -221,6 +221,61 @@ describe('OpenTUI presentation', () => {
     expect(filtered).not.toContain('checking behavior');
   });
 
+  it('summarizes the active agent’s todos and expands them with Ctrl+T', async () => {
+    const testRenderer = await createTestRenderer({width: 100, height: 24});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      agentKind: 'implementer',
+      todoPhases: [
+        {
+          agentKind: 'implementer',
+          roundNumber: null,
+          items: [
+            {content: 'Profile the hot loop', status: 'completed'},
+            {content: 'Vectorize the kernel', status: 'in_progress'},
+            {content: 'Re-run the benchmark', status: 'pending'},
+          ],
+        },
+      ],
+      conversation: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    const collapsed = await testRenderer.waitForFrame(value => value.includes('Todo 1/3'));
+    expect(collapsed).toContain('▶ Vectorize the kernel');
+    expect(collapsed).not.toContain('Re-run the benchmark');
+
+    testRenderer.mockInput.pressKey('t', {ctrl: true});
+    const expanded = await testRenderer.waitForFrame(value =>
+      value.includes('Re-run the benchmark'),
+    );
+    expect(expanded).toContain('✓ Profile the hot loop');
+    expect(expanded).toContain('○ Re-run the benchmark');
+  });
+
+  it('hides the todo strip when the visible agent has no todos', async () => {
+    const testRenderer = await createTestRenderer({width: 100, height: 20});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      agentKind: 'judge',
+      todoPhases: [
+        {
+          agentKind: 'implementer',
+          roundNumber: null,
+          items: [{content: 'Edit files', status: 'completed'}],
+        },
+      ],
+      conversation: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    const frame = await testRenderer.waitForFrame(value => value.includes('live output'));
+    expect(frame).not.toContain('Todo');
+    expect(frame).not.toContain('Edit files');
+  });
+
   it('keeps terminal results visible until the operator exits', async () => {
     const testRenderer = await createTestRenderer({width: 80, height: 16});
     const controller = new FakeController({
@@ -312,6 +367,10 @@ class FakeController implements SessionController {
   }
   selectRound(roundNumber: number): void {
     this.state = {...this.state, selectedRound: roundNumber, selectedAgentKind: null};
+    for (const listener of this.#listeners) listener(this.state);
+  }
+  toggleTodos(): void {
+    this.state = {...this.state, todosExpanded: !this.state.todosExpanded};
     for (const listener of this.#listeners) listener(this.state);
   }
 

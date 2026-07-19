@@ -22,7 +22,8 @@ export interface SessionState {
   conversation: ConversationEntry[];
   overlay: OverlayPanel | null;
   terminal: boolean;
-  todos: TodoItem[];
+  todoPhases: PhaseTodos[];
+  todosExpanded: boolean;
   usage: UsageMeter | null;
   /**
    * Set once a typed tool_call/tool_result event is seen. From then on the
@@ -35,6 +36,17 @@ export interface SessionState {
 export interface TodoItem {
   content: string;
   status: string;
+}
+
+/**
+ * One agent phase's latest todo-list snapshot. Todos are keyed per
+ * (round, agent) so concurrent or successive phases never clobber each
+ * other's lists, mirroring how the conversation filter scopes entries.
+ */
+export interface PhaseTodos {
+  agentKind: string | null;
+  roundNumber: number | null;
+  items: TodoItem[];
 }
 
 export interface UsageMeter {
@@ -87,7 +99,8 @@ export function initialSessionState(): SessionState {
     conversation: [],
     overlay: null,
     terminal: false,
-    todos: [],
+    todoPhases: [],
+    todosExpanded: false,
     usage: null,
     typedToolEvents: false,
   };
@@ -122,10 +135,18 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
     next.typedToolEvents = true;
   }
   if (data?.kind === 'todo_update') {
-    next.todos = (data.todos ?? []).map(todo => ({
+    const items = (data.todos ?? []).map(todo => ({
       content: String(todo.content),
       status: String(todo.status),
     }));
+    const agentKind = event.agent_kind ?? null;
+    const roundNumber = roundNumberFromLabel(event.round_label);
+    next.todoPhases = [
+      ...next.todoPhases.filter(
+        phase => phase.agentKind !== agentKind || phase.roundNumber !== roundNumber,
+      ),
+      {agentKind, roundNumber, items},
+    ].slice(-100);
   }
   if (data?.kind === 'usage_update') {
     next.usage = {
@@ -446,6 +467,43 @@ export function visibleConversation(state: SessionState): ConversationEntry[] {
 
 export function visiblePhases(state: SessionState): AgentPhase[] {
   return visibleRunMapPhases(state.phases, visibleRoundNumber(state));
+}
+
+export function toggleTodos(state: SessionState): SessionState {
+  return {...state, todosExpanded: !state.todosExpanded};
+}
+
+/**
+ * The todo list for the phase the operator is looking at, following the same
+ * scoping rules as the conversation filter. Entries whose events carried no
+ * agent or round stamp (legacy streams) match any scope rather than vanish.
+ */
+export function visibleTodos(state: SessionState): TodoItem[] {
+  const roundNumber = visibleRoundNumber(state);
+  const matchesRound = (phase: PhaseTodos): boolean =>
+    roundNumber === null || phase.roundNumber === roundNumber || phase.roundNumber === null;
+  const latestFirst = [...state.todoPhases].reverse();
+  if (state.selectedAgentKind !== null) {
+    const selected = state.selectedAgentKind;
+    return (
+      latestFirst.find(
+        phase => (phase.agentKind === selected || phase.agentKind === null) && matchesRound(phase),
+      )?.items ?? []
+    );
+  }
+  if (state.selectedRound !== null) {
+    // Browsing a round without an agent selected: show the round's most
+    // recently updated list, i.e. its final todo state.
+    return latestFirst.find(matchesRound)?.items ?? [];
+  }
+  // Live view: follow the currently active agent so a phase that never
+  // emits todos shows nothing instead of the previous phase's leftovers.
+  return (
+    latestFirst.find(
+      phase =>
+        (phase.agentKind === state.agentKind || phase.agentKind === null) && matchesRound(phase),
+    )?.items ?? []
+  );
 }
 
 export function visibleRoundNumber(state: SessionState): number | null {
