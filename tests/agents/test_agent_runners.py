@@ -34,14 +34,14 @@ def _judge_fallback() -> JudgeResponse:
     )
 
 
-def test_prompt_markdown_emitter_preserves_raw_log_and_truncates_stdout(capsys):
+def test_prompt_markdown_emitter_preserves_raw_log_and_truncates_stdout(capsys, headless_renderer):
+    headless_renderer.max_text_len = 20
     log = StringIO()
     prompt = "# Title\n\nUse **markdown** and `code`."
 
-    log_prompt_markdown_and_print(prompt, log_file=log, max_len=20)
+    log_prompt_markdown_and_print(prompt, log_file=log)
 
     stdout = capsys.readouterr().out
-    assert "Title" in stdout
     assert "# Title" in stdout
     assert "... [17 more chars, see log for full text]" in stdout
     assert log.getvalue() == prompt + "\n"

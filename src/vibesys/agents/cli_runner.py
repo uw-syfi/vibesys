@@ -36,7 +36,6 @@ from vibesys._agent_cli.codex import CodexCodingAgent
 from vibesys._agent_cli.gemini import GeminiCodingAgent
 from vibesys._agent_cli.opencode import OpencodeCodingAgent
 from vibesys.agent_runner import (
-    DEFAULT_MAX_TEXT_LEN,
     log_and_print,
     log_json_and_print,
     log_markdown_and_print,
@@ -332,11 +331,7 @@ class CliAgentRunner:
             self._run_log_file,
         )
         log_and_print("--- input ---", self._run_log_file)
-        log_prompt_markdown_and_print(
-            combined_prompt,
-            self._run_log_file,
-            max_len=DEFAULT_MAX_TEXT_LEN,
-        )
+        log_prompt_markdown_and_print(combined_prompt, self._run_log_file)
 
         # 7. Run the agent. Wrap exceptions to surface them in the run log
         #    before re-raising. The ``finally`` clause runs both cleanups —
@@ -356,11 +351,7 @@ class CliAgentRunner:
                 f"\n=== {label} ROUND ERROR: {round_label} ===",
                 self._run_log_file,
             )
-            log_and_print(
-                f"{type(exc).__name__}: {exc}",
-                self._run_log_file,
-                max_len=DEFAULT_MAX_TEXT_LEN,
-            )
+            log_and_print(f"{type(exc).__name__}: {exc}", self._run_log_file)
             raise
         finally:
             if mcp_servers:
@@ -384,18 +375,14 @@ class CliAgentRunner:
                     f"\n=== {label} ROUND OUTPUT (raw output) ===",
                     self._run_log_file,
                 )
-                log_markdown_and_print(text, self._run_log_file, max_len=DEFAULT_MAX_TEXT_LEN)
+                log_markdown_and_print(text, self._run_log_file)
             return fallback_factory()
 
         log_and_print(
             f"\n=== {label} ROUND OUTPUT ===",
             self._run_log_file,
         )
-        log_json_and_print(
-            parsed.model_dump_json(indent=2),
-            self._run_log_file,
-            max_len=DEFAULT_MAX_TEXT_LEN,
-        )
+        log_json_and_print(parsed.model_dump_json(indent=2), self._run_log_file)
         return parsed
 
     def _write_usage_record(self, *, kind: str, round_label: str, agent: Any) -> None:

@@ -33,23 +33,20 @@ class StubAgentRunner:
         **kwargs: object,
     ) -> T:
         del workspace, system_prompt, user_prompt, progress, kwargs
-        from vibesys.server.registry import active_supervisor
+        from vibesys.render.sink import output_sink
 
-        supervisor = active_supervisor()
-        if supervisor is not None:
-            supervisor.publish_agent_output(
-                f"[stub-agent] {round_label}: starting {kind}\n",
-                channel="diagnostic",
-                agent_kind=kind,
-            )
+        output_sink().agent_output(
+            f"[stub-agent] {round_label}: starting {kind}\n",
+            channel="diagnostic",
+            agent_kind=kind,
+        )
         time.sleep(0.05)
         response = _response_data(response_cls.__name__)
-        if supervisor is not None:
-            supervisor.publish_agent_output(
-                f"[stub-agent] {round_label}: completed {kind}\n",
-                channel="diagnostic",
-                agent_kind=kind,
-            )
+        output_sink().agent_output(
+            f"[stub-agent] {round_label}: completed {kind}\n",
+            channel="diagnostic",
+            agent_kind=kind,
+        )
         return response_cls.model_validate(response) if response is not None else fallback_factory()
 
 

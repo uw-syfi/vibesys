@@ -22,6 +22,25 @@ export interface SessionState {
   conversation: ConversationEntry[];
   overlay: OverlayPanel | null;
   terminal: boolean;
+  todos: TodoItem[];
+  usage: UsageMeter | null;
+  /**
+   * Set once a typed tool_call/tool_result event is seen. From then on the
+   * legacy tool-channel text chunks (still present in event files recorded
+   * by older backends) are ignored so tool turns never render twice.
+   */
+  typedToolEvents: boolean;
+}
+
+export interface TodoItem {
+  content: string;
+  status: string;
+}
+
+export interface UsageMeter {
+  inputTokens: number;
+  contextWindow: number | null;
+  model: string | null;
 }
 
 export interface OverlayPanel {
@@ -68,6 +87,9 @@ export function initialSessionState(): SessionState {
     conversation: [],
     overlay: null,
     terminal: false,
+    todos: [],
+    usage: null,
+    typedToolEvents: false,
   };
 }
 
@@ -95,10 +117,34 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
   next.rounds = runMap.rounds;
   next.phases = runMap.phases;
 
-  const line = renderEventForTranscript(event);
-  if (line !== null) next.liveContent = appendTranscript(next.liveContent, line);
-  const entry = eventToConversationEntry(event);
-  if (entry !== null) next.conversation = appendConversation(next.conversation, entry);
+  const data = event.data;
+  if (data?.kind === 'tool_call' || data?.kind === 'tool_result') {
+    next.typedToolEvents = true;
+  }
+  if (data?.kind === 'todo_update') {
+    next.todos = (data.todos ?? []).map(todo => ({
+      content: String(todo.content),
+      status: String(todo.status),
+    }));
+  }
+  if (data?.kind === 'usage_update') {
+    next.usage = {
+      inputTokens: data.input_tokens,
+      contextWindow: data.context_window ?? null,
+      model: data.model ?? null,
+    };
+  }
+
+  // Prefer typed tool events; fall back to legacy tool-channel chunks only
+  // for streams that never produce typed events (old event files / replays).
+  const suppressed =
+    data?.kind === 'agent_output_chunk' && data.channel === 'tool' && next.typedToolEvents;
+  if (!suppressed) {
+    const line = renderEventForTranscript(event);
+    if (line !== null) next.liveContent = appendTranscript(next.liveContent, line);
+    const entry = eventToConversationEntry(event);
+    if (entry !== null) next.conversation = appendConversation(next.conversation, entry);
+  }
 
   if (event.type === 'run_started') {
     next.status = 'running';
@@ -222,6 +268,36 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
         : {}),
     };
   }
+  if (data?.kind === 'tool_call') {
+    const call = formatToolCall(data.tool, data.args ?? {});
+    const invocationId = event.invocation_id ?? undefined;
+    return {
+      id,
+      kind: 'tool',
+      content: call,
+      label: labelFor(event, 'tool'),
+      ...agentKind,
+      ...roundFields,
+      turnId: invocationId ?? id,
+      ...(invocationId === undefined ? {} : {invocationId}),
+      startsTurn: true,
+      toolCall: call,
+    };
+  }
+  if (data?.kind === 'tool_result') {
+    const invocationId = event.invocation_id ?? undefined;
+    return {
+      id,
+      kind: 'tool',
+      content: data.content,
+      label: labelFor(event, 'tool'),
+      ...(data.is_error ? {tone: 'failure' as const} : {}),
+      ...agentKind,
+      ...roundFields,
+      turnId: invocationId ?? id,
+      ...(invocationId === undefined ? {} : {invocationId}),
+    };
+  }
   if (data?.kind === 'subprocess_output') {
     return {
       id,
@@ -341,7 +417,20 @@ export function showDetail(
 }
 
 export function statusText(state: SessionState): string {
-  return `${state.status} · ${state.agentKind ?? 'starting'} · ${state.roundLabel ?? 'no round yet'}`;
+  const base = `${state.status} · ${state.agentKind ?? 'starting'} · ${state.roundLabel ?? 'no round yet'}`;
+  if (state.usage === null) return base;
+  const used = formatTokenCount(state.usage.inputTokens);
+  const meter =
+    state.usage.contextWindow === null
+      ? used
+      : `${used}/${formatTokenCount(state.usage.contextWindow)}`;
+  return `${base} · ${meter} tokens`;
+}
+
+function formatTokenCount(count: number): string {
+  if (count < 1_000) return String(count);
+  if (count < 1_000_000) return `${Math.floor(count / 1_000)}k`;
+  return `${(count / 1_000_000).toFixed(1)}M`;
 }
 
 export function visibleConversation(state: SessionState): ConversationEntry[] {
@@ -363,10 +452,30 @@ export function visibleRoundNumber(state: SessionState): number | null {
   return visibleRunMapRoundNumber(state.rounds, state.selectedRound);
 }
 
+const MAX_TOOL_ARG_LEN = 80;
+
+function formatToolCall(tool: string, args: Record<string, unknown>): string {
+  const parts = Object.entries(args).map(([key, value]) => {
+    const isString = typeof value === 'string';
+    let rendered = isString ? value : (JSON.stringify(value) ?? String(value));
+    if (rendered.length > MAX_TOOL_ARG_LEN) {
+      rendered = `${rendered.slice(0, MAX_TOOL_ARG_LEN)}...`;
+    }
+    return isString ? `${key}="${rendered}"` : `${key}=${rendered}`;
+  });
+  return `→ ${tool}(${parts.join(', ')})\n`;
+}
+
 function renderEventForTranscript(event: RunEvent): string | null {
   const data = event.data;
   if (data?.kind === 'agent_output_chunk' || data?.kind === 'subprocess_output') {
     return data.content;
+  }
+  if (data?.kind === 'tool_call') {
+    return formatToolCall(data.tool, data.args ?? {});
+  }
+  if (data?.kind === 'tool_result') {
+    return data.content.endsWith('\n') ? data.content : `${data.content}\n`;
   }
   if (data?.kind === 'output') return data.content;
   if (data?.kind === 'judge_result') {

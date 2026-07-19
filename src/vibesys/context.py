@@ -40,6 +40,7 @@ from vibesys.profilers import (
     profiler_definition,
     resolve_profiler_kind,
 )
+from vibesys.render import HeadlessRenderer, output_sink
 from vibesys.run import DeviceLease, GitTracker, RunCommands, RunLogger, RunPaths, Workspace
 from vibesys.sandbox.run_environment import (
     RunEnvironment,
@@ -164,10 +165,24 @@ def create_run_context(
     supervisor = active_supervisor()
     if supervisor is not None:
         supervisor.attach(log_dir)
-    # A full-screen TUI owns the terminal. Its thread-aware stream router
-    # suppresses worker writes; replacing it with a process-global tee here
-    # would both corrupt the display and record terminal escape frames.
-    logger = RunLogger(log_dir, redirect_stderr=supervisor is None)
+    # The stderr tee captures diagnostics into the run log; it never renders,
+    # so it is safe under both the TUI and the headless renderer.
+    logger = RunLogger(log_dir)
+
+    # One teardown stack for the whole context: every component with
+    # cleanup registers here, and close() unwinds it in reverse
+    # construction order (device → environment hooks → session → logs).
+    teardown_stack = ExitStack()
+    teardown_stack.callback(logger.close)
+
+    # Presentation is selected exactly once, here: with a TUI supervisor
+    # attached, events flow to the supervision client; otherwise the
+    # headless renderer subscribes to the same event stream and owns the
+    # terminal for the lifetime of the run.
+    if supervisor is None:
+        renderer = HeadlessRenderer()
+        teardown_stack.callback(output_sink().subscribe(renderer.handle))
+
     paths = RunPaths(
         exp_dir=exp_dir,
         log_dir=log_dir,
@@ -283,11 +298,6 @@ def create_run_context(
     if git_tracking:
         git.init(existing)
 
-    # One teardown stack for the whole context: every component with
-    # cleanup registers here, and close() unwinds it in reverse
-    # construction order (device → environment hooks → session → logs).
-    teardown_stack = ExitStack()
-    teardown_stack.callback(logger.close)
     session = teardown_stack.enter_context(
         environment.open(
             RunEnvironmentRequest(

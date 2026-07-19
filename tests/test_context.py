@@ -42,12 +42,10 @@ def test_setup_exp_dir_uses_unique_names_for_concurrent_default_runs(tmp_path):
     assert (second / ".git").is_dir()
 
 
-def test_interactive_log_switch_preserves_supervision_stderr(tmp_path):
+def test_log_switch_retargets_stderr_tee_and_restores_on_close(tmp_path):
     ctx = object.__new__(_RunContext)
     original_stderr = sys.stderr
-    # Supervised (TUI) runs never redirect stderr; switching log files must
-    # keep it that way.
-    ctx.logger = RunLogger(tmp_path, redirect_stderr=False)
+    ctx.logger = RunLogger(tmp_path)
     ctx._paths = RunPaths(
         exp_dir=tmp_path,
         log_dir=tmp_path,
@@ -58,10 +56,16 @@ def test_interactive_log_switch_preserves_supervision_stderr(tmp_path):
 
     ctx.switch_log_file("round001")
 
-    assert sys.stderr is original_stderr
+    # The unconditional tee mirrors stderr into the *current* log file,
+    # stripped of ANSI escapes, while writes still reach the real stderr.
+    print("\033[31mcolored diagnostic\033[0m", file=sys.stderr)
     assert ctx.run_log_path.name.endswith("-round001.log")
+
+    ctx.logger.close()
+    assert sys.stderr is original_stderr
+    assert "colored diagnostic" in ctx.run_log_path.read_text()
+    assert "\033[31m" not in ctx.run_log_path.read_text()
     original_log.close()
-    ctx.run_log_file.close()
 
 
 def test_input_copy_respects_source_gitignore(tmp_path):

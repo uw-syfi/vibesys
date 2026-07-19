@@ -33,6 +33,10 @@ class EventType(StrEnum):
     RUN_FINISHED = "run_finished"
     RUN_FAILED = "run_failed"
     OUTPUT = "output"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    TODO_UPDATE = "todo_update"
+    USAGE_UPDATE = "usage_update"
 
 
 class EventStatus(StrEnum):
@@ -108,10 +112,60 @@ class PhaseData(BaseModel):
     attempt: int | None = None
 
 
+class AgentStatusData(BaseModel):
+    """Structured progress readings for one agent invocation.
+
+    Carried on presentation events so renderers can format their own status
+    prefix (e.g. ``[Round 3/24 | Implementer | 12.3s | 20k/1.0M]``) without
+    the backend baking any layout or styling into the payload.
+    """
+
+    progress: str | None = None
+    agent_label: str | None = None
+    elapsed_seconds: float = 0.0
+    input_tokens: int = 0
+    context_window: int | None = None
+
+
 class AgentOutputChunkData(BaseModel):
     kind: Literal["agent_output_chunk"] = "agent_output_chunk"
     channel: AgentOutputChannel
     content: str
+    status: AgentStatusData | None = None
+
+
+class ToolCallData(BaseModel):
+    kind: Literal["tool_call"] = "tool_call"
+    tool: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    status: AgentStatusData | None = None
+
+
+class ToolResultData(BaseModel):
+    kind: Literal["tool_result"] = "tool_result"
+    tool: str
+    content: str
+    is_error: bool = False
+
+
+class TodoItemData(BaseModel):
+    content: str
+    # Expected values are "pending" / "in_progress" / "completed", but the
+    # field stays open: todo payloads originate from agent tool calls, and an
+    # unknown status must degrade in the renderer, not fail event emission.
+    status: str
+
+
+class TodoUpdateData(BaseModel):
+    kind: Literal["todo_update"] = "todo_update"
+    todos: list[TodoItemData] = Field(default_factory=list)
+
+
+class UsageUpdateData(BaseModel):
+    kind: Literal["usage_update"] = "usage_update"
+    input_tokens: int
+    context_window: int | None = None
+    model: str | None = None
 
 
 class SubprocessOutputData(BaseModel):
@@ -158,7 +212,11 @@ EventData = Annotated[
     | SubprocessOutputData
     | JudgeResultData
     | BenchmarkResultData
-    | RoundFinishedData,
+    | RoundFinishedData
+    | ToolCallData
+    | ToolResultData
+    | TodoUpdateData
+    | UsageUpdateData,
     Field(discriminator="kind"),
 ]
 
