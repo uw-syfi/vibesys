@@ -6,6 +6,7 @@ import {
   selectNextAgent,
   selectNextRound,
   selectRound,
+  statusText,
   visibleConversation,
   visiblePhases,
 } from './session-model.js';
@@ -166,6 +167,124 @@ describe('session event model', () => {
       toolCall: '→ Bash(command="first")\n',
       toolResponse: 'first result',
     });
+  });
+
+  it('pairs typed tool_call and tool_result events into tool turns', () => {
+    let state = initialSessionState();
+    state = applyEvent(
+      state,
+      event(1, 'tool_call', {kind: 'tool_call', tool: 'Bash', args: {command: 'first'}}, 'inv-1'),
+    );
+    state = applyEvent(
+      state,
+      event(
+        2,
+        'tool_result',
+        {kind: 'tool_result', tool: 'Bash', content: 'first result'},
+        'inv-1',
+      ),
+    );
+    state = applyEvent(
+      state,
+      event(3, 'tool_call', {kind: 'tool_call', tool: 'Bash', args: {command: 'second'}}, 'inv-1'),
+    );
+    state = applyEvent(
+      state,
+      event(
+        4,
+        'tool_result',
+        {kind: 'tool_result', tool: 'Bash', content: 'second result'},
+        'inv-1',
+      ),
+    );
+
+    expect(state.conversation.map(entry => entry.content)).toEqual([
+      '→ Bash(command="first")\nfirst result',
+      '→ Bash(command="second")\nsecond result',
+    ]);
+    expect(state.conversation[0]).toMatchObject({
+      kind: 'tool',
+      toolCall: '→ Bash(command="first")\n',
+      toolResponse: 'first result',
+    });
+    expect(state.liveContent).toContain('→ Bash(command="first")');
+    expect(state.liveContent).toContain('first result');
+  });
+
+  it('truncates long typed tool-call arguments and renders non-string args as JSON', () => {
+    const longArg = 'x'.repeat(200);
+    const state = applyEvent(
+      initialSessionState(),
+      event(1, 'tool_call', {kind: 'tool_call', tool: 'Edit', args: {text: longArg, count: 3}}),
+    );
+
+    expect(state.conversation[0]?.toolCall).toContain(`text="${'x'.repeat(80)}..."`);
+    expect(state.conversation[0]?.toolCall).toContain('count=3');
+    expect(state.conversation[0]?.toolCall).not.toContain(longArg);
+  });
+
+  it('prefers typed tool events over legacy tool-channel chunks', () => {
+    let state = initialSessionState();
+    state = applyEvent(
+      state,
+      event(1, 'tool_call', {kind: 'tool_call', tool: 'Bash', args: {command: 'ls'}}, 'inv-1'),
+    );
+    // A legacy duplicate of the same call must not render a second turn.
+    state = applyEvent(
+      state,
+      event(
+        2,
+        'agent_output_chunk',
+        {kind: 'agent_output_chunk', channel: 'tool', content: '→ Bash(command="ls")\n'},
+        'inv-1',
+      ),
+    );
+
+    expect(state.typedToolEvents).toBe(true);
+    expect(state.conversation).toHaveLength(1);
+    expect(state.conversation[0]?.toolCall).toBe('→ Bash(command="ls")\n');
+  });
+
+  it('stores todo updates as data instead of transcript text', () => {
+    const state = applyEvent(
+      initialSessionState(),
+      event(1, 'todo_update', {
+        kind: 'todo_update',
+        todos: [
+          {content: 'Set up project', status: 'completed'},
+          {content: 'Add tests', status: 'pending'},
+        ],
+      }),
+    );
+
+    expect(state.todos).toEqual([
+      {content: 'Set up project', status: 'completed'},
+      {content: 'Add tests', status: 'pending'},
+    ]);
+    expect(state.conversation).toHaveLength(0);
+    expect(state.liveContent).toBe('Waiting for run events…');
+  });
+
+  it('feeds usage updates into the status token meter', () => {
+    let state = initialSessionState();
+    expect(statusText(state)).not.toContain('tokens');
+    state = applyEvent(
+      state,
+      event(1, 'usage_update', {
+        kind: 'usage_update',
+        input_tokens: 20_100,
+        context_window: 1_000_000,
+        model: 'claude-sonnet-4-6',
+      }),
+    );
+
+    expect(state.usage).toEqual({
+      inputTokens: 20_100,
+      contextWindow: 1_000_000,
+      model: 'claude-sonnet-4-6',
+    });
+    expect(statusText(state)).toContain('20k/1.0M tokens');
+    expect(state.conversation).toHaveLength(0);
   });
 
   it('classifies prompt events as distinct markdown turns', () => {

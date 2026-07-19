@@ -133,8 +133,9 @@ class HeadlessRenderer:
 
     def _render_chunk(self, data: AgentOutputChunkData) -> None:
         if data.channel == "tool":
-            # Tool traffic is rendered from the typed TOOL_CALL/TOOL_RESULT
-            # events; the tool-channel chunks exist for client compatibility.
+            # Tool traffic arrives as typed TOOL_CALL/TOOL_RESULT events;
+            # tool-channel chunks only exist in event files recorded by
+            # older backends and never reach a live renderer.
             return
         if data.channel == "assistant":
             self._render_assistant(data)

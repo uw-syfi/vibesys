@@ -268,11 +268,7 @@ class AgentLogger(BaseCallbackHandler):
     )
 
     def _emit_tool_call(self, name: str, args: dict[str, Any]):
-        # Tool-channel chunk kept alongside the typed TOOL_CALL event for
-        # wire compatibility with existing clients.
-        status = self._status()
-        self._publish(f"→ {name}({json.dumps(args, default=str)})\n", "tool", status=status)
-        output_sink().tool_call(name, args, status=status)
+        output_sink().tool_call(name, args, status=self._status())
         is_code_tool = name in self._CODE_CHANGE_TOOLS
 
         # Log file: skip code content args for file-writing tools
@@ -298,9 +294,6 @@ class AgentLogger(BaseCallbackHandler):
 
     def _emit_tool_result(self, name: str, content: str, *, is_error: bool = False):
         full_text = str(content)
-        # Tool-channel chunk kept alongside the typed TOOL_RESULT event for
-        # wire compatibility with existing clients.
-        self._publish(full_text, "tool")
         output_sink().tool_result(name, full_text, is_error=is_error)
 
         # Truncated to log file

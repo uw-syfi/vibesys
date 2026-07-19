@@ -78,8 +78,8 @@ class TestBlockChannels:
 
 class TestToolEvents:
     def test_tool_channel_chunks_are_ignored(self):
-        # Tool traffic renders from the typed events; the tool-channel chunks
-        # exist only for wire compatibility and must not double-render.
+        # Tool traffic renders from the typed events; tool-channel chunks
+        # (legacy event files only) must not double-render.
         assert _render(_chunk("→ shell({})\n", channel="tool")) == ""
 
     def test_tool_call_line(self):
