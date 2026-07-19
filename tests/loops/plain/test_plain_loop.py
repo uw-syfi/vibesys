@@ -116,7 +116,7 @@ def ref_file(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_bootstrap_creates_initial_feature_issue_on_first_run(
@@ -155,7 +155,7 @@ def test_bootstrap_creates_initial_feature_issue_on_first_run(
     assert "FastAPI" in title or "inference server" in title
 
 
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_bootstrap_idempotent_on_resume(
@@ -217,7 +217,7 @@ def test_bootstrap_idempotent_on_resume(
 # ---------------------------------------------------------------------------
 
 
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_judge_pass_closes_issue(mock_build_runner, mock_backend, mock_build, ref_file, tmp_path):
@@ -247,7 +247,7 @@ def test_judge_pass_closes_issue(mock_build_runner, mock_backend, mock_build, re
     assert issue1.status == IssueStatus.CLOSED
 
 
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_judge_fail_increments_attempts_and_keeps_open(
@@ -286,7 +286,7 @@ def test_judge_fail_increments_attempts_and_keeps_open(
     assert issue1.status == IssueStatus.CLOSED
 
 
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_issue_blocks_after_max_attempts_exhausted(
@@ -359,7 +359,7 @@ _EXPECTED_TRACKER_TOOL_NAMES = {
 
 
 @pytest.mark.parametrize("backend_name", ["deepagents", "cli"])
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_judge_invoke_receives_tracker_kwargs(
@@ -419,7 +419,7 @@ def test_judge_invoke_receives_tracker_kwargs(
 
 
 @pytest.mark.parametrize("backend_name", ["deepagents", "cli"])
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_perf_eval_invoke_receives_tracker_kwargs(
@@ -476,7 +476,7 @@ def test_perf_eval_invoke_receives_tracker_kwargs(
         assert {t.name for t in tools} == _EXPECTED_TRACKER_TOOL_NAMES
 
 
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_judge_phase_calls_store_reload_after_invoke(
@@ -541,7 +541,7 @@ def test_judge_phase_calls_store_reload_after_invoke(
 
 
 @pytest.mark.parametrize("backend_name", ["deepagents", "cli"])
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_implementer_invoke_has_no_tracker_kwargs(
@@ -601,7 +601,7 @@ def test_implementer_invoke_has_no_tracker_kwargs(
 # ---------------------------------------------------------------------------
 
 
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_perf_eval_runs_after_drain_complete(
@@ -650,7 +650,7 @@ def test_perf_eval_runs_after_drain_complete(
 # ---------------------------------------------------------------------------
 
 
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_resume_with_bootstrap_done_skips_bootstrap_creation(
@@ -708,7 +708,7 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(
     assert kinds == ["perf_eval"]
 
 
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_resume_retries_previously_blocked_issue(
@@ -784,7 +784,7 @@ def test_resume_retries_previously_blocked_issue(
 # ---------------------------------------------------------------------------
 
 
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_run_returns_true_when_perf_eval_files_no_issues_after_clean_drain(
@@ -820,7 +820,7 @@ def test_run_returns_true_when_perf_eval_files_no_issues_after_clean_drain(
 # ---------------------------------------------------------------------------
 
 
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_state_json_written_with_bootstrap_done_after_run(
@@ -861,7 +861,7 @@ def test_state_json_written_with_bootstrap_done_after_run(
 # ---------------------------------------------------------------------------
 
 
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_issue_loop_writes_per_issue_markdown_via_callback(
@@ -923,7 +923,7 @@ def test_issue_loop_writes_per_issue_markdown_via_callback(
 # ---------------------------------------------------------------------------
 
 
-@patch("vibesys.context._build_model")
+@patch("vibesys.context.build_model")
 @patch("vibesys.backends.cuda.LocalShellBackend")
 @patch("vibesys.context.build_agent_runner")
 def test_implementer_retry_user_prompt_includes_prior_judge_feedback(

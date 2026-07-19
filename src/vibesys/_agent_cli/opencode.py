@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
 
 
-class OpencodeCodingAgent(CLICodingAgent):
+class OpencodeCodingAgent(CLICodingAgent[OpencodeGenerationSession]):
     """Coding agent implementation using the Opencode CLI tool."""
 
     def __init__(
@@ -56,7 +56,7 @@ class OpencodeCodingAgent(CLICodingAgent):
 
         return cmd
 
-    def _create_session(  # pyright: ignore[reportIncompatibleMethodOverride]
+    def _create_session(
         self,
         cmd: list[str],
         cwd: str | None = None,

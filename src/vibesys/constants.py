@@ -5,18 +5,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SKILLS_DIR = ".agents/skills/"
 
 # ANSI colors
-_DIM = "\033[2m"
-_RED = "\033[31m"
+DIM = "\033[2m"
+RED = "\033[31m"
 _BOLD = "\033[1m"
 _CYAN = "\033[36m"
 _MAGENTA = "\033[35m"
-_YELLOW = "\033[33m"
-_GREEN = "\033[32m"
-_RESET = "\033[0m"
+YELLOW = "\033[33m"
+GREEN = "\033[32m"
+RESET = "\033[0m"
 
-_ANTHROPIC_PREFIXES = ("claude-",)
-_GOOGLE_PREFIXES = ("gemini-", "gemma-")
-_OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4")
+ANTHROPIC_PREFIXES = ("claude-",)
+GOOGLE_PREFIXES = ("gemini-", "gemma-")
+OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4")
 
 
 class ComputeBackend(StrEnum):

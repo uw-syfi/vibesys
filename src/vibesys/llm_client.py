@@ -5,29 +5,29 @@ from pydantic import SecretStr
 
 from vibesys.config import Config, ThinkingCfg
 from vibesys.constants import (
-    _ANTHROPIC_PREFIXES,  # pyright: ignore[reportPrivateUsage]
-    _GOOGLE_PREFIXES,  # pyright: ignore[reportPrivateUsage]
-    _OPENAI_PREFIXES,  # pyright: ignore[reportPrivateUsage]
+    ANTHROPIC_PREFIXES,
+    GOOGLE_PREFIXES,
+    OPENAI_PREFIXES,
 )
 
 
 def _is_google_model(model_name: str) -> bool:
-    return any(model_name.startswith(p) for p in _GOOGLE_PREFIXES)
+    return any(model_name.startswith(p) for p in GOOGLE_PREFIXES)
 
 
 def _is_anthropic_model(model_name: str) -> bool:
-    return any(model_name.startswith(p) for p in _ANTHROPIC_PREFIXES)
+    return any(model_name.startswith(p) for p in ANTHROPIC_PREFIXES)
 
 
 def _is_openai_model(model_name: str) -> bool:
-    return any(model_name.startswith(p) for p in _OPENAI_PREFIXES)
+    return any(model_name.startswith(p) for p in OPENAI_PREFIXES)
 
 
 def _has_thinking(thinking: ThinkingCfg) -> bool:
     return bool(thinking.level or thinking.budget)
 
 
-def _build_model(config: Config):  # pyright: ignore[reportUnusedFunction]
+def build_model(config: Config):
     """Build the chat model from a parsed :class:`Config`."""
     model_name = config.model.name
     provider = config.model.provider

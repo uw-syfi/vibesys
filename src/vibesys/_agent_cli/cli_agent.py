@@ -1,140 +1,30 @@
-import sys
 from abc import abstractmethod
-from typing import Any
+from typing import Generic, TypeVar
 
+# Re-exported so callers (and compat tests) can keep importing
+# ``CLIGenerationSession`` from this module. agentshim's class is the single
+# session implementation; provider modules subclass it per CLI.
+from agentshim.cli_agent import CLIGenerationSession
 from agentshim.events import AgentEventHandler
-from agentshim.executor import (
-    CallbackCommandStreamSink,
-    CommandExecutor,
-    CommandRequest,
-    HostCommandExecutor,
-)
+from agentshim.executor import CommandExecutor, HostCommandExecutor
 from agentshim.utils import get_interactive_env
 from loguru import logger
 
 from .base import CodingAgent
 from .hostsandbox import WorkspaceSandbox
 
+__all__ = ["CLICodingAgent", "CLIGenerationSession"]
 
-class CLIGenerationSession:
-    """Handles a single generation request lifecycle."""
-
-    def __init__(
-        self,
-        binary_name: str,
-        env: dict[str, str],
-        log_prefix: str,
-        cmd: list[str],
-        logger: Any,
-        cwd: str | None = None,
-        timeout: int | None = None,
-        silent: bool = False,
-        event_handler: AgentEventHandler | None = None,
-        executor: CommandExecutor | None = None,
-    ):
-        self.binary_name = binary_name
-        self.env = env
-        self.log_prefix = log_prefix
-        self.cmd = cmd
-        self.logger = logger
-        self.cwd = cwd
-        self.timeout = timeout
-        self.silent = silent
-        self.event_handler = event_handler
-        self.executor = executor or HostCommandExecutor()
-
-        # State initialization
-        self.stdout_lines: list[str] = []
-        self.stderr_lines: list[str] = []
-        self._at_line_start = True
-
-    def _log_raw(self, message: str) -> None:
-        """Log a raw message directly to output if not silent."""
-        if not self.silent:
-            self.logger.opt(raw=True).info(message)
-
-    def _process_stdout(self, line: str) -> None:
-        """Process a line from stdout."""
-        line_stripped = line.rstrip("\n")
-        if not self.silent:
-            self.logger.info(line_stripped)
-
-        if self.event_handler and line_stripped:
-            self.event_handler.on_thinking(line_stripped + "\n")
-
-        self.stdout_lines.append(line)
-
-    def _print_stream_content(self, content: str):
-        """Print streaming content with prefix handling."""
-        if not content:
-            return
-
-        lines = content.split("\n")
-
-        for i, line in enumerate(lines):
-            is_last = i == len(lines) - 1
-
-            if is_last:
-                if line:
-                    if self._at_line_start:
-                        self._log_raw(f"{self.log_prefix} ")
-                        self._at_line_start = False
-                    self._log_raw(line)
-            else:
-                if self._at_line_start:
-                    self._log_raw(f"{self.log_prefix} ")
-                self._log_raw(line)
-                self._log_raw("\n")
-                self._at_line_start = True
-
-    def _process_stderr(self, line: str) -> None:
-        """Process a line from stderr."""
-        line_stripped = line.rstrip("\n")
-        if not self.silent:
-            self.logger.bind(stderr=True).info(f"[STDERR] {line_stripped}")
-        self.stderr_lines.append(line)
-
-    def run(self, prompt: str) -> str:
-        """Execute the generation process."""
-        if not self.silent:
-            self.logger.info(f"Running command: {' '.join(self.cmd)}")
-            self._log_raw("=" * 80 + "\n")
-            sys.stdout.flush()
-
-        on_run_start = getattr(self.event_handler, "on_run_start", None)
-        if on_run_start is not None:
-            on_run_start(self.cmd)
-
-        result = self.executor.run(
-            CommandRequest(
-                argv=self.cmd,
-                stdin=prompt,
-                cwd=self.cwd,
-                env=self.env,
-                timeout=self.timeout,
-            ),
-            CallbackCommandStreamSink(
-                on_stdout=self._process_stdout,
-                on_stderr=self._process_stderr,
-            ),
-        )
-
-        on_run_end = getattr(self.event_handler, "on_run_end", None)
-        if on_run_end is not None:
-            on_run_end(result.returncode)
-
-        self._log_raw("=" * 80 + "\n")
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"{self.binary_name} exited with code {result.returncode}: {result.stderr}"
-            )
-
-        return "".join(self.stdout_lines).strip()
+SessionT = TypeVar("SessionT", bound=CLIGenerationSession)
 
 
-class CLICodingAgent(CodingAgent):
-    """Base class for CLI-based coding agents."""
+class CLICodingAgent(CodingAgent, Generic[SessionT]):
+    """Base class for CLI-based coding agents.
+
+    Generic over the provider's :class:`~agentshim.cli_agent.CLIGenerationSession`
+    subclass, so ``_create_session`` / ``_extract_session_id`` overrides stay
+    type-safe per provider.
+    """
 
     def __init__(
         self,
@@ -164,6 +54,7 @@ class CLICodingAgent(CodingAgent):
         self.executor.check_binary(self.binary_path, self.env, timeout=10)
         self.logger = logger.bind(agent_prefix=self._log_prefix)
         self.session_id: str | None = None
+        self._last_session: SessionT | None = None
         # Host-path filesystem confinement. Left ``None`` here (unconfined,
         # legacy behavior); the CLI runner installs a platform-specific
         # :class:`WorkspaceSandbox` on the host execution path. Container executors
@@ -183,7 +74,7 @@ class CLICodingAgent(CodingAgent):
         """
         return None
 
-    def _extract_session_id(self, session: "CLIGenerationSession") -> str | None:
+    def _extract_session_id(self, session: SessionT) -> str | None:
         """Extract a session/conversation ID from the completed session.
 
         Subclasses override this to parse the provider's output format.
@@ -196,29 +87,15 @@ class CLICodingAgent(CodingAgent):
         """Return the log prefix for this agent."""
         return f"[{self.__class__.__name__}]"
 
+    @abstractmethod
     def _create_session(
         self,
         cmd: list[str],
         cwd: str | None = None,
         timeout: int | None = None,
         silent: bool = False,
-    ) -> CLIGenerationSession:
-        """Create a session for a single generation request.
-
-        Can be overridden by subclasses to return specialized sessions.
-        """
-        return CLIGenerationSession(
-            binary_name=self.binary_name,
-            env=self.env,
-            log_prefix=self._log_prefix,
-            cmd=cmd,
-            logger=self.logger,
-            cwd=cwd,
-            timeout=timeout,
-            silent=silent,
-            event_handler=self.event_handler,
-            executor=self.executor,
-        )
+    ) -> SessionT:
+        """Create the provider-specific session for one generation request."""
 
     def generate(
         self,

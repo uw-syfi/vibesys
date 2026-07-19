@@ -1,23 +1,22 @@
 """Shared run context: ``_RunContext``, ``create_run_context``, and ``setup_exp_dir``."""
 
-# File-scoped strict relaxations to keep churn low while this module is
-# under active refactoring (see the _RunContext extraction PRs); pay down
-# once that work settles.
-# pyright: reportPrivateUsage=false, reportUnknownParameterType=false, reportMissingParameterType=false, reportDeprecated=false
-
 import shutil
 import subprocess
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, overload
+from typing import TYPE_CHECKING, Any, TextIO, TypeVar, overload
+
+from pydantic import BaseModel
 
 from vibesys import backends
 from vibesys.agents import build_agent_runner
+from vibesys.agents.base import AgentRunner
 from vibesys.agents.progress import AgentProgress
+from vibesys.backends.base import ComputeBackendImpl, ContentionMonitor
 from vibesys.config import Config, as_config
 from vibesys.constants import (
     DEFAULT_AGENT_BACKEND,
@@ -29,10 +28,11 @@ from vibesys.domains.base import DomainName
 from vibesys.domains.environment import (
     EnvironmentContext,
     EnvironmentHooks,
+    EnvironmentPatch,
     NoopEnvironmentHooks,
 )
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.llm_client import _build_model
+from vibesys.llm_client import build_model
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
     ProfilerKind,
@@ -42,11 +42,18 @@ from vibesys.profilers import (
 )
 from vibesys.run import DeviceLease, GitTracker, RunCommands, RunLogger, RunPaths, Workspace
 from vibesys.sandbox.run_environment import (
+    RunEnvironment,
     RunEnvironmentRequest,
+    RunEnvironmentSession,
     RunEnvironmentSpec,
     build_run_environment,
     make_run_environment_spec,
 )
+
+if TYPE_CHECKING:
+    from vibesys.server.supervisor import RunSupervisor
+
+T = TypeVar("T", bound=BaseModel)
 
 
 def setup_exp_dir(
@@ -180,7 +187,7 @@ def create_run_context(
     resolved_backend = agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND
     resolved_cli_provider = cli_provider or config.agent.cli_provider or "codex"
 
-    model = _build_model(config)
+    model = build_model(config)
     model_name = config.model.name
 
     input_path_str = _coerce_dir_path(input_path, "--input")
@@ -408,14 +415,14 @@ class _RunContext:
         self,
         *,
         backend: ComputeBackend,
-        run_environment,
-        supervisor,
+        run_environment: RunEnvironment,
+        supervisor: "RunSupervisor | None",
         logger: RunLogger,
         paths: RunPaths,
         debug: bool,
         git_tracking: bool,
-        backend_impl,
-        model,
+        backend_impl: ComputeBackendImpl,
+        model: Any,
         model_name: str,
         input_path: str | None,
         workspace_seed_path: Path | None,
@@ -429,14 +436,14 @@ class _RunContext:
         ref_name: str,
         environment_hooks: EnvironmentHooks,
         environment_context: EnvironmentContext,
-        environment_patch,
+        environment_patch: EnvironmentPatch,
         workspace_files: Workspace,
         git: GitTracker,
         teardown_stack: ExitStack,
-        run_environment_session,
+        run_environment_session: RunEnvironmentSession,
         commands: RunCommands,
         device: DeviceLease,
-        agent_runner,
+        agent_runner: AgentRunner,
     ):
         self.backend = backend
         self.run_environment = run_environment
@@ -499,17 +506,17 @@ class _RunContext:
         return self._paths.run_log_path
 
     @property
-    def run_log_file(self):
+    def run_log_file(self) -> TextIO:
         """The current open log file handle (owned by ``RunLogger``)."""
         return self.logger.file
 
     @property
-    def gpu_monitor(self):
+    def gpu_monitor(self) -> "ContentionMonitor | None":
         """The active device monitor (owned by ``DeviceLease``)."""
         return self.device.monitor
 
     @gpu_monitor.setter
-    def gpu_monitor(self, monitor) -> None:
+    def gpu_monitor(self, monitor: "ContentionMonitor | None") -> None:
         self.device.monitor = monitor
 
     def gpu_env(self) -> dict[str, str]:
@@ -517,7 +524,7 @@ class _RunContext:
         return self.device.gpu_env()
 
     @contextmanager
-    def progress(self, progress: AgentProgress) -> Iterator[None]:
+    def progress(self, progress: AgentProgress) -> Generator[None]:
         """Temporarily attach loop progress to agent invocations in this context."""
         self._progress_stack.append(progress)
         try:
@@ -537,12 +544,12 @@ class _RunContext:
         kind: str,
         system_prompt: str,
         user_prompt: str,
-        response_cls,
-        fallback_factory: Callable[[], Any] | None = None,
+        response_cls: type[T],
+        fallback_factory: Callable[[], T],
         round_label: str = "",
         progress: AgentProgress | None = None,
-        **extra,
-    ):
+        **extra: Any,
+    ) -> T:
         """Invoke an agent through ``self.agent_runner`` with workspace+env defaults.
 
         Wraps ``self.agent_runner.invoke(...)`` so the per-call boilerplate
@@ -554,8 +561,8 @@ class _RunContext:
         supervisor = getattr(self, "supervisor", None)
         if supervisor is not None:
             supervisor.before_agent(kind, round_label, user_prompt, system_prompt)
-        result = None
-        error = None
+        result: T | None = None
+        error: BaseException | None = None
         try:
             result = self.agent_runner.invoke(
                 kind=kind,
@@ -564,9 +571,7 @@ class _RunContext:
                 env=self.gpu_env(),
                 user_prompt=user_prompt,
                 response_cls=response_cls,
-                # Every live call site supplies a factory; the None default
-                # is a legacy convenience.
-                fallback_factory=fallback_factory,  # pyright: ignore[reportArgumentType]
+                fallback_factory=fallback_factory,
                 round_label=round_label,
                 progress=progress if progress is not None else self.current_progress(),
                 **extra,

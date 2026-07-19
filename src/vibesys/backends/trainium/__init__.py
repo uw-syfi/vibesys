@@ -37,7 +37,7 @@ from vibesys.backends.base import (
 )
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
-from vs_sandbox.docker_sandbox import DockerSandbox
+from vs_sandbox import DockerSandbox
 
 # AWS Neuron DLC.  Tag chosen to match the host's Neuron tools (2.30):
 # PyTorch 2.9 / Python 3.12 / Neuron SDK 2.30 on Ubuntu 24.04.  Carries

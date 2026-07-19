@@ -882,6 +882,10 @@ def run_agent_loop(
         raise ValueError(
             f"Unknown inner_loop {inner_loop!r}; choose from {', '.join(_INNER_LOOPS)}"
         )
+    if max_retries_per_round < 1:
+        # Guard against a zero-iteration retry loop: with no attempts the
+        # round bookkeeping below would reference an unbound loop variable.
+        raise ValueError(f"max_retries_per_round must be >= 1, got {max_retries_per_round}")
     if interface not in _INTERFACES:
         raise ValueError(f"Unknown interface {interface!r}; choose from {', '.join(_INTERFACES)}")
     if domain is None:
@@ -1022,6 +1026,10 @@ def run_agent_loop(
                 passed = False
                 single_agent_response: SingleAgentRoundResponse | None = None
                 framework_perf_metric: float | None = None
+                # ``max_retries_per_round >= 1`` is validated at entry, so the
+                # loop always runs; the initializer keeps ``retry`` provably
+                # bound for the post-loop round bookkeeping.
+                retry = 0
                 for retry in range(1, max_retries_per_round + 1):
                     ctx.lprint(f"\n--- attempt {retry}/{max_retries_per_round} ---\n")
                     if inner_loop == "multi-agent":
@@ -1155,7 +1163,7 @@ def run_agent_loop(
                         status=EventStatus.COMPLETED if passed else EventStatus.FAILED,
                         round_label=f"round-{round_number}",
                         data=RoundFinishedData(
-                            attempts=retry,  # pyright: ignore[reportPossiblyUnboundVariable]
+                            attempts=retry,
                             judge_verdict="pass" if passed else "fail",
                             perf_metric=perf_metric,
                             perf_unit=perf_unit,

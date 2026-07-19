@@ -30,7 +30,7 @@ T = TypeVar("T", bound=BaseModel)
 # Constants
 # ---------------------------------------------------------------------------
 
-_DEFAULT_MAX_TEXT_LEN = 2000
+DEFAULT_MAX_TEXT_LEN = 2000
 _JUDGE_REVIEW_PROMPT = (
     "Review the implementation. "
     "Write or update pytest tests, run them via `uv run pytest -v`, "
@@ -114,9 +114,7 @@ def _extract_last_ai_message_text(update: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _log_agent_config(  # pyright: ignore[reportUnusedFunction] — imported by deepagents_runner
-    agent: Any, label: str, log_file: TextIO | None
-) -> None:
+def log_agent_config(agent: Any, label: str, log_file: TextIO | None) -> None:
     """Write agent configuration (tools list) to log file."""
     if not log_file:
         return
@@ -141,7 +139,7 @@ def _log_agent_config(  # pyright: ignore[reportUnusedFunction] — imported by 
     log_file.flush()
 
 
-def _log_and_print(
+def log_and_print(
     text: str,
     log_file: TextIO | None = None,
     max_len: int | None = None,
@@ -162,7 +160,7 @@ def _log_and_print(
         print(text)
 
 
-def _log_markdown_and_print(
+def log_markdown_and_print(
     text: str,
     log_file: TextIO | None = None,
     max_len: int | None = None,
@@ -185,13 +183,13 @@ def _log_markdown_and_print(
         print(text)
 
 
-def _log_prompt_markdown_and_print(
+def log_prompt_markdown_and_print(
     prompt: str,
     log_file: TextIO | None = None,
     max_len: int | None = None,
 ) -> None:
     """Emit raw prompt Markdown while preserving it in logs."""
-    _log_markdown_and_print(
+    log_markdown_and_print(
         prompt,
         log_file=log_file,
         max_len=max_len,
@@ -199,13 +197,13 @@ def _log_prompt_markdown_and_print(
     )
 
 
-def _log_json_and_print(
+def log_json_and_print(
     text: str,
     log_file: TextIO | None = None,
     max_len: int | None = None,
 ) -> None:
     """Emit raw JSON; presentation clients decide how to render it."""
-    _log_and_print(text, log_file=log_file, max_len=max_len)
+    log_and_print(text, log_file=log_file, max_len=max_len)
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +211,7 @@ def _log_json_and_print(
 # ---------------------------------------------------------------------------
 
 
-def _parse_typed_response_text(text: str, response_cls: type[T]) -> T | None:
+def parse_typed_response_text(text: str, response_cls: type[T]) -> T | None:
     """Best-effort recovery of a typed Pydantic payload from raw model text."""
     if not text:
         return None
@@ -253,7 +251,7 @@ def _coerce_typed_response(payload: Any, response_cls: type[T]) -> T | None:
         except ValidationError:
             return None
     if isinstance(payload, str):
-        return _parse_typed_response_text(payload, response_cls)
+        return parse_typed_response_text(payload, response_cls)
     return None
 
 
@@ -266,16 +264,6 @@ def _extract_typed_structured_response(update: Any, response_cls: type[T]) -> T 
         if response is not None:
             return response
     return None
-
-
-# Backwards-compatible aliases retained for tests that import these names
-# directly. Internal callers should use the generic helpers above.
-def _parse_implementer_response_text(text: str) -> ImplementerResponse | None:  # pyright: ignore[reportUnusedFunction] — imported by tests
-    return _parse_typed_response_text(text, ImplementerResponse)
-
-
-def _parse_perf_eval_response_text(text: str) -> PerfEvalResponse | None:  # pyright: ignore[reportUnusedFunction] — imported by tests
-    return _parse_typed_response_text(text, PerfEvalResponse)
 
 
 # ---------------------------------------------------------------------------
@@ -303,11 +291,11 @@ def run_agent(
     if thread_id is None:
         thread_id = uuid.uuid4().hex
     todo_display = TodoDisplay()
-    _log_and_print(f"\n=== LLM ROUND START: {round_label} ===", log_file)
-    _log_and_print(f"callbacks: {callbacks_label}", log_file)
-    _log_and_print(f"thread_id: {thread_id}", log_file)
-    _log_and_print("--- input ---", log_file)
-    _log_prompt_markdown_and_print(prompt, log_file, max_len=max_text_len)
+    log_and_print(f"\n=== LLM ROUND START: {round_label} ===", log_file)
+    log_and_print(f"callbacks: {callbacks_label}", log_file)
+    log_and_print(f"thread_id: {thread_id}", log_file)
+    log_and_print("--- input ---", log_file)
+    log_prompt_markdown_and_print(prompt, log_file, max_len=max_text_len)
     last_ai_message = ""
     try:
         for update in agent.stream(
@@ -324,16 +312,16 @@ def run_agent(
                         last_ai_message = msg.content
     except Exception as exc:
         error_text = f"error: {type(exc).__name__}: {exc}"
-        _log_and_print(f"\n=== LLM ROUND ERROR: {round_label} ===", log_file)
-        _log_and_print(error_text, log_file, max_len=max_text_len)
+        log_and_print(f"\n=== LLM ROUND ERROR: {round_label} ===", log_file)
+        log_and_print(error_text, log_file, max_len=max_text_len)
         raise
     output_text = last_ai_message if last_ai_message else "<no ai message returned>"
-    _log_and_print("\n=== LLM ROUND OUTPUT (final ai message) ===", log_file)
-    _log_markdown_and_print(output_text, log_file, max_len=max_text_len)
+    log_and_print("\n=== LLM ROUND OUTPUT (final ai message) ===", log_file)
+    log_markdown_and_print(output_text, log_file, max_len=max_text_len)
     return last_ai_message
 
 
-def _run_typed_agent(
+def run_typed_agent(
     agent: Any,
     prompt: str,
     *,
@@ -360,11 +348,11 @@ def _run_typed_agent(
     callbacks_label = " + ".join(type(cb).__name__ for cb in callbacks)
     structured_response = None
     last_ai_message = ""
-    _log_and_print(f"\n=== {label} ROUND START: {round_label} ===", log_file)
-    _log_and_print(f"callbacks: {callbacks_label}", log_file)
-    _log_and_print(f"thread_id: {thread_id}", log_file)
-    _log_and_print("--- input ---", log_file)
-    _log_prompt_markdown_and_print(prompt, log_file, max_len=max_text_len)
+    log_and_print(f"\n=== {label} ROUND START: {round_label} ===", log_file)
+    log_and_print(f"callbacks: {callbacks_label}", log_file)
+    log_and_print(f"thread_id: {thread_id}", log_file)
+    log_and_print("--- input ---", log_file)
+    log_prompt_markdown_and_print(prompt, log_file, max_len=max_text_len)
     try:
         for update in agent.stream(
             {"messages": [("human", prompt)]},
@@ -382,21 +370,21 @@ def _run_typed_agent(
                 last_ai_message = extracted_text
     except Exception as exc:
         error_text = f"error: {type(exc).__name__}: {exc}"
-        _log_and_print(f"\n=== {label} ROUND ERROR: {round_label} ===", log_file)
-        _log_and_print(error_text, log_file, max_len=max_text_len)
+        log_and_print(f"\n=== {label} ROUND ERROR: {round_label} ===", log_file)
+        log_and_print(error_text, log_file, max_len=max_text_len)
         raise
     if structured_response is None:
-        structured_response = _parse_typed_response_text(last_ai_message, response_cls)
+        structured_response = parse_typed_response_text(last_ai_message, response_cls)
     if structured_response is None:
-        _log_and_print(f"\n=== {label} ROUND OUTPUT (missing response) ===", log_file)
-        _log_and_print(f"No structured response received from {label.lower()}.", log_file)
+        log_and_print(f"\n=== {label} ROUND OUTPUT (missing response) ===", log_file)
+        log_and_print(f"No structured response received from {label.lower()}.", log_file)
         if last_ai_message:
-            _log_and_print(f"\n=== {label} ROUND OUTPUT (raw ai message) ===", log_file)
-            _log_markdown_and_print(last_ai_message, log_file, max_len=max_text_len)
+            log_and_print(f"\n=== {label} ROUND OUTPUT (raw ai message) ===", log_file)
+            log_markdown_and_print(last_ai_message, log_file, max_len=max_text_len)
         return fallback_factory()
     output_json = structured_response.model_dump_json(indent=2)
-    _log_and_print(f"\n=== {label} ROUND OUTPUT ===", log_file)
-    _log_json_and_print(output_json, log_file, max_len=max_text_len)
+    log_and_print(f"\n=== {label} ROUND OUTPUT ===", log_file)
+    log_json_and_print(output_json, log_file, max_len=max_text_len)
     return structured_response
 
 
@@ -410,7 +398,7 @@ def run_implementer_agent(
     max_text_len: int | None = None,
 ) -> ImplementerResponse:
     """Run implementer agent, return structured ImplementerResponse."""
-    return _run_typed_agent(
+    return run_typed_agent(
         agent,
         prompt,
         response_cls=ImplementerResponse,
@@ -441,7 +429,7 @@ def run_judge_agent(
     When *log_file* is provided, full input/output/error text is written there
     while stdout receives a truncated version (controlled by *max_text_len*).
     """
-    return _run_typed_agent(
+    return run_typed_agent(
         agent,
         prompt,
         response_cls=JudgeResponse,
@@ -469,7 +457,7 @@ def run_perf_eval_agent(
     max_text_len: int | None = None,
 ) -> PerfEvalResponse:
     """Run perf evaluator agent, return structured PerfEvalResponse."""
-    return _run_typed_agent(
+    return run_typed_agent(
         agent,
         prompt,
         response_cls=PerfEvalResponse,
@@ -573,11 +561,11 @@ def run_profiler_agent(
     callbacks_label = " + ".join(type(cb).__name__ for cb in callbacks)
     structured_response = None
     last_ai_message = ""
-    _log_and_print(f"\n=== PROFILER ROUND START: {round_label} ===", log_file)
-    _log_and_print(f"callbacks: {callbacks_label}", log_file)
-    _log_and_print(f"thread_id: {thread_id}", log_file)
-    _log_and_print("--- input ---", log_file)
-    _log_prompt_markdown_and_print(prompt, log_file, max_len=max_text_len)
+    log_and_print(f"\n=== PROFILER ROUND START: {round_label} ===", log_file)
+    log_and_print(f"callbacks: {callbacks_label}", log_file)
+    log_and_print(f"thread_id: {thread_id}", log_file)
+    log_and_print("--- input ---", log_file)
+    log_prompt_markdown_and_print(prompt, log_file, max_len=max_text_len)
     try:
         for update in agent.stream(
             {"messages": [("human", prompt)]},
@@ -595,25 +583,25 @@ def run_profiler_agent(
                 last_ai_message = extracted_text
     except Exception as exc:
         error_text = f"error: {type(exc).__name__}: {exc}"
-        _log_and_print(f"\n=== PROFILER ROUND ERROR: {round_label} ===", log_file)
-        _log_and_print(error_text, log_file, max_len=max_text_len)
+        log_and_print(f"\n=== PROFILER ROUND ERROR: {round_label} ===", log_file)
+        log_and_print(error_text, log_file, max_len=max_text_len)
         raise
     if structured_response is None:
         structured_response = _parse_profiler_response_text(last_ai_message)
     if structured_response is None:
-        _log_and_print("\n=== PROFILER ROUND OUTPUT (missing response) ===", log_file)
-        _log_and_print("No structured response received from profiler.", log_file)
+        log_and_print("\n=== PROFILER ROUND OUTPUT (missing response) ===", log_file)
+        log_and_print("No structured response received from profiler.", log_file)
         if last_ai_message:
-            _log_and_print("\n=== PROFILER ROUND OUTPUT (raw ai message) ===", log_file)
-            _log_markdown_and_print(last_ai_message, log_file, max_len=max_text_len)
+            log_and_print("\n=== PROFILER ROUND OUTPUT (raw ai message) ===", log_file)
+            log_markdown_and_print(last_ai_message, log_file, max_len=max_text_len)
         return ProfilerResponse(
             analysis="No structured response received from profiler.",
             bottlenecks="Profiler did not produce a structured response.",
             suggestions="Re-run profiling manually.",
         )
     output_json = structured_response.model_dump_json(indent=2)
-    _log_and_print("\n=== PROFILER ROUND OUTPUT ===", log_file)
-    _log_json_and_print(output_json, log_file, max_len=max_text_len)
+    log_and_print("\n=== PROFILER ROUND OUTPUT ===", log_file)
+    log_json_and_print(output_json, log_file, max_len=max_text_len)
     return structured_response
 
 
@@ -629,7 +617,7 @@ def run_issue_implementer_agent(
     max_text_len: int | None = None,
 ) -> IssueImplementerResponse:
     """Run the issue-loop implementer agent, return structured IssueImplementerResponse."""
-    return _run_typed_agent(
+    return run_typed_agent(
         agent,
         prompt,
         response_cls=IssueImplementerResponse,
@@ -660,7 +648,7 @@ def run_issue_judge_agent(
     max_text_len: int | None = None,
 ) -> IssueJudgeResponse:
     """Run the issue-loop judge agent, return structured IssueJudgeResponse."""
-    return _run_typed_agent(
+    return run_typed_agent(
         agent,
         prompt,
         response_cls=IssueJudgeResponse,
@@ -690,7 +678,7 @@ def run_issue_perf_eval_agent(
     max_text_len: int | None = None,
 ) -> IssuePerfEvalResponse:
     """Run the issue-loop performance evaluator agent, return structured IssuePerfEvalResponse."""
-    return _run_typed_agent(
+    return run_typed_agent(
         agent,
         prompt,
         response_cls=IssuePerfEvalResponse,

@@ -9,7 +9,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 
 from vibesys.agents.progress import AgentProgress
-from vibesys.constants import _DIM, _GREEN, _RESET, _YELLOW  # pyright: ignore[reportPrivateUsage]
+from vibesys.constants import DIM, GREEN, RESET, YELLOW
 from vibesys.server.events import AgentOutputChannel
 
 ContextWindowLookup = Callable[[str | None], int | None]
@@ -69,9 +69,9 @@ def _format_token_count(n: int) -> str:
 
 
 _STATUS_INDICATORS = {
-    "completed": f"{_GREEN}✓{_RESET}",
-    "in_progress": f"{_YELLOW}▶{_RESET}",
-    "pending": f"{_DIM}○{_RESET}",
+    "completed": f"{GREEN}✓{RESET}",
+    "in_progress": f"{YELLOW}▶{RESET}",
+    "pending": f"{DIM}○{RESET}",
 }
 
 
@@ -357,7 +357,7 @@ class AgentLogger(BaseCallbackHandler):
     # readable while still capturing enough output for debugging.
     _LOG_MAX_RESULT_LEN = 2000
 
-    def _print_tool_result(self, name: str, content: str, color: str = _DIM):
+    def _print_tool_result(self, name: str, content: str, color: str = DIM):
         del name, color
         full_text = str(content)
         self._publish(full_text, "tool")

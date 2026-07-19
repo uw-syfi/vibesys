@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibesys.agent_runner import _log_json_and_print, _log_prompt_markdown_and_print
+from vibesys.agent_runner import log_json_and_print, log_prompt_markdown_and_print
 from vibesys.agents import build_agent_runner
 from vibesys.agents.callbacks import AgentLogger
 from vibesys.agents.cli_runner import CliAgentRunner
@@ -38,7 +38,7 @@ def test_prompt_markdown_emitter_preserves_raw_log_and_truncates_stdout(capsys):
     log = StringIO()
     prompt = "# Title\n\nUse **markdown** and `code`."
 
-    _log_prompt_markdown_and_print(prompt, log_file=log, max_len=20)
+    log_prompt_markdown_and_print(prompt, log_file=log, max_len=20)
 
     stdout = capsys.readouterr().out
     assert "Title" in stdout
@@ -51,7 +51,7 @@ def test_json_emitter_preserves_raw_log(capsys):
     log = StringIO()
     raw_json = '{"analysis":"ok","items":[1,2]}'
 
-    _log_json_and_print(raw_json, log_file=log)
+    log_json_and_print(raw_json, log_file=log)
 
     stdout = capsys.readouterr().out
     assert raw_json in stdout
@@ -69,7 +69,7 @@ class TestDeepAgentsRunner:
         )
         with (
             patch("vibesys.agents.deepagents_runner.create_deep_agent") as mock_create,
-            patch("vibesys.agents.deepagents_runner._run_typed_agent") as mock_run,
+            patch("vibesys.agents.deepagents_runner.run_typed_agent") as mock_run,
         ):
             mock_create.return_value = MagicMock(name="deep_agent")
             mock_run.return_value = pass_response
@@ -122,7 +122,7 @@ class TestDeepAgentsRunner:
                 side_effect=_capture,
             ),
             patch(
-                "vibesys.agents.deepagents_runner._run_typed_agent",
+                "vibesys.agents.deepagents_runner.run_typed_agent",
                 return_value=_judge_fallback(),
             ),
         ):

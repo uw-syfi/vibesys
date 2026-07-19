@@ -5,8 +5,8 @@ import json
 from vibesys.loops.plain.loop import (
     PlainLoopState,
     _determine_resume_point,
-    _load_state,
     _save_state,
+    load_state,
 )
 from vs_issue_board import IssueBoard, IssueStatus, IssueType
 
@@ -16,7 +16,7 @@ def _make_store(tmp_path) -> IssueBoard:
 
 
 # ---------------------------------------------------------------------------
-# _save_state / _load_state round-trip
+# _save_state / load_state round-trip
 # ---------------------------------------------------------------------------
 
 
@@ -29,7 +29,7 @@ class TestSaveLoadState:
             bootstrap_done=True,
         )
         _save_state(tmp_path, state)
-        loaded = _load_state(tmp_path)
+        loaded = load_state(tmp_path)
         assert loaded is not None
         assert loaded.round_idx == 2
         assert loaded.phase == "judge"
@@ -37,17 +37,17 @@ class TestSaveLoadState:
         assert loaded.bootstrap_done is True
 
     def test_load_missing(self, tmp_path):
-        assert _load_state(tmp_path) is None
+        assert load_state(tmp_path) is None
 
     def test_load_corrupt_json(self, tmp_path):
         (tmp_path / "state.json").write_text("not json", encoding="utf-8")
-        assert _load_state(tmp_path) is None
+        assert load_state(tmp_path) is None
 
     def test_load_wrong_version(self, tmp_path):
         (tmp_path / "state.json").write_text(
             json.dumps({"version": 999, "iteration": 0}), encoding="utf-8"
         )
-        assert _load_state(tmp_path) is None
+        assert load_state(tmp_path) is None
 
     def test_atomic_write_leaves_no_tmp(self, tmp_path):
         _save_state(tmp_path, PlainLoopState())
@@ -64,7 +64,7 @@ class TestSaveLoadState:
             "extra_field": "ignored",
         }
         (tmp_path / "state.json").write_text(json.dumps(data), encoding="utf-8")
-        loaded = _load_state(tmp_path)
+        loaded = load_state(tmp_path)
         assert loaded is not None
         assert loaded.round_idx == 3
         assert loaded.bootstrap_done is True

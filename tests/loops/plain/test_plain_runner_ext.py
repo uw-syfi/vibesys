@@ -9,6 +9,7 @@ LangChain ``@tool`` callables. Implementer phase passes through.
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import BaseModel
 
 from vibesys._agent_cli.base import MCPServerSpec
 from vibesys.agents.base import AgentRunner
@@ -16,6 +17,10 @@ from vibesys.loops.plain.runner_ext import PlainLoopAgentRunner
 from vs_issue_board import IssueBoard
 
 _EXPECTED_TOOL_NAMES = {"list_issues", "get_issue", "search_issues", "create_issue"}
+
+
+class _Resp(BaseModel):
+    """Minimal response model for exercising the wrapper's typed invoke."""
 
 
 def _mock_runner(backend_name: str) -> MagicMock:
@@ -44,7 +49,7 @@ class TestDeepAgentsBackend:
         inner = _mock_runner("deepagents")
         wrapper = PlainLoopAgentRunner(inner, store=store, max_issues_per_perf_eval=3)
 
-        wrapper.invoke(kind="judge", iteration=2, round_label="r")
+        wrapper.invoke(response_cls=_Resp, kind="judge", iteration=2, round_label="r")
 
         inner.invoke.assert_called_once()
         kwargs = inner.invoke.call_args.kwargs
@@ -57,7 +62,7 @@ class TestDeepAgentsBackend:
         inner = _mock_runner("deepagents")
         wrapper = PlainLoopAgentRunner(inner, store=store, max_issues_per_perf_eval=4)
 
-        wrapper.invoke(kind="perf_eval", iteration=5, round_label="r")
+        wrapper.invoke(response_cls=_Resp, kind="perf_eval", iteration=5, round_label="r")
 
         kwargs = inner.invoke.call_args.kwargs
         assert kwargs["kind"] == "perf_eval"
@@ -71,7 +76,7 @@ class TestDeepAgentsBackend:
         inner = _mock_runner("deepagents")
         wrapper = PlainLoopAgentRunner(inner, store=store, max_issues_per_perf_eval=5)
 
-        wrapper.invoke(kind="perf_eval", iteration=1, round_label="r")
+        wrapper.invoke(response_cls=_Resp, kind="perf_eval", iteration=1, round_label="r")
         tools = inner.invoke.call_args.kwargs["tools"]
         create = next(t for t in tools if t.name == "create_issue")
 
@@ -88,7 +93,7 @@ class TestDeepAgentsBackend:
         inner = _mock_runner("deepagents")
         wrapper = PlainLoopAgentRunner(inner, store=store, max_issues_per_perf_eval=3)
 
-        wrapper.invoke(kind="judge", iteration=1, round_label="r")
+        wrapper.invoke(response_cls=_Resp, kind="judge", iteration=1, round_label="r")
         tools = inner.invoke.call_args.kwargs["tools"]
         create = next(t for t in tools if t.name == "create_issue")
 
@@ -108,7 +113,7 @@ class TestCliBackend:
         inner = _mock_runner("cli")
         wrapper = PlainLoopAgentRunner(inner, store=store, max_issues_per_perf_eval=3)
 
-        wrapper.invoke(kind="judge", iteration=7, round_label="r")
+        wrapper.invoke(response_cls=_Resp, kind="judge", iteration=7, round_label="r")
 
         kwargs = inner.invoke.call_args.kwargs
         assert kwargs["tools"] is None
@@ -131,7 +136,7 @@ class TestCliBackend:
         inner = _mock_runner("cli")
         wrapper = PlainLoopAgentRunner(inner, store=store, max_issues_per_perf_eval=4)
 
-        wrapper.invoke(kind="perf_eval", iteration=2, round_label="r")
+        wrapper.invoke(response_cls=_Resp, kind="perf_eval", iteration=2, round_label="r")
 
         kwargs = inner.invoke.call_args.kwargs
         assert kwargs["tools"] is None
@@ -155,7 +160,7 @@ class TestPassThrough:
         inner = _mock_runner("deepagents")
         wrapper = PlainLoopAgentRunner(inner, store=store, max_issues_per_perf_eval=3)
 
-        wrapper.invoke(kind="implementer", round_label="r")
+        wrapper.invoke(response_cls=_Resp, kind="implementer", round_label="r")
 
         kwargs = inner.invoke.call_args.kwargs
         assert kwargs["kind"] == "implementer"
@@ -167,7 +172,7 @@ class TestPassThrough:
         inner = _mock_runner("cli")
         wrapper = PlainLoopAgentRunner(inner, store=store, max_issues_per_perf_eval=3)
 
-        wrapper.invoke(kind="implementer", round_label="r")
+        wrapper.invoke(response_cls=_Resp, kind="implementer", round_label="r")
 
         kwargs = inner.invoke.call_args.kwargs
         assert kwargs["mcp_servers"] is None
@@ -180,7 +185,7 @@ class TestPassThrough:
         inner = _mock_runner("deepagents")
         wrapper = PlainLoopAgentRunner(inner, store=store, max_issues_per_perf_eval=3)
 
-        wrapper.invoke(kind="judge", iteration=1, round_label="r")
+        wrapper.invoke(response_cls=_Resp, kind="judge", iteration=1, round_label="r")
 
         assert "iteration" not in inner.invoke.call_args.kwargs
 
@@ -192,6 +197,7 @@ class TestPassThrough:
         wrapper = PlainLoopAgentRunner(inner, store=store, max_issues_per_perf_eval=3)
 
         wrapper.invoke(
+            response_cls=_Resp,
             kind="judge",
             iteration=1,
             workspace="/tmp/ws",
@@ -216,7 +222,7 @@ class TestValidation:
             max_issues_per_perf_eval=3,
         )
         with pytest.raises(ValueError, match="iteration"):
-            wrapper.invoke(kind="judge", round_label="r")
+            wrapper.invoke(response_cls=_Resp, kind="judge", round_label="r")
 
     def test_perf_eval_without_iteration_raises(self, tmp_path):
         store = _make_store(tmp_path)
@@ -226,7 +232,7 @@ class TestValidation:
             max_issues_per_perf_eval=3,
         )
         with pytest.raises(ValueError, match="iteration"):
-            wrapper.invoke(kind="perf_eval", round_label="r")
+            wrapper.invoke(response_cls=_Resp, kind="perf_eval", round_label="r")
 
 
 class TestBackendName:

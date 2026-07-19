@@ -6,7 +6,7 @@ import pytest
 from agentshim.executor import CommandRequest, CommandResult, CommandStreamSink
 
 from vibesys._agent_cli.claude import ClaudeCodeCodingAgent
-from vibesys._agent_cli.cli_agent import CLICodingAgent
+from vibesys._agent_cli.cli_agent import CLICodingAgent, CLIGenerationSession
 from vibesys._agent_cli.codex import CodexCodingAgent
 from vibesys._agent_cli.gemini import GeminiCodingAgent
 
@@ -56,12 +56,32 @@ class RecordingExecutor:
         )
 
 
-class DummyAgent(CLICodingAgent):
+class DummyAgent(CLICodingAgent[CLIGenerationSession]):
     def __init__(self, executor: RecordingExecutor):
         super().__init__("dummy", executor=executor)
 
     def _get_command(self, prompt: str) -> list[str]:
         return [self.binary_path, "run"]
+
+    def _create_session(
+        self,
+        cmd: list[str],
+        cwd: str | None = None,
+        timeout: int | None = None,
+        silent: bool = False,
+    ) -> CLIGenerationSession:
+        return CLIGenerationSession(
+            binary_name=self.binary_name,
+            env=self.env,
+            log_prefix=self._log_prefix,
+            cmd=cmd,
+            logger=self.logger,
+            cwd=cwd,
+            timeout=timeout,
+            silent=silent,
+            event_handler=self.event_handler,
+            executor=self.executor,
+        )
 
 
 def test_agent_initialization_uses_command_executor():

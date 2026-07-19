@@ -89,7 +89,7 @@ def _save_state(log_dir: Path, state: PlainLoopState) -> None:
     os.replace(tmp, target)
 
 
-def _load_state(log_dir: Path) -> PlainLoopState | None:  # pyright: ignore[reportUnusedFunction]
+def load_state(log_dir: Path) -> PlainLoopState | None:
     path = log_dir / "state.json"
     if not path.is_file():
         return None

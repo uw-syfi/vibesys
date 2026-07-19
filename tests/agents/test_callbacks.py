@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 from vibesys.agents.callbacks import AgentLogger
 from vibesys.agents.progress import RoundProgress
-from vibesys.constants import _DIM, _GREEN, _RED, _RESET
+from vibesys.constants import DIM, GREEN, RED, RESET
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
@@ -63,7 +63,7 @@ class TestOnLlmEnd:
         logger.on_llm_end(_make_response("some text"))
         out = capsys.readouterr().out
         # Only the newline, no green-wrapped text
-        assert f"{_GREEN}some text{_RESET}" not in out
+        assert f"{GREEN}some text{RESET}" not in out
 
     def test_not_streaming_prints_text(self, capsys):
         logger = AgentLogger()
@@ -151,8 +151,8 @@ class TestOnToolEnd:
         logger.on_tool_end(output)
         out = capsys.readouterr().out
         assert "ok" in out
-        assert _DIM not in out
-        assert _RED not in out
+        assert DIM not in out
+        assert RED not in out
 
     def test_error_status_is_plain_text(self, capsys):
         logger = AgentLogger()
@@ -163,8 +163,8 @@ class TestOnToolEnd:
         logger.on_tool_end(output)
         out = capsys.readouterr().out
         assert "Error: file not found" in out
-        assert _RED not in out
-        assert _DIM not in out
+        assert RED not in out
+        assert DIM not in out
 
     def test_command_failed_exit_code_is_plain_text(self, capsys):
         logger = AgentLogger()
@@ -179,8 +179,8 @@ class TestOnToolEnd:
         logger.on_tool_end(output)
         out = capsys.readouterr().out
         assert "Exit code: 128" in out
-        assert _RED not in out
-        assert _DIM not in out
+        assert RED not in out
+        assert DIM not in out
 
     def test_command_succeeded_exit_code_is_plain_text(self, capsys):
         logger = AgentLogger()
@@ -191,8 +191,8 @@ class TestOnToolEnd:
         logger.on_tool_end(output)
         out = capsys.readouterr().out
         assert "hello world" in out
-        assert _DIM not in out
-        assert _RED not in out
+        assert DIM not in out
+        assert RED not in out
 
 
 class TestOnToolError:
@@ -202,7 +202,7 @@ class TestOnToolError:
 
         logger.on_tool_error(Exception("something broke"), run_id=uuid4())
         out = capsys.readouterr().out
-        assert _RED not in out
+        assert RED not in out
         assert "something broke" in out
         assert "Tool error" in out
 
@@ -212,7 +212,7 @@ class TestOnToolError:
 
         logger.on_tool_error(Exception("fail"), run_id=uuid4())
         out = capsys.readouterr().out
-        assert _DIM not in out
+        assert DIM not in out
 
 
 class TestStateManagement:
