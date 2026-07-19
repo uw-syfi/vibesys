@@ -1,5 +1,10 @@
 """Shared run context: ``_RunContext``, ``create_run_context``, and ``setup_exp_dir``."""
 
+# File-scoped strict relaxations to keep churn low while this module is
+# under active refactoring (see the _RunContext extraction PRs); pay down
+# once that work settles.
+# pyright: reportPrivateUsage=false, reportUnknownParameterType=false, reportMissingParameterType=false, reportDeprecated=false
+
 import shutil
 import subprocess
 import uuid

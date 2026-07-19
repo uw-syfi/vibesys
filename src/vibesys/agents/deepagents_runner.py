@@ -10,19 +10,20 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TextIO, TypeVar
 
 from deepagents import create_deep_agent
 from langchain.agents.structured_output import AutoStrategy
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel
 
 from vibesys._agent_cli.base import MCPServerSpec
 from vibesys.agent_runner import (
-    _DEFAULT_MAX_TEXT_LEN,
-    _log_agent_config,
-    _run_typed_agent,
+    _DEFAULT_MAX_TEXT_LEN,  # pyright: ignore[reportPrivateUsage]
+    _log_agent_config,  # pyright: ignore[reportPrivateUsage]
+    _run_typed_agent,  # pyright: ignore[reportPrivateUsage]
 )
 from vibesys.agents.callbacks import AgentLogger
 from vibesys.agents.progress import AgentProgress
@@ -47,7 +48,7 @@ class DeepAgentsRunner:
         backends: dict[str, Any],
         skills: list[str],
         model_name: str | None,
-        run_log_file,
+        run_log_file: TextIO | None,
     ):
         self._model = model
         self._backends = backends
@@ -90,7 +91,7 @@ class DeepAgentsRunner:
         )
         _log_agent_config(agent, label, self._run_log_file)
 
-        callbacks = [
+        callbacks: list[BaseCallbackHandler] = [
             AgentLogger(
                 log_file=self._run_log_file,
                 model_name=self._model_name,

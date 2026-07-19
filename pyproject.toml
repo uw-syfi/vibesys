@@ -73,7 +73,16 @@ select = ["E", "F", "I", "UP", "B", "W"]
 ignore = ["E501"]
 
 [tool.pyright]
-typeCheckingMode = "basic"
+typeCheckingMode = "strict"
+# Strict minus the three rules below: untyped third-party dependencies
+# (deepagents, langchain, modal, docker SDKs) leak Unknown into member
+# accesses, inferred variables, and call arguments throughout the agent
+# runner and loop code. Declared annotations remain fully enforced via
+# reportUnknownParameterType / reportMissingParameterType /
+# reportMissingTypeArgument, which stay at strict defaults.
+reportUnknownMemberType = "none"
+reportUnknownVariableType = "none"
+reportUnknownArgumentType = "none"
 pythonVersion = "3.11"
 include = ["src", "libs/vs-feature-flags/src", "libs/vs-issue-board/src", "libs/vs-sandbox/src"]
 executionEnvironments = [

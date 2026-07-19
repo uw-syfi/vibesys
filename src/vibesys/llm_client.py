@@ -4,7 +4,11 @@ from pathlib import Path
 from pydantic import SecretStr
 
 from vibesys.config import Config, ThinkingCfg
-from vibesys.constants import _ANTHROPIC_PREFIXES, _GOOGLE_PREFIXES, _OPENAI_PREFIXES
+from vibesys.constants import (
+    _ANTHROPIC_PREFIXES,  # pyright: ignore[reportPrivateUsage]
+    _GOOGLE_PREFIXES,  # pyright: ignore[reportPrivateUsage]
+    _OPENAI_PREFIXES,  # pyright: ignore[reportPrivateUsage]
+)
 
 
 def _is_google_model(model_name: str) -> bool:
@@ -23,7 +27,7 @@ def _has_thinking(thinking: ThinkingCfg) -> bool:
     return bool(thinking.level or thinking.budget)
 
 
-def _build_model(config: Config):
+def _build_model(config: Config):  # pyright: ignore[reportUnusedFunction]
     """Build the chat model from a parsed :class:`Config`."""
     model_name = config.model.name
     provider = config.model.provider

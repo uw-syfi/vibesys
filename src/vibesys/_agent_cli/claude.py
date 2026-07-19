@@ -1,12 +1,15 @@
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentshim.claude import ClaudeGenerationSession
 from agentshim.events import AgentEventHandler
 
 from .base import MCPServerSpec
 from .cli_agent import CLICodingAgent
+
+if TYPE_CHECKING:
+    from agentshim.executor import CommandExecutor
 
 
 class ClaudeCodeCodingAgent(CLICodingAgent):
@@ -17,7 +20,7 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
         model: str | None = None,
         event_handler: AgentEventHandler | None = None,
         *,
-        executor=None,
+        executor: "CommandExecutor | None" = None,
     ):
         """Initialize the Claude Code coding agent.
 
@@ -71,10 +74,10 @@ class ClaudeCodeCodingAgent(CLICodingAgent):
             cmd.extend(["--model", self.model])
         return cmd
 
-    def _extract_session_id(self, session: ClaudeGenerationSession) -> str | None:
+    def _extract_session_id(self, session: ClaudeGenerationSession) -> str | None:  # pyright: ignore[reportIncompatibleMethodOverride]
         return session.session_id
 
-    def _create_session(
+    def _create_session(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         cmd: list[str],
         cwd: str | None = None,

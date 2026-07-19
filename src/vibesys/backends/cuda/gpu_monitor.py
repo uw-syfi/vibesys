@@ -20,6 +20,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -48,7 +49,7 @@ class ContentionStatus:
 
     is_contended: bool = False
     #: Processes that appeared on the monitored GPU after the baseline.
-    new_procs: list[dict] = field(default_factory=list)
+    new_procs: list[dict[str, Any]] = field(default_factory=list)
     #: Current GPU memory / utilisation.
     gpu: GpuInfo | None = None
     timestamp: str = ""
@@ -128,9 +129,9 @@ def _query_gpu_procs() -> str:
     return result.stdout
 
 
-def _parse_proc_output(raw: str) -> list[dict]:
+def _parse_proc_output(raw: str) -> list[dict[str, Any]]:
     """Parse nvidia-smi compute-apps CSV into process dicts."""
-    procs: list[dict] = []
+    procs: list[dict[str, Any]] = []
     for line in raw.strip().splitlines():
         if not line.strip() or "pid" in line.lower() and "process" in line.lower():
             continue

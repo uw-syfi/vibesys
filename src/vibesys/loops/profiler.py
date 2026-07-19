@@ -16,8 +16,13 @@ and decides what to do with the returned summary.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from vibesys.profilers import ProfilerKind, profiler_definition, require_profiler_kind
 from vibesys.schemas import ProfilerSummary
+
+if TYPE_CHECKING:
+    from vibesys.run import LoopContext
 
 
 def mcp_spec(profiler_kind: ProfilerKind):
@@ -44,7 +49,7 @@ def mcp_spec(profiler_kind: ProfilerKind):
 
 
 def invoke_profiler(
-    ctx,
+    ctx: LoopContext,
     *,
     system_prompt: str,
     round_label: str,

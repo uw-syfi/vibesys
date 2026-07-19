@@ -12,6 +12,7 @@ import tempfile
 import uuid
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from deepagents.backends.protocol import (
     EditResult,
@@ -21,6 +22,9 @@ from deepagents.backends.protocol import (
     WriteResult,
 )
 from deepagents.backends.sandbox import BaseSandbox
+
+if TYPE_CHECKING:
+    from types import FrameType
 
 # Global registry of live containers for cleanup on exit / SIGINT.
 _live_containers: dict[str, str] = {}  # container_id -> container_name
@@ -56,7 +60,7 @@ atexit.register(_cleanup_containers)
 _original_sigint = signal.getsignal(signal.SIGINT)
 
 
-def _sigint_handler(signum, frame):
+def _sigint_handler(signum: int, frame: FrameType | None) -> None:
     """Ensure cleanup runs then re-raise the interrupt."""
     # Restore original handler FIRST to prevent recursive re-entry
     # if another SIGINT arrives during cleanup.
@@ -179,7 +183,7 @@ class DockerSandbox(BaseSandbox):
     def _log_cmd(
         self,
         cmd: list[str],
-        result: subprocess.CompletedProcess | None = None,
+        result: subprocess.CompletedProcess[str] | None = None,
         error: str | None = None,
     ) -> None:
         if self._logger is None:
@@ -646,5 +650,5 @@ class DockerSandbox(BaseSandbox):
         self.start()
         return self
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, *exc: object) -> None:
         self.stop()

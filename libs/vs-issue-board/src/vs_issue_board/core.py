@@ -16,6 +16,7 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from threading import RLock
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -46,7 +47,7 @@ class IssueEvent(BaseModel):
     action: str
     iteration: int | None = None
     note: str = ""
-    payload: dict | None = None
+    payload: dict[str, Any] | None = None
 
 
 class Issue(BaseModel):
@@ -78,7 +79,7 @@ class IssueBoard:
         self.path = Path(path)
         self._lock = RLock()
         self._on_change: Callable[[], None] | None = None
-        self._data: dict = {
+        self._data: dict[str, Any] = {
             "version": _STORE_VERSION,
             "next_id": 1,
             "issues": [],
@@ -120,7 +121,7 @@ class IssueBoard:
             if isinstance(loaded, dict) and loaded.get("version") == _STORE_VERSION:
                 self._data = loaded
 
-    def _issue_from_dict(self, raw: dict) -> Issue:
+    def _issue_from_dict(self, raw: dict[str, Any]) -> Issue:
         return Issue.model_validate(raw)
 
     def _replace_issue(self, issue: Issue) -> None:
@@ -183,7 +184,7 @@ class IssueBoard:
         actor: str,
         iteration: int,
         note: str = "",
-        payload: dict | None = None,
+        payload: dict[str, Any] | None = None,
     ) -> Issue:
         if not isinstance(status, IssueStatus):
             status = IssueStatus(status)
@@ -252,7 +253,7 @@ class IssueBoard:
         actor: str,
         iteration: int,
         note: str = "",
-        payload: dict | None = None,
+        payload: dict[str, Any] | None = None,
     ) -> Issue:
         with self._lock:
             issue = self.get(issue_id)

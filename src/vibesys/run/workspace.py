@@ -15,8 +15,13 @@ import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vibesys.input_project import materialize_input_project
+
+if TYPE_CHECKING:
+    from vibesys.backends.base import ComputeBackendImpl
+    from vibesys.sandbox.run_environment import RunEnvironment
 
 # Dirs excluded from workspace copy, git tracking, and the
 # Modal-side tar download. ``_auth`` and ``_opt_vibesys`` are
@@ -85,8 +90,8 @@ class Workspace:
         self,
         root: Path,
         *,
-        run_environment,
-        backend,
+        run_environment: "RunEnvironment",
+        backend: "ComputeBackendImpl",
         log: Callable[[str], None],
         project_root: Path,
         excluded_dirs: Iterable[str] = EXCLUDED_WORKSPACE_DIRS,

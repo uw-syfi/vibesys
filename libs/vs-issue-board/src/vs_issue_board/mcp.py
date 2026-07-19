@@ -86,7 +86,7 @@ def build_server(args: argparse.Namespace) -> FastMCP:
     mcp = FastMCP("issue-board")
 
     @mcp.tool()
-    def list_issues(status: str | None = None) -> str:
+    def list_issues(status: str | None = None) -> str:  # pyright: ignore[reportUnusedFunction]
         """List issues. Optional status filter: 'open', 'in_progress', 'closed', 'blocked'."""
         store.reload()
         try:
@@ -102,7 +102,7 @@ def build_server(args: argparse.Namespace) -> FastMCP:
         return "\n".join(format_issue_short(i) for i in issues)
 
     @mcp.tool()
-    def get_issue(issue_id: int) -> str:
+    def get_issue(issue_id: int) -> str:  # pyright: ignore[reportUnusedFunction]
         """Return the full body of an issue by id."""
         store.reload()
         issue = store.get(issue_id)
@@ -111,7 +111,7 @@ def build_server(args: argparse.Namespace) -> FastMCP:
         return format_issue_full(issue)
 
     @mcp.tool()
-    def search_issues(query: str) -> str:
+    def search_issues(query: str) -> str:  # pyright: ignore[reportUnusedFunction]
         """Substring search across all issues' title+description.
 
         Use comma-separated keywords for AND-matching, e.g. 'kv cache, paged'.
@@ -126,7 +126,7 @@ def build_server(args: argparse.Namespace) -> FastMCP:
     if not args.read_only:
 
         @mcp.tool()
-        def create_issue(type: str, title: str, description: str) -> str:
+        def create_issue(type: str, title: str, description: str) -> str:  # pyright: ignore[reportUnusedFunction]
             """Create a new issue.
 
             Args:

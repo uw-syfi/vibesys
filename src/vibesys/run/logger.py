@@ -3,16 +3,17 @@
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import TextIO
 
-from vibesys.agent_runner import _log_and_print
+from vibesys.agent_runner import _log_and_print  # pyright: ignore[reportPrivateUsage]
 
 
 class _TeeWriter:
-    def __init__(self, primary, secondary):
+    def __init__(self, primary: TextIO, secondary: TextIO) -> None:
         self._primary = primary
         self._secondary = secondary
 
-    def write(self, text):
+    def write(self, text: str) -> int:
         self._primary.write(text)
         self._secondary.write(text)
         return len(text)

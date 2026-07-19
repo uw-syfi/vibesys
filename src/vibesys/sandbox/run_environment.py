@@ -222,7 +222,7 @@ class DockerEnvironment:
             extra_init_commands=extra_init_commands,
             setup_fns=setup_fns,
         )
-        log = request.log or (lambda _: None)
+        log: Callable[[str], None] = request.log or (lambda _: None)
         label = getattr(request.backend, "image", self.config.image or "<backend-default>")
         log(f"[docker] starting container with image {label}")
         # DOCKER-kind sandboxes always implement start().
@@ -367,7 +367,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             extra_init_commands=extra_init_commands,
             setup_fns=setup_fns,
         )
-        log = request.log or (lambda _: None)
+        log: Callable[[str], None] = request.log or (lambda _: None)
         log(
             "[modal] starting local Docker editor; GPU work will dispatch "
             "to Modal via `modal run main.py::<function>`"
@@ -667,7 +667,7 @@ def _docker_workspace_run(
     backend: ComputeBackendImpl,
     shell_command: str,
     timeout: int,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[bytes]:
     image = getattr(backend, "image", "ubuntu:latest")
     return subprocess.run(
         [

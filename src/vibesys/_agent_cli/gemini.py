@@ -1,12 +1,15 @@
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentshim.events import AgentEventHandler
 from agentshim.gemini import GeminiGenerationSession
 
 from .base import MCPServerSpec
 from .cli_agent import CLICodingAgent
+
+if TYPE_CHECKING:
+    from agentshim.executor import CommandExecutor
 
 
 class GeminiCodingAgent(CLICodingAgent):
@@ -17,7 +20,7 @@ class GeminiCodingAgent(CLICodingAgent):
         model: str | None = None,
         event_handler: AgentEventHandler | None = None,
         *,
-        executor=None,
+        executor: "CommandExecutor | None" = None,
     ):
         """Initialize the Gemini coding agent.
 
@@ -57,7 +60,7 @@ class GeminiCodingAgent(CLICodingAgent):
 
         return cmd
 
-    def _create_session(
+    def _create_session(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         cmd: list[str],
         cwd: str | None = None,

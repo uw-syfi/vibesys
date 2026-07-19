@@ -11,14 +11,25 @@ backend.
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vibesys.backends.base import ComputeBackendImpl, ContentionMonitor
+    from vibesys.sandbox.run_environment import RunEnvironmentView
 
 
 class DeviceLease:
-    def __init__(self, backend, *, log_dir: Path, run_environment_view=None) -> None:
+    def __init__(
+        self,
+        backend: "ComputeBackendImpl",
+        *,
+        log_dir: Path,
+        run_environment_view: "RunEnvironmentView | None" = None,
+    ) -> None:
         self._backend = backend
         self._log_dir = log_dir
         self._view = run_environment_view
-        self.monitor = None
+        self.monitor: ContentionMonitor | None = None
 
     @property
     def selected_device(self):

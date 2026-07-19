@@ -3,8 +3,11 @@
 import json
 import re
 import uuid
+from collections.abc import Callable, Iterator
+from typing import Any, TextIO, TypeVar
 
-from pydantic import ValidationError
+from langchain_core.callbacks import BaseCallbackHandler
+from pydantic import BaseModel, ValidationError
 
 from vibesys.agents.callbacks import AgentLogger, TodoDisplay
 from vibesys.schemas import (
@@ -20,6 +23,8 @@ from vibesys.schemas import (
     Verdict,
 )
 from vibesys.server.events import AgentOutputChannel
+
+T = TypeVar("T", bound=BaseModel)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -49,7 +54,7 @@ _PROFILER_PROMPT = (
 # ---------------------------------------------------------------------------
 
 
-def _extract_todos(update: dict) -> list[dict] | None:
+def _extract_todos(update: dict[str, Any]) -> list[dict[str, Any]] | None:
     """Extract todos from any node in a stream update."""
     for node_data in update.values():
         if isinstance(node_data, dict):
@@ -59,7 +64,7 @@ def _extract_todos(update: dict) -> list[dict] | None:
     return None
 
 
-def _iter_update_dicts(value):
+def _iter_update_dicts(value: Any) -> Iterator[dict[str, Any]]:
     """Yield all nested dict nodes reachable from a stream update payload."""
     if isinstance(value, dict):
         yield value
@@ -70,7 +75,7 @@ def _iter_update_dicts(value):
             yield from _iter_update_dicts(item)
 
 
-def _extract_text_from_message_content(content) -> str:
+def _extract_text_from_message_content(content: Any) -> str:
     """Normalize AI message content that may be a string or a content-block list."""
     if isinstance(content, str):
         return content
@@ -88,7 +93,7 @@ def _extract_text_from_message_content(content) -> str:
     return ""
 
 
-def _extract_last_ai_message_text(update: dict) -> str:
+def _extract_last_ai_message_text(update: dict[str, Any]) -> str:
     """Find the most recent AI message text anywhere in the streamed update tree."""
     last_text = ""
     for node in _iter_update_dicts(update):
@@ -109,7 +114,9 @@ def _extract_last_ai_message_text(update: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _log_agent_config(agent, label: str, log_file) -> None:
+def _log_agent_config(  # pyright: ignore[reportUnusedFunction] — imported by deepagents_runner
+    agent: Any, label: str, log_file: TextIO | None
+) -> None:
     """Write agent configuration (tools list) to log file."""
     if not log_file:
         return
@@ -136,7 +143,7 @@ def _log_agent_config(agent, label: str, log_file) -> None:
 
 def _log_and_print(
     text: str,
-    log_file=None,
+    log_file: TextIO | None = None,
     max_len: int | None = None,
 ) -> None:
     """Print to stdout (optionally truncated) and write full text to log_file."""
@@ -157,7 +164,7 @@ def _log_and_print(
 
 def _log_markdown_and_print(
     text: str,
-    log_file=None,
+    log_file: TextIO | None = None,
     max_len: int | None = None,
     *,
     channel: AgentOutputChannel = "assistant",
@@ -180,7 +187,7 @@ def _log_markdown_and_print(
 
 def _log_prompt_markdown_and_print(
     prompt: str,
-    log_file=None,
+    log_file: TextIO | None = None,
     max_len: int | None = None,
 ) -> None:
     """Emit raw prompt Markdown while preserving it in logs."""
@@ -194,7 +201,7 @@ def _log_prompt_markdown_and_print(
 
 def _log_json_and_print(
     text: str,
-    log_file=None,
+    log_file: TextIO | None = None,
     max_len: int | None = None,
 ) -> None:
     """Emit raw JSON; presentation clients decide how to render it."""
@@ -206,7 +213,7 @@ def _log_json_and_print(
 # ---------------------------------------------------------------------------
 
 
-def _parse_typed_response_text(text: str, response_cls):
+def _parse_typed_response_text(text: str, response_cls: type[T]) -> T | None:
     """Best-effort recovery of a typed Pydantic payload from raw model text."""
     if not text:
         return None
@@ -237,7 +244,7 @@ def _parse_typed_response_text(text: str, response_cls):
     return None
 
 
-def _coerce_typed_response(payload, response_cls):
+def _coerce_typed_response(payload: Any, response_cls: type[T]) -> T | None:
     if isinstance(payload, response_cls):
         return payload
     if isinstance(payload, dict):
@@ -250,7 +257,7 @@ def _coerce_typed_response(payload, response_cls):
     return None
 
 
-def _extract_typed_structured_response(update, response_cls):
+def _extract_typed_structured_response(update: Any, response_cls: type[T]) -> T | None:
     """Find a structured response of the given type anywhere in the streamed update tree."""
     for node in _iter_update_dicts(update):
         if "structured_response" not in node:
@@ -263,11 +270,11 @@ def _extract_typed_structured_response(update, response_cls):
 
 # Backwards-compatible aliases retained for tests that import these names
 # directly. Internal callers should use the generic helpers above.
-def _parse_implementer_response_text(text: str) -> ImplementerResponse | None:
+def _parse_implementer_response_text(text: str) -> ImplementerResponse | None:  # pyright: ignore[reportUnusedFunction] — imported by tests
     return _parse_typed_response_text(text, ImplementerResponse)
 
 
-def _parse_perf_eval_response_text(text: str) -> PerfEvalResponse | None:
+def _parse_perf_eval_response_text(text: str) -> PerfEvalResponse | None:  # pyright: ignore[reportUnusedFunction] — imported by tests
     return _parse_typed_response_text(text, PerfEvalResponse)
 
 
@@ -277,12 +284,12 @@ def _parse_perf_eval_response_text(text: str) -> PerfEvalResponse | None:
 
 
 def run_agent(
-    agent,
+    agent: Any,
     prompt: str,
-    callbacks: list | None = None,
+    callbacks: list[BaseCallbackHandler] | None = None,
     thread_id: str | None = None,
     round_label: str = "implementer",
-    log_file=None,
+    log_file: TextIO | None = None,
     max_text_len: int | None = None,
 ) -> str:
     """Run agent, return final AI message text.
@@ -327,18 +334,18 @@ def run_agent(
 
 
 def _run_typed_agent(
-    agent,
+    agent: Any,
     prompt: str,
     *,
-    response_cls,
+    response_cls: type[T],
     label: str,
-    fallback_factory,
-    callbacks: list | None = None,
+    fallback_factory: Callable[[], T],
+    callbacks: list[BaseCallbackHandler] | None = None,
     thread_id: str | None = None,
     round_label: str = "agent",
-    log_file=None,
+    log_file: TextIO | None = None,
     max_text_len: int | None = None,
-):
+) -> T:
     """Generic agent runner returning a structured Pydantic response of *response_cls*.
 
     All structured-response runners share this plumbing so the per-agent
@@ -394,12 +401,12 @@ def _run_typed_agent(
 
 
 def run_implementer_agent(
-    agent,
+    agent: Any,
     prompt: str,
-    callbacks: list | None = None,
+    callbacks: list[BaseCallbackHandler] | None = None,
     thread_id: str | None = None,
     round_label: str = "implementer",
-    log_file=None,
+    log_file: TextIO | None = None,
     max_text_len: int | None = None,
 ) -> ImplementerResponse:
     """Run implementer agent, return structured ImplementerResponse."""
@@ -421,12 +428,12 @@ def run_implementer_agent(
 
 
 def run_judge_agent(
-    agent,
+    agent: Any,
     prompt: str,
-    callbacks: list | None = None,
+    callbacks: list[BaseCallbackHandler] | None = None,
     thread_id: str | None = None,
     round_label: str = "judge",
-    log_file=None,
+    log_file: TextIO | None = None,
     max_text_len: int | None = None,
 ) -> JudgeResponse:
     """Run judge agent, return structured JudgeResponse.
@@ -453,12 +460,12 @@ def run_judge_agent(
 
 
 def run_perf_eval_agent(
-    agent,
+    agent: Any,
     prompt: str,
-    callbacks: list | None = None,
+    callbacks: list[BaseCallbackHandler] | None = None,
     thread_id: str | None = None,
     round_label: str = "perf_eval",
-    log_file=None,
+    log_file: TextIO | None = None,
     max_text_len: int | None = None,
 ) -> PerfEvalResponse:
     """Run perf evaluator agent, return structured PerfEvalResponse."""
@@ -519,7 +526,7 @@ def _parse_profiler_response_text(text: str) -> ProfilerResponse | None:
     return None
 
 
-def _coerce_profiler_response(payload) -> ProfilerResponse | None:
+def _coerce_profiler_response(payload: Any) -> ProfilerResponse | None:
     if isinstance(payload, ProfilerResponse):
         return payload
     if isinstance(payload, dict):
@@ -532,7 +539,7 @@ def _coerce_profiler_response(payload) -> ProfilerResponse | None:
     return None
 
 
-def _extract_profiler_structured_response(update: dict) -> ProfilerResponse | None:
+def _extract_profiler_structured_response(update: dict[str, Any]) -> ProfilerResponse | None:
     """Find a structured profiler response anywhere in the streamed update tree."""
     for node in _iter_update_dicts(update):
         if "structured_response" not in node:
@@ -549,12 +556,12 @@ def _extract_profiler_structured_response(update: dict) -> ProfilerResponse | No
 
 
 def run_profiler_agent(
-    agent,
+    agent: Any,
     prompt: str,
-    callbacks: list | None = None,
+    callbacks: list[BaseCallbackHandler] | None = None,
     thread_id: str | None = None,
     round_label: str = "profiler",
-    log_file=None,
+    log_file: TextIO | None = None,
     max_text_len: int | None = None,
 ) -> ProfilerResponse:
     """Run profiler agent, return structured ProfilerResponse."""
@@ -611,14 +618,14 @@ def run_profiler_agent(
 
 
 def run_issue_implementer_agent(
-    agent,
+    agent: Any,
     prompt: str,
     *,
     issue_id: int,
-    callbacks: list | None = None,
+    callbacks: list[BaseCallbackHandler] | None = None,
     thread_id: str | None = None,
     round_label: str = "issue_implementer",
-    log_file=None,
+    log_file: TextIO | None = None,
     max_text_len: int | None = None,
 ) -> IssueImplementerResponse:
     """Run the issue-loop implementer agent, return structured IssueImplementerResponse."""
@@ -642,14 +649,14 @@ def run_issue_implementer_agent(
 
 
 def run_issue_judge_agent(
-    agent,
+    agent: Any,
     prompt: str,
     *,
     issue_id: int,
-    callbacks: list | None = None,
+    callbacks: list[BaseCallbackHandler] | None = None,
     thread_id: str | None = None,
     round_label: str = "issue_judge",
-    log_file=None,
+    log_file: TextIO | None = None,
     max_text_len: int | None = None,
 ) -> IssueJudgeResponse:
     """Run the issue-loop judge agent, return structured IssueJudgeResponse."""
@@ -674,12 +681,12 @@ def run_issue_judge_agent(
 
 
 def run_issue_perf_eval_agent(
-    agent,
+    agent: Any,
     prompt: str,
-    callbacks: list | None = None,
+    callbacks: list[BaseCallbackHandler] | None = None,
     thread_id: str | None = None,
     round_label: str = "issue_perf_eval",
-    log_file=None,
+    log_file: TextIO | None = None,
     max_text_len: int | None = None,
 ) -> IssuePerfEvalResponse:
     """Run the issue-loop performance evaluator agent, return structured IssuePerfEvalResponse."""

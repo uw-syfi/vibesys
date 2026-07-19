@@ -76,7 +76,7 @@ class PlainLoopAgentRunner:
         mcp_servers: list[MCPServerSpec] | None = None,
         tools: list[BaseTool] | None = None,
         **kwargs: Any,
-    ) -> T:
+    ) -> T:  # pyright: ignore[reportInvalidTypeVarUse]
         if kind in ("judge", "perf_eval"):
             if iteration is None:
                 raise ValueError(

@@ -13,6 +13,7 @@ import math
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from vibesys.agents.progress import RoundProgress
 from vibesys.config import Config
@@ -82,7 +83,7 @@ class _RoundRecord:
     # real plateau.
     profile_skipped: bool = False
 
-    def to_json(self) -> dict:
+    def to_json(self) -> dict[str, Any]:
         return {
             "round": self.round_number,
             "commit": self.commit,
@@ -93,7 +94,7 @@ class _RoundRecord:
         }
 
     @classmethod
-    def from_json(cls, data: dict) -> _RoundRecord:
+    def from_json(cls, data: dict[str, Any]) -> _RoundRecord:
         return cls(
             round_number=int(data["round"]),
             commit=data.get("commit"),
@@ -1154,7 +1155,7 @@ def run_agent_loop(
                         status=EventStatus.COMPLETED if passed else EventStatus.FAILED,
                         round_label=f"round-{round_number}",
                         data=RoundFinishedData(
-                            attempts=retry,
+                            attempts=retry,  # pyright: ignore[reportPossiblyUnboundVariable]
                             judge_verdict="pass" if passed else "fail",
                             perf_metric=perf_metric,
                             perf_unit=perf_unit,

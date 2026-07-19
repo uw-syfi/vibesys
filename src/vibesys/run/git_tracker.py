@@ -75,8 +75,8 @@ class GitTracker:
         }
 
     def run(
-        self, cmd: list[str], *, check: bool = True, env: dict | None = None
-    ) -> subprocess.CompletedProcess:
+        self, cmd: list[str], *, check: bool = True, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[bytes]:
         """Run a git command in the workspace, logging stderr on failure."""
         if env is None:
             env = {**os.environ, **self._GIT_ENV}

@@ -293,7 +293,7 @@ class CudaBackend:
         (self.log_dir / "gpu.json").write_text(json.dumps(data, indent=2))
 
 
-def _gpu_to_dict(g: GpuInfo) -> dict:
+def _gpu_to_dict(g: GpuInfo) -> dict[str, int | str]:
     return {
         "index": g.index,
         "uuid": g.uuid,

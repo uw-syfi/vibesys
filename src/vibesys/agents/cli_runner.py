@@ -24,7 +24,7 @@ import shutil
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol, TextIO, TypeVar
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
@@ -36,12 +36,12 @@ from vibesys._agent_cli.codex import CodexCodingAgent
 from vibesys._agent_cli.gemini import GeminiCodingAgent
 from vibesys._agent_cli.opencode import OpencodeCodingAgent
 from vibesys.agent_runner import (
-    _DEFAULT_MAX_TEXT_LEN,
-    _log_and_print,
-    _log_json_and_print,
-    _log_markdown_and_print,
-    _log_prompt_markdown_and_print,
-    _parse_typed_response_text,
+    _DEFAULT_MAX_TEXT_LEN,  # pyright: ignore[reportPrivateUsage]
+    _log_and_print,  # pyright: ignore[reportPrivateUsage]
+    _log_json_and_print,  # pyright: ignore[reportPrivateUsage]
+    _log_markdown_and_print,  # pyright: ignore[reportPrivateUsage]
+    _log_prompt_markdown_and_print,  # pyright: ignore[reportPrivateUsage]
+    _parse_typed_response_text,  # pyright: ignore[reportPrivateUsage]
 )
 from vibesys.agents.callbacks import AgentLogger
 from vibesys.agents.progress import AgentProgress
@@ -99,7 +99,9 @@ def _discover_skill_dirs(root: Path) -> list[Path]:
     return [p.parent for p in root.rglob("SKILL.md")]
 
 
-def _materialize_skills(workspace: Path, skill_dirs: list[Path], log_file=None) -> None:
+def _materialize_skills(
+    workspace: Path, skill_dirs: list[Path], log_file: TextIO | None = None
+) -> None:
     """Copy each skill directory into the per-CLI skill-discovery paths.
 
     Walks each ``skill_dirs`` entry for ``SKILL.md`` files and flattens each
@@ -176,9 +178,9 @@ class CliAgentRunner:
         skills: list[Path] | None = None,
         model_name: str | None = None,
         timeout: int | None = None,
-        run_log_file=None,
-        docker_sandboxes: dict | None = None,
-        modal_sandboxes: dict | None = None,
+        run_log_file: TextIO | None = None,
+        docker_sandboxes: dict[str, Any] | None = None,
+        modal_sandboxes: dict[str, Any] | None = None,
         log_dir: Path | None = None,
     ):
         if provider not in _PROVIDER_CLASSES:
