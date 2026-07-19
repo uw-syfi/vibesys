@@ -85,11 +85,11 @@ class TestBuild:
         assert hostsandbox.build(tmp_path, env={}, log=logs.append) is None
         assert any("bwrap" in m for m in logs)
 
-    def test_non_linux_returns_none(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(hostsandbox.sys, "platform", "darwin")
+    def test_unsupported_platform_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(hostsandbox.sys, "platform", "win32")
         logs: list[str] = []
         assert hostsandbox.build(tmp_path, env={}, log=logs.append) is None
-        assert any("unavailable" in m for m in logs)
+        assert any("no host confinement backend" in m for m in logs)
 
     def test_allow_ancestor_of_workspace_is_rejected(self, tmp_path, monkeypatch):
         monkeypatch.setattr(hostsandbox.sys, "platform", "linux")
@@ -195,6 +195,89 @@ def _has_pair(argv: list[str], flag: str, *operands: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# macOS Seatbelt backend (runs everywhere via monkeypatched platform)
+# ---------------------------------------------------------------------------
+
+
+class TestMacosBuild:
+    def _patch(self, monkeypatch, sandbox_exec="/usr/bin/sandbox-exec"):
+        monkeypatch.setattr(hostsandbox.sys, "platform", "darwin")
+        monkeypatch.setattr(hostsandbox.shutil, "which", lambda *a, **k: sandbox_exec)
+
+    def test_build_returns_seatbelt_on_darwin(self, tmp_path, monkeypatch):
+        self._patch(monkeypatch)
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        sb = hostsandbox.build(workspace, env={})
+        assert isinstance(sb, hostsandbox.SeatbeltSandbox)
+        assert sb.workspace == workspace.resolve()
+
+    def test_missing_sandbox_exec_returns_none(self, tmp_path, monkeypatch):
+        self._patch(monkeypatch, sandbox_exec=None)
+        logs: list[str] = []
+        assert hostsandbox.build(tmp_path, env={}, log=logs.append) is None
+        assert any("sandbox-exec" in m for m in logs)
+
+    def test_allow_ancestor_rejected_on_darwin(self, tmp_path, monkeypatch):
+        self._patch(monkeypatch)
+        workspace = tmp_path / "exp_env" / "run" / "workspace"
+        workspace.mkdir(parents=True)
+        sb = hostsandbox.build(workspace, env={hostsandbox.ALLOW_ENV: str(tmp_path)})
+        assert isinstance(sb, hostsandbox.SeatbeltSandbox)
+        assert tmp_path.resolve() not in sb.read_paths
+
+
+class TestSeatbeltProfile:
+    def _sandbox(self, workspace: Path) -> hostsandbox.SeatbeltSandbox:
+        return hostsandbox.SeatbeltSandbox(
+            sandbox_exec_path="/usr/bin/sandbox-exec",
+            workspace=workspace,
+            read_paths=(Path("/opt/toolchain"),),
+            write_paths=(Path("/home/u/.codex"),),
+        )
+
+    def test_profile_denies_by_default_and_allows_workspace(self, tmp_path):
+        prof = self._sandbox(tmp_path).profile()
+        assert prof.startswith("(version 1)\n(deny default)")
+        # Workspace is read-write; toolchain is read-only; network stays open.
+        assert f'(subpath "{tmp_path}")' in prof
+        assert '(subpath "/opt/toolchain")' in prof
+        assert "(allow network*)" in prof
+
+    def test_profile_does_not_grant_workspace_parent(self, tmp_path):
+        """The sibling-run parent must not appear as an allowed subpath."""
+        workspace = tmp_path / "exp_env" / "run-A" / "workspace"
+        prof = self._sandbox(workspace).profile()
+        # The exact workspace subpath is granted, but its parent is not.
+        assert f'(subpath "{workspace}")' in prof
+        parent = workspace.parent
+        assert f'(subpath "{parent}")' not in prof
+
+    def test_wrap_shape(self, tmp_path):
+        sb = self._sandbox(tmp_path)
+        argv = sb.wrap(["codex", "exec", "--json"])
+        assert argv[0] == "/usr/bin/sandbox-exec"
+        assert argv[1] == "-p"
+        assert argv[2] == sb.profile()
+        assert argv[3:] == ["codex", "exec", "--json"]
+
+    def test_sbpl_string_escapes_quotes_and_backslashes(self):
+        assert hostsandbox._sbpl_string(r'/a/"b"\c') == r'"/a/\"b\"\\c"'
+
+    def test_profile_embeds_paths_safely(self, tmp_path):
+        """A workspace path with SBPL-significant characters stays quoted."""
+        workspace = tmp_path / 'weird ")name'
+        workspace.mkdir()
+        sb = hostsandbox.SeatbeltSandbox(
+            sandbox_exec_path="/usr/bin/sandbox-exec", workspace=workspace
+        )
+        prof = sb.profile()
+        # The literal appears escaped, and the raw unescaped form does not leak.
+        assert hostsandbox._sbpl_string(str(workspace)) in prof
+        assert f'(subpath "{workspace}")' not in prof
+
+
+# ---------------------------------------------------------------------------
 # End-to-end regression through the real launch path (issue #149)
 # ---------------------------------------------------------------------------
 
@@ -285,3 +368,44 @@ def test_generate_does_not_wrap_when_cwd_is_none(tmp_path_factory, monkeypatch):
     monkeypatch.chdir(scratch)
     out = agent.generate("no cwd", cwd=None, silent=True)
     assert "READ_OK" in out
+
+
+def _seatbelt_works() -> bool:
+    """True on macOS with a usable ``sandbox-exec``."""
+    if sys.platform != "darwin":
+        return False
+    sandbox_exec = shutil.which("sandbox-exec")
+    if not sandbox_exec:
+        return False
+    probe = "/usr/bin/true" if Path("/usr/bin/true").exists() else "/bin/true"
+    try:
+        proc = subprocess.run(
+            [sandbox_exec, "-p", "(version 1)(allow default)", probe],
+            capture_output=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
+requires_seatbelt = pytest.mark.skipif(
+    not _seatbelt_works(),
+    reason="requires macOS sandbox-exec",
+)
+
+
+@requires_seatbelt
+def test_seatbelt_blocks_escape_but_allows_workspace(tmp_path_factory):
+    """macOS counterpart of the Linux regression: the Seatbelt profile denies the
+    sibling read/write while the workspace stays usable."""
+    agent, workspace, sibling = _escape_probe(tmp_path_factory)
+    agent.sandbox = hostsandbox.build(workspace, env=agent.env, binary_path=agent.binary_path)
+    assert isinstance(agent.sandbox, hostsandbox.SeatbeltSandbox)
+    out = agent.generate("stay in the workspace", cwd=str(workspace), silent=True)
+
+    assert "READ_OK" not in out and "SECRET=leak" not in out
+    assert "WRITE_OK" not in out
+    assert not (sibling / "pwn.txt").exists()
+    assert "WS_OK" in out
+    assert (workspace / "candidate.txt").read_text().strip() == "ok"
