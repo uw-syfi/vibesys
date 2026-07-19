@@ -89,12 +89,28 @@ class RunSupervisor:
     ) -> None:
         if not content:
             return
-        self.record(
+        self.publish_presentation(
             EventType.AGENT_OUTPUT_CHUNK,
+            AgentOutputChunkData(channel=channel, content=content),
+            agent_kind=agent_kind,
+            invocation_id=invocation_id,
+        )
+
+    def publish_presentation(
+        self,
+        event_type: EventType,
+        data: EventData,
+        *,
+        agent_kind: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Record a presentation event enriched with the active invocation scope."""
+        self.record(
+            event_type,
             agent_kind=agent_kind or self._current_kind,
             round_label=self._current_round,
             invocation_id=invocation_id or self._active_invocation,
-            data=AgentOutputChunkData(channel=channel, content=content),
+            data=data,
         )
 
     def record(

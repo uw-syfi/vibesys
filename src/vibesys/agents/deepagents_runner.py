@@ -21,7 +21,6 @@ from pydantic import BaseModel
 
 from vibesys._agent_cli.base import MCPServerSpec
 from vibesys.agent_runner import (
-    DEFAULT_MAX_TEXT_LEN,
     log_agent_config,
     run_typed_agent,
 )
@@ -110,5 +109,4 @@ class DeepAgentsRunner:
             thread_id=thread_id,
             round_label=round_label,
             log_file=self._run_log_file,
-            max_text_len=DEFAULT_MAX_TEXT_LEN,
         )

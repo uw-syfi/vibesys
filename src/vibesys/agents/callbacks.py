@@ -1,5 +1,4 @@
 import json
-import sys
 import time
 import traceback
 from collections.abc import Callable
@@ -9,8 +8,9 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 
 from vibesys.agents.progress import AgentProgress
-from vibesys.constants import DIM, GREEN, RESET, YELLOW
-from vibesys.server.events import AgentOutputChannel
+from vibesys.render.format import format_status_prefix
+from vibesys.render.sink import output_sink
+from vibesys.server.events import AgentOutputChannel, AgentStatusData
 
 ContextWindowLookup = Callable[[str | None], int | None]
 """Resolves a model name to its context window size in tokens.
@@ -59,75 +59,18 @@ def _default_context_window_lookup(model_name: str | None) -> int | None:
     return None
 
 
-def _format_token_count(n: int) -> str:
-    """Format a token count compactly: ``999`` / ``20k`` / ``1.0M``."""
-    if n < 1_000:
-        return str(n)
-    if n < 1_000_000:
-        return f"{n // 1000}k"
-    return f"{n / 1_000_000:.1f}M"
-
-
-_STATUS_INDICATORS = {
-    "completed": f"{GREEN}✓{RESET}",
-    "in_progress": f"{YELLOW}▶{RESET}",
-    "pending": f"{DIM}○{RESET}",
-}
-
-
-class TodoDisplay:
-    """Renders a persistent todo list box using ANSI cursor control."""
-
-    def __init__(self, file: TextIO | None = None):
-        self._file = file or sys.stdout
-        self._prev_lines = 0
-
-    def update(self, todos: list[dict[str, Any]]) -> None:
-        if not todos:
-            return
-        # Build box lines
-        items = []
-        for t in todos:
-            indicator = _STATUS_INDICATORS.get(t["status"], "?")
-            items.append(f"│ {indicator} {t['content']}")
-        width = max(len(self._strip_ansi(line)) for line in items) + 2
-        width = max(width, len("─ Todo ─") + 4)
-
-        top = f"┌─ Todo {'─' * (width - 8)}┐"
-        bot = f"└{'─' * (width - 1)}┘"
-        padded = [line + " " * (width - len(self._strip_ansi(line)) - 1) + "│" for line in items]
-        box = [top] + padded + [bot]
-
-        out = self._file
-        # Clear previous block
-        if self._prev_lines > 0:
-            out.write(f"\033[{self._prev_lines}A")
-            for _ in range(self._prev_lines):
-                out.write("\033[2K\n")
-            out.write(f"\033[{self._prev_lines}A")
-
-        for line in box:
-            out.write(line + "\n")
-        out.flush()
-        self._prev_lines = len(box)
-
-    @staticmethod
-    def _strip_ansi(s: str) -> str:
-        import re
-
-        return re.sub(r"\033\[[0-9;]*m", "", s)
-
-
 class AgentLogger(BaseCallbackHandler):
-    """Single callback handler for all agent logging: token streaming, tool calls, and tool results.
+    """Single event adapter for all agent activity: token streaming, tool calls, and tool results.
 
-    When ``log_file`` is provided, full untruncated output is written there while
-    stdout receives the truncated version.
+    Every observation is published as typed events through the process-global
+    :func:`~vibesys.render.sink.output_sink` (rendered by whichever surface is
+    composed — headless terminal renderer or TUI client) and, when ``log_file``
+    is provided, written untruncated as plain text to the durable run log.
+    ``AgentLogger`` itself never writes to the terminal.
     """
 
     def __init__(
         self,
-        max_result_len: int | None = 500,
         log_file: TextIO | None = None,
         model_name: str | None = None,
         agent_label: str | None = None,
@@ -135,8 +78,6 @@ class AgentLogger(BaseCallbackHandler):
         context_window_lookup: ContextWindowLookup | None = None,
     ):
         self._streaming = False
-        self._max_result_len = max_result_len
-        self._output = sys.stdout
         self._log_file = log_file
         self._call_count = 0
         self._model_name = model_name
@@ -151,28 +92,23 @@ class AgentLogger(BaseCallbackHandler):
         self._context_window_lookup = context_window_lookup or _default_context_window_lookup
         self._context_window = self._context_window_lookup(model_name)
 
-    def _format_prefix(self) -> str:
-        """Build the dynamic ``[progress | label | elapsed | tokens/max]`` prefix.
+    def _status(self) -> AgentStatusData:
+        """Snapshot the ``[progress | label | elapsed | tokens/max]`` readings.
 
         Computed lazily on each use so the elapsed-time and token-count
-        readings reflect the latest state when the prefix is printed.
+        readings reflect the latest state when the event is emitted.
         """
-        progress_text = self._progress.label() if self._progress is not None else None
-        if not self._agent_label and not progress_text:
-            return ""
-        elapsed = time.monotonic() - self._start_time
-        used = _format_token_count(self._input_tokens)
-        if self._context_window:
-            tokens_str = f"{used}/{_format_token_count(self._context_window)}"
-        else:
-            tokens_str = used
-        parts = []
-        if progress_text:
-            parts.append(progress_text)
-        if self._agent_label:
-            parts.append(self._agent_label)
-        parts.extend([f"{elapsed:.1f}s", tokens_str])
-        return f"[{' | '.join(parts)}] "
+        return AgentStatusData(
+            progress=self._progress.label() if self._progress is not None else None,
+            agent_label=self._agent_label,
+            elapsed_seconds=time.monotonic() - self._start_time,
+            input_tokens=self._input_tokens,
+            context_window=self._context_window,
+        )
+
+    def _format_prefix(self) -> str:
+        """Render the status snapshot as the plain-text log prefix."""
+        return format_status_prefix(self._status())
 
     # --- LLM call context (log-file only) ---
 
@@ -185,9 +121,9 @@ class AgentLogger(BaseCallbackHandler):
         flat = messages[0] if messages else []
 
         # Separator with call number
-        self._print_log(f"\n{'─' * 60}")
-        self._print_log(f"  LLM call #{self._call_count}")
-        self._print_log(f"{'─' * 60}")
+        self._log_line(f"\n{'─' * 60}")
+        self._log_line(f"  LLM call #{self._call_count}")
+        self._log_line(f"{'─' * 60}")
 
         # First call: log model info and system prompt
         if self._call_count == 1:
@@ -195,11 +131,11 @@ class AgentLogger(BaseCallbackHandler):
             if not model_name:
                 id_parts = serialized.get("id", [])
                 model_name = "/".join(id_parts) if id_parts else "unknown"
-            self._print_log(f"  Model: {model_name}")
+            self._log_line(f"  Model: {model_name}")
 
             for msg in flat:
                 if getattr(msg, "type", None) == "system":
-                    self._print_log(f"\n  System prompt:\n{msg.content}")
+                    self._log_line(f"\n  System prompt:\n{msg.content}")
                     break
 
         # Message type summary
@@ -207,7 +143,7 @@ class AgentLogger(BaseCallbackHandler):
 
         type_counts = Counter(getattr(m, "type", "unknown") for m in flat)
         summary = ", ".join(f"{count} {typ}" for typ, count in sorted(type_counts.items()))
-        self._print_log(f"  Messages: {len(flat)} ({summary})")
+        self._log_line(f"  Messages: {len(flat)} ({summary})")
 
         # Last human or tool message (trigger for this call)
         for msg in reversed(flat):
@@ -215,23 +151,27 @@ class AgentLogger(BaseCallbackHandler):
                 content = str(msg.content)
                 if len(content) > 500:
                     content = content[:500] + "..."
-                self._print_log(f"  Last {msg.type} message: {content}")
+                self._log_line(f"  Last {msg.type} message: {content}")
                 break
 
     # --- LLM token streaming ---
 
     def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
         if token:
-            self._publish(token, "assistant")
-            if not self._streaming and self._agent_label:
-                self._print(f"{self._format_prefix()}", end="", flush=True)
-            self._print(token, end="", flush=True)
+            status = self._status()
+            self._publish(token, "assistant", status=status)
+            if not self._streaming:
+                self._log_write(format_status_prefix(status))
+            self._log_write(token)
             self._streaming = True
 
     def on_llm_end(self, response: Any, **kwargs: Any) -> None:
         was_streaming = self._streaming
         if self._streaming:
-            self._print()
+            # Close the streamed line on every surface: renderers and the
+            # log both need the trailing newline the stream never carried.
+            self._publish("\n", "assistant")
+            self._log_write("\n")
             self._streaming = False
 
         msg = response.generations[0][0].message
@@ -254,6 +194,7 @@ class AgentLogger(BaseCallbackHandler):
         input_tokens = usage.get("input_tokens") or 0
         if input_tokens:
             self._input_tokens = input_tokens
+            self._publish_usage()
 
         content = msg.content
 
@@ -263,18 +204,18 @@ class AgentLogger(BaseCallbackHandler):
                 if isinstance(block, dict) and block.get("type") == "thinking":
                     thinking_text = block.get("thinking", "")
                     if thinking_text:
-                        self._print_thinking(thinking_text)
+                        self._emit_thinking(thinking_text)
 
         if was_streaming:
             return
 
-        # Fallback: print full text for models that don't stream tokens
+        # Fallback: emit full text for models that don't stream tokens
         text = msg.text
         if text:
-            self._publish(text, "assistant")
-            self._print(text)
+            self._publish(text + "\n", "assistant")
+            self._log_line(text)
         for tc in msg.tool_calls:
-            self._print_tool_call(tc["name"], tc["args"])
+            self._emit_tool_call(tc["name"], tc["args"])
 
     # --- Tool execution ---
 
@@ -291,16 +232,19 @@ class AgentLogger(BaseCallbackHandler):
     def on_tool_end(self, output: Any, **kwargs: Any) -> None:
         content = output.content if hasattr(output, "content") else str(output)
         name = getattr(output, "name", None) or "unknown"
-        self._print_tool_result(name, content)
+        self._emit_tool_result(name, content)
 
     def on_tool_error(self, error: Any, **kwargs: Any) -> None:
-        self._print(f"Tool error: {error!r}")
+        lines = [f"Tool error: {error!r}"]
         if isinstance(error, BaseException):
             tb = traceback.format_exception(type(error), error, error.__traceback__)
             if tb:
-                self._print("".join(tb).strip())
+                lines.append("".join(tb).strip())
+        text = "\n".join(lines)
+        self._publish(text + "\n", "diagnostic")
+        self._log_line(text)
 
-    # --- Formatting ---
+    # --- Event emission + log formatting ---
 
     # Tool names whose args contain code content that is already tracked in
     # git — no need to duplicate it in the run log.
@@ -323,8 +267,12 @@ class AgentLogger(BaseCallbackHandler):
         }
     )
 
-    def _print_tool_call(self, name: str, args: dict[str, Any]):
-        self._publish(f"→ {name}({json.dumps(args, default=str)})\n", "tool")
+    def _emit_tool_call(self, name: str, args: dict[str, Any]):
+        # Tool-channel chunk kept alongside the typed TOOL_CALL event for
+        # wire compatibility with existing clients.
+        status = self._status()
+        self._publish(f"→ {name}({json.dumps(args, default=str)})\n", "tool", status=status)
+        output_sink().tool_call(name, args, status=status)
         is_code_tool = name in self._CODE_CHANGE_TOOLS
 
         # Log file: skip code content args for file-writing tools
@@ -336,31 +284,24 @@ class AgentLogger(BaseCallbackHandler):
                     continue
                 s = json.dumps(v) if not isinstance(v, str) else v
                 full_parts.append(f'{k}="{s}"' if isinstance(v, str) else f"{k}={s}")
-            self._print_log(f"\n→ {name}({', '.join(full_parts)})")
+            self._log_line(f"\n→ {name}({', '.join(full_parts)})")
 
-        # Truncated args to stdout
-        parts = []
-        for k, v in args.items():
-            s = json.dumps(v) if not isinstance(v, str) else v
-            if len(s) > 80:
-                s = s[:80] + "..."
-            parts.append(f'{k}="{s}"' if isinstance(v, str) else f"{k}={s}")
-        self._print_stdout(f"\n{self._format_prefix()}→ {name}({', '.join(parts)})")
-
-    def _print_thinking(self, text: str):
+    def _emit_thinking(self, text: str):
         self._publish(text, "analysis")
-        self._print("\n[thinking]")
+        self._log_line("\n[thinking]")
         for line in text.split("\n"):
-            self._print(line)
+            self._log_line(line)
 
     # Maximum chars to write per tool result in the log file.  Keeps logs
     # readable while still capturing enough output for debugging.
     _LOG_MAX_RESULT_LEN = 2000
 
-    def _print_tool_result(self, name: str, content: str, color: str = DIM):
-        del name, color
+    def _emit_tool_result(self, name: str, content: str, *, is_error: bool = False):
         full_text = str(content)
+        # Tool-channel chunk kept alongside the typed TOOL_RESULT event for
+        # wire compatibility with existing clients.
         self._publish(full_text, "tool")
+        output_sink().tool_result(name, full_text, is_error=is_error)
 
         # Truncated to log file
         if self._log_file:
@@ -371,17 +312,14 @@ class AgentLogger(BaseCallbackHandler):
                     + f"... [{len(full_text) - self._LOG_MAX_RESULT_LEN} more chars]"
                 )
             for line in log_preview.split("\n"):
-                self._print_log(f"  {line}")
+                self._log_line(f"  {line}")
 
-        # Truncated to stdout
-        preview = full_text
-        if self._max_result_len is not None and len(preview) > self._max_result_len:
-            preview = preview[: self._max_result_len] + "..."
-        for line in preview.split("\n"):
-            self._print_stdout(f"  {line}")
+    def _log_line(self, text: str = "") -> None:
+        """Write one line to the log file only."""
+        self._log_write(text + "\n")
 
-    def _print(self, *args: Any, **kwargs: Any) -> None:
-        """Write to both stdout and log file.
+    def _log_write(self, text: str) -> None:
+        """Write raw text to the log file.
 
         Flushes the log file after each write so operators tailing
         ``run-*.log`` see agent events as they arrive (e.g. codex reasoning
@@ -389,19 +327,8 @@ class AgentLogger(BaseCallbackHandler):
         regular files with block buffering, so without the explicit flush
         streamed events can sit in the buffer for minutes.
         """
-        print(*args, file=self._output, **kwargs)
-        if self._log_file:
-            print(*args, file=self._log_file, **kwargs)
-            self._log_file.flush()
-
-    def _print_stdout(self, *args: Any, **kwargs: Any) -> None:
-        """Write to stdout only."""
-        print(*args, file=self._output, **kwargs)
-
-    def _print_log(self, *args: Any, **kwargs: Any) -> None:
-        """Write to log file only."""
-        if self._log_file:
-            print(*args, file=self._log_file, **kwargs)
+        if self._log_file and text:
+            self._log_file.write(text)
             self._log_file.flush()
 
     # --- Public hooks for non-langchain event sources ---
@@ -410,14 +337,15 @@ class AgentLogger(BaseCallbackHandler):
     # ``BaseCallbackHandler`` hooks (``on_llm_new_token``, ``on_tool_end``, …).
     # The cli runner in ``vibesys.agents.cli_runner`` receives events
     # from ``vibesys._agent_cli.AgentEventHandler`` directly on this object. Both
-    # paths converge on the same private ``_print_*`` formatters, so on-screen
-    # output is identical regardless of which backend is in use.
+    # paths converge on the same private ``_emit_*`` helpers, so emitted events
+    # and log text are identical regardless of which backend is in use.
 
     def on_thinking(self, text: str) -> None:
         if not text:
             return
-        self._publish(text, "analysis")
-        self._print(f"{self._format_prefix()}{text}")
+        status = self._status()
+        self._publish(text, "analysis", status=status)
+        self._log_line(f"{format_status_prefix(status)}{text}")
 
     def on_tool_call(self, tool: str, args: dict[str, Any] | str | None = None) -> None:
         if isinstance(args, dict):
@@ -462,21 +390,24 @@ class AgentLogger(BaseCallbackHandler):
         input_tokens = usage.get("input_tokens") or 0
         if input_tokens:
             self._input_tokens = input_tokens
+            self._publish_usage()
 
     def log_text(self, text: str) -> None:
-        """Print *text* with the agent's prefix and the standard green styling.
+        """Emit *text* as one complete assistant line.
 
-        Mirrors how ``on_llm_new_token`` renders streamed tokens, but for
-        complete chunks of text emitted by the cli backend.
+        Mirrors how ``on_llm_new_token`` streams tokens, but for complete
+        chunks of text emitted by the cli backend — hence the appended
+        newline, which the streaming path only adds at stream end.
         """
         if not text:
             return
-        self._publish(text, "assistant")
-        self._print(f"{self._format_prefix()}{text}")
+        status = self._status()
+        self._publish(text + "\n", "assistant", status=status)
+        self._log_line(f"{format_status_prefix(status)}{text}")
 
     def log_tool_call(self, name: str, args: dict[str, Any]) -> None:
-        """Format a tool invocation the same way the deepagents path does."""
-        self._print_tool_call(name, args)
+        """Emit a tool invocation the same way the deepagents path does."""
+        self._emit_tool_call(name, args)
 
     def log_tool_result(
         self,
@@ -485,12 +416,22 @@ class AgentLogger(BaseCallbackHandler):
         *,
         is_error: bool = False,
     ) -> None:
-        """Format a tool result the same way ``on_tool_end`` does."""
-        self._print_tool_result(name, content)
+        """Emit a tool result the same way ``on_tool_end`` does."""
+        self._emit_tool_result(name, content, is_error=is_error)
 
-    def _publish(self, content: str, channel: AgentOutputChannel) -> None:
-        from vibesys.server.registry import active_supervisor
+    def _publish(
+        self,
+        content: str,
+        channel: AgentOutputChannel,
+        status: AgentStatusData | None = None,
+    ) -> None:
+        output_sink().agent_output(
+            content, channel=channel, status=status if status is not None else self._status()
+        )
 
-        supervisor = active_supervisor()
-        if supervisor is not None:
-            supervisor.publish_agent_output(content, channel=channel)
+    def _publish_usage(self) -> None:
+        output_sink().usage_update(
+            self._input_tokens,
+            context_window=self._context_window,
+            model=self._model_name,
+        )

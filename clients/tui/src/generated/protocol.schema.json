@@ -22,6 +22,17 @@
         "content": {
           "title": "Content",
           "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentStatusData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -29,6 +40,59 @@
         "content"
       ],
       "title": "AgentOutputChunkData",
+      "type": "object"
+    },
+    "AgentStatusData": {
+      "description": "Structured progress readings for one agent invocation.\n\nCarried on presentation events so renderers can format their own status\nprefix (e.g. ``[Round 3/24 | Implementer | 12.3s | 20k/1.0M]``) without\nthe backend baking any layout or styling into the payload.",
+      "properties": {
+        "progress": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Progress"
+        },
+        "agent_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Label"
+        },
+        "elapsed_seconds": {
+          "default": 0.0,
+          "title": "Elapsed Seconds",
+          "type": "number"
+        },
+        "input_tokens": {
+          "default": 0,
+          "title": "Input Tokens",
+          "type": "integer"
+        },
+        "context_window": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Window"
+        }
+      },
+      "title": "AgentStatusData",
       "type": "object"
     },
     "BenchmarkResultData": {
@@ -287,7 +351,11 @@
         "round_finished",
         "run_finished",
         "run_failed",
-        "output"
+        "output",
+        "tool_call",
+        "tool_result",
+        "todo_update",
+        "usage_update"
       ],
       "title": "EventType",
       "type": "string"
@@ -911,7 +979,11 @@
                   "run_interrupted": "#/$defs/RunInterruptedData",
                   "run_started": "#/$defs/RunStartedData",
                   "server_ready": "#/$defs/ServerReadyData",
-                  "subprocess_output": "#/$defs/SubprocessOutputData"
+                  "subprocess_output": "#/$defs/SubprocessOutputData",
+                  "todo_update": "#/$defs/TodoUpdateData",
+                  "tool_call": "#/$defs/ToolCallData",
+                  "tool_result": "#/$defs/ToolResultData",
+                  "usage_update": "#/$defs/UsageUpdateData"
                 },
                 "propertyName": "kind"
               },
@@ -957,6 +1029,18 @@
                 },
                 {
                   "$ref": "#/$defs/RoundFinishedData"
+                },
+                {
+                  "$ref": "#/$defs/ToolCallData"
+                },
+                {
+                  "$ref": "#/$defs/ToolResultData"
+                },
+                {
+                  "$ref": "#/$defs/TodoUpdateData"
+                },
+                {
+                  "$ref": "#/$defs/UsageUpdateData"
                 }
               ]
             },
@@ -1235,6 +1319,150 @@
         "latest_sequence"
       ],
       "title": "SubscribedMessage",
+      "type": "object"
+    },
+    "TodoItemData": {
+      "properties": {
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "content",
+        "status"
+      ],
+      "title": "TodoItemData",
+      "type": "object"
+    },
+    "TodoUpdateData": {
+      "properties": {
+        "kind": {
+          "const": "todo_update",
+          "default": "todo_update",
+          "title": "Kind",
+          "type": "string"
+        },
+        "todos": {
+          "items": {
+            "$ref": "#/$defs/TodoItemData"
+          },
+          "title": "Todos",
+          "type": "array"
+        }
+      },
+      "title": "TodoUpdateData",
+      "type": "object"
+    },
+    "ToolCallData": {
+      "properties": {
+        "kind": {
+          "const": "tool_call",
+          "default": "tool_call",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "args": {
+          "additionalProperties": true,
+          "title": "Args",
+          "type": "object"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentStatusData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "tool"
+      ],
+      "title": "ToolCallData",
+      "type": "object"
+    },
+    "ToolResultData": {
+      "properties": {
+        "kind": {
+          "const": "tool_result",
+          "default": "tool_result",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "is_error": {
+          "default": false,
+          "title": "Is Error",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "tool",
+        "content"
+      ],
+      "title": "ToolResultData",
+      "type": "object"
+    },
+    "UsageUpdateData": {
+      "properties": {
+        "kind": {
+          "const": "usage_update",
+          "default": "usage_update",
+          "title": "Kind",
+          "type": "string"
+        },
+        "input_tokens": {
+          "title": "Input Tokens",
+          "type": "integer"
+        },
+        "context_window": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Window"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        }
+      },
+      "required": [
+        "input_tokens"
+      ],
+      "title": "UsageUpdateData",
       "type": "object"
     }
   },

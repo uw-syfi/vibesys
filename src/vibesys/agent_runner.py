@@ -9,7 +9,8 @@ from typing import Any, TextIO, TypeVar
 from langchain_core.callbacks import BaseCallbackHandler
 from pydantic import BaseModel, ValidationError
 
-from vibesys.agents.callbacks import AgentLogger, TodoDisplay
+from vibesys.agents.callbacks import AgentLogger
+from vibesys.render.sink import output_sink
 from vibesys.schemas import (
     ImplementerResponse,
     IssueImplementerResponse,
@@ -22,7 +23,7 @@ from vibesys.schemas import (
     ProfilerResponse,
     Verdict,
 )
-from vibesys.server.events import AgentOutputChannel
+from vibesys.server.events import AgentOutputChannel, TodoItemData
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -30,7 +31,7 @@ T = TypeVar("T", bound=BaseModel)
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_MAX_TEXT_LEN = 2000
+
 _JUDGE_REVIEW_PROMPT = (
     "Review the implementation. "
     "Write or update pytest tests, run them via `uv run pytest -v`, "
@@ -142,57 +143,36 @@ def log_agent_config(agent: Any, label: str, log_file: TextIO | None) -> None:
 def log_and_print(
     text: str,
     log_file: TextIO | None = None,
-    max_len: int | None = None,
 ) -> None:
-    """Print to stdout (optionally truncated) and write full text to log_file."""
-    from vibesys.server.registry import active_supervisor
+    """Emit *text* as a diagnostic event and write it in full to log_file.
 
-    supervisor = active_supervisor()
-    if supervisor is not None:
-        supervisor.publish_agent_output(text + "\n", channel="diagnostic")
-    if log_file:
-        log_file.write(text + "\n")
-        log_file.flush()
-    if max_len is not None and len(text) > max_len:
-        print(text[:max_len])
-        print(f"... [{len(text) - max_len} more chars, see log for full text]")
-    else:
-        print(text)
+    Display (including any truncation) is the subscribed renderer's job;
+    the log always receives the untruncated text.
+    """
+    log_markdown_and_print(text, log_file=log_file, channel="diagnostic")
 
 
 def log_markdown_and_print(
     text: str,
     log_file: TextIO | None = None,
-    max_len: int | None = None,
     *,
     channel: AgentOutputChannel = "assistant",
 ) -> None:
     """Emit raw Markdown; presentation clients decide how to render it."""
-    from vibesys.server.registry import active_supervisor
-
-    supervisor = active_supervisor()
-    if supervisor is not None:
-        supervisor.publish_agent_output(text + "\n", channel=channel)
+    output_sink().agent_output(text + "\n", channel=channel)
     if log_file:
         log_file.write(text + "\n")
         log_file.flush()
-    if max_len is not None and len(text) > max_len:
-        print(text[:max_len])
-        print(f"... [{len(text) - max_len} more chars, see log for full text]")
-    else:
-        print(text)
 
 
 def log_prompt_markdown_and_print(
     prompt: str,
     log_file: TextIO | None = None,
-    max_len: int | None = None,
 ) -> None:
     """Emit raw prompt Markdown while preserving it in logs."""
     log_markdown_and_print(
         prompt,
         log_file=log_file,
-        max_len=max_len,
         channel="prompt",
     )
 
@@ -200,10 +180,18 @@ def log_prompt_markdown_and_print(
 def log_json_and_print(
     text: str,
     log_file: TextIO | None = None,
-    max_len: int | None = None,
 ) -> None:
     """Emit raw JSON; presentation clients decide how to render it."""
-    log_and_print(text, log_file=log_file, max_len=max_len)
+    log_and_print(text, log_file=log_file)
+
+
+def publish_todos(todos: list[dict[str, Any]]) -> None:
+    """Emit a structured todo-list snapshot extracted from a stream update."""
+    items = [
+        TodoItemData(content=str(t.get("content", "")), status=str(t.get("status", "")))
+        for t in todos
+    ]
+    output_sink().todo_update(items)
 
 
 # ---------------------------------------------------------------------------
@@ -278,24 +266,22 @@ def run_agent(
     thread_id: str | None = None,
     round_label: str = "implementer",
     log_file: TextIO | None = None,
-    max_text_len: int | None = None,
 ) -> str:
     """Run agent, return final AI message text.
 
-    When *log_file* is provided, full input/output/error text is written there
-    while stdout receives a truncated version (controlled by *max_text_len*).
+    When *log_file* is provided, full input/output/error text is written there;
+    terminal display is handled by the subscribed renderer.
     """
     if callbacks is None:
         callbacks = [AgentLogger()]
     callbacks_label = " + ".join(type(cb).__name__ for cb in callbacks)
     if thread_id is None:
         thread_id = uuid.uuid4().hex
-    todo_display = TodoDisplay()
     log_and_print(f"\n=== LLM ROUND START: {round_label} ===", log_file)
     log_and_print(f"callbacks: {callbacks_label}", log_file)
     log_and_print(f"thread_id: {thread_id}", log_file)
     log_and_print("--- input ---", log_file)
-    log_prompt_markdown_and_print(prompt, log_file, max_len=max_text_len)
+    log_prompt_markdown_and_print(prompt, log_file)
     last_ai_message = ""
     try:
         for update in agent.stream(
@@ -305,7 +291,7 @@ def run_agent(
         ):
             todos = _extract_todos(update)
             if todos is not None:
-                todo_display.update(todos)
+                publish_todos(todos)
             if "agent" in update:
                 for msg in update["agent"].get("messages", []):
                     if getattr(msg, "type", None) == "ai" and msg.content:
@@ -313,11 +299,11 @@ def run_agent(
     except Exception as exc:
         error_text = f"error: {type(exc).__name__}: {exc}"
         log_and_print(f"\n=== LLM ROUND ERROR: {round_label} ===", log_file)
-        log_and_print(error_text, log_file, max_len=max_text_len)
+        log_and_print(error_text, log_file)
         raise
     output_text = last_ai_message if last_ai_message else "<no ai message returned>"
     log_and_print("\n=== LLM ROUND OUTPUT (final ai message) ===", log_file)
-    log_markdown_and_print(output_text, log_file, max_len=max_text_len)
+    log_markdown_and_print(output_text, log_file)
     return last_ai_message
 
 
@@ -332,7 +318,6 @@ def run_typed_agent(
     thread_id: str | None = None,
     round_label: str = "agent",
     log_file: TextIO | None = None,
-    max_text_len: int | None = None,
 ) -> T:
     """Generic agent runner returning a structured Pydantic response of *response_cls*.
 
@@ -344,7 +329,6 @@ def run_typed_agent(
         callbacks = [AgentLogger()]
     if thread_id is None:
         thread_id = uuid.uuid4().hex
-    todo_display = TodoDisplay()
     callbacks_label = " + ".join(type(cb).__name__ for cb in callbacks)
     structured_response = None
     last_ai_message = ""
@@ -352,7 +336,7 @@ def run_typed_agent(
     log_and_print(f"callbacks: {callbacks_label}", log_file)
     log_and_print(f"thread_id: {thread_id}", log_file)
     log_and_print("--- input ---", log_file)
-    log_prompt_markdown_and_print(prompt, log_file, max_len=max_text_len)
+    log_prompt_markdown_and_print(prompt, log_file)
     try:
         for update in agent.stream(
             {"messages": [("human", prompt)]},
@@ -361,7 +345,7 @@ def run_typed_agent(
         ):
             todos = _extract_todos(update)
             if todos is not None:
-                todo_display.update(todos)
+                publish_todos(todos)
             structured_response = (
                 _extract_typed_structured_response(update, response_cls) or structured_response
             )
@@ -371,7 +355,7 @@ def run_typed_agent(
     except Exception as exc:
         error_text = f"error: {type(exc).__name__}: {exc}"
         log_and_print(f"\n=== {label} ROUND ERROR: {round_label} ===", log_file)
-        log_and_print(error_text, log_file, max_len=max_text_len)
+        log_and_print(error_text, log_file)
         raise
     if structured_response is None:
         structured_response = parse_typed_response_text(last_ai_message, response_cls)
@@ -380,11 +364,11 @@ def run_typed_agent(
         log_and_print(f"No structured response received from {label.lower()}.", log_file)
         if last_ai_message:
             log_and_print(f"\n=== {label} ROUND OUTPUT (raw ai message) ===", log_file)
-            log_markdown_and_print(last_ai_message, log_file, max_len=max_text_len)
+            log_markdown_and_print(last_ai_message, log_file)
         return fallback_factory()
     output_json = structured_response.model_dump_json(indent=2)
     log_and_print(f"\n=== {label} ROUND OUTPUT ===", log_file)
-    log_json_and_print(output_json, log_file, max_len=max_text_len)
+    log_json_and_print(output_json, log_file)
     return structured_response
 
 
@@ -395,7 +379,6 @@ def run_implementer_agent(
     thread_id: str | None = None,
     round_label: str = "implementer",
     log_file: TextIO | None = None,
-    max_text_len: int | None = None,
 ) -> ImplementerResponse:
     """Run implementer agent, return structured ImplementerResponse."""
     return run_typed_agent(
@@ -411,7 +394,6 @@ def run_implementer_agent(
         thread_id=thread_id,
         round_label=round_label,
         log_file=log_file,
-        max_text_len=max_text_len,
     )
 
 
@@ -422,12 +404,11 @@ def run_judge_agent(
     thread_id: str | None = None,
     round_label: str = "judge",
     log_file: TextIO | None = None,
-    max_text_len: int | None = None,
 ) -> JudgeResponse:
     """Run judge agent, return structured JudgeResponse.
 
-    When *log_file* is provided, full input/output/error text is written there
-    while stdout receives a truncated version (controlled by *max_text_len*).
+    When *log_file* is provided, full input/output/error text is written there;
+    terminal display is handled by the subscribed renderer.
     """
     return run_typed_agent(
         agent,
@@ -443,7 +424,6 @@ def run_judge_agent(
         thread_id=thread_id,
         round_label=round_label,
         log_file=log_file,
-        max_text_len=max_text_len,
     )
 
 
@@ -454,7 +434,6 @@ def run_perf_eval_agent(
     thread_id: str | None = None,
     round_label: str = "perf_eval",
     log_file: TextIO | None = None,
-    max_text_len: int | None = None,
 ) -> PerfEvalResponse:
     """Run perf evaluator agent, return structured PerfEvalResponse."""
     return run_typed_agent(
@@ -474,7 +453,6 @@ def run_perf_eval_agent(
         thread_id=thread_id,
         round_label=round_label,
         log_file=log_file,
-        max_text_len=max_text_len,
     )
 
 
@@ -550,14 +528,12 @@ def run_profiler_agent(
     thread_id: str | None = None,
     round_label: str = "profiler",
     log_file: TextIO | None = None,
-    max_text_len: int | None = None,
 ) -> ProfilerResponse:
     """Run profiler agent, return structured ProfilerResponse."""
     if callbacks is None:
         callbacks = [AgentLogger()]
     if thread_id is None:
         thread_id = uuid.uuid4().hex
-    todo_display = TodoDisplay()
     callbacks_label = " + ".join(type(cb).__name__ for cb in callbacks)
     structured_response = None
     last_ai_message = ""
@@ -565,7 +541,7 @@ def run_profiler_agent(
     log_and_print(f"callbacks: {callbacks_label}", log_file)
     log_and_print(f"thread_id: {thread_id}", log_file)
     log_and_print("--- input ---", log_file)
-    log_prompt_markdown_and_print(prompt, log_file, max_len=max_text_len)
+    log_prompt_markdown_and_print(prompt, log_file)
     try:
         for update in agent.stream(
             {"messages": [("human", prompt)]},
@@ -574,7 +550,7 @@ def run_profiler_agent(
         ):
             todos = _extract_todos(update)
             if todos is not None:
-                todo_display.update(todos)
+                publish_todos(todos)
             structured_response = (
                 _extract_profiler_structured_response(update) or structured_response
             )
@@ -584,7 +560,7 @@ def run_profiler_agent(
     except Exception as exc:
         error_text = f"error: {type(exc).__name__}: {exc}"
         log_and_print(f"\n=== PROFILER ROUND ERROR: {round_label} ===", log_file)
-        log_and_print(error_text, log_file, max_len=max_text_len)
+        log_and_print(error_text, log_file)
         raise
     if structured_response is None:
         structured_response = _parse_profiler_response_text(last_ai_message)
@@ -593,7 +569,7 @@ def run_profiler_agent(
         log_and_print("No structured response received from profiler.", log_file)
         if last_ai_message:
             log_and_print("\n=== PROFILER ROUND OUTPUT (raw ai message) ===", log_file)
-            log_markdown_and_print(last_ai_message, log_file, max_len=max_text_len)
+            log_markdown_and_print(last_ai_message, log_file)
         return ProfilerResponse(
             analysis="No structured response received from profiler.",
             bottlenecks="Profiler did not produce a structured response.",
@@ -601,7 +577,7 @@ def run_profiler_agent(
         )
     output_json = structured_response.model_dump_json(indent=2)
     log_and_print("\n=== PROFILER ROUND OUTPUT ===", log_file)
-    log_json_and_print(output_json, log_file, max_len=max_text_len)
+    log_json_and_print(output_json, log_file)
     return structured_response
 
 
@@ -614,7 +590,6 @@ def run_issue_implementer_agent(
     thread_id: str | None = None,
     round_label: str = "issue_implementer",
     log_file: TextIO | None = None,
-    max_text_len: int | None = None,
 ) -> IssueImplementerResponse:
     """Run the issue-loop implementer agent, return structured IssueImplementerResponse."""
     return run_typed_agent(
@@ -632,7 +607,6 @@ def run_issue_implementer_agent(
         thread_id=thread_id,
         round_label=round_label,
         log_file=log_file,
-        max_text_len=max_text_len,
     )
 
 
@@ -645,7 +619,6 @@ def run_issue_judge_agent(
     thread_id: str | None = None,
     round_label: str = "issue_judge",
     log_file: TextIO | None = None,
-    max_text_len: int | None = None,
 ) -> IssueJudgeResponse:
     """Run the issue-loop judge agent, return structured IssueJudgeResponse."""
     return run_typed_agent(
@@ -664,7 +637,6 @@ def run_issue_judge_agent(
         thread_id=thread_id,
         round_label=round_label,
         log_file=log_file,
-        max_text_len=max_text_len,
     )
 
 
@@ -675,7 +647,6 @@ def run_issue_perf_eval_agent(
     thread_id: str | None = None,
     round_label: str = "issue_perf_eval",
     log_file: TextIO | None = None,
-    max_text_len: int | None = None,
 ) -> IssuePerfEvalResponse:
     """Run the issue-loop performance evaluator agent, return structured IssuePerfEvalResponse."""
     return run_typed_agent(
@@ -695,5 +666,4 @@ def run_issue_perf_eval_agent(
         thread_id=thread_id,
         round_label=round_label,
         log_file=log_file,
-        max_text_len=max_text_len,
     )

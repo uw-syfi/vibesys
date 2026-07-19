@@ -87,7 +87,18 @@ class TestOnLlmEnd:
         logger.on_llm_end(_make_response(content=content))
         out = capsys.readouterr().out
         assert "let me think..." in out
-        assert "[thinking]" in out
+
+    def test_thinking_blocks_marked_in_log(self):
+        log = io.StringIO()
+        content = [
+            {"type": "thinking", "thinking": "let me think..."},
+            {"type": "text", "text": "answer"},
+        ]
+        logger = AgentLogger(log_file=log)
+        logger.on_llm_end(_make_response(content=content))
+        log_text = log.getvalue()
+        assert "[thinking]" in log_text
+        assert "let me think..." in log_text
 
 
 class TestOnToolStart:
@@ -109,8 +120,9 @@ class TestOnToolEnd:
         out = capsys.readouterr().out
         assert "file1.py" in out
 
-    def test_truncates_long_output(self, capsys):
-        logger = AgentLogger(max_result_len=10)
+    def test_truncates_long_output(self, capsys, headless_renderer):
+        headless_renderer.max_result_len = 10
+        logger = AgentLogger()
         output = MagicMock()
         output.content = "a" * 20
         output.name = "shell"
@@ -118,8 +130,9 @@ class TestOnToolEnd:
         out = capsys.readouterr().out
         assert "..." in out
 
-    def test_exact_limit_no_truncation(self, capsys):
-        logger = AgentLogger(max_result_len=10)
+    def test_exact_limit_no_truncation(self, capsys, headless_renderer):
+        headless_renderer.max_result_len = 10
+        logger = AgentLogger()
         output = MagicMock()
         output.content = "a" * 10
         output.name = "shell"
@@ -127,8 +140,9 @@ class TestOnToolEnd:
         out = capsys.readouterr().out
         assert "..." not in out
 
-    def test_custom_max_result_len(self, capsys):
-        logger = AgentLogger(max_result_len=5)
+    def test_custom_max_result_len(self, capsys, headless_renderer):
+        headless_renderer.max_result_len = 5
+        logger = AgentLogger()
         output = MagicMock()
         output.content = "abcdefghij"
         output.name = "test"
@@ -231,9 +245,10 @@ class TestStateManagement:
 class TestLogFile:
     """AgentLogger with log_file writes full output to log while truncating stdout."""
 
-    def test_tool_result_full_in_log_truncated_on_stdout(self, capsys):
+    def test_tool_result_full_in_log_truncated_on_stdout(self, capsys, headless_renderer):
+        headless_renderer.max_result_len = 10
         log = io.StringIO()
-        logger = AgentLogger(max_result_len=10, log_file=log)
+        logger = AgentLogger(log_file=log)
         output = MagicMock()
         output.content = "a" * 50
         output.name = "shell"
@@ -280,9 +295,10 @@ class TestLogFile:
         log_text = log.getvalue()
         assert "deep thoughts" in log_text
 
-    def test_no_log_file_works_normally(self, capsys):
+    def test_no_log_file_works_normally(self, capsys, headless_renderer):
         """AgentLogger without log_file still works as before."""
-        logger = AgentLogger(max_result_len=10)
+        headless_renderer.max_result_len = 10
+        logger = AgentLogger()
         output = MagicMock()
         output.content = "a" * 20
         output.name = "shell"
@@ -436,34 +452,6 @@ class TestOnChatModelStart:
         logger.on_chat_model_start(serialized, messages)
         second_log = log.getvalue()
         assert system_prompt not in second_log
-
-
-class TestFormatTokenCount:
-    def test_zero(self):
-        from vibesys.agents.callbacks import _format_token_count
-
-        assert _format_token_count(0) == "0"
-
-    def test_under_thousand(self):
-        from vibesys.agents.callbacks import _format_token_count
-
-        assert _format_token_count(523) == "523"
-        assert _format_token_count(999) == "999"
-
-    def test_thousands_boundary(self):
-        from vibesys.agents.callbacks import _format_token_count
-
-        assert _format_token_count(1000) == "1k"
-        assert _format_token_count(20_100) == "20k"
-        assert _format_token_count(199_500) == "199k"
-        assert _format_token_count(999_999) == "999k"
-
-    def test_millions(self):
-        from vibesys.agents.callbacks import _format_token_count
-
-        assert _format_token_count(1_000_000) == "1.0M"
-        assert _format_token_count(1_200_000) == "1.2M"
-        assert _format_token_count(1_048_576) == "1.0M"
 
 
 class TestDefaultContextWindowLookup:

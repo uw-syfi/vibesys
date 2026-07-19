@@ -86,7 +86,11 @@ export type EventType =
   | "round_finished"
   | "run_finished"
   | "run_failed"
-  | "output";
+  | "output"
+  | "tool_call"
+  | "tool_result"
+  | "todo_update"
+  | "usage_update";
 export type Text1 = string;
 export type EventStatus = "active" | "answered" | "pending" | "consumed" | "completed" | "failed";
 export type RoundLabel1 = string | null;
@@ -108,6 +112,10 @@ export type Data =
       | JudgeResultData
       | BenchmarkResultData
       | RoundFinishedData
+      | ToolCallData
+      | ToolResultData
+      | TodoUpdateData
+      | UsageUpdateData
     )
   | null;
 export type Kind = "chat";
@@ -142,6 +150,11 @@ export type Attempt = number | null;
 export type Kind9 = "agent_output_chunk";
 export type Channel = "assistant" | "analysis" | "tool" | "diagnostic" | "prompt";
 export type Content1 = string;
+export type Progress = string | null;
+export type AgentLabel = string | null;
+export type ElapsedSeconds = number;
+export type InputTokens = number;
+export type ContextWindow = number | null;
 export type Kind10 = "subprocess_output";
 export type ProcessId = string;
 export type ProcessKind = string;
@@ -160,6 +173,20 @@ export type Attempts = number;
 export type JudgeVerdict = "pass" | "fail";
 export type PerfMetric = number | null;
 export type PerfUnit = string | null;
+export type Kind14 = "tool_call";
+export type Tool = string;
+export type Kind15 = "tool_result";
+export type Tool1 = string;
+export type Content3 = string;
+export type IsError = boolean;
+export type Kind16 = "todo_update";
+export type Content4 = string;
+export type Status2 = string;
+export type Todos = TodoItemData[];
+export type Kind17 = "usage_update";
+export type InputTokens1 = number;
+export type ContextWindow1 = number | null;
+export type Model = string | null;
 export type Events = RunEvent[];
 export type Round = number;
 export type PerfMetric1 = number;
@@ -350,6 +377,22 @@ export interface AgentOutputChunkData {
   kind?: Kind9;
   channel: Channel;
   content: Content1;
+  status?: AgentStatusData | null;
+  [k: string]: unknown;
+}
+/**
+ * Structured progress readings for one agent invocation.
+ *
+ * Carried on presentation events so renderers can format their own status
+ * prefix (e.g. ``[Round 3/24 | Implementer | 12.3s | 20k/1.0M]``) without
+ * the backend baking any layout or styling into the payload.
+ */
+export interface AgentStatusData {
+  progress?: Progress;
+  agent_label?: AgentLabel;
+  elapsed_seconds?: ElapsedSeconds;
+  input_tokens?: InputTokens;
+  context_window?: ContextWindow;
   [k: string]: unknown;
 }
 export interface SubprocessOutputData {
@@ -380,6 +423,40 @@ export interface RoundFinishedData {
   judge_verdict: JudgeVerdict;
   perf_metric?: PerfMetric;
   perf_unit?: PerfUnit;
+  [k: string]: unknown;
+}
+export interface ToolCallData {
+  kind?: Kind14;
+  tool: Tool;
+  args?: Args;
+  status?: AgentStatusData | null;
+  [k: string]: unknown;
+}
+export interface Args {
+  [k: string]: unknown;
+}
+export interface ToolResultData {
+  kind?: Kind15;
+  tool: Tool1;
+  content: Content3;
+  is_error?: IsError;
+  [k: string]: unknown;
+}
+export interface TodoUpdateData {
+  kind?: Kind16;
+  todos?: Todos;
+  [k: string]: unknown;
+}
+export interface TodoItemData {
+  content: Content4;
+  status: Status2;
+  [k: string]: unknown;
+}
+export interface UsageUpdateData {
+  kind?: Kind17;
+  input_tokens: InputTokens1;
+  context_window?: ContextWindow1;
+  model?: Model;
   [k: string]: unknown;
 }
 export interface PerformanceRound {
