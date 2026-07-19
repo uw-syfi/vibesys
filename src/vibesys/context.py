@@ -1,6 +1,5 @@
 """Shared run context: ``_RunContext``, ``create_run_context``, and ``setup_exp_dir``."""
 
-import json
 import shutil
 import subprocess
 import uuid
@@ -36,7 +35,7 @@ from vibesys.profilers import (
     profiler_definition,
     resolve_profiler_kind,
 )
-from vibesys.run import GitTracker, RunCommands, RunLogger, RunPaths, Workspace
+from vibesys.run import DeviceLease, GitTracker, RunCommands, RunLogger, RunPaths, Workspace
 from vibesys.sandbox.run_environment import (
     RunEnvironmentRequest,
     RunEnvironmentSpec,
@@ -272,8 +271,12 @@ def create_run_context(
     if git_tracking:
         git.init(existing)
 
-    run_environment_stack = ExitStack()
-    session = run_environment_stack.enter_context(
+    # One teardown stack for the whole context: every component with
+    # cleanup registers here, and close() unwinds it in reverse
+    # construction order (device → environment hooks → session → logs).
+    teardown_stack = ExitStack()
+    teardown_stack.callback(logger.close)
+    session = teardown_stack.enter_context(
         environment.open(
             RunEnvironmentRequest(
                 log_dir=log_dir,
@@ -301,10 +304,18 @@ def create_run_context(
         profiler_benchmark_command=session.view.paths.benchmark_command,
     )
 
+    def _teardown_environment_hooks() -> None:
+        try:
+            hooks.teardown(environment_context)
+        except Exception as exc:
+            logger.lprint(f"[warn] environment hook teardown failed: {exc}")
+
+    teardown_stack.callback(_teardown_environment_hooks)
+
     # Start backend-specific background monitoring (CUDA: nvidia-smi).
-    gpu_monitor = backend_impl.make_monitor(log_dir)
-    if gpu_monitor is not None:
-        gpu_monitor.start()
+    device = DeviceLease(backend_impl, log_dir=log_dir, run_environment_view=session.view)
+    device.start_monitor()
+    teardown_stack.callback(device.close)
 
     # Build the backend-agnostic agent runner. Loops invoke this instead
     # of calling create_deep_agent / vibesys._agent_cli directly. The cli
@@ -364,10 +375,10 @@ def create_run_context(
         environment_patch=environment_patch,
         workspace_files=workspace_files,
         git=git,
-        run_environment_stack=run_environment_stack,
+        teardown_stack=teardown_stack,
         run_environment_session=session,
         commands=commands,
-        gpu_monitor=gpu_monitor,
+        device=device,
         agent_runner=agent_runner,
     )
 
@@ -416,10 +427,10 @@ class _RunContext:
         environment_patch,
         workspace_files: Workspace,
         git: GitTracker,
-        run_environment_stack: ExitStack,
+        teardown_stack: ExitStack,
         run_environment_session,
         commands: RunCommands,
-        gpu_monitor,
+        device: DeviceLease,
         agent_runner,
     ):
         self.backend = backend
@@ -449,15 +460,15 @@ class _RunContext:
         self.workspace_files = workspace_files
         self.EXCLUDED_WORKSPACE_DIRS = workspace_files.excluded_dirs
         self.git = git
-        self._run_environment_stack = run_environment_stack
+        self._teardown_stack = teardown_stack
         self.run_environment_session = run_environment_session
         self.run_environment_view = run_environment_session.view
         self.implementer_backend = run_environment_session.sandbox
         self.judge_backend = run_environment_session.sandbox
         self.commands = commands
+        self.device = device
         # Expose the picked device for legacy callers (gpu monitor tests etc).
-        self.selected_gpu = getattr(backend_impl, "selected_device", None)
-        self.gpu_monitor = gpu_monitor
+        self.selected_gpu = device.selected_device
         self.agent_runner = agent_runner
         self._closed = False
         self._progress_stack: list[AgentProgress] = []
@@ -487,18 +498,18 @@ class _RunContext:
         """The current open log file handle (owned by ``RunLogger``)."""
         return self.logger.file
 
-    def gpu_env(self) -> dict[str, str]:
-        """Env vars to inject into the host-running cli agent runner.
+    @property
+    def gpu_monitor(self):
+        """The active device monitor (owned by ``DeviceLease``)."""
+        return self.device.monitor
 
-        Today this is just the device pin (``CUDA_VISIBLE_DEVICES`` for cuda),
-        derived from whichever device the backend selected.  The deepagents
-        path ignores this; the cli path layers it onto the spawned subprocess
-        env so it sees the same device the sandbox env was built with.
-        """
-        dev = getattr(self.backend_impl, "selected_device", None)
-        if dev is None:
-            return {}
-        return {"CUDA_VISIBLE_DEVICES": str(dev.index)}
+    @gpu_monitor.setter
+    def gpu_monitor(self, monitor) -> None:
+        self.device.monitor = monitor
+
+    def gpu_env(self) -> dict[str, str]:
+        """Env vars for the host-running cli agent runner — see :meth:`DeviceLease.gpu_env`."""
+        return self.device.gpu_env()
 
     @contextmanager
     def progress(self, progress: AgentProgress) -> Iterator[None]:
@@ -641,53 +652,19 @@ class _RunContext:
             self.agent_runner._run_log_file = new_file  # pyright: ignore[reportAttributeAccessIssue]
 
     def reselect_gpu(self) -> None:
-        """Delegate mid-run device rebalance to the backend.
-
-        Restarted sandboxes re-run their ``setup_fns`` (e.g. docker symlinks)
-        as part of ``start()`` — no replay logic needed here.
-        """
-        run_environment_view = getattr(self, "run_environment_view", None)
-        if run_environment_view is not None and not run_environment_view.host_device_reselect:
-            return
-        self.backend_impl.reselect_device()
+        """Delegate mid-run device rebalance — see :meth:`DeviceLease.reselect`."""
+        self.device.reselect()
         # Mirror backend state on _RunContext for legacy callers/tests.
-        self.selected_gpu = getattr(self.backend_impl, "selected_device", None)
-        self.gpu_monitor = getattr(self.backend_impl, "_monitor", None)
-
-    def _finalize_gpu_metadata(self) -> None:
-        """Update ``gpu.json`` with contention summary before closing."""
-        gpu_json = self.log_dir / "gpu.json"
-        if not gpu_json.exists():
-            return
-
-        data = json.loads(gpu_json.read_text())
-
-        contention_log = self.log_dir / "gpu_contention.jsonl"
-        contention_events = 0
-        if contention_log.exists():
-            text = contention_log.read_text().strip()
-            if text:
-                contention_events = len(text.splitlines())
-
-        data["contention_detected"] = contention_events > 0
-        data["contention_events"] = contention_events
-        data["finished_at"] = datetime.now().isoformat()
-        gpu_json.write_text(json.dumps(data, indent=2))
+        self.selected_gpu = self.device.selected_device
 
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        if self.gpu_monitor is not None:
-            self.gpu_monitor.stop()
-        self._finalize_gpu_metadata()
-        if hasattr(self, "environment_hooks") and hasattr(self, "environment_context"):
-            try:
-                self.environment_hooks.teardown(self.environment_context)
-            except Exception as exc:
-                self.lprint(f"[warn] environment hook teardown failed: {exc}")
-        self._run_environment_stack.close()
-        self.logger.close()
+        # Unwinds in reverse construction order: device monitor stop +
+        # gpu.json finalization, environment hook teardown, run-environment
+        # session exit, stderr restore + log file close.
+        self._teardown_stack.close()
 
     def __enter__(self) -> "_RunContext":
         return self

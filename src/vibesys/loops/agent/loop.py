@@ -17,7 +17,7 @@ from pathlib import Path
 from vibesys.agents.progress import RoundProgress
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
-from vibesys.context import _RunContext, create_run_context
+from vibesys.context import create_run_context
 from vibesys.domains.base import DomainDefinition, DomainName, DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
@@ -30,6 +30,7 @@ from vibesys.profilers import (
     require_profiler_kind,
 )
 from vibesys.prompts import render_template
+from vibesys.run import LoopContext
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -207,7 +208,7 @@ def _is_fresh_cold_start(round_number: int, records: list[_RoundRecord]) -> bool
 
 
 def _run_pre_round_decision(
-    ctx: _RunContext,
+    ctx: LoopContext,
     *,
     round_number: int,
     objective: str,
@@ -273,7 +274,7 @@ def _effective_profiler_definition(
 
 
 def _run_profiler(
-    ctx: _RunContext,
+    ctx: LoopContext,
     *,
     round_number: int,
     profile_focus: str,
@@ -319,7 +320,7 @@ def _run_profiler(
 
 
 def _domain_render_context(
-    ctx: _RunContext, modality: str | None, interface: str
+    ctx: LoopContext, modality: str | None, interface: str
 ) -> dict[str, object]:
     """The uniform variable set every domain role file is rendered with.
 
@@ -342,7 +343,7 @@ def _domain_render_context(
 
 
 def _run_orchestrator_plan(
-    ctx: _RunContext,
+    ctx: LoopContext,
     *,
     round_number: int,
     objective: str,
@@ -390,7 +391,7 @@ def _run_orchestrator_plan(
 
 
 def _run_implementer(
-    ctx: _RunContext,
+    ctx: LoopContext,
     *,
     round_number: int,
     retry: int,
@@ -439,7 +440,7 @@ def _run_implementer(
 
 
 def _run_judge(
-    ctx: _RunContext,
+    ctx: LoopContext,
     *,
     round_number: int,
     retry: int,
@@ -503,7 +504,7 @@ def _run_judge(
 
 
 def _run_single_agent_round(
-    ctx: _RunContext,
+    ctx: LoopContext,
     *,
     round_number: int,
     retry: int,
@@ -603,7 +604,7 @@ def _profiler_summary_from_single_agent(
 
 
 def _run_framework_accuracy_gate(
-    ctx: _RunContext,
+    ctx: LoopContext,
     *,
     round_number: int,
     retry: int,
@@ -687,7 +688,7 @@ def _metric_values(value: object, metric: str) -> list[object]:
 
 
 def _run_framework_benchmark(
-    ctx: _RunContext,
+    ctx: LoopContext,
     *,
     result_spec: BenchmarkResult | None,
     round_number: int,
@@ -793,7 +794,7 @@ def _run_framework_benchmark(
 
 
 def _run_framework_gates(
-    ctx: _RunContext,
+    ctx: LoopContext,
     *,
     benchmark_result: BenchmarkResult | None,
     round_number: int,
@@ -1202,7 +1203,7 @@ def run_agent_loop(
 
 
 def _publish_subprocess_output(
-    ctx: _RunContext,
+    ctx: LoopContext,
     *,
     process_id: str,
     process_kind: str,

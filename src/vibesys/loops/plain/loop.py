@@ -31,12 +31,13 @@ from pathlib import Path
 from vibesys.agents.progress import RoundProgress
 from vibesys.config import Config, as_config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
-from vibesys.context import _RunContext, create_run_context
+from vibesys.context import create_run_context
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.loops.plain.render import render_all
 from vibesys.loops.plain.runner_ext import PlainLoopAgentRunner
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import Prompt
+from vibesys.run import LoopContext
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -305,7 +306,7 @@ def _ensure_bootstrap_issue(
     *,
     state: PlainLoopState,
     log_dir: Path,
-    ctx: _RunContext,
+    ctx: LoopContext,
     prompt: Prompt,
 ) -> None:
     """Auto-create the initial feature issue on the first run.
