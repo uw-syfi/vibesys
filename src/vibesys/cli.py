@@ -19,8 +19,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
-import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -1059,30 +1057,6 @@ def _control_socket_from_argv(argv: list[str]) -> Path | None:
     return None
 
 
-def _launch_interactive_client(argv: list[str]) -> int:
-    env = os.environ.copy()
-    env["VIBESYS_PYTHON"] = sys.executable
-
-    local_launcher = PROJECT_ROOT / "clients" / "tui" / "dist" / "launcher.js"
-    if local_launcher.is_file():
-        node = shutil.which("node")
-        if node is None:
-            print("vibesys: Node.js 20+ is required by the interactive client.", file=sys.stderr)
-            return 1
-        return subprocess.call([node, str(local_launcher), *argv], env=env)
-
-    installed_launcher = shutil.which("vibesys-tui")
-    if installed_launcher is not None:
-        return subprocess.call([installed_launcher, *argv], env=env)
-
-    print(
-        "vibesys: interactive client is not available; run `./vs ...` from a source checkout "
-        "or install the @vibesys/tui npm package.",
-        file=sys.stderr,
-    )
-    return 1
-
-
 def _render_configuration_error(error: ConfigurationError) -> NoReturn:
     diagnostic = error.diagnostic
     print(f"vibesys: {diagnostic.message}", file=sys.stderr)
@@ -1094,14 +1068,6 @@ def _render_configuration_error(error: ConfigurationError) -> NoReturn:
 def main() -> None:
     argv = sys.argv[1:]
     control_socket = _control_socket_from_argv(argv)
-    interactive = (
-        control_socket is None
-        and "--headless" not in argv
-        and sys.stdin.isatty()
-        and sys.stdout.isatty()
-    )
-    if interactive:
-        raise SystemExit(_launch_interactive_client(argv))
     if control_socket is not None:
         from vibesys.server.runtime import run_server
 

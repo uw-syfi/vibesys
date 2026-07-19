@@ -1,6 +1,7 @@
-import {access, chmod, mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {access, chmod, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it} from 'vitest';
 import {launch} from './launcher.js';
 
@@ -24,8 +25,20 @@ afterEach(async () => {
 });
 
 describe('launcher', () => {
+  it('publishes simple installed command names', async () => {
+    const packageJsonPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+      bin?: Record<string, string>;
+    };
+
+    expect(packageJson.bin).toEqual({
+      vibesys: './dist/launcher.js',
+      vs: './dist/launcher.js',
+    });
+  });
+
   it('starts a headless backend, waits for readiness, and runs the frontend', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'vibesys-launcher-test-'));
+    tempDir = await mkdtemp(join(tmpdir(), 'vs-launcher-test-'));
     const backendTerminated = join(tempDir, 'backend-terminated');
     const backend = await writeExecutable(
       'fake-backend.mjs',

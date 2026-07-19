@@ -99,4 +99,4 @@ if [[ "$interactive" == true ]]; then
   python_executable="$(uv run python -c 'import sys; print(sys.executable)')"
   exec env VIBESYS_PYTHON="$python_executable" node clients/tui/dist/launcher.js "$@"
 fi
-exec uv run vibesys "$@"
+exec uv run python -m vibesys.cli "$@"

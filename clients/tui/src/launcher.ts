@@ -25,7 +25,7 @@ export async function launch(argv: string[]): Promise<number> {
 
   const runtime = process.env['VIBESYS_TUI_RUNTIME'] ?? 'bun';
   if (!(await executableExists(runtime))) {
-    console.error('vibesys-tui: Bun is required by the OpenTUI client.');
+    console.error('vs: Bun is required by the OpenTUI client.');
     return 1;
   }
 
@@ -33,7 +33,7 @@ export async function launch(argv: string[]): Promise<number> {
     process.env['VIBESYS_TUI_ENTRYPOINT'] ??
     join(dirname(fileURLToPath(import.meta.url)), 'index.js');
   if (!(await fileExists(entrypoint))) {
-    console.error('vibesys-tui: TUI build is missing; run `pnpm --dir clients/tui build`.');
+    console.error('vs: TUI build is missing; run `pnpm --dir clients/tui build`.');
     return 1;
   }
 
@@ -101,7 +101,7 @@ function resolveBackendCommand(): BackendCommand | undefined {
 
 function reportMissingPython(): number {
   console.error(
-    'vibesys-tui: Python is required and must have the vibesys package installed. Set VIBESYS_PYTHON to the Python executable to use.',
+    'vs: Python is required and must have the vibesys package installed. Set VIBESYS_PYTHON to the Python executable to use.',
   );
   return 1;
 }
@@ -227,7 +227,7 @@ async function waitOrKill(process: ChildProcess): Promise<void> {
 
 async function reportBackendFailure(backend: ChildProcess, logPath: string): Promise<void> {
   const code = exitStatus(backend) ?? 1;
-  console.error(`vibesys-tui: backend exited with status ${code}`);
+  console.error(`vs: backend exited with status ${code}`);
   const tail = await readLogTail(logPath);
   if (tail.length > 0) console.error(tail.join('\n'));
 }
@@ -245,7 +245,7 @@ function runToCompletion(command: string, args: string[]): Promise<number> {
     const child = spawn(command, args, {stdio: 'inherit'});
     child.once('exit', (code, signal) => resolve(code ?? signalExitCode(signal)));
     child.once('error', error => {
-      console.error(`vibesys-tui: failed to start backend: ${error.message}`);
+      console.error(`vs: failed to start backend: ${error.message}`);
       resolve(1);
     });
   });

@@ -454,7 +454,7 @@ def test_main_routes_to_runner(loop_name: str, runner_attr: str):
         assert args.input_bundle.root.name == "Llama-3-8B"
 
 
-def test_main_wraps_tty_run_in_tui():
+def test_main_tty_run_stays_in_python_cli():
     argv = [
         "vibesys",
         "--outer-loop",
@@ -468,14 +468,10 @@ def test_main_wraps_tty_run_in_tui():
         patch.object(sys.stdin, "isatty", return_value=True),
         patch.object(sys.stdout, "isatty", return_value=True),
         patch("vibesys.cli._run_agent") as runner,
-        patch("vibesys.cli._launch_interactive_client", return_value=0) as launch,
     ):
-        with pytest.raises(SystemExit) as exc:
-            main()
+        main()
 
-    assert exc.value.code == 0
-    runner.assert_not_called()
-    launch.assert_called_once_with(argv[1:])
+    runner.assert_called_once()
 
 
 def test_main_headless_skips_tui():
@@ -489,79 +485,6 @@ def test_main_headless_skips_tui():
     with (
         patch.object(sys, "argv", argv),
         patch("vibesys.cli._run_agent") as runner,
-        patch("vibesys.cli._launch_interactive_client") as launch,
     ):
         main()
     runner.assert_called_once()
-    launch.assert_not_called()
-
-
-def test_launch_interactive_client_uses_local_launcher(monkeypatch, tmp_path):
-    import vibesys.cli as cli
-
-    launcher = tmp_path / "clients" / "tui" / "dist" / "launcher.js"
-    launcher.parent.mkdir(parents=True)
-    launcher.write_text("console.log('launcher')\n")
-    calls: list[tuple[list[str], dict[str, str]]] = []
-
-    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(
-        cli.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None
-    )
-    monkeypatch.setattr(
-        cli.subprocess,
-        "call",
-        lambda command, env: calls.append((command, env)) or 0,
-    )
-
-    assert cli._launch_interactive_client(["--stub-agent"]) == 0
-    assert len(calls) == 1
-    assert calls[0][0] == ["/usr/bin/node", str(launcher), "--stub-agent"]
-    assert calls[0][1]["VIBESYS_PYTHON"] == sys.executable
-
-
-def test_launch_interactive_client_reports_missing_node(monkeypatch, tmp_path, capsys):
-    import vibesys.cli as cli
-
-    launcher = tmp_path / "clients" / "tui" / "dist" / "launcher.js"
-    launcher.parent.mkdir(parents=True)
-    launcher.write_text("console.log('launcher')\n")
-
-    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(cli.shutil, "which", lambda _name: None)
-
-    assert cli._launch_interactive_client([]) == 1
-    assert "Node.js 20+ is required" in capsys.readouterr().err
-
-
-def test_launch_interactive_client_uses_installed_launcher(monkeypatch, tmp_path):
-    import vibesys.cli as cli
-
-    calls: list[tuple[list[str], dict[str, str]]] = []
-
-    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(
-        cli.shutil,
-        "which",
-        lambda name: "/usr/local/bin/vibesys-tui" if name == "vibesys-tui" else None,
-    )
-    monkeypatch.setattr(
-        cli.subprocess,
-        "call",
-        lambda command, env: calls.append((command, env)) or 7,
-    )
-
-    assert cli._launch_interactive_client(["--max-rounds", "1"]) == 7
-    assert len(calls) == 1
-    assert calls[0][0] == ["/usr/local/bin/vibesys-tui", "--max-rounds", "1"]
-    assert calls[0][1]["VIBESYS_PYTHON"] == sys.executable
-
-
-def test_launch_interactive_client_reports_missing_launcher(monkeypatch, tmp_path, capsys):
-    import vibesys.cli as cli
-
-    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(cli.shutil, "which", lambda _name: None)
-
-    assert cli._launch_interactive_client([]) == 1
-    assert "interactive client is not available" in capsys.readouterr().err

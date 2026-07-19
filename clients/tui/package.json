@@ -7,7 +7,8 @@
     "node": ">=20"
   },
   "bin": {
-    "vibesys-tui": "./dist/launcher.js"
+    "vibesys": "./dist/launcher.js",
+    "vs": "./dist/launcher.js"
   },
   "files": [
     "dist",

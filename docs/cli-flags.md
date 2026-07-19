@@ -34,7 +34,9 @@ come from the domain and input bundle, not the interface mode.
 | `openevolve` | MAP-Elites-style evolutionary loop. | Reuses evolve mutator, judge, and profiler prompts. |
 
 From a source checkout, use `./vs` for the commands below. It prepares a current
-interactive client when needed and forwards every argument to `vibesys`.
+interactive client when needed and forwards every argument to the TypeScript
+launcher. For installed npm users, the same launcher is exposed as `vs` and
+`vibesys`.
 Use `./vs --outer-loop <kind> --help` for loop-specific flags.
 
 ## Interface
