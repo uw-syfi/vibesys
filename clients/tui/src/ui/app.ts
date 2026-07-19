@@ -8,6 +8,7 @@ import {bindKeybindings} from './keybindings.js';
 import {OverlayView} from './overlay.js';
 import {RoundStripView} from './round-strip.js';
 import {createMarkdownStyle} from './styles.js';
+import {TodoStripView} from './todo-strip.js';
 
 export interface OpenTuiApp {
   destroy(): void;
@@ -48,10 +49,11 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
     id: 'key-help',
     height: 1,
     fg: '#64748b',
-    content: '[/]: round · Tab: agent · PgUp/PgDn · Ctrl+P: prompt · Ctrl+L: live',
+    content: '[/]: round · Tab: agent · PgUp/PgDn · Ctrl+T: todos · Ctrl+P: prompt · Ctrl+L: live',
   });
   const markdownStyle = createMarkdownStyle();
   const roundStrip = new RoundStripView(renderer, controller);
+  const todoStrip = new TodoStripView(renderer, controller);
   const agentMap = new AgentMapView(renderer);
   const overlay = new OverlayView(renderer);
   const conversation = new ConversationView(renderer, controller, markdownStyle);
@@ -63,6 +65,7 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
   root.add(header);
   root.add(roundStrip.output);
   root.add(main);
+  root.add(todoStrip.output);
   root.add(help);
   root.add(input.box);
   root.add(overlay.output);
@@ -74,6 +77,7 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
     const selection = state.selectedAgentKind ? ` · selected ${state.selectedAgentKind}` : '';
     header.content = `VibeSys · ${statusText(state)}${selection}${returnHint}`;
     roundStrip.render(state);
+    todoStrip.render(state);
     agentMap.render(state);
     conversation.render(state);
     overlay.render(state);
@@ -84,6 +88,7 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
     selectPreviousAgent: () => controller.selectPreviousAgent(),
     selectNextRound: () => controller.selectNextRound(),
     selectPreviousRound: () => controller.selectPreviousRound(),
+    toggleTodos: () => controller.toggleTodos(),
   });
   const unsubscribe = controller.subscribe(render);
 

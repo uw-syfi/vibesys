@@ -21,6 +21,7 @@ import {
   selectRound,
   showDetail,
   showLive,
+  toggleTodos,
 } from './session-model.js';
 
 export interface SessionController {
@@ -34,6 +35,7 @@ export interface SessionController {
   selectNextRound(): void;
   selectPreviousRound(): void;
   selectRound(roundNumber: number): void;
+  toggleTodos(): void;
   subscribe(listener: (state: SessionState) => void): () => void;
 }
 
@@ -104,6 +106,10 @@ export class SocketSessionController implements SessionController {
 
   selectRound(roundNumber: number): void {
     this.#setState(selectRound(this.#state, roundNumber));
+  }
+
+  toggleTodos(): void {
+    this.#setState(toggleTodos(this.#state));
   }
 
   async submit(value: string): Promise<void> {
