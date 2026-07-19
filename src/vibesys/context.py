@@ -2,13 +2,13 @@
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
 import uuid
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -39,6 +39,7 @@ from vibesys.profilers import (
     profiler_definition,
     resolve_profiler_kind,
 )
+from vibesys.run import GitTracker, RunCommands, RunPaths
 from vibesys.sandbox.run_environment import (
     RunEnvironmentRequest,
     RunEnvironmentSpec,
@@ -131,17 +132,22 @@ class _RunContext:
         run_environment = run_environment or make_run_environment_spec()
         self.run_environment = build_run_environment(run_environment)
 
-        self.exp_dir = setup_exp_dir(exp_name, PROJECT_ROOT, existing)
+        exp_dir = setup_exp_dir(exp_name, PROJECT_ROOT, existing)
 
-        self.log_dir = self.exp_dir / "logs"
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        log_dir = exp_dir / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
         from vibesys.server.registry import active_supervisor
 
         self.supervisor = active_supervisor()
         if self.supervisor is not None:
-            self.supervisor.attach(self.log_dir)
+            self.supervisor.attach(log_dir)
         run_started = datetime.now().strftime("%Y%m%d-%H%M%S")
-        self.run_log_path = self.log_dir / f"run-{run_started}.log"
+        self._paths = RunPaths(
+            exp_dir=exp_dir,
+            log_dir=log_dir,
+            workspace=exp_dir / "workspace",
+            run_log_path=log_dir / f"run-{run_started}.log",
+        )
         self.run_log_file = self.run_log_path.open("a", encoding="utf-8")
 
         self._original_stderr = sys.stderr
@@ -245,7 +251,6 @@ class _RunContext:
         environment_reference = ref_dir or (input_dir / "reference")
         input_project_dir = input_dir if (input_dir / "pyproject.toml").is_file() else None
 
-        self.workspace = self.exp_dir / "workspace"
         self.workspace.mkdir(parents=True, exist_ok=True)
 
         # When resuming an existing run, skip workspace file setup — the
@@ -357,8 +362,17 @@ class _RunContext:
             if not destination.exists():
                 self._copy_excluding_extras(src, destination)
 
+        # Git snapshot tracking over the workspace. The tracker is always
+        # constructed (construction is side-effect free), so loops can call
+        # e.g. ``ctx.git.current_sha()`` unconditionally; ``init`` only runs
+        # when --git-tracking is enabled.
+        self.git = GitTracker(
+            self.workspace,
+            log=self.lprint,
+            excluded_dirs=self.EXCLUDED_WORKSPACE_DIRS,
+        )
         if git_tracking:
-            self._init_git_tracking(existing)
+            self.git.init(existing)
 
         self.run_environment_session = self._run_environment_stack.enter_context(
             self.run_environment.open(
@@ -380,6 +394,14 @@ class _RunContext:
             )
         )
         self.run_environment_view = self.run_environment_session.view
+        # Snapshot the agent-facing commands once the session is open; the
+        # view's paths are fixed for the session lifetime.
+        self.commands = RunCommands(
+            judge_accuracy_command=self.run_environment_view.paths.accuracy_command,
+            judge_benchmark_command=self.run_environment_view.paths.benchmark_command,
+            profiler_support_agent_path=self.run_environment_view.paths.profiler_support,
+            profiler_benchmark_command=self.run_environment_view.paths.benchmark_command,
+        )
         self.implementer_backend = self.run_environment_session.sandbox
         self.judge_backend = self.run_environment_session.sandbox
 
@@ -425,6 +447,26 @@ class _RunContext:
             use_modal=self.run_environment_view.cli_modal_sandboxed,
             log_dir=self.log_dir,
         )
+
+    # -- path passthroughs ----------------------------------------------------
+    # Canonical values live in the frozen ``RunPaths`` record; these
+    # properties keep existing ``ctx.exp_dir``-style call sites working.
+
+    @property
+    def exp_dir(self) -> Path:
+        return self._paths.exp_dir
+
+    @property
+    def log_dir(self) -> Path:
+        return self._paths.log_dir
+
+    @property
+    def workspace(self) -> Path:
+        return self._paths.workspace
+
+    @property
+    def run_log_path(self) -> Path:
+        return self._paths.run_log_path
 
     def gpu_env(self) -> dict[str, str]:
         """Env vars to inject into the host-running cli agent runner.
@@ -700,7 +742,7 @@ class _RunContext:
                 self.lprint(f"[warn] modal workspace sync to host failed: {exc}")
 
         if self.git_tracking:
-            self._git_snapshot(label)
+            self.git.snapshot(label)
             return
         dst = self.log_dir / "snapshots" / label
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -714,237 +756,36 @@ class _RunContext:
         )
         self._replace_external_symlinks(dst)
 
-    # -- git tracking helpers -------------------------------------------------
-
-    _GIT_ENV_STATIC = {
-        "GIT_AUTHOR_NAME": "vibesys",
-        "GIT_AUTHOR_EMAIL": "vibesys@local",
-        "GIT_COMMITTER_NAME": "vibesys",
-        "GIT_COMMITTER_EMAIL": "vibesys@local",
-    }
-
-    @property
-    def _GIT_ENV(self) -> dict[str, str]:
-        """Git env with safe.directory set to workspace to avoid ownership errors."""
-        return {
-            **self._GIT_ENV_STATIC,
-            "GIT_CONFIG_COUNT": "1",
-            "GIT_CONFIG_KEY_0": "safe.directory",
-            "GIT_CONFIG_VALUE_0": str(self.workspace),
-        }
-
-    def _git_run(
-        self, cmd: list[str], *, check: bool = True, env: dict | None = None
-    ) -> subprocess.CompletedProcess:
-        """Run a git command in workspace, logging stderr on failure."""
-        if env is None:
-            env = {**os.environ, **self._GIT_ENV}
-        result = subprocess.run(cmd, cwd=self.workspace, capture_output=True, env=env)
-        if check and result.returncode != 0:
-            stderr = result.stderr.decode(errors="replace").strip()
-            self.lprint(f"[git-tracking] command failed: {' '.join(cmd)}")
-            self.lprint(f"[git-tracking] exit code {result.returncode}: {stderr}")
-            result.check_returncode()
-        return result
-
-    # Compiled-accelerator artifacts an agent may emit into the workspace.
-    # Large and never wanted in a per-round checkpoint. The Neuron compile cache
-    # is bind-mounted *outside* the workspace, but a stray trace/compile call
-    # pointed at the workspace (or a torch.compile dump) would otherwise be
-    # committed and bloat history across rounds.
-    _ARTIFACT_GITIGNORE_PATTERNS: tuple[str, ...] = (
-        "*.neff",
-        "*.ntff",
-        "*.neuron",
-        "neuroncc_compile_workdir/",
-        "neuron-compile-cache/",
-    )
-
-    _TRUSTED_INPUT_PATHS: tuple[str, ...] = (
-        "OBJECTIVE.md",
-        "vibesys.input.toml",
-        "reference",
-        "accuracy_checker",
-        "benchmark",
-        "_input_libs",
-        "_evaluator",
-    )
-
     def trusted_input_changes(self) -> list[str]:
         """Return evaluator-owned paths changed since workspace initialization."""
         if not self.git_tracking:
             return []
+        return self.git.trusted_input_changes()
 
-        root = self._git_run(["git", "rev-list", "--max-parents=0", "HEAD"])
-        root_commit = root.stdout.decode().strip()
-        if not root_commit:
-            return ["unable to resolve the initial workspace commit"]
-
-        pathspec = ["--", *self._TRUSTED_INPUT_PATHS]
-        committed = self._git_run(["git", "diff", "--name-only", f"{root_commit}..HEAD", *pathspec])
-        pending = self._git_run(
-            [
-                "git",
-                "status",
-                "--porcelain=v1",
-                "--untracked-files=all",
-                *pathspec,
-            ]
-        )
-
-        changes = {line for line in committed.stdout.decode(errors="replace").splitlines() if line}
-        changes.update(
-            line[3:]
-            for line in pending.stdout.decode(errors="replace").splitlines()
-            if len(line) > 3
-        )
-        return sorted(changes)
-
-    def _workspace_gitignore(self) -> str:
-        """Contents of the workspace ``.gitignore`` (excluded dirs + artifacts)."""
-        lines = sorted(self.EXCLUDED_WORKSPACE_DIRS) + list(self._ARTIFACT_GITIGNORE_PATTERNS)
-        return "\n".join(lines) + "\n"
-
-    def _init_git_tracking(self, existing: bool) -> None:
-        """Initialize or validate the git repo in the unified workspace."""
-        if existing:
-            if not (self.workspace / ".git").is_dir():
-                raise ValueError(
-                    f"--git-tracking with --resume but no git repository in {self.workspace}"
-                )
-            return
-
-        self._git_run(["git", "init"])
-
-        gitignore = self.workspace / ".gitignore"
-        existing_gitignore = gitignore.read_text() if gitignore.is_file() else ""
-        if existing_gitignore and not existing_gitignore.endswith("\n"):
-            existing_gitignore += "\n"
-        gitignore.write_text(existing_gitignore + self._workspace_gitignore())
-
-        self._git_add_all()
-        self._git_run(["git", "commit", "-m", "initial: workspace setup"])
-
-    # -- snapshot resilience --------------------------------------------------
-    #
-    # On the Docker/Modal paths the sandbox runs as root and writes files into
-    # the bind-mounted workspace.  Most land mode-644 (host-readable), but a
-    # tool may emit a restrictive file the *host* user running `git add` cannot
-    # read (e.g. neuron-explorer's mode-600 ``system_profile.json``).  A single
-    # such file makes ``git add -A`` exit 128 and would otherwise abort the whole
-    # run.  These are always transient scratch artifacts we never want in a
-    # checkpoint, so we exclude them (local-only, via ``.git/info/exclude``)
-    # rather than fail.
-
-    def _collect_unreadable(self) -> list[str]:
-        """Workspace-relative paths the snapshotting user cannot read.
-
-        Walks the worktree (skipping ``.git``, never following symlinks) and
-        records files lacking ``R_OK`` and directories lacking ``R_OK|X_OK``
-        (an unsearchable dir hides its whole subtree from ``git add`` too).
-        """
-        unreadable: list[str] = []
-        root = str(self.workspace)
-        for dirpath, dirnames, filenames in os.walk(root):
-            if ".git" in dirnames:
-                dirnames.remove(".git")
-            kept = []
-            for d in dirnames:
-                full = os.path.join(dirpath, d)
-                if os.access(full, os.R_OK | os.X_OK):
-                    kept.append(d)
-                else:
-                    unreadable.append(os.path.relpath(full, root))
-            dirnames[:] = kept  # prune unsearchable dirs from the walk
-            for f in filenames:
-                full = os.path.join(dirpath, f)
-                if not os.access(full, os.R_OK):
-                    unreadable.append(os.path.relpath(full, root))
-        return unreadable
-
-    @staticmethod
-    def _unreadable_from_stderr(stderr: str) -> list[str]:
-        """Parse paths git reported it could not index from *stderr*.
-
-        Git prints e.g. ``error: open("foo"): Permission denied`` and
-        ``error: unable to index file 'foo'``.
-        """
-        paths: list[str] = []
-        for m in re.finditer(r'(?:open\("|unable to index file \')([^"\']+)', stderr):
-            paths.append(m.group(1))
-        return paths
-
-    def _exclude_paths(self, rel_paths: list[str]) -> None:
-        """Append *rel_paths* to ``.git/info/exclude`` (local, untracked)."""
-        rel_paths = [p for p in dict.fromkeys(rel_paths) if p]
-        if not rel_paths:
-            return
-        exclude_file = self.workspace / ".git" / "info" / "exclude"
-        exclude_file.parent.mkdir(parents=True, exist_ok=True)
-        existing = exclude_file.read_text() if exclude_file.exists() else ""
-        have = set(existing.splitlines())
-        new = [p for p in rel_paths if p not in have]
-        if not new:
-            return
-        prefix = "" if (not existing or existing.endswith("\n")) else "\n"
-        exclude_file.write_text(existing + prefix + "\n".join(new) + "\n")
-        shown = ", ".join(new[:5]) + ("…" if len(new) > 5 else "")
-        self.lprint(f"[git-tracking] excluded {len(new)} unreadable path(s) from snapshot: {shown}")
-
-    def _git_add_all(self) -> None:
-        """``git add -A``, resilient to files the host user cannot read.
-
-        Excludes unreadable paths up front, then retries on any residual
-        permission failure (a file may appear between the scan and the add).
-        """
-        self._exclude_paths(self._collect_unreadable())
-        for _ in range(3):
-            result = self._git_run(["git", "add", "-A"], check=False)
-            if result.returncode == 0:
-                return
-            stderr = result.stderr.decode(errors="replace")
-            offenders = self._unreadable_from_stderr(stderr)
-            if not offenders:
-                break  # failure unrelated to unreadable files — surface it
-            self._exclude_paths(offenders)
-        # Final attempt: let _git_run raise with full diagnostics if it still fails.
-        self._git_run(["git", "add", "-A"])
-
-    def _git_snapshot(self, label: str) -> None:
-        """Commit current workspace state with *label* as the commit message."""
-        self._git_add_all()
-        # git diff --cached --quiet exits 1 when there are staged changes
-        has_changes = (
-            self._git_run(
-                ["git", "diff", "--cached", "--quiet"],
-                check=False,
-            ).returncode
-            != 0
-        )
-        if has_changes:
-            self._git_run(["git", "commit", "-m", label])
-        else:
-            self.lprint(f"[git-tracking] no changes to commit for '{label}'")
+    # -- command passthroughs -------------------------------------------------
+    # Canonical values live in the frozen ``RunCommands`` snapshot; these
+    # properties keep existing ``ctx.judge_accuracy_command``-style call
+    # sites working.
 
     @property
     def judge_accuracy_command(self) -> str | None:
         """Return the accuracy command as seen by the judge agent."""
-        return self.run_environment_view.paths.accuracy_command
+        return self.commands.judge_accuracy_command
 
     @property
     def judge_benchmark_command(self) -> str | None:
         """Return the benchmark command as seen by the judge agent."""
-        return self.run_environment_view.paths.benchmark_command
+        return self.commands.judge_benchmark_command
 
     @property
     def profiler_support_agent_path(self) -> str | None:
         """Return the selected profiler support path as seen by its agent."""
-        return self.run_environment_view.paths.profiler_support
+        return self.commands.profiler_support_agent_path
 
     @property
     def profiler_benchmark_command(self) -> str | None:
         """Return the benchmark command as seen by the profiler agent."""
-        return self.run_environment_view.paths.benchmark_command
+        return self.commands.profiler_benchmark_command
 
     def lprint(self, text: str) -> None:
         _log_and_print(text, self.run_log_file)
@@ -967,7 +808,7 @@ class _RunContext:
         suffix = f"step{label}" if isinstance(label, int) else label
         new_path = self.log_dir / f"run-{ts}-{suffix}.log"
         new_file = new_path.open("a", encoding="utf-8")
-        self.run_log_path = new_path
+        self._paths = replace(self._paths, run_log_path=new_path)
         self.run_log_file = new_file
         if self._stderr_redirected:
             sys.stderr = _TeeWriter(self._original_stderr, new_file)

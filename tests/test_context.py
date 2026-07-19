@@ -10,17 +10,24 @@ from vibesys.domains.base import DomainName
 from vibesys.domains.environment import NoopEnvironmentHooks
 from vibesys.errors import ConfigurationError
 from vibesys.profilers import ACTIVE_PROFILER_KINDS, ProfilerKind, ProfilerPreflightResult
+from vibesys.run import GitTracker, RunPaths
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
 
 
 def _minimal_copy_context(workspace):
     ctx = object.__new__(_RunContext)
-    ctx.workspace = workspace
+    ctx._paths = RunPaths(
+        exp_dir=workspace.parent,
+        log_dir=workspace.parent / "logs",
+        workspace=workspace,
+        run_log_path=workspace.parent / "run.log",
+    )
     ctx.git_tracking = True
     ctx.EXCLUDED_WORKSPACE_DIRS = {".git", "target"}
     ctx.run_environment = SimpleNamespace(isolated=False)
     ctx.backend_impl = MagicMock()
     ctx.lprint = MagicMock()
+    ctx.git = GitTracker(workspace, log=ctx.lprint, excluded_dirs=ctx.EXCLUDED_WORKSPACE_DIRS)
     return ctx
 
 
@@ -37,9 +44,13 @@ def test_setup_exp_dir_uses_unique_names_for_concurrent_default_runs(tmp_path):
 
 def test_interactive_log_switch_preserves_supervision_stderr(tmp_path):
     ctx = object.__new__(_RunContext)
-    ctx.log_dir = tmp_path
+    ctx._paths = RunPaths(
+        exp_dir=tmp_path,
+        log_dir=tmp_path,
+        workspace=tmp_path / "workspace",
+        run_log_path=tmp_path / "run.log",
+    )
     ctx.run_log_file = (tmp_path / "run.log").open("a", encoding="utf-8")
-    ctx.run_log_path = tmp_path / "run.log"
     ctx._stderr_redirected = False
     ctx._original_stderr = sys.stderr
     original_log = ctx.run_log_file

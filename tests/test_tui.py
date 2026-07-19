@@ -14,6 +14,7 @@ import pytest
 
 from vibesys.context import _RunContext
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.run import RunPaths
 from vibesys.server import (
     EventType,
     RunInspector,
@@ -405,7 +406,12 @@ def test_run_context_records_invocation_boundary(tmp_path):
     ctx.supervisor = supervisor
     ctx.agent_runner = Mock()
     ctx.agent_runner.invoke.return_value = {"summary": "measured"}
-    ctx.workspace = tmp_path
+    ctx._paths = RunPaths(
+        exp_dir=tmp_path,
+        log_dir=tmp_path / "logs",
+        workspace=tmp_path,
+        run_log_path=tmp_path / "run.log",
+    )
     ctx.gpu_env = lambda: {}
     ctx._progress_stack = []
 

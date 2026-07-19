@@ -270,11 +270,17 @@ class TestReselectGpu:
         """Build a minimal _RunContext-like object for reselect_gpu testing."""
         from vibesys.backends.cuda import CudaBackend
         from vibesys.context import _RunContext
+        from vibesys.run import RunPaths
         from vs_sandbox.docker_sandbox import DockerSandbox
 
         ctx = object.__new__(_RunContext)
         ctx.selected_gpu = selected_gpu
-        ctx.log_dir = tmp_path / "logs"
+        ctx._paths = RunPaths(
+            exp_dir=tmp_path,
+            log_dir=tmp_path / "logs",
+            workspace=tmp_path / "workspace",
+            run_log_path=tmp_path / "run.log",
+        )
         ctx.log_dir.mkdir(parents=True, exist_ok=True)
         ctx.gpu_monitor = None
         ctx._docker_symlinks = []
