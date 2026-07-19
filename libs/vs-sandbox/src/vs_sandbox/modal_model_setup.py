@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable
 
 import modal
 
@@ -43,7 +44,7 @@ def ensure_model_volume(
     hf_token: str | None = None,
     local_path: str | None = None,
     *,
-    log: callable = print,
+    log: Callable[[str], object] = print,
 ) -> str:
     """Ensure a populated Modal Volume exists for *model_id* and return its name.
 

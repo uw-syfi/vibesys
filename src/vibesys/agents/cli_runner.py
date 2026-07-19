@@ -24,7 +24,7 @@ import shutil
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
@@ -49,7 +49,19 @@ from vibesys.agents.progress import AgentProgress
 T = TypeVar("T", bound=BaseModel)
 
 
-_PROVIDER_CLASSES: dict[str, type[CodingAgent]] = {
+class _ProviderFactory(Protocol):
+    """Constructor signature shared by every CLI provider agent class."""
+
+    def __call__(
+        self,
+        model: str | None = None,
+        event_handler: Any | None = None,
+        *,
+        executor: Any | None = None,
+    ) -> CodingAgent: ...
+
+
+_PROVIDER_CLASSES: dict[str, _ProviderFactory] = {
     "claude": ClaudeCodeCodingAgent,
     "gemini": GeminiCodingAgent,
     "codex": CodexCodingAgent,
@@ -241,8 +253,10 @@ class CliAgentRunner:
             # Modal sandbox was recreated after a fallback restart); refresh
             # the runner so the next exec targets the live container.
             if self._docker_sandboxes is not None:
+                # Dynamic poke: only the docker path constructs agents with a
+                # DockerCommandExecutor, which carries container_id.
                 executor = getattr(agent, "executor", None)
-                executor.container_id = self._docker_sandboxes[kind]._container_id
+                executor.container_id = self._docker_sandboxes[kind]._container_id  # pyright: ignore[reportOptionalMemberAccess]
             # ModalCommandExecutor reads ``_modal_sandbox._sandbox`` on every
             # ``run()``, so a fallback-triggered sandbox restart is picked up
             # automatically — no per-invocation refresh needed here.
@@ -268,7 +282,8 @@ class CliAgentRunner:
                 executor=executor,
             )
             if self._provider == "codex" and hasattr(agent, "base_config_args"):
-                agent.base_config_args = [
+                # Codex-only attribute, guarded by the hasattr check above.
+                agent.base_config_args = [  # pyright: ignore[reportAttributeAccessIssue]
                     "--config",
                     'cli_auth_credentials_store="file"',
                     "--config",

@@ -44,6 +44,13 @@ class EventStatus(StrEnum):
     FAILED = "failed"
 
 
+OutputStream = Literal["stdout", "stderr"]
+"""Which host stream a captured line of backend output came from."""
+
+AgentOutputChannel = Literal["assistant", "analysis", "tool", "diagnostic", "prompt"]
+"""Presentation channel for streamed agent output."""
+
+
 class ChatData(BaseModel):
     kind: Literal["chat"] = "chat"
     answer: str
@@ -63,7 +70,7 @@ class InvocationFinishedData(BaseModel):
 
 class OutputData(BaseModel):
     kind: Literal["output"] = "output"
-    stream: Literal["stdout", "stderr"]
+    stream: OutputStream
     source: str = "backend"
     content: str
 
@@ -103,7 +110,7 @@ class PhaseData(BaseModel):
 
 class AgentOutputChunkData(BaseModel):
     kind: Literal["agent_output_chunk"] = "agent_output_chunk"
-    channel: Literal["assistant", "analysis", "tool", "diagnostic", "prompt"]
+    channel: AgentOutputChannel
     content: str
 
 
@@ -111,7 +118,7 @@ class SubprocessOutputData(BaseModel):
     kind: Literal["subprocess_output"] = "subprocess_output"
     process_id: str
     process_kind: str
-    stream: Literal["stdout", "stderr"]
+    stream: OutputStream
     content: str
 
 

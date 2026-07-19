@@ -433,7 +433,9 @@ def run_plain_loop(
         # MCP server spec under cli). The wrapper consumes an extra
         # ``iteration=`` kwarg on invoke() that the loop passes per call.
         # See vibesys/plain/runner_ext.py.
-        ctx.agent_runner = PlainLoopAgentRunner(
+        # Duck-typed wrapper: preserves the AgentRunner surface the issue
+        # loop uses (see PlainLoopAgentRunner docstring).
+        ctx.agent_runner = PlainLoopAgentRunner(  # pyright: ignore[reportAttributeAccessIssue]
             ctx.agent_runner,
             store=store,
             max_issues_per_perf_eval=max_issues_per_perf_eval,

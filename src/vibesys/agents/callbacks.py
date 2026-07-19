@@ -9,6 +9,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 
 from vibesys.agents.progress import AgentProgress
 from vibesys.constants import _DIM, _GREEN, _RESET, _YELLOW
+from vibesys.server.events import AgentOutputChannel
 
 ContextWindowLookup = Callable[[str | None], int | None]
 """Resolves a model name to its context window size in tokens.
@@ -477,7 +478,7 @@ class AgentLogger(BaseCallbackHandler):
         """Format a tool result the same way ``on_tool_end`` does."""
         self._print_tool_result(name, content)
 
-    def _publish(self, content: str, channel: str) -> None:
+    def _publish(self, content: str, channel: AgentOutputChannel) -> None:
         from vibesys.server.registry import active_supervisor
 
         supervisor = active_supervisor()
