@@ -165,6 +165,28 @@ class TestWrap:
         assert ws_bind > last_ro
 
 
+class TestInstallRoot:
+    """Regression for a real breakage caught by running codex under the sandbox:
+    an npm-packaged CLI must be able to reach its sibling platform binary."""
+
+    def test_node_package_binds_whole_package_tree(self):
+        launcher = Path(
+            "/home/u/.nvm/versions/node/v24/lib/node_modules/@openai/codex/bin/codex.js"
+        )
+        # Must expose the dir holding node_modules, so the sibling
+        # @openai/codex-linux-x64 platform binary resolves.
+        root = hostsandbox._install_root(launcher)
+        assert root == Path("/home/u/.nvm/versions/node/v24/lib")
+        platform_bin = Path(
+            "/home/u/.nvm/versions/node/v24/lib/node_modules/@openai/"
+            "codex/node_modules/@openai/codex-linux-x64/bin/codex"
+        )
+        assert platform_bin.is_relative_to(root)
+
+    def test_plain_binary_binds_its_directory(self):
+        assert hostsandbox._install_root(Path("/opt/tool/bin/agent")) == Path("/opt/tool/bin")
+
+
 def _has_pair(argv: list[str], flag: str, *operands: str) -> bool:
     for i, tok in enumerate(argv):
         if tok == flag and argv[i + 1 : i + 1 + len(operands)] == list(operands):

@@ -94,11 +94,29 @@ def _existing(paths: list[Path]) -> list[Path]:
     return out
 
 
+def _install_root(real_path: Path) -> Path:
+    """Directory to expose so *real_path* can find its siblings/dependencies.
+
+    Node CLIs (codex, claude, ...) are shipped as npm packages whose launcher
+    (``.../node_modules/<pkg>/bin/foo.js``) loads a platform binary from a
+    *sibling* ``node_modules`` (e.g. ``@openai/codex-linux-x64``). Binding only
+    the launcher's ``bin/`` dir hides that, so codex fails with "Missing optional
+    dependency". Bind the directory that holds the top-level ``node_modules`` so
+    the whole package tree resolves; otherwise bind the containing directory.
+    """
+    parts = real_path.parts
+    if "node_modules" in parts:
+        idx = parts.index("node_modules")  # top-level node_modules
+        if idx > 0:
+            return Path(*parts[:idx])
+    return real_path.parent
+
+
 def _default_read_paths(env: dict[str, str], binary_path: str | None) -> list[Path]:
     """Toolchain paths the agent needs to *launch* (never the workspace parent).
 
     These are specific subtrees — the Python runtime, the Node/agent install
-    directory, and the VibeSys package source — rather than broad roots like
+    tree, and the VibeSys package source — rather than broad roots like
     ``$HOME``, precisely so sibling repositories under the same parent stay
     invisible.
     """
@@ -107,14 +125,19 @@ def _default_read_paths(env: dict[str, str], binary_path: str | None) -> list[Pa
         Path(sys.prefix),
     ]
 
-    # The agent binary and its interpreter (e.g. a Node install under ~/.nvm),
-    # resolved through any symlinks so the real install tree is exposed.
+    # The agent binary and its full install tree (e.g. the npm package plus its
+    # platform-binary sibling), resolved through symlinks.
     if binary_path:
         real_binary = Path(binary_path).resolve()
+        candidates.append(_install_root(real_binary))
         candidates.append(real_binary.parent)
+    # Node and its install prefix (``<prefix>/bin/node`` -> ``<prefix>``), which
+    # holds the global ``node_modules`` where the agent CLIs live.
     node = shutil.which("node", path=env.get("PATH"))
     if node:
-        candidates.append(Path(node).resolve().parent)
+        real_node = Path(node).resolve()
+        candidates.append(real_node.parent)
+        candidates.append(real_node.parent.parent)
 
     # The installed VibeSys source tree, so codex/claude MCP servers launched as
     # ``python -m ...`` can import the package even under an editable install.
