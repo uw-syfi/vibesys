@@ -482,6 +482,55 @@ def _make_parser(prog: str, description: str) -> argparse.ArgumentParser:
 
 
 # ---------------------------------------------------------------------------
+# Input-bundle validation command
+# ---------------------------------------------------------------------------
+
+
+def _build_validate_parser() -> argparse.ArgumentParser:
+    parser = _RunArgumentParser(
+        prog="vibesys validate",
+        description="Validate an input-bundle harness contract without starting a run.",
+    )
+    parser.add_argument(
+        "input_bundle",
+        type=Path,
+        nargs="?",
+        default=None,
+        help="Path to the input bundle (default: current directory).",
+    )
+    return parser
+
+
+def _run_validate(argv: list[str]) -> None:
+    """Validate one input-bundle contract, then report its resolved paths."""
+
+    args = _build_validate_parser().parse_args(argv)
+    input_path = (args.input_bundle or Path.cwd()).expanduser().resolve()
+
+    try:
+        bundle = load_input_bundle(input_path)
+    except (FileNotFoundError, ValueError) as exc:
+        _configuration_error(
+            f"Validation failed for input bundle {input_path}: {exc}",
+            code="validation_failed",
+            stage="input_validation",
+            exit_code=1,
+        )
+
+    print("VibeSys validation passed: input bundle is valid.")
+    print(f"  input bundle: {bundle.root}")
+    print(f"  objective: {bundle.objective_path}")
+    print(f"  accuracy command: {bundle.accuracy_command_display}")
+    print(f"  benchmark command: {bundle.benchmark_command_display}")
+    if bundle.workspace_seed_path is not None:
+        print(f"  workspace seed: {bundle.workspace_seed_path}")
+    if bundle.evaluator_path is not None:
+        print(f"  evaluator source: {bundle.evaluator_path}")
+    if bundle.benchmark_result is not None:
+        print(f"  benchmark metric: {bundle.benchmark_result.metric}")
+
+
+# ---------------------------------------------------------------------------
 # Shared input-bundle discovery
 # ---------------------------------------------------------------------------
 
@@ -1025,6 +1074,10 @@ def parse_cli_invocation(argv: list[str]) -> CliInvocation:
 
 
 def _dispatch(argv: list[str]) -> None:
+    if argv and argv[0] == "validate":
+        _run_validate(argv[1:])
+        return
+
     invocation = parse_cli_invocation(argv)
     loop_kind, args = invocation.loop_kind, invocation.args
     runner = globals()[_RUNNERS[loop_kind]]

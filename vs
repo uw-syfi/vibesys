@@ -16,6 +16,9 @@ interactive=true
 if [[ ! -t 0 || ! -t 1 ]]; then
   interactive=false
 fi
+if [[ "${1:-}" == "validate" ]]; then
+  interactive=false
+fi
 for argument in "$@"; do
   if [[ "$argument" == "--headless" ]]; then
     interactive=false

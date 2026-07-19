@@ -378,6 +378,77 @@ def test_missing_config_reports_configuration_error(tmp_path):
     assert exc.value.diagnostic.stage == "config_loading"
 
 
+# ---------------------------------------------------------------------------
+# validate command
+# ---------------------------------------------------------------------------
+
+
+def test_validate_command_defaults_to_current_input_bundle(monkeypatch, tmp_path, capsys):
+    bundle = _write_input_bundle(tmp_path)
+    monkeypatch.chdir(bundle)
+    monkeypatch.setattr(sys, "argv", ["vibesys", "validate"])
+
+    main()
+
+    output = capsys.readouterr().out
+    assert "VibeSys validation passed" in output
+    assert f"input bundle: {bundle}" in output
+    assert "accuracy command: uv run python accuracy_checker/checker.py" in output
+    assert "benchmark command: uv run python benchmark/benchmark.py" in output
+
+
+def test_validate_command_accepts_input_bundle_path(tmp_path, capsys):
+    bundle = _write_input_bundle(tmp_path)
+    argv = ["vibesys", "validate", str(bundle)]
+
+    with patch.object(sys, "argv", argv):
+        main()
+
+    output = capsys.readouterr().out
+    assert "input bundle is valid" in output
+    assert f"objective: {bundle / 'OBJECTIVE.md'}" in output
+
+
+def test_validate_command_rejects_run_input_flag(tmp_path, capsys):
+    bundle = _write_input_bundle(tmp_path)
+    argv = ["vibesys", "validate", "--input", str(bundle)]
+
+    with patch.object(sys, "argv", argv), pytest.raises(SystemExit) as exc:
+        main()
+
+    assert exc.value.code == 2
+    assert "unrecognized arguments" in capsys.readouterr().err
+
+
+def test_all_example_input_bundles_pass_validate(example_input_bundles: tuple[Path, ...], capsys):
+    for input_bundle in example_input_bundles:
+        argv = ["vibesys", "validate", str(input_bundle)]
+        with patch.object(sys, "argv", argv):
+            main()
+
+    output = capsys.readouterr().out
+    assert output.count("VibeSys validation passed") == len(example_input_bundles)
+
+
+def test_validate_command_reports_invalid_harness_without_running_agent(tmp_path, capsys):
+    bundle = _write_input_bundle(tmp_path)
+    (bundle / "OBJECTIVE.md").unlink()
+    argv = ["vibesys", "validate", str(bundle)]
+
+    with (
+        patch.object(sys, "argv", argv),
+        patch("vibesys.main._run_agent") as runner,
+        pytest.raises(SystemExit) as exc,
+    ):
+        main()
+
+    assert exc.value.code == 1
+    runner.assert_not_called()
+    error = capsys.readouterr().err
+    assert "Validation failed for input bundle" in error
+    assert "OBJECTIVE.md not found" in error
+
+
 def test_resume_without_input_infers_original_input(monkeypatch, tmp_path):
     import vibesys.main as cli
 

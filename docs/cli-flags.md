@@ -39,6 +39,32 @@ launcher. For installed npm users, the same launcher is exposed as `vs` and
 `vibesys`.
 Use `./vs --outer-loop <kind> --help` for loop-specific flags.
 
+## Repository Validation
+
+Run `vibesys validate [INPUT_BUNDLE]` to check an input bundle's static harness
+contract without starting the interactive client, an optimization loop, or an
+agent. From a source checkout, use the equivalent `./vs validate` command.
+
+The input bundle is the positional argument. When omitted, it defaults to the
+current directory:
+
+```bash
+vibesys validate
+```
+
+Pass another bundle directly:
+
+```bash
+vibesys validate examples/<target>
+```
+
+The command applies the same strict schemas and path checks as a real run. It
+validates `OBJECTIVE.md`, `vibesys.input.toml`, accuracy and benchmark command
+paths, optional workspace seed and evaluator source, and the optional
+benchmark-result contract. A valid bundle exits with status 0; an invalid bundle
+prints the failing contract and exits with status 1. Command-line usage errors
+exit with status 2. Validation does not execute the checker or benchmark.
+
 ## Interface
 
 `--interface` applies to the agent loop.

@@ -86,13 +86,11 @@ def _make_context(input_dir: Path, seed: Path | None = None, **kwargs) -> _RunCo
     )
 
 
-def test_all_repo_example_input_bundles_are_valid():
-    project_root = Path(__file__).parents[1]
-    manifests = sorted((project_root / "examples").glob("**/vibesys.input.toml"))
-
-    assert manifests
-    for manifest in manifests:
-        bundle = load_input_bundle(manifest.parent, project_root=project_root)
+def test_all_repo_example_input_bundles_are_valid(
+    repo_root: Path, example_input_bundles: tuple[Path, ...]
+):
+    for input_bundle in example_input_bundles:
+        bundle = load_input_bundle(input_bundle, project_root=repo_root)
         assert bundle.domain is bundle.manifest.agent.domain
 
 
