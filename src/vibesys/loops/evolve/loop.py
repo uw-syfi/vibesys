@@ -35,7 +35,7 @@ from jinja2 import Environment, FileSystemLoader
 from vibesys.agents.progress import CandidateProgress
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
-from vibesys.context import _RunContext
+from vibesys.context import _RunContext, create_run_context
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.loops.evolve.population import (
     Individual,
@@ -280,7 +280,7 @@ def run_evolve_loop(
     behavior, kept for back-compat.
     """
     run_environment = run_environment or make_run_environment_spec()
-    ctx = _RunContext(
+    ctx = create_run_context(
         config=config,
         exp_name=exp_name,
         input_path=input_path,

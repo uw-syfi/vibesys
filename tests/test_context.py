@@ -5,12 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibesys.context import _RunContext, setup_exp_dir
+from vibesys.context import _RunContext, create_run_context, setup_exp_dir
 from vibesys.domains.base import DomainName
 from vibesys.domains.environment import NoopEnvironmentHooks
 from vibesys.errors import ConfigurationError
 from vibesys.profilers import ACTIVE_PROFILER_KINDS, ProfilerKind, ProfilerPreflightResult
-from vibesys.run import GitTracker, RunPaths
+from vibesys.run import GitTracker, RunLogger, RunPaths, Workspace
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
 
 
@@ -44,20 +44,22 @@ def test_setup_exp_dir_uses_unique_names_for_concurrent_default_runs(tmp_path):
 
 def test_interactive_log_switch_preserves_supervision_stderr(tmp_path):
     ctx = object.__new__(_RunContext)
+    original_stderr = sys.stderr
+    # Supervised (TUI) runs never redirect stderr; switching log files must
+    # keep it that way.
+    ctx.logger = RunLogger(tmp_path, redirect_stderr=False)
     ctx._paths = RunPaths(
         exp_dir=tmp_path,
         log_dir=tmp_path,
         workspace=tmp_path / "workspace",
-        run_log_path=tmp_path / "run.log",
+        run_log_path=ctx.logger.path,
     )
-    ctx.run_log_file = (tmp_path / "run.log").open("a", encoding="utf-8")
-    ctx._stderr_redirected = False
-    ctx._original_stderr = sys.stderr
     original_log = ctx.run_log_file
 
     ctx.switch_log_file("round001")
 
-    assert sys.stderr is ctx._original_stderr
+    assert sys.stderr is original_stderr
+    assert ctx.run_log_path.name.endswith("-round001.log")
     original_log.close()
     ctx.run_log_file.close()
 
@@ -73,8 +75,15 @@ def test_input_copy_respects_source_gitignore(tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=source, check=True)
 
     destination = tmp_path / "workspace"
-    ctx = _minimal_copy_context(destination)
-    ctx._copy_excluding_extras(source, destination, respect_source_gitignore=True)
+    workspace = Workspace(
+        destination,
+        run_environment=SimpleNamespace(isolated=False),
+        backend=MagicMock(),
+        log=MagicMock(),
+        project_root=tmp_path,
+        excluded_dirs={".git", "target"},
+    )
+    workspace.copy_dir(source, destination, respect_source_gitignore=True)
 
     assert (destination / "main.rs").is_file()
     assert not (destination / "candidate.so").exists()
@@ -178,7 +187,7 @@ def test_run_context_defaults_profiler_support_paths(tmp_path, profiler_kind, wo
         patch("vibesys.context._build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend()),
-        _RunContext(
+        create_run_context(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name=f"{profiler_kind}-defaults",
             input_path=str(ref.parent),
@@ -212,7 +221,7 @@ def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
         patch("vibesys.context._build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend()),
-        _RunContext(
+        create_run_context(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name=f"{selected.value}-support",
             input_path=str(ref.parent),
@@ -250,7 +259,7 @@ def test_run_context_generic_auto_resolves_to_macos_profiler(tmp_path):
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend(ProfilerKind.NSYS)),
         patch("vibesys.profilers.platform.system", return_value="Darwin"),
-        _RunContext(
+        create_run_context(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="generic-auto-none",
             input_path=str(ref.parent),
@@ -283,7 +292,7 @@ def test_run_context_generic_auto_resolves_to_linux_profiler(tmp_path):
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend(ProfilerKind.NSYS)),
         patch("vibesys.profilers.platform.system", return_value="Linux"),
-        _RunContext(
+        create_run_context(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="generic-auto-linux",
             input_path=str(ref.parent),
@@ -327,7 +336,7 @@ def test_run_context_fails_fast_when_resolved_profiler_is_unusable(tmp_path):
         patch("vibesys.context.preflight_profiler_kind", side_effect=fail_preflight),
         pytest.raises(ConfigurationError, match="Resolved profiler 'linux_cpu' is not usable"),
     ):
-        _RunContext(
+        create_run_context(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="generic-auto-linux-unusable",
             input_path=str(ref.parent),
@@ -357,7 +366,7 @@ def test_run_context_rejects_generic_explicit_active_profilers(tmp_path, profile
         patch("vibesys.context.backends.get", return_value=_FakeBackend(profiler_kind)),
         pytest.raises(ValueError, match="not supported for domain 'generic'"),
     ):
-        _RunContext(
+        create_run_context(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name=f"generic-{profiler_kind.value}",
             input_path=str(ref.parent),
@@ -381,7 +390,7 @@ def test_run_context_llm_auto_uses_backend_profiler_and_defaults_support_dir(tmp
         patch("vibesys.context._build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend(ProfilerKind.NSYS)),
-        _RunContext(
+        create_run_context(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="llm-auto-nsys",
             input_path=str(ref.parent),
@@ -411,7 +420,7 @@ def test_run_context_noop_environment_hooks_do_not_require_model_artifacts(tmp_p
         patch("vibesys.context._build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend()),
-        _RunContext(
+        create_run_context(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="generic-reference-dir",
             input_path=str(ref_dir.parent),
@@ -460,7 +469,7 @@ def test_run_context_materializes_input_project_path_dependencies(tmp_path):
         patch("vibesys.context._build_model", return_value="mock-model"),
         patch("vibesys.context.build_agent_runner", return_value=MagicMock()),
         patch("vibesys.context.backends.get", return_value=_FakeBackend()),
-        _RunContext(
+        create_run_context(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="input-local-package",
             input_path=str(ref_dir.parent),

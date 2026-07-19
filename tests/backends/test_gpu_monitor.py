@@ -315,7 +315,7 @@ class TestReselectGpu:
             (kind, ctx.judge_backend),
         ]
 
-        ctx.run_log_file = MagicMock()
+        ctx.logger = MagicMock()  # lprint / run_log_file delegate to RunLogger
         return ctx
 
     @patch("vibesys.backends.cuda.pick_gpu")

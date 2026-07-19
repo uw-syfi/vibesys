@@ -17,7 +17,7 @@ from pathlib import Path
 from vibesys.agents.progress import RoundProgress
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
-from vibesys.context import _RunContext
+from vibesys.context import _RunContext, create_run_context
 from vibesys.domains.base import DomainDefinition, DomainName, DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
@@ -890,7 +890,7 @@ def run_agent_loop(
     if modality is None and domain_definition.name is DomainName.LLM_SERVING:
         modality = "text_generation"
     run_environment = run_environment or make_run_environment_spec()
-    ctx = _RunContext(
+    ctx = create_run_context(
         config=config,
         exp_name=exp_name,
         input_path=input_path,
