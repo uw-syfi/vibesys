@@ -357,9 +357,10 @@ class SeatbeltSandbox:
         ]
 
         # Writes are denied by default; permit them only on the workspace, the
-        # agent's own config/auth dirs, and scratch tmp.
+        # agent's own config/auth dirs, scratch tmp, and device nodes (a process
+        # must be able to write /dev/null, /dev/stdout, /dev/tty, ...).
         write_roots = [str(self.workspace)] + [str(p) for p in self.write_paths]
-        write_roots += ["/private/tmp", "/private/var/tmp"]
+        write_roots += ["/private/tmp", "/private/var/tmp", "/dev"]
         lines.append("(allow file-write*")
         lines += [f"    (subpath {_sbpl_string(w)})" for w in write_roots]
         lines.append(")")
