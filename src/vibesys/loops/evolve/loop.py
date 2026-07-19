@@ -71,44 +71,17 @@ def _render(name: str, **kwargs) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Git checkout helpers (parent materialization + dirty-tree discard)
+# Git helpers (dirty-tree discard)
 # ---------------------------------------------------------------------------
-
-
-def _checkout_commit_tree(ctx: _RunContext, commit: str) -> bool:
-    """Materialize *commit*'s tree into the working directory.
-
-    Uses ``git checkout <sha> -- .`` so HEAD stays where it is and the
-    next ``git commit`` produces a new child commit (rather than
-    rewriting history). Untracked files left over from a prior failed
-    attempt are removed via ``git clean -fd``.
-    """
-    try:
-        ctx._git_run(["git", "checkout", commit, "--", "."])
-        ctx._git_run(["git", "clean", "-fd"], check=False)
-        return True
-    except Exception as exc:
-        ctx.lprint(f"[warn] git checkout {commit[:8]} failed: {exc}")
-        return False
 
 
 def _discard_working_tree(ctx: _RunContext) -> None:
     """Drop any uncommitted changes left by a failed mutation attempt."""
     try:
-        ctx._git_run(["git", "checkout", "HEAD", "--", "."], check=False)
-        ctx._git_run(["git", "clean", "-fd"], check=False)
+        ctx.git.run(["git", "checkout", "HEAD", "--", "."], check=False)
+        ctx.git.run(["git", "clean", "-fd"], check=False)
     except Exception as exc:
         ctx.lprint(f"[warn] discard working tree failed: {exc}")
-
-
-def _current_commit_sha(ctx: _RunContext) -> str | None:
-    try:
-        result = ctx._git_run(["git", "rev-parse", "HEAD"], check=False)
-        if result.returncode != 0:
-            return None
-        return result.stdout.decode(errors="replace").strip()
-    except Exception:
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +351,7 @@ def run_evolve_loop(
                     # 2. Materialize parent's tree (skip on cold start —
                     # _RunContext seeded the workspace from the reference).
                     if parent is not None and parent.commit:
-                        if not _checkout_commit_tree(ctx, parent.commit):
+                        if not ctx.git.checkout_tree(parent.commit, clean=True):
                             ctx.lprint(
                                 f"[warn] could not check out parent {parent.id} "
                                 f"(commit {parent.commit[:8]}); skipping cand"
@@ -452,7 +425,7 @@ def run_evolve_loop(
 
                     # 6. Commit + record.
                     ctx.snapshot_workspace(f"gen-{generation}-child-{child_idx}")
-                    commit = _current_commit_sha(ctx)
+                    commit = ctx.git.current_sha()
                     child = Individual(
                         id=population.next_id(),
                         generation=generation,

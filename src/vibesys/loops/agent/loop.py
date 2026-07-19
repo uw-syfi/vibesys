@@ -183,38 +183,6 @@ def _detect_plateau(
 
 
 # ---------------------------------------------------------------------------
-# Git helpers
-# ---------------------------------------------------------------------------
-
-
-def _current_commit_sha(ctx: _RunContext) -> str | None:
-    if not ctx.git_tracking:
-        return None
-    try:
-        result = ctx._git_run(["git", "rev-parse", "HEAD"], check=False)
-        if result.returncode != 0:
-            return None
-        return result.stdout.decode(errors="replace").strip()
-    except Exception:
-        return None
-
-
-def _git_checkout(ctx: _RunContext, sha: str) -> bool:
-    """Check out *sha* into the working tree.
-
-    Uses ``git checkout -- .`` style (non-branch) so subsequent commits
-    continue to land on the current branch as new commits after the
-    reverted state.
-    """
-    try:
-        ctx._git_run(["git", "checkout", sha, "--", "."])
-        return True
-    except Exception as exc:
-        ctx.lprint(f"[warn] git checkout {sha[:8]} failed: {exc}")
-        return False
-
-
-# ---------------------------------------------------------------------------
 # Carry-over state between rounds
 # ---------------------------------------------------------------------------
 
@@ -1032,7 +1000,10 @@ def run_agent_loop(
                         None,
                     )
                     if target and target.commit:
-                        _git_checkout(ctx, target.commit)
+                        # Non-branch checkout so subsequent commits continue
+                        # to land on the current branch as new commits after
+                        # the reverted state.
+                        ctx.git.checkout_tree(target.commit)
                         ctx.lprint(
                             f"Reverted workspace to round {plan.revert_to_round} ({target.commit[:8]})."
                         )
@@ -1118,7 +1089,7 @@ def run_agent_loop(
                         feedback = single_agent_response.feedback
 
                 # --- Record round result & update carry-over ---
-                commit = _current_commit_sha(ctx)
+                commit = ctx.git.current_sha() if ctx.git_tracking else None
                 # `profile_skipped` is True when no fresh profile ran this round
                 # (cold-start or the orchestrator/framework decided to skip).
                 # The plateau detector ignores skipped-profile rounds so cached

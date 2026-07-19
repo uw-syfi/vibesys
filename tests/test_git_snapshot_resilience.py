@@ -7,42 +7,23 @@ from __future__ import annotations
 
 import os
 import subprocess
-from types import SimpleNamespace
 
 import pytest
 
-from vibesys.context import _RunContext
+from vibesys.run import GitTracker
 
 
 def _git(ws, *args):
     subprocess.run(["git", *args], cwd=ws, check=True, capture_output=True)
 
 
-def _make_ctx(ws):
-    """A minimal stand-in exposing just the git-snapshot helpers."""
-    ctx = SimpleNamespace(
-        workspace=ws,
-        lprint=lambda *a, **k: None,
-        _GIT_ENV={
-            "GIT_AUTHOR_NAME": "t",
-            "GIT_AUTHOR_EMAIL": "t@t",
-            "GIT_COMMITTER_NAME": "t",
-            "GIT_COMMITTER_EMAIL": "t@t",
-        },
-    )
-    ctx._collect_unreadable = lambda: _RunContext._collect_unreadable(ctx)
-    ctx._exclude_paths = lambda p: _RunContext._exclude_paths(ctx, p)
-    ctx._git_run = lambda cmd, check=True: _RunContext._git_run(ctx, cmd, check=check)
-    ctx._unreadable_from_stderr = _RunContext._unreadable_from_stderr
-    return ctx
+def _make_tracker(ws, excluded_dirs=()):
+    return GitTracker(ws, log=lambda *a, **k: None, excluded_dirs=excluded_dirs)
 
 
-def test_workspace_gitignore_excludes_compiled_artifacts():
-    ctx = SimpleNamespace(
-        EXCLUDED_WORKSPACE_DIRS={".git", "__pycache__", "_mounts", "target"},
-        _ARTIFACT_GITIGNORE_PATTERNS=_RunContext._ARTIFACT_GITIGNORE_PATTERNS,
-    )
-    gi = _RunContext._workspace_gitignore(ctx)
+def test_workspace_gitignore_excludes_compiled_artifacts(tmp_path):
+    tracker = _make_tracker(tmp_path, excluded_dirs={".git", "__pycache__", "_mounts", "target"})
+    gi = tracker._workspace_gitignore()
     # accelerator artifacts an agent might drop into the workspace
     for pat in ("*.neff", "*.ntff", "neuron-compile-cache/"):
         assert pat in gi
@@ -56,7 +37,7 @@ def test_unreadable_from_stderr_parses_git_output():
         "error: unable to index file 'sub/ntrace.pb'\n"
         "fatal: adding files failed\n"
     )
-    assert _RunContext._unreadable_from_stderr(stderr) == [
+    assert GitTracker._unreadable_from_stderr(stderr) == [
         "system_profile.json",
         "sub/ntrace.pb",
     ]
@@ -70,8 +51,8 @@ def test_collect_unreadable_finds_mode000_file(tmp_path):
     secret.write_text("x")
     os.chmod(secret, 0o000)
     try:
-        ctx = _make_ctx(ws)
-        assert ctx._collect_unreadable() == ["secret.bin"]
+        tracker = _make_tracker(ws)
+        assert tracker._collect_unreadable() == ["secret.bin"]
     finally:
         os.chmod(secret, 0o644)  # let pytest clean up
 
@@ -87,11 +68,10 @@ def test_git_add_all_excludes_unreadable_and_succeeds(tmp_path):
     os.chmod(secret, 0o600)  # owner-read, but pytest runs as the owner...
     os.chmod(secret, 0o000)  # ...so make it truly unreadable
 
-    ctx = _make_ctx(ws)
+    tracker = _make_tracker(ws)
     try:
         # Plain `git add -A` would exit 128 here; the resilient path must not.
-        ctx._git_add_all = lambda: _RunContext._git_add_all(ctx)
-        ctx._git_add_all()
+        tracker._add_all()
         staged = subprocess.run(
             ["git", "diff", "--cached", "--name-only"],
             cwd=ws,

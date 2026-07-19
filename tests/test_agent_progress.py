@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 from vibesys.agents.progress import CandidateProgress, RoundProgress
 from vibesys.context import _RunContext
+from vibesys.run import RunPaths
 from vibesys.schemas import JudgeResponse, Verdict
 
 
@@ -16,7 +17,12 @@ def _judge_fallback() -> JudgeResponse:
 def _make_context(tmp_path):
     ctx = object.__new__(_RunContext)
     ctx._progress_stack = []
-    ctx.workspace = tmp_path
+    ctx._paths = RunPaths(
+        exp_dir=tmp_path,
+        log_dir=tmp_path / "logs",
+        workspace=tmp_path,
+        run_log_path=tmp_path / "run.log",
+    )
     ctx.gpu_env = lambda: {}
     ctx.agent_runner = MagicMock()
     ctx.agent_runner.invoke.return_value = _judge_fallback()
