@@ -66,9 +66,6 @@ fitness and drops the candidate from the frontier.
 - Text-generation, dense causal LM. Hopper-class hardware assumed.
 - Implement model layers explicitly (own attention / MLP / norm / RoPE); use
   `transformers` only as a utility for config / tokenizer / weight loading.
-- FP16/BF16 is a reasonable baseline; quantization is an optimization, not a
-  prerequisite. Continuous batching / paged-KV / CUDA-graph capture are the
-  levers that move both axes at once under the concurrent load above.
 - Both the benchmark and the accuracy checker drive the **running server over
   HTTP** (no local model import). The accuracy checker enforces reference-free
   gates — sentinel-echo, known-answer, and greedy determinism — so a real
