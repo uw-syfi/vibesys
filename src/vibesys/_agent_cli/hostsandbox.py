@@ -154,6 +154,33 @@ def _default_read_paths(env: dict[str, str], binary_path: str | None) -> list[Pa
         Path(sys.prefix),
     ]
 
+    # Agent-generated commands run inside the namespace too. Expose the
+    # executable directories advertised by PATH, not just the agent CLI's own
+    # install tree, so ordinary build tools such as Go and CMake remain usable.
+    candidates.extend(
+        Path(entry).expanduser() for entry in env.get("PATH", "").split(os.pathsep) if entry
+    )
+
+    # rustup's shims live in CARGO_HOME/bin while the selected compiler and
+    # standard library live under RUSTUP_HOME. Mount only those toolchain paths,
+    # not all of $HOME or Cargo's credential-bearing registry configuration.
+    home = env.get("HOME")
+    if home:
+        home_path = Path(home)
+        cargo_home = Path(env.get("CARGO_HOME", home_path / ".cargo")).expanduser()
+        rustup_home = Path(env.get("RUSTUP_HOME", home_path / ".rustup")).expanduser()
+        candidates.extend(
+            (
+                cargo_home / "bin",
+                cargo_home / "env",
+                rustup_home,
+                home_path / ".bash_profile",
+                home_path / ".bash_login",
+                home_path / ".profile",
+                home_path / ".bashrc",
+            )
+        )
+
     # The agent binary and its full install tree (e.g. the npm package plus its
     # platform-binary sibling), resolved through symlinks.
     if binary_path:
@@ -275,7 +302,11 @@ class HostSandbox(WorkspaceSandbox):
         # directories are ephemeral inside the namespace; only the explicitly
         # bound files below are sourced from the host.
         parent_dirs = {
-            parent for path in self.write_paths for parent in path.parents if parent != Path("/")
+            parent
+            for path in (*self.read_paths, *self.write_paths)
+            if path.is_file()
+            for parent in path.parents
+            if parent != Path("/")
         }
         for parent in sorted(parent_dirs, key=lambda path: len(path.parts)):
             cmd += ["--dir", str(parent)]

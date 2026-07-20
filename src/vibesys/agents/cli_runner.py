@@ -374,12 +374,14 @@ class CliAgentRunner:
             )
             if self._provider == "codex" and hasattr(agent, "base_config_args"):
                 # Codex-only attribute, guarded by the hasattr check above.
-                agent.base_config_args = [  # pyright: ignore[reportAttributeAccessIssue]
-                    "--config",
-                    'cli_auth_credentials_store="file"',
-                    "--config",
-                    'forced_login_method="chatgpt"',
-                ]
+                agent.base_config_args.extend(
+                    [  # pyright: ignore[reportAttributeAccessIssue]
+                        "--config",
+                        'cli_auth_credentials_store="file"',
+                        "--config",
+                        'forced_login_method="chatgpt"',
+                    ]
+                )
             if reuse_agent:
                 self._agents[kind] = agent
         else:

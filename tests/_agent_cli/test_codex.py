@@ -17,7 +17,11 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
-from vibesys._agent_cli.codex import CodexCodingAgent, CodexGenerationSession
+from vibesys._agent_cli.codex import (
+    CodexCodingAgent,
+    CodexGenerationSession,
+    _shell_path_config_args,
+)
 
 
 def _agent() -> CodexCodingAgent:
@@ -49,6 +53,15 @@ def _session(event_handler=None) -> CodexGenerationSession:
 
 
 class TestGetCommand:
+    def test_shell_path_config_preserves_launcher_path(self):
+        assert _shell_path_config_args({"PATH": '/opt/go/bin:/path/with"quote'}) == [
+            "--config",
+            'shell_environment_policy.set.PATH="/opt/go/bin:/path/with\\"quote"',
+        ]
+
+    def test_shell_path_config_omits_missing_path(self):
+        assert _shell_path_config_args({}) == []
+
     def test_initial_command_includes_skip_git_repo_check(self):
         cmd = _agent()._get_command("hello")
         assert "--skip-git-repo-check" in cmd

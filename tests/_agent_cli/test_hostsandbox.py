@@ -238,6 +238,27 @@ class TestInstallRoot:
     def test_plain_binary_binds_its_directory(self):
         assert hostsandbox._install_root(Path("/opt/tool/bin/agent")) == Path("/opt/tool/bin")
 
+    def test_default_read_paths_include_path_and_rustup_toolchains(self, tmp_path):
+        home = tmp_path / "home"
+        tool_bin = home / "tools" / "bin"
+        cargo_bin = home / ".cargo" / "bin"
+        rustup_home = home / ".rustup"
+        bash_profile = home / ".bash_profile"
+        for directory in (tool_bin, cargo_bin, rustup_home):
+            directory.mkdir(parents=True)
+        bash_profile.write_text('export PATH="$HOME/tools/bin:$PATH"\n')
+
+        paths = hostsandbox._default_read_paths(
+            {"HOME": str(home), "PATH": f"{tool_bin}:/usr/bin"},
+            binary_path=None,
+        )
+
+        assert tool_bin in paths
+        assert cargo_bin in paths
+        assert rustup_home in paths
+        assert bash_profile in paths
+        assert home not in paths
+
 
 def _has_pair(argv: list[str], flag: str, *operands: str) -> bool:
     for i, tok in enumerate(argv):
