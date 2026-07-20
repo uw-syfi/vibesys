@@ -219,7 +219,7 @@ visibility = "internal"
         ["--repo", "generated-trial", "--config", str(config_path), "--no-skills"]
     )
 
-    load_config_and_skills(args)
+    load_config_and_skills(args, domain=DomainName.GENERIC)
 
     assert args.repo == "my-playground/generated-trial"
     assert args.repo_visibility is RepositoryVisibility.INTERNAL
