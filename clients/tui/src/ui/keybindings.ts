@@ -3,6 +3,7 @@ import type {SessionController} from '../session-controller.js';
 
 export interface KeybindingActions {
   completeInput(): boolean;
+  closeChat(): void;
   toggleLatestPrompt(): void;
   selectNextAgent(): void;
   selectPreviousAgent(): void;
@@ -21,6 +22,13 @@ export function bindKeybindings(
     if (key.ctrl && key.name === 'c') {
       key.preventDefault();
       renderer.destroy();
+      return;
+    }
+    if (controller.state.chatOpen) {
+      if (key.name === 'escape') {
+        actions.closeChat();
+        key.preventDefault();
+      }
       return;
     }
     if (key.name === 'escape' && controller.state.overlay !== null) {

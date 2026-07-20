@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from vibesys._agent_cli.base import MCPServerSpec
 from vibesys.agent_runner import (
     log_agent_config,
+    run_agent,
     run_typed_agent,
 )
 from vibesys.agents.callbacks import AgentLogger
@@ -66,6 +67,7 @@ class DeepAgentsRunner:
         response_cls: type[T],
         fallback_factory: Callable[[], T],
         round_label: str,
+        invocation_id: str | None = None,
         progress: AgentProgress | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,  # noqa: ARG002 — cli-only injection point; deepagents uses tools=
         tools: list[BaseTool] | None = None,
@@ -96,6 +98,9 @@ class DeepAgentsRunner:
                 model_name=self._model_name,
                 agent_label=label,
                 progress=progress,
+                agent_kind=kind,
+                round_label=round_label,
+                invocation_id=invocation_id,
             )
         ]
 
@@ -105,6 +110,53 @@ class DeepAgentsRunner:
             response_cls=response_cls,
             label=kind.upper(),
             fallback_factory=fallback_factory,
+            callbacks=callbacks,
+            thread_id=thread_id,
+            round_label=round_label,
+            log_file=self._run_log_file,
+        )
+
+    def invoke_text(
+        self,
+        *,
+        kind: str,
+        workspace: Path,  # noqa: ARG002 — backend already encapsulates cwd
+        system_prompt: str,
+        env: dict[str, str] | None = None,  # noqa: ARG002 — env on the BaseSandbox
+        user_prompt: str,
+        round_label: str,
+        invocation_id: str | None = None,
+        progress: AgentProgress | None = None,
+        mcp_servers: list[MCPServerSpec] | None = None,  # noqa: ARG002 — cli-only
+        tools: list[BaseTool] | None = None,
+    ) -> str:
+        """Run a conversational agent without imposing a response schema."""
+        checkpointer = MemorySaver()
+        thread_id = uuid.uuid4().hex
+        label = _agent_label(kind)
+        agent = create_deep_agent(
+            model=self._model,
+            backend=self._backends[kind],
+            system_prompt=system_prompt,
+            skills=self._skills,
+            checkpointer=checkpointer,
+            tools=tools,
+        )
+        log_agent_config(agent, label, self._run_log_file)
+        callbacks: list[BaseCallbackHandler] = [
+            AgentLogger(
+                log_file=self._run_log_file,
+                model_name=self._model_name,
+                agent_label=label,
+                progress=progress,
+                agent_kind=kind,
+                round_label=round_label,
+                invocation_id=invocation_id,
+            )
+        ]
+        return run_agent(
+            agent,
+            user_prompt,
             callbacks=callbacks,
             thread_id=thread_id,
             round_label=round_label,

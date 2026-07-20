@@ -21,6 +21,10 @@ export interface SessionState {
   liveContent: string;
   conversation: ConversationEntry[];
   overlay: OverlayPanel | null;
+  chatOpen: boolean;
+  chatConversation: ConversationEntry[];
+  chatPending: boolean;
+  chatTypedToolEvents: boolean;
   terminal: boolean;
   todoPhases: PhaseTodos[];
   todosExpanded: boolean;
@@ -64,6 +68,7 @@ export interface ConversationEntry {
   id: string;
   kind:
     | 'assistant'
+    | 'user'
     | 'prompt'
     | 'analysis'
     | 'tool'
@@ -98,6 +103,10 @@ export function initialSessionState(): SessionState {
     liveContent: 'Waiting for run events…',
     conversation: [],
     overlay: null,
+    chatOpen: false,
+    chatConversation: [],
+    chatPending: false,
+    chatTypedToolEvents: false,
     terminal: false,
     todoPhases: [],
     todosExpanded: false,
@@ -120,6 +129,7 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
   const sequence = event.sequence ?? 0;
   if (sequence > 0 && sequence <= state.sequence) return state;
   const next = {...state, sequence: Math.max(state.sequence, sequence)};
+  if (event.agent_kind === 'chat') return applyChatEvent(next, event);
   if (event.agent_kind) next.agentKind = event.agent_kind;
   if (event.round_label) next.roundLabel = event.round_label;
   const runMap = applyRunMapEvent(
@@ -181,6 +191,22 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
   if (event.type === 'run_failed' || event.type === 'run_interrupted') {
     next.status = 'failed';
     next.terminal = true;
+  }
+  return next;
+}
+
+function applyChatEvent(state: SessionState, event: RunEvent): SessionState {
+  const next = {...state};
+  const data = event.data;
+  if (data?.kind === 'tool_call' || data?.kind === 'tool_result') {
+    next.chatTypedToolEvents = true;
+  }
+  const suppressed =
+    data?.kind === 'agent_output_chunk' && data.channel === 'tool' && next.chatTypedToolEvents;
+  if (suppressed) return next;
+  const entry = eventToConversationEntry(event);
+  if (entry !== null) {
+    next.chatConversation = appendConversation(next.chatConversation, entry);
   }
   return next;
 }
@@ -259,6 +285,16 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
       content: formatConfigurationFailure(event),
       label: 'Configuration failed',
       tone: 'failure',
+    };
+  }
+  if (data?.kind === 'chat') {
+    return {
+      id,
+      kind: 'assistant',
+      content: data.answer,
+      label: 'Answer',
+      ...agentKind,
+      ...roundFields,
     };
   }
   if (data?.kind === 'agent_output_chunk') {
@@ -426,7 +462,13 @@ function appendConversation(
 }
 
 export function showLive(state: SessionState): SessionState {
-  return {...state, overlay: null, selectedRound: null, selectedAgentKind: null};
+  return {
+    ...state,
+    overlay: null,
+    chatOpen: false,
+    selectedRound: null,
+    selectedAgentKind: null,
+  };
 }
 
 export function showDetail(

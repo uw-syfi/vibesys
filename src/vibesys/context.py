@@ -1,7 +1,9 @@
 """Shared run context: ``_RunContext``, ``create_run_context``, and ``setup_exp_dir``."""
 
+import json
 import shutil
 import subprocess
+import threading
 import uuid
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
@@ -64,6 +66,33 @@ if TYPE_CHECKING:
     from vibesys.server.supervisor import RunSupervisor
 
 T = TypeVar("T", bound=BaseModel)
+
+_CHAT_STATE_DIR = "_vibesys_chat"
+_CHAT_TRAJECTORY_SUFFIXES = frozenset({".json", ".jsonl", ".log", ".md", ".txt"})
+_EXPERIMENT_CHAT_SYSTEM_PROMPT = """\
+You are the read-only investigation agent for a live VibeSys experiment. Answer the
+user's question by examining evidence instead of relying on a precomputed summary.
+
+Your working directory is the current experiment workspace. Relevant evidence is:
+- `_vibesys_chat/trajectory/`: refreshed snapshots of the experiment event stream,
+  agent run logs, round state, progress, performance metrics, and other textual logs.
+- `_vibesys_chat/conversation.jsonl`: successful earlier exchanges in this chat.
+- the rest of the workspace: the current implementation, evaluator inputs, and git
+  history/diffs when available.
+
+Investigate only what the question requires. Prefer targeted commands such as `rg`,
+`tail`, `jq`, `git status`, and `git diff`; correlate claims with round labels, event
+sequence numbers, tool output, or file contents. Distinguish direct evidence from
+inference, mention important missing evidence, and give a concise answer.
+
+Do not edit files, run mutating commands, start workloads, steer optimization agents,
+or claim actions you did not take. Your role is analysis only.
+"""
+_EXPERIMENT_CHAT_CONTINUATION_PROMPT = """\
+Continue the read-only experiment chat. Follow `_vibesys_chat/instructions.md`,
+consult `_vibesys_chat/conversation.jsonl` when the question depends on an earlier
+exchange, and investigate the refreshed trajectory evidence before making claims.
+"""
 
 
 def setup_exp_dir(
@@ -389,6 +418,8 @@ def create_run_context(
         backends={
             "implementer": session.sandbox,
             "judge": session.sandbox,
+            # TUI chat is a read-only peer agent over the current workspace.
+            "chat": session.sandbox,
             # Perf eval reuses the implementer's backend today (loop.py:564),
             # so the runner picks the same one when kind="perf_eval".
             "perf_eval": session.sandbox,
@@ -533,6 +564,10 @@ class _RunContext:
         self.agent_runner = agent_runner
         self._closed = False
         self._progress_stack: list[AgentProgress] = []
+        self._chat_lock = threading.Lock()
+        self._chat_history = self._load_chat_history()
+        if self.supervisor is not None:
+            self.supervisor.set_chat_handler(self.chat)
 
     # -- path passthroughs ----------------------------------------------------
     # Canonical values live in the frozen ``RunPaths`` record; these
@@ -633,6 +668,102 @@ class _RunContext:
             if supervisor is not None:
                 supervisor.after_agent(kind, round_label, result=result, error=error)
 
+    def chat(self, question: str) -> str:
+        """Ask a read-only peer agent about the live experiment."""
+        from vibesys.server.inspector import RunInspector
+
+        with self._chat_lock:
+            self._sync_chat_trajectory()
+
+            def fallback() -> str:
+                assert self.supervisor is not None
+                diagnostic = RunInspector(self.supervisor).answer(question)
+                return f"Chat agent did not return an answer.\n\nFallback diagnostic:\n{diagnostic}"
+
+            assert self.supervisor is not None
+            invocation_id = uuid.uuid4().hex
+            system_prompt = (
+                _EXPERIMENT_CHAT_CONTINUATION_PROMPT
+                if self._chat_history
+                else _EXPERIMENT_CHAT_SYSTEM_PROMPT
+            )
+            with self.supervisor.presentation_scope(
+                agent_kind="chat",
+                round_label="experiment-chat",
+                invocation_id=invocation_id,
+            ):
+                try:
+                    answer = self.agent_runner.invoke_text(
+                        kind="chat",
+                        workspace=self.workspace,
+                        system_prompt=system_prompt,
+                        env=self.gpu_env(),
+                        user_prompt=question,
+                        round_label="experiment chat",
+                        invocation_id=invocation_id,
+                        progress=self.current_progress(),
+                    )
+                except Exception as exc:
+                    raise RuntimeError(f"Chat agent failed: {type(exc).__name__}: {exc}") from exc
+            if not answer.strip():
+                answer = fallback()
+            self._chat_history.append((question, answer))
+            self._append_chat_exchange(question, answer)
+            return answer
+
+    @property
+    def _chat_state_dir(self) -> Path:
+        return self.workspace / _CHAT_STATE_DIR
+
+    def _load_chat_history(self) -> list[tuple[str, str]]:
+        """Load successful prior exchanges so reopening a run resumes its chat."""
+        transcript = self._chat_state_dir / "conversation.jsonl"
+        if not transcript.is_file():
+            return []
+        history: list[tuple[str, str]] = []
+        try:
+            for line in transcript.read_text(encoding="utf-8").splitlines():
+                payload = json.loads(line)
+                question = payload.get("question")
+                answer = payload.get("answer")
+                if isinstance(question, str) and isinstance(answer, str):
+                    history.append((question, answer))
+        except (OSError, json.JSONDecodeError, AttributeError):
+            return []
+        return history
+
+    def _append_chat_exchange(self, question: str, answer: str) -> None:
+        """Persist one successful exchange for later agent investigation."""
+        try:
+            self._chat_state_dir.mkdir(parents=True, exist_ok=True)
+            with (self._chat_state_dir / "conversation.jsonl").open(
+                "a", encoding="utf-8"
+            ) as transcript:
+                transcript.write(
+                    json.dumps({"question": question, "answer": answer}, ensure_ascii=False) + "\n"
+                )
+        except OSError as exc:
+            self.logger.lprint(f"[warn] could not persist experiment chat: {exc}")
+
+    def _sync_chat_trajectory(self) -> None:
+        """Refresh textual run evidence that the workspace-confined chat can inspect."""
+        trajectory_dir = self._chat_state_dir / "trajectory"
+        try:
+            trajectory_dir.mkdir(parents=True, exist_ok=True)
+            (self._chat_state_dir / "instructions.md").write_text(
+                _EXPERIMENT_CHAT_SYSTEM_PROMPT, encoding="utf-8"
+            )
+            self.run_log_file.flush()
+            for source in self.log_dir.iterdir():
+                if not source.is_file() or source.suffix not in _CHAT_TRAJECTORY_SUFFIXES:
+                    continue
+                destination = trajectory_dir / source.name
+                temporary = trajectory_dir / f".{source.name}.tmp"
+                shutil.copyfile(source, temporary)
+                temporary.replace(destination)
+        except OSError as exc:
+            self.logger.lprint(f"[warn] could not refresh experiment chat trajectory: {exc}")
+
     def wait_for_debug(self, step: str) -> None:
         if self.debug:
             input(f"\n[debug] {step}. Press Enter to continue...")
@@ -720,6 +851,8 @@ class _RunContext:
         if self._closed:
             return
         self._closed = True
+        if self.supervisor is not None:
+            self.supervisor.set_chat_handler(None)
         # Unwinds in reverse construction order: device monitor stop +
         # gpu.json finalization, environment hook teardown, run-environment
         # session exit, stderr restore + log file close.

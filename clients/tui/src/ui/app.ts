@@ -2,6 +2,7 @@ import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} fr
 import type {SessionController} from '../session-controller.js';
 import {type SessionState, statusText} from '../session-model.js';
 import {AgentMapView} from './agent-map.js';
+import {ChatOverlayView} from './chat-overlay.js';
 import {ConversationView} from './conversation.js';
 import {createInputPanel} from './input.js';
 import {bindKeybindings} from './keybindings.js';
@@ -57,6 +58,7 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
   const agentMap = new AgentMapView(renderer);
   const overlay = new OverlayView(renderer);
   const conversation = new ConversationView(renderer, controller, markdownStyle);
+  const chat = new ChatOverlayView(renderer, controller, markdownStyle);
   const input = createInputPanel(renderer, value => void controller.submit(value));
 
   viewport.add(conversation.output);
@@ -70,11 +72,13 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
   root.add(input.suggestions);
   root.add(input.box);
   root.add(overlay.output);
+  root.add(chat.output);
   renderer.root.add(root);
   input.focus();
 
+  let chatWasOpen = false;
   const render = (state: SessionState): void => {
-    const returnHint = state.overlay === null ? '' : ' · Esc: close dialog';
+    const returnHint = state.chatOpen || state.overlay !== null ? ' · Esc: close dialog' : '';
     const selection = state.selectedAgentKind ? ` · selected ${state.selectedAgentKind}` : '';
     header.content = `VibeSys · ${statusText(state)}${selection}${returnHint}`;
     roundStrip.render(state);
@@ -82,9 +86,14 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
     agentMap.render(state);
     conversation.render(state);
     overlay.render(state);
+    chat.render(state);
+    if (state.chatOpen && !chatWasOpen) chat.focus();
+    if (!state.chatOpen && chatWasOpen) input.focus();
+    chatWasOpen = state.chatOpen;
   };
   const unbindKeys = bindKeybindings(renderer, controller, viewport, {
     completeInput: () => input.completeSuggestion(),
+    closeChat: () => controller.closeChat(),
     toggleLatestPrompt: () => conversation.toggleLatestPrompt(),
     selectNextAgent: () => controller.selectNextAgent(),
     selectPreviousAgent: () => controller.selectPreviousAgent(),
@@ -99,6 +108,7 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
       unsubscribe();
       unbindKeys();
       input.destroy();
+      chat.destroy();
       roundStrip.destroy();
       root.destroyRecursively();
       markdownStyle.destroy();

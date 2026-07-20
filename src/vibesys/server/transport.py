@@ -10,7 +10,7 @@ import threading
 import time
 from pathlib import Path
 
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter
 
 from vibesys.server.protocol import (
     EventBatchMessage,
@@ -44,7 +44,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                         self.server.client_disconnected.set()  # type: ignore[attr-defined]
                     return
                 response = service.execute(request)
-            except (json.JSONDecodeError, TypeError, ValidationError, ValueError) as exc:
+            except Exception as exc:
                 response = Response(
                     request_id=request_id,
                     ok=False,

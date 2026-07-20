@@ -24,6 +24,21 @@ def test_stub_runner_returns_valid_agent_loop_responses(tmp_path):
     assert responses[3].verdict is Verdict.PASS
 
 
+def test_stub_runner_returns_plain_chat_text(tmp_path):
+    runner = StubAgentRunner()
+
+    answer = runner.invoke_text(
+        kind="chat",
+        workspace=tmp_path,
+        system_prompt="investigate",
+        user_prompt="what happened?",
+        round_label="experiment-chat",
+        invocation_id="chat-1",
+    )
+
+    assert answer == "Stub chat inspected the available experiment trajectory."
+
+
 def invoke(runner, workspace, kind, response_cls):
     return runner.invoke(
         kind=kind,

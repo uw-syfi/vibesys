@@ -30,6 +30,9 @@ export function entryPalette(entry: ConversationEntry): EntryPalette {
   if (entry.kind === 'assistant') {
     return {border: '#0891b2', background: '#0f1b24', label: '#67e8f9', content: '#e2e8f0'};
   }
+  if (entry.kind === 'user') {
+    return {border: '#2563eb', background: '#102548', label: '#7dd3fc', content: '#e0f2fe'};
+  }
   if (entry.kind === 'prompt') {
     return {border: '#3b82f6', background: '#102548', label: '#93c5fd', content: '#dbeafe'};
   }

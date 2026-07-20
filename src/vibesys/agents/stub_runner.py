@@ -7,8 +7,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
 
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 
+from vibesys._agent_cli.base import MCPServerSpec
 from vibesys.agents.progress import AgentProgress
 
 T = TypeVar("T", bound=BaseModel)
@@ -48,6 +50,33 @@ class StubAgentRunner:
             agent_kind=kind,
         )
         return response_cls.model_validate(response) if response is not None else fallback_factory()
+
+    def invoke_text(
+        self,
+        *,
+        kind: str,
+        workspace: Path,
+        system_prompt: str,
+        env: dict[str, str] | None = None,
+        user_prompt: str,
+        round_label: str,
+        invocation_id: str | None = None,
+        progress: AgentProgress | None = None,
+        mcp_servers: list[MCPServerSpec] | None = None,
+        tools: list[BaseTool] | None = None,
+    ) -> str:
+        """Return a deterministic conversational answer for TUI smoke tests."""
+        del workspace, system_prompt, env, progress, mcp_servers, tools
+        from vibesys.render.sink import output_sink
+
+        output_sink().agent_output(
+            f"[stub-agent] investigating: {user_prompt}\n",
+            channel="analysis",
+            agent_kind=kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+        )
+        return "Stub chat inspected the available experiment trajectory."
 
 
 def _response_data(model_name: str) -> dict[str, object] | None:

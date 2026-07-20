@@ -136,6 +136,85 @@ describe('session controller', () => {
     expect(controller.state.overlay?.content).toContain('Performance · total_ops_per_sec');
     expect(controller.state.overlay?.content).toContain('best r2 2.4k total_ops_per_sec');
   });
+
+  it('opens a multi-turn chat panel and renders agent answers there', async () => {
+    const transport = new FakeTransport(
+      [
+        chatEvent(1, 'agent_output_chunk', {
+          kind: 'agent_output_chunk',
+          channel: 'analysis',
+          content: 'Reading progress.md',
+        }),
+        chatEvent(2, 'tool_call', {
+          kind: 'tool_call',
+          tool: 'read_file',
+          args: {path: 'progress.md'},
+          status: null,
+        }),
+        chatEvent(3, 'chat', {
+          kind: 'chat',
+          answer: 'Round 2 improved throughput.',
+        }),
+      ],
+      [],
+      {
+        question: 'what changed?',
+        answer: 'Round 2 improved throughput.',
+        effect: 'none',
+      },
+    );
+    const controller = new SocketSessionController(transport);
+
+    await controller.submit('/chat');
+
+    expect(controller.state.chatOpen).toBe(true);
+    expect(transport.requests).toEqual([]);
+
+    await controller.sendChat('what changed?');
+
+    expect(transport.requests).toEqual([{type: 'query.chat', text: 'what changed?'}]);
+    expect(controller.state.chatConversation.map(entry => entry.kind)).toEqual([
+      'user',
+      'analysis',
+      'tool',
+      'assistant',
+    ]);
+    expect(controller.state.chatConversation.at(-1)?.content).toBe('Round 2 improved throughput.');
+
+    controller.closeChat();
+    expect(controller.state.chatOpen).toBe(false);
+    expect(controller.state.chatConversation).toHaveLength(4);
+  });
+
+  it('opens chat and sends an initial message from the command line', async () => {
+    const transport = new FakeTransport([], [], {
+      question: 'why?',
+      answer: 'Because the configuration failed.',
+      effect: 'none',
+    });
+    const controller = new SocketSessionController(transport);
+
+    await controller.submit('/chat why?');
+
+    expect(controller.state.chatOpen).toBe(true);
+    expect(transport.requests).toEqual([{type: 'query.chat', text: 'why?'}]);
+  });
+
+  it('shows chat request failures as explicit failed trajectory entries', async () => {
+    const transport = new FakeTransport([], [], undefined, new Error('Codex exited with code 1'));
+    const controller = new SocketSessionController(transport);
+
+    await controller.submit('/chat');
+    await controller.sendChat('what happened?');
+
+    expect(controller.state.chatPending).toBe(false);
+    expect(controller.state.chatConversation.at(-1)).toMatchObject({
+      kind: 'result',
+      label: 'Chat failed',
+      tone: 'failure',
+      content: 'Error: Codex exited with code 1',
+    });
+  });
 });
 
 class FakeTransport implements SupervisionTransport {
@@ -147,10 +226,13 @@ class FakeTransport implements SupervisionTransport {
   constructor(
     private readonly responseEvents: RunEvent[] = [],
     private readonly responsePerformance: NonNullable<ProtocolResponse['performance']> = [],
+    private readonly responseChat?: NonNullable<ProtocolResponse['chat']>,
+    private readonly responseError?: Error,
   ) {}
 
   request(input: RequestInput): Promise<ProtocolResponse> {
     this.requests.push(input);
+    if (this.responseError) return Promise.reject(this.responseError);
     return Promise.resolve({
       protocol_version: 1,
       request_id: 'request',
@@ -158,6 +240,7 @@ class FakeTransport implements SupervisionTransport {
       ok: true,
       events: this.responseEvents,
       performance: this.responsePerformance,
+      ...(this.responseChat ? {chat: this.responseChat} : {}),
       snapshot: {run_id: 'run', status: 'running', sequence: 12},
     });
   }
@@ -196,5 +279,21 @@ function event(sequence: number, type: RunEvent['type'], content?: string): RunE
       : {
           data: {kind: 'agent_output_chunk', channel: 'assistant', content},
         }),
+  };
+}
+
+function chatEvent(
+  sequence: number,
+  type: RunEvent['type'],
+  data: NonNullable<RunEvent['data']>,
+): RunEvent {
+  return {
+    sequence,
+    timestamp: '2026-01-01T00:00:00Z',
+    type,
+    agent_kind: 'chat',
+    round_label: 'experiment-chat',
+    invocation_id: 'chat-1',
+    data,
   };
 }

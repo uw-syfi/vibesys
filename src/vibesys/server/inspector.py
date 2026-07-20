@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.server.events import EventStatus, EventType, RunEvent
+from vibesys.server.events import ConfigurationFailedData, EventStatus, EventType, RunEvent
 
 if TYPE_CHECKING:
     from vibesys.server.supervisor import RunSupervisor
@@ -20,6 +20,9 @@ class RunInspector:
         self.supervisor = supervisor
 
     def answer(self, question: str) -> str:
+        configuration_failure = self._latest_configuration_failure()
+        if configuration_failure is not None:
+            return self._status_answer(question, configuration_failure)
         query = question.lower()
         if any(word in query for word in ("doing", "current", "status", "now")):
             return self._status_answer(question, self.supervisor.status())
@@ -117,6 +120,19 @@ class RunInspector:
             if agent_kind is not None and event.agent_kind != agent_kind:
                 continue
             return self._format_event(event)
+        return None
+
+    def _latest_configuration_failure(self) -> str | None:
+        for event in reversed(self.supervisor.read_history_events()):
+            if event.type is not EventType.CONFIGURATION_FAILED:
+                continue
+            data = event.data
+            if not isinstance(data, ConfigurationFailedData):
+                continue
+            answer = f"Experiment configuration failed during {data.stage}: {data.message}"
+            if data.usage:
+                answer += f"\n\n{data.usage}"
+            return answer
         return None
 
     def _latest_round_number(self) -> int | None:
