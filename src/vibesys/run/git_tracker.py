@@ -115,6 +115,26 @@ class GitTracker:
         self._add_all()
         self.run(["git", "commit", "-m", "initial: workspace setup"])
 
+    def add_worktree(self, worktree_dir: Path, commit: str) -> None:
+        """Create a detached linked worktree at *commit*.
+
+        The worktree gets its own working tree, index, and (detached) HEAD but
+        shares this repository's object store, so a commit made in the worktree
+        is immediately reachable by sha from the main repo — exactly what a
+        per-candidate evolve worktree needs (isolated edits, one shared
+        lineage). ``git worktree add`` mutates the main repo's
+        ``.git/worktrees`` admin area, so callers must serialize concurrent
+        adds; committing *inside* a worktree afterwards is independent per
+        worktree and safe to run concurrently.
+        """
+        worktree_dir.parent.mkdir(parents=True, exist_ok=True)
+        self.run(["git", "worktree", "add", "--detach", str(worktree_dir), commit])
+
+    def remove_worktree(self, worktree_dir: Path) -> None:
+        """Remove a linked worktree and prune its admin entry (best-effort)."""
+        self.run(["git", "worktree", "remove", "--force", str(worktree_dir)], check=False)
+        self.run(["git", "worktree", "prune"], check=False)
+
     def snapshot(self, label: str) -> None:
         """Commit current workspace state with *label* as the commit message."""
         self._add_all()

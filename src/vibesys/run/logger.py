@@ -50,15 +50,23 @@ class RunLogger:
     reach the real stderr untouched), so it is safe regardless of which
     renderer owns the terminal. The log copy has ANSI escapes stripped so
     ``run-*.log`` stays plain text.
+
+    ``tee_stderr=False`` builds a logger that owns only its file and never
+    touches the process-global ``sys.stderr``. This is required for concurrent
+    per-candidate sub-loggers: only the one top-level run logger may own the
+    stderr tee, or overlapping loggers would fight over (and mis-restore) the
+    global handle. A no-tee logger's ``switch``/``close`` leave stderr alone.
     """
 
-    def __init__(self, log_dir: Path) -> None:
+    def __init__(self, log_dir: Path, *, tee_stderr: bool = True) -> None:
         self.log_dir = log_dir
+        self._tee_stderr = tee_stderr
         run_started = datetime.now().strftime("%Y%m%d-%H%M%S")
         self.path = log_dir / f"run-{run_started}.log"
         self.file = self.path.open("a", encoding="utf-8")
         self._original_stderr = sys.stderr
-        sys.stderr = _TeeWriter(self._original_stderr, self.file)
+        if tee_stderr:
+            sys.stderr = _TeeWriter(self._original_stderr, self.file)
 
     def lprint(self, text: str) -> None:
         log_and_print(text, self.file)
@@ -83,9 +91,11 @@ class RunLogger:
         new_file = new_path.open("a", encoding="utf-8")
         self.path = new_path
         self.file = new_file
-        sys.stderr = _TeeWriter(self._original_stderr, new_file)
+        if self._tee_stderr:
+            sys.stderr = _TeeWriter(self._original_stderr, new_file)
         return new_file
 
     def close(self) -> None:
-        sys.stderr = self._original_stderr
+        if self._tee_stderr:
+            sys.stderr = self._original_stderr
         self.file.close()
