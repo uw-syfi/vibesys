@@ -166,6 +166,46 @@ def format_stats(values: list[float], unit: str = "ms", multiplier: float = 1000
 # ---------------------------------------------------------------------------
 
 
+async def run_closed_loop(
+    client: httpx.AsyncClient,
+    url: str,
+    prompts: list[str],
+    args: argparse.Namespace,
+    rng: random.Random,
+    t_bench_start: float,
+) -> list[dict]:
+    """Closed-loop driver: `args.concurrency` workers send requests back-to-back.
+
+    Each worker holds at most one in-flight request, so the number of concurrent
+    requests is bounded to exactly `args.concurrency`. Stops when `--duration`
+    elapses, or (if `--num-requests` is set) once that many requests have been
+    dispatched across all workers.
+    """
+    use_duration = args.num_requests is None
+    total_requests = args.num_requests if not use_duration else None
+    results: list[dict] = []
+    sent = 0
+
+    async def worker() -> None:
+        nonlocal sent
+        while True:
+            if use_duration:
+                if (time.perf_counter() - t_bench_start) >= args.duration:
+                    return
+            else:
+                # Claim a slot before awaiting; increments are atomic between
+                # awaits in a single-threaded event loop, so no lock is needed.
+                if sent >= total_requests:
+                    return
+                sent += 1
+            prompt = rng.choice(prompts)
+            result = await send_request(client, url, prompt, args.max_tokens, args.temperature)
+            results.append(result)
+
+    await asyncio.gather(*[asyncio.create_task(worker()) for _ in range(args.concurrency)])
+    return results
+
+
 async def run_benchmark(args: argparse.Namespace) -> dict:
     rng = random.Random(args.seed)
     url = args.url.rstrip("/") + args.endpoint
@@ -181,38 +221,47 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     use_duration = args.num_requests is None
     total_requests = args.num_requests if not use_duration else 10**9
 
-    tasks: list[asyncio.Task] = []
     results: list[dict] = []
-    sent = 0
 
     async with httpx.AsyncClient() as client:
         t_bench_start = time.perf_counter()
 
-        while sent < total_requests:
-            # Check duration limit
-            if use_duration and (time.perf_counter() - t_bench_start) >= args.duration:
-                break
+        if args.concurrency:
+            # Closed-loop load: exactly `concurrency` persistent workers, each
+            # sending requests back-to-back. In-flight count is bounded to
+            # `concurrency`, producing a deterministic saturating operating
+            # point (overrides the open-loop Poisson `--rate` path).
+            results = await run_closed_loop(client, url, prompts, args, rng, t_bench_start)
+        else:
+            # Open-loop load: Poisson arrivals at `--rate`, fire-and-forget.
+            tasks: list[asyncio.Task] = []
+            sent = 0
+            while sent < total_requests:
+                # Check duration limit
+                if use_duration and (time.perf_counter() - t_bench_start) >= args.duration:
+                    break
 
-            prompt = rng.choice(prompts)
-            task = asyncio.create_task(
-                send_request(client, url, prompt, args.max_tokens, args.temperature)
-            )
-            tasks.append(task)
-            sent += 1
+                prompt = rng.choice(prompts)
+                task = asyncio.create_task(
+                    send_request(client, url, prompt, args.max_tokens, args.temperature)
+                )
+                tasks.append(task)
+                sent += 1
 
-            # Poisson inter-arrival delay
-            if sent < total_requests:
-                delay = -math.log(1.0 - rng.random()) / args.rate
-                # Cap delay so we don't overshoot duration
-                if use_duration:
-                    remaining = args.duration - (time.perf_counter() - t_bench_start)
-                    if remaining <= 0:
-                        break
-                    delay = min(delay, remaining)
-                await asyncio.sleep(delay)
+                # Poisson inter-arrival delay
+                if sent < total_requests:
+                    delay = -math.log(1.0 - rng.random()) / args.rate
+                    # Cap delay so we don't overshoot duration
+                    if use_duration:
+                        remaining = args.duration - (time.perf_counter() - t_bench_start)
+                        if remaining <= 0:
+                            break
+                        delay = min(delay, remaining)
+                    await asyncio.sleep(delay)
 
-        # Wait for in-flight requests to finish
-        results = await asyncio.gather(*tasks)
+            # Wait for in-flight requests to finish
+            results = await asyncio.gather(*tasks)
+
         t_bench_end = time.perf_counter()
 
     wall_clock = t_bench_end - t_bench_start
@@ -263,6 +312,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         "config": {
             "url": args.url.rstrip("/") + args.endpoint,
             "rate": args.rate,
+            "concurrency": args.concurrency,
             "duration": args.duration,
             "max_tokens": args.max_tokens,
             "temperature": args.temperature,
@@ -293,6 +343,15 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     result_dict["tpot"] = _pct_block(sorted_tpots)
     result_dict["total_latency"] = _pct_block(sorted_lats)
 
+    # Flat top-level p99 fields (ms) for exact-name objective matching. These
+    # mirror the p99 of the nested blocks above; null when no data.
+    def _p99(block):
+        return block["p99"] if block else None
+
+    result_dict["p99_ttft_ms"] = _p99(result_dict["ttft"])
+    result_dict["p99_tpot_ms"] = _p99(result_dict["tpot"])
+    result_dict["p99_latency_ms"] = _p99(result_dict["total_latency"])
+
     if hasattr(args, "output_json") and args.output_json:
         with open(args.output_json, "w") as f:
             json.dump(result_dict, f, indent=2)
@@ -313,6 +372,16 @@ def main() -> None:
     parser.add_argument("--url", default="http://localhost:8000", help="Server base URL")
     parser.add_argument("--endpoint", default="/v1/completions", help="API endpoint path")
     parser.add_argument("--rate", type=float, default=1.0, help="Request rate (req/s, Poisson)")
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        help=(
+            "If set, use a closed-loop load with this many persistent workers "
+            "sending requests back-to-back (bounds in-flight requests to exactly "
+            "this value; overrides --rate)."
+        ),
+    )
     parser.add_argument("--duration", type=float, default=60, help="Benchmark duration in seconds")
     parser.add_argument(
         "--num-requests", type=int, default=None, help="Total requests (overrides --duration)"
