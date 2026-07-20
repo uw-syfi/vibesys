@@ -24,20 +24,11 @@ The system separates four kinds of concern:
 
 ```mermaid
 flowchart LR
-    W["Versioned workload TOML"] --> C["Strict config loader"]
-    C --> R["Extension registry"]
-    R --> E["Shared trial and load engine"]
-
-    E --> A["Application adapter"]
-    A -->|"protocol-specific invocation"| D["Protocol driver"]
-    D -->|"HTTP, future gRPC or Thrift"| T["Running application"]
-    T -->|"native response"| D
-    D -->|"common protocol result"| A
-    A -->|"semantic validation"| E
-
-    E --> O["Common observations"]
-    O --> S["Statistics and validity"]
-    S --> J["Summary JSON + raw NDJSON"]
+    W["Workload"] --> E["Shared benchmark core"]
+    A["Application adapter"] <--> E
+    E <--> D["Protocol driver"]
+    D <--> T["Running application"]
+    E --> R["Validated results"]
 ```
 
 The dependency direction is deliberate:
