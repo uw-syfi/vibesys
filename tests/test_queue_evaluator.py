@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -170,6 +171,19 @@ def test_spsc_rigtorp_baseline_builds_and_passes_accuracy(tmp_path):
         text=True,
     )
     assert "PASS - spsc linearizable" in completed.stdout
+
+
+def test_spsc_rigtorp_baseline_uses_pinned_upstream_header():
+    project_root = Path(__file__).parents[1]
+    baseline = project_root / "examples" / "baselines" / "queue-spsc-rigtorp"
+    upstream_header = baseline / "include" / "rigtorp" / "SPSCQueue.h"
+    adapter = (baseline / "spsc_queue.cpp").read_text()
+
+    assert hashlib.sha256(upstream_header.read_bytes()).hexdigest() == (
+        "1e631ec9e8ba4955da5cac116620815055f7da0ea936bfdb3036c4e87bc8a6e8"
+    )
+    assert '#include "rigtorp/SPSCQueue.h"' in adapter
+    assert "rigtorp::SPSCQueue<QueueEntry> entries" in adapter
 
 
 @pytest.mark.parametrize(("input_name", "scenario"), LINEARIZABLE_QUEUE_INPUTS.items())

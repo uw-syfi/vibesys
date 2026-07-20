@@ -8,7 +8,7 @@ $(error could not locate vibesys_queue_abi.h)
 endif
 
 CXXFLAGS ?= -O3 -DNDEBUG -march=native
-CXXFLAGS += -std=c++17 -fPIC -Wall -Wextra -Wpedantic -Werror -I$(dir $(ABI_HEADER))
+CXXFLAGS += -std=c++17 -fPIC -Wall -Wextra -Wpedantic -Werror -Iinclude -I$(dir $(ABI_HEADER))
 
 ifeq ($(shell uname -s),Darwin)
 SHARED_FLAGS := -dynamiclib
@@ -18,7 +18,7 @@ endif
 
 all: queue-candidate.so
 
-queue-candidate.so: spsc_queue.cpp $(ABI_HEADER)
+queue-candidate.so: spsc_queue.cpp include/rigtorp/SPSCQueue.h $(ABI_HEADER)
 	$(CXX) $(CXXFLAGS) $(SHARED_FLAGS) spsc_queue.cpp -o $@
 
 clean:
