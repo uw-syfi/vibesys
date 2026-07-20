@@ -28,6 +28,8 @@ def _minimal_copy_context(workspace):
     ctx.backend_impl = MagicMock()
     ctx.lprint = MagicMock()
     ctx.git = GitTracker(workspace, log=ctx.lprint, excluded_dirs=ctx.EXCLUDED_WORKSPACE_DIRS)
+    ctx.implementer_backend = SimpleNamespace()
+    ctx._experiment_repository = None
     return ctx
 
 
@@ -122,6 +124,54 @@ def test_trusted_input_changes_compare_against_initial_commit(tmp_path):
 
     (workspace / "accuracy_checker" / "checker.py").write_text("print('forged')\n")
     assert ctx.trusted_input_changes() == ["accuracy_checker/checker.py"]
+
+
+def test_workspace_snapshot_pushes_remote_experiment_checkpoint(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("VALUE = 1\n")
+    ctx = _minimal_copy_context(workspace)
+    ctx.git.init(existing=False)
+    ctx._experiment_repository = MagicMock()
+
+    (workspace / "main.py").write_text("VALUE = 2\n")
+    ctx.snapshot_workspace("round-1-implementer")
+
+    ctx._experiment_repository.sync.assert_called_once_with()
+
+
+def test_directory_snapshot_pushes_remote_experiment_checkpoint(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("VALUE = 1\n")
+    ctx = _minimal_copy_context(workspace)
+    ctx.git_tracking = False
+    ctx.workspace_files = MagicMock()
+    ctx._experiment_repository = MagicMock()
+
+    ctx.snapshot_workspace("round-1-implementer")
+
+    snapshot = ctx.log_dir / "snapshots" / "round-1-implementer"
+    assert (snapshot / "main.py").read_text() == "VALUE = 1\n"
+    ctx.workspace_files.replace_external_symlinks.assert_called_once_with(snapshot)
+    ctx._experiment_repository.sync.assert_called_once_with()
+
+
+def test_workspace_snapshot_retries_remote_failure_without_stopping_run(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("VALUE = 1\n")
+    ctx = _minimal_copy_context(workspace)
+    ctx.git.init(existing=False)
+    ctx._experiment_repository = MagicMock()
+    ctx._experiment_repository.sync.side_effect = RuntimeError("network unavailable")
+
+    ctx.snapshot_workspace("round-1-implementer")
+
+    ctx._experiment_repository.sync.assert_called_once_with()
+    ctx.lprint.assert_called_with(
+        "[warn] experiment repository checkpoint push failed: network unavailable"
+    )
 
 
 class _FakeBackend:

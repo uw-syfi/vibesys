@@ -238,9 +238,10 @@ gh auth login
 
 For non-interactive use, `--repo queue-trial` uses the configured owner, while
 `--repo another-org/queue-trial` overrides it explicitly. Durable workspace and
-run state are committed and pushed when the run closes; raw `logs/*.log` files
-stay local. Later runs automatically push again when resumed from a clone with
-an `origin`.
+run state are committed and pushed after each workspace checkpoint and again
+when the run closes; raw `logs/*.log` files stay local. Checkpoint push failures
+are retried without stopping the run. Later runs automatically push again when
+resumed from a clone with an `origin`.
 
 ## Repository layout
 

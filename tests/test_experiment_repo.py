@@ -42,6 +42,20 @@ def test_sync_commits_durable_state_and_pushes_to_origin(tmp_path):
     assert messages == ["[repo] pushed experiment state to origin"]
 
 
+def test_sync_without_origin_is_a_noop(tmp_path):
+    experiment = tmp_path / "experiment"
+    experiment.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=experiment, check=True)
+    (experiment / "workspace").mkdir()
+    (experiment / "workspace" / "main.py").write_text("VALUE = 1\n")
+
+    messages: list[str] = []
+    ExperimentRepository(experiment, messages.append).sync()
+
+    assert _git(experiment, "status", "--short") == "?? workspace/"
+    assert messages == []
+
+
 def test_create_remote_uses_configurable_slug_and_visibility(tmp_path, monkeypatch):
     experiment = tmp_path / "experiment"
     experiment.mkdir()

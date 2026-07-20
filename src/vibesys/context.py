@@ -227,7 +227,9 @@ def create_run_context(
                     message=f"Could not create experiment repository {remote_repo!r}: {exc}",
                 )
             ) from exc
+    tracked_experiment_repository: ExperimentRepository | None = None
     if experiment_repository.has_origin():
+        tracked_experiment_repository = experiment_repository
 
         def _sync_experiment_repository() -> None:
             try:
@@ -467,6 +469,7 @@ def create_run_context(
         environment_patch=environment_patch,
         workspace_files=workspace_files,
         git=git,
+        experiment_repository=tracked_experiment_repository,
         teardown_stack=teardown_stack,
         run_environment_session=session,
         commands=commands,
@@ -622,6 +625,9 @@ def create_candidate_context(
         environment_patch=parent.environment_patch,
         workspace_files=workspace_files,
         git=git,
+        # Candidate worktrees share the parent repository and may run in
+        # parallel. Only the parent context owns remote synchronization.
+        experiment_repository=None,
         teardown_stack=teardown_stack,
         run_environment_session=session,
         commands=commands,
@@ -674,6 +680,7 @@ class _RunContext:
         environment_patch: EnvironmentPatch,
         workspace_files: Workspace,
         git: GitTracker,
+        experiment_repository: ExperimentRepository | None,
         teardown_stack: ExitStack,
         run_environment_session: RunEnvironmentSession,
         commands: RunCommands,
@@ -707,6 +714,7 @@ class _RunContext:
         self.workspace_files = workspace_files
         self.EXCLUDED_WORKSPACE_DIRS = workspace_files.excluded_dirs
         self.git = git
+        self._experiment_repository = experiment_repository
         self._teardown_stack = teardown_stack
         self.run_environment_session = run_environment_session
         self.run_environment_view = run_environment_session.view
@@ -945,18 +953,30 @@ class _RunContext:
 
         if self.git_tracking:
             self.git.snapshot(label)
-            return
-        dst = self.log_dir / "snapshots" / label
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if dst.exists():
-            shutil.rmtree(dst)
-        shutil.copytree(
-            self.workspace,
-            dst,
-            symlinks=True,
-            ignore=lambda _, names: [n for n in names if n in self.EXCLUDED_WORKSPACE_DIRS],
-        )
-        self.workspace_files.replace_external_symlinks(dst)
+        else:
+            dst = self.log_dir / "snapshots" / label
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(
+                self.workspace,
+                dst,
+                symlinks=True,
+                ignore=lambda _, names: [n for n in names if n in self.EXCLUDED_WORKSPACE_DIRS],
+            )
+            self.workspace_files.replace_external_symlinks(dst)
+
+        # Remote experiment repositories are durability boundaries, not just
+        # publication targets. Push after each existing loop checkpoint so a
+        # long-running agent does not keep all completed phases only on the
+        # host until context shutdown. A transient remote failure must not
+        # discard subsequent optimization work; the next checkpoint and the
+        # final strict teardown sync will retry every local commit.
+        if self._experiment_repository is not None:
+            try:
+                self._experiment_repository.sync()
+            except Exception as exc:
+                self.lprint(f"[warn] experiment repository checkpoint push failed: {exc}")
 
     def trusted_input_changes(self) -> list[str]:
         """Return evaluator-owned paths changed since workspace initialization."""

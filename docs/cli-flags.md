@@ -62,9 +62,12 @@ through the authenticated `gh` CLI.
 
 The experiment repository records the materialized workspace and durable state
 needed to continue the loop. Provider/agent `logs/*.log` files and directory
-snapshots are excluded. VibeSys commits and pushes on context shutdown, including
-normal loop failures and keyboard interruption. A non-fast-forward or
-authentication failure is reported rather than force-pushing.
+snapshots are excluded. VibeSys commits and pushes after each workspace
+checkpoint, then performs a final sync on context shutdown, including normal
+loop failures and keyboard interruption. A failed checkpoint push is logged and
+retried at the next checkpoint so a transient remote failure does not stop the
+optimization run. A final non-fast-forward or authentication failure is reported
+rather than force-pushing.
 
 `--resume` accepts all existing run forms plus local experiment directories,
 GitHub `OWNER/NAME` pairs, and cloneable HTTPS/SSH URLs:

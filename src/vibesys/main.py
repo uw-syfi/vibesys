@@ -308,8 +308,9 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         metavar="[OWNER/]NAME",
         help=(
             "Create a GitHub repository for this experiment, commit its durable "
-            "state, and push after each run. A configured [repository].owner supplies "
-            "an omitted owner. Requires an authenticated `gh` CLI."
+            "state, and push after each workspace checkpoint and at shutdown. "
+            "A configured [repository].owner supplies an omitted owner. Requires "
+            "an authenticated `gh` CLI."
         ),
     )
     parser.add_argument(
