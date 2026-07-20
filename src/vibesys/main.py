@@ -32,6 +32,7 @@ from vibesys.constants import (
     PROJECT_ROOT,
     ComputeBackend,
 )
+from vibesys.domains.base import DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.input_manifest import InputBundle, load_input_bundle
 from vibesys.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind
@@ -220,8 +221,8 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
             "Path to a skill source candidate root (can be repeated). Each "
             "entry can be either a single skill directory (containing a "
             "top-level `SKILL.md`) or a parent directory of multiple skill "
-            "directories. Skills with `vibesys.backends` metadata are loaded "
-            "only for matching --backend values. Default: `resources/skills/`."
+            "directories. Skills with VibeSys routing metadata are loaded only "
+            "for matching domains and backends. Default: `resources/skills/`."
         ),
     )
     parser.add_argument(
@@ -324,8 +325,10 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 def load_config_and_skills(
     args: argparse.Namespace,
+    *,
+    domain: DomainName,
 ) -> tuple[Config, list[str] | None, ComputeBackend]:
-    """Load config from args.config, process skills_dir, and resolve the backend."""
+    """Load config, resolve the backend, and select compatible skills."""
     if getattr(args, "stub_agent", False) and not Path(args.config).is_file():
         config = Config.model_validate(tomllib.loads(_STUB_AGENT_DEFAULT_CONFIG_TEXT))
     else:
@@ -344,7 +347,7 @@ def load_config_and_skills(
             if isinstance(args.skills_dir, list)
             else ([args.skills_dir] if args.skills_dir else None)
         )
-        skills = resolve_skill_source_dirs(raw_skills, backend=backend)
+        skills = resolve_skill_source_dirs(raw_skills, backend=backend, domain=domain)
     return config, skills, backend
 
 
@@ -639,10 +642,10 @@ def _validate_agent(args: argparse.Namespace) -> None:
 
 
 def _run_agent(args: argparse.Namespace) -> None:
-    config, skills, backend = load_config_and_skills(args)
+    bundle: InputBundle = args.input_bundle
+    config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
     from vibesys.loops.agent.loop import run_agent_loop
 
-    bundle: InputBundle = args.input_bundle
     objective = _load_objective(bundle)
 
     existing = False
@@ -805,10 +808,10 @@ def _validate_evolve(args: argparse.Namespace) -> None:
 
 
 def _run_evolve(args: argparse.Namespace) -> None:
-    config, skills, backend = load_config_and_skills(args)
+    bundle: InputBundle = args.input_bundle
+    config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
     from vibesys.loops.evolve.loop import run_evolve_loop
 
-    bundle: InputBundle = args.input_bundle
     objective = _load_objective(bundle)
     objectives = _resolve_objectives(args)
     if objectives:
@@ -890,14 +893,13 @@ def _validate_plain(args: argparse.Namespace) -> None:
 
 
 def _run_plain(args: argparse.Namespace) -> None:
-    config, skills, backend = load_config_and_skills(args)
+    bundle: InputBundle = args.input_bundle
+    config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
     from vibesys.loops.plain.loop import (
         PlainLoopState,
         load_state,
         run_plain_loop,
     )
-
-    bundle: InputBundle = args.input_bundle
 
     existing = False
     exp_name = args.exp_name

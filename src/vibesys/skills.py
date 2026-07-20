@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from vibesys.constants import PROJECT_ROOT, ComputeBackend
+from vibesys.domains.base import DomainName
 
 DEFAULT_SKILL_ROOTS: tuple[Path, ...] = (Path("resources/skills"),)
 SIDECAR_NAME = ".vibesys.toml"
@@ -28,6 +29,7 @@ class SkillRule:
     raw_path: str
     target_path: Path
     backends: tuple[ComputeBackend, ...] | None
+    domains: tuple[DomainName, ...] | None
 
     @property
     def specificity(self) -> int:
@@ -48,11 +50,16 @@ class SkillMetadata:
 
     skill_dir: Path
     backends: tuple[ComputeBackend, ...] | None
+    domains: tuple[DomainName, ...] | None
     rule: SkillRule | None = None
 
     def supports_backend(self, backend: ComputeBackend) -> bool:
         """True when this skill should be loaded for *backend*."""
         return self.backends is None or backend in self.backends
+
+    def supports_domain(self, domain: DomainName) -> bool:
+        """True when this skill should be loaded for *domain*."""
+        return self.domains is None or domain in self.domains
 
 
 def _metadata_error(path: Path, message: str) -> SkillMetadataError:
@@ -118,6 +125,32 @@ def _parse_backends(sidecar_path: Path, raw_backends: object) -> tuple[ComputeBa
     return tuple(dict.fromkeys(backends))
 
 
+def _parse_domains(sidecar_path: Path, raw_domains: object) -> tuple[DomainName, ...] | None:
+    if raw_domains is None:
+        return None
+    if not isinstance(raw_domains, list):
+        raise _metadata_error(sidecar_path, "`domains` must be a list")
+
+    known = {domain.value: domain for domain in DomainName}
+    domains: list[DomainName] = []
+    invalid: list[object] = []
+    for value in raw_domains:
+        if not isinstance(value, str) or value not in known:
+            invalid.append(value)
+            continue
+        domains.append(known[value])
+
+    if invalid:
+        allowed = ", ".join(sorted(known))
+        bad = ", ".join(repr(v) for v in invalid)
+        raise _metadata_error(
+            sidecar_path,
+            f"`domains` contains invalid domain name(s): {bad}. Allowed: {allowed}",
+        )
+
+    return tuple(dict.fromkeys(domains))
+
+
 def _parse_rule_path(sidecar_path: Path, raw_path: object) -> tuple[str, Path]:
     if not isinstance(raw_path, str) or not raw_path.strip():
         raise _metadata_error(sidecar_path, "`rule.path` must be a non-empty string")
@@ -159,7 +192,7 @@ def load_sidecar_rules(sidecar_path: Path) -> list[SkillRule]:
         if not isinstance(raw_rule, dict):
             raise _metadata_error(sidecar_path, f"rule #{index} must be a table")
 
-        allowed_rule = {"path", "backends"}
+        allowed_rule = {"path", "backends", "domains"}
         unknown_rule = sorted(set(raw_rule) - allowed_rule)
         if unknown_rule:
             raise _metadata_error(
@@ -174,6 +207,7 @@ def load_sidecar_rules(sidecar_path: Path) -> list[SkillRule]:
                 raw_path=raw_path,
                 target_path=target,
                 backends=_parse_backends(sidecar_path, raw_rule.get("backends")),
+                domains=_parse_domains(sidecar_path, raw_rule.get("domains")),
             )
         )
     return rules
@@ -228,12 +262,12 @@ def effective_skill_metadata(skill_dir: Path, rules: list[SkillRule]) -> SkillMe
 
     matches = [rule for rule in rules if rule.applies_to(skill_dir)]
     if not matches:
-        return SkillMetadata(skill_dir=skill_dir, backends=None)
+        return SkillMetadata(skill_dir=skill_dir, backends=None, domains=None)
 
     best_specificity = max(rule.specificity for rule in matches)
     winners = [rule for rule in matches if rule.specificity == best_specificity]
-    backend_sets = {rule.backends for rule in winners}
-    if len(backend_sets) > 1:
+    constraints = {(rule.backends, rule.domains) for rule in winners}
+    if len(constraints) > 1:
         locations = ", ".join(f"{rule.sidecar_path}:{rule.raw_path}" for rule in winners)
         raise _metadata_error(
             skill_dir / "SKILL.md",
@@ -241,21 +275,27 @@ def effective_skill_metadata(skill_dir: Path, rules: list[SkillRule]) -> SkillMe
         )
 
     winner = winners[0]
-    return SkillMetadata(skill_dir=skill_dir, backends=winner.backends, rule=winner)
+    return SkillMetadata(
+        skill_dir=skill_dir,
+        backends=winner.backends,
+        domains=winner.domains,
+        rule=winner,
+    )
 
 
 def resolve_skill_source_dirs(
     raw_dirs: list[str | Path] | None,
     *,
     backend: ComputeBackend,
+    domain: DomainName,
     project_root: Path = PROJECT_ROOT,
 ) -> list[str]:
-    """Resolve configured skill roots to backend-compatible skill directories.
+    """Resolve configured skill roots to compatible skill directories.
 
     ``raw_dirs`` defines the candidate roots. Each discovered ``SKILL.md`` is
     validated, then included only if the effective VibeSys sidecar metadata
-    supports the selected backend. Skills with no matching rule are
-    backend-agnostic and load for every backend.
+    supports the selected backend and domain. Skills with no matching rule are
+    globally eligible and load for every backend and domain.
     """
     if not raw_dirs:
         return []
@@ -266,7 +306,7 @@ def resolve_skill_source_dirs(
         rules = discover_sidecar_rules(root)
         for skill_dir in discover_skill_dirs(root):
             metadata = effective_skill_metadata(skill_dir, rules)
-            if metadata.supports_backend(backend):
+            if metadata.supports_backend(backend) and metadata.supports_domain(domain):
                 resolved[skill_dir.resolve()] = None
     return [str(path) for path in resolved]
 
