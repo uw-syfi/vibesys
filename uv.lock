@@ -20,6 +20,7 @@ resolution-markers = [
 members = [
     "vibesys",
     "vs-feature-flags",
+    "vs-github",
     "vs-issue-board",
     "vs-sandbox",
 ]
@@ -4649,6 +4650,7 @@ dependencies = [
     { name = "rich" },
     { name = "soundfile" },
     { name = "vs-feature-flags" },
+    { name = "vs-github" },
     { name = "vs-issue-board" },
     { name = "vs-sandbox" },
 ]
@@ -4690,6 +4692,7 @@ requires-dist = [
     { name = "rich", specifier = ">=14.3.3" },
     { name = "soundfile", specifier = ">=0.13.1" },
     { name = "vs-feature-flags", editable = "libs/vs-feature-flags" },
+    { name = "vs-github", editable = "libs/vs-github" },
     { name = "vs-issue-board", editable = "libs/vs-issue-board" },
     { name = "vs-sandbox", editable = "libs/vs-sandbox" },
 ]
@@ -4715,6 +4718,11 @@ test = [
 name = "vs-feature-flags"
 version = "0.1.0"
 source = { editable = "libs/vs-feature-flags" }
+
+[[package]]
+name = "vs-github"
+version = "0.1.0"
+source = { editable = "libs/vs-github" }
 
 [[package]]
 name = "vs-issue-board"

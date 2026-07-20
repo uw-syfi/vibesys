@@ -44,7 +44,7 @@ from vibesys.loops.evolve.population import (
 )
 from vibesys.loops.profiler import invoke_profiler
 from vibesys.profilers import ProfilerKind, profiler_definition
-from vibesys.run import LoopContext
+from vibesys.run import LoopContext, RepositoryVisibility
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -266,6 +266,8 @@ def run_evolve_loop(
     modality: str = "text_generation",
     objectives: list[Objective] | None = None,
     frontier_bias: float = 0.7,
+    remote_repo: str | None = None,
+    repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
 ) -> bool:
     """Run an LLM-driven evolutionary search.
 
@@ -299,6 +301,8 @@ def run_evolve_loop(
         cli_provider=cli_provider,
         backend=backend,
         environment_hooks=LLMServingEnvironmentHooks(),
+        remote_repo=remote_repo,
+        repo_visibility=repo_visibility,
     )
     ctx.lprint(f"[log] evolutionary run: {ctx.run_log_path}")
     ctx.lprint(f"[log] experiment root: {ctx.exp_dir}")

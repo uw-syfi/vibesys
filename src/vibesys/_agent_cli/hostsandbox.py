@@ -188,8 +188,15 @@ def _default_config_paths(env: dict[str, str]) -> list[Path]:
     if not home:
         return []
     base = Path(home)
+    codex_home = Path(env.get("CODEX_HOME", base / ".codex")).expanduser()
     paths = [
-        base / ".codex",
+        # Mount the files Codex needs rather than the whole directory. A Codex
+        # checkout may itself live under ``$CODEX_HOME/worktrees``; mounting the
+        # directory would expose sibling tasks, while dropping it makes the CLI
+        # appear logged out inside the sandbox. Bubblewrap creates an ephemeral
+        # parent directory for these leaf mounts in ``HostSandbox.wrap``.
+        codex_home / "auth.json",
+        codex_home / "config.toml",
         base / ".claude",
         base / ".claude.json",
         base / ".config" / "codex",
@@ -263,6 +270,15 @@ class HostSandbox(WorkspaceSandbox):
             "--tmpfs",
             "/tmp",
         ]
+        # Leaf config mounts such as ~/.codex/auth.json need their destination
+        # parents to exist in bubblewrap's otherwise-empty /home tree. These
+        # directories are ephemeral inside the namespace; only the explicitly
+        # bound files below are sourced from the host.
+        parent_dirs = {
+            parent for path in self.write_paths for parent in path.parents if parent != Path("/")
+        }
+        for parent in sorted(parent_dirs, key=lambda path: len(path.parts)):
+            cmd += ["--dir", str(parent)]
         for root in self.system_read_roots:
             cmd += ["--ro-bind-try", root, root]
         for path in self.read_paths:

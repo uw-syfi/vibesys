@@ -50,6 +50,23 @@ def test_init_appends_to_existing_gitignore(ws):
     assert "*.neff" in gitignore
 
 
+def test_init_uses_containing_experiment_repo_without_nesting(tmp_path):
+    experiment = tmp_path / "experiment"
+    workspace = experiment / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / "main.py").write_text("VALUE = 1\n")
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=experiment, check=True)
+
+    tracker = _make_tracker(workspace)
+    tracker.init(existing=False)
+
+    assert not (workspace / ".git").exists()
+    assert _git_stdout(workspace, "show", "--format=", "--name-only").strip().splitlines() == [
+        "workspace/.gitignore",
+        "workspace/main.py",
+    ]
+
+
 def test_init_existing_requires_repo(ws):
     tracker = _make_tracker(ws)
     with pytest.raises(ValueError, match="no git repository"):

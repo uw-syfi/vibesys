@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -28,6 +29,7 @@ from vibesys.main import (
     parse_cli_invocation,
 )
 from vibesys.profilers import ProfilerKind
+from vs_github import GitHubCLI
 
 
 def _patch_loop_runner(loop_name: str, runner: Mock):
@@ -184,6 +186,43 @@ def test_input_arg_is_available_on_all_loop_parsers(builder_name):
     args = parser.parse_args(["--input", "examples/data-structures/queue-spsc"])
 
     assert args.input == Path("examples/data-structures/queue-spsc")
+
+
+def test_remote_repository_options_are_user_configurable():
+    from vibesys.main import _build_agent_parser
+    from vibesys.run import RepositoryVisibility
+
+    args = _build_agent_parser().parse_args(
+        ["--repo", "my-lab/trial", "--repo-visibility", "internal"]
+    )
+
+    assert args.repo == "my-lab/trial"
+    assert args.repo_visibility is RepositoryVisibility.INTERNAL
+
+
+def test_short_repository_name_uses_configured_owner(tmp_path):
+    from vibesys.main import _build_agent_parser
+    from vibesys.run import RepositoryVisibility
+
+    config_path = tmp_path / "agent.toml"
+    config_path.write_text(
+        """\
+[model]
+name = "gpt-5.5"
+
+[repository]
+owner = "my-playground"
+visibility = "internal"
+"""
+    )
+    args = _build_agent_parser().parse_args(
+        ["--repo", "generated-trial", "--config", str(config_path), "--no-skills"]
+    )
+
+    load_config_and_skills(args)
+
+    assert args.repo == "my-playground/generated-trial"
+    assert args.repo_visibility is RepositoryVisibility.INTERNAL
 
 
 @pytest.mark.parametrize(
@@ -398,6 +437,41 @@ def test_missing_config_reports_configuration_error(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_tui_defaults_uses_repository_config_and_generated_name(tmp_path, capsys):
+    import json
+
+    config_path = tmp_path / "agent.toml"
+    config_path.write_text(
+        """\
+[model]
+name = "gpt-5.5"
+
+[repository]
+owner = "vibesys-playground"
+visibility = "private"
+"""
+    )
+    input_path = tmp_path / "Queue MPSC"
+    input_path.mkdir()
+    argv = [
+        "vibesys",
+        "tui-defaults",
+        "--config",
+        str(config_path),
+        "--input",
+        str(input_path),
+    ]
+
+    with patch.object(sys, "argv", argv):
+        main()
+
+    defaults = json.loads(capsys.readouterr().out)
+    assert defaults["repository_owner"] == "vibesys-playground"
+    assert defaults["visibility"] == "private"
+    assert defaults["experiment_name"].startswith("queue-mpsc-")
+    assert defaults["repository_name"] == defaults["experiment_name"]
+
+
 def test_validate_command_defaults_to_current_input_bundle(monkeypatch, tmp_path, capsys):
     bundle = _write_input_bundle(tmp_path)
     monkeypatch.chdir(bundle)
@@ -494,6 +568,117 @@ def test_resume_accepts_exp_env_path_without_input(monkeypatch, tmp_path):
 
     assert invocation.args.resume == "20260716-180256-test"
     assert invocation.args.input_bundle.root == bundle.resolve()
+
+
+def test_resume_accepts_external_local_clone_and_materialized_input(monkeypatch, tmp_path):
+    import vibesys.main as cli
+
+    run_dir = tmp_path / "clone"
+    workspace = _write_input_bundle(run_dir)
+    # These source locations are intentionally unavailable in a clone. They
+    # were already copied into the workspace by the original fresh run.
+    manifest = workspace / "vibesys.input.toml"
+    manifest.write_text(
+        manifest.read_text()
+        + '\n[workspace]\nseed = "../../starters/missing"\n'
+        + '\n[evaluator]\nsource = "../../evaluators/missing"\n'
+    )
+    experiment = run_dir / "experiment"
+    experiment.mkdir()
+    workspace.rename(experiment / "workspace")
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path / "project")
+
+    invocation = parse_cli_invocation(["--outer-loop", "agent", "--resume", str(experiment)])
+
+    assert invocation.args.resume == str(experiment.resolve())
+    assert invocation.args.input_bundle.root == (experiment / "workspace").resolve()
+    assert invocation.args.input_bundle.workspace_seed_path is None
+    assert invocation.args.input_bundle.evaluator_path is None
+
+
+def test_resume_github_repo_clones_into_exp_env(monkeypatch, tmp_path):
+    import vibesys.main as cli
+
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+    commands: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        if command[:3] == ["gh", "repo", "clone"]:
+            Path(command[-1]).mkdir(parents=True)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(cli, "GitHubCLI", lambda: GitHubCLI(_runner=fake_run))
+
+    assert _resolve_run_dir("vibesys-playground/trial") == "trial"
+    assert commands == [
+        ["gh", "auth", "status", "--hostname", "github.com"],
+        ["gh", "repo", "clone", "vibesys-playground/trial", str(tmp_path / "exp_env/trial")],
+    ]
+
+
+def test_resume_github_repo_reuses_matching_local_clone(monkeypatch, tmp_path):
+    import vibesys.main as cli
+
+    destination = tmp_path / "exp_env" / "trial"
+    destination.mkdir(parents=True)
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    def fake_run(command, **_kwargs):
+        assert command == ["git", "remote", "get-url", "origin"]
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "git@github.com:vibesys-playground/trial.git\n",
+            "",
+        )
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        cli,
+        "GitHubCLI",
+        lambda: pytest.fail("matching local clone should not invoke GitHub CLI"),
+    )
+
+    assert _resolve_run_dir("vibesys-playground/trial") == "trial"
+
+
+def test_resume_github_repo_explains_missing_authentication(monkeypatch, tmp_path):
+    import vibesys.main as cli
+
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    def fake_run(command, **_kwargs):
+        return subprocess.CompletedProcess(command, 1, "", "not logged into any GitHub hosts")
+
+    monkeypatch.setattr(cli, "GitHubCLI", lambda: GitHubCLI(_runner=fake_run))
+
+    with pytest.raises(ConfigurationError) as exc:
+        _resolve_run_dir("vibesys-playground/trial")
+
+    assert exc.value.diagnostic.code == "resume_clone_failed"
+    assert "gh auth login --hostname github.com" in exc.value.diagnostic.message
+    assert "not logged into any GitHub hosts" in exc.value.diagnostic.message
+
+
+def test_resume_rejects_creating_a_second_repository(tmp_path):
+    bundle = _write_input_bundle(tmp_path)
+
+    with pytest.raises(ConfigurationError) as exc:
+        parse_cli_invocation(
+            [
+                "--outer-loop",
+                "agent",
+                "--input",
+                str(bundle),
+                "--resume",
+                "run",
+                "--repo",
+                "my-lab/run",
+            ]
+        )
+
+    assert exc.value.diagnostic.code == "invalid_arguments"
 
 
 def test_resume_latest_without_input_uses_latest_run_metadata(monkeypatch, tmp_path):

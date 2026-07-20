@@ -19,6 +19,7 @@ Several flags look independent, but they combine into one execution contract:
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--no-skills` | Candidate skill roots and the ablation switch that disables skill loading. |
 | Target inputs | `--input` | Target bundle directory with manifest-declared correctness and benchmark commands. |
+| Experiment repository | `--repo`, `--repo-visibility`, `--resume` | Optionally create and synchronize a remote experiment, or resume from a local path/GitHub repository. |
 
 Do not treat these as simple toggles. Some combinations imply a startup
 contract, profiler, or sandbox capability. Language and artifact requirements
@@ -37,6 +38,48 @@ interactive client when needed and forwards every argument to the TypeScript
 launcher. For installed npm users, the same launcher is exposed as `vs` and
 `vibesys`.
 Use `./vs --outer-loop <kind> --help` for loop-specific flags.
+
+## Remote Experiment Repositories
+
+Configure interactive defaults in `agent.toml`:
+
+```toml
+[repository]
+owner = "vibesys-playground"
+visibility = "private"
+```
+
+The owner can be any GitHub user or organization and is never hard-coded. On a
+fresh interactive run, a pre-launch form opens when `owner` is configured. The
+input path and generated experiment/repository names are prefilled; Tab and
+Shift-Tab move between fields, Enter launches, and clearing the owner keeps the
+run local. Names default to `<input-name>-<UTC timestamp>`.
+
+For headless use, pass `--repo NAME` to combine the name with the configured
+owner, or `--repo OWNER/NAME` to override the owner explicitly. Repositories use
+`[repository].visibility` unless `--repo-visibility` overrides it. Creation goes
+through the authenticated `gh` CLI.
+
+The experiment repository records the materialized workspace and durable state
+needed to continue the loop. Provider/agent `logs/*.log` files and directory
+snapshots are excluded. VibeSys commits and pushes on context shutdown, including
+normal loop failures and keyboard interruption. A non-fast-forward or
+authentication failure is reported rather than force-pushing.
+
+`--resume` accepts all existing run forms plus local experiment directories,
+GitHub `OWNER/NAME` pairs, and cloneable HTTPS/SSH URLs:
+
+```bash
+./vs --resume 20260720-120000-example
+./vs --resume /work/experiments/example
+./vs --resume vibesys-playground/example
+./vs --resume https://github.com/my-org/example.git
+```
+
+Remote repositories are cloned under `exp_env/`. A local clone can live
+anywhere. Resumed repositories with an `origin` are synchronized again after
+the run. `--repo` only creates a repository for a fresh experiment and cannot
+be combined with `--resume`.
 
 ## Repository Validation
 

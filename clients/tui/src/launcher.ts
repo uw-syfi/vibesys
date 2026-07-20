@@ -8,6 +8,13 @@ import {createConnection} from 'node:net';
 import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {
+  applySetupSelection,
+  parseSetupDefaults,
+  type SetupDefaults,
+  type SetupSelection,
+  shouldOfferInteractiveSetup,
+} from './setup-model.js';
 
 const READY_TIMEOUT_MS = 30_000;
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -39,6 +46,10 @@ export async function launch(argv: string[]): Promise<number> {
     return 1;
   }
 
+  const prepared = await prepareInteractiveArgs(backend, runtime, entrypoint, argv);
+  if ('exitCode' in prepared) return prepared.exitCode;
+  const runArgv = prepared.argv;
+
   const sessionDir = await mkdtemp(join(tmpdir(), 'vibesys-session-'));
   const socketPath = join(sessionDir, 'control.sock');
   const backendLogPath = join(sessionDir, 'backend.log');
@@ -46,7 +57,7 @@ export async function launch(argv: string[]): Promise<number> {
   let backendLogClosed = false;
   const backendProcess = spawn(
     backend.command,
-    [...backend.args, ...argv, '--headless', '--control-socket', socketPath],
+    [...backend.args, ...runArgv, '--headless', '--control-socket', socketPath],
     {
       detached: true,
       stdio: ['ignore', backendLogFd, backendLogFd],
@@ -91,6 +102,122 @@ export async function launch(argv: string[]): Promise<number> {
 interface BackendCommand {
   command: string;
   args: string[];
+}
+
+type PreparedArguments = {argv: string[]} | {exitCode: number};
+
+async function prepareInteractiveArgs(
+  backend: BackendCommand,
+  runtime: string,
+  frontendEntrypoint: string,
+  argv: string[],
+): Promise<PreparedArguments> {
+  if (!shouldOfferInteractiveSetup(argv)) return {argv};
+
+  const defaultsResult = await resolveSetupDefaults(backend, argv);
+  if (defaultsResult.exitCode !== 0) {
+    console.error(defaultsResult.stderr || 'vs: could not resolve interactive setup defaults');
+    return {exitCode: defaultsResult.exitCode};
+  }
+
+  let defaults: SetupDefaults;
+  try {
+    defaults = parseSetupDefaults(defaultsResult.stdout.trim());
+  } catch (error) {
+    console.error(`vs: ${error instanceof Error ? error.message : String(error)}`);
+    return {exitCode: 1};
+  }
+  if (defaults.repository_owner === null) return {argv};
+
+  const setupEntrypoint =
+    process.env['VIBESYS_SETUP_ENTRYPOINT'] ?? join(dirname(frontendEntrypoint), 'setup.js');
+  if (!(await fileExists(setupEntrypoint))) {
+    console.error('vs: TUI setup build is missing; run `pnpm --dir clients/tui build`.');
+    return {exitCode: 1};
+  }
+
+  const setupDir = await mkdtemp(join(tmpdir(), 'vibesys-setup-'));
+  const resultPath = join(setupDir, 'selection.json');
+  try {
+    const exitCode = await runSetupFrontend(runtime, setupEntrypoint, defaults, resultPath);
+    if (exitCode !== 0) return {exitCode};
+    let selection: SetupSelection;
+    try {
+      selection = JSON.parse(await readFile(resultPath, 'utf8')) as SetupSelection;
+    } catch {
+      return {exitCode: 130};
+    }
+    return {argv: applySetupSelection(argv, selection)};
+  } finally {
+    await rm(setupDir, {recursive: true, force: true});
+  }
+}
+
+function resolveSetupDefaults(
+  backend: BackendCommand,
+  argv: string[],
+): Promise<{exitCode: number; stdout: string; stderr: string}> {
+  const args = [...backend.args, 'tui-defaults'];
+  for (const option of ['--config', '--input', '--exp-name']) {
+    const value = optionValue(argv, option);
+    if (value !== undefined) args.push(option, value);
+  }
+  return runCaptured(backend.command, args);
+}
+
+function optionValue(argv: string[], option: string): string | undefined {
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === option) return argv[index + 1];
+    if (argument?.startsWith(`${option}=`)) return argument.slice(option.length + 1);
+  }
+  return undefined;
+}
+
+function runSetupFrontend(
+  runtime: string,
+  entrypoint: string,
+  defaults: SetupDefaults,
+  resultPath: string,
+): Promise<number> {
+  return new Promise(resolve => {
+    const child = spawn(runtime, [entrypoint], {
+      env: {
+        ...process.env,
+        VIBESYS_SETUP_DEFAULTS: JSON.stringify(defaults),
+        VIBESYS_SETUP_RESULT: resultPath,
+      },
+      stdio: 'inherit',
+    });
+    child.once('exit', (code, signal) => resolve(code ?? signalExitCode(signal)));
+    child.once('error', error => {
+      console.error(`vs: failed to start interactive setup: ${error.message}`);
+      resolve(1);
+    });
+  });
+}
+
+function runCaptured(
+  command: string,
+  args: string[],
+): Promise<{exitCode: number; stdout: string; stderr: string}> {
+  return new Promise(resolve => {
+    const child = spawn(command, args, {stdio: ['ignore', 'pipe', 'pipe']});
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', chunk => {
+      stdout += String(chunk);
+    });
+    child.stderr?.on('data', chunk => {
+      stderr += String(chunk);
+    });
+    child.once('exit', (code, signal) =>
+      resolve({exitCode: code ?? signalExitCode(signal), stdout, stderr}),
+    );
+    child.once('error', error => resolve({exitCode: 1, stdout, stderr: error.message}));
+  });
 }
 
 function resolveBackendCommand(): BackendCommand | undefined {

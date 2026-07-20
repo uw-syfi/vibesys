@@ -38,7 +38,7 @@ from vibesys.loops.plain.render import render_all
 from vibesys.loops.plain.runner_ext import PlainLoopAgentRunner
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import Prompt
-from vibesys.run import LoopContext
+from vibesys.run import LoopContext, RepositoryVisibility
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -361,6 +361,8 @@ def run_plain_loop(
     agent_backend: str | None = None,
     cli_provider: str | None = None,
     backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
+    remote_repo: str | None = None,
+    repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
 ) -> bool:
     """Run the issue-tracker driven loop.
 
@@ -393,6 +395,8 @@ def run_plain_loop(
         cli_provider=cli_provider,
         backend=backend,
         environment_hooks=LLMServingEnvironmentHooks(),
+        remote_repo=remote_repo,
+        repo_visibility=repo_visibility,
     ) as ctx:
         ctx.lprint(f"[log] experiment log: {ctx.run_log_path}")
         ctx.lprint(f"[log] experiment root: {ctx.exp_dir}")

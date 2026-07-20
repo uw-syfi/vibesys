@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import tomllib
 from collections.abc import Callable
@@ -36,11 +37,19 @@ from vibesys.domains.base import DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.input_manifest import InputBundle, load_input_bundle
 from vibesys.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind
+from vibesys.repository import (
+    REPOSITORY_SLUG,
+    InteractiveSetupDefaults,
+    RepositoryVisibility,
+    generate_experiment_name,
+    repository_name_from_experiment,
+)
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
 )
 from vibesys.skills import DEFAULT_SKILL_ROOTS, resolve_skill_source_dirs
+from vs_github import GitHubCLI, GitHubCLIError
 
 if TYPE_CHECKING:
     from vibesys.loops.evolve.population import Objective
@@ -294,6 +303,26 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Track workspace versions via git commits instead of directory snapshots.",
     )
     parser.add_argument(
+        "--repo",
+        default=None,
+        metavar="[OWNER/]NAME",
+        help=(
+            "Create a GitHub repository for this experiment, commit its durable "
+            "state, and push after each run. A configured [repository].owner supplies "
+            "an omitted owner. Requires an authenticated `gh` CLI."
+        ),
+    )
+    parser.add_argument(
+        "--repo-visibility",
+        type=RepositoryVisibility,
+        choices=list(RepositoryVisibility),
+        default=None,
+        help=(
+            "Visibility for a repository created by --repo. Defaults to "
+            "[repository].visibility in agent.toml."
+        ),
+    )
+    parser.add_argument(
         "--agent-backend",
         choices=["deepagents", "cli"],
         default=None,
@@ -336,6 +365,29 @@ def load_config_and_skills(
             config = load_config(args.config)
         except (ValueError, FileNotFoundError) as e:
             _configuration_error(str(e), code="config_load_failed", stage="config_loading")
+
+    repository = getattr(args, "repo", None)
+    if repository is not None:
+        if "/" not in repository:
+            owner = config.repository.owner
+            if owner is None:
+                _configuration_error(
+                    f"--repo {repository!r} omits OWNER, but [repository].owner is not set",
+                    code="invalid_repository",
+                    stage="repository_setup",
+                )
+            repository = f"{owner}/{repository}"
+        if not REPOSITORY_SLUG.fullmatch(repository):
+            _configuration_error(
+                f"--repo must be NAME with [repository].owner configured or an "
+                f"explicit GitHub OWNER/NAME pair, got {repository!r}",
+                code="invalid_repository",
+                stage="repository_setup",
+            )
+        args.repo = repository
+
+    if getattr(args, "repo_visibility", None) is None:
+        args.repo_visibility = config.repository.visibility
 
     backend: ComputeBackend = args.backend or config.backend.name
 
@@ -384,9 +436,23 @@ def _resolve_run_dir(run_dir_arg: str) -> str:
     name or a path whose final parent is ``exp_env``.
     """
     if run_dir_arg != "latest":
-        run_dir_path = Path(run_dir_arg)
+        run_dir_path = Path(run_dir_arg).expanduser()
         if run_dir_path.parent.name == "exp_env":
-            return run_dir_path.name
+            project_relative = PROJECT_ROOT / run_dir_path
+            if project_relative.is_dir():
+                return run_dir_path.name
+        if run_dir_path.is_dir():
+            resolved = run_dir_path.resolve()
+            if resolved.parent == (PROJECT_ROOT / "exp_env").resolve():
+                return resolved.name
+            return str(resolved)
+
+        legacy_path = PROJECT_ROOT / "exp_env" / run_dir_arg
+        if legacy_path.is_dir():
+            return run_dir_arg
+
+        if _is_remote_experiment(run_dir_arg):
+            return _clone_experiment(run_dir_arg)
         return run_dir_arg
     exp_env = PROJECT_ROOT / "exp_env"
     if not exp_env.is_dir():
@@ -403,11 +469,97 @@ def _resolve_run_dir(run_dir_arg: str) -> str:
     return dirs[-1]
 
 
+def _is_remote_experiment(value: str) -> bool:
+    return bool(
+        REPOSITORY_SLUG.fullmatch(value) or value.startswith(("https://", "ssh://", "git@"))
+    )
+
+
+def _clone_experiment(remote: str) -> str:
+    """Clone a remote experiment into ``exp_env/`` and return its run key."""
+    repository_name = remote.rstrip("/").rsplit("/", 1)[-1]
+    if ":" in repository_name:
+        repository_name = repository_name.rsplit(":", 1)[-1]
+    if repository_name.endswith(".git"):
+        repository_name = repository_name[:-4]
+    if not repository_name:
+        _configuration_error(
+            f"Cannot determine a local directory name from --resume {remote!r}",
+            code="resume_clone_failed",
+            stage="resume_resolution",
+        )
+
+    destination = PROJECT_ROOT / "exp_env" / repository_name
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        if not destination.is_dir():
+            _configuration_error(
+                f"Cannot clone experiment: destination is not a directory: {destination}",
+                code="resume_clone_failed",
+                stage="resume_resolution",
+            )
+        existing_origin = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=destination,
+            capture_output=True,
+            text=True,
+        )
+        expected_suffix = remote.removesuffix(".git").rstrip("/")
+        origin = existing_origin.stdout.strip().removesuffix(".git").rstrip("/")
+        if existing_origin.returncode == 0 and (
+            origin == expected_suffix
+            or origin.endswith(f"/{expected_suffix}")
+            or origin.endswith(f":{expected_suffix}")
+        ):
+            return destination.name
+        _configuration_error(
+            f"Cannot clone {remote!r}: destination already exists with a different origin: "
+            f"{destination}",
+            code="resume_clone_failed",
+            stage="resume_resolution",
+        )
+    if REPOSITORY_SLUG.fullmatch(remote):
+        try:
+            GitHubCLI().clone_repository(remote, destination)
+        except GitHubCLIError as exc:
+            _configuration_error(
+                f"Cannot clone experiment repository {remote!r}: {exc}",
+                code="resume_clone_failed",
+                stage="resume_resolution",
+            )
+        return destination.name
+
+    command = ["git", "clone", remote, str(destination)]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        tool = command[0]
+        _configuration_error(
+            f"Cannot clone {remote!r}: required command {tool!r} is not installed ({exc})",
+            code="resume_clone_failed",
+            stage="resume_resolution",
+        )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+        _configuration_error(
+            f"Cannot clone experiment repository {remote!r}: {detail}",
+            code="resume_clone_failed",
+            stage="resume_resolution",
+        )
+    return destination.name
+
+
 def _resume_exp_dir(run_dir_name: str) -> Path:
     return PROJECT_ROOT / "exp_env" / run_dir_name
 
 
 def _infer_resume_input(exp_dir: Path) -> Path:
+    materialized_input = exp_dir / "workspace"
+    if (materialized_input / "vibesys.input.toml").is_file() and (
+        materialized_input / "OBJECTIVE.md"
+    ).is_file():
+        return materialized_input
+
     events_path = exp_dir / "logs" / "run-events.jsonl"
     if not events_path.is_file():
         _configuration_error(
@@ -447,6 +599,12 @@ def _infer_resume_input(exp_dir: Path) -> Path:
 def _resolve_resume_args(args: argparse.Namespace) -> None:
     if args.resume is None:
         return
+    if args.repo is not None:
+        _configuration_error(
+            "--repo creates a remote for a new experiment and cannot be combined with --resume",
+            code="invalid_arguments",
+            stage="argument_parsing",
+        )
 
     run_dir_name = _resolve_run_dir(args.resume)
     args.resume = run_dir_name
@@ -486,6 +644,41 @@ def _make_parser(prog: str, description: str) -> argparse.ArgumentParser:
     parser = _RunArgumentParser(prog=prog, description=description)
     _apply_common_args(parser)
     return parser
+
+
+# ---------------------------------------------------------------------------
+# Interactive setup defaults command
+# ---------------------------------------------------------------------------
+
+
+def _build_tui_defaults_parser() -> argparse.ArgumentParser:
+    parser = _RunArgumentParser(
+        prog="vibesys tui-defaults",
+        description="Resolve configuration defaults for the pre-launch TUI.",
+    )
+    parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "agent.toml")
+    parser.add_argument("--input", type=Path, default=None)
+    parser.add_argument("--exp-name", default=None)
+    return parser
+
+
+def _run_tui_defaults(argv: list[str]) -> None:
+    args = _build_tui_defaults_parser().parse_args(argv)
+    try:
+        config = load_config(args.config)
+    except (ValueError, FileNotFoundError) as exc:
+        _configuration_error(str(exc), code="config_load_failed", stage="config_loading")
+
+    input_path = args.input.expanduser().resolve() if args.input is not None else None
+    experiment_name = args.exp_name or generate_experiment_name(input_path)
+    defaults = InteractiveSetupDefaults(
+        input_path=str(input_path) if input_path is not None else "",
+        experiment_name=experiment_name,
+        repository_owner=config.repository.owner,
+        repository_name=repository_name_from_experiment(experiment_name),
+        visibility=config.repository.visibility,
+    )
+    print(defaults.model_dump_json())
 
 
 # ---------------------------------------------------------------------------
@@ -626,7 +819,10 @@ def _validate_target_inputs(args: argparse.Namespace) -> None:
             stage="input_loading",
         )
     try:
-        args.input_bundle = load_input_bundle(input_arg)
+        args.input_bundle = load_input_bundle(
+            input_arg,
+            allow_materialized_sources=getattr(args, "resume", None) is not None,
+        )
     except (FileNotFoundError, ValueError) as exc:
         _configuration_error(str(exc), code="invalid_input", stage="input_loading")
 
@@ -708,6 +904,8 @@ def _run_agent(args: argparse.Namespace) -> None:
         domain=bundle.domain,
         interface=args.interface,
         inner_loop=args.inner_loop,
+        remote_repo=args.repo,
+        repo_visibility=args.repo_visibility,
     )
 
     if success:
@@ -852,6 +1050,8 @@ def _run_evolve(args: argparse.Namespace) -> None:
         modality=args.modality,
         objectives=objectives,
         frontier_bias=args.frontier_bias,
+        remote_repo=args.repo,
+        repo_visibility=args.repo_visibility,
     )
 
     if success:
@@ -958,6 +1158,8 @@ def _run_plain(args: argparse.Namespace) -> None:
         agent_backend=args.agent_backend,
         cli_provider=args.cli_provider,
         backend=backend,
+        remote_repo=args.repo,
+        repo_visibility=args.repo_visibility,
     )
 
     if success:
@@ -1000,6 +1202,9 @@ def parse_cli_invocation(argv: list[str]) -> CliInvocation:
 
 
 def _dispatch(argv: list[str]) -> None:
+    if argv and argv[0] == "tui-defaults":
+        _run_tui_defaults(argv[1:])
+        return
     if argv and argv[0] == "validate":
         _run_validate(argv[1:])
         return
