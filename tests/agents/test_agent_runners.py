@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibesys._agent_cli import hostsandbox
 from vibesys.agent_runner import log_json_and_print, log_prompt_markdown_and_print
 from vibesys.agents import build_agent_runner
 from vibesys.agents.callbacks import AgentLogger
@@ -16,11 +15,11 @@ from vibesys.agents.cli_runner import CliAgentRunner
 from vibesys.agents.deepagents_runner import DeepAgentsRunner
 from vibesys.agents.progress import RoundProgress
 from vibesys.config import Config
-from vibesys.host_resources import HostResource
 from vibesys.schemas import (
     JudgeResponse,
     Verdict,
 )
+from vs_sandbox import HostResource
 
 
 def _agent_config(**agent) -> Config:
@@ -310,9 +309,10 @@ class TestCliAgentRunner:
             fake_cls,
         )
         builds: list[dict] = []
+        cli_runner_module = __import__("vibesys.agents.cli_runner", fromlist=["_"])
         monkeypatch.setattr(
-            hostsandbox,
-            "build",
+            cli_runner_module,
+            "build_host_sandbox",
             lambda *args, **kwargs: builds.append({"args": args, **kwargs}),
         )
         resource = HostResource(

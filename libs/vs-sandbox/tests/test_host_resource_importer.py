@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vibesys._agent_cli import host_resource_importer
-from vibesys.host_resources import HostResource, HostResourceAccess
+from vs_sandbox import host_resource_importer
+from vs_sandbox.host_resources import HostResource, HostResourceAccess
 
 
 def test_importer_partitions_access_and_write_wins(tmp_path):

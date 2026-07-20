@@ -27,7 +27,7 @@ from .progress import AgentProgress, CandidateProgress, RoundProgress
 # The ``TYPE_CHECKING`` imports let pyright resolve the lazily provided
 # names statically without triggering the runtime cycle.
 if TYPE_CHECKING:
-    from vibesys.host_resources import HostResource
+    from vs_sandbox import HostResource
 
     from .cli_runner import CliAgentRunner
     from .deepagents_runner import DeepAgentsRunner

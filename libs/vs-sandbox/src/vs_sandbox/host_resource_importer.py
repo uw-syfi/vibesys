@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from vibesys.host_resources import HostResource, HostResourceAccess
+from vs_sandbox.host_resources import HostResource, HostResourceAccess
 
 
 @dataclass(frozen=True)

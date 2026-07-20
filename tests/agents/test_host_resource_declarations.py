@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from vibesys.agents import host_resource_declarations
-from vibesys.host_resources import HostResourceAccess
+from vs_sandbox import HostResourceAccess
 
 
 class TestInstallRoot:

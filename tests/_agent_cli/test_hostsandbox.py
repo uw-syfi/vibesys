@@ -21,10 +21,10 @@ from pathlib import Path
 
 import pytest
 
-from vibesys import host_resources
-from vibesys._agent_cli import hostsandbox
 from vibesys._agent_cli.cli_agent import CLICodingAgent, CLIGenerationSession
 from vibesys.agents import host_resource_declarations
+from vs_sandbox import host_resources
+from vs_sandbox import host_sandbox as hostsandbox
 
 
 def _declared_resources(

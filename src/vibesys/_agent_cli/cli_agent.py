@@ -10,8 +10,9 @@ from agentshim.executor import CommandExecutor, HostCommandExecutor
 from agentshim.utils import get_interactive_env
 from loguru import logger
 
+from vs_sandbox import WorkspaceSandbox
+
 from .base import CodingAgent
-from .hostsandbox import WorkspaceSandbox
 
 __all__ = ["CLICodingAgent", "CLIGenerationSession"]
 

@@ -29,7 +29,6 @@ from typing import Any, Protocol, TextIO, TypeVar, cast
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 
-from vibesys._agent_cli import hostsandbox
 from vibesys._agent_cli.base import CodingAgent, MCPServerSpec
 from vibesys._agent_cli.claude import ClaudeCodeCodingAgent
 from vibesys._agent_cli.codex import CodexCodingAgent
@@ -45,7 +44,7 @@ from vibesys.agent_runner import (
 from vibesys.agents.callbacks import AgentLogger
 from vibesys.agents.host_resource_declarations import declare_agent_host_resources
 from vibesys.agents.progress import AgentProgress
-from vibesys.host_resources import HostResource
+from vs_sandbox import HostResource, build_host_sandbox
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -409,7 +408,7 @@ class CliAgentRunner:
                 provider=self._provider,
                 additional=self._host_resources,
             )
-            agent.sandbox = hostsandbox.build(
+            agent.sandbox = build_host_sandbox(
                 Path(workspace),
                 env=agent.env,
                 resources=resources,

@@ -12,7 +12,7 @@ This module wraps the agent command in an OS confinement layer that exposes only
 
 * a read-only view of system/toolchain directories and the Python/agent
   runtimes needed to launch,
-* resources supplied as typed :class:`~vibesys.host_resources.HostResource`
+* resources supplied as typed :class:`~vs_sandbox.host_resources.HostResource`
   declarations (agent state, toolchains, model caches, MCP server code),
 * read-write access to the run workspace and a private ``/tmp``.
 
@@ -41,8 +41,8 @@ Operator controls (read from the agent's environment):
     not cover). Disabling is logged loudly.
 
 Resource discovery and policy are deliberately outside this module. The caller
-passes declarations from :mod:`vibesys.agents.host_resource_declarations`; this
-consumer only validates them and implements their requested access.
+passes declarations through the public resource SDK; this consumer only
+validates them and implements their requested access.
 """
 
 from __future__ import annotations
@@ -54,8 +54,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from vibesys._agent_cli.host_resource_importer import prepare_host_resource_imports
-from vibesys.host_resources import HostResource
+from vs_sandbox.host_resource_importer import prepare_host_resource_imports
+from vs_sandbox.host_resources import HostResource
 
 DISABLE_ENV = "VIBESYS_AGENT_SANDBOX"
 
@@ -108,8 +108,8 @@ class WorkspaceSandbox(ABC):
 
     Both OS backends are built by :func:`build` from the same inputs — the
     workspace plus the read/write allowlists computed from resource declarations
-    — and expose the same ``wrap(argv) -> argv`` contract consumed at the agent
-    launch chokepoint (:meth:`CLICodingAgent.generate`). Subclasses differ only
+    — and expose the same ``wrap(argv) -> argv`` contract consumed at the process
+    launch chokepoint. Subclasses differ only
     in the OS mechanism they emit: :class:`HostSandbox` a bubblewrap namespace,
     :class:`SeatbeltSandbox` a ``sandbox-exec`` profile.
     """

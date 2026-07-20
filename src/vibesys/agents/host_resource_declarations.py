@@ -1,7 +1,7 @@
 """Default host resource declarations for local coding-agent CLIs.
 
 This is the policy layer: it contains the actual list of resources agents need,
-expressed only through the public :mod:`vibesys.host_resources` SDK. It does not
+expressed only through the public :mod:`vs_sandbox.host_resources` SDK. It does not
 know whether a consumer uses bubblewrap, Seatbelt, bind mounts, or another
 resource-import mechanism.
 """
@@ -14,7 +14,7 @@ import sys
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
-from vibesys.host_resources import (
+from vs_sandbox import (
     HostResource,
     HostResourceAccess,
     HostResourceContext,

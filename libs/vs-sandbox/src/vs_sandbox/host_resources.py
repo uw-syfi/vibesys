@@ -1,4 +1,4 @@
-"""SDK for declaring host resources needed by an agent.
+"""SDK for declaring host resources needed inside a sandbox.
 
 This module intentionally contains no agent-specific resource list and no
 sandbox or mount logic. Callers use these types to describe resource intent;
