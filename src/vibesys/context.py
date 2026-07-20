@@ -625,6 +625,9 @@ def create_candidate_context(
         environment_patch=parent.environment_patch,
         workspace_files=workspace_files,
         git=git,
+        # Candidate worktrees share the parent repository and may run in
+        # parallel. Only the parent context owns remote synchronization.
+        experiment_repository=None,
         teardown_stack=teardown_stack,
         run_environment_session=session,
         commands=commands,
