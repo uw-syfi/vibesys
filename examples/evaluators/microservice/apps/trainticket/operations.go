@@ -44,7 +44,7 @@ func (a *Application) BuildOperation(operation api.Operation, sample api.Sample,
 	case operation.Name == "create_read_delete_config":
 		return a.buildEphemeral(operation, sample, data)
 	case strings.HasPrefix(operation.Name, "list_"):
-		return a.buildList(operation, service), nil
+		return a.buildList(operation, service, item), nil
 	case strings.HasPrefix(operation.Name, "read_"):
 		return a.buildRead(operation, service, item), nil
 	case strings.HasPrefix(operation.Name, "update_read_"):
@@ -62,17 +62,36 @@ func (a *Application) FinishOperation(plan api.OperationPlan) {
 	}
 }
 
-func (a *Application) buildList(operation api.Operation, service string) api.OperationPlan {
+func (a *Application) buildList(operation api.Operation, service string, item *record) api.OperationPlan {
 	paths := map[string]string{
 		"config": "/api/v1/configservice/configs", "station": "/api/v1/stationservice/stations",
 		"train": "/api/v1/trainservice/trains", "travel": "/api/v1/travelservice/trips",
 		"route": "/api/v1/routeservice/routes", "price": "/api/v1/priceservice/prices",
 	}
+	item.mu.Lock()
 	return api.OperationPlan{
 		Invocations: []api.Invocation{a.invocation(service, operation.Name, http.MethodGet, paths[service], nil)},
-		State: &operationState{expectations: []stepExpectation{{
-			status: http.StatusOK, appStatus: 1, kind: expectEntityList, service: service,
+		State: &operationState{locked: item, expectations: []stepExpectation{{
+			status: http.StatusOK, appStatus: 1, kind: expectEntityList,
+			service: service, expected: listExpectedValue(service, item),
 		}}},
+	}
+}
+
+func listExpectedValue(service string, item *record) any {
+	switch service {
+	case "config":
+		return item.config
+	case "station":
+		return item.stationA
+	case "train":
+		return item.train
+	case "route":
+		return item.route
+	case "price":
+		return item.price
+	default:
+		return item.trip
 	}
 }
 

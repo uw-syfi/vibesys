@@ -70,6 +70,11 @@ func validateStep(result api.ProtocolResult, expectation stepExpectation) api.Va
 			return invalid("response_shape", fmt.Sprintf("%s list data must be a non-empty array", expectation.service))
 		}
 		want := entityFields[expectation.service]
+		expected, err := normalizedJSON(expectation.expected)
+		if err != nil {
+			return invalid("validator", err.Error())
+		}
+		foundExpected := false
 		for index, item := range items {
 			object, objectOK := item.(map[string]any)
 			if !objectOK {
@@ -83,6 +88,15 @@ func validateStep(result api.ProtocolResult, expectation stepExpectation) api.Va
 			if !reflect.DeepEqual(keys, want) {
 				return invalid("response_schema", fmt.Sprintf("%s list item %d fields %v, want %v", expectation.service, index, keys, want))
 			}
+			if reflect.DeepEqual(item, expected) {
+				foundExpected = true
+			}
+		}
+		if !foundExpected {
+			return invalid(
+				"response_value",
+				fmt.Sprintf("%s list omitted or returned stale selected runtime record", expectation.service),
+			)
 		}
 	}
 	return api.ValidationResult{Success: true}

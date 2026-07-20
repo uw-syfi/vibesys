@@ -23,6 +23,7 @@ import urllib.request
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any
 
@@ -105,6 +106,7 @@ class GraphCase:
     price: dict[str, Any]
     trip_input: dict[str, Any]
     trip: dict[str, Any]
+    retired_station_names: dict[str, str] = dataclass_field(default_factory=dict)
 
 
 def _b64url(raw: bytes) -> str:
@@ -371,14 +373,26 @@ def assert_entity(service: str, actual: Any, expected: Mapping[str, Any], *, whe
 def index_entities(
     service: str, entities: Iterable[Mapping[str, Any]]
 ) -> dict[str, Mapping[str, Any]]:
-    return {entity_key(service, item): item for item in entities}
+    indexed: dict[str, Mapping[str, Any]] = {}
+    for index, item in enumerate(entities):
+        key = entity_key(service, item)
+        if key in indexed:
+            raise CheckFailure(f"{service} list contains duplicate key {key!r} at item {index}")
+        indexed[key] = item
+    return indexed
 
 
 def verify_seed_catalog(client: APIClient) -> int:
     checks = 0
     for service, expected_entities in SEED_CATALOG.items():
         expected = index_entities(service, expected_entities)
-        actual = index_entities(service, client.list_entities(service))
+        actual_entities = client.list_entities(service)
+        if len(actual_entities) != len(expected_entities):
+            raise CheckFailure(
+                f"{service} seed count is {len(actual_entities)}, "
+                f"expected exactly {len(expected_entities)}"
+            )
+        actual = index_entities(service, actual_entities)
         if actual.keys() != expected.keys():
             raise CheckFailure(
                 f"{service} seed IDs differ: missing={sorted(expected.keys() - actual.keys())}, "
@@ -509,16 +523,30 @@ def verify_case(client: APIClient, case: GraphCase, rng: random.Random) -> int:
             check_trip,
         )
     )
+    if case.retired_station_names:
+        checks.append(lambda: verify_retired_station_names(client, case))
     rng.shuffle(checks)
     for check in checks:
         check()
     return len(checks)
 
 
+def verify_retired_station_names(client: APIClient, case: GraphCase) -> None:
+    for retired_name in case.retired_station_names:
+        client.envelope(
+            "station",
+            "GET",
+            "/stations/id/" + urllib.parse.quote(retired_name, safe=""),
+            app_status=0,
+        )
+
+
 def update_case(client: APIClient, case: GraphCase, rng: random.Random) -> int:
     suffix = secrets.token_urlsafe(8)
     case.config["value"] = suffix
     case.config["description"] = "updated " + secrets.token_urlsafe(16)
+    case.retired_station_names[case.station_a["name"]] = case.station_a["id"]
+    case.retired_station_names[case.station_b["name"]] = case.station_b["id"]
     case.station_a["name"] = "Updated A " + suffix
     case.station_a["stayTime"] = rng.randint(41, 90)
     case.station_b["name"] = "Updated B " + suffix
@@ -581,10 +609,27 @@ def verify_deleted(client: APIClient, case: GraphCase) -> int:
     for service, path in probes:
         client.envelope(service, "GET", path, app_status=0)
     stations = index_entities("station", client.list_entities("station"))
+    station_checks = 0
     for station in (case.station_a, case.station_b):
         if station["id"] in stations:
             raise CheckFailure(f"deleted station {station['id']} remains visible")
-    return len(probes) + 2
+        client.envelope("station", "GET", "/stations/name/" + station["id"], app_status=0)
+        client.envelope(
+            "station",
+            "GET",
+            "/stations/id/" + urllib.parse.quote(station["name"], safe=""),
+            app_status=0,
+        )
+        station_checks += 3
+    for retired_name in case.retired_station_names:
+        client.envelope(
+            "station",
+            "GET",
+            "/stations/id/" + urllib.parse.quote(retired_name, safe=""),
+            app_status=0,
+        )
+        station_checks += 1
+    return len(probes) + station_checks
 
 
 def cleanup_cases(client: APIClient, cases: Sequence[GraphCase]) -> None:
@@ -654,6 +699,7 @@ class ManagedCandidate:
             env=env,
             stdout=self._log,
             stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
         try:
             wait_ready(self._client, self._startup_timeout)
@@ -668,16 +714,21 @@ class ManagedCandidate:
         self._process = None
         if process is None:
             return
-        if process.poll() is None:
-            if kill:
-                process.send_signal(signal.SIGKILL)
-            else:
-                process.send_signal(signal.SIGTERM)
+        process_group = process.pid
+        requested_signal = signal.SIGKILL if kill else signal.SIGTERM
+        signal_process_group(process_group, requested_signal)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        if not wait_process_group_exit(process_group, timeout=5):
+            signal_process_group(process_group, signal.SIGKILL)
             try:
-                process.wait(timeout=5)
+                process.wait(timeout=1)
             except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+                pass
+            if not wait_process_group_exit(process_group, timeout=5):
+                raise CheckFailure(f"candidate process group {process_group} did not terminate")
 
     def crash_restart(self) -> None:
         self.stop(kill=True)
@@ -686,6 +737,25 @@ class ManagedCandidate:
     def close(self) -> None:
         self.stop(kill=False)
         self._log.close()
+
+
+def signal_process_group(process_group: int, requested_signal: signal.Signals) -> None:
+    try:
+        os.killpg(process_group, requested_signal)
+    except ProcessLookupError:
+        pass
+
+
+def wait_process_group_exit(process_group: int, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            os.killpg(process_group, 0)
+        except ProcessLookupError:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
 
 
 def parse_targets(values: Sequence[str]) -> dict[str, str]:

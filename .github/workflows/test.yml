@@ -194,6 +194,9 @@ jobs:
       - name: Run tests
         run: uv run python -m pytest -v --cov=vibesys --cov=vs_github --cov=vs_issue_board --cov=vs_sandbox --cov-report=term-missing --cov-report=xml --cov-fail-under=75
 
+      - name: Test Train Ticket accuracy checker
+        run: uv run python -m pytest -v examples/microservices/train-ticket/accuracy_checker/tests
+
       - name: Upload coverage report
         if: matrix.python-version == '3.11'
         uses: actions/upload-artifact@v4

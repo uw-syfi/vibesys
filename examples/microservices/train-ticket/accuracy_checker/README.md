@@ -10,7 +10,8 @@ and shuffled operation order. It verifies:
 - the exact v0.2.0 startup catalog and response schemas;
 - welcome, list, point-read, and secondary-index routes;
 - connected station, train, route, price, and trip graphs;
-- create, immediate read-your-write, update, and delete behavior; and
+- create, immediate read-your-write, update, and delete behavior;
+- removal of stale station-name indexes after updates and deletes; and
 - persistent HTTP connections.
 
 Against an already running candidate:
@@ -25,8 +26,9 @@ is given an external restart hook. The structured result reports
 that unexecuted property.
 
 To let the checker start and `SIGKILL` a local candidate, provide its command as
-a JSON argument. The checker reuses the same `TRAIN_TICKET_DATA_DIR` after
-restart:
+a JSON argument. The checker starts the command in its own process session,
+kills the entire process group, verifies that it exited, and reuses the same
+`TRAIN_TICKET_DATA_DIR` after restart:
 
 ```bash
 python checker.py \
