@@ -22,6 +22,14 @@ def _toml_array(values: list[str]) -> str:
     return "[" + ",".join(_toml_str(v) for v in values) + "]"
 
 
+def _shell_path_config_args(env: dict[str, str]) -> list[str]:
+    """Preserve the launcher PATH in commands spawned by Codex."""
+    path = env.get("PATH")
+    if not path:
+        return []
+    return ["--config", f"shell_environment_policy.set.PATH={_toml_str(path)}"]
+
+
 class CodexCodingAgent(CLICodingAgent[CodexGenerationSession]):
     """Coding agent implementation using the Codex CLI tool."""
 
@@ -50,7 +58,7 @@ class CodexCodingAgent(CLICodingAgent[CodexGenerationSession]):
         # because Codex has no project-level config file discovery — its
         # only project-scoped knob is the runtime ``--config`` override
         # layer (verified via codex-rs/core/src/config_loader/README.md).
-        self.base_config_args: list[str] = []
+        self.base_config_args = _shell_path_config_args(self.env)
         self.extra_config_args: list[str] = []
 
     @property

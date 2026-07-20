@@ -19,6 +19,7 @@ from vibesys.schemas import (
     JudgeResponse,
     Verdict,
 )
+from vs_sandbox import HostResource
 
 
 def _agent_config(**agent) -> Config:
@@ -289,6 +290,56 @@ class TestCliAgentRunner:
         assert result.verdict == Verdict.PASS
         assert len(captured) == 1
         assert captured[0].generate_calls[0]["cwd"] == str(workspace)
+
+    @pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
+    def test_host_resource_declarations_apply_to_every_local_cli_provider(
+        self, monkeypatch, tmp_path, provider
+    ):
+        captured: list = []
+        fake_cls = _make_fake_agent_class(
+            generate_returns='{"analysis": "ok", "feedback": "", "verdict": "pass"}',
+            captured=captured,
+        )
+        monkeypatch.setitem(
+            __import__(
+                "vibesys.agents.cli_runner",
+                fromlist=["_PROVIDER_CLASSES"],
+            )._PROVIDER_CLASSES,
+            provider,
+            fake_cls,
+        )
+        builds: list[dict] = []
+        cli_runner_module = __import__("vibesys.agents.cli_runner", fromlist=["_"])
+        monkeypatch.setattr(
+            cli_runner_module,
+            "build_host_sandbox",
+            lambda *args, **kwargs: builds.append({"args": args, **kwargs}),
+        )
+        resource = HostResource(
+            tmp_path / "toolchain",
+            purpose="test toolchain",
+        )
+        runner = CliAgentRunner(
+            provider=provider,
+            model="m",
+            host_resources=(resource,),
+            run_log_file=None,
+        )
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+
+        result = runner.invoke(
+            kind="judge",
+            workspace=workspace,
+            system_prompt="sys",
+            user_prompt="usr",
+            response_cls=JudgeResponse,
+            fallback_factory=_judge_fallback,
+            round_label="judge #1",
+        )
+
+        assert result.verdict == Verdict.PASS
+        assert resource in builds[0]["resources"]
 
     def test_cli_runner_falls_back_on_unparseable_output(self, monkeypatch, tmp_path, capsys):
         captured: list = []
@@ -595,6 +646,64 @@ class TestCliAgentRunner:
         assert captured[1].generate_calls[0]["prompt"] == "sys\n\nturn 2"
         assert "Return EXACTLY" not in captured[0].generate_calls[0]["prompt"]
         assert "chat" not in runner._agents
+
+    def test_cli_runner_retries_missing_codex_rollout_as_fresh_thread(self, monkeypatch, tmp_path):
+        captured: list = []
+
+        class FakeCodexAgent:
+            def __init__(self, model=None, event_handler=None):
+                self.model = model
+                self.event_handler = event_handler
+                self.env: dict[str, str] = {}
+                self.session_id = "stale-thread"
+                self.generate_calls: list[dict] = []
+                self._last_session = None
+                captured.append(self)
+
+            def install_mcp_servers(self, workspace, servers):
+                pass
+
+            def uninstall_mcp_servers(self, workspace, servers):
+                pass
+
+            def generate(self, prompt, cwd=None, timeout=300, silent=False):
+                self.generate_calls.append(
+                    {"prompt": prompt, "cwd": cwd, "session_id": self.session_id}
+                )
+                if self.session_id is not None:
+                    raise RuntimeError(
+                        "thread/resume failed: no rollout found for thread id stale-thread"
+                    )
+                return '{"analysis": "ok", "feedback": "", "verdict": "pass"}'
+
+        monkeypatch.setitem(
+            __import__(
+                "vibesys.agents.cli_runner",
+                fromlist=["_PROVIDER_CLASSES"],
+            )._PROVIDER_CLASSES,
+            "codex",
+            FakeCodexAgent,
+        )
+
+        runner = CliAgentRunner(provider="codex", model="m", run_log_file=None)
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+
+        result = runner.invoke(
+            kind="judge",
+            workspace=workspace,
+            system_prompt="sys",
+            user_prompt="usr",
+            response_cls=JudgeResponse,
+            fallback_factory=_judge_fallback,
+            round_label="judge #1",
+        )
+
+        assert result.verdict == Verdict.PASS
+        assert [call["session_id"] for call in captured[0].generate_calls] == [
+            "stale-thread",
+            None,
+        ]
 
     def test_cli_runner_prints_prompt_as_rendered_markdown_before_generate(
         self, monkeypatch, tmp_path, capsys

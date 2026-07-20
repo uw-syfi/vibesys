@@ -21,15 +21,14 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, TextIO, TypeVar
+from typing import Any, Protocol, TextIO, TypeVar, cast
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 
-from vibesys._agent_cli import hostsandbox
 from vibesys._agent_cli.base import CodingAgent, MCPServerSpec
 from vibesys._agent_cli.claude import ClaudeCodeCodingAgent
 from vibesys._agent_cli.codex import CodexCodingAgent
@@ -43,7 +42,9 @@ from vibesys.agent_runner import (
     parse_typed_response_text,
 )
 from vibesys.agents.callbacks import AgentLogger
+from vibesys.agents.host_resource_declarations import declare_agent_host_resources
 from vibesys.agents.progress import AgentProgress
+from vs_sandbox import HostResource, build_host_sandbox
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -71,6 +72,12 @@ _PROVIDER_CLASSES: dict[str, _ProviderFactory] = {
 def _agent_label(kind: str) -> str:
     """Convert ``"perf_eval"`` to ``"Perf Eval"``, etc."""
     return kind.replace("_", " ").title()
+
+
+def _is_missing_codex_rollout(exc: RuntimeError) -> bool:
+    """Return whether Codex rejected a stale resumable thread."""
+    message = str(exc)
+    return "thread/resume failed" in message and "no rollout found" in message
 
 
 # Per-provider CLI skill-discovery paths, matching upstream
@@ -180,6 +187,7 @@ class CliAgentRunner:
         run_log_file: TextIO | None = None,
         docker_sandboxes: dict[str, Any] | None = None,
         modal_sandboxes: dict[str, Any] | None = None,
+        host_resources: Iterable[HostResource] = (),
         log_dir: Path | None = None,
     ):
         if provider not in _PROVIDER_CLASSES:
@@ -200,6 +208,9 @@ class CliAgentRunner:
         self._run_log_file = run_log_file
         self._docker_sandboxes = docker_sandboxes
         self._modal_sandboxes = modal_sandboxes
+        # Additional resource intent is provider-independent. The declaration
+        # policy combines it with provider defaults only on the local CLI path.
+        self._host_resources = tuple(host_resources)
         # When set, each ``invoke()`` appends one JSON record to
         # ``<log_dir>/usage.jsonl`` capturing per-call token counts and
         # cost. ``None`` disables the file write (legacy callers, unit
@@ -374,12 +385,15 @@ class CliAgentRunner:
             )
             if self._provider == "codex" and hasattr(agent, "base_config_args"):
                 # Codex-only attribute, guarded by the hasattr check above.
-                agent.base_config_args = [  # pyright: ignore[reportAttributeAccessIssue]
-                    "--config",
-                    'cli_auth_credentials_store="file"',
-                    "--config",
-                    'forced_login_method="chatgpt"',
-                ]
+                codex_agent = cast(CodexCodingAgent, agent)
+                codex_agent.base_config_args.extend(
+                    [
+                        "--config",
+                        'cli_auth_credentials_store="file"',
+                        "--config",
+                        'forced_login_method="chatgpt"',
+                    ]
+                )
             if reuse_agent:
                 self._agents[kind] = agent
         else:
@@ -388,10 +402,16 @@ class CliAgentRunner:
             # level so it cannot read or modify sibling runs or unrelated host
             # files (issue #149). Container executors above are already
             # externally sandboxed and deliberately skip this.
-            agent.sandbox = hostsandbox.build(
+            resources = declare_agent_host_resources(
+                agent.env,
+                binary_path=getattr(agent, "binary_path", None),
+                provider=self._provider,
+                additional=self._host_resources,
+            )
+            agent.sandbox = build_host_sandbox(
                 Path(workspace),
                 env=agent.env,
-                binary_path=getattr(agent, "binary_path", None),
+                resources=resources,
                 log=lambda msg: log_and_print(msg, self._run_log_file),
             )
             if reuse_agent:
@@ -430,12 +450,36 @@ class CliAgentRunner:
         #    (tokens were spent either way, and an audit gap on failure
         #    defeats the purpose).
         try:
-            text = agent.generate(
-                combined_prompt,
-                cwd=workspace_arg,
-                timeout=self._timeout,
-                silent=True,
-            )
+            try:
+                text = agent.generate(
+                    combined_prompt,
+                    cwd=workspace_arg,
+                    timeout=self._timeout,
+                    silent=True,
+                )
+            except RuntimeError as exc:
+                # Codex rollouts may be evicted after a long turn even though
+                # the local agent still has the thread ID. The full prompt and
+                # workspace progress files carry the durable context, so retry
+                # once as a fresh thread instead of aborting the outer loop.
+                if not (
+                    self._provider == "codex"
+                    and getattr(agent, "session_id", None)
+                    and _is_missing_codex_rollout(exc)
+                ):
+                    raise
+                log_and_print(
+                    f"[{label}] Codex session is no longer available; "
+                    "retrying with a fresh thread.",
+                    self._run_log_file,
+                )
+                cast(CodexCodingAgent, agent).session_id = None
+                text = agent.generate(
+                    combined_prompt,
+                    cwd=workspace_arg,
+                    timeout=self._timeout,
+                    silent=True,
+                )
         except Exception as exc:
             log_and_print(
                 f"\n=== {label} ROUND ERROR: {round_label} ===",

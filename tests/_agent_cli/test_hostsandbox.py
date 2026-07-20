@@ -21,8 +21,24 @@ from pathlib import Path
 
 import pytest
 
-from vibesys._agent_cli import hostsandbox
 from vibesys._agent_cli.cli_agent import CLICodingAgent, CLIGenerationSession
+from vibesys.agents import host_resource_declarations
+from vs_sandbox import host_resources
+from vs_sandbox import host_sandbox as hostsandbox
+
+
+def _declared_resources(
+    env: dict[str, str],
+    *,
+    binary_path: str | None = None,
+    provider: str = "codex",
+) -> tuple[host_resources.HostResource, ...]:
+    return host_resource_declarations.declare_agent_host_resources(
+        env,
+        binary_path=binary_path,
+        provider=provider,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Real-sandbox availability probe
@@ -101,9 +117,11 @@ class TestBuild:
         workspace = tmp_path / "exp_env" / "run" / "workspace"
         workspace.mkdir(parents=True)
         logs: list[str] = []
+        env = {host_resource_declarations.ALLOW_ENV: str(tmp_path)}
         sb = hostsandbox.build(
             workspace,
-            env={hostsandbox.ALLOW_ENV: str(tmp_path)},  # ancestor => sibling leak
+            env=env,
+            resources=_declared_resources(env),
             log=logs.append,
         )
         assert sb is not None
@@ -118,11 +136,42 @@ class TestBuild:
         weights = tmp_path.parent / f"{tmp_path.name}-weights"
         weights.mkdir()
         try:
-            sb = hostsandbox.build(workspace, env={hostsandbox.ALLOW_ENV: str(weights)})
+            env = {host_resource_declarations.ALLOW_ENV: str(weights)}
+            sb = hostsandbox.build(
+                workspace,
+                env=env,
+                resources=_declared_resources(env),
+            )
             assert sb is not None
             assert weights.resolve() in sb.read_paths
         finally:
             weights.rmdir()
+
+    def test_programmatic_resources_are_imported_by_access(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(hostsandbox.sys, "platform", "linux")
+        monkeypatch.setattr(hostsandbox.shutil, "which", lambda *a, **k: "/usr/bin/bwrap")
+        workspace = tmp_path / "workspace"
+        readonly = tmp_path / "compiler"
+        writable = tmp_path / "agent-state"
+        for path in (workspace, readonly, writable):
+            path.mkdir()
+
+        sb = hostsandbox.build(
+            workspace,
+            env={},
+            resources=(
+                host_resources.HostResource(readonly, purpose="compiler"),
+                host_resources.HostResource(
+                    writable,
+                    host_resources.HostResourceAccess.READ_WRITE,
+                    purpose="agent state",
+                ),
+            ),
+        )
+
+        assert isinstance(sb, hostsandbox.HostSandbox)
+        assert readonly in sb.read_paths
+        assert writable in sb.write_paths
 
     def test_codex_auth_file_survives_nested_codex_worktree_filter(self, tmp_path, monkeypatch):
         monkeypatch.setattr(hostsandbox.sys, "platform", "linux")
@@ -138,6 +187,7 @@ class TestBuild:
         sb = hostsandbox.build(
             workspace,
             env={"HOME": str(tmp_path), "CODEX_HOME": str(codex_home)},
+            resources=_declared_resources({"HOME": str(tmp_path), "CODEX_HOME": str(codex_home)}),
         )
 
         assert isinstance(sb, hostsandbox.HostSandbox)
@@ -217,28 +267,6 @@ class TestSharedAbstraction:
             assert sb.wrap(["agent"])[-1] == "agent"
 
 
-class TestInstallRoot:
-    """Regression for a real breakage caught by running codex under the sandbox:
-    an npm-packaged CLI must be able to reach its sibling platform binary."""
-
-    def test_node_package_binds_whole_package_tree(self):
-        launcher = Path(
-            "/home/u/.nvm/versions/node/v24/lib/node_modules/@openai/codex/bin/codex.js"
-        )
-        # Must expose the dir holding node_modules, so the sibling
-        # @openai/codex-linux-x64 platform binary resolves.
-        root = hostsandbox._install_root(launcher)
-        assert root == Path("/home/u/.nvm/versions/node/v24/lib")
-        platform_bin = Path(
-            "/home/u/.nvm/versions/node/v24/lib/node_modules/@openai/"
-            "codex/node_modules/@openai/codex-linux-x64/bin/codex"
-        )
-        assert platform_bin.is_relative_to(root)
-
-    def test_plain_binary_binds_its_directory(self):
-        assert hostsandbox._install_root(Path("/opt/tool/bin/agent")) == Path("/opt/tool/bin")
-
-
 def _has_pair(argv: list[str], flag: str, *operands: str) -> bool:
     for i, tok in enumerate(argv):
         if tok == flag and argv[i + 1 : i + 1 + len(operands)] == list(operands):
@@ -274,7 +302,12 @@ class TestMacosBuild:
         self._patch(monkeypatch)
         workspace = tmp_path / "exp_env" / "run" / "workspace"
         workspace.mkdir(parents=True)
-        sb = hostsandbox.build(workspace, env={hostsandbox.ALLOW_ENV: str(tmp_path)})
+        env = {host_resource_declarations.ALLOW_ENV: str(tmp_path)}
+        sb = hostsandbox.build(
+            workspace,
+            env=env,
+            resources=_declared_resources(env),
+        )
         assert isinstance(sb, hostsandbox.SeatbeltSandbox)
         assert tmp_path.resolve() not in sb.read_paths
 
@@ -440,7 +473,11 @@ def test_sandbox_blocks_escape_but_allows_workspace(tmp_path_factory):
     """With confinement installed the same escape attempts fail, yet the agent
     can still read and write inside its own workspace."""
     agent, workspace, sibling = _escape_probe(tmp_path_factory)
-    agent.sandbox = hostsandbox.build(workspace, env=agent.env, binary_path=agent.binary_path)
+    agent.sandbox = hostsandbox.build(
+        workspace,
+        env=agent.env,
+        resources=_declared_resources(agent.env, binary_path=agent.binary_path),
+    )
     assert agent.sandbox is not None
     out = agent.generate("stay in the workspace", cwd=str(workspace), silent=True)
 
@@ -466,7 +503,11 @@ def test_sandbox_exposes_codex_auth_but_not_sibling_worktrees(tmp_path):
     config.write_text("model = 'gpt-5.4'\n")
     env = {**os.environ, "HOME": str(tmp_path), "CODEX_HOME": str(codex_home)}
 
-    sandbox = hostsandbox.build(workspace, env=env, binary_path="/bin/sh")
+    sandbox = hostsandbox.build(
+        workspace,
+        env=env,
+        resources=_declared_resources(env, binary_path="/bin/sh"),
+    )
 
     assert isinstance(sandbox, hostsandbox.HostSandbox)
     command = sandbox.wrap(
@@ -485,7 +526,11 @@ def test_generate_does_not_wrap_when_cwd_is_none(tmp_path_factory, monkeypatch):
     """Container executors pass ``cwd=None``; the sandbox must not engage there
     (they are already externally sandboxed)."""
     agent, workspace, _ = _escape_probe(tmp_path_factory)
-    agent.sandbox = hostsandbox.build(workspace, env=agent.env, binary_path=agent.binary_path)
+    agent.sandbox = hostsandbox.build(
+        workspace,
+        env=agent.env,
+        resources=_declared_resources(agent.env, binary_path=agent.binary_path),
+    )
     # cwd=None => no wrapping => stub runs from the process cwd unconfined. Run
     # from a scratch dir so the stub's ``./candidate.txt`` doesn't leak into the
     # repo, and confirm it still reaches the sibling (guard skips confinement).
@@ -525,7 +570,11 @@ def test_seatbelt_blocks_escape_but_allows_workspace(tmp_path_factory):
     """macOS counterpart of the Linux regression: the Seatbelt profile denies the
     sibling read/write while the workspace stays usable."""
     agent, workspace, sibling = _escape_probe(tmp_path_factory)
-    agent.sandbox = hostsandbox.build(workspace, env=agent.env, binary_path=agent.binary_path)
+    agent.sandbox = hostsandbox.build(
+        workspace,
+        env=agent.env,
+        resources=_declared_resources(agent.env, binary_path=agent.binary_path),
+    )
     assert isinstance(agent.sandbox, hostsandbox.SeatbeltSandbox)
 
     # Sanity-check that the profile lets an ordinary binary launch at all before

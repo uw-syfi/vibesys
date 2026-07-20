@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vs-sandbox"
 version = "0.1.0"
-description = "Reusable Docker and Modal sandbox backends for agent workspaces"
+description = "Reusable host, Docker, and Modal sandbox backends for agent workspaces"
 requires-python = ">=3.11"
 dependencies = [
     "deepagents",

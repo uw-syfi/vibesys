@@ -12,8 +12,8 @@ This module wraps the agent command in an OS confinement layer that exposes only
 
 * a read-only view of system/toolchain directories and the Python/agent
   runtimes needed to launch,
-* the agent's own config/auth directories (so it can authenticate),
-* any explicitly allowed extra paths (model/weight caches, MCP server code),
+* resources supplied as typed :class:`~vs_sandbox.host_resources.HostResource`
+  declarations (agent state, toolchains, model caches, MCP server code),
 * read-write access to the run workspace and a private ``/tmp``.
 
 Everything else — including the workspace's *parent* and sibling runs — is
@@ -40,25 +40,24 @@ Operator controls (read from the agent's environment):
     debugging, or on a host whose toolchain layout the default allowlist does
     not cover). Disabling is logged loudly.
 
-``VIBESYS_AGENT_SANDBOX_ALLOW``
-    ``os.pathsep``-separated list of extra host paths to expose read-only inside
-    the sandbox (model weights, HF/torch caches, MCP server code, ...). Paths
-    that are ancestors of the workspace are rejected, because binding them would
-    re-expose sibling runs and defeat the confinement.
+Resource discovery and policy are deliberately outside this module. The caller
+passes declarations through the public resource SDK; this consumer only
+validates them and implements their requested access.
 """
 
 from __future__ import annotations
 
-import os
 import shutil
 import sys
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from vs_sandbox.host_resource_importer import prepare_host_resource_imports
+from vs_sandbox.host_resources import HostResource
+
 DISABLE_ENV = "VIBESYS_AGENT_SANDBOX"
-ALLOW_ENV = "VIBESYS_AGENT_SANDBOX_ALLOW"
 
 _DISABLED_VALUES = frozenset({"0", "false", "off", "no"})
 
@@ -103,132 +102,14 @@ def _is_disabled(env: dict[str, str]) -> bool:
     return env.get(DISABLE_ENV, "").strip().lower() in _DISABLED_VALUES
 
 
-def _is_ancestor(ancestor: Path, path: Path) -> bool:
-    """Return ``True`` if *ancestor* is *path* itself or one of its parents."""
-    try:
-        path.relative_to(ancestor)
-    except ValueError:
-        return False
-    return True
-
-
-def _existing(paths: list[Path]) -> list[Path]:
-    seen: set[Path] = set()
-    out: list[Path] = []
-    for p in paths:
-        if p in seen or not p.exists():
-            continue
-        seen.add(p)
-        out.append(p)
-    return out
-
-
-def _install_root(real_path: Path) -> Path:
-    """Directory to expose so *real_path* can find its siblings/dependencies.
-
-    Node CLIs (codex, claude, ...) are shipped as npm packages whose launcher
-    (``.../node_modules/<pkg>/bin/foo.js``) loads a platform binary from a
-    *sibling* ``node_modules`` (e.g. ``@openai/codex-linux-x64``). Binding only
-    the launcher's ``bin/`` dir hides that, so codex fails with "Missing optional
-    dependency". Bind the directory that holds the top-level ``node_modules`` so
-    the whole package tree resolves; otherwise bind the containing directory.
-    """
-    parts = real_path.parts
-    if "node_modules" in parts:
-        idx = parts.index("node_modules")  # top-level node_modules
-        if idx > 0:
-            return Path(*parts[:idx])
-    return real_path.parent
-
-
-def _default_read_paths(env: dict[str, str], binary_path: str | None) -> list[Path]:
-    """Toolchain paths the agent needs to *launch* (never the workspace parent).
-
-    These are specific subtrees — the Python runtime, the Node/agent install
-    tree, and the VibeSys package source — rather than broad roots like
-    ``$HOME``, precisely so sibling repositories under the same parent stay
-    invisible.
-    """
-    candidates: list[Path] = [
-        Path(sys.base_prefix),
-        Path(sys.prefix),
-    ]
-
-    # The agent binary and its full install tree (e.g. the npm package plus its
-    # platform-binary sibling), resolved through symlinks.
-    if binary_path:
-        real_binary = Path(binary_path).resolve()
-        candidates.append(_install_root(real_binary))
-        candidates.append(real_binary.parent)
-    # Node and its install prefix (``<prefix>/bin/node`` -> ``<prefix>``), which
-    # holds the global ``node_modules`` where the agent CLIs live.
-    node = shutil.which("node", path=env.get("PATH"))
-    if node:
-        real_node = Path(node).resolve()
-        candidates.append(real_node.parent)
-        candidates.append(real_node.parent.parent)
-
-    # The installed VibeSys source tree, so codex/claude MCP servers launched as
-    # ``python -m ...`` can import the package even under an editable install.
-    try:
-        import vibesys
-
-        pkg_file = getattr(vibesys, "__file__", None)
-        if pkg_file:
-            candidates.append(Path(pkg_file).resolve().parents[1])
-    except Exception:  # pragma: no cover - defensive; import cannot normally fail here
-        pass
-
-    return candidates
-
-
-def _default_config_paths(env: dict[str, str]) -> list[Path]:
-    """Read-write agent config/auth directories (the agent's own state only)."""
-    home = env.get("HOME")
-    if not home:
-        return []
-    base = Path(home)
-    codex_home = Path(env.get("CODEX_HOME", base / ".codex")).expanduser()
-    paths = [
-        # Mount the files Codex needs rather than the whole directory. A Codex
-        # checkout may itself live under ``$CODEX_HOME/worktrees``; mounting the
-        # directory would expose sibling tasks, while dropping it makes the CLI
-        # appear logged out inside the sandbox. Bubblewrap creates an ephemeral
-        # parent directory for these leaf mounts in ``HostSandbox.wrap``.
-        codex_home / "auth.json",
-        codex_home / "config.toml",
-        base / ".claude",
-        base / ".claude.json",
-        base / ".config" / "codex",
-        base / ".config" / "claude",
-    ]
-    if sys.platform == "darwin":
-        # macOS agent CLIs also keep state under Application Support / Caches.
-        support = base / "Library" / "Application Support"
-        caches = base / "Library" / "Caches"
-        paths += [
-            support / "codex",
-            support / "claude",
-            support / "com.openai.codex",
-            caches / "codex",
-            caches / "claude",
-        ]
-    return paths
-
-
-def _parse_allow(env: dict[str, str]) -> list[Path]:
-    raw = env.get(ALLOW_ENV, "")
-    return [Path(p).expanduser() for p in raw.split(os.pathsep) if p.strip()]
-
-
 @dataclass(frozen=True)
 class WorkspaceSandbox(ABC):
     """A host confinement policy for a single run workspace.
 
     Both OS backends are built by :func:`build` from the same inputs — the
-    workspace plus the read/write allowlists computed by :func:`_collect_paths`
-    — and expose the same ``wrap(argv) -> argv`` contract consumed at the agent
-    launch chokepoint (:meth:`CLICodingAgent.generate`). Subclasses differ only
+    workspace plus the read/write allowlists computed from resource declarations
+    — and expose the same ``wrap(argv) -> argv`` contract consumed at the process
+    launch chokepoint. Subclasses differ only
     in the OS mechanism they emit: :class:`HostSandbox` a bubblewrap namespace,
     :class:`SeatbeltSandbox` a ``sandbox-exec`` profile.
     """
@@ -275,7 +156,11 @@ class HostSandbox(WorkspaceSandbox):
         # directories are ephemeral inside the namespace; only the explicitly
         # bound files below are sourced from the host.
         parent_dirs = {
-            parent for path in self.write_paths for parent in path.parents if parent != Path("/")
+            parent
+            for path in (*self.read_paths, *self.write_paths)
+            if path.is_file()
+            for parent in path.parents
+            if parent != Path("/")
         }
         for parent in sorted(parent_dirs, key=lambda path: len(path.parts)):
             cmd += ["--dir", str(parent)]
@@ -417,44 +302,21 @@ class SeatbeltSandbox(WorkspaceSandbox):
         return [self.sandbox_exec_path, "-p", self.profile(), *argv]
 
 
-def _collect_paths(
+def _resource_paths(
     workspace: Path,
-    env: dict[str, str],
-    binary_path: str | None,
     log: Callable[[str], None],
+    resources: Iterable[HostResource],
 ) -> tuple[list[Path], list[Path]]:
-    """Compute the (read, write) allowlists shared by both host backends.
-
-    Applies the sibling-isolation invariant: no allowlisted path may be an
-    ancestor of the workspace, since that would re-expose sibling runs.
-    """
-    read_paths = _existing(_default_read_paths(env, binary_path))
-    write_paths = _existing(_default_config_paths(env))
-
-    for extra in _parse_allow(env):
-        resolved = extra.resolve()
-        if _is_ancestor(resolved, workspace):
-            log(
-                f"[hostsandbox] ignoring {ALLOW_ENV} entry {extra} because it is an "
-                "ancestor of the workspace; allowing it would expose sibling runs."
-            )
-            continue
-        if resolved.exists():
-            read_paths.append(resolved)
-
-    # Safety net: drop any default read/write path that is an ancestor of the
-    # workspace. (Toolchain subtrees like the venv are not ancestors, so this
-    # normally changes nothing.)
-    read_paths = [p for p in read_paths if not _is_ancestor(p, workspace)]
-    write_paths = [p for p in write_paths if not _is_ancestor(p, workspace)]
-    return read_paths, write_paths
+    """Prepare SDK declarations for an OS-specific import backend."""
+    imports = prepare_host_resource_imports(workspace, resources, log=log)
+    return list(imports.read_paths), list(imports.write_paths)
 
 
 def build(
     workspace: Path | str,
     *,
     env: dict[str, str],
-    binary_path: str | None = None,
+    resources: Iterable[HostResource] = (),
     log: Callable[[str], None] | None = None,
 ) -> WorkspaceSandbox | None:
     """Build a host confinement policy for *workspace*, or ``None`` if not enforced.
@@ -481,9 +343,19 @@ def build(
         return None
 
     if sys.platform.startswith("linux"):
-        return _build_linux(workspace, env=env, binary_path=binary_path, log=_log)
+        return _build_linux(
+            workspace,
+            env=env,
+            resources=resources,
+            log=_log,
+        )
     if sys.platform == "darwin":
-        return _build_macos(workspace, env=env, binary_path=binary_path, log=_log)
+        return _build_macos(
+            workspace,
+            env=env,
+            resources=resources,
+            log=_log,
+        )
 
     _log(
         f"[hostsandbox] no host confinement backend for {sys.platform!r}; agent "
@@ -496,7 +368,7 @@ def _build_linux(
     workspace: Path,
     *,
     env: dict[str, str],
-    binary_path: str | None,
+    resources: Iterable[HostResource],
     log: Callable[[str], None],
 ) -> HostSandbox | None:
     bwrap = shutil.which("bwrap", path=env.get("PATH")) or shutil.which("bwrap")
@@ -507,7 +379,7 @@ def _build_linux(
         )
         return None
 
-    read_paths, write_paths = _collect_paths(workspace, env, binary_path, log)
+    read_paths, write_paths = _resource_paths(workspace, log, resources)
     return HostSandbox(
         bwrap_path=bwrap,
         workspace=workspace,
@@ -521,7 +393,7 @@ def _build_macos(
     workspace: Path,
     *,
     env: dict[str, str],
-    binary_path: str | None,
+    resources: Iterable[HostResource],
     log: Callable[[str], None],
 ) -> SeatbeltSandbox | None:
     sandbox_exec = shutil.which("sandbox-exec", path=env.get("PATH")) or shutil.which(
@@ -534,7 +406,7 @@ def _build_macos(
         )
         return None
 
-    read_paths, write_paths = _collect_paths(workspace, env, binary_path, log)
+    read_paths, write_paths = _resource_paths(workspace, log, resources)
     return SeatbeltSandbox(
         sandbox_exec_path=sandbox_exec,
         workspace=workspace,
