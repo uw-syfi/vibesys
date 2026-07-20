@@ -22,6 +22,24 @@ path.
 - Keep compatibility wrappers thin. New behavior should live in the canonical
   implementation module or reusable library.
 
+When one part of the application describes behavior and another part applies
+it, separate these roles when they have different owners or change for different
+reasons:
+
+- The **shared interface** defines the types and extension points. It contains no
+  application-specific defaults or side effects.
+- The **application configuration** contains the actual defaults,
+  registrations, and selected values. It depends only on the shared interface.
+- The **implementation** validates and applies values passed through the shared
+  interface. It does not read application configuration directly.
+- The **wiring code** selects the application configuration and passes it to the
+  implementation.
+
+A new configuration case should normally change the application configuration,
+not add a concrete-type branch to each implementation. Do not create separate
+modules merely to name these roles when the behavior is trivial and has one
+owner.
+
 ## Unidirectional Data Flow
 
 Treat unidirectional data flow as the default architecture principle. Inputs
@@ -29,7 +47,7 @@ move through core behavior into typed outputs or events, which consumers then
 interpret. Dependencies should not point back from core behavior into the
 adapters or presentation layers that consume its results.
 
-- Write core orchestration against stable protocols and data contracts, not
+- Write core orchestration against stable interfaces and typed data, not
   concrete sandbox, compute backend, renderer, or CLI implementations.
 - Keep most behavior sandbox-strategy-agnostic. Sandbox-specific decisions
   belong in the sandbox implementations, their factories, or narrowly scoped
@@ -40,10 +58,10 @@ adapters or presentation layers that consume its results.
   or displays it.
 - Keep cross-boundary values typed and explicit. Do not reach through an
   interface to depend on implementation details or branch on concrete
-  implementation names outside the composition layer that selects them.
+  implementation names outside the wiring code that selects them.
 - Introduce an abstraction when it creates a genuine ownership boundary,
   clarifies the direction of data flow, or removes meaningful duplication. Do
-  not add indirection without a concrete contract to protect.
+  not add indirection without a shared interface to protect.
 
 ## Python Code
 
@@ -56,7 +74,7 @@ adapters or presentation layers that consume its results.
   the main concern.
 - Accept `Path`-like inputs at boundaries when useful, then normalize once.
 - Keep functions small enough that ownership is obvious. Add shared abstractions
-  only when they remove real duplication or clarify a cross-module contract.
+  only when they remove real duplication or clarify a shared interface.
 
 ## Validation And Failure Modes
 
@@ -102,7 +120,7 @@ through business logic.
 - Make the command runner injectable when useful so tests can cover behavior
   without requiring the real external tool.
 - Keep trivial, one-off process calls local when a wrapper would not clarify a
-  contract or improve testability.
+  shared interface or improve testability.
 
 ## Resource Lifecycle
 
@@ -146,6 +164,8 @@ failure cases.
 
 - Use shared contract tests for interchangeable implementations, especially
   sandbox strategies and compute backends.
+- Test application configuration and implementation separately, then add a
+  focused test for the wiring between them.
 - Test external CLI adapters with fake runners and representative success,
   missing-tool, timeout, nonzero-exit, and malformed-output cases.
 - Test event changes through serialization and each affected consumer, not only
@@ -160,8 +180,8 @@ failure cases.
 - Ad hoc parsing when TOML, YAML, Pydantic, or standard library parsers are
   available.
 - Silent acceptance of misspelled config or metadata.
-- Mixing domain knowledge, execution policy, and interface mechanics in one
-  place.
+- Mixing a shared interface, application configuration, and side-effecting
+  implementation when they have different owners or reasons to change.
 - Concrete sandbox or renderer checks in otherwise strategy-agnostic core code.
 - Presentation formatting in backend event producers.
 - Scattered subprocess command construction and output parsing for the same
