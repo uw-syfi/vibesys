@@ -121,10 +121,55 @@ def test_linearizable_queue_inputs_use_shared_editable_rust_starter():
         assert (
             bundle.evaluator_path == (project_root / "examples" / "evaluators" / "queue").resolve()
         )
+        assert not (input_dir / "baseline").exists()
         assert not (input_dir / "reference" / "reference.py").exists()
         assert not (input_dir / "pyproject.toml").exists()
         for relative in starter_files:
             assert not (input_dir / relative).exists()
+
+
+def test_spsc_rigtorp_baseline_builds_and_passes_accuracy(tmp_path):
+    if shutil.which("go") is None or shutil.which("c++") is None:
+        pytest.skip("Go and a C++ compiler are required by the SPSC baseline")
+
+    project_root = Path(__file__).parents[1]
+    baseline_source = project_root / "examples" / "baselines" / "queue-spsc-rigtorp"
+    baseline = tmp_path / "queue-spsc-rigtorp"
+    shutil.copytree(baseline_source, baseline)
+    evaluator = project_root / "examples" / "evaluators" / "queue"
+    abi_header = evaluator / "include" / "vibesys_queue_abi.h"
+
+    subprocess.run(
+        ["make", "clean", "all", f"ABI_HEADER={abi_header}"],
+        cwd=baseline,
+        check=True,
+    )
+    completed = subprocess.run(
+        [
+            "go",
+            "-C",
+            str(evaluator),
+            "run",
+            ".",
+            "check",
+            "--workspace",
+            str(baseline),
+            "--scenario",
+            "spsc",
+            "--capacity",
+            "4",
+            "--value-size",
+            "64",
+            "--operations",
+            "12",
+            "--trials",
+            "4",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "PASS - spsc linearizable" in completed.stdout
 
 
 @pytest.mark.parametrize(("input_name", "scenario"), LINEARIZABLE_QUEUE_INPUTS.items())
