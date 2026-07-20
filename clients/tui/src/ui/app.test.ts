@@ -340,6 +340,65 @@ describe('OpenTUI presentation', () => {
     await new Promise(resolve => setTimeout(resolve, 150));
     expect(destroyed).toBe(false);
   });
+
+  it('opens a focused chat popup after a configuration failure', async () => {
+    const testRenderer = await createTestRenderer({width: 100, height: 24});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      status: 'failed',
+      terminal: true,
+      conversation: [
+        {
+          id: 'configuration-error',
+          kind: 'result',
+          label: 'Configuration failed',
+          content: 'agent.toml was not found',
+          tone: 'failure',
+        },
+      ],
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    await testRenderer.mockInput.typeText('/chat');
+    testRenderer.mockInput.pressEnter();
+    const popup = await testRenderer.waitForFrame(value => value.includes('Experiment chat'));
+    expect(popup).toContain('Ask about this experiment');
+    expect(popup).toContain('Message');
+
+    await testRenderer.mockInput.typeText('why did startup fail?');
+    testRenderer.mockInput.pressEnter();
+    const answer = await testRenderer.waitForFrame(value => value.includes('Recorded diagnostic'));
+    expect(controller.chatSubmissions).toEqual(['why did startup fail?']);
+    expect(answer).toContain('Inspecting configuration events');
+    expect(answer).toContain('→ Read(run-events.jsonl)');
+
+    testRenderer.mockInput.pressKey('ESCAPE');
+    await testRenderer.waitForFrame(value => !value.includes('Experiment chat'));
+    expect(controller.state.chatOpen).toBe(false);
+  });
+
+  it('accepts another chat message while an agent turn is pending', async () => {
+    const testRenderer = await createTestRenderer({width: 100, height: 24});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      chatPending: true,
+      chatConversation: [
+        {id: 'active-question', kind: 'user', label: 'You', content: 'first question'},
+      ],
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    await testRenderer.mockInput.typeText('/chat');
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(value => value.includes('Experiment chat'));
+    await testRenderer.mockInput.typeText('queued follow-up');
+    testRenderer.mockInput.pressEnter();
+
+    await testRenderer.waitForFrame(value => value.includes('Recorded diagnostic'));
+    expect(controller.chatSubmissions).toEqual(['queued follow-up']);
+  });
 });
 
 function registerCleanup(
@@ -355,6 +414,7 @@ function registerCleanup(
 class FakeController implements SessionController {
   readonly #listeners = new Set<(state: SessionState) => void>();
   readonly submissions: string[] = [];
+  readonly chatSubmissions: string[] = [];
   liveCalls = 0;
 
   constructor(public state: SessionState) {}
@@ -367,6 +427,46 @@ class FakeController implements SessionController {
   }
   submit(value: string): Promise<void> {
     this.submissions.push(value);
+    if (value.trim() === '/chat') {
+      this.state = {...this.state, chatOpen: true, overlay: null};
+      this.#notify();
+    }
+    return Promise.resolve();
+  }
+  closeChat(): void {
+    this.state = {...this.state, chatOpen: false};
+    this.#notify();
+  }
+  sendChat(value: string): Promise<void> {
+    this.chatSubmissions.push(value);
+    this.state = {
+      ...this.state,
+      chatConversation: [
+        ...this.state.chatConversation,
+        {id: 'chat-user', kind: 'user', label: 'You', content: value},
+        {
+          id: 'chat-analysis',
+          kind: 'analysis',
+          label: 'Chat analysis',
+          content: 'Inspecting configuration events',
+        },
+        {
+          id: 'chat-tool',
+          kind: 'tool',
+          label: 'Chat tool',
+          content: '→ Read(run-events.jsonl)\nFound config_load_failed',
+          toolCall: '→ Read(run-events.jsonl)\n',
+          toolResponse: 'Found config_load_failed',
+        },
+        {
+          id: 'chat-answer',
+          kind: 'assistant',
+          label: 'Answer',
+          content: 'Recorded diagnostic: agent.toml was not found.',
+        },
+      ],
+    };
+    this.#notify();
     return Promise.resolve();
   }
   live(): void {
@@ -412,5 +512,9 @@ class FakeController implements SessionController {
     this.#listeners.add(listener);
     listener(this.state);
     return () => this.#listeners.delete(listener);
+  }
+
+  #notify(): void {
+    for (const listener of this.#listeners) listener(this.state);
   }
 }

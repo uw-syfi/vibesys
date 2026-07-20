@@ -151,6 +151,35 @@ class TestDeepAgentsRunner:
 
         assert captured_backends == [impl_backend, judge_backend, perf_backend]
 
+    def test_deepagents_runner_returns_plain_text_without_response_format(self, tmp_path):
+        with (
+            patch("vibesys.agents.deepagents_runner.create_deep_agent") as mock_create,
+            patch(
+                "vibesys.agents.deepagents_runner.run_agent",
+                return_value="Natural **Markdown** answer.",
+            ) as mock_run,
+        ):
+            mock_create.return_value = MagicMock(name="chat-agent")
+            runner = DeepAgentsRunner(
+                model="m",
+                backends={"chat": MagicMock(name="chat-backend")},
+                skills=[],
+                model_name="m",
+                run_log_file=None,
+            )
+
+            result = runner.invoke_text(
+                kind="chat",
+                workspace=tmp_path,
+                system_prompt="investigate",
+                user_prompt="what happened?",
+                round_label="experiment chat",
+            )
+
+        assert result == "Natural **Markdown** answer."
+        assert "response_format" not in mock_create.call_args.kwargs
+        assert mock_run.call_args.args[1] == "what happened?"
+
 
 # ---------------------------------------------------------------------------
 # Helpers for CLI runner tests
@@ -528,6 +557,44 @@ class TestCliAgentRunner:
         prompt = captured[0].generate_calls[0]["prompt"]
         assert "JudgeResponse" in prompt
         assert prompt.startswith("THE-SYSTEM-PROMPT")
+
+    def test_cli_runner_chat_returns_plain_text_in_a_fresh_session_per_turn(
+        self, monkeypatch, tmp_path
+    ):
+        captured: list = []
+        fake_cls = _make_fake_agent_class(
+            generate_returns="Natural **Markdown** answer.",
+            captured=captured,
+        )
+        monkeypatch.setitem(
+            __import__(
+                "vibesys.agents.cli_runner",
+                fromlist=["_PROVIDER_CLASSES"],
+            )._PROVIDER_CLASSES,
+            "codex",
+            fake_cls,
+        )
+
+        runner = CliAgentRunner(provider="codex", model="m", run_log_file=None)
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+
+        for turn in (1, 2):
+            answer = runner.invoke_text(
+                kind="chat",
+                workspace=workspace,
+                system_prompt="sys",
+                user_prompt=f"turn {turn}",
+                round_label="experiment-chat",
+            )
+            assert answer == "Natural **Markdown** answer."
+
+        assert len(captured) == 2
+        assert captured[0] is not captured[1]
+        assert captured[0].generate_calls[0]["prompt"] == "sys\n\nturn 1"
+        assert captured[1].generate_calls[0]["prompt"] == "sys\n\nturn 2"
+        assert "Return EXACTLY" not in captured[0].generate_calls[0]["prompt"]
+        assert "chat" not in runner._agents
 
     def test_cli_runner_prints_prompt_as_rendered_markdown_before_generate(
         self, monkeypatch, tmp_path, capsys

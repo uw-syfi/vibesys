@@ -20,6 +20,7 @@ from vibesys.server import (
     RunInspector,
     RunSupervisor,
 )
+from vibesys.server.events import ConfigurationFailedData
 from vibesys.server.protocol import (
     ChatQuery,
     EventsQuery,
@@ -101,6 +102,26 @@ def test_general_chat_is_distinct_from_status_query(tmp_path):
     supervisor.chat("hello there")
     event_types = [event["type"] for event in _events(tmp_path / "run-events.jsonl")]
     assert event_types == ["server_started", "chat"]
+
+
+def test_side_channel_chat_output_is_tagged_without_changing_active_agent(tmp_path):
+    supervisor = RunSupervisor()
+    supervisor.attach(tmp_path)
+    supervisor.before_agent("implementer", "round-1", "work")
+
+    with supervisor.presentation_scope(
+        agent_kind="chat", round_label="experiment-chat", invocation_id="chat-1"
+    ):
+        supervisor.publish_agent_output("private chat output")
+    supervisor.publish_agent_output("experiment output")
+
+    agent_events = [
+        event for event in supervisor.read_events() if event.type is EventType.AGENT_OUTPUT_CHUNK
+    ]
+    assert [event.agent_kind for event in agent_events] == ["chat", "implementer"]
+    assert agent_events[0].round_label == "experiment-chat"
+    assert agent_events[0].invocation_id == "chat-1"
+    assert agent_events[1].data.content == "experiment output"
 
 
 def test_bootstrap_events_migrate_to_run_audit_without_replacing_history(tmp_path):
@@ -220,6 +241,92 @@ def test_service_accepts_chat(tmp_path):
     assert any(event["type"] == "status_query" for event in events)
 
 
+def test_service_routes_chat_to_configured_agent_handler(tmp_path):
+    supervisor = RunSupervisor()
+    supervisor.attach(tmp_path)
+    questions = []
+    supervisor.set_chat_handler(lambda question: questions.append(question) or "agent answer")
+
+    response = SupervisionService(supervisor).execute(ChatQuery(text="what changed?"))
+
+    assert response.chat.answer == "agent answer"
+    assert questions == ["what changed?"]
+    assert response.events[-1].type is EventType.CHAT
+    assert response.events[-1].agent_kind == "chat"
+    assert _events(tmp_path / "run-events.jsonl")[-1]["type"] == "chat"
+
+
+def test_chat_explains_configuration_failure_without_a_run_context(tmp_path):
+    supervisor = RunSupervisor()
+    supervisor.attach(tmp_path)
+    supervisor.record(
+        EventType.CONFIGURATION_FAILED,
+        status="failed",
+        data=ConfigurationFailedData(
+            code="config_load_failed",
+            stage="config_loading",
+            message="agent.toml was not found",
+            usage=None,
+            exit_code=2,
+        ),
+    )
+
+    response = SupervisionService(supervisor).execute(ChatQuery(text="why did startup fail?"))
+
+    assert "config_loading" in response.chat.answer
+    assert "agent.toml was not found" in response.chat.answer
+
+
+def test_run_context_chat_exposes_trajectory_without_inlining_it_in_prompt(tmp_path):
+    supervisor = RunSupervisor()
+    supervisor.attach(tmp_path / "logs")
+    (tmp_path / "logs" / "progress.md").write_text("Round 2 improved throughput.")
+    ctx = _RunContext.__new__(_RunContext)
+    ctx.supervisor = supervisor
+    ctx.agent_runner = Mock()
+    ctx.agent_runner.invoke_text.return_value = "It improved in round 2."
+    ctx._paths = RunPaths(
+        exp_dir=tmp_path,
+        log_dir=tmp_path / "logs",
+        workspace=tmp_path / "workspace",
+        run_log_path=tmp_path / "run.log",
+    )
+    ctx.gpu_env = lambda: {}
+    ctx._progress_stack = []
+    ctx._chat_lock = threading.Lock()
+    ctx._chat_history = []
+    ctx.logger = Mock()
+    ctx.logger.file = Mock()
+
+    answer = ctx.chat("what improved?")
+
+    assert answer == "It improved in round 2."
+    invocation = ctx.agent_runner.invoke_text.call_args.kwargs
+    assert invocation["kind"] == "chat"
+    assert "response_cls" not in invocation
+    assert invocation["user_prompt"] == "what improved?"
+    assert "Round 2 improved throughput." not in invocation["user_prompt"]
+    assert "_vibesys_chat/trajectory/" in invocation["system_prompt"]
+    assert "read-only investigation agent" in invocation["system_prompt"]
+    trajectory = tmp_path / "workspace" / "_vibesys_chat" / "trajectory"
+    assert (trajectory / "progress.md").read_text() == "Round 2 improved throughput."
+    transcript = tmp_path / "workspace" / "_vibesys_chat" / "conversation.jsonl"
+    assert json.loads(transcript.read_text()) == {
+        "question": "what improved?",
+        "answer": "It improved in round 2.",
+    }
+
+    ctx.agent_runner.invoke_text.side_effect = RuntimeError("agent unavailable")
+    with pytest.raises(RuntimeError, match="Chat agent failed: RuntimeError: agent unavailable"):
+        ctx.chat("what is the current status?")
+    continuation = ctx.agent_runner.invoke_text.call_args.kwargs
+    assert continuation["user_prompt"] == "what is the current status?"
+    assert "It improved in round 2." not in continuation["user_prompt"]
+    assert "_vibesys_chat/instructions.md" in continuation["system_prompt"]
+    assert "Prefer targeted commands" not in continuation["system_prompt"]
+    assert ctx._load_chat_history() == [("what improved?", "It improved in round 2.")]
+
+
 def test_socket_transport_supports_multiple_clients_and_event_replay(tmp_path):
     supervisor = RunSupervisor()
     supervisor.attach(tmp_path / "logs")
@@ -246,6 +353,28 @@ def test_socket_transport_supports_multiple_clients_and_event_replay(tmp_path):
     assert sequences == sorted(sequences)
     assert len(sequences) == len(set(sequences))
     assert any(event["type"] == "server_started" for event in replay["events"])
+
+
+def test_socket_transport_returns_clear_chat_agent_errors(tmp_path):
+    supervisor = RunSupervisor()
+    supervisor.attach(tmp_path / "logs")
+
+    def fail_chat(question: str) -> str:
+        raise RuntimeError(f"Chat agent failed while answering: {question}")
+
+    supervisor.set_chat_handler(fail_chat)
+    socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"
+
+    with SupervisionSocketServer(socket_path, SupervisionService(supervisor)):
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.connect(str(socket_path))
+            stream = client.makefile("rwb")
+            stream.write(ChatQuery(text="what happened?").model_dump_json().encode() + b"\n")
+            stream.flush()
+            response = json.loads(stream.readline())
+
+    assert response["ok"] is False
+    assert response["error"] == "Chat agent failed while answering: what happened?"
 
 
 def test_socket_subscription_replays_then_streams_new_events(tmp_path):
@@ -345,6 +474,7 @@ def test_supervision_runtime_streams_configuration_failure_before_exiting():
     session_dir = Path("/tmp") / f"vs-runtime-test-{uuid.uuid4().hex}"
     socket_path = session_dir / "control.sock"
     received_events = []
+    chat_responses = []
 
     def subscribe_until_failure() -> None:
         deadline = time.monotonic() + 5
@@ -364,6 +494,16 @@ def test_supervision_runtime_streams_configuration_failure_before_exiting():
                     received_events.extend(message["events"])
                 if any(event["type"] == "configuration_failed" for event in received_events):
                     break
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as chat_client:
+                chat_client.settimeout(5)
+                chat_client.connect(str(socket_path))
+                chat_stream = chat_client.makefile("rwb")
+                chat_stream.write(
+                    ChatQuery(text="why did startup fail?").model_dump_json().encode() + b"\n"
+                )
+                chat_stream.flush()
+                chat_responses.append(json.loads(chat_stream.readline()))
+                chat_stream.close()
             stream.close()
 
     subscriber = threading.Thread(target=subscribe_until_failure)
@@ -394,6 +534,8 @@ def test_supervision_runtime_streams_configuration_failure_before_exiting():
             "exit_code": 2,
         }
         assert not any(event["type"] == "run_failed" for event in received_events)
+        assert chat_responses[0]["ok"] is True
+        assert "unknown option --bad" in chat_responses[0]["chat"]["answer"]
     finally:
         subscriber.join(timeout=5)
         shutil.rmtree(session_dir, ignore_errors=True)

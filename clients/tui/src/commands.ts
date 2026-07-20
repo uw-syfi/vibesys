@@ -1,7 +1,8 @@
 import type {RequestInput} from './protocol.js';
 
 export type ParsedInput = {
-  localView?: 'help';
+  localView?: 'chat' | 'help';
+  chatMessage?: string;
   request?: RequestInput;
   responseView?: 'history' | 'perf';
   error?: string;
@@ -14,6 +15,7 @@ export interface SlashCommand {
 
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
   {name: '/help', description: 'Show this help'},
+  {name: '/chat', description: 'Open experiment chat'},
   {name: '/history', description: 'List rounds and their elapsed time'},
   {name: '/perf', description: 'Plot performance by round'},
 ];
@@ -43,6 +45,11 @@ export function slashCommandRange(text: string): {start: number; end: number} | 
 
 export function parseInput(text: string): ParsedInput {
   if (text === '/help') return {localView: 'help'};
+  const chat = text.match(/^\/chat(?:\s+(.*))?$/);
+  if (chat) {
+    const message = chat[1]?.trim();
+    return {localView: 'chat', ...(message ? {chatMessage: message} : {})};
+  }
   if (text === '/history') return {request: {type: 'query.history'}, responseView: 'history'};
   if (text === '/perf') return {request: {type: 'query.performance'}, responseView: 'perf'};
   return {error: `Unknown command: ${text || '(empty)'}. Use /help.`};

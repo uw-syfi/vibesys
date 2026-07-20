@@ -77,6 +77,9 @@ class AgentLogger(BaseCallbackHandler):
         agent_label: str | None = None,
         progress: AgentProgress | None = None,
         context_window_lookup: ContextWindowLookup | None = None,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
     ):
         self._streaming = False
         self._log_file = log_file
@@ -92,6 +95,9 @@ class AgentLogger(BaseCallbackHandler):
         self._latest_usage: dict[str, Any] | None = None
         self._context_window_lookup = context_window_lookup or _default_context_window_lookup
         self._context_window = self._context_window_lookup(model_name)
+        self._agent_kind = agent_kind
+        self._round_label = round_label
+        self._invocation_id = invocation_id
 
     def _status(self) -> AgentStatusData:
         """Snapshot the ``[progress | label | elapsed | tokens/max]`` readings.
@@ -269,10 +275,22 @@ class AgentLogger(BaseCallbackHandler):
     )
 
     def _emit_tool_call(self, name: str, args: dict[str, Any]):
-        output_sink().tool_call(name, args, status=self._status())
+        output_sink().tool_call(
+            name,
+            args,
+            status=self._status(),
+            agent_kind=self._agent_kind,
+            round_label=self._round_label,
+            invocation_id=self._invocation_id,
+        )
         todos = todos_from_tool_call(name, args)
         if todos is not None:
-            output_sink().todo_update(todos)
+            output_sink().todo_update(
+                todos,
+                agent_kind=self._agent_kind,
+                round_label=self._round_label,
+                invocation_id=self._invocation_id,
+            )
         is_code_tool = name in self._CODE_CHANGE_TOOLS
 
         # Log file: skip code content args for file-writing tools
@@ -298,7 +316,14 @@ class AgentLogger(BaseCallbackHandler):
 
     def _emit_tool_result(self, name: str, content: str, *, is_error: bool = False):
         full_text = str(content)
-        output_sink().tool_result(name, full_text, is_error=is_error)
+        output_sink().tool_result(
+            name,
+            full_text,
+            is_error=is_error,
+            agent_kind=self._agent_kind,
+            round_label=self._round_label,
+            invocation_id=self._invocation_id,
+        )
 
         # Truncated to log file
         if self._log_file:
@@ -423,7 +448,12 @@ class AgentLogger(BaseCallbackHandler):
         status: AgentStatusData | None = None,
     ) -> None:
         output_sink().agent_output(
-            content, channel=channel, status=status if status is not None else self._status()
+            content,
+            channel=channel,
+            status=status if status is not None else self._status(),
+            agent_kind=self._agent_kind,
+            round_label=self._round_label,
+            invocation_id=self._invocation_id,
         )
 
     def _publish_usage(self) -> None:
@@ -431,4 +461,7 @@ class AgentLogger(BaseCallbackHandler):
             self._input_tokens,
             context_window=self._context_window,
             model=self._model_name,
+            agent_kind=self._agent_kind,
+            round_label=self._round_label,
+            invocation_id=self._invocation_id,
         )

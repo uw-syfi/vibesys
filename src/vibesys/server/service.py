@@ -45,10 +45,12 @@ class SupervisionService:
                 ack=CommandAck(action="resume", status="consumed"),
             )
         if isinstance(request, ChatQuery):
+            sequence = self.supervisor.snapshot().sequence
             answer = self.supervisor.chat(request.text)
             return Response(
                 request_id=request.request_id,
                 chat=ChatResult(question=request.text, answer=answer),
+                events=self.supervisor.read_events(sequence),
             )
         if isinstance(request, HistoryQuery):
             self.supervisor.record(EventType.STATUS_QUERY, "/history")
