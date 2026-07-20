@@ -202,22 +202,25 @@ The default candidate root is `resources/skills/`.
 
 Before a run starts, VibeSys discovers each `SKILL.md` under the candidate
 roots and validates its frontmatter. Optional `.vibesys.toml` sidecars can
-declare backend applicability for a skill subtree:
+declare domain and backend applicability for a skill subtree:
 
 ```toml
 [[rule]]
 path = "skills"
 backends = ["trainium"]
+domains = ["llm-serving"]
 ```
 
-Effective skill loading is:
+Effective skill loading is the intersection of the declared constraints:
 
-- backend-agnostic skills load for every `--backend`;
+- unscoped skills load for every domain and `--backend`;
 - skills matched by a sidecar rule with `backends` load only when the selected
   backend is in that list;
-- `--skills-dir` adds candidate roots, but backend metadata still filters the
+- skills matched by a sidecar rule with `domains` load only when the input
+  bundle's `[agent].domain` is in that list;
+- `--skills-dir` adds candidate roots, but routing metadata still filters the
   discovered skills;
-- `--no-skills` disables all skill loading, including backend-scoped skills.
+- `--no-skills` disables all skill loading, including scoped skills.
 
 See [Skill Metadata](skill-metadata.md) for the VibeSys-specific metadata
 contract and validation rules.

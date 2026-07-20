@@ -219,7 +219,7 @@ visibility = "internal"
         ["--repo", "generated-trial", "--config", str(config_path), "--no-skills"]
     )
 
-    load_config_and_skills(args)
+    load_config_and_skills(args, domain=DomainName.GENERIC)
 
     assert args.repo == "my-playground/generated-trial"
     assert args.repo_visibility is RepositoryVisibility.INTERNAL
@@ -406,7 +406,7 @@ def test_stub_agent_can_run_without_agent_toml(tmp_path):
     )
     _validate_target_inputs(args)
 
-    config, skills, _ = load_config_and_skills(args)
+    config, skills, _ = load_config_and_skills(args, domain=DomainName.GENERIC)
 
     assert config.model.name == "gpt-5.5"
     assert skills is None
@@ -426,7 +426,7 @@ def test_missing_config_reports_configuration_error(tmp_path):
     )
 
     with pytest.raises(ConfigurationError) as exc:
-        load_config_and_skills(args)
+        load_config_and_skills(args, domain=DomainName.GENERIC)
 
     assert exc.value.diagnostic.code == "config_load_failed"
     assert exc.value.diagnostic.stage == "config_loading"

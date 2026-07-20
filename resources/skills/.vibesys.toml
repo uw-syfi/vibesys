@@ -1,0 +1,3 @@
+[[rule]]
+path = "serving-systems"
+domains = ["llm-serving"]

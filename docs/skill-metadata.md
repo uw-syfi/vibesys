@@ -37,6 +37,7 @@ Each `.vibesys.toml` contains one or more path-scoped rules:
 [[rule]]
 path = "skills"
 backends = ["trainium"]
+domains = ["llm-serving"]
 ```
 
 Semantics:
@@ -47,11 +48,16 @@ Semantics:
 - `backends` is optional. If absent, the rule does not constrain backend.
 - Every backend value must match a `ComputeBackend` value: `cuda`, `metal`,
   `trainium`, or `cpu`.
-- A skill with no matching rule is backend-agnostic and may load for any
-  backend.
+- `domains` is optional. If absent, the rule does not constrain domain.
+- Every domain value must match a registered domain: `generic`, `llm-serving`,
+  or `microservices`.
+- A skill with no matching rule is globally eligible and may load for any
+  backend and domain.
+- When a rule declares both `backends` and `domains`, both constraints must
+  match for the skill to load.
 - If multiple rules match a skill, the rule with the longest resolved `path`
   wins.
-- If multiple same-specificity rules define conflicting `backends`, validation
+- If multiple same-specificity rules define conflicting constraints, validation
   fails rather than guessing.
 
 Example for the vendored AWS Neuron skills:
@@ -65,6 +71,15 @@ backends = ["trainium"]
 
 The sidecar is outside `skills/`, so `update.sh` can delete and recreate the
 vendored `skills/` subtree without deleting VibeSys routing metadata.
+
+Example for a domain-specific top-level skill:
+
+```toml
+# resources/skills/.vibesys.toml
+[[rule]]
+path = "serving-systems"
+domains = ["llm-serving"]
+```
 
 ## Validation
 
@@ -80,6 +95,8 @@ offending path when:
   nonexistent path.
 - `backends` is present but is not a list.
 - `backends` contains an unknown backend name.
+- `domains` is present but is not a list.
+- `domains` contains an unknown domain name.
 
 The repository test suite validates every `SKILL.md` and `.vibesys.toml`
 under `resources/skills/` so metadata drift is caught in CI.
