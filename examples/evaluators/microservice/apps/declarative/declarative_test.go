@@ -14,26 +14,26 @@ func TestValidateRejectsApplicationErrorEnvelope(t *testing.T) {
 		JSON:                true,
 		JSONStatusIfPresent: &status,
 	}}
-	validation := application.Validate(operation, api.ProtocolResult{
+	validation := application.ValidateOperation(operation, api.OperationPlan{}, []api.ProtocolResult{{
 		TransportSuccess: true,
 		Payload:          api.HTTPResponse{StatusCode: 200, Body: []byte(`{"status":0,"msg":"failed"}`)},
-	})
+	}})
 	if validation.Success || validation.ErrorCategory != "application_status" {
 		t.Fatalf("unexpected validation: %+v", validation)
 	}
 }
 
-func TestBuildInvocationExpandsDeterministicVariables(t *testing.T) {
+func TestBuildOperationExpandsDeterministicVariables(t *testing.T) {
 	application := &Application{}
 	operation := api.Operation{
 		Name: "compose", Target: "api",
 		HTTP: &api.HTTPRequestSpec{Path: "/${counter}", Form: map[string]string{"value": "${random}"}},
 	}
-	invocation, err := application.BuildInvocation(operation, api.Sample{Counter: 7, Random: 11}, nil)
+	plan, err := application.BuildOperation(operation, api.Sample{Counter: 7, Random: 11}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := invocation.Payload.(api.HTTPRequestSpec)
+	request := plan.Invocations[0].Payload.(api.HTTPRequestSpec)
 	if request.Path != "/7" || request.Form["value"] != "11" {
 		t.Fatalf("variables were not expanded: %+v", request)
 	}

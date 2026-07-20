@@ -18,7 +18,7 @@ The system separates four kinds of concern:
 | Layer | Owns | Does not own |
 | --- | --- | --- |
 | Workload | Targets, traffic mix, load, objective, and validity constraints | Scheduling or protocol code |
-| Core engine | Trial lifecycle, open-loop scheduling, timestamps, aggregation, and result validity | Application schemas or wire formats |
+| Core engine | Trial lifecycle, open- or closed-loop scheduling, timestamps, aggregation, and result validity | Application schemas or wire formats |
 | Application adapter | Fixture setup, dynamic request construction, and semantic response validation | Worker scheduling or headline statistics |
 | Protocol driver | Connections, serialization, transport calls, and native response metadata | Application operation meaning |
 
@@ -54,7 +54,7 @@ warmup followed by the measured phase.
 
 ```mermaid
 sequenceDiagram
-    participant CLI as microbench
+    participant CLI as servicebench
     participant App as Application adapter
     participant Engine as Trial engine
     participant Driver as Protocol driver
@@ -71,13 +71,15 @@ sequenceDiagram
             Driver->>Target: Invoke
         end
         loop Scheduled measured arrivals
-            Engine->>App: BuildInvocation(operation, sample)
-            App-->>Engine: Invocation
-            Engine->>Driver: Invoke(invocation)
-            Driver->>Target: Protocol request
-            Target-->>Driver: Native response
-            Driver-->>Engine: ProtocolResult
-            Engine->>App: Validate(operation, result)
+            Engine->>App: BuildOperation(operation, sample)
+            App-->>Engine: OperationPlan
+            loop Every invocation in the plan
+                Engine->>Driver: Invoke(invocation)
+                Driver->>Target: Protocol request
+                Target-->>Driver: Native response
+                Driver-->>Engine: ProtocolResult
+            end
+            Engine->>App: ValidateOperation(operation, plan, results)
             App-->>Engine: Semantic result + custom timings
         end
         Engine->>Engine: Summarize trial and enforce constraints
@@ -118,14 +120,24 @@ does not inflate the recorded protocol latency. The engine also reports actual
 offered rate, scheduler lag, and maximum queue depth so a benchmark can
 distinguish target behavior from load-generator saturation.
 
+### Closed-loop saturation model
+
+Closed-loop workloads keep the configured number of logical operations in
+flight for the measurement duration. Each worker schedules its next operation
+only after the previous operation completes. This measures achieved throughput
+without imposing a fixed offered-rate ceiling. Queue wait and scheduler lag are
+zero by construction; total latency still spans every invocation in the logical
+operation.
+
 ### Correctness and result validity
 
 Transport success is not sufficient. The application adapter validates native
 status and application-level semantics—for example, an HTTP 200 containing a
 Train Ticket error envelope is still a failed request.
 
-Latency distributions contain only semantically successful requests. Error
-counts contain every failed attempt. A trial is invalid when it:
+Latency distributions contain only semantically successful logical operations.
+Error counts contain every failed operation. Physical invocation counts and
+bytes remain visible separately. A trial is invalid when it:
 
 - has no successful samples matching the objective;
 - fails to sustain the workload's minimum offered-rate ratio;
@@ -136,10 +148,10 @@ An invalid run omits `primary_value`, preventing the optimization loop from
 treating a fast-but-incorrect or client-limited result as an improvement.
 
 The summary aggregates trial-level primary values rather than pooling every
-request across trials. It reports median, median absolute deviation (MAD), and
+operation across trials. It reports median, median absolute deviation (MAD), and
 interquartile range (IQR), plus a deterministic bootstrap confidence interval
 when at least two valid trials are available. The optional raw NDJSON output
-retains one observation per measured request for diagnosis.
+retains one observation per measured logical operation for diagnosis.
 
 ## Package map
 
@@ -150,7 +162,7 @@ retains one observation per measured request for diagnosis.
 | [`apps/declarative/`](apps/declarative/) | Declarative HTTP request and response adapter |
 | [`apps/socialnetwork/`](apps/socialnetwork/) | Typed DeathStarBench Social Network adapter |
 | [`cmd/`](cmd/) | Executable composition roots |
-| [`cmd/microbench/`](cmd/microbench/) | Benchmark CLI |
+| [`cmd/servicebench/`](cmd/servicebench/) | Benchmark CLI |
 | [`config/`](config/) | Strict TOML decoding, defaults, profiles, and canonical serialization |
 | [`drivers/`](drivers/) | Protocol-driver extension layer |
 | [`drivers/httpdriver/`](drivers/httpdriver/) | HTTP transport and connection policy |
@@ -170,7 +182,8 @@ A workload declares:
 - one application adapter;
 - one or more named protocol targets;
 - weighted operations and optional objective tags;
-- open-loop rate, duration, warmup, concurrency, timeout, seed, and repetitions;
+- open- or closed-loop model, rate, duration, warmup, concurrency, timeout,
+  seed, and repetitions;
 - the primary metric and direction; and
 - correctness and offered-load constraints.
 
@@ -188,7 +201,7 @@ See the checked-in workloads for complete examples:
 From the repository root:
 
 ```bash
-go -C examples/evaluators/microservice run ./cmd/microbench \
+go -C examples/evaluators/microservice run ./cmd/servicebench \
   --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
   --base-url http://localhost:8080 \
   --output-json /tmp/result.json \
@@ -198,12 +211,12 @@ go -C examples/evaluators/microservice run ./cmd/microbench \
 Validate a workload and its registered extensions without running traffic:
 
 ```bash
-go -C examples/evaluators/microservice run ./cmd/microbench \
+go -C examples/evaluators/microservice run ./cmd/servicebench \
   --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
   --validate-only
 ```
 
-Use `go run ./cmd/microbench --help` from this directory for target, load,
+Use `go run ./cmd/servicebench --help` from this directory for target, load,
 profile, fixture, and output overrides.
 
 ## Testing

@@ -1,7 +1,7 @@
 # Train Ticket Evaluator Inputs
 
 Accuracy and workload inputs for a running Train Ticket deployment. The checker
-is application-specific; the benchmark uses the shared Go microservice evaluator.
+is application-specific; the benchmark uses the shared Go service evaluator.
 Both can run without a full `vibesys --input` optimization run.
 
 Expected target for a gateway/proxy deployment:
@@ -14,11 +14,10 @@ The scripts call `/api/v1/...` endpoints through whichever base URL you pass.
 
 ```bash
 python examples/microservices/train-ticket/accuracy_checker/checker.py --base-url http://localhost:8080
-go -C examples/evaluators/microservice run ./cmd/microbench \
+go -C examples/evaluators/microservice run ./cmd/servicebench \
   --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
   --base-url http://localhost:8080 \
-  --rate 20 \
-  --duration 30 \
+	--duration 30 \
   --output-json /tmp/train_ticket_bench.json
 ```
 
@@ -61,9 +60,9 @@ the config/station/train/travel/route/price services with their local MongoDB
 and MySQL dependencies. The 0.2.0 prebuilt images store data in MongoDB (the
 MySQL containers and `*_MYSQL_*` env are used by source-built v1.0.0 images
 instead; both datastores are started so either image set works). All services
-self-seed reference data on startup, so `check` runs the checker in strict
-mode (no `--allow-empty`). Auth-protected services such as contacts are
-excluded from the default no-auth checker and benchmark. The published
+self-seed reference data on startup, so `check` verifies the exact v0.2.0
+catalog directly through the six service ports. Services outside that contract
+are excluded from the checker and benchmark. The published
 dashboard image is intentionally not started because its nginx config
 references additional services outside this minimal read-only cluster.
 
@@ -127,9 +126,14 @@ Manual direct-service runs:
 ```bash
 python examples/microservices/train-ticket/accuracy_checker/checker.py \
   --base-url http://localhost:18888 \
-  --direct-services
+  --target config=http://localhost:15679 \
+  --target station=http://localhost:12345 \
+  --target train=http://localhost:14567 \
+  --target travel=http://localhost:12346 \
+  --target route=http://localhost:11178 \
+  --target price=http://localhost:16579
 
-go -C examples/evaluators/microservice run ./cmd/microbench \
+go -C examples/evaluators/microservice run ./cmd/servicebench \
   --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
   --target config=http://localhost:15679 \
   --target station=http://localhost:12345 \
@@ -137,8 +141,7 @@ go -C examples/evaluators/microservice run ./cmd/microbench \
   --target travel=http://localhost:12346 \
   --target route=http://localhost:11178 \
   --target price=http://localhost:16579 \
-  --rate 10 \
-  --duration 30 \
+	--duration 30 \
   --concurrency 32
 ```
 
@@ -148,14 +151,12 @@ Manual gateway runs after source-built deployment:
 python examples/microservices/train-ticket/accuracy_checker/checker.py \
   --base-url http://localhost:18888
 
-go -C examples/evaluators/microservice run ./cmd/microbench \
+go -C examples/evaluators/microservice run ./cmd/servicebench \
   --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
   --base-url http://localhost:18888 \
-  --rate 10 \
-  --duration 30 \
+	--duration 30 \
   --concurrency 32
 ```
 
-The images self-seed reference data, so the checker runs in strict mode by
-default; pass `--allow-empty` only for deployments known to have no seeded
-data.
+The checker requires the exact v0.2.0 seed catalog and does not silently accept
+empty or structurally different startup data.

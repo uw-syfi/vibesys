@@ -157,6 +157,15 @@ type Invocation struct {
 	Payload   any
 }
 
+// OperationPlan describes every protocol invocation in one scheduled logical
+// operation. State is opaque application-owned data used to validate the
+// collected results. The engine, rather than the application, always executes
+// and accounts for every invocation.
+type OperationPlan struct {
+	Invocations []Invocation
+	State       any
+}
+
 type ProtocolResult struct {
 	TransportSuccess bool
 	NativeStatus     string
@@ -198,8 +207,9 @@ type Application interface {
 	Name() string
 	Prepare(context.Context, Runtime, TrialContext) (any, error)
 	Reset(context.Context, Runtime, TrialContext) error
-	BuildInvocation(Operation, Sample, any) (Invocation, error)
-	Validate(Operation, ProtocolResult) ValidationResult
+	BuildOperation(Operation, Sample, any) (OperationPlan, error)
+	ValidateOperation(Operation, OperationPlan, []ProtocolResult) ValidationResult
+	FinishOperation(OperationPlan)
 }
 
 type Observation struct {
@@ -226,6 +236,8 @@ type Observation struct {
 	NativeStatus       string                   `json:"native_status"`
 	ErrorCategory      string                   `json:"error_category,omitempty"`
 	ErrorMessage       string                   `json:"error_message,omitempty"`
+	InvocationCount    int                      `json:"invocation_count"`
+	NativeStatuses     []string                 `json:"native_statuses,omitempty"`
 	RequestBytes       int64                    `json:"request_bytes"`
 	ResponseBytes      int64                    `json:"response_bytes"`
 	CustomTimings      map[string]time.Duration `json:"-"`

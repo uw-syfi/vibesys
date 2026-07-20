@@ -158,7 +158,7 @@ func (a *Application) Prepare(ctx context.Context, runtime api.Runtime, _ api.Tr
 	return nil, nil
 }
 
-func (a *Application) BuildInvocation(operation api.Operation, sample api.Sample, _ any) (api.Invocation, error) {
+func (a *Application) BuildOperation(operation api.Operation, sample api.Sample, _ any) (api.OperationPlan, error) {
 	user := int(sample.Random % uint64(a.config.Users))
 	var request api.HTTPRequestSpec
 	switch operation.Name {
@@ -181,12 +181,18 @@ func (a *Application) BuildInvocation(operation api.Operation, sample api.Sample
 	case composePost:
 		request = a.composeRequest(user, "live_"+strconv.FormatInt(sample.Counter, 10))
 	default:
-		return api.Invocation{}, fmt.Errorf("unknown Social Network operation %q", operation.Name)
+		return api.OperationPlan{}, fmt.Errorf("unknown Social Network operation %q", operation.Name)
 	}
-	return api.Invocation{Target: operation.Target, Operation: operation.Name, Payload: request}, nil
+	return api.OperationPlan{Invocations: []api.Invocation{{
+		Target: operation.Target, Operation: operation.Name, Payload: request,
+	}}}, nil
 }
 
-func (a *Application) Validate(operation api.Operation, result api.ProtocolResult) api.ValidationResult {
+func (a *Application) ValidateOperation(operation api.Operation, _ api.OperationPlan, results []api.ProtocolResult) api.ValidationResult {
+	if len(results) != 1 {
+		return invalid("invalid_response", fmt.Sprintf("expected one protocol result, got %d", len(results)))
+	}
+	result := results[0]
 	if !result.TransportSuccess {
 		return api.ValidationResult{ErrorCategory: result.ErrorCategory, ErrorMessage: result.ErrorMessage}
 	}
@@ -217,6 +223,8 @@ func (a *Application) Validate(operation api.Operation, result api.ProtocolResul
 	}
 	return api.ValidationResult{Success: true, CustomTimings: custom}
 }
+
+func (a *Application) FinishOperation(api.OperationPlan) {}
 
 func (a *Application) follow(ctx context.Context, runtime api.Runtime, user int, followee int) error {
 	err := invokeOK(ctx, runtime, api.HTTPRequestSpec{

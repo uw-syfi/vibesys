@@ -41,9 +41,9 @@ func TestPrepareBuildsDeterministicFixture(t *testing.T) {
 	}
 }
 
-func TestBuildInvocationUsesOperationCatalog(t *testing.T) {
+func TestBuildOperationUsesOperationCatalog(t *testing.T) {
 	application := &Application{config: Config{Users: 2, UserIDBase: 100, UsernamePrefix: "test_"}}
-	invocation, err := application.BuildInvocation(
+	plan, err := application.BuildOperation(
 		api.Operation{Name: userTimelineRead, Target: "gateway"},
 		api.Sample{Random: 1},
 		nil,
@@ -51,7 +51,7 @@ func TestBuildInvocationUsesOperationCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := invocation.Payload.(api.HTTPRequestSpec)
+	request := plan.Invocations[0].Payload.(api.HTTPRequestSpec)
 	if got := request.Query["user_id"]; got != "101" {
 		t.Fatalf("user_id = %q, want 101", got)
 	}

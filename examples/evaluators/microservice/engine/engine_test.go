@@ -31,7 +31,7 @@ func (c fakeClient) Invoke(ctx context.Context, _ api.Invocation) api.ProtocolRe
 	case <-ctx.Done():
 		return api.ProtocolResult{ErrorCategory: "timeout", ErrorMessage: ctx.Err().Error()}
 	case <-timer.C:
-		return api.ProtocolResult{TransportSuccess: true, NativeStatus: "OK"}
+		return api.ProtocolResult{TransportSuccess: true, NativeStatus: "OK", RequestBytes: 2, ResponseBytes: 3}
 	}
 }
 
@@ -44,15 +44,22 @@ func (fakeApplication) Prepare(context.Context, api.Runtime, api.TrialContext) (
 	return nil, nil
 }
 func (fakeApplication) Reset(context.Context, api.Runtime, api.TrialContext) error { return nil }
-func (fakeApplication) BuildInvocation(operation api.Operation, _ api.Sample, _ any) (api.Invocation, error) {
-	return api.Invocation{Target: operation.Target, Operation: operation.Name, Payload: "opaque-schema"}, nil
+func (fakeApplication) BuildOperation(operation api.Operation, _ api.Sample, _ any) (api.OperationPlan, error) {
+	return api.OperationPlan{Invocations: []api.Invocation{{
+		Target: operation.Target, Operation: operation.Name, Payload: "opaque-schema",
+	}}}, nil
 }
-func (fakeApplication) Validate(_ api.Operation, result api.ProtocolResult) api.ValidationResult {
+func (fakeApplication) ValidateOperation(_ api.Operation, _ api.OperationPlan, results []api.ProtocolResult) api.ValidationResult {
+	if len(results) != 1 {
+		return api.ValidationResult{ErrorCategory: "result_count", ErrorMessage: "unexpected result count"}
+	}
+	result := results[0]
 	if !result.TransportSuccess {
 		return api.ValidationResult{ErrorCategory: result.ErrorCategory, ErrorMessage: result.ErrorMessage}
 	}
 	return api.ValidationResult{Success: true}
 }
+func (fakeApplication) FinishOperation(api.OperationPlan) {}
 
 func workload(rate float64, duration float64, concurrency int, repetitions int) api.Workload {
 	zero := 0.0
@@ -128,6 +135,25 @@ func TestEngineExposesQueueDelayAndInvalidatesClientSaturation(t *testing.T) {
 	}
 }
 
+func TestEngineClosedLoopMeasuresSaturationThroughput(t *testing.T) {
+	configured := workload(0, 0.05, 2, 1)
+	configured.Load.Model = "closed_loop"
+	configured.Objective = api.Objective{
+		Name: "operations_per_second", Metric: "operations_per_second", Direction: "maximize", Unit: "operations/s",
+	}
+	run, err := newTestEngine(t, time.Millisecond).Run(context.Background(), configured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trial := run.Summary.Trials[0]
+	if !run.Summary.Valid || run.Summary.PrimaryValue == nil || *run.Summary.PrimaryValue <= 0 {
+		t.Fatalf("closed-loop throughput was not measured: %+v", run.Summary)
+	}
+	if trial.Generator.TargetRate != 0 || !trial.Generator.Sustained || trial.Generator.SubmittedOperations == 0 {
+		t.Fatalf("unexpected closed-loop generator report: %+v", trial.Generator)
+	}
+}
+
 func TestRegistryRejectsUnregisteredProtocol(t *testing.T) {
 	registered := registry.New()
 	if err := registered.RegisterApplication("fake-app", func(api.Workload) (api.Application, error) {
@@ -141,5 +167,53 @@ func TestRegistryRejectsUnregisteredProtocol(t *testing.T) {
 	}
 	if got := fmt.Sprint(err); got == "" {
 		t.Fatal("empty error")
+	}
+}
+
+type multiStepApplication struct {
+	finished int
+}
+
+func (*multiStepApplication) Name() string { return "multi" }
+func (*multiStepApplication) Prepare(context.Context, api.Runtime, api.TrialContext) (any, error) {
+	return nil, nil
+}
+func (*multiStepApplication) Reset(context.Context, api.Runtime, api.TrialContext) error {
+	return nil
+}
+func (*multiStepApplication) BuildOperation(operation api.Operation, _ api.Sample, _ any) (api.OperationPlan, error) {
+	return api.OperationPlan{Invocations: []api.Invocation{
+		{Target: operation.Target, Operation: operation.Name},
+		{Target: operation.Target, Operation: operation.Name},
+	}}, nil
+}
+func (*multiStepApplication) ValidateOperation(_ api.Operation, _ api.OperationPlan, results []api.ProtocolResult) api.ValidationResult {
+	return api.ValidationResult{Success: len(results) == 2}
+}
+func (a *multiStepApplication) FinishOperation(api.OperationPlan) { a.finished++ }
+
+func TestExecuteRequestAccountsForEveryInvocationInLogicalOperation(t *testing.T) {
+	application := &multiStepApplication{}
+	runtime := &runtime{
+		clients:   map[string]api.Client{"service": fakeClient{delay: time.Millisecond}},
+		protocols: map[string]string{"service": "fake-rpc"},
+	}
+	observation := executeRequest(
+		context.Background(), api.PhaseMeasurement, 0,
+		api.Load{TimeoutSeconds: 1},
+		scheduledSample{
+			operation: api.Operation{Name: "transaction", Target: "service"},
+			scheduled: time.Now(),
+		},
+		application, runtime, nil,
+	)
+	if !observation.ApplicationSuccess {
+		t.Fatalf("logical operation failed: %+v", observation)
+	}
+	if observation.InvocationCount != 2 || observation.RequestBytes != 4 || observation.ResponseBytes != 6 {
+		t.Fatalf("invocations were not aggregated: %+v", observation)
+	}
+	if len(observation.NativeStatuses) != 2 || application.finished != 1 {
+		t.Fatalf("statuses or cleanup were not preserved: observation=%+v finished=%d", observation, application.finished)
 	}
 }

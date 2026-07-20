@@ -347,7 +347,7 @@ case "${cmd}" in
       echo "gateway returns 503 for all routes; use '$0 check' / '$0 bench' (direct services)."
     fi
     echo "Checker: $0 check"
-    echo "Benchmark: TT_BENCH_RATE=10 TT_BENCH_DURATION=30 TT_BENCH_CONCURRENCY=32 $0 bench"
+    echo "Benchmark: TT_BENCH_DURATION=30 TT_BENCH_CONCURRENCY=32 $0 bench"
     ;;
   stop)
     require_tools
@@ -374,15 +374,18 @@ case "${cmd}" in
     echo "  TT_NAMESPACE=${TT_BUILD_REPO} TT_TAG=${TT_BUILD_TAG} TT_GATEWAY_TAG=${TT_BUILD_TAG} TT_SKIP_PULL=1 $0 start"
     ;;
   check)
-    # No --allow-empty: the prebuilt and source-built images both self-seed
-    # reference data on startup, so empty lists indicate a real failure.
     python3 "${INPUT_DIR}/accuracy_checker/checker.py" \
       --base-url "http://localhost:${TT_GATEWAY_PORT}" \
-      --direct-services
+      --target "config=http://localhost:15679" \
+      --target "station=http://localhost:12345" \
+      --target "train=http://localhost:14567" \
+      --target "travel=http://localhost:12346" \
+      --target "route=http://localhost:11178" \
+      --target "price=http://localhost:16579"
     ;;
   bench)
     command -v go >/dev/null || { echo "go is required" >&2; exit 127; }
-    go -C "${REPO_ROOT}/examples/evaluators/microservice" run ./cmd/microbench \
+    go -C "${REPO_ROOT}/examples/evaluators/microservice" run ./cmd/servicebench \
       --workload "${INPUT_DIR}/benchmark/workload.toml" \
       --target "config=http://localhost:15679" \
       --target "station=http://localhost:12345" \
@@ -390,8 +393,7 @@ case "${cmd}" in
       --target "travel=http://localhost:12346" \
       --target "route=http://localhost:11178" \
       --target "price=http://localhost:16579" \
-      --rate "${TT_BENCH_RATE:-10}" \
-      --duration "${TT_BENCH_DURATION:-30}" \
+	  --duration "${TT_BENCH_DURATION:-30}" \
       --concurrency "${TT_BENCH_CONCURRENCY:-32}"
     ;;
   config)

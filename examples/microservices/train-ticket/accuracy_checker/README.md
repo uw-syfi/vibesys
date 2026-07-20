@@ -1,38 +1,49 @@
 # Train Ticket Accuracy Checker
 
-Checks a running Train Ticket deployment using read-only endpoints:
+This black-box checker validates the six mutable Train Ticket v0.2.0 services
+through their public HTTP APIs. It makes no assumptions about process topology,
+implementation language, database, or persistence format.
 
-- welcome endpoints of the config, station, train, travel, route, and price
-  services (exact service banner text)
-- station, train, trip, route, price, and config list endpoints
+Every run uses a fresh cryptographically random namespace, randomized values,
+and shuffled operation order. It verifies:
 
-For every list endpoint the checker validates the full response contract, not
-just HTTP reachability:
+- the exact v0.2.0 startup catalog and response schemas;
+- welcome, list, point-read, and secondary-index routes;
+- connected station, train, route, price, and trip graphs;
+- create, immediate read-your-write, update, and delete behavior; and
+- persistent HTTP connections.
 
-- the `edu.fudan.common.util.Response` envelope reports `status == 1`
-  (an HTTP-200 body with `status: 0` is a service-level failure and fails the
-  check, except for the tolerated empty case under `--allow-empty`)
-- every returned item has the expected fields (restricted to field names that
-  exist in both the 0.2.0 prebuilt images and the v1.0.0 source)
-- referential integrity across services: trips and prices must reference
-  existing routes and trains; on 0.2.0 image deployments trips must also
-  reference existing stations and train types (v1.0.0 renamed those trip
-  fields, so those two checks skip there)
-
-Usage:
+Against an already running candidate:
 
 ```bash
-python checker.py --base-url http://localhost:18888 --direct-services
+python checker.py --base-url http://localhost:8080
 ```
 
-- `--base-url` points at the gateway or UI proxy. With `--direct-services`
-  only its hostname is used and each check goes straight to the service's
-  published port (required for the local prebuilt-image cluster, whose gateway
-  cannot route).
-- `--allow-empty` tolerates unseeded deployments: list endpoints may return
-  the `status: 0, msg: "No content"` empty envelope. All other validation
-  still applies. The images used by the local cluster self-seed on startup,
-  so the flag is not needed there.
+Crash recovery is checked only when the checker owns the candidate lifecycle or
+is given an external restart hook. The structured result reports
+`crash_recovery: false` when no restart mechanism is provided; it never claims
+that unexecuted property.
 
-Exit code is 0 only if every check (including the cross-endpoint consistency
-checks) passes.
+To let the checker start and `SIGKILL` a local candidate, provide its command as
+a JSON argument. The checker reuses the same `TRAIN_TICKET_DATA_DIR` after
+restart:
+
+```bash
+python checker.py \
+  --base-url http://127.0.0.1:18080 \
+  --candidate-dir /path/to/candidate \
+  --run-command-json '["./run.sh"]'
+```
+
+For an externally managed deployment, use `--restart-command-json`. Separate
+service addresses can be supplied by repeating `--target NAME=URL` for
+`config`, `station`, `train`, `travel`, `route`, and `price`.
+
+The exit status is zero only when every property actually exercised passes.
+
+## Testing
+
+```bash
+uv run ruff check examples/microservices/train-ticket/accuracy_checker
+uv run pytest -q examples/microservices/train-ticket/accuracy_checker/tests
+```

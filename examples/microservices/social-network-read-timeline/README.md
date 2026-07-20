@@ -164,7 +164,7 @@ the original medium profile: 300 target RPS, 20 seconds of warmup, 120 seconds
 of measurement, 50 users, and 10 seed posts per user.
 
 ```bash
-go -C examples/evaluators/microservice run ./cmd/microbench \
+go -C examples/evaluators/microservice run ./cmd/servicebench \
   --workload "$PWD/examples/microservices/social-network-read-timeline/benchmark/workload.toml" \
   --base-url http://localhost:8080 \
   --output-json /tmp/social-network.json \
@@ -185,7 +185,7 @@ Select one with `--profile light`, `--profile medium`, or `--profile heavy`.
 On repeated runs against an already-prepared deployment, skip fixture setup:
 
 ```bash
-go -C examples/evaluators/microservice run ./cmd/microbench \
+go -C examples/evaluators/microservice run ./cmd/servicebench \
   --workload "$PWD/examples/microservices/social-network-read-timeline/benchmark/workload.toml" \
   --skip-prepare
 ```

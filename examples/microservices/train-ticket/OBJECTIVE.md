@@ -1,16 +1,16 @@
-Optimize a Train Ticket microservice deployment for read-only API throughput
-while preserving response correctness.
+Optimize a Train Ticket v0.2.0-compatible deployment for stateful API
+throughput while preserving externally observable behavior.
 
-Headline metric: `requests_per_second` from the shared evaluator result
-(`primary_value`, maximize).
+Headline metric: successful `operations_per_second` from the shared evaluator
+result (`primary_value`, maximize). An operation may contain multiple dependent
+HTTP requests; update/read and create/read/delete sequences are counted once.
 
-The target is a running Train Ticket gateway or direct-service deployment. The
-candidate must preserve the existing HTTP API behavior checked by
-`accuracy_checker/checker.py`, including service welcome endpoints, list
-response envelopes, expected item fields, and cross-service referential
-integrity.
+The candidate may use any implementation language, process topology, database,
+persistence format, or caching strategy. It must preserve the public HTTP
+contract checked by `accuracy_checker/checker.py`, including the startup
+catalog, exact entity schemas, referential integrity, acknowledged mutations,
+read-your-write, deletes, and—when a restart hook is provided—crash recovery.
 
-The benchmark exercises a fixed-rate read-only workload across station, train,
-trip, route, price, config, and welcome endpoints. Improve successful completed
-requests per second without increasing the error rate beyond the benchmark's
-configured threshold.
+Traffic values, namespaces, and operation order are randomized at evaluation
+time. A run is invalid if any measured logical operation fails semantic
+validation or if the load generator cannot sustain the configured offered rate.

@@ -1,4 +1,4 @@
-# `microbench` command
+# `servicebench` command
 
 This package is the CLI entry point for running a microservice workload. It is
 the composition root that registers the built-in HTTP driver and application

@@ -85,11 +85,14 @@ func Validate(workload api.Workload) error {
 	if strings.TrimSpace(workload.Application) == "" {
 		return fmt.Errorf("application must not be empty")
 	}
-	if workload.Load.Model != "open_loop" {
-		return fmt.Errorf("load.model must be open_loop, got %q", workload.Load.Model)
+	if workload.Load.Model != "open_loop" && workload.Load.Model != "closed_loop" {
+		return fmt.Errorf("load.model must be open_loop or closed_loop, got %q", workload.Load.Model)
 	}
-	if workload.Load.Rate <= 0 {
-		return fmt.Errorf("load.rate must be greater than zero")
+	if workload.Load.Model == "open_loop" && workload.Load.Rate <= 0 {
+		return fmt.Errorf("load.rate must be greater than zero for open_loop workloads")
+	}
+	if workload.Load.Model == "closed_loop" && workload.Load.Rate != 0 {
+		return fmt.Errorf("load.rate must be zero for closed_loop workloads")
 	}
 	if workload.Load.DurationSeconds <= 0 {
 		return fmt.Errorf("load.duration_seconds must be greater than zero")
@@ -161,8 +164,8 @@ func Validate(workload api.Workload) error {
 	if workload.Objective.Name == "" {
 		return fmt.Errorf("objective.name must not be empty")
 	}
-	if workload.Objective.Metric != "latency_ms.p50" && workload.Objective.Metric != "requests_per_second" {
-		return fmt.Errorf("objective.metric must be latency_ms.p50 or requests_per_second")
+	if workload.Objective.Metric != "latency_ms.p50" && workload.Objective.Metric != "operations_per_second" && workload.Objective.Metric != "requests_per_second" {
+		return fmt.Errorf("objective.metric must be latency_ms.p50, operations_per_second, or the legacy requests_per_second alias")
 	}
 	if workload.Objective.Direction != "minimize" && workload.Objective.Direction != "maximize" {
 		return fmt.Errorf("objective.direction must be minimize or maximize")

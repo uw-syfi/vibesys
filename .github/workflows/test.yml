@@ -168,8 +168,8 @@ jobs:
       - name: Validate microservice workloads
         working-directory: examples/evaluators/microservice
         run: |
-          go run ./cmd/microbench --workload ../../microservices/train-ticket/benchmark/workload.toml --validate-only
-          go run ./cmd/microbench --workload ../../microservices/social-network-read-timeline/benchmark/workload.toml --validate-only
+          go run ./cmd/servicebench --workload ../../microservices/train-ticket/benchmark/workload.toml --validate-only
+          go run ./cmd/servicebench --workload ../../microservices/social-network-read-timeline/benchmark/workload.toml --validate-only
 
   test:
     runs-on: ubuntu-latest

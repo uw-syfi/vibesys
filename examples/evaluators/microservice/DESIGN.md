@@ -61,6 +61,12 @@ The scheduler reports actual offered rate, scheduler lag, and maximum client
 queue depth. A trial is invalid when the client cannot offer the configured
 minimum fraction of target rate.
 
+Closed-loop workloads use the same engine, drivers, observations, and semantic
+validation, but each worker schedules its next logical operation after the
+previous one completes. They are appropriate for saturation-throughput
+objectives where a fixed open-loop rate would cap every successful candidate at
+the same score.
+
 ## Extension points
 
 `api.Driver` opens a target-specific `api.Client`. The client accepts an
@@ -70,7 +76,9 @@ transport fields. This draft implements HTTP. gRPC and Thrift should implement
 the same contract and pass the same engine/driver tests rather than adding
 protocol branches to the scheduler.
 
-`api.Application` prepares fixtures, builds invocations, and validates results.
+`api.Application` prepares fixtures, builds logical-operation plans, and
+validates their collected results. A plan may contain one or more invocations;
+the engine always issues and accounts for each invocation itself.
 The declarative adapter covers ordinary HTTP operations. The Social Network
 adapter demonstrates the typed escape hatch for dynamic users and setup.
 

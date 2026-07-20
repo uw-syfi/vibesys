@@ -45,9 +45,9 @@ func (a *Application) Reset(context.Context, api.Runtime, api.TrialContext) erro
 	return nil
 }
 
-func (a *Application) BuildInvocation(operation api.Operation, sample api.Sample, _ any) (api.Invocation, error) {
+func (a *Application) BuildOperation(operation api.Operation, sample api.Sample, _ any) (api.OperationPlan, error) {
 	if operation.HTTP == nil {
-		return api.Invocation{}, fmt.Errorf("operation %q has no HTTP request", operation.Name)
+		return api.OperationPlan{}, fmt.Errorf("operation %q has no HTTP request", operation.Name)
 	}
 	request := *operation.HTTP
 	request.Path = expand(request.Path, sample)
@@ -55,10 +55,16 @@ func (a *Application) BuildInvocation(operation api.Operation, sample api.Sample
 	request.Query = expandMap(request.Query, sample)
 	request.Headers = expandMap(request.Headers, sample)
 	request.Form = expandMap(request.Form, sample)
-	return api.Invocation{Target: operation.Target, Operation: operation.Name, Payload: request}, nil
+	return api.OperationPlan{Invocations: []api.Invocation{{
+		Target: operation.Target, Operation: operation.Name, Payload: request,
+	}}}, nil
 }
 
-func (a *Application) Validate(operation api.Operation, result api.ProtocolResult) api.ValidationResult {
+func (a *Application) ValidateOperation(operation api.Operation, _ api.OperationPlan, results []api.ProtocolResult) api.ValidationResult {
+	if len(results) != 1 {
+		return invalid("invalid_response", fmt.Sprintf("expected one protocol result, got %d", len(results)))
+	}
+	result := results[0]
 	if !result.TransportSuccess {
 		return api.ValidationResult{ErrorCategory: result.ErrorCategory, ErrorMessage: result.ErrorMessage}
 	}
@@ -103,6 +109,8 @@ func (a *Application) Validate(operation api.Operation, result api.ProtocolResul
 	}
 	return api.ValidationResult{Success: true, CustomTimings: custom}
 }
+
+func (a *Application) FinishOperation(api.OperationPlan) {}
 
 func invalid(category string, message string) api.ValidationResult {
 	return api.ValidationResult{ErrorCategory: category, ErrorMessage: message}
