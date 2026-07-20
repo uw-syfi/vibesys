@@ -152,16 +152,22 @@ retains one observation per measured request for diagnosis.
 
 ## Package map
 
-```text
-api/                    Shared workload, extension, and observation contracts
-apps/declarative/       Declarative HTTP request and response adapter
-apps/socialnetwork/     Typed DeathStarBench Social Network adapter
-cmd/microbench/         CLI composition root
-config/                 Strict TOML decoding, defaults, profiles, and hashing
-drivers/httpdriver/     HTTP transport and connection policy
-engine/                 Scheduler, trial lifecycle, statistics, and results
-registry/               Driver and application registration
-```
+| Directory | Responsibility |
+| --- | --- |
+| [`api/`](api/) | Shared workload, extension, and observation contracts |
+| [`apps/`](apps/) | Application-adapter extension layer |
+| [`apps/declarative/`](apps/declarative/) | Declarative HTTP request and response adapter |
+| [`apps/socialnetwork/`](apps/socialnetwork/) | Typed DeathStarBench Social Network adapter |
+| [`cmd/`](cmd/) | Executable composition roots |
+| [`cmd/microbench/`](cmd/microbench/) | Benchmark CLI |
+| [`config/`](config/) | Strict TOML decoding, defaults, profiles, and canonical serialization |
+| [`drivers/`](drivers/) | Protocol-driver extension layer |
+| [`drivers/httpdriver/`](drivers/httpdriver/) | HTTP transport and connection policy |
+| [`engine/`](engine/) | Scheduler, trial lifecycle, statistics, and results |
+| [`registry/`](registry/) | Driver and application registration |
+
+Every directory has its own README with its ownership boundary and extension
+guidance.
 
 More detailed ownership rules and measurement semantics are recorded in
 [`DESIGN.md`](DESIGN.md).
