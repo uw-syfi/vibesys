@@ -30,6 +30,12 @@ name = "claude-sonnet-4-6"
                               # one of: claude, gemini, codex, opencode
 # cli_timeout = 1800          # per-iteration timeout in seconds (default: no timeout)
 
+[repository]
+# The interactive setup screen uses these as editable defaults. Change owner
+# to any GitHub user or organization where you are allowed to create repos.
+owner = "vibesys-playground"
+visibility = "private"       # private, public, or internal
+
 # [feature_flags]
 # VibeSys feature flags are declared in src/vibesys/features.py.
 

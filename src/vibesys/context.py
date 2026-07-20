@@ -41,7 +41,16 @@ from vibesys.profilers import (
     resolve_profiler_kind,
 )
 from vibesys.render import HeadlessRenderer, output_sink
-from vibesys.run import DeviceLease, GitTracker, RunCommands, RunLogger, RunPaths, Workspace
+from vibesys.run import (
+    DeviceLease,
+    ExperimentRepository,
+    GitTracker,
+    RepositoryVisibility,
+    RunCommands,
+    RunLogger,
+    RunPaths,
+    Workspace,
+)
 from vibesys.sandbox.run_environment import (
     RunEnvironment,
     RunEnvironmentRequest,
@@ -75,7 +84,7 @@ def setup_exp_dir(
     exp_dir.mkdir(parents=True, exist_ok=False)
     if not (exp_dir / ".git").is_dir():
         subprocess.run(
-            ["git", "init"],
+            ["git", "init", "-b", "main"],
             cwd=exp_dir,
             capture_output=True,
             check=True,
@@ -143,6 +152,8 @@ def create_run_context(
     cli_provider: str | None = None,
     backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
     environment_hooks: EnvironmentHooks | None = None,
+    remote_repo: str | None = None,
+    repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
 ) -> "_RunContext":
     """Build a fully wired :class:`_RunContext`.
 
@@ -174,6 +185,34 @@ def create_run_context(
     # construction order (device → environment hooks → session → logs).
     teardown_stack = ExitStack()
     teardown_stack.callback(logger.close)
+    experiment_repository = ExperimentRepository(exp_dir, logger.lprint)
+    if remote_repo is not None:
+        try:
+            experiment_repository.create_remote(remote_repo, repo_visibility)
+        except Exception as exc:
+            teardown_stack.close()
+            raise ConfigurationError(
+                ConfigurationDiagnostic(
+                    code="repository_setup_failed",
+                    stage="repository_setup",
+                    message=f"Could not create experiment repository {remote_repo!r}: {exc}",
+                )
+            ) from exc
+    if experiment_repository.has_origin():
+
+        def _sync_experiment_repository() -> None:
+            try:
+                experiment_repository.sync()
+            except Exception as exc:
+                raise ConfigurationError(
+                    ConfigurationDiagnostic(
+                        code="repository_sync_failed",
+                        stage="repository_sync",
+                        message=f"Could not push experiment repository: {exc}",
+                    )
+                ) from exc
+
+        teardown_stack.callback(_sync_experiment_repository)
 
     # Presentation is selected exactly once, here: with a TUI supervisor
     # attached, events flow to the supervision client; otherwise the

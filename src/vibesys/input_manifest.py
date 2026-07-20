@@ -162,8 +162,18 @@ class InputBundle(BaseModel):
         return self.manifest.benchmark.result
 
 
-def load_input_bundle(path: Path, *, project_root: Path | None = None) -> InputBundle:
-    """Load and validate a command-based input bundle."""
+def load_input_bundle(
+    path: Path,
+    *,
+    project_root: Path | None = None,
+    allow_materialized_sources: bool = False,
+) -> InputBundle:
+    """Load and validate a command-based input bundle.
+
+    ``allow_materialized_sources`` is used only when resuming an experiment
+    from its copied workspace. Starter and evaluator sources may have lived
+    outside the original bundle and are no longer needed once materialized.
+    """
 
     project_root = (project_root or PROJECT_ROOT).resolve()
     root = path.expanduser().resolve()
@@ -213,7 +223,7 @@ def load_input_bundle(path: Path, *, project_root: Path | None = None) -> InputB
         reference_path = None
 
     workspace_seed_path = None
-    if manifest.workspace is not None:
+    if manifest.workspace is not None and not allow_materialized_sources:
         starters_root = (project_root / "examples" / "starters").resolve()
         workspace_seed_path = (root / manifest.workspace.seed).resolve()
         try:
@@ -228,7 +238,7 @@ def load_input_bundle(path: Path, *, project_root: Path | None = None) -> InputB
             raise ValueError(f"workspace.seed path is not a directory: {workspace_seed_path}")
 
     evaluator_path = None
-    if manifest.evaluator is not None:
+    if manifest.evaluator is not None and not allow_materialized_sources:
         evaluators_root = (project_root / "examples" / "evaluators").resolve()
         evaluator_path = (root / manifest.evaluator.source).resolve()
         try:
