@@ -56,6 +56,8 @@ region = "us-east5"
         assert config.providers.vertex_ai is None
         assert config.providers.openai_compatible is None
         assert config.feature_flags == {}
+        assert config.repository.owner is None
+        assert config.repository.visibility == "private"
 
 
 class TestLoadConfigErrors:
@@ -283,6 +285,34 @@ cli_timeout = 1800
         assert config.agent.backend is None
         assert config.agent.cli_provider is None
         assert config.agent.cli_timeout is None
+
+
+class TestLoadConfigRepositorySection:
+    def test_repository_defaults_are_typed(self, tmp_path):
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text(
+            """\
+[model]
+name = "gpt-5.5"
+
+[repository]
+owner = "vibesys-playground"
+visibility = "internal"
+"""
+        )
+
+        config = load_config(cfg_file)
+
+        assert config.repository.owner == "vibesys-playground"
+        assert config.repository.visibility == "internal"
+
+    @pytest.mark.parametrize("owner", ["owner/name", "spaces are bad", ""])
+    def test_invalid_repository_owner_is_rejected(self, tmp_path, owner):
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text(f'[model]\nname = "gpt-5.5"\n\n[repository]\nowner = "{owner}"\n')
+
+        with pytest.raises(ValueError, match="repository owner"):
+            load_config(cfg_file)
 
 
 class TestLoadConfigPerfEval:

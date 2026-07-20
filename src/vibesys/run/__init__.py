@@ -5,7 +5,9 @@ tracking) rather than reusable standalone libraries, so they live under
 ``src/vibesys/run/`` instead of ``libs/``.
 """
 
+from vibesys.repository import RepositoryVisibility
 from vibesys.run.device import DeviceLease
+from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_tracker import GitTracker
 from vibesys.run.logger import RunLogger
 from vibesys.run.paths import RunCommands, RunPaths
@@ -22,12 +24,14 @@ __all__ = [
     "EXCLUDED_WORKSPACE_DIRS",
     "CopySpec",
     "DeviceLease",
+    "ExperimentRepository",
     "GitTracker",
     "InputProjectSpec",
     "LoopContext",
     "RunCommands",
     "RunLogger",
     "RunPaths",
+    "RepositoryVisibility",
     "Workspace",
     "WorkspaceStep",
 ]

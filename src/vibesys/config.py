@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
 from vibesys.features import FeatureFlag
+from vibesys.repository import REPOSITORY_COMPONENT, RepositoryVisibility
 from vs_feature_flags import parse_feature_flag_overrides
 
 Provider = Literal["vertex-ai", "anthropic", "google-genai", "openai", "openai-compatible"]
@@ -168,6 +169,30 @@ class AgentCfg(_Strict):
     )
 
 
+class RepositoryCfg(_Strict):
+    owner: str | None = Field(
+        default=None,
+        description=(
+            "Default GitHub user or organization for repositories created by the "
+            "interactive setup screen. None leaves remote tracking opt-in."
+        ),
+    )
+    visibility: RepositoryVisibility = Field(
+        default=RepositoryVisibility.PRIVATE,
+        description="Default visibility for interactively created experiment repositories.",
+    )
+
+    @field_validator("owner")
+    @classmethod
+    def _valid_owner(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        owner = value.strip()
+        if not REPOSITORY_COMPONENT.fullmatch(owner):
+            raise ValueError("repository owner must be one GitHub user or organization name")
+        return owner
+
+
 class LoadLevelCfg(_Strict):
     """One benchmark load level fed to the perf_eval prompt template.
 
@@ -206,6 +231,10 @@ class Config(_Strict):
     agent: AgentCfg = Field(
         default_factory=AgentCfg,
         description="[agent] — agent runner backend and CLI-agent settings.",
+    )
+    repository: RepositoryCfg = Field(
+        default_factory=RepositoryCfg,
+        description="[repository] — defaults for remote experiment repositories.",
     )
     perf_eval: PerfEvalCfg = Field(
         default_factory=PerfEvalCfg,

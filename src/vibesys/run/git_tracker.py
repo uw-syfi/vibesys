@@ -89,15 +89,22 @@ class GitTracker:
         return result
 
     def init(self, existing: bool) -> None:
-        """Initialize or validate the git repo in the unified workspace."""
+        """Initialize or validate Git tracking for the unified workspace.
+
+        Experiment directories are themselves Git repositories. When the
+        workspace already lives below one, use that repository and keep every
+        operation scoped to the workspace. Standalone callers still get a
+        repository rooted directly at ``self.root``.
+        """
         if existing:
-            if not (self.root / ".git").is_dir():
+            if not self._inside_work_tree():
                 raise ValueError(
                     f"--git-tracking with --resume but no git repository in {self.root}"
                 )
             return
 
-        self.run(["git", "init"])
+        if not self._inside_work_tree():
+            self.run(["git", "init"])
 
         gitignore = self.root / ".gitignore"
         existing_gitignore = gitignore.read_text() if gitignore.is_file() else ""
@@ -153,13 +160,25 @@ class GitTracker:
 
     def trusted_input_changes(self) -> list[str]:
         """Return evaluator-owned paths changed since workspace initialization."""
-        root = self.run(["git", "rev-list", "--max-parents=0", "HEAD"])
-        root_commit = root.stdout.decode().strip()
-        if not root_commit:
+        baseline = self.run(
+            [
+                "git",
+                "log",
+                "--diff-filter=A",
+                "--format=%H",
+                "--reverse",
+                "--",
+                *self._TRUSTED_INPUT_PATHS,
+            ]
+        )
+        initial_commit = baseline.stdout.decode().splitlines()[0:1]
+        if not initial_commit:
             return ["unable to resolve the initial workspace commit"]
 
         pathspec = ["--", *self._TRUSTED_INPUT_PATHS]
-        committed = self.run(["git", "diff", "--name-only", f"{root_commit}..HEAD", *pathspec])
+        committed = self.run(
+            ["git", "diff", "--name-only", f"{initial_commit[0]}..HEAD", *pathspec]
+        )
         pending = self.run(
             [
                 "git",
@@ -170,9 +189,19 @@ class GitTracker:
             ]
         )
 
-        changes = {line for line in committed.stdout.decode(errors="replace").splitlines() if line}
+        prefix_result = self.run(["git", "rev-parse", "--show-prefix"])
+        prefix = prefix_result.stdout.decode(errors="replace").strip()
+
+        def workspace_relative(path: str) -> str:
+            return path.removeprefix(prefix) if prefix else path
+
+        changes = {
+            workspace_relative(line)
+            for line in committed.stdout.decode(errors="replace").splitlines()
+            if line
+        }
         changes.update(
-            line[3:]
+            workspace_relative(line[3:])
             for line in pending.stdout.decode(errors="replace").splitlines()
             if len(line) > 3
         )
@@ -257,7 +286,7 @@ class GitTracker:
         """
         self._exclude_paths(self._collect_unreadable())
         for _ in range(3):
-            result = self.run(["git", "add", "-A"], check=False)
+            result = self.run(["git", "add", "-A", "--", "."], check=False)
             if result.returncode == 0:
                 return
             stderr = result.stderr.decode(errors="replace")
@@ -266,4 +295,8 @@ class GitTracker:
                 break  # failure unrelated to unreadable files — surface it
             self._exclude_paths(offenders)
         # Final attempt: let run() raise with full diagnostics if it still fails.
-        self.run(["git", "add", "-A"])
+        self.run(["git", "add", "-A", "--", "."])
+
+    def _inside_work_tree(self) -> bool:
+        result = self.run(["git", "rev-parse", "--is-inside-work-tree"], check=False)
+        return result.returncode == 0 and result.stdout.decode().strip() == "true"

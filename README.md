@@ -173,6 +173,10 @@ backend = "cli"               # "cli" (codex/claude/gemini/opencode) or "deepage
 cli_provider = "codex"        # which coding-agent harness to drive
 # cli_timeout = 1800          # per-invocation timeout (seconds)
 
+[repository]
+owner = "vibesys-playground"  # any GitHub user/org; enables pre-launch repository setup
+visibility = "private"        # private, public, or internal
+
 # Optional: benchmark load levels handed to the perf evaluator.
 # [[perf_eval.load_levels]]
 # rate = 1
@@ -212,7 +216,31 @@ Resume any run with `--resume` (defaults to "latest"):
 ```bash
 ./vs --resume                  # newest run
 ./vs --resume 20260507-...     # specific dir
+./vs --resume /path/to/clone   # local experiment clone
+./vs --resume owner/repo       # clone a GitHub experiment, then resume it
 ```
+
+When `[repository].owner` is configured, an interactive fresh run first opens a
+setup form populated with the input path, an automatically generated experiment
+name, owner, repository name, and visibility. Use Tab/Shift-Tab to move through
+the defaults and Enter to launch. Clear the owner field for a local-only run.
+
+The generated repository owner comes only from `agent.toml`; no organization is
+hard-coded. `agent.toml.example` uses `vibesys-playground` as its editable
+default. Authenticate the GitHub CLI before launching a remotely tracked run:
+
+```bash
+gh auth login
+./vs \
+  --input examples/data-structures/queue-spsc \
+  ...
+```
+
+For non-interactive use, `--repo queue-trial` uses the configured owner, while
+`--repo another-org/queue-trial` overrides it explicitly. Durable workspace and
+run state are committed and pushed when the run closes; raw `logs/*.log` files
+stay local. Later runs automatically push again when resumed from a clone with
+an `origin`.
 
 ## Repository layout
 

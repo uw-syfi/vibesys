@@ -31,7 +31,7 @@ from vibesys.profilers import (
     require_profiler_kind,
 )
 from vibesys.prompts import render_template
-from vibesys.run import LoopContext
+from vibesys.run import LoopContext, RepositoryVisibility
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -852,6 +852,8 @@ def run_agent_loop(
     inner_loop: str = "multi-agent",
     domain: DomainName | None = None,
     interface: str = DEFAULT_INTERFACE,
+    remote_repo: str | None = None,
+    repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
 ) -> bool:
     """Run the orchestrator-driven build loop.
 
@@ -915,6 +917,8 @@ def run_agent_loop(
         cli_provider=cli_provider,
         backend=backend,
         environment_hooks=domain_definition.environment_hooks,
+        remote_repo=remote_repo,
+        repo_visibility=repo_visibility,
     )
     ctx.lprint(f"[log] orchestrate run: {ctx.run_log_path}")
     ctx.lprint(f"[log] experiment root: {ctx.exp_dir}")

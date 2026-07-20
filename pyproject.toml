@@ -27,6 +27,7 @@ dependencies = [
     "librosa>=0.11.0",
     "modal>=1.4.2",
     "vs-feature-flags",
+    "vs-github",
     "vs-issue-board",
     "vs-sandbox",
 ]
@@ -59,14 +60,14 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "libs/vs-feature-flags/tests", "libs/vs-issue-board/tests", "libs/vs-sandbox/tests"]
+testpaths = ["tests", "libs/vs-feature-flags/tests", "libs/vs-github/tests", "libs/vs-issue-board/tests", "libs/vs-sandbox/tests"]
 addopts = "-ra"
 pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests"]
+src = ["src", "tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W"]
@@ -84,9 +85,10 @@ reportUnknownMemberType = "none"
 reportUnknownVariableType = "none"
 reportUnknownArgumentType = "none"
 pythonVersion = "3.11"
-include = ["src", "libs/vs-feature-flags/src", "libs/vs-issue-board/src", "libs/vs-sandbox/src"]
+include = ["src", "libs/vs-feature-flags/src", "libs/vs-github/src", "libs/vs-issue-board/src", "libs/vs-sandbox/src"]
 executionEnvironments = [
     { root = "libs/vs-feature-flags/src" },
+    { root = "libs/vs-github/src" },
     { root = "libs/vs-issue-board/src" },
     { root = "libs/vs-sandbox/src" },
     { root = "src" },
@@ -102,5 +104,6 @@ members = ["libs/*"]
 [tool.uv.sources]
 agentshim = { git = "https://github.com/vic-lsh/agentshim.git", rev = "codex/executor-injection" }
 vs-feature-flags = { workspace = true }
+vs-github = { workspace = true }
 vs-issue-board = { workspace = true }
 vs-sandbox = { workspace = true }
