@@ -377,6 +377,28 @@ describe('OpenTUI presentation', () => {
     await testRenderer.waitForFrame(value => !value.includes('Experiment chat'));
     expect(controller.state.chatOpen).toBe(false);
   });
+
+  it('accepts another chat message while an agent turn is pending', async () => {
+    const testRenderer = await createTestRenderer({width: 100, height: 24});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      chatPending: true,
+      chatConversation: [
+        {id: 'active-question', kind: 'user', label: 'You', content: 'first question'},
+      ],
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    await testRenderer.mockInput.typeText('/chat');
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(value => value.includes('Experiment chat'));
+    await testRenderer.mockInput.typeText('queued follow-up');
+    testRenderer.mockInput.pressEnter();
+
+    await testRenderer.waitForFrame(value => value.includes('Recorded diagnostic'));
+    expect(controller.chatSubmissions).toEqual(['queued follow-up']);
+  });
 });
 
 function registerCleanup(

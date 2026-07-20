@@ -103,7 +103,7 @@ export class ChatOverlayView {
   }
 
   readonly #submit = (value: string): void => {
-    if (this.controller.state.chatPending || !value.trim()) return;
+    if (!value.trim()) return;
     this.#input.value = '';
     void this.controller.sendChat(value);
   };

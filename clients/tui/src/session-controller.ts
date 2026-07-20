@@ -57,6 +57,8 @@ export class SocketSessionController implements SessionController {
   readonly #listeners = new Set<(state: SessionState) => void>();
   #eventSubscription: EventSubscription | null = null;
   #chatMessageId = 0;
+  readonly #chatQueue: Array<{id: string; text: string}> = [];
+  #chatDrain: Promise<void> | null = null;
 
   constructor(private readonly client: SupervisionTransport) {}
 
@@ -120,24 +122,53 @@ export class SocketSessionController implements SessionController {
     this.#setState({...this.#state, chatOpen: false});
   }
 
-  async sendChat(value: string): Promise<void> {
+  sendChat(value: string): Promise<void> {
     const text = value.trim();
-    if (!text || this.#state.chatPending) return;
+    if (!text) return Promise.resolve();
+    const id = `chat-user-${++this.#chatMessageId}`;
+    const queued = this.#state.chatPending || this.#chatQueue.length > 0;
+    this.#chatQueue.push({id, text});
     this.#setState({
       ...this.#state,
       chatOpen: true,
-      chatPending: true,
       chatConversation: appendChatEntry(this.#state.chatConversation, {
-        id: `chat-user-${++this.#chatMessageId}`,
+        id,
         kind: 'user',
-        label: 'You',
+        label: queued ? 'You · queued' : 'You',
         content: text,
       }),
     });
+    if (this.#chatDrain === null) {
+      const drain = this.#drainChatQueue();
+      this.#chatDrain = drain.finally(() => {
+        this.#chatDrain = null;
+      });
+    }
+    return this.#chatDrain;
+  }
+
+  async #drainChatQueue(): Promise<void> {
+    try {
+      for (let message = this.#chatQueue.shift(); message; message = this.#chatQueue.shift()) {
+        this.#setState({
+          ...this.#state,
+          chatPending: true,
+          chatConversation: this.#state.chatConversation.map(entry =>
+            entry.id === message.id ? {...entry, label: 'You'} : entry,
+          ),
+        });
+        await this.#requestChat(message.text);
+      }
+    } finally {
+      this.#setState({...this.#state, chatPending: false});
+    }
+  }
+
+  async #requestChat(text: string): Promise<void> {
     try {
       const response = await this.client.request({type: 'query.chat', text});
       const answer = response.chat?.answer ?? 'No chat answer was returned.';
-      let state = {...this.#state, chatPending: false};
+      let state = this.#state;
       for (const event of response.events ?? []) state = applyEvent(state, event);
       if (!(response.events ?? []).some(event => event.data?.kind === 'chat')) {
         state = {
@@ -154,7 +185,6 @@ export class SocketSessionController implements SessionController {
     } catch (error) {
       this.#setState({
         ...this.#state,
-        chatPending: false,
         chatConversation: appendChatEntry(this.#state.chatConversation, {
           id: `chat-error-${++this.#chatMessageId}`,
           kind: 'result',

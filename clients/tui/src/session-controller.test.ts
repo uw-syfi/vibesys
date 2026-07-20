@@ -200,6 +200,41 @@ describe('session controller', () => {
     expect(transport.requests).toEqual([{type: 'query.chat', text: 'why?'}]);
   });
 
+  it('queues messages entered while the chat agent is still working', async () => {
+    const transport = new DeferredChatTransport();
+    const controller = new SocketSessionController(transport);
+
+    const first = controller.sendChat('first question');
+    const second = controller.sendChat('follow-up question');
+
+    expect(transport.requests).toEqual([{type: 'query.chat', text: 'first question'}]);
+    expect(controller.state.chatConversation).toMatchObject([
+      {kind: 'user', label: 'You', content: 'first question'},
+      {kind: 'user', label: 'You · queued', content: 'follow-up question'},
+    ]);
+
+    transport.resolveNext('first answer');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(transport.requests).toEqual([
+      {type: 'query.chat', text: 'first question'},
+      {type: 'query.chat', text: 'follow-up question'},
+    ]);
+    expect(controller.state.chatConversation[1]?.label).toBe('You');
+
+    transport.resolveNext('follow-up answer');
+    await Promise.all([first, second]);
+
+    expect(controller.state.chatPending).toBe(false);
+    expect(controller.state.chatConversation.map(entry => entry.content)).toEqual([
+      'first question',
+      'follow-up question',
+      'first answer',
+      'follow-up answer',
+    ]);
+  });
+
   it('shows chat request failures as explicit failed trajectory entries', async () => {
     const transport = new FakeTransport([], [], undefined, new Error('Codex exited with code 1'));
     const controller = new SocketSessionController(transport);
@@ -266,6 +301,44 @@ class FakeTransport implements SupervisionTransport {
 
   disconnect(error: Error): void {
     this.#disconnect?.(error);
+  }
+}
+
+class DeferredChatTransport implements SupervisionTransport {
+  readonly requests: RequestInput[] = [];
+  readonly #pending: Array<(response: ProtocolResponse) => void> = [];
+
+  request(input: RequestInput): Promise<ProtocolResponse> {
+    this.requests.push(input);
+    return new Promise(resolve => this.#pending.push(resolve));
+  }
+
+  resolveNext(answer: string): void {
+    const resolve = this.#pending.shift();
+    if (!resolve) throw new Error('No pending chat request');
+    resolve({
+      protocol_version: 1,
+      request_id: 'request',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: true,
+      chat: {
+        question: '',
+        answer,
+        effect: 'none',
+      },
+    });
+  }
+
+  subscribe(
+    _afterSequence: number,
+    _onMessage: (message: ServerMessage) => void,
+    _onDisconnect: (error: Error) => void,
+  ): Promise<EventSubscription> {
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
   }
 }
 
