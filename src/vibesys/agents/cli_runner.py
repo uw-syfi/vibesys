@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, TextIO, TypeVar, cast
@@ -43,7 +43,9 @@ from vibesys.agent_runner import (
     parse_typed_response_text,
 )
 from vibesys.agents.callbacks import AgentLogger
+from vibesys.agents.host_resource_declarations import declare_agent_host_resources
 from vibesys.agents.progress import AgentProgress
+from vibesys.host_resources import HostResource
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -186,6 +188,7 @@ class CliAgentRunner:
         run_log_file: TextIO | None = None,
         docker_sandboxes: dict[str, Any] | None = None,
         modal_sandboxes: dict[str, Any] | None = None,
+        host_resources: Iterable[HostResource] = (),
         log_dir: Path | None = None,
     ):
         if provider not in _PROVIDER_CLASSES:
@@ -206,6 +209,9 @@ class CliAgentRunner:
         self._run_log_file = run_log_file
         self._docker_sandboxes = docker_sandboxes
         self._modal_sandboxes = modal_sandboxes
+        # Additional resource intent is provider-independent. The declaration
+        # policy combines it with provider defaults only on the local CLI path.
+        self._host_resources = tuple(host_resources)
         # When set, each ``invoke()`` appends one JSON record to
         # ``<log_dir>/usage.jsonl`` capturing per-call token counts and
         # cost. ``None`` disables the file write (legacy callers, unit
@@ -397,10 +403,16 @@ class CliAgentRunner:
             # level so it cannot read or modify sibling runs or unrelated host
             # files (issue #149). Container executors above are already
             # externally sandboxed and deliberately skip this.
+            resources = declare_agent_host_resources(
+                agent.env,
+                binary_path=getattr(agent, "binary_path", None),
+                provider=self._provider,
+                additional=self._host_resources,
+            )
             agent.sandbox = hostsandbox.build(
                 Path(workspace),
                 env=agent.env,
-                binary_path=getattr(agent, "binary_path", None),
+                resources=resources,
                 log=lambda msg: log_and_print(msg, self._run_log_file),
             )
             if reuse_agent:

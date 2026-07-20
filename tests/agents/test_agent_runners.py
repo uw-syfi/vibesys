@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from vibesys._agent_cli import hostsandbox
 from vibesys.agent_runner import log_json_and_print, log_prompt_markdown_and_print
 from vibesys.agents import build_agent_runner
 from vibesys.agents.callbacks import AgentLogger
@@ -15,6 +16,7 @@ from vibesys.agents.cli_runner import CliAgentRunner
 from vibesys.agents.deepagents_runner import DeepAgentsRunner
 from vibesys.agents.progress import RoundProgress
 from vibesys.config import Config
+from vibesys.host_resources import HostResource
 from vibesys.schemas import (
     JudgeResponse,
     Verdict,
@@ -289,6 +291,55 @@ class TestCliAgentRunner:
         assert result.verdict == Verdict.PASS
         assert len(captured) == 1
         assert captured[0].generate_calls[0]["cwd"] == str(workspace)
+
+    @pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
+    def test_host_resource_declarations_apply_to_every_local_cli_provider(
+        self, monkeypatch, tmp_path, provider
+    ):
+        captured: list = []
+        fake_cls = _make_fake_agent_class(
+            generate_returns='{"analysis": "ok", "feedback": "", "verdict": "pass"}',
+            captured=captured,
+        )
+        monkeypatch.setitem(
+            __import__(
+                "vibesys.agents.cli_runner",
+                fromlist=["_PROVIDER_CLASSES"],
+            )._PROVIDER_CLASSES,
+            provider,
+            fake_cls,
+        )
+        builds: list[dict] = []
+        monkeypatch.setattr(
+            hostsandbox,
+            "build",
+            lambda *args, **kwargs: builds.append({"args": args, **kwargs}),
+        )
+        resource = HostResource(
+            tmp_path / "toolchain",
+            purpose="test toolchain",
+        )
+        runner = CliAgentRunner(
+            provider=provider,
+            model="m",
+            host_resources=(resource,),
+            run_log_file=None,
+        )
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+
+        result = runner.invoke(
+            kind="judge",
+            workspace=workspace,
+            system_prompt="sys",
+            user_prompt="usr",
+            response_cls=JudgeResponse,
+            fallback_factory=_judge_fallback,
+            round_label="judge #1",
+        )
+
+        assert result.verdict == Verdict.PASS
+        assert resource in builds[0]["resources"]
 
     def test_cli_runner_falls_back_on_unparseable_output(self, monkeypatch, tmp_path, capsys):
         captured: list = []

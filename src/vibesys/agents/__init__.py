@@ -8,6 +8,7 @@ runner classes are imported, so the public API of this package is::
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
@@ -26,6 +27,8 @@ from .progress import AgentProgress, CandidateProgress, RoundProgress
 # The ``TYPE_CHECKING`` imports let pyright resolve the lazily provided
 # names statically without triggering the runtime cycle.
 if TYPE_CHECKING:
+    from vibesys.host_resources import HostResource
+
     from .cli_runner import CliAgentRunner
     from .deepagents_runner import DeepAgentsRunner
 
@@ -66,6 +69,7 @@ def build_agent_runner(
     use_docker: bool,
     use_modal: bool = False,
     log_dir: Path | None = None,
+    host_resources: Iterable[HostResource] = (),
 ) -> AgentRunner:
     """Construct the right :class:`AgentRunner` for the requested backend.
 
@@ -95,6 +99,9 @@ def build_agent_runner(
             deepagents backend, which already shows live token counts in
             its callback prefix and would need a separate cleanup for JSONL
             persistence.
+        host_resources: Provider-independent host resource declarations for
+            local CLI agents. Ignored by container and non-CLI backends, whose
+            run-environment importers own resource exposure.
 
     Raises:
         SystemExit: If the requested backend is unknown, the cli backend was
@@ -161,6 +168,7 @@ def build_agent_runner(
             run_log_file=run_log_file,
             docker_sandboxes=docker_sandboxes,
             modal_sandboxes=modal_sandboxes,
+            host_resources=host_resources,
             log_dir=log_dir,
         )
 
