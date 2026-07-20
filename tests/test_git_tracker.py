@@ -160,3 +160,61 @@ def test_run_is_a_public_escape_hatch(ws):
 
     result = tracker.run(["git", "status", "--porcelain"], check=True)
     assert result.returncode == 0
+
+
+def test_add_worktree_materializes_commit_and_shares_object_store(ws, tmp_path):
+    tracker = _make_tracker(ws)
+    tracker.init(existing=False)
+    base_sha = tracker.current_sha()
+    assert base_sha is not None
+
+    # Advance the main tree so the worktree must reflect the OLD commit, not HEAD.
+    (ws / "main.py").write_text("VALUE = 99\n")
+    tracker.snapshot("advance")
+
+    wt = tmp_path / "candidates" / "g1c1"
+    tracker.add_worktree(wt, base_sha)
+
+    # Worktree holds the parent commit's content, isolated from the main tree.
+    assert (wt / "main.py").read_text() == "VALUE = 1\n"
+    assert (ws / "main.py").read_text() == "VALUE = 99\n"
+
+    # A commit in the worktree lands in the SHARED object store: the main repo
+    # can resolve it by sha.
+    wt_tracker = _make_tracker(wt)
+    (wt / "main.py").write_text("VALUE = 7\n")
+    wt_tracker.snapshot("child")
+    child_sha = wt_tracker.current_sha()
+    assert child_sha is not None and child_sha != base_sha
+    # `git cat-file -e <sha>` in the MAIN repo succeeds → object is shared.
+    assert tracker.run(["git", "cat-file", "-e", child_sha], check=False).returncode == 0
+
+    # Untracked files must not block cleanup: the directory is always deleted.
+    (wt / "scratch.log").write_text("editor leftover\n")
+    tracker.remove_worktree(wt)
+    assert not wt.exists()
+    # The child commit object survives worktree removal (shared store).
+    assert tracker.run(["git", "cat-file", "-e", child_sha], check=False).returncode == 0
+
+
+def test_remove_worktree_deletes_orphaned_directory(ws, tmp_path):
+    """If `git worktree remove` leaves the directory behind (as observed when a
+    file is still held open by a just-stopped editor container), the explicit
+    recursive delete still clears it."""
+    import shutil
+
+    tracker = _make_tracker(ws)
+    tracker.init(existing=False)
+    base_sha = tracker.current_sha()
+    assert base_sha is not None
+
+    wt = tmp_path / "candidates" / "g2c1"
+    tracker.add_worktree(wt, base_sha)
+    assert wt.exists()
+
+    # Orphan the worktree: drop git's admin registration but leave the tree on
+    # disk. `git worktree remove` then no-ops ("not a working tree"), so only
+    # the rmtree fallback can clear the leftover directory.
+    shutil.rmtree(ws / ".git" / "worktrees")
+    tracker.remove_worktree(wt)
+    assert not wt.exists()

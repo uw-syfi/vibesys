@@ -996,6 +996,17 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
             "post-hoc log inspection."
         ),
     )
+    parser.add_argument(
+        "--max-parallelism",
+        type=int,
+        default=1,
+        help=(
+            "Max candidates to evaluate concurrently within a generation "
+            "(default: 1 = serial). Values >1 take effect only under --modal, "
+            "where each candidate runs in its own isolated worktree + editor "
+            "container + Modal app; local/docker backends stay serial."
+        ),
+    )
     parser.add_argument("--modality", default="text_generation", choices=_MODALITIES)
     return parser
 
@@ -1016,6 +1027,13 @@ def _validate_evolve(args: argparse.Namespace) -> None:
         _configuration_error("--frontier-bias must be in [0, 1].")
     if args.bootstrap_max_attempts < 1:
         _configuration_error("--bootstrap-max-attempts must be >= 1.")
+    if args.max_parallelism < 1:
+        _configuration_error("--max-parallelism must be >= 1.")
+    if args.max_parallelism > 1 and not args.modal:
+        _configuration_error(
+            "--max-parallelism > 1 requires --modal (parallel candidate "
+            "evaluation is Modal-only; other backends contend on one GPU)."
+        )
 
 
 def _run_evolve(args: argparse.Namespace) -> None:
@@ -1065,6 +1083,7 @@ def _run_evolve(args: argparse.Namespace) -> None:
         frontier_bias=args.frontier_bias,
         bootstrap_max_attempts=args.bootstrap_max_attempts,
         keep_modal_apps=args.keep_modal_apps,
+        max_parallelism=args.max_parallelism,
         remote_repo=args.repo,
         repo_visibility=args.repo_visibility,
     )

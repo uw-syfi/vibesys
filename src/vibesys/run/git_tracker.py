@@ -10,6 +10,7 @@ history; nothing here touches sandboxes or backends.
 
 import os
 import re
+import shutil
 import subprocess
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -114,6 +115,39 @@ class GitTracker:
 
         self._add_all()
         self.run(["git", "commit", "-m", "initial: workspace setup"])
+
+    def add_worktree(self, worktree_dir: Path, commit: str) -> None:
+        """Create a detached linked worktree at *commit*.
+
+        The worktree gets its own working tree, index, and (detached) HEAD but
+        shares this repository's object store, so a commit made in the worktree
+        is immediately reachable by sha from the main repo — exactly what a
+        per-candidate evolve worktree needs (isolated edits, one shared
+        lineage). ``git worktree add`` mutates the main repo's
+        ``.git/worktrees`` admin area, so callers must serialize concurrent
+        adds; committing *inside* a worktree afterwards is independent per
+        worktree and safe to run concurrently.
+        """
+        worktree_dir.parent.mkdir(parents=True, exist_ok=True)
+        self.run(["git", "worktree", "add", "--detach", str(worktree_dir), commit])
+
+    def remove_worktree(self, worktree_dir: Path) -> None:
+        """Unregister a linked worktree and delete its directory (best-effort).
+
+        ``git worktree remove`` unregisters the worktree, but it can leave the
+        directory on disk — e.g. when the editor container wrote scratch files
+        (``__pycache__``, ``.pytest_cache``) into the bind-mounted tree that
+        ``git`` then declines to delete. Follow up with an explicit recursive
+        delete so per-candidate workspaces don't accumulate across a run, then
+        prune any stale admin entry. Both the ``git`` failure and any
+        undeletable leftovers are non-fatal: unregistration is what matters for
+        correctness, so ``ignore_errors`` keeps a stubborn file from sinking the
+        run.
+        """
+        self.run(["git", "worktree", "remove", "--force", str(worktree_dir)], check=False)
+        if Path(worktree_dir).exists():
+            shutil.rmtree(worktree_dir, ignore_errors=True)
+        self.run(["git", "worktree", "prune"], check=False)
 
     def snapshot(self, label: str) -> None:
         """Commit current workspace state with *label* as the commit message."""

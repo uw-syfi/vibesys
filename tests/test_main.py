@@ -269,6 +269,49 @@ def test_keep_modal_apps_flag_defaults_off_and_parses(tmp_path):
     assert parser.parse_args(["--keep-modal-apps", "--input", str(bundle)]).keep_modal_apps is True
 
 
+def test_max_parallelism_defaults_to_one_and_parses(tmp_path):
+    """--max-parallelism is serial (1) by default and accepts an int override."""
+    import vibesys.main as cli
+
+    bundle = _write_input_bundle(tmp_path)
+    parser = cli._build_evolve_parser()
+
+    assert parser.parse_args(["--input", str(bundle)]).max_parallelism == 1
+    assert (
+        parser.parse_args(["--max-parallelism", "4", "--input", str(bundle)]).max_parallelism == 4
+    )
+
+
+def test_validate_evolve_rejects_nonpositive_parallelism(tmp_path):
+    """--max-parallelism < 1 is a configuration error."""
+    import vibesys.main as cli
+
+    bundle = _write_input_bundle(tmp_path)
+    parser = cli._build_evolve_parser()
+    args = parser.parse_args(["--max-parallelism", "0", "--input", str(bundle)])
+    with pytest.raises(ConfigurationError):
+        cli._validate_evolve(args)
+
+
+def test_validate_evolve_rejects_parallelism_without_modal(tmp_path):
+    """--max-parallelism > 1 requires --modal; local backends stay serial."""
+    import vibesys.main as cli
+
+    bundle = _write_input_bundle(tmp_path)
+    parser = cli._build_evolve_parser()
+
+    # >1 without --modal is rejected...
+    args = parser.parse_args(["--max-parallelism", "4", "--input", str(bundle)])
+    with pytest.raises(ConfigurationError):
+        cli._validate_evolve(args)
+
+    # ...but >1 with --modal is accepted (torch profiler keeps --modal valid).
+    args = parser.parse_args(
+        ["--max-parallelism", "4", "--modal", "--profiler", "torch", "--input", str(bundle)]
+    )
+    cli._validate_evolve(args)
+
+
 @pytest.mark.parametrize(
     "argv",
     [

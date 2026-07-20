@@ -478,6 +478,161 @@ def create_run_context(
     )
 
 
+def create_candidate_context(
+    parent: "_RunContext",
+    *,
+    config: Config,
+    generation: int,
+    child_idx: int,
+    parent_commit: str,
+    agent_backend: str | None = None,
+    cli_provider: str | None = None,
+) -> "_RunContext":
+    """Build an isolated sub-context for evaluating one candidate concurrently.
+
+    The sub-context shares the parent run's identity, model, compute backend,
+    run-environment policy, and — crucially — the parent workspace's **git
+    object store**, so a candidate's commit lands in the one evolutionary
+    lineage. Everything that would collide under concurrency is its own:
+
+    - a **git worktree** checked out at ``parent_commit`` (isolated working
+      tree / index / detached HEAD; edits never touch the shared tree);
+    - a fresh **run-environment session** (its own Modal editor container);
+    - its own **agent runner** (the CLI runner is not thread-safe);
+    - a **no-tee ``RunLogger``** writing only to the candidate's log file — only
+      the top-level run logger may own the process ``sys.stderr``.
+
+    Only Modal mode is supported for parallel evaluation (host GPU reselection
+    is a no-op there); the caller is responsible for that gating. Close the
+    returned context (or use it as a context manager) to stop the container and
+    remove the worktree.
+    """
+    config = as_config(config)
+    cand_root = parent.exp_dir / "candidates" / f"{parent.exp_dir.name}-g{generation}c{child_idx}"
+    workspace = cand_root / "workspace"
+    log_dir = cand_root / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Materialize the parent's tree in an isolated worktree (shared object
+    # store). `git worktree add` touches the main repo's admin area, so the
+    # caller serializes this; the container/agent work afterward is isolated.
+    parent.git.add_worktree(workspace, parent_commit)
+
+    logger = RunLogger(log_dir, tee_stderr=False)
+    teardown_stack = ExitStack()
+    teardown_stack.callback(logger.close)
+    # Remove the worktree *after* the session's container is stopped: register
+    # the removal before entering the session so it unwinds afterward (LIFO).
+    teardown_stack.callback(lambda: parent.git.remove_worktree(workspace))
+
+    resolved_backend = agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND
+    resolved_cli_provider = cli_provider or config.agent.cli_provider or "codex"
+
+    git = GitTracker(
+        workspace,
+        log=logger.lprint,
+        excluded_dirs=parent.EXCLUDED_WORKSPACE_DIRS,
+    )
+    workspace_files = Workspace(
+        workspace,
+        run_environment=parent.run_environment,
+        backend=parent.backend_impl,
+        log=logger.lprint,
+        project_root=PROJECT_ROOT,
+    )
+
+    # Reuse the parent's already-provisioned Modal model volume: the shared
+    # run_environment has `model_volume` set from the parent's open(), so this
+    # open() skips re-upload and ref_dir is unneeded.
+    session = teardown_stack.enter_context(
+        parent.run_environment.open(
+            RunEnvironmentRequest(
+                log_dir=log_dir,
+                workspace=workspace,
+                ref_dir=None,
+                backend=parent.backend_impl,
+                agent_backend=resolved_backend,
+                cli_provider=resolved_cli_provider,
+                accuracy_command=parent.accuracy_command,
+                benchmark_command=parent.benchmark_command,
+                profiler_support_path=parent.profiler_support_path,
+                profiler_support_name=parent.profiler_support_name,
+                environment_bind_mounts=parent.environment_patch.bind_mounts,
+                log=logger.lprint,
+                project_root=PROJECT_ROOT,
+            )
+        )
+    )
+    commands = RunCommands(
+        judge_accuracy_command=session.view.paths.accuracy_command,
+        judge_benchmark_command=session.view.paths.benchmark_command,
+        profiler_support_agent_path=session.view.paths.profiler_support,
+        profiler_benchmark_command=session.view.paths.benchmark_command,
+    )
+
+    agent_runner = build_agent_runner(
+        config,
+        agent_backend=agent_backend,
+        cli_provider=cli_provider,
+        backends={
+            "implementer": session.sandbox,
+            "judge": session.sandbox,
+            "chat": session.sandbox,
+            "perf_eval": session.sandbox,
+            "profiler": session.sandbox,
+            "orchestrator": session.sandbox,
+        },
+        skills=[src.name for src in parent.skill_source_paths],
+        skill_source_dirs=parent.skill_source_paths,
+        model=parent.model,
+        model_name=parent.model_name,
+        run_log_file=logger.file,
+        use_docker=(session.view.cli_sandboxed and not session.view.cli_modal_sandboxed),
+        use_modal=session.view.cli_modal_sandboxed,
+        log_dir=log_dir,
+    )
+
+    paths = RunPaths(
+        exp_dir=parent.exp_dir,
+        log_dir=log_dir,
+        workspace=workspace,
+        run_log_path=logger.path,
+    )
+
+    return _RunContext(
+        backend=parent.backend,
+        run_environment=parent.run_environment,
+        supervisor=None,  # candidates never own the TUI/chat handler
+        logger=logger,
+        paths=paths,
+        debug=parent.debug,
+        git_tracking=True,
+        backend_impl=parent.backend_impl,
+        model=parent.model,
+        model_name=parent.model_name,
+        input_path=parent.input_path,
+        workspace_seed_path=None,
+        evaluator_path=parent.evaluator_path,
+        accuracy_command=parent.accuracy_command,
+        benchmark_command=parent.benchmark_command,
+        profiler_kind=parent.profiler_kind,
+        profiler_support_path=parent.profiler_support_path,
+        profiler_support_name=parent.profiler_support_name,
+        skill_source_paths=parent.skill_source_paths,
+        ref_name=parent.ref_name,
+        environment_hooks=parent.environment_hooks,
+        environment_context=parent.environment_context,
+        environment_patch=parent.environment_patch,
+        workspace_files=workspace_files,
+        git=git,
+        teardown_stack=teardown_stack,
+        run_environment_session=session,
+        commands=commands,
+        device=parent.device,  # shared; Modal reselect is a no-op
+        agent_runner=agent_runner,
+    )
+
+
 class _RunContext:
     """Experiment lifecycle owner shared by simple, orchestrate, and issue loops.
 
@@ -598,6 +753,11 @@ class _RunContext:
     def run_log_file(self) -> TextIO:
         """The current open log file handle (owned by ``RunLogger``)."""
         return self.logger.file
+
+    @property
+    def skill_source_paths(self) -> list[Path]:
+        """Skill source directories copied into the workspace for agents."""
+        return self._skill_source_paths
 
     @property
     def gpu_monitor(self) -> "ContentionMonitor | None":
