@@ -1,6 +1,8 @@
 import json
 import time
 import traceback
+import uuid
+from collections import defaultdict, deque
 from collections.abc import Callable
 from typing import Any, TextIO
 
@@ -92,6 +94,7 @@ class AgentLogger(BaseCallbackHandler):
         self._latest_usage: dict[str, Any] | None = None
         self._context_window_lookup = context_window_lookup or _default_context_window_lookup
         self._context_window = self._context_window_lookup(model_name)
+        self._pending_tool_calls: dict[str, deque[str]] = defaultdict(deque)
 
     def _status(self) -> AgentStatusData:
         """Snapshot the ``[progress | label | elapsed | tokens/max]`` readings.
@@ -216,7 +219,7 @@ class AgentLogger(BaseCallbackHandler):
             self._publish(text + "\n", "assistant")
             self._log_line(text)
         for tc in msg.tool_calls:
-            self._emit_tool_call(tc["name"], tc["args"])
+            self._emit_tool_call(tc["name"], tc["args"], call_id=tc.get("id"))
 
     # --- Tool execution ---
 
@@ -233,7 +236,12 @@ class AgentLogger(BaseCallbackHandler):
     def on_tool_end(self, output: Any, **kwargs: Any) -> None:
         content = output.content if hasattr(output, "content") else str(output)
         name = getattr(output, "name", None) or "unknown"
-        self._emit_tool_result(name, content)
+        call_id = getattr(output, "tool_call_id", None)
+        self._emit_tool_result(
+            name,
+            content,
+            call_id=call_id if isinstance(call_id, str) and call_id else None,
+        )
 
     def on_tool_error(self, error: Any, **kwargs: Any) -> None:
         lines = [f"Tool error: {error!r}"]
@@ -268,8 +276,12 @@ class AgentLogger(BaseCallbackHandler):
         }
     )
 
-    def _emit_tool_call(self, name: str, args: dict[str, Any]):
-        output_sink().tool_call(name, args, status=self._status())
+    def _emit_tool_call(
+        self, name: str, args: dict[str, Any], *, call_id: str | None = None
+    ) -> None:
+        resolved_call_id = call_id or uuid.uuid4().hex
+        self._pending_tool_calls[name].append(resolved_call_id)
+        output_sink().tool_call(name, args, call_id=resolved_call_id, status=self._status())
         todos = todos_from_tool_call(name, args)
         if todos is not None:
             output_sink().todo_update(todos)
@@ -296,9 +308,25 @@ class AgentLogger(BaseCallbackHandler):
     # readable while still capturing enough output for debugging.
     _LOG_MAX_RESULT_LEN = 2000
 
-    def _emit_tool_result(self, name: str, content: str, *, is_error: bool = False):
+    def _emit_tool_result(
+        self,
+        name: str,
+        content: str,
+        *,
+        call_id: str | None = None,
+        is_error: bool = False,
+    ) -> None:
         full_text = str(content)
-        output_sink().tool_result(name, full_text, is_error=is_error)
+        pending = self._pending_tool_calls[name]
+        resolved_call_id = call_id
+        if resolved_call_id is None and pending:
+            resolved_call_id = pending.popleft()
+        elif resolved_call_id is not None:
+            try:
+                pending.remove(resolved_call_id)
+            except ValueError:
+                pass
+        output_sink().tool_result(name, full_text, call_id=resolved_call_id, is_error=is_error)
 
         # Truncated to log file
         if self._log_file:

@@ -15,6 +15,7 @@ export class ConversationView {
   readonly output: BoxRenderable;
   readonly #expandedPrompts = new Set<string>();
   #renderedConversation: ConversationEntry[] = [];
+  #renderedCards: BoxRenderable[] = [];
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -35,10 +36,9 @@ export class ConversationView {
   }
 
   toggleLatestPrompt(): void {
-    const latestPrompt = [...this.controller.state.conversation]
-      .reverse()
-      .find(entry => entry.kind === 'prompt');
-    if (latestPrompt) this.#togglePrompt(latestPrompt.id);
+    const visible = visibleConversation(this.controller.state);
+    const latestPrompt = [...visible].reverse().find(entry => entry.kind === 'prompt');
+    if (latestPrompt) this.#togglePrompt(latestPrompt.id, visible);
   }
 
   #clear(): void {
@@ -46,29 +46,56 @@ export class ConversationView {
       this.output.remove(child);
       child.destroyRecursively();
     }
+    this.#renderedCards = [];
   }
 
   #renderConversation(entries: ConversationEntry[]): void {
-    if (entries === this.#renderedConversation) return;
-    this.#renderedConversation = entries;
-    this.#clear();
-    if (entries.length === 0) {
-      this.output.add(
-        new TextRenderable(this.renderer, {
-          content: 'Waiting for run events…',
-          fg: '#64748b',
-        }),
-      );
+    if (sameEntries(entries, this.#renderedConversation)) return;
+    if (isEntryPrefix(this.#renderedConversation, entries)) {
+      for (const entry of entries.slice(this.#renderedConversation.length)) {
+        const card = this.#renderEntry(entry);
+        this.output.add(card);
+        this.#renderedCards.push(card);
+      }
+      this.#renderedConversation = entries;
       return;
     }
-    for (const entry of entries) this.output.add(this.#renderEntry(entry));
+    const changedIndex = singleChangedEntryIndex(this.#renderedConversation, entries);
+    if (changedIndex !== -1) {
+      const previousCard = this.#renderedCards[changedIndex];
+      const entry = entries[changedIndex];
+      if (previousCard !== undefined && entry !== undefined) {
+        this.output.remove(previousCard);
+        previousCard.destroyRecursively();
+        const card = this.#renderEntry(entry);
+        this.output.add(card, changedIndex);
+        this.#renderedCards[changedIndex] = card;
+        this.#renderedConversation = entries;
+        return;
+      }
+    }
+    this.#clear();
+    this.#renderedConversation = entries;
+    if (entries.length === 0) {
+      const card = new TextRenderable(this.renderer, {
+        content: 'Waiting for run events…',
+        fg: '#64748b',
+      });
+      this.output.add(card);
+      return;
+    }
+    for (const entry of entries) {
+      const card = this.#renderEntry(entry);
+      this.output.add(card);
+      this.#renderedCards.push(card);
+    }
   }
 
-  #togglePrompt(id: string): void {
+  #togglePrompt(id: string, visible = visibleConversation(this.controller.state)): void {
     if (this.#expandedPrompts.has(id)) this.#expandedPrompts.delete(id);
     else this.#expandedPrompts.add(id);
     this.#renderedConversation = [];
-    this.#renderConversation(this.controller.state.conversation);
+    this.#renderConversation(visible);
   }
 
   #renderEntry(entry: ConversationEntry): BoxRenderable {
@@ -155,4 +182,30 @@ export class ConversationView {
       );
     }
   }
+}
+
+function sameEntries(left: ConversationEntry[], right: ConversationEntry[]): boolean {
+  return left.length === right.length && left.every((entry, index) => entry === right[index]);
+}
+
+function isEntryPrefix(prefix: ConversationEntry[], entries: ConversationEntry[]): boolean {
+  return (
+    prefix.length > 0 &&
+    prefix.length < entries.length &&
+    prefix.every((entry, index) => entry === entries[index])
+  );
+}
+
+function singleChangedEntryIndex(
+  previous: ConversationEntry[],
+  entries: ConversationEntry[],
+): number {
+  if (previous.length === 0 || previous.length !== entries.length) return -1;
+  let changedIndex = -1;
+  for (let index = 0; index < entries.length; index += 1) {
+    if (previous[index] === entries[index]) continue;
+    if (changedIndex !== -1 || previous[index]?.id !== entries[index]?.id) return -1;
+    changedIndex = index;
+  }
+  return changedIndex;
 }

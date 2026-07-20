@@ -80,17 +80,25 @@ class OutputSink:
         tool: str,
         args: dict[str, Any],
         *,
+        call_id: str | None = None,
         status: AgentStatusData | None = None,
     ) -> None:
         self._emit(
             EventType.TOOL_CALL,
-            ToolCallData(tool=tool, args=_json_safe(args), status=status),
+            ToolCallData(tool=tool, call_id=call_id, args=_json_safe(args), status=status),
         )
 
-    def tool_result(self, tool: str, content: str, *, is_error: bool = False) -> None:
+    def tool_result(
+        self,
+        tool: str,
+        content: str,
+        *,
+        call_id: str | None = None,
+        is_error: bool = False,
+    ) -> None:
         self._emit(
             EventType.TOOL_RESULT,
-            ToolResultData(tool=tool, content=content, is_error=is_error),
+            ToolResultData(tool=tool, call_id=call_id, content=content, is_error=is_error),
         )
 
     def todo_update(self, todos: list[TodoItemData]) -> None:

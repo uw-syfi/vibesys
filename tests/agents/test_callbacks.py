@@ -1,10 +1,13 @@
 import io
 import re
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from vibesys.agents.callbacks import AgentLogger
 from vibesys.agents.progress import RoundProgress
 from vibesys.constants import DIM, GREEN, RED, RESET
+from vibesys.render.sink import output_sink
+from vibesys.server.events import ToolCallData, ToolResultData
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
@@ -108,6 +111,51 @@ class TestOnToolStart:
         logger.on_tool_start(serialized, "", inputs={"cmd": "ls -la"})
         out = capsys.readouterr().out
         assert out == ""
+
+
+class TestToolCorrelation:
+    def test_provider_call_ids_correlate_parallel_results(self):
+        seen = []
+        unsubscribe = output_sink().subscribe(seen.append)
+        try:
+            logger = AgentLogger()
+            logger.on_llm_end(
+                _make_response(
+                    tool_calls=[
+                        {"id": "call-a", "name": "Read", "args": {"path": "a"}},
+                        {"id": "call-b", "name": "Read", "args": {"path": "b"}},
+                    ]
+                )
+            )
+            logger.on_tool_end(
+                SimpleNamespace(name="Read", tool_call_id="call-b", content="result b")
+            )
+            logger.on_tool_end(
+                SimpleNamespace(name="Read", tool_call_id="call-a", content="result a")
+            )
+        finally:
+            unsubscribe()
+
+        calls = [event.data for event in seen if isinstance(event.data, ToolCallData)]
+        results = [event.data for event in seen if isinstance(event.data, ToolResultData)]
+        assert [call.call_id for call in calls] == ["call-a", "call-b"]
+        assert [result.call_id for result in results] == ["call-b", "call-a"]
+
+    def test_cli_events_get_stable_fifo_call_ids(self):
+        seen = []
+        unsubscribe = output_sink().subscribe(seen.append)
+        try:
+            logger = AgentLogger()
+            logger.on_tool_call("Read", {"path": "a"})
+            logger.on_tool_call("Read", {"path": "b"})
+            logger.on_tool_result("Read", stdout="result a")
+            logger.on_tool_result("Read", stdout="result b")
+        finally:
+            unsubscribe()
+
+        calls = [event.data for event in seen if isinstance(event.data, ToolCallData)]
+        results = [event.data for event in seen if isinstance(event.data, ToolResultData)]
+        assert [result.call_id for result in results] == [call.call_id for call in calls]
 
 
 class TestOnToolEnd:

@@ -2,14 +2,20 @@ import {describe, expect, it} from 'vitest';
 import {parseInput, slashCommandRange, suggestSlashCommands} from './commands.js';
 
 describe('parseInput', () => {
-  it('only accepts the intentionally small command surface', () => {
+  it('accepts the intentionally small slash-command surface', () => {
     expect(parseInput('/history').request?.type).toBe('query.history');
     expect(parseInput('/perf')).toMatchObject({
       request: {type: 'query.performance'},
       responseView: 'perf',
     });
-    expect(parseInput('what is happening?').error).toContain('Unknown command');
     expect(parseInput('/steer inspect the cache').error).toContain('Unknown command');
+  });
+
+  it('sends ordinary text to the supervision chat endpoint', () => {
+    expect(parseInput('what is happening?')).toEqual({
+      request: {type: 'query.chat', text: 'what is happening?'},
+    });
+    expect(parseInput('')).toEqual({error: 'Enter a question or use /help.'});
   });
 
   it('keeps inspection commands out of the public command surface', () => {

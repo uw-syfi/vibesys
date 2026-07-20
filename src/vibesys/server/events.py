@@ -137,6 +137,7 @@ class AgentOutputChunkData(BaseModel):
 class ToolCallData(BaseModel):
     kind: Literal["tool_call"] = "tool_call"
     tool: str
+    call_id: str | None = None
     args: dict[str, Any] = Field(default_factory=dict)
     status: AgentStatusData | None = None
 
@@ -144,6 +145,7 @@ class ToolCallData(BaseModel):
 class ToolResultData(BaseModel):
     kind: Literal["tool_result"] = "tool_result"
     tool: str
+    call_id: str | None = None
     content: str
     is_error: bool = False
 

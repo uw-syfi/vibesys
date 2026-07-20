@@ -1,5 +1,6 @@
-import {CliRenderEvents, createCliRenderer} from '@opentui/core';
+import {createCliRenderer} from '@opentui/core';
 import {SupervisionClient} from './client.js';
+import {runTuiSession} from './runtime.js';
 import {SocketSessionController} from './session-controller.js';
 import {createOpenTuiApp} from './ui/app.js';
 
@@ -10,9 +11,4 @@ const client = await SupervisionClient.connect(socketPath);
 const renderer = await createCliRenderer({exitOnCtrlC: true});
 const controller = new SocketSessionController(client);
 const app = createOpenTuiApp(renderer, controller);
-renderer.start();
-await controller.start();
-
-await new Promise<void>(resolve => renderer.once(CliRenderEvents.DESTROY, resolve));
-app.destroy();
-await controller.stop();
+await runTuiSession(renderer, controller, app);

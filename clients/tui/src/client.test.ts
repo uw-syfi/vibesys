@@ -3,7 +3,7 @@ import {unlink} from 'node:fs/promises';
 import {createServer, type Server, type Socket} from 'node:net';
 import {join} from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
-import {SupervisionClient} from './client.js';
+import {SupervisionClient, type SupervisionClientOptions} from './client.js';
 
 let socketPath: string | undefined;
 
@@ -87,16 +87,142 @@ describe('SupervisionClient', () => {
       },
     );
   });
+
+  it('rejects malformed responses instead of throwing from the socket callback', async () => {
+    await withServer(
+      socket => socket.once('data', () => socket.write('{not-json}\n')),
+      async client => {
+        await expect(client.request({type: 'query.snapshot'})).rejects.toThrow(
+          'Invalid supervision response JSON',
+        );
+      },
+    );
+  });
+
+  it('rejects incompatible protocol versions', async () => {
+    await withServer(
+      socket =>
+        respondToLines(socket, request => {
+          socket.write(
+            `${JSON.stringify({...successResponse(request['request_id'] as string), protocol_version: 2})}\n`,
+          );
+        }),
+      async client => {
+        await expect(client.request({type: 'query.snapshot'})).rejects.toThrow(
+          'Unsupported supervision protocol version',
+        );
+      },
+    );
+  });
+
+  it('times out requests that never receive a response', async () => {
+    await withServer(
+      socket => socket.on('data', () => undefined),
+      async client => {
+        await expect(client.request({type: 'query.snapshot'})).rejects.toThrow(
+          'Supervision request timed out after 20ms',
+        );
+      },
+      {requestTimeoutMs: 20},
+    );
+  });
+
+  it('reassembles and validates fragmented subscription messages', async () => {
+    await withServer(
+      socket =>
+        respondToLines(socket, request => {
+          if (request['type'] !== 'subscribe') return;
+          const subscribed = `${JSON.stringify({
+            type: 'subscribed',
+            request_id: request['request_id'],
+            run_id: 'run-1',
+            latest_sequence: 1,
+          })}\n`;
+          const batch = `${JSON.stringify({
+            type: 'event_batch',
+            events: [{sequence: 1, timestamp: new Date().toISOString(), type: 'server_started'}],
+          })}\n`;
+          socket.write(subscribed.slice(0, 10));
+          socket.write(`${subscribed.slice(10)}${batch}`);
+        }),
+      async client => {
+        const messages: string[] = [];
+        const subscription = await client.subscribe(
+          0,
+          message => messages.push(String(message.type)),
+          error => {
+            throw error;
+          },
+        );
+        expect(messages).toEqual(['subscribed', 'event_batch']);
+        await subscription.close();
+      },
+    );
+  });
+
+  it('reports an event-stream disconnect only once', async () => {
+    await withServer(
+      socket =>
+        respondToLines(socket, request => {
+          if (request['type'] !== 'subscribe') return;
+          socket.write(
+            `${JSON.stringify({
+              type: 'subscribed',
+              request_id: request['request_id'],
+              run_id: 'run-1',
+              latest_sequence: 0,
+            })}\n`,
+            () => socket.destroy(),
+          );
+        }),
+      async client => {
+        const disconnects: Error[] = [];
+        await client.subscribe(
+          0,
+          () => undefined,
+          error => disconnects.push(error),
+        );
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(disconnects).toHaveLength(1);
+      },
+    );
+  });
+
+  it('reports unknown event-stream message types as protocol errors', async () => {
+    await withServer(
+      socket =>
+        respondToLines(socket, request => {
+          if (request['type'] !== 'subscribe') return;
+          socket.write(
+            `${JSON.stringify({
+              type: 'subscribed',
+              request_id: request['request_id'],
+              run_id: 'run-1',
+              latest_sequence: 0,
+            })}\n${JSON.stringify({type: 'unknown'})}\n`,
+          );
+        }),
+      async client => {
+        const disconnect = new Promise<Error>(resolve => {
+          void client.subscribe(0, () => undefined, resolve);
+        });
+        await expect(disconnect).resolves.toMatchObject({
+          message: expect.stringContaining('Unknown supervision event-stream message'),
+        });
+      },
+    );
+  });
 });
 
 async function withServer(
   onConnection: (socket: Socket) => void,
   test: (client: SupervisionClient) => Promise<void>,
+  options: SupervisionClientOptions = {},
 ): Promise<void> {
   socketPath = join('/tmp', `vs-${randomUUID().slice(0, 8)}.sock`);
   const server = createServer(onConnection);
   await listen(server, socketPath);
-  const client = await SupervisionClient.connect(socketPath);
+  const client = await SupervisionClient.connect(socketPath, options);
   try {
     await test(client);
   } finally {

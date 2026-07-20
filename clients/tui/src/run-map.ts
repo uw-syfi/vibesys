@@ -71,6 +71,13 @@ function applyPhaseEvent(state: RunMapState, event: RunEvent): AgentPhase[] {
   if (roundNumber !== null && state.outerLoop !== null) {
     phases = seedExpectedPhases(state.outerLoop, phases, roundNumber);
   }
+  if (event.type === 'run_failed' || event.type === 'run_interrupted') {
+    return phases.map(phase =>
+      phase.roundNumber === roundNumber && phase.status === 'active'
+        ? {...phase, status: 'failed', finishedAt: event.timestamp}
+        : phase,
+    );
+  }
   if (event.type !== 'phase_started' && event.type !== 'phase_finished') {
     return ensurePhase(phases, kind, roundNumber);
   }
@@ -92,18 +99,22 @@ function applyRoundEvent(rounds: RoundSummary[], event: RunEvent): RoundSummary[
   const number = roundNumberFromLabel(event.round_label);
   if (number === null) return rounds;
   const existing = rounds.find(round => round.number === number);
-  const status =
-    event.type === 'round_finished'
+  if (event.type === 'run_finished') return rounds;
+  const terminalFailure = event.type === 'run_failed' || event.type === 'run_interrupted';
+  const status = terminalFailure
+    ? 'failed'
+    : event.type === 'round_finished'
       ? event.status === 'failed'
         ? 'failed'
         : 'completed'
-      : 'active';
+      : existing?.status === 'completed' || existing?.status === 'failed'
+        ? existing.status
+        : 'active';
+  const terminal = terminalFailure || event.type === 'round_finished';
   const patch: RoundSummary = {
     number,
     status,
-    ...(event.type === 'round_finished'
-      ? {finishedAt: event.timestamp}
-      : {startedAt: event.timestamp}),
+    ...(terminal ? {finishedAt: event.timestamp} : {startedAt: event.timestamp}),
   };
   const round = existing ? mergeRound(existing, patch) : patch;
   return replaceRound(rounds, updateRoundAgentElapsed(round, event));
@@ -192,7 +203,13 @@ function earliestTimestamp(
 
 function updateRoundAgentElapsed(round: RoundSummary, event: RunEvent): RoundSummary {
   if (event.type !== 'phase_started' && event.type !== 'phase_finished') {
-    if (event.type !== 'round_finished') return round;
+    if (
+      event.type !== 'round_finished' &&
+      event.type !== 'run_failed' &&
+      event.type !== 'run_interrupted'
+    ) {
+      return round;
+    }
     return closeActiveAgentTimings(round, event.timestamp);
   }
   return event.type === 'phase_started'

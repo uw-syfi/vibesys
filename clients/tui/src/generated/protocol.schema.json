@@ -1370,6 +1370,18 @@
           "title": "Tool",
           "type": "string"
         },
+        "call_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Call Id"
+        },
         "args": {
           "additionalProperties": true,
           "title": "Args",
@@ -1404,6 +1416,18 @@
         "tool": {
           "title": "Tool",
           "type": "string"
+        },
+        "call_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Call Id"
         },
         "content": {
           "title": "Content",

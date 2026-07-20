@@ -55,11 +55,12 @@ class TestTypedEmitters:
     def test_tool_call_event(self):
         sink = OutputSink()
         seen, _ = _collect(sink)
-        sink.tool_call("shell", {"cmd": "ls"})
+        sink.tool_call("shell", {"cmd": "ls"}, call_id="call-1")
         assert seen[0].type == EventType.TOOL_CALL
         data = seen[0].data
         assert isinstance(data, ToolCallData)
         assert data.tool == "shell"
+        assert data.call_id == "call-1"
         assert data.args == {"cmd": "ls"}
 
     def test_tool_call_args_coerced_to_json_safe(self):
@@ -75,10 +76,11 @@ class TestTypedEmitters:
     def test_tool_result_event(self):
         sink = OutputSink()
         seen, _ = _collect(sink)
-        sink.tool_result("shell", "output text", is_error=True)
+        sink.tool_result("shell", "output text", call_id="call-1", is_error=True)
         data = seen[0].data
         assert isinstance(data, ToolResultData)
         assert data.tool == "shell"
+        assert data.call_id == "call-1"
         assert data.content == "output text"
         assert data.is_error is True
 
