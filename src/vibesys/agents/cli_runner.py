@@ -206,7 +206,9 @@ class CliAgentRunner:
         # tests that don't care about usage).
         self._log_dir = log_dir
         # Cache agent instances per kind so session IDs persist across
-        # invocations (enables conversation continuation).
+        # invocations (enables conversation continuation). Experiment chat is
+        # the exception: its history is carried explicitly in each prompt, so
+        # it must not depend on provider-side session state.
         self._agents: dict[str, CodingAgent] = {}
 
     def invoke(
@@ -220,32 +222,119 @@ class CliAgentRunner:
         response_cls: type[T],
         fallback_factory: Callable[[], T],
         round_label: str,
+        invocation_id: str | None = None,
         progress: AgentProgress | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
         tools: list[BaseTool] | None = None,  # noqa: ARG002 — deepagents-only injection point; cli uses mcp_servers
     ) -> T:
-        label = _agent_label(kind)
-
-        # 1. Materialize skills into the workspace so the CLI tool can pick
-        #    them up. No-op if no skills were configured.
-        _materialize_skills(workspace, self._skills, log_file=self._run_log_file)
-
-        # 2. Build the combined prompt. CLI tools have no separate system
-        #    slot — prepending the system prompt is the standard workaround.
         schema_hint = _build_schema_hint(response_cls)
         combined_prompt = f"{system_prompt}\n\n{user_prompt}{schema_hint}"
+        text = self._generate(
+            kind=kind,
+            workspace=workspace,
+            env=env,
+            combined_prompt=combined_prompt,
+            round_label=round_label,
+            invocation_id=invocation_id,
+            progress=progress,
+            mcp_servers=mcp_servers,
+        )
+        label = _agent_label(kind)
+        parsed = parse_typed_response_text(text, response_cls)
+        if parsed is None:
+            log_and_print(
+                f"\n=== {label} ROUND OUTPUT (missing response) ===",
+                self._run_log_file,
+            )
+            log_and_print(
+                f"No structured response received from {label.lower()}.",
+                self._run_log_file,
+            )
+            if text:
+                log_and_print(
+                    f"\n=== {label} ROUND OUTPUT (raw output) ===",
+                    self._run_log_file,
+                )
+                log_markdown_and_print(text, self._run_log_file)
+            return fallback_factory()
 
-        # 3. Wire on-screen logging so the cli backend looks like deepagents.
+        log_and_print(
+            f"\n=== {label} ROUND OUTPUT ===",
+            self._run_log_file,
+        )
+        log_json_and_print(parsed.model_dump_json(indent=2), self._run_log_file)
+        return parsed
+
+    def invoke_text(
+        self,
+        *,
+        kind: str,
+        workspace: Path,
+        system_prompt: str,
+        env: dict[str, str] | None = None,
+        user_prompt: str,
+        round_label: str,
+        invocation_id: str | None = None,
+        progress: AgentProgress | None = None,
+        mcp_servers: list[MCPServerSpec] | None = None,
+        tools: list[BaseTool] | None = None,  # noqa: ARG002 — deepagents-only
+    ) -> str:
+        """Run a conversational CLI agent without requesting structured JSON."""
+        text = self._generate(
+            kind=kind,
+            workspace=workspace,
+            env=env,
+            combined_prompt=f"{system_prompt}\n\n{user_prompt}",
+            round_label=round_label,
+            invocation_id=invocation_id,
+            progress=progress,
+            mcp_servers=mcp_servers,
+        )
+        label = _agent_label(kind)
+        if text:
+            log_and_print(f"\n=== {label} ROUND OUTPUT ===", self._run_log_file)
+            log_markdown_and_print(text, self._run_log_file)
+        else:
+            log_and_print(
+                f"\n=== {label} ROUND OUTPUT (missing response) ===",
+                self._run_log_file,
+            )
+            log_and_print(f"No response received from {label.lower()}.", self._run_log_file)
+        return text
+
+    def _generate(
+        self,
+        *,
+        kind: str,
+        workspace: Path,
+        env: dict[str, str] | None,
+        combined_prompt: str,
+        round_label: str,
+        invocation_id: str | None,
+        progress: AgentProgress | None,
+        mcp_servers: list[MCPServerSpec] | None,
+    ) -> str:
+        """Run one CLI generation with shared setup, logging, and cleanup."""
+        label = _agent_label(kind)
+        _materialize_skills(workspace, self._skills, log_file=self._run_log_file)
+
         logger = AgentLogger(
             log_file=self._run_log_file,
             model_name=self._model_name,
             agent_label=label,
             progress=progress,
+            agent_kind=kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
         )
 
-        # 4. Reuse or construct the underlying agent.  Reusing preserves the
-        #    session_id so the CLI tool can resume the conversation.
-        agent = self._agents.get(kind)
+        # Reuse or construct the underlying agent. Reusing preserves the
+        #    session_id so the CLI tool can resume the conversation. Chat owns
+        #    its multi-turn history in the prompt, and provider session IDs can
+        #    become unavailable when a sandbox or process changes, so every
+        #    chat turn deliberately starts a fresh CLI session.
+        reuse_agent = kind != "chat"
+        agent = self._agents.get(kind) if reuse_agent else None
         if agent is not None:
             # Update the event handler for this invocation's logger.
             agent.event_handler = logger
@@ -271,7 +360,8 @@ class CliAgentRunner:
                 event_handler=logger,
                 executor=executor,
             )
-            self._agents[kind] = agent
+            if reuse_agent:
+                self._agents[kind] = agent
         elif self._modal_sandboxes is not None:
             from vibesys.agents.modal_executor import ModalCommandExecutor
 
@@ -290,7 +380,8 @@ class CliAgentRunner:
                     "--config",
                     'forced_login_method="chatgpt"',
                 ]
-            self._agents[kind] = agent
+            if reuse_agent:
+                self._agents[kind] = agent
         else:
             agent = self._provider_cls(model=self._model, event_handler=logger)
             # Host execution path: confine the agent to its workspace at the OS
@@ -303,7 +394,8 @@ class CliAgentRunner:
                 binary_path=getattr(agent, "binary_path", None),
                 log=lambda msg: log_and_print(msg, self._run_log_file),
             )
-            self._agents[kind] = agent
+            if reuse_agent:
+                self._agents[kind] = agent
 
         # Layer GPU env vars on top of the captured interactive env so the
         # spawned subprocess inherits CUDA_VISIBLE_DEVICES. Containerised
@@ -313,14 +405,12 @@ class CliAgentRunner:
             agent.env = {**agent.env, **env}
         workspace_arg = None if _in_container else str(workspace)
 
-        # 5. Install per-provider MCP server config (file under workspace
+        # Install per-provider MCP server config (file under workspace
         #    for claude/gemini/opencode, runtime --config flags for codex).
         #    Wrapped in try/finally so a crash in generate() still cleans up.
         if mcp_servers:
             agent.install_mcp_servers(workspace, mcp_servers)
 
-        # 6. Log the round header so the run log structure mirrors the
-        #    deepagents path.
         log_and_print(
             f"\n=== {label} ROUND START: {round_label} ===",
             self._run_log_file,
@@ -333,7 +423,7 @@ class CliAgentRunner:
         log_and_print("--- input ---", self._run_log_file)
         log_prompt_markdown_and_print(combined_prompt, self._run_log_file)
 
-        # 7. Run the agent. Wrap exceptions to surface them in the run log
+        # Run the agent. Wrap exceptions to surface them in the run log
         #    before re-raising. The ``finally`` clause runs both cleanups —
         #    per-provider MCP config (so the next phase starts clean even
         #    if generate() raises) and the per-invocation usage record
@@ -357,33 +447,7 @@ class CliAgentRunner:
             if mcp_servers:
                 agent.uninstall_mcp_servers(workspace, mcp_servers)
             self._write_usage_record(kind=kind, round_label=round_label, agent=agent)
-
-        # 8. Parse the structured response, falling back if the CLI tool
-        #    didn't produce parseable JSON.
-        parsed = parse_typed_response_text(text, response_cls)
-        if parsed is None:
-            log_and_print(
-                f"\n=== {label} ROUND OUTPUT (missing response) ===",
-                self._run_log_file,
-            )
-            log_and_print(
-                f"No structured response received from {label.lower()}.",
-                self._run_log_file,
-            )
-            if text:
-                log_and_print(
-                    f"\n=== {label} ROUND OUTPUT (raw output) ===",
-                    self._run_log_file,
-                )
-                log_markdown_and_print(text, self._run_log_file)
-            return fallback_factory()
-
-        log_and_print(
-            f"\n=== {label} ROUND OUTPUT ===",
-            self._run_log_file,
-        )
-        log_json_and_print(parsed.model_dump_json(indent=2), self._run_log_file)
-        return parsed
+        return text
 
     def _write_usage_record(self, *, kind: str, round_label: str, agent: Any) -> None:
         """Append one JSONL record to ``<log_dir>/usage.jsonl`` for this call.

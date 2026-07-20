@@ -11,9 +11,18 @@ import {visibleConversation} from '../session-model.js';
 import {promptPreview, toolOutputPreview} from './previews.js';
 import {entryPalette} from './styles.js';
 
+export interface ConversationViewOptions {
+  selectConversation?: (state: SessionState) => ConversationEntry[];
+  emptyContent?: string;
+  renderMarkdown?: boolean;
+}
+
 export class ConversationView {
   readonly output: BoxRenderable;
   readonly #expandedPrompts = new Set<string>();
+  readonly #selectConversation: (state: SessionState) => ConversationEntry[];
+  readonly #emptyContent: string;
+  readonly #renderMarkdown: boolean;
   #renderedConversation: ConversationEntry[] = [];
   #renderedCards: BoxRenderable[] = [];
 
@@ -21,7 +30,11 @@ export class ConversationView {
     private readonly renderer: CliRenderer,
     private readonly controller: SessionController,
     private readonly markdownStyle: SyntaxStyle,
+    options: ConversationViewOptions = {},
   ) {
+    this.#selectConversation = options.selectConversation ?? visibleConversation;
+    this.#emptyContent = options.emptyContent ?? 'Waiting for run events…';
+    this.#renderMarkdown = options.renderMarkdown ?? true;
     this.output = new BoxRenderable(renderer, {
       id: 'output',
       width: '100%',
@@ -32,13 +45,14 @@ export class ConversationView {
   }
 
   render(state: SessionState): void {
-    this.#renderConversation(visibleConversation(state));
+    this.#renderConversation(this.#selectConversation(state));
   }
 
   toggleLatestPrompt(): void {
-    const visible = visibleConversation(this.controller.state);
-    const latestPrompt = [...visible].reverse().find(entry => entry.kind === 'prompt');
-    if (latestPrompt) this.#togglePrompt(latestPrompt.id, visible);
+    const latestPrompt = [...this.#selectConversation(this.controller.state)]
+      .reverse()
+      .find(entry => entry.kind === 'prompt');
+    if (latestPrompt) this.#togglePrompt(latestPrompt.id);
   }
 
   #clear(): void {
@@ -50,7 +64,11 @@ export class ConversationView {
   }
 
   #renderConversation(entries: ConversationEntry[]): void {
-    if (sameEntries(entries, this.#renderedConversation)) return;
+    if (
+      sameEntries(entries, this.#renderedConversation) &&
+      (entries.length > 0 || this.output.getChildren().length > 0)
+    )
+      return;
     if (isEntryPrefix(this.#renderedConversation, entries)) {
       for (const entry of entries.slice(this.#renderedConversation.length)) {
         const card = this.#renderEntry(entry);
@@ -78,7 +96,7 @@ export class ConversationView {
     this.#renderedConversation = entries;
     if (entries.length === 0) {
       const card = new TextRenderable(this.renderer, {
-        content: 'Waiting for run events…',
+        content: this.#emptyContent,
         fg: '#64748b',
       });
       this.output.add(card);
@@ -91,11 +109,11 @@ export class ConversationView {
     }
   }
 
-  #togglePrompt(id: string, visible = visibleConversation(this.controller.state)): void {
+  #togglePrompt(id: string): void {
     if (this.#expandedPrompts.has(id)) this.#expandedPrompts.delete(id);
     else this.#expandedPrompts.add(id);
     this.#renderedConversation = [];
-    this.#renderConversation(visible);
+    this.#renderConversation(this.#selectConversation(this.controller.state));
   }
 
   #renderEntry(entry: ConversationEntry): BoxRenderable {
@@ -120,16 +138,35 @@ export class ConversationView {
         height: 1,
       }),
     );
-    if (entry.kind === 'assistant' || entry.kind === 'prompt') {
+    if (
+      this.#renderMarkdown &&
+      (entry.kind === 'assistant' || entry.kind === 'prompt' || entry.kind === 'user')
+    ) {
       this.#renderMarkdownEntry(card, entry);
     } else if (entry.kind === 'tool' && entry.toolCall) {
       this.#renderToolTurn(card, entry);
     } else {
-      const content =
-        entry.kind === 'tool' || entry.kind === 'diagnostic' || entry.kind === 'subprocess'
+      const prompt =
+        entry.kind === 'prompt'
+          ? promptPreview(entry.content, this.#expandedPrompts.has(entry.id))
+          : null;
+      const content = prompt
+        ? prompt.content
+        : entry.kind === 'tool' || entry.kind === 'diagnostic' || entry.kind === 'subprocess'
           ? toolOutputPreview(entry.content)
           : entry.content;
       card.add(new TextRenderable(this.renderer, {content, fg: palette.content, width: '100%'}));
+      if (prompt && (prompt.hiddenLines > 0 || this.#expandedPrompts.has(entry.id))) {
+        card.add(
+          new TextRenderable(this.renderer, {
+            content: this.#expandedPrompts.has(entry.id)
+              ? '▴ click to collapse'
+              : `▾ ${prompt.hiddenLines} more lines · click to expand`,
+            fg: '#60a5fa',
+            width: '100%',
+          }),
+        );
+      }
     }
     return card;
   }

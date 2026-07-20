@@ -8,6 +8,10 @@ describe('parseInput', () => {
       request: {type: 'query.performance'},
       responseView: 'perf',
     });
+    expect(parseInput('/chat what changed in the latest round?')).toEqual({
+      localView: 'chat',
+      chatMessage: 'what changed in the latest round?',
+    });
     expect(parseInput('/steer inspect the cache').error).toContain('Unknown command');
   });
 
@@ -27,12 +31,18 @@ describe('parseInput', () => {
   it('provides local help without a backend request', () => {
     expect(parseInput('/help')).toEqual({localView: 'help'});
   });
+
+  it('opens chat without requiring an initial question', () => {
+    expect(parseInput('/chat')).toEqual({localView: 'chat'});
+    expect(parseInput('/chat   ')).toEqual({localView: 'chat'});
+  });
 });
 
 describe('slash-command input helpers', () => {
   it('suggests available commands from a slash prefix', () => {
     expect(suggestSlashCommands('/').map(command => command.name)).toEqual([
       '/help',
+      '/chat',
       '/history',
       '/perf',
     ]);

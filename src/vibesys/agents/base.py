@@ -50,6 +50,7 @@ class AgentRunner(Protocol):
         response_cls: type[T],
         fallback_factory: Callable[[], T],
         round_label: str,
+        invocation_id: str | None = None,
         progress: AgentProgress | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
         tools: list[BaseTool] | None = None,
@@ -93,4 +94,21 @@ class AgentRunner(Protocol):
             An instance of ``response_cls``, either parsed from the agent's
             output or produced by ``fallback_factory()``.
         """
+        ...
+
+    def invoke_text(
+        self,
+        *,
+        kind: str,
+        workspace: Path,
+        system_prompt: str,
+        env: dict[str, str] | None = None,
+        user_prompt: str,
+        round_label: str,
+        invocation_id: str | None = None,
+        progress: AgentProgress | None = None,
+        mcp_servers: list[MCPServerSpec] | None = None,
+        tools: list[BaseTool] | None = None,
+    ) -> str:
+        """Run an agent and return its final message without a response schema."""
         ...

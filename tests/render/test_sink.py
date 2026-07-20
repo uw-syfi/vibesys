@@ -1,7 +1,9 @@
 """Tests for the process-global OutputSink emission point."""
 
+import threading
 from pathlib import Path
 
+from vibesys.agents.callbacks import AgentLogger
 from vibesys.render.sink import OutputSink
 from vibesys.server.events import (
     AgentOutputChunkData,
@@ -122,3 +124,39 @@ class TestSupervisorForwarding:
     def test_no_supervisor_no_error(self):
         sink = OutputSink()
         sink.agent_output("standalone")  # must not raise without a supervisor
+
+    def test_logger_metadata_routes_subprocess_thread_events_to_chat(self, tmp_path):
+        supervisor = RunSupervisor()
+        supervisor.attach(tmp_path / "logs")
+        logger = AgentLogger(
+            agent_kind="chat",
+            round_label="experiment-chat",
+            invocation_id="chat-invocation",
+        )
+        REGISTRY.activate(supervisor)
+        try:
+            worker = threading.Thread(
+                target=lambda: (
+                    logger.on_tool_call("execute", {"command": "rg throughput"}),
+                    logger.on_tool_result("execute", stdout="round 2: 2400 tok/s"),
+                )
+            )
+            worker.start()
+            worker.join(timeout=2)
+        finally:
+            REGISTRY.deactivate(supervisor)
+
+        events = [
+            event
+            for event in supervisor.read_events()
+            if event.type in (EventType.TOOL_CALL, EventType.TOOL_RESULT)
+        ]
+        assert [event.agent_kind for event in events] == ["chat", "chat"]
+        assert [event.round_label for event in events] == [
+            "experiment-chat",
+            "experiment-chat",
+        ]
+        assert [event.invocation_id for event in events] == [
+            "chat-invocation",
+            "chat-invocation",
+        ]

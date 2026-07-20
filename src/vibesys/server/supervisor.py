@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 import threading
 import uuid
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +45,8 @@ class RunSupervisor:
         self.log_dir: Path | None = None
         self._current_kind: str | None = None
         self._current_round: str | None = None
+        self._chat_handler: Callable[[str], str] | None = None
+        self._presentation_local = threading.local()
 
     @property
     def current_round(self) -> str | None:
@@ -85,6 +89,7 @@ class RunSupervisor:
         *,
         channel: AgentOutputChannel = "assistant",
         agent_kind: str | None = None,
+        round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
         if not content:
@@ -93,6 +98,7 @@ class RunSupervisor:
             EventType.AGENT_OUTPUT_CHUNK,
             AgentOutputChunkData(channel=channel, content=content),
             agent_kind=agent_kind,
+            round_label=round_label,
             invocation_id=invocation_id,
         )
 
@@ -102,14 +108,18 @@ class RunSupervisor:
         data: EventData,
         *,
         agent_kind: str | None = None,
+        round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
         """Record a presentation event enriched with the active invocation scope."""
+        scoped_kind = getattr(self._presentation_local, "agent_kind", None)
+        scoped_round = getattr(self._presentation_local, "round_label", None)
+        scoped_invocation = getattr(self._presentation_local, "invocation_id", None)
         self.record(
             event_type,
-            agent_kind=agent_kind or self._current_kind,
-            round_label=self._current_round,
-            invocation_id=invocation_id or self._active_invocation,
+            agent_kind=agent_kind or scoped_kind or self._current_kind,
+            round_label=round_label or scoped_round or self._current_round,
+            invocation_id=invocation_id or scoped_invocation or self._active_invocation,
             data=data,
         )
 
@@ -158,16 +168,50 @@ class RunSupervisor:
             )
 
     def chat(self, text: str) -> str:
-        from vibesys.server.inspector import RunInspector
+        with self._condition:
+            handler = self._chat_handler
+        if handler is None:
+            from vibesys.server.inspector import RunInspector
 
-        answer = RunInspector(self).answer(text)
+            answer = RunInspector(self).answer(text)
+        else:
+            answer = handler(text)
         self.record(
             EventType.CHAT,
             text,
             status=EventStatus.ANSWERED,
+            agent_kind="chat",
+            round_label="experiment-chat",
             data=ChatData(answer=answer),
         )
         return answer
+
+    def set_chat_handler(self, handler: Callable[[str], str] | None) -> None:
+        """Install the current experiment's agent-backed chat handler."""
+        with self._condition:
+            self._chat_handler = handler
+
+    @contextmanager
+    def presentation_scope(
+        self, *, agent_kind: str, round_label: str, invocation_id: str
+    ) -> Generator[None]:
+        """Tag side-channel presentation events without changing active run state."""
+        previous = (
+            getattr(self._presentation_local, "agent_kind", None),
+            getattr(self._presentation_local, "round_label", None),
+            getattr(self._presentation_local, "invocation_id", None),
+        )
+        self._presentation_local.agent_kind = agent_kind
+        self._presentation_local.round_label = round_label
+        self._presentation_local.invocation_id = invocation_id
+        try:
+            yield
+        finally:
+            (
+                self._presentation_local.agent_kind,
+                self._presentation_local.round_label,
+                self._presentation_local.invocation_id,
+            ) = previous
 
     def pause_after_call(self) -> None:
         with self._condition:

@@ -76,6 +76,56 @@ describe('session event model', () => {
     expect(state.conversation[0]?.tone).toBe('failure');
   });
 
+  it('routes chat agent trajectory events away from the experiment transcript', () => {
+    let state = initialSessionState();
+    state = applyEvent(
+      state,
+      chatEvent(1, 'agent_output_chunk', {
+        kind: 'agent_output_chunk',
+        channel: 'analysis',
+        content: 'Inspecting the latest round',
+      }),
+    );
+    state = applyEvent(
+      state,
+      chatEvent(2, 'tool_call', {
+        kind: 'tool_call',
+        tool: 'read_file',
+        args: {path: 'progress.md'},
+        status: null,
+      }),
+    );
+    state = applyEvent(
+      state,
+      chatEvent(3, 'tool_result', {
+        kind: 'tool_result',
+        tool: 'read_file',
+        content: 'Round 2 improved throughput.',
+        is_error: false,
+      }),
+    );
+    state = applyEvent(
+      state,
+      chatEvent(4, 'chat', {
+        kind: 'chat',
+        answer: 'Round 2 improved throughput.',
+      }),
+    );
+
+    expect(state.conversation).toEqual([]);
+    expect(state.agentKind).toBeNull();
+    expect(state.chatConversation.map(entry => entry.kind)).toEqual([
+      'analysis',
+      'tool',
+      'assistant',
+    ]);
+    expect(state.chatConversation[1]).toMatchObject({
+      toolCall: '→ read_file(path="progress.md")\n',
+      toolResponse: 'Round 2 improved throughput.',
+    });
+    expect(state.chatConversation.at(-1)?.content).toBe('Round 2 improved throughput.');
+  });
+
   it('coalesces streamed assistant chunks and pairs each tool call with its result', () => {
     let state = initialSessionState();
     state = applyEvent(
@@ -541,5 +591,17 @@ function event(
     ...(type === 'run_started' ? {} : {agent_kind: 'judge'}),
     ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
     ...(data === undefined ? {} : {data}),
+  };
+}
+
+function chatEvent(
+  sequence: number,
+  type: RunEvent['type'],
+  data: NonNullable<RunEvent['data']>,
+): RunEvent {
+  return {
+    ...event(sequence, type, data, 'chat-1'),
+    agent_kind: 'chat',
+    round_label: 'experiment-chat',
   };
 }

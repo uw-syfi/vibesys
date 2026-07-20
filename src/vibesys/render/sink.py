@@ -66,6 +66,8 @@ class OutputSink:
         channel: AgentOutputChannel = "assistant",
         status: AgentStatusData | None = None,
         agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
     ) -> None:
         if not content:
             return
@@ -73,6 +75,8 @@ class OutputSink:
             EventType.AGENT_OUTPUT_CHUNK,
             AgentOutputChunkData(channel=channel, content=content, status=status),
             agent_kind=agent_kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
         )
 
     def tool_call(
@@ -82,10 +86,16 @@ class OutputSink:
         *,
         call_id: str | None = None,
         status: AgentStatusData | None = None,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
     ) -> None:
         self._emit(
             EventType.TOOL_CALL,
             ToolCallData(tool=tool, call_id=call_id, args=_json_safe(args), status=status),
+            agent_kind=agent_kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
         )
 
     def tool_result(
@@ -95,16 +105,35 @@ class OutputSink:
         *,
         call_id: str | None = None,
         is_error: bool = False,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
     ) -> None:
         self._emit(
             EventType.TOOL_RESULT,
             ToolResultData(tool=tool, call_id=call_id, content=content, is_error=is_error),
+            agent_kind=agent_kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
         )
 
-    def todo_update(self, todos: list[TodoItemData]) -> None:
+    def todo_update(
+        self,
+        todos: list[TodoItemData],
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
         if not todos:
             return
-        self._emit(EventType.TODO_UPDATE, TodoUpdateData(todos=todos))
+        self._emit(
+            EventType.TODO_UPDATE,
+            TodoUpdateData(todos=todos),
+            agent_kind=agent_kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+        )
 
     def usage_update(
         self,
@@ -112,10 +141,16 @@ class OutputSink:
         *,
         context_window: int | None = None,
         model: str | None = None,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
     ) -> None:
         self._emit(
             EventType.USAGE_UPDATE,
             UsageUpdateData(input_tokens=input_tokens, context_window=context_window, model=model),
+            agent_kind=agent_kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
         )
 
     # -- dispatch ------------------------------------------------------------
@@ -126,17 +161,31 @@ class OutputSink:
         data: EventData,
         *,
         agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
     ) -> None:
         from vibesys.server.registry import active_supervisor
 
         supervisor = active_supervisor()
         if supervisor is not None:
-            supervisor.publish_presentation(event_type, data, agent_kind=agent_kind)
+            supervisor.publish_presentation(
+                event_type,
+                data,
+                agent_kind=agent_kind,
+                round_label=round_label,
+                invocation_id=invocation_id,
+            )
         with self._lock:
             subscribers = self._subscribers
         if not subscribers:
             return
-        event = make_event(event_type, agent_kind=agent_kind, data=data)
+        event = make_event(
+            event_type,
+            agent_kind=agent_kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+            data=data,
+        )
         for handler in subscribers:
             handler(event)
 
