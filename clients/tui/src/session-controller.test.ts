@@ -20,6 +20,20 @@ describe('session controller', () => {
     expect(transport.requests).toEqual([]);
   });
 
+  it('sends ordinary text to the multi-turn chat panel', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+
+    await controller.submit('what is happening?');
+
+    expect(transport.requests).toEqual([{type: 'query.chat', text: 'what is happening?'}]);
+    expect(controller.state.chatOpen).toBe(true);
+    expect(controller.state.chatConversation).toMatchObject([
+      {kind: 'user', label: 'You', content: 'what is happening?'},
+      {kind: 'assistant', label: 'Answer', content: 'The implementer is running.'},
+    ]);
+  });
+
   it('reduces replay and live events without depending on OpenTUI', async () => {
     const transport = new FakeTransport();
     const controller = new SocketSessionController(transport);
@@ -28,7 +42,7 @@ describe('session controller', () => {
     transport.emit({type: 'event_batch', events: [event(1, 'agent_output_chunk', 'one\n')]});
     transport.emit({type: 'event', event: event(2, 'agent_output_chunk', 'two\n')});
 
-    expect(controller.state.liveContent).toBe('one\ntwo\n');
+    expect(controller.state.conversation.map(entry => entry.content).join('')).toBe('one\ntwo\n');
     expect(controller.state.sequence).toBe(2);
     await controller.stop();
     expect(transport.closed).toBe(true);
@@ -303,7 +317,15 @@ class FakeTransport implements SupervisionTransport {
       ok: true,
       events: this.responseEvents,
       performance: this.responsePerformance,
-      ...(this.responseChat ? {chat: this.responseChat} : {}),
+      ...(input.type === 'query.chat'
+        ? {
+            chat: this.responseChat ?? {
+              question: input.text,
+              answer: 'The implementer is running.',
+              effect: 'none' as const,
+            },
+          }
+        : {}),
       snapshot: {run_id: 'run', status: 'running', sequence: 12},
     });
   }

@@ -84,6 +84,7 @@ class OutputSink:
         tool: str,
         args: dict[str, Any],
         *,
+        call_id: str | None = None,
         status: AgentStatusData | None = None,
         agent_kind: str | None = None,
         round_label: str | None = None,
@@ -91,7 +92,7 @@ class OutputSink:
     ) -> None:
         self._emit(
             EventType.TOOL_CALL,
-            ToolCallData(tool=tool, args=_json_safe(args), status=status),
+            ToolCallData(tool=tool, call_id=call_id, args=_json_safe(args), status=status),
             agent_kind=agent_kind,
             round_label=round_label,
             invocation_id=invocation_id,
@@ -102,6 +103,7 @@ class OutputSink:
         tool: str,
         content: str,
         *,
+        call_id: str | None = None,
         is_error: bool = False,
         agent_kind: str | None = None,
         round_label: str | None = None,
@@ -109,7 +111,7 @@ class OutputSink:
     ) -> None:
         self._emit(
             EventType.TOOL_RESULT,
-            ToolResultData(tool=tool, content=content, is_error=is_error),
+            ToolResultData(tool=tool, call_id=call_id, content=content, is_error=is_error),
             agent_kind=agent_kind,
             round_label=round_label,
             invocation_id=invocation_id,

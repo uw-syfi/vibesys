@@ -210,6 +210,10 @@ export class SocketSessionController implements SessionController {
       return;
     }
     if (!parsed.request) return;
+    if (parsed.request.type === 'query.chat') {
+      await this.sendChat(parsed.request.text);
+      return;
+    }
     try {
       const response = await this.client.request(parsed.request);
       const rendered = renderResponse(parsed.request, response, parsed.responseView);

@@ -18,7 +18,6 @@ export interface SessionState {
   phases: AgentPhase[];
   selectedRound: number | null;
   selectedAgentKind: string | null;
-  liveContent: string;
   conversation: ConversationEntry[];
   overlay: OverlayPanel | null;
   chatOpen: boolean;
@@ -87,6 +86,8 @@ export interface ConversationEntry {
   startsTurn?: boolean;
   toolCall?: string;
   toolResponse?: string;
+  toolName?: string;
+  toolCallId?: string;
 }
 
 export function initialSessionState(): SessionState {
@@ -100,7 +101,6 @@ export function initialSessionState(): SessionState {
     phases: [],
     selectedRound: null,
     selectedAgentKind: null,
-    liveContent: 'Waiting for run events…',
     conversation: [],
     overlay: null,
     chatOpen: false,
@@ -171,8 +171,6 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
   const suppressed =
     data?.kind === 'agent_output_chunk' && data.channel === 'tool' && next.typedToolEvents;
   if (!suppressed) {
-    const line = renderEventForTranscript(event);
-    if (line !== null) next.liveContent = appendTranscript(next.liveContent, line);
     const entry = eventToConversationEntry(event);
     if (entry !== null) next.conversation = appendConversation(next.conversation, entry);
   }
@@ -339,6 +337,8 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
       ...(invocationId === undefined ? {} : {invocationId}),
       startsTurn: true,
       toolCall: call,
+      toolName: data.tool,
+      ...(data.call_id === null || data.call_id === undefined ? {} : {toolCallId: data.call_id}),
     };
   }
   if (data?.kind === 'tool_result') {
@@ -352,6 +352,8 @@ function eventToConversationEntry(event: RunEvent): ConversationEntry | null {
       ...agentKind,
       ...roundFields,
       turnId: invocationId ?? id,
+      toolName: data.tool,
+      ...(data.call_id === null || data.call_id === undefined ? {} : {toolCallId: data.call_id}),
       ...(invocationId === undefined ? {} : {invocationId}),
     };
   }
@@ -431,6 +433,14 @@ function appendConversation(
   previous: ConversationEntry[],
   incoming: ConversationEntry,
 ): ConversationEntry[] {
+  if (incoming.kind === 'tool' && !incoming.startsTurn && incoming.toolName !== undefined) {
+    const target = findToolCall(previous, incoming);
+    if (target !== -1) {
+      return previous.map((entry, index) =>
+        index === target ? mergeToolResult(entry, incoming) : entry,
+      );
+    }
+  }
   const last = previous.at(-1);
   if (
     last &&
@@ -439,16 +449,7 @@ function appendConversation(
     last.invocationId === incoming.invocationId &&
     !incoming.startsTurn
   ) {
-    const separator = last.content.endsWith('\n') || incoming.content.startsWith('\n') ? '' : '\n';
-    return [
-      ...previous.slice(0, -1),
-      {
-        ...last,
-        content: last.content + separator + incoming.content,
-        toolResponse:
-          (last.toolResponse ?? '') + (last.toolResponse ? separator : '') + incoming.content,
-      },
-    ];
+    return [...previous.slice(0, -1), mergeToolResult(last, incoming)];
   }
   if (
     last &&
@@ -459,6 +460,38 @@ function appendConversation(
     return [...previous.slice(0, -1), {...last, content: last.content + incoming.content}];
   }
   return [...previous, incoming].slice(-1_000);
+}
+
+function findToolCall(previous: ConversationEntry[], result: ConversationEntry): number {
+  const indices = Array.from(previous.keys());
+  if (result.toolCallId !== undefined) indices.reverse();
+  for (const index of indices) {
+    const candidate = previous[index];
+    if (
+      candidate?.kind !== 'tool' ||
+      candidate.toolCall === undefined ||
+      candidate.toolResponse !== undefined ||
+      candidate.invocationId !== result.invocationId
+    ) {
+      continue;
+    }
+    if (result.toolCallId !== undefined) {
+      if (candidate.toolCallId === result.toolCallId) return index;
+      continue;
+    }
+    if (candidate.toolName === result.toolName) return index;
+  }
+  return -1;
+}
+
+function mergeToolResult(call: ConversationEntry, result: ConversationEntry): ConversationEntry {
+  const separator = call.content.endsWith('\n') || result.content.startsWith('\n') ? '' : '\n';
+  return {
+    ...call,
+    content: call.content + separator + result.content,
+    toolResponse: (call.toolResponse ?? '') + (call.toolResponse ? separator : '') + result.content,
+    ...(result.tone === undefined ? {} : {tone: result.tone}),
+  };
 }
 
 export function showLive(state: SessionState): SessionState {
@@ -564,39 +597,4 @@ function formatToolCall(tool: string, args: Record<string, unknown>): string {
     return isString ? `${key}="${rendered}"` : `${key}=${rendered}`;
   });
   return `→ ${tool}(${parts.join(', ')})\n`;
-}
-
-function renderEventForTranscript(event: RunEvent): string | null {
-  const data = event.data;
-  if (data?.kind === 'agent_output_chunk' || data?.kind === 'subprocess_output') {
-    return data.content;
-  }
-  if (data?.kind === 'tool_call') {
-    return formatToolCall(data.tool, data.args ?? {});
-  }
-  if (data?.kind === 'tool_result') {
-    return data.content.endsWith('\n') ? data.content : `${data.content}\n`;
-  }
-  if (data?.kind === 'output') return data.content;
-  if (data?.kind === 'judge_result') {
-    return `Judge: ${data.verdict.toUpperCase()}${data.feedback ? ` — ${data.feedback}` : ''}\n`;
-  }
-  if (data?.kind === 'benchmark_result') {
-    return `Benchmark: ${data.metric}=${data.value} ${data.unit}\n`;
-  }
-  if (data?.kind === 'round_finished') {
-    return `Round finished: ${data.judge_verdict.toUpperCase()} after ${data.attempts} attempt(s)\n`;
-  }
-  if (event.type === 'phase_started') {
-    return `\n[${event.round_label ?? 'run'}] ${event.agent_kind ?? 'phase'} started\n`;
-  }
-  if (event.type === 'run_failed' || event.type === 'run_interrupted') {
-    return `\nRun failed: ${event.text || 'interrupted'}\n`;
-  }
-  return null;
-}
-
-function appendTranscript(previous: string, next: string): string {
-  const current = previous === 'Waiting for run events…' ? '' : previous;
-  return `${current}${next}`.slice(-500_000);
 }

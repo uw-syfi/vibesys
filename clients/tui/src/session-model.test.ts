@@ -42,9 +42,6 @@ describe('session event model', () => {
       }),
     );
 
-    expect(state.liveContent).toContain('[round-1] judge started');
-    expect(state.liveContent).toContain('checking accuracy');
-    expect(state.liveContent).toContain('Judge: PASS');
     expect(state.conversation.map(entry => entry.kind)).toEqual(['status', 'assistant', 'result']);
     expect(state.conversation[1]?.content).toBe('checking accuracy\n');
   });
@@ -259,8 +256,48 @@ describe('session event model', () => {
       toolCall: '→ Bash(command="first")\n',
       toolResponse: 'first result',
     });
-    expect(state.liveContent).toContain('→ Bash(command="first")');
-    expect(state.liveContent).toContain('first result');
+  });
+
+  it('correlates parallel typed tool results by call ID', () => {
+    let state = initialSessionState();
+    state = applyEvent(
+      state,
+      event(
+        1,
+        'tool_call',
+        {kind: 'tool_call', tool: 'Read', call_id: 'call-a', args: {path: 'a'}},
+        'inv-1',
+      ),
+    );
+    state = applyEvent(
+      state,
+      event(
+        2,
+        'tool_call',
+        {kind: 'tool_call', tool: 'Read', call_id: 'call-b', args: {path: 'b'}},
+        'inv-1',
+      ),
+    );
+    state = applyEvent(
+      state,
+      event(
+        3,
+        'tool_result',
+        {kind: 'tool_result', tool: 'Read', call_id: 'call-b', content: 'result b'},
+        'inv-1',
+      ),
+    );
+    state = applyEvent(
+      state,
+      event(
+        4,
+        'tool_result',
+        {kind: 'tool_result', tool: 'Read', call_id: 'call-a', content: 'result a'},
+        'inv-1',
+      ),
+    );
+
+    expect(state.conversation.map(entry => entry.toolResponse)).toEqual(['result a', 'result b']);
   });
 
   it('truncates long typed tool-call arguments and renders non-string args as JSON', () => {
@@ -320,7 +357,6 @@ describe('session event model', () => {
       },
     ]);
     expect(state.conversation).toHaveLength(0);
-    expect(state.liveContent).toBe('Waiting for run events…');
   });
 
   it('keeps each phase’s todo list separate so agents never clobber each other', () => {

@@ -93,6 +93,18 @@ describe('OpenTUI presentation', () => {
     expect(controller.submissions).toEqual(['/help']);
   });
 
+  it('submits ordinary text as an operator question', async () => {
+    const testRenderer = await createTestRenderer({width: 80, height: 16});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    await testRenderer.mockInput.typeText('what is running?');
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.submissions.length === 1);
+    expect(controller.submissions).toEqual(['what is running?']);
+  });
+
   it('suggests and completes slash commands with Tab', async () => {
     const testRenderer = await createTestRenderer({width: 80, height: 16});
     const controller = new FakeController(initialSessionState());
@@ -213,6 +225,78 @@ describe('OpenTUI presentation', () => {
     testRenderer.mockInput.pressKey('p', {ctrl: true});
     const expanded = await testRenderer.waitForFrame(value => value.includes('prompt line 20'));
     expect(expanded).toContain('collapse');
+  });
+
+  it('expands the latest visible prompt without dropping agent filters', async () => {
+    const visiblePrompt = Array.from(
+      {length: 20},
+      (_, index) => `implementer prompt ${index + 1}`,
+    ).join('\n');
+    const hiddenPrompt = Array.from({length: 20}, (_, index) => `judge prompt ${index + 1}`).join(
+      '\n',
+    );
+    const testRenderer = await createTestRenderer({width: 100, height: 20});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      selectedRound: 1,
+      selectedAgentKind: 'implementer',
+      rounds: [{number: 1, status: 'active'}],
+      conversation: [
+        {
+          id: 'implementer-prompt',
+          kind: 'prompt',
+          agentKind: 'implementer',
+          roundNumber: 1,
+          content: visiblePrompt,
+        },
+        {
+          id: 'judge-prompt',
+          kind: 'prompt',
+          agentKind: 'judge',
+          roundNumber: 1,
+          content: hiddenPrompt,
+        },
+      ],
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    await testRenderer.waitForFrame(value => value.includes('implementer prompt 1'));
+    testRenderer.mockInput.pressKey('p', {ctrl: true});
+    const expanded = await testRenderer.waitForFrame(value =>
+      value.includes('implementer prompt 20'),
+    );
+    expect(expanded).not.toContain('judge prompt');
+  });
+
+  it('preserves existing cards when a large transcript receives state-only and tail updates', async () => {
+    const conversation = Array.from({length: 1_000}, (_, index) => ({
+      id: `entry-${index}`,
+      kind: 'status' as const,
+      content: `event ${index}`,
+    }));
+    const testRenderer = await createTestRenderer({width: 100, height: 20});
+    const controller = new FakeController({...initialSessionState(), conversation});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('event 999'));
+    const firstCard = testRenderer.renderer.root.findDescendantById('event-entry-0');
+    const lastCard = testRenderer.renderer.root.findDescendantById('event-entry-999');
+
+    controller.publish({...controller.state, status: 'paused'});
+    expect(testRenderer.renderer.root.findDescendantById('event-entry-0')).toBe(firstCard);
+    expect(testRenderer.renderer.root.findDescendantById('event-entry-999')).toBe(lastCard);
+
+    const previousLast = conversation.at(-1);
+    if (previousLast === undefined) throw new Error('large transcript is unexpectedly empty');
+    const updatedLast = {...previousLast, content: 'updated tail'};
+    controller.publish({
+      ...controller.state,
+      conversation: [...conversation.slice(0, -1), updatedLast],
+    });
+    await testRenderer.waitForFrame(value => value.includes('updated tail'));
+    expect(testRenderer.renderer.root.findDescendantById('event-entry-0')).toBe(firstCard);
+    expect(testRenderer.renderer.root.findDescendantById('event-entry-999')).not.toBe(lastCard);
   });
 
   it('selects an agent with Tab and filters the transcript', async () => {
@@ -418,6 +502,11 @@ class FakeController implements SessionController {
   liveCalls = 0;
 
   constructor(public state: SessionState) {}
+
+  publish(state: SessionState): void {
+    this.state = state;
+    for (const listener of this.#listeners) listener(this.state);
+  }
 
   start(): Promise<void> {
     return Promise.resolve();

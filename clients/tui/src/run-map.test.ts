@@ -25,6 +25,38 @@ describe('run map round timing', () => {
     expect(state.rounds[0]?.activeAgentStarts).toEqual({});
     expect(roundAgentElapsedMs(onlyRound(state), new Date('2026-01-01T00:01:00Z'))).toBe(5000);
   });
+
+  it('does not reopen a completed round when the run finishes', () => {
+    let state = initialRunMapState();
+    state = applyRunMapEvent(state, phaseEvent(1, 'phase_started', '2026-01-01T00:00:00Z'));
+    state = applyRunMapEvent(state, phaseEvent(2, 'phase_finished', '2026-01-01T00:00:05Z'));
+    state = applyRunMapEvent(state, {
+      ...phaseEvent(3, 'phase_finished', '2026-01-01T00:00:06Z'),
+      type: 'round_finished',
+      status: 'completed',
+    });
+    state = applyRunMapEvent(state, {
+      ...phaseEvent(4, 'phase_finished', '2026-01-01T00:00:07Z'),
+      type: 'run_finished',
+      status: 'completed',
+    });
+
+    expect(onlyRound(state).status).toBe('completed');
+  });
+
+  it('fails the active round and phase when the run fails', () => {
+    let state = initialRunMapState();
+    state = applyRunMapEvent(state, phaseEvent(1, 'phase_started', '2026-01-01T00:00:00Z'));
+    state = applyRunMapEvent(state, {
+      ...phaseEvent(2, 'phase_finished', '2026-01-01T00:00:05Z'),
+      type: 'run_failed',
+      status: 'failed',
+    });
+
+    expect(onlyRound(state).status).toBe('failed');
+    expect(state.rounds[0]?.activeAgentStarts).toEqual({});
+    expect(state.phases[0]?.status).toBe('failed');
+  });
 });
 
 function initialRunMapState(): RunMapState {

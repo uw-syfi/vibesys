@@ -175,8 +175,10 @@ export type PerfMetric = number | null;
 export type PerfUnit = string | null;
 export type Kind14 = "tool_call";
 export type Tool = string;
+export type CallId = string | null;
 export type Kind15 = "tool_result";
 export type Tool1 = string;
+export type CallId1 = string | null;
 export type Content3 = string;
 export type IsError = boolean;
 export type Kind16 = "todo_update";
@@ -428,6 +430,7 @@ export interface RoundFinishedData {
 export interface ToolCallData {
   kind?: Kind14;
   tool: Tool;
+  call_id?: CallId;
   args?: Args;
   status?: AgentStatusData | null;
   [k: string]: unknown;
@@ -438,6 +441,7 @@ export interface Args {
 export interface ToolResultData {
   kind?: Kind15;
   tool: Tool1;
+  call_id?: CallId1;
   content: Content3;
   is_error?: IsError;
   [k: string]: unknown;
