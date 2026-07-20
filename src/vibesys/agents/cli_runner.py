@@ -73,6 +73,12 @@ def _agent_label(kind: str) -> str:
     return kind.replace("_", " ").title()
 
 
+def _is_missing_codex_rollout(exc: RuntimeError) -> bool:
+    """Return whether Codex rejected a stale resumable thread."""
+    message = str(exc)
+    return "thread/resume failed" in message and "no rollout found" in message
+
+
 # Per-provider CLI skill-discovery paths, matching upstream
 # vibesys-skills install.sh conventions. Each CLI tool auto-loads
 # skills from a flat directory of `<skill-name>/SKILL.md`.
@@ -432,12 +438,36 @@ class CliAgentRunner:
         #    (tokens were spent either way, and an audit gap on failure
         #    defeats the purpose).
         try:
-            text = agent.generate(
-                combined_prompt,
-                cwd=workspace_arg,
-                timeout=self._timeout,
-                silent=True,
-            )
+            try:
+                text = agent.generate(
+                    combined_prompt,
+                    cwd=workspace_arg,
+                    timeout=self._timeout,
+                    silent=True,
+                )
+            except RuntimeError as exc:
+                # Codex rollouts may be evicted after a long turn even though
+                # the local agent still has the thread ID. The full prompt and
+                # workspace progress files carry the durable context, so retry
+                # once as a fresh thread instead of aborting the outer loop.
+                if not (
+                    self._provider == "codex"
+                    and getattr(agent, "session_id", None)
+                    and _is_missing_codex_rollout(exc)
+                ):
+                    raise
+                log_and_print(
+                    f"[{label}] Codex session is no longer available; "
+                    "retrying with a fresh thread.",
+                    self._run_log_file,
+                )
+                agent.session_id = None
+                text = agent.generate(
+                    combined_prompt,
+                    cwd=workspace_arg,
+                    timeout=self._timeout,
+                    silent=True,
+                )
         except Exception as exc:
             log_and_print(
                 f"\n=== {label} ROUND ERROR: {round_label} ===",

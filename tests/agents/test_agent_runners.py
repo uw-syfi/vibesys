@@ -596,6 +596,64 @@ class TestCliAgentRunner:
         assert "Return EXACTLY" not in captured[0].generate_calls[0]["prompt"]
         assert "chat" not in runner._agents
 
+    def test_cli_runner_retries_missing_codex_rollout_as_fresh_thread(self, monkeypatch, tmp_path):
+        captured: list = []
+
+        class FakeCodexAgent:
+            def __init__(self, model=None, event_handler=None):
+                self.model = model
+                self.event_handler = event_handler
+                self.env: dict[str, str] = {}
+                self.session_id = "stale-thread"
+                self.generate_calls: list[dict] = []
+                self._last_session = None
+                captured.append(self)
+
+            def install_mcp_servers(self, workspace, servers):
+                pass
+
+            def uninstall_mcp_servers(self, workspace, servers):
+                pass
+
+            def generate(self, prompt, cwd=None, timeout=300, silent=False):
+                self.generate_calls.append(
+                    {"prompt": prompt, "cwd": cwd, "session_id": self.session_id}
+                )
+                if self.session_id is not None:
+                    raise RuntimeError(
+                        "thread/resume failed: no rollout found for thread id stale-thread"
+                    )
+                return '{"analysis": "ok", "feedback": "", "verdict": "pass"}'
+
+        monkeypatch.setitem(
+            __import__(
+                "vibesys.agents.cli_runner",
+                fromlist=["_PROVIDER_CLASSES"],
+            )._PROVIDER_CLASSES,
+            "codex",
+            FakeCodexAgent,
+        )
+
+        runner = CliAgentRunner(provider="codex", model="m", run_log_file=None)
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+
+        result = runner.invoke(
+            kind="judge",
+            workspace=workspace,
+            system_prompt="sys",
+            user_prompt="usr",
+            response_cls=JudgeResponse,
+            fallback_factory=_judge_fallback,
+            round_label="judge #1",
+        )
+
+        assert result.verdict == Verdict.PASS
+        assert [call["session_id"] for call in captured[0].generate_calls] == [
+            "stale-thread",
+            None,
+        ]
+
     def test_cli_runner_prints_prompt_as_rendered_markdown_before_generate(
         self, monkeypatch, tmp_path, capsys
     ):
