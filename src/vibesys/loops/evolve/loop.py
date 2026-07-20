@@ -30,14 +30,18 @@ left to the user.
 from __future__ import annotations
 
 import random
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, cast
 
 from jinja2 import Environment, FileSystemLoader
 
 from vibesys.agents.progress import CandidateProgress
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
-from vibesys.context import create_run_context
+from vibesys.context import create_candidate_context, create_run_context
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.loops.evolve.population import (
     Individual,
@@ -339,6 +343,473 @@ def _run_profiler(
     )
 
 
+@dataclass
+class _CandidateOutcome:
+    """Result of evaluating one candidate against its parent.
+
+    Deliberately carries no ``Population`` state: evaluation runs on a
+    per-candidate context (its own workspace/container in parallel mode), while
+    id assignment and ``Population`` mutation happen serially in the
+    orchestrator via :func:`_record_outcome`. This split is what makes
+    candidate evaluation safe to run concurrently.
+    """
+
+    passed: bool
+    parent_id: int | None
+    inspiration_ids: list[int]
+    summary: str
+    feedback: str | None
+    commit: str | None = None
+    perf_metric: float | None = None
+    perf_unit: str | None = None
+    metrics: dict[str, float] = field(default_factory=dict)
+
+
+def _evaluate_candidate(
+    ctx: LoopContext,
+    *,
+    generation: int,
+    child_idx: int,
+    parent: Individual,
+    inspirations: list[Individual],
+    objective: str,
+    objectives: list[Objective] | None,
+    modality: str,
+    pass_criteria: str,
+    keep_modal_apps: bool,
+    isolated_app: bool = False,
+) -> _CandidateOutcome:
+    """Mutate → judge → (profile → commit) one candidate on ``ctx``.
+
+    Assumes ``ctx``'s workspace is already materialized at the parent commit
+    (serial: the caller checked the shared tree out; parallel: the candidate's
+    worktree was created at the parent sha). Touches only ``ctx`` — never the
+    shared ``Population`` — so distinct contexts can run this concurrently. The
+    per-candidate Modal app is always stopped on the way out.
+
+    ``isolated_app`` selects how the candidate's Modal app is named. In serial
+    mode all candidates share one context/app, so we derive a per-candidate app
+    name by suffixing (``_candidate_runtime_notes``). In parallel mode each
+    candidate already has its own sub-context whose session opened a distinct
+    app, so we use that app/notes directly with no further suffixing.
+    """
+    if isolated_app:
+        cand_notes = ctx.run_environment_view.prompt_notes
+        cand_app = getattr(ctx.run_environment_view, "modal_app_name", None)
+    else:
+        # In Modal mode this gives the mutator/judge/profiler a candidate-unique
+        # app name so the judge never reads a prior candidate's stale app logs.
+        cand_notes, cand_app = _candidate_runtime_notes(ctx, generation, child_idx)
+    ctx.lprint(
+        f"parent=#{parent.id} (perf={parent.perf_metric})"
+        + (f" modal-app={cand_app}" if cand_app else "")
+        + f"; inspirations={[i.id for i in inspirations]}"
+    )
+
+    inspiration_ids = [i.id for i in inspirations]
+    try:
+        # 1. Mutator edits the workspace, mutating the passing parent.
+        ctx.reselect_gpu()
+        mutator = _run_mutator(
+            ctx,
+            generation=generation,
+            child_idx=child_idx,
+            objective=objective,
+            parent=parent,
+            inspirations=inspirations,
+            modality=modality,
+            is_cold_start=False,
+            objectives=objectives,
+            runtime_notes=cand_notes,
+        )
+
+        # 2. Judge.
+        ctx.reselect_gpu()
+        verdict = _run_judge(
+            ctx,
+            generation=generation,
+            child_idx=child_idx,
+            modality=modality,
+            objective=objective,
+            pass_criteria=pass_criteria,
+            runtime_notes=cand_notes,
+        )
+
+        if verdict.verdict != Verdict.PASS:
+            return _CandidateOutcome(
+                passed=False,
+                parent_id=parent.id,
+                inspiration_ids=inspiration_ids,
+                summary=mutator.summary,
+                feedback=verdict.feedback,
+            )
+
+        # 3. Profile the offspring to get its fitness.
+        ctx.reselect_gpu()
+        summary = _run_profiler(
+            ctx,
+            generation=generation,
+            child_idx=child_idx,
+            modality=modality,
+            objective=objective,
+            objectives=objectives,
+            runtime_notes=cand_notes,
+        )
+
+        # 4. Commit the offspring's tree so it can serve as a future parent.
+        ctx.snapshot_workspace(f"gen-{generation}-child-{child_idx}")
+        return _CandidateOutcome(
+            passed=True,
+            parent_id=parent.id,
+            inspiration_ids=inspiration_ids,
+            summary=mutator.summary,
+            feedback=verdict.feedback,
+            commit=ctx.git.current_sha(),
+            perf_metric=summary.perf_metric if summary else None,
+            perf_unit=summary.perf_unit if summary else None,
+            metrics=dict(summary.metrics) if summary and summary.metrics else {},
+        )
+    finally:
+        _teardown_candidate_app(ctx, cand_app, keep=keep_modal_apps)
+
+
+def _record_outcome(
+    ctx: LoopContext,
+    population: Population,
+    population_path: Path,
+    outcome: _CandidateOutcome,
+    *,
+    generation: int,
+) -> Individual:
+    """Assign an id, add the individual to the population, and persist it.
+
+    Serialized by construction — the orchestrator calls this from a single
+    thread after each candidate's evaluation returns, so ``next_id`` and
+    ``Population`` mutation never race even when evaluation ran in parallel.
+    """
+    individual = Individual(
+        id=population.next_id(),
+        generation=generation,
+        parent_id=outcome.parent_id,
+        inspiration_ids=outcome.inspiration_ids,
+        commit=outcome.commit,
+        perf_metric=outcome.perf_metric,
+        perf_unit=outcome.perf_unit,
+        metrics=dict(outcome.metrics),
+        passed=outcome.passed,
+        summary=outcome.summary,
+        feedback=outcome.feedback or "",
+    )
+    population.add(individual)
+    population.save(population_path)
+    if outcome.passed:
+        metrics_repr = (
+            " ".join(f"{k}={v:g}" for k, v in individual.metrics.items())
+            if individual.metrics
+            else f"{individual.perf_metric} {individual.perf_unit or ''}"
+        )
+        ctx.lprint(
+            f"[Gen {generation}] Cand {individual.id} PASSED — "
+            f"{metrics_repr} (parent={outcome.parent_id})"
+        )
+    else:
+        ctx.lprint(
+            f"[Gen {generation}] Cand {individual.id} FAILED — "
+            f"feedback: {(outcome.feedback or '').splitlines()[0][:120] if outcome.feedback else ''}"
+        )
+    return individual
+
+
+def _plan_candidate(
+    ctx: LoopContext,
+    population: Population,
+    rng: random.Random,
+    *,
+    k_top_inspirations: int,
+    k_random_inspirations: int,
+    selection_temperature: float,
+    objectives: list[Objective] | None,
+    frontier_bias: float,
+) -> tuple[Individual, list[Individual]] | None:
+    """Select a (parent, inspirations) pair from the current population.
+
+    Reads ``population`` and advances ``rng`` — must be called from a single
+    thread (the orchestrator), never inside a worker. Returns ``None`` when no
+    passing parent exists yet (the candidate is skipped). Bootstrap guarantees
+    a passing gen-0 seed, so a passer normally always exists; ``select_parent``
+    only returns ``None`` when no passer has a scalar ``perf_metric`` (e.g.
+    profiler disabled), in which case we fall back to the latest passer so the
+    loop never cold-starts.
+    """
+    parent = population.select_parent(
+        rng=rng,
+        temperature=selection_temperature,
+        objectives=objectives,
+        frontier_bias=frontier_bias,
+    )
+    inspirations = population.select_inspirations(
+        parent_id=parent.id if parent else None,
+        k_top=k_top_inspirations,
+        k_random=k_random_inspirations,
+        rng=rng,
+        objectives=objectives,
+    )
+    if parent is None:
+        passers = population.passed
+        if not passers:
+            ctx.lprint("[warn] no passing parent available; skipping candidate")
+            return None
+        parent = passers[-1]
+    return parent, inspirations
+
+
+def _run_generation_serial(
+    ctx: LoopContext,
+    *,
+    generation: int,
+    max_generations: int,
+    children_per_generation: int,
+    population: Population,
+    population_path: Path,
+    rng: random.Random,
+    k_top_inspirations: int,
+    k_random_inspirations: int,
+    selection_temperature: float,
+    objective: str,
+    objectives: list[Objective] | None,
+    frontier_bias: float,
+    modality: str,
+    pass_criteria: str,
+    keep_modal_apps: bool,
+) -> None:
+    """Evaluate a generation's candidates one at a time on the shared context."""
+    for child_idx in range(1, children_per_generation + 1):
+        candidate_progress = CandidateProgress(
+            generation, max_generations, child_idx, children_per_generation
+        )
+        with ctx.progress(candidate_progress):
+            ctx.lprint(f"\n--- {candidate_progress.label()} ---\n")
+            plan = _plan_candidate(
+                ctx,
+                population,
+                rng,
+                k_top_inspirations=k_top_inspirations,
+                k_random_inspirations=k_random_inspirations,
+                selection_temperature=selection_temperature,
+                objectives=objectives,
+                frontier_bias=frontier_bias,
+            )
+            if plan is None:
+                continue
+            parent, inspirations = plan
+            if parent.commit and not ctx.git.checkout_tree(parent.commit, clean=True):
+                ctx.lprint(
+                    f"[warn] could not check out parent {parent.id} "
+                    f"(commit {parent.commit[:8]}); skipping cand"
+                )
+                continue
+
+            outcome = _evaluate_candidate(
+                ctx,
+                generation=generation,
+                child_idx=child_idx,
+                parent=parent,
+                inspirations=inspirations,
+                objective=objective,
+                objectives=objectives,
+                modality=modality,
+                pass_criteria=pass_criteria,
+                keep_modal_apps=keep_modal_apps,
+            )
+            _record_outcome(ctx, population, population_path, outcome, generation=generation)
+            if not outcome.passed:
+                # Dead-end mutation: revert the dirty tree back to the passing
+                # parent for the next candidate.
+                _discard_working_tree(ctx)
+
+
+def _evaluate_in_subcontext(
+    parent_ctx: LoopContext,
+    *,
+    config: Config,
+    agent_backend: str | None,
+    cli_provider: str | None,
+    generation: int,
+    child_idx: int,
+    parent: Individual,
+    inspirations: list[Individual],
+    objective: str,
+    objectives: list[Objective] | None,
+    modality: str,
+    pass_criteria: str,
+    keep_modal_apps: bool,
+    worktree_lock: threading.Lock,
+) -> _CandidateOutcome:
+    """Run one candidate in its own isolated sub-context (worker thread).
+
+    Never raises: setup/evaluation/teardown failures are logged and folded into
+    a failed ``_CandidateOutcome`` so one bad candidate can't sink the pool. The
+    ``worktree_lock`` serializes ``git worktree add`` (which mutates the shared
+    repo's admin area); everything after — the container, agent calls, and the
+    candidate's own commit — is fully isolated per worktree.
+    """
+    inspiration_ids = [i.id for i in inspirations]
+    label = f"g{generation}c{child_idx}"
+    commit = parent.commit
+    if commit is None:
+        parent_ctx.lprint(f"[warn] candidate {label} has no parent commit; skipping")
+        return _CandidateOutcome(
+            passed=False,
+            parent_id=parent.id,
+            inspiration_ids=inspiration_ids,
+            summary="candidate has no parent commit",
+            feedback="parent individual has no commit to branch from",
+        )
+    try:
+        with worktree_lock:
+            subctx = create_candidate_context(
+                cast(Any, parent_ctx),
+                config=config,
+                generation=generation,
+                child_idx=child_idx,
+                parent_commit=commit,
+                agent_backend=agent_backend,
+                cli_provider=cli_provider,
+            )
+    except Exception as exc:
+        parent_ctx.lprint(f"[warn] candidate {label} setup failed: {exc}")
+        return _CandidateOutcome(
+            passed=False,
+            parent_id=parent.id,
+            inspiration_ids=inspiration_ids,
+            summary="candidate setup failed",
+            feedback=str(exc),
+        )
+    try:
+        return _evaluate_candidate(
+            subctx,
+            generation=generation,
+            child_idx=child_idx,
+            parent=parent,
+            inspirations=inspirations,
+            objective=objective,
+            objectives=objectives,
+            modality=modality,
+            pass_criteria=pass_criteria,
+            keep_modal_apps=keep_modal_apps,
+            isolated_app=True,
+        )
+    except Exception as exc:
+        parent_ctx.lprint(f"[warn] candidate {label} evaluation raised: {exc}")
+        return _CandidateOutcome(
+            passed=False,
+            parent_id=parent.id,
+            inspiration_ids=inspiration_ids,
+            summary="candidate evaluation raised",
+            feedback=str(exc),
+        )
+    finally:
+        try:
+            subctx.close()
+        except Exception as exc:
+            parent_ctx.lprint(f"[warn] candidate {label} teardown failed: {exc}")
+
+
+def _run_generation_parallel(
+    parent_ctx: LoopContext,
+    *,
+    config: Config,
+    agent_backend: str | None,
+    cli_provider: str | None,
+    max_parallelism: int,
+    generation: int,
+    children_per_generation: int,
+    population: Population,
+    population_path: Path,
+    rng: random.Random,
+    k_top_inspirations: int,
+    k_random_inspirations: int,
+    selection_temperature: float,
+    objective: str,
+    objectives: list[Objective] | None,
+    frontier_bias: float,
+    modality: str,
+    pass_criteria: str,
+    keep_modal_apps: bool,
+) -> None:
+    """Evaluate a generation's candidates concurrently in isolated sub-contexts.
+
+    Parent/inspiration selection for *all* children happens first, single-
+    threaded, from the pre-generation population snapshot (so ``rng`` and
+    ``Population`` are never touched from a worker). Candidates then run in a
+    bounded pool; results are recorded serially, in deterministic child order,
+    after the pool drains — so id assignment and ``Population`` mutation stay on
+    one thread.
+    """
+    plans: list[tuple[int, Individual, list[Individual]]] = []
+    for child_idx in range(1, children_per_generation + 1):
+        plan = _plan_candidate(
+            parent_ctx,
+            population,
+            rng,
+            k_top_inspirations=k_top_inspirations,
+            k_random_inspirations=k_random_inspirations,
+            selection_temperature=selection_temperature,
+            objectives=objectives,
+            frontier_bias=frontier_bias,
+        )
+        if plan is None:
+            continue
+        parent, inspirations = plan
+        if not parent.commit:
+            parent_ctx.lprint(
+                f"[warn] parent {parent.id} has no commit; cannot isolate "
+                f"candidate g{generation}c{child_idx}; skipping"
+            )
+            continue
+        plans.append((child_idx, parent, inspirations))
+
+    if not plans:
+        return
+
+    cap = max(1, min(max_parallelism, len(plans)))
+    parent_ctx.lprint(
+        f"[parallel] generation {generation}: evaluating {len(plans)} "
+        f"candidate(s), up to {cap} concurrently"
+    )
+    worktree_lock = threading.Lock()
+    outcomes: dict[int, _CandidateOutcome] = {}
+    with ThreadPoolExecutor(max_workers=cap, thread_name_prefix=f"gen{generation}") as pool:
+        futures = {
+            pool.submit(
+                _evaluate_in_subcontext,
+                parent_ctx,
+                config=config,
+                agent_backend=agent_backend,
+                cli_provider=cli_provider,
+                generation=generation,
+                child_idx=child_idx,
+                parent=parent,
+                inspirations=inspirations,
+                objective=objective,
+                objectives=objectives,
+                modality=modality,
+                pass_criteria=pass_criteria,
+                keep_modal_apps=keep_modal_apps,
+                worktree_lock=worktree_lock,
+            ): child_idx
+            for (child_idx, parent, inspirations) in plans
+        }
+        for future in as_completed(futures):
+            outcomes[futures[future]] = future.result()
+
+    # Record serially, in child order, on this (single) thread.
+    for child_idx in sorted(outcomes):
+        _record_outcome(
+            parent_ctx, population, population_path, outcomes[child_idx], generation=generation
+        )
+
+
 # ---------------------------------------------------------------------------
 # Bootstrap
 # ---------------------------------------------------------------------------
@@ -546,6 +1017,7 @@ def run_evolve_loop(
     frontier_bias: float = 0.7,
     bootstrap_max_attempts: int = 5,
     keep_modal_apps: bool = False,
+    max_parallelism: int = 1,
     remote_repo: str | None = None,
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
 ) -> bool:
@@ -623,6 +1095,19 @@ def run_evolve_loop(
                 )
                 return False
 
+        # Parallelism is Modal-only: host GPU reselection is a no-op there and
+        # each candidate deploys to its own Modal app, so isolated sub-contexts
+        # (worktree + editor container + agent runner) can run concurrently.
+        # Local/Docker backends contend on one physical GPU, so they stay
+        # serial regardless of --max-parallelism.
+        env_kind = getattr(ctx.run_environment_view, "env_kind", "local")
+        parallel = max_parallelism > 1 and env_kind == "modal"
+        if max_parallelism > 1 and not parallel:
+            ctx.lprint(
+                f"[parallel] --max-parallelism={max_parallelism} ignored: parallel "
+                f"candidate evaluation requires Modal (env_kind={env_kind}); running serially"
+            )
+
         for generation in range(1, max_generations + 1):
             ctx.switch_log_file(f"gen{generation:03d}")
             ctx.lprint(
@@ -631,157 +1116,47 @@ def run_evolve_loop(
                 f"{'=' * 60}\n"
             )
 
-            for child_idx in range(1, children_per_generation + 1):
-                candidate_progress = CandidateProgress(
-                    generation,
-                    max_generations,
-                    child_idx,
-                    children_per_generation,
+            if parallel:
+                _run_generation_parallel(
+                    ctx,
+                    config=config,
+                    agent_backend=agent_backend,
+                    cli_provider=cli_provider,
+                    max_parallelism=max_parallelism,
+                    generation=generation,
+                    children_per_generation=children_per_generation,
+                    population=population,
+                    population_path=population_path,
+                    rng=rng,
+                    k_top_inspirations=k_top_inspirations,
+                    k_random_inspirations=k_random_inspirations,
+                    selection_temperature=selection_temperature,
+                    objective=objective,
+                    objectives=objectives,
+                    frontier_bias=frontier_bias,
+                    modality=modality,
+                    pass_criteria=pass_criteria,
+                    keep_modal_apps=keep_modal_apps,
                 )
-                with ctx.progress(candidate_progress):
-                    ctx.lprint(f"\n--- {candidate_progress.label()} ---\n")
-
-                    # 1. Pick parent + inspirations.
-                    parent = population.select_parent(
-                        rng=rng,
-                        temperature=selection_temperature,
-                        objectives=objectives,
-                        frontier_bias=frontier_bias,
-                    )
-                    inspirations = population.select_inspirations(
-                        parent_id=parent.id if parent else None,
-                        k_top=k_top_inspirations,
-                        k_random=k_random_inspirations,
-                        rng=rng,
-                        objectives=objectives,
-                    )
-                    # 2. Materialize the parent's tree. Bootstrap guarantees a
-                    # passing gen-0 seed, so a passing parent always exists.
-                    # select_parent only returns None when no passer has a
-                    # scalar perf_metric (e.g. profiler disabled); fall back to
-                    # the latest passer so the loop never cold-starts.
-                    if parent is None:
-                        passers = population.passed
-                        if not passers:
-                            ctx.lprint("[warn] no passing parent available; skipping candidate")
-                            continue
-                        parent = passers[-1]
-                    if parent.commit and not ctx.git.checkout_tree(parent.commit, clean=True):
-                        ctx.lprint(
-                            f"[warn] could not check out parent {parent.id} "
-                            f"(commit {parent.commit[:8]}); skipping cand"
-                        )
-                        continue
-
-                    # Per-candidate runtime notes: in Modal mode this gives the
-                    # mutator/judge/profiler a candidate-unique app name so the
-                    # judge never reads a prior candidate's stale app logs.
-                    cand_notes, cand_app = _candidate_runtime_notes(ctx, generation, child_idx)
-
-                    ctx.lprint(
-                        f"parent=#{parent.id} (perf={parent.perf_metric})"
-                        + (f" modal-app={cand_app}" if cand_app else "")
-                        + f"; inspirations={[i.id for i in inspirations]}"
-                    )
-
-                    # The candidate deploys its per-candidate Modal app during
-                    # mutate/judge/profile; stop it once evaluation is done, on
-                    # every exit path (fail continue, pass fall-through).
-                    try:
-                        # 3. Mutator edits the workspace, mutating the passing parent.
-                        ctx.reselect_gpu()
-                        mutator = _run_mutator(
-                            ctx,
-                            generation=generation,
-                            child_idx=child_idx,
-                            objective=objective,
-                            parent=parent,
-                            inspirations=inspirations,
-                            modality=modality,
-                            is_cold_start=False,
-                            objectives=objectives,
-                            runtime_notes=cand_notes,
-                        )
-
-                        # 4. Judge.
-                        ctx.reselect_gpu()
-                        verdict = _run_judge(
-                            ctx,
-                            generation=generation,
-                            child_idx=child_idx,
-                            modality=modality,
-                            objective=objective,
-                            pass_criteria=pass_criteria,
-                            runtime_notes=cand_notes,
-                        )
-
-                        if verdict.verdict != Verdict.PASS:
-                            # The mutation was a dead end: record the failed child so
-                            # its feedback is visible to future mutators (excluded
-                            # from selection because ``passed`` is False, no commit),
-                            # then revert the dirty tree back to the passing parent.
-                            failed = Individual(
-                                id=population.next_id(),
-                                generation=generation,
-                                parent_id=parent.id,
-                                inspiration_ids=[i.id for i in inspirations],
-                                commit=None,
-                                perf_metric=None,
-                                perf_unit=None,
-                                passed=False,
-                                summary=mutator.summary,
-                                feedback=verdict.feedback,
-                            )
-                            population.add(failed)
-                            population.save(population_path)
-                            _discard_working_tree(ctx)
-                            ctx.lprint(
-                                f"[Gen {generation}] Cand {failed.id} FAILED — "
-                                f"feedback: {(verdict.feedback or '').splitlines()[0][:120]}"
-                            )
-                            continue
-
-                        # 5. Profile the offspring to get its fitness.
-                        ctx.reselect_gpu()
-                        summary = _run_profiler(
-                            ctx,
-                            generation=generation,
-                            child_idx=child_idx,
-                            modality=modality,
-                            objective=objective,
-                            objectives=objectives,
-                            runtime_notes=cand_notes,
-                        )
-
-                        # 6. Commit + record.
-                        ctx.snapshot_workspace(f"gen-{generation}-child-{child_idx}")
-                        commit = ctx.git.current_sha()
-                        child = Individual(
-                            id=population.next_id(),
-                            generation=generation,
-                            parent_id=parent.id,
-                            inspiration_ids=[i.id for i in inspirations],
-                            commit=commit,
-                            perf_metric=summary.perf_metric if summary else None,
-                            perf_unit=summary.perf_unit if summary else None,
-                            metrics=dict(summary.metrics) if summary and summary.metrics else {},
-                            passed=True,
-                            summary=mutator.summary,
-                            feedback=verdict.feedback,
-                        )
-                        population.add(child)
-                        population.save(population_path)
-                        metrics_repr = (
-                            " ".join(f"{k}={v:g}" for k, v in child.metrics.items())
-                            if child.metrics
-                            else f"{child.perf_metric} {child.perf_unit or ''}"
-                        )
-                        ctx.lprint(
-                            f"[Gen {generation}] Cand {child.id} PASSED — "
-                            f"{metrics_repr} (parent={parent.id})"
-                        )
-                    finally:
-                        _teardown_candidate_app(ctx, cand_app, keep=keep_modal_apps)
+            else:
+                _run_generation_serial(
+                    ctx,
+                    generation=generation,
+                    max_generations=max_generations,
+                    children_per_generation=children_per_generation,
+                    population=population,
+                    population_path=population_path,
+                    rng=rng,
+                    k_top_inspirations=k_top_inspirations,
+                    k_random_inspirations=k_random_inspirations,
+                    selection_temperature=selection_temperature,
+                    objective=objective,
+                    objectives=objectives,
+                    frontier_bias=frontier_bias,
+                    modality=modality,
+                    pass_criteria=pass_criteria,
+                    keep_modal_apps=keep_modal_apps,
+                )
 
         if objectives:
             front = population.frontier(objectives)

@@ -9,6 +9,9 @@ are patched out — same pattern as ``tests/test_orchestrate.py``.
 
 from __future__ import annotations
 
+import random
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -16,10 +19,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vibesys.agents import AgentRunner
+from vibesys.context import create_run_context
+from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
+from vibesys.loops.evolve import loop as evolve_loop
 from vibesys.loops.evolve.loop import (
     _candidate_runtime_notes,
+    _CandidateOutcome,
+    _evaluate_in_subcontext,
     _latest_wip_seed,
+    _plan_candidate,
     _recent_failure_lessons,
+    _run_generation_parallel,
     _teardown_candidate_app,
     run_evolve_loop,
 )
@@ -28,7 +38,7 @@ from vibesys.loops.evolve.population import (
     Objective,
     Population,
 )
-from vibesys.sandbox.run_environment import candidate_modal_app_name
+from vibesys.sandbox.run_environment import RunEnvironmentSpec, candidate_modal_app_name
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
 
 # ---------------------------------------------------------------------------
@@ -661,6 +671,303 @@ def test_teardown_candidate_app_noop_when_kept_or_no_app():
     _teardown_candidate_app(ctx, None, keep=False)
 
     run_env.teardown_deployment.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Parallel generation orchestration
+# ---------------------------------------------------------------------------
+
+
+def _passing_seed(commit: str = "seedsha", perf: float = 1.0) -> Individual:
+    return Individual(
+        id=1,
+        generation=0,
+        parent_id=None,
+        commit=commit,
+        perf_metric=perf,
+        perf_unit="tok/s",
+        metrics={"aggregate_throughput": perf},
+        passed=True,
+        summary="seed",
+    )
+
+
+def test_plan_candidate_falls_back_to_latest_passer_then_none():
+    ctx = SimpleNamespace(lprint=lambda _msg: None)
+    rng = random.Random(0)
+
+    # No passers at all → None (candidate skipped).
+    empty = Population([])
+    assert (
+        _plan_candidate(
+            ctx,
+            empty,
+            rng,
+            k_top_inspirations=1,
+            k_random_inspirations=1,
+            selection_temperature=0.5,
+            objectives=None,
+            frontier_bias=0.7,
+        )
+        is None
+    )
+
+    # A passer exists → returned as parent.
+    pop = Population([_passing_seed()])
+    plan = _plan_candidate(
+        ctx,
+        pop,
+        rng,
+        k_top_inspirations=1,
+        k_random_inspirations=1,
+        selection_temperature=0.5,
+        objectives=None,
+        frontier_bias=0.7,
+    )
+    assert plan is not None
+    parent, _inspirations = plan
+    assert parent.id == 1
+
+
+def test_run_generation_parallel_bounds_concurrency_and_records_all(tmp_path, monkeypatch):
+    """Candidates run concurrently up to the cap; every result is recorded once,
+    in child order, on the orchestrator thread (population never races)."""
+    population = Population([_passing_seed()])
+    population_path = tmp_path / "population.json"
+    logs: list[str] = []
+    ctx = SimpleNamespace(lprint=logs.append)
+
+    live = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def fake_eval(parent_ctx, *, generation, child_idx, parent, inspirations, **_kw):
+        nonlocal live, peak
+        with lock:
+            live += 1
+            peak = max(peak, live)
+        time.sleep(0.05)
+        with lock:
+            live -= 1
+        return _CandidateOutcome(
+            passed=True,
+            parent_id=parent.id,
+            inspiration_ids=[i.id for i in inspirations],
+            summary=f"cand-{child_idx}",
+            feedback="",
+            commit=f"child-{child_idx}",
+            perf_metric=float(child_idx),
+            perf_unit="tok/s",
+            metrics={"aggregate_throughput": float(child_idx)},
+        )
+
+    monkeypatch.setattr(evolve_loop, "_evaluate_in_subcontext", fake_eval)
+
+    _run_generation_parallel(
+        ctx,
+        config={"model": {"name": "m"}},
+        agent_backend=None,
+        cli_provider=None,
+        max_parallelism=2,
+        generation=1,
+        children_per_generation=5,
+        population=population,
+        population_path=population_path,
+        rng=random.Random(0),
+        k_top_inspirations=1,
+        k_random_inspirations=1,
+        selection_temperature=0.5,
+        objective="obj",
+        objectives=None,
+        frontier_bias=0.7,
+        modality="text_generation",
+        pass_criteria="crit",
+        keep_modal_apps=False,
+    )
+
+    # Cap respected, never exceeded.
+    assert peak <= 2
+    # All 5 children recorded (ids 2..6) plus the seed.
+    assert len(population) == 6
+    recorded = [i for i in population.all if i.generation == 1]
+    assert len(recorded) == 5
+    assert {i.commit for i in recorded} == {f"child-{c}" for c in range(1, 6)}
+    assert population_path.exists()
+
+
+def test_run_generation_parallel_skips_parent_without_commit(tmp_path, monkeypatch):
+    """A parent with no commit can't be isolated into a worktree → skipped, not
+    dispatched."""
+    seed = _passing_seed()
+    seed.commit = None  # passer but nothing to branch from
+    # ``passed`` requires a commit, so this seed won't be selectable; give the
+    # planner a stub that returns it anyway to exercise the guard.
+    population = Population([_passing_seed(), seed])
+    population_path = tmp_path / "population.json"
+    ctx = SimpleNamespace(lprint=lambda _m: None)
+
+    monkeypatch.setattr(
+        evolve_loop,
+        "_plan_candidate",
+        lambda *a, **k: (seed, []),
+    )
+    called = False
+
+    def fake_eval(*a, **k):
+        nonlocal called
+        called = True
+        return _CandidateOutcome(True, seed.id, [], "s", "")
+
+    monkeypatch.setattr(evolve_loop, "_evaluate_in_subcontext", fake_eval)
+
+    _run_generation_parallel(
+        ctx,
+        config={"model": {"name": "m"}},
+        agent_backend=None,
+        cli_provider=None,
+        max_parallelism=2,
+        generation=1,
+        children_per_generation=2,
+        population=population,
+        population_path=population_path,
+        rng=random.Random(0),
+        k_top_inspirations=1,
+        k_random_inspirations=1,
+        selection_temperature=0.5,
+        objective="obj",
+        objectives=None,
+        frontier_bias=0.7,
+        modality="text_generation",
+        pass_criteria="crit",
+        keep_modal_apps=False,
+    )
+
+    assert called is False  # commit-less parent never dispatched
+    assert all(i.generation == 0 for i in population.all)  # nothing recorded
+
+
+# ---------------------------------------------------------------------------
+# Isolated sub-context evaluation (worktree + own logger/agent-runner)
+# ---------------------------------------------------------------------------
+
+
+def test_evaluate_in_subcontext_skips_parent_without_commit():
+    """A parent with no commit can't seed a worktree — folded into a failed
+    outcome without ever building a sub-context."""
+    logs: list[str] = []
+    parent_ctx = SimpleNamespace(lprint=logs.append)
+    parentless = Individual(id=3, generation=1, parent_id=1, commit=None, passed=True, summary="x")
+
+    outcome = _evaluate_in_subcontext(
+        parent_ctx,
+        config={"model": {"name": "m"}},
+        agent_backend=None,
+        cli_provider=None,
+        generation=2,
+        child_idx=1,
+        parent=parentless,
+        inspirations=[],
+        objective="obj",
+        objectives=None,
+        modality="text_generation",
+        pass_criteria="crit",
+        keep_modal_apps=False,
+        worktree_lock=threading.Lock(),
+    )
+
+    assert outcome.passed is False
+    assert outcome.parent_id == 3
+    assert "no parent commit" in outcome.summary
+    assert any("no parent commit" in line for line in logs)
+
+
+def test_evaluate_in_subcontext_builds_worktree_and_evaluates(tmp_path, ref_file):
+    """End-to-end: a real parent context spawns an isolated candidate sub-context
+    (git worktree at the parent commit + its own logger/agent-runner), evaluates
+    it, and the offspring commit lands in the parent's shared object store."""
+    runner = _make_runner(mutator_writes=True)
+    with (
+        patch("vibesys.context.build_model", return_value="mock-model"),
+        patch("vibesys.backends.cuda.LocalShellBackend"),
+        patch("vibesys.context.build_agent_runner", return_value=runner),
+        patch("vibesys.context.PROJECT_ROOT", tmp_path),
+        create_run_context(
+            config={"model": {"name": "claude-sonnet-4-6"}},
+            exp_name="test-parallel-subctx",
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
+            skills_dirs=[],
+            run_environment=RunEnvironmentSpec("local"),
+            environment_hooks=LLMServingEnvironmentHooks(),
+            git_tracking=True,
+        ) as parent,
+    ):
+        base_commit = parent.git.current_sha()
+        assert base_commit is not None
+        parent_ind = Individual(
+            id=1,
+            generation=0,
+            parent_id=None,
+            commit=base_commit,
+            perf_metric=1.0,
+            perf_unit="tok/s",
+            passed=True,
+            summary="seed",
+        )
+
+        outcome = _evaluate_in_subcontext(
+            parent,
+            config={"model": {"name": "claude-sonnet-4-6"}},
+            agent_backend=None,
+            cli_provider=None,
+            generation=1,
+            child_idx=1,
+            parent=parent_ind,
+            inspirations=[],
+            objective="Maximize tok/s throughput.",
+            objectives=None,
+            modality="text_generation",
+            pass_criteria="be faster",
+            keep_modal_apps=False,
+            worktree_lock=threading.Lock(),
+        )
+
+        assert outcome.passed is True
+        assert outcome.parent_id == 1
+        assert outcome.perf_metric == 10.0
+        assert outcome.commit and outcome.commit != base_commit
+        # The offspring commit is reachable from the parent repo — the worktree
+        # shared its object store, so the candidate joins the one lineage.
+        assert (
+            parent.git.run(["git", "cat-file", "-e", outcome.commit], check=False).returncode == 0
+        )
+        # The candidate's worktree is torn down when its sub-context closes.
+        cand_ws = parent.exp_dir / "candidates" / f"{parent.exp_dir.name}-g1c1" / "workspace"
+        assert not cand_ws.exists()
+
+
+def test_max_parallelism_ignored_on_non_modal_env(tmp_path, ref_file, monkeypatch):
+    """--max-parallelism > 1 on a non-Modal env logs a downgrade and runs the
+    serial path (parallel orchestrator is never entered)."""
+    called = {"parallel": False}
+    monkeypatch.setattr(
+        evolve_loop,
+        "_run_generation_parallel",
+        lambda *a, **k: called.__setitem__("parallel", True),
+    )
+    runner = _make_runner(judge_verdicts=["pass", "pass", "pass"])
+    _invoke_loop(
+        tmp_path,
+        ref_file,
+        runner,
+        max_generations=1,
+        children_per_generation=1,
+        max_parallelism=4,  # local env → must downgrade to serial
+    )
+    assert called["parallel"] is False
+    pop = _load_population(tmp_path)
+    assert len(pop) == 2  # bootstrap seed + one serial gen-1 candidate
 
 
 def test_loop_tears_down_candidate_on_pass_and_fail_paths(tmp_path, ref_file):
