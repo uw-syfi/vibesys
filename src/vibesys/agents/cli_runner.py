@@ -24,7 +24,7 @@ import shutil
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, TextIO, TypeVar
+from typing import Any, Protocol, TextIO, TypeVar, cast
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
@@ -380,8 +380,9 @@ class CliAgentRunner:
             )
             if self._provider == "codex" and hasattr(agent, "base_config_args"):
                 # Codex-only attribute, guarded by the hasattr check above.
-                agent.base_config_args.extend(
-                    [  # pyright: ignore[reportAttributeAccessIssue]
+                codex_agent = cast(CodexCodingAgent, agent)
+                codex_agent.base_config_args.extend(
+                    [
                         "--config",
                         'cli_auth_credentials_store="file"',
                         "--config",
@@ -461,7 +462,7 @@ class CliAgentRunner:
                     "retrying with a fresh thread.",
                     self._run_log_file,
                 )
-                agent.session_id = None
+                cast(CodexCodingAgent, agent).session_id = None
                 text = agent.generate(
                     combined_prompt,
                     cwd=workspace_arg,
