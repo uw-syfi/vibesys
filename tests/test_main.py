@@ -617,6 +617,32 @@ def test_resume_github_repo_clones_into_exp_env(monkeypatch, tmp_path):
     ]
 
 
+def test_resume_github_repo_reuses_matching_local_clone(monkeypatch, tmp_path):
+    import vibesys.main as cli
+
+    destination = tmp_path / "exp_env" / "trial"
+    destination.mkdir(parents=True)
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    def fake_run(command, **_kwargs):
+        assert command == ["git", "remote", "get-url", "origin"]
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "git@github.com:vibesys-playground/trial.git\n",
+            "",
+        )
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        cli,
+        "GitHubCLI",
+        lambda: pytest.fail("matching local clone should not invoke GitHub CLI"),
+    )
+
+    assert _resolve_run_dir("vibesys-playground/trial") == "trial"
+
+
 def test_resume_github_repo_explains_missing_authentication(monkeypatch, tmp_path):
     import vibesys.main as cli
 
