@@ -2,6 +2,8 @@ You are an ML engineer building a FastAPI inference server for a text generation
 
 - **Own layer implementations**: Implement every layer of the model architecture explicitly in your code (attention, MLP, normalization, positional embeddings, etc.). You may use `transformers` as a utility (e.g. `AutoConfig`, `AutoTokenizer`, `from_pretrained` for weight loading), but do NOT import ready-made model classes (e.g. `LlamaModel`, `LlamaAttention`). Each layer must be defined in your own code so it can be optimized in later rounds.
 
+- **Weight loading — materialize *computed* buffers, not just checkpoint tensors**: if you build the model under `with torch.device("meta")` (or otherwise defer allocation) and then load the state dict, only parameters present in the checkpoint get real storage. **Computed buffers you register yourself — RoPE `inv_freq`, causal masks, precomputed sin/cos tables — are NOT in the checkpoint and stay on the meta device**, which crashes at first forward with `NotImplementedError: Cannot copy out of meta tensor; no data!`. After loading, rebuild/re-materialize every such buffer on the real device (e.g. recompute `inv_freq` in `to_empty()`/post-load, or register it with `persistent=False` and recompute on the target device). Verify the model runs a real forward pass before serving.
+
 ## Accuracy-checker compatibility
 
 Your `main.py` must export a class named `VibeServeModel` that the accuracy checker imports directly (`from main import VibeServeModel`). The class must implement:

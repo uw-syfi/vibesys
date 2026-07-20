@@ -10,16 +10,24 @@ are patched out — same pattern as ``tests/test_orchestrate.py``.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from vibesys.agents import AgentRunner
-from vibesys.loops.evolve.loop import run_evolve_loop
+from vibesys.loops.evolve.loop import (
+    _candidate_runtime_notes,
+    _latest_wip_seed,
+    _recent_failure_lessons,
+    run_evolve_loop,
+)
 from vibesys.loops.evolve.population import (
+    Individual,
     Objective,
     Population,
 )
+from vibesys.sandbox.run_environment import candidate_modal_app_name
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
 
 # ---------------------------------------------------------------------------
@@ -48,6 +56,7 @@ def _make_runner(
     judge_verdicts: list[str] | None = None,
     profiler_responses: list[ProfilerSummary] | None = None,
     capture_mutator_prompts: list[str] | None = None,
+    mutator_writes: bool = False,
 ):
     """Build a MagicMock AgentRunner with scripted responses.
 
@@ -68,6 +77,15 @@ def _make_runner(
             counters["mutator"] += 1
             if capture_mutator_prompts is not None:
                 capture_mutator_prompts.append(system_prompt)
+            # Simulate a real edit so the cold-start snapshot has something to
+            # commit (a WIP repair-seed). Without a file change the snapshot is
+            # a no-op and no commit is recorded.
+            if mutator_writes:
+                workspace = kwargs.get("workspace")
+                if workspace is not None:
+                    (Path(workspace) / f"mutant_{counters['mutator']}.py").write_text(
+                        f"# mutant {counters['mutator']}\n"
+                    )
             return MutatorResponse(
                 summary=f"mutator call {counters['mutator']}",
                 hypothesis="should be faster",
@@ -139,21 +157,24 @@ def _load_population(tmp_path) -> Population:
 
 
 # ---------------------------------------------------------------------------
-# Cold start
+# Bootstrap phase (runs before the generation loop)
 # ---------------------------------------------------------------------------
+#
+# ``max_generations=0`` runs the bootstrap phase only (the generation loop is
+# an empty ``range(1, 1)``), which isolates bootstrap behavior. The mock runner
+# counts calls globally, so every multi-generation run has one extra gen-0
+# bootstrap round (one mutator + one judge + one profiler) in front.
 
 
-def test_cold_start_records_first_individual_with_no_parent(tmp_path, ref_file):
-    """Generation 1 child 1 has no parent (population empty); a passing
-    judge produces an Individual with parent_id=None and a perf_metric
-    from the profiler."""
+def test_bootstrap_succeeds_first_try(tmp_path, ref_file):
+    """Bootstrap produces the first passing implementation as a generation-0
+    seed with parent_id=None and a perf_metric from the profiler."""
     runner = _make_runner()
     result = _invoke_loop(
         tmp_path,
         ref_file,
         runner,
-        max_generations=1,
-        children_per_generation=1,
+        max_generations=0,  # bootstrap only
     )
     assert result is True
 
@@ -161,6 +182,7 @@ def test_cold_start_records_first_individual_with_no_parent(tmp_path, ref_file):
     assert len(pop) == 1
     seed = pop.all[0]
     assert seed.id == 1
+    assert seed.generation == 0
     assert seed.parent_id is None
     assert seed.passed is True
     assert seed.perf_metric == 10.0
@@ -168,10 +190,162 @@ def test_cold_start_records_first_individual_with_no_parent(tmp_path, ref_file):
     assert seed.commit  # an actual git SHA was recorded
 
 
-def test_cold_start_skips_profiler_when_judge_fails(tmp_path, ref_file):
-    """A failed cold-start child doesn't get profiled — its Individual
-    is recorded with passed=False and no commit."""
-    runner = _make_runner(judge_verdicts=["fail"])
+def test_bootstrap_fails_all_attempts_returns_false(tmp_path, ref_file):
+    """When every bootstrap attempt fails the judge, the run aborts before the
+    generation loop and returns False. Failed attempts are never profiled, and
+    with no mutator edits they record no commit."""
+    runner = _make_runner(judge_verdicts=["fail", "fail"])
+    result = _invoke_loop(
+        tmp_path,
+        ref_file,
+        runner,
+        bootstrap_max_attempts=2,
+        max_generations=0,
+    )
+    assert result is False
+    assert runner.counters["mutator"] == 2
+    assert runner.counters["judge"] == 2
+    assert runner.counters["profiler"] == 0  # judged-fail attempts skip profiling
+
+    pop = _load_population(tmp_path)
+    assert len(pop) == 2
+    for ind in pop.all:
+        assert ind.passed is False
+        assert ind.generation == 0
+        assert ind.commit is None  # no edits → no WIP snapshot
+    assert "needs work" in pop.all[0].feedback
+
+
+def test_bootstrap_failed_attempt_records_wip_seed_commit(tmp_path, ref_file):
+    """A failed bootstrap attempt whose mutator actually edited the workspace is
+    snapshotted to a WIP commit, so a later attempt can repair it in place."""
+    runner = _make_runner(judge_verdicts=["fail"], mutator_writes=True)
+    result = _invoke_loop(
+        tmp_path,
+        ref_file,
+        runner,
+        bootstrap_max_attempts=1,
+        max_generations=0,
+    )
+    assert result is False  # single attempt, failed → no seed
+
+    pop = _load_population(tmp_path)
+    assert len(pop) == 1
+    failed = pop.all[0]
+    assert failed.passed is False
+    assert failed.generation == 0
+    assert failed.parent_id is None
+    assert failed.commit  # WIP snapshot recorded because the tree changed
+
+
+def test_bootstrap_repairs_wip_seed_across_attempts(tmp_path, ref_file):
+    """A second bootstrap attempt fix-forwards from the most-recent WIP seed:
+    it checks that commit out and mutates on top, yielding a fresh WIP commit
+    distinct from the first."""
+    runner = _make_runner(judge_verdicts=["fail", "fail"], mutator_writes=True)
+    result = _invoke_loop(
+        tmp_path,
+        ref_file,
+        runner,
+        bootstrap_max_attempts=2,
+        max_generations=0,
+    )
+    assert result is False
+
+    pop = _load_population(tmp_path)
+    assert len(pop) == 2
+    first, second = pop.all
+    assert first.passed is False and second.passed is False
+    assert first.generation == 0 and second.generation == 0
+    assert first.parent_id is None and second.parent_id is None
+    # Both attempts snapshotted their (distinct) trees.
+    assert first.commit and second.commit
+    assert first.commit != second.commit
+
+
+def test_bootstrap_succeeds_after_repair(tmp_path, ref_file):
+    """Bootstrap that fails once then passes: the failed attempt is snapshotted,
+    the passing attempt repairs it in place and becomes the gen-0 seed. Only the
+    passing attempt is profiled."""
+    runner = _make_runner(judge_verdicts=["fail", "pass"], mutator_writes=True)
+    result = _invoke_loop(
+        tmp_path,
+        ref_file,
+        runner,
+        bootstrap_max_attempts=3,
+        max_generations=0,
+    )
+    assert result is True
+    assert runner.counters["profiler"] == 1  # only the passing attempt profiled
+
+    pop = _load_population(tmp_path)
+    assert len(pop) == 2
+    failed, seed = pop.all
+    assert failed.passed is False and failed.commit
+    assert seed.passed is True
+    assert seed.generation == 0
+    assert seed.parent_id is None
+    # The passing seed built on the repaired WIP tree → distinct commit.
+    assert seed.commit and seed.commit != failed.commit
+
+
+def test_bootstrap_prompt_uses_cold_start_section(tmp_path, ref_file):
+    """The bootstrap attempt sees the cold-start branch of the mutator prompt
+    (no parent block)."""
+    captured: list[str] = []
+    runner = _make_runner(capture_mutator_prompts=captured)
+    _invoke_loop(
+        tmp_path,
+        ref_file,
+        runner,
+        max_generations=0,
+    )
+    assert len(captured) == 1
+    prompt = captured[0]
+    assert "Cold start" in prompt
+    assert "Parent (the implementation you are mutating)" not in prompt
+
+
+def test_evolve_with_preexisting_passing_seed_skips_bootstrap(tmp_path, ref_file):
+    """A resumed run whose population already has a passing seed skips the
+    bootstrap phase entirely and evolves straight off the seed."""
+    # First run: bootstrap-only, creates a passing gen-0 seed with a real commit.
+    _invoke_loop(tmp_path, ref_file, _make_runner(), max_generations=0)
+    exp_envs = list((tmp_path / "exp_env").iterdir())
+    assert len(exp_envs) == 1
+    exp_name = exp_envs[0].name
+
+    # Second run resumes that exp dir; bootstrap must NOT be called, and a
+    # gen-1 child must be appended off the seed.
+    with patch("vibesys.loops.evolve.loop._bootstrap_seed") as spy:
+        result = _invoke_loop(
+            tmp_path,
+            ref_file,
+            _make_runner(),
+            exp_name=exp_name,
+            existing=True,
+            max_generations=1,
+            children_per_generation=1,
+        )
+        spy.assert_not_called()
+    assert result is True
+
+    pop = _load_population(tmp_path)
+    assert len(pop) == 2  # gen-0 seed + one gen-1 child (same exp dir, resumed)
+    seed, child = pop.all
+    assert seed.generation == 0 and seed.parent_id is None
+    assert child.parent_id == seed.id
+
+
+# ---------------------------------------------------------------------------
+# Multi-generation: parent selection + lineage tracking
+# ---------------------------------------------------------------------------
+
+
+def test_first_generation_uses_bootstrap_seed_as_parent(tmp_path, ref_file):
+    """Gen 1's child must be tagged with parent_id pointing at the bootstrap
+    seed."""
+    runner = _make_runner()
     result = _invoke_loop(
         tmp_path,
         ref_file,
@@ -180,28 +354,24 @@ def test_cold_start_skips_profiler_when_judge_fails(tmp_path, ref_file):
         children_per_generation=1,
     )
     assert result is True
-    assert runner.counters["mutator"] == 1
-    assert runner.counters["judge"] == 1
-    assert runner.counters["profiler"] == 0  # judged-fail children skip profiling
 
     pop = _load_population(tmp_path)
-    assert len(pop) == 1
-    failed = pop.all[0]
-    assert failed.passed is False
-    assert failed.commit is None
-    assert failed.perf_metric is None
-    assert "needs work" in failed.feedback
+    assert len(pop) == 2  # bootstrap seed + one gen-1 child
+    seed, child = pop.all
+    assert seed.generation == 0
+    assert seed.parent_id is None
+    assert child.parent_id == seed.id
+    assert child.passed is True
+    # Seed and child were profiled separately; two distinct stub values.
+    assert {seed.perf_metric, child.perf_metric} == {10.0, 11.0}
 
 
-# ---------------------------------------------------------------------------
-# Multi-generation: parent selection + lineage tracking
-# ---------------------------------------------------------------------------
-
-
-def test_second_generation_uses_first_passing_child_as_parent(tmp_path, ref_file):
-    """After gen 1 produces a passing seed, gen 2's child must be tagged
-    with parent_id pointing at that seed."""
-    runner = _make_runner()
+def test_failed_child_excluded_from_future_parent_pool(tmp_path, ref_file):
+    """Bootstrap: pass (the seed). Gen 1: fail (no commit, not eligible as
+    parent). Gen 2: must still parent off the seed — never off the failed
+    Gen 1 child."""
+    # Judge order: bootstrap(pass), gen1(fail), gen2(pass).
+    runner = _make_runner(judge_verdicts=["pass", "fail", "pass"])
     result = _invoke_loop(
         tmp_path,
         ref_file,
@@ -210,67 +380,24 @@ def test_second_generation_uses_first_passing_child_as_parent(tmp_path, ref_file
         children_per_generation=1,
     )
     assert result is True
-
-    pop = _load_population(tmp_path)
-    assert len(pop) == 2
-    seed, child = pop.all
-    assert seed.parent_id is None
-    assert child.parent_id == seed.id
-    assert child.passed is True
-    # Both individuals were profiled separately; their perf numbers should
-    # be the two distinct values our stub generated (10.0 and 11.0).
-    assert {seed.perf_metric, child.perf_metric} == {10.0, 11.0}
-
-
-def test_failed_child_excluded_from_future_parent_pool(tmp_path, ref_file):
-    """Gen 1: pass. Gen 2: fail (no commit, not eligible as parent).
-    Gen 3: must still parent off Gen 1 — never off the failed Gen 2."""
-    # 3 mutators, 3 judges (pass, fail, pass), 2 profilers (pass children only).
-    runner = _make_runner(judge_verdicts=["pass", "fail", "pass"])
-    result = _invoke_loop(
-        tmp_path,
-        ref_file,
-        runner,
-        max_generations=3,
-        children_per_generation=1,
-    )
-    assert result is True
     assert runner.counters["mutator"] == 3
     assert runner.counters["judge"] == 3
-    assert runner.counters["profiler"] == 2  # only the passes
+    assert runner.counters["profiler"] == 2  # only the passes (seed + gen2)
 
     pop = _load_population(tmp_path)
     assert len(pop) == 3
-    g1, g2, g3 = pop.all
-    assert g1.passed is True
-    assert g2.passed is False
-    assert g2.commit is None
-    # The third child must descend from the seed (id=1), NOT from the
-    # failed g2 (id=2). g2 had no commit, so it can't be selected.
-    assert g3.parent_id == g1.id
+    seed, g1, g2 = pop.all
+    assert seed.passed is True
+    assert g1.passed is False
+    assert g1.commit is None
+    # The gen-2 child must descend from the seed, NOT from the failed g1
+    # (which has no commit and can't be selected).
+    assert g2.parent_id == seed.id
 
 
 # ---------------------------------------------------------------------------
 # Mutator prompt content
 # ---------------------------------------------------------------------------
-
-
-def test_cold_start_prompt_uses_cold_start_section(tmp_path, ref_file):
-    """The first child sees the cold-start branch of the mutator prompt."""
-    captured: list[str] = []
-    runner = _make_runner(capture_mutator_prompts=captured)
-    _invoke_loop(
-        tmp_path,
-        ref_file,
-        runner,
-        max_generations=1,
-        children_per_generation=1,
-    )
-    assert len(captured) == 1
-    prompt = captured[0]
-    assert "Cold start" in prompt
-    # No parent block when the population is empty.
-    assert "Parent (the implementation you are mutating)" not in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +436,7 @@ def test_pareto_mode_records_metrics_dict_on_individuals(tmp_path, ref_file):
         tmp_path,
         ref_file,
         runner,
-        max_generations=2,
+        max_generations=1,  # bootstrap seed + one gen-1 child
         children_per_generation=1,
         objectives=objectives,
         frontier_bias=1.0,
@@ -366,8 +493,7 @@ def test_pareto_addendum_appears_in_profiler_prompt(tmp_path, ref_file):
         tmp_path,
         ref_file,
         runner,
-        max_generations=1,
-        children_per_generation=1,
+        max_generations=0,  # only the bootstrap seed is profiled
         objectives=objectives,
         frontier_bias=1.0,
     )
@@ -387,8 +513,7 @@ def test_no_objectives_keeps_metrics_empty_and_legacy_behavior(tmp_path, ref_fil
         tmp_path,
         ref_file,
         runner,
-        max_generations=1,
-        children_per_generation=1,
+        max_generations=0,
         # Note: no `objectives` kwarg → single-objective mode.
     )
     assert result is True
@@ -398,21 +523,112 @@ def test_no_objectives_keeps_metrics_empty_and_legacy_behavior(tmp_path, ref_fil
 
 
 def test_second_child_prompt_includes_parent_block(tmp_path, ref_file):
-    """Gen 2's mutator prompt mentions the parent's perf_metric — one of
-    the few signals the mutator has to ground its change in fitness."""
+    """Gen 1's mutator prompt mentions the parent (bootstrap seed) perf_metric —
+    one of the few signals the mutator has to ground its change in fitness."""
     captured: list[str] = []
     runner = _make_runner(capture_mutator_prompts=captured)
     _invoke_loop(
         tmp_path,
         ref_file,
         runner,
-        max_generations=2,
+        max_generations=1,
         children_per_generation=1,
     )
-    assert len(captured) == 2
-    gen2_prompt = captured[1]
-    assert "Cold start" not in gen2_prompt
-    assert "Parent (the implementation you are mutating)" in gen2_prompt
+    assert len(captured) == 2  # bootstrap (cold-start) + gen-1 (parent block)
+    gen1_prompt = captured[1]
+    assert "Cold start" not in gen1_prompt
+    assert "Parent (the implementation you are mutating)" in gen1_prompt
     # The seed's perf_metric (10.0) was emitted by the profiler and should
     # appear in the parent block.
-    assert "10.0" in gen2_prompt
+    assert "10.0" in gen1_prompt
+
+
+# ---------------------------------------------------------------------------
+# Helper units: failure lessons, WIP-seed lookup, per-candidate Modal app
+# ---------------------------------------------------------------------------
+
+
+def _ind(id_, *, passed=False, parent_id=None, commit=None, feedback=""):
+    return Individual(
+        id=id_,
+        generation=1,
+        parent_id=parent_id,
+        passed=passed,
+        commit=commit,
+        feedback=feedback,
+    )
+
+
+def test_recent_failure_lessons_dedupes_and_orders_most_recent_first():
+    pop = Population()
+    pop.add(_ind(1, feedback="crash: CUDA out of memory"))
+    pop.add(_ind(2, feedback="crash: CUDA out of memory"))  # duplicate → collapsed
+    pop.add(_ind(3, feedback="server never bound to port"))
+    pop.add(_ind(4, passed=True, feedback="ignored because it passed"))
+
+    lessons = _recent_failure_lessons(pop, limit=3)
+    assert lessons == ["server never bound to port", "crash: CUDA out of memory"]
+
+
+def test_recent_failure_lessons_truncates_long_feedback():
+    pop = Population()
+    pop.add(_ind(1, feedback="x" * 5000))
+    (lesson,) = _recent_failure_lessons(pop, limit=1, max_chars=100)
+    assert lesson.endswith("…")
+    assert len(lesson) <= 102  # 100 chars + space + ellipsis
+
+
+def test_latest_wip_seed_returns_most_recent_failed_seed_with_commit():
+    pop = Population()
+    pop.add(_ind(1, commit="aaa"))  # failed cold-start seed
+    pop.add(_ind(2, commit="bbb"))  # newer failed cold-start seed
+    pop.add(_ind(3, passed=True, commit="ccc"))  # passing → not a WIP seed
+    pop.add(_ind(4, parent_id=2, commit="ddd"))  # has a parent → not cold-start
+
+    seed = _latest_wip_seed(pop)
+    assert seed is not None and seed.id == 2
+
+
+def test_latest_wip_seed_none_when_no_snapshotted_failure():
+    pop = Population()
+    pop.add(_ind(1, commit=None))  # failed but never snapshotted
+    pop.add(_ind(2, passed=True, commit="ccc"))
+    assert _latest_wip_seed(pop) is None
+
+
+def test_candidate_runtime_notes_substitutes_per_candidate_app_name():
+    base = "run-20260720-abcd1234-llama3"
+    ctx = SimpleNamespace(
+        run_environment_view=SimpleNamespace(
+            modal_app_name=base,
+            prompt_notes=f"Deploy to Modal app {base}; endpoint {base}-web.",
+        )
+    )
+    notes, app = _candidate_runtime_notes(ctx, generation=3, child_idx=2)
+    expected_app = candidate_modal_app_name(base, 3, 2)
+    assert app == expected_app
+    # Every occurrence of the base name is swapped for the candidate app name
+    # (which itself starts with the base + suffix, so the base survives only as
+    # that prefix — there is no bare, un-suffixed occurrence left).
+    assert notes == f"Deploy to Modal app {expected_app}; endpoint {expected_app}-web."
+    assert notes.count(expected_app) == 2
+
+
+def test_candidate_runtime_notes_noop_without_modal_app():
+    notes_in = "Local run; no Modal app."
+    ctx = SimpleNamespace(
+        run_environment_view=SimpleNamespace(modal_app_name=None, prompt_notes=notes_in)
+    )
+    notes, app = _candidate_runtime_notes(ctx, generation=1, child_idx=1)
+    assert app is None
+    assert notes == notes_in
+
+
+def test_candidate_modal_app_name_suffix_and_length():
+    short = candidate_modal_app_name("run-abc", 2, 5)
+    assert short == "run-abc-g2c5"
+
+    long_base = "r" * 80
+    name = candidate_modal_app_name(long_base, 12, 7)
+    assert name.endswith("-g12c7")
+    assert len(name) <= 63

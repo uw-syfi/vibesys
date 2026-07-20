@@ -246,6 +246,18 @@ def test_profiler_none_is_valid_with_modal(builder_name, validator_name, tmp_pat
     assert args.input_bundle.root == bundle.resolve()
 
 
+def test_validate_evolve_rejects_nonpositive_bootstrap_attempts(tmp_path):
+    """--bootstrap-max-attempts must be >= 1; 0 is a configuration error."""
+    import vibesys.main as cli
+
+    bundle = _write_input_bundle(tmp_path)
+    parser = cli._build_evolve_parser()
+    args = parser.parse_args(["--bootstrap-max-attempts", "0", "--input", str(bundle)])
+    assert args.bootstrap_max_attempts == 0
+    with pytest.raises(ConfigurationError):
+        cli._validate_evolve(args)
+
+
 @pytest.mark.parametrize(
     "argv",
     [

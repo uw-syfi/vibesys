@@ -82,6 +82,13 @@ class RunEnvironmentView:
     # Coarse environment label for prompt-template branching:
     # ``"local"`` | ``"docker"`` | ``"modal"``.
     env_kind: str = "local"
+    # Modal only: the per-run Modal app namespace prefix embedded in
+    # ``prompt_notes`` (``None`` for non-Modal envs).  Loops that evaluate
+    # many candidates against Modal use this to derive a *per-candidate* app
+    # name so each candidate deploys to a pristine app — otherwise all
+    # candidates share one app and the judge reads stale logs from the first
+    # (possibly broken) deploy for every later candidate.
+    modal_app_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -386,6 +393,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                 cli_modal_sandboxed=False,  # codex no longer runs inside Modal
                 host_device_reselect=False,
                 env_kind="modal",
+                modal_app_name=app_name,
             ),
             stop_on_close=True,
         )
@@ -513,6 +521,23 @@ def _modal_app_name(workspace: Path, fallback: str) -> str:
     return name[:63].rstrip("-") or "vibesys"
 
 
+def candidate_modal_app_name(base_app_name: str, generation: int, child_idx: int) -> str:
+    """Derive a per-candidate Modal app name from the per-run base name.
+
+    Every candidate in a run must deploy to its *own* Modal app: Modal app
+    logs are cumulative per app name, so if all candidates share one name the
+    judge reads the first (often broken) deploy's crash for every later
+    candidate and fails them identically.  We append a ``-g<gen>c<child>``
+    suffix, truncating the base to keep the whole name within Modal's 63-char
+    limit.  The leading timestamp+uuid in the base keeps it unique per run
+    even after truncation.
+    """
+    suffix = f"-g{generation}c{child_idx}"
+    keep = 63 - len(suffix)
+    trimmed = base_app_name[:keep].rstrip("-")
+    return f"{trimmed}{suffix}"
+
+
 def _modal_runtime_notes(gpu: str, app_name: str) -> str:
     """Render the Modal-mode runtime instructions for agent prompts.
 
@@ -576,6 +601,25 @@ def _modal_runtime_notes(gpu: str, app_name: str) -> str:
         "Use `modal.Volume.from_name(<that-name>)` and mount it at "
         "whatever container path you prefer (no fixed convention is "
         "required).\n"
+        "  - **The `reference/` directory (meta.json, config.json, "
+        "reference.py) exists ONLY in this local editor container — it is "
+        "NOT present inside the deployed Modal container.** Reading "
+        "`reference/meta.json` or `reference/config.json` from a relative "
+        "path at `@app.cls`/module import or `@modal.enter()` time will "
+        "crash the container with `FileNotFoundError` before `/health` can "
+        "serve, which fails every gate. Do NOT read local `reference/` "
+        "files at container runtime. Instead: (a) the pre-staged "
+        "model-weight Volume already contains the full HuggingFace snapshot "
+        "— `config.json`, tokenizer files, and the safetensors — so load "
+        "the model config and tokenizer from the *mounted volume path* at "
+        "runtime; and (b) if you need a value only found in "
+        "`reference/meta.json` (e.g. the `model_id`), read it in the editor "
+        "at build time and embed it as a module-level constant, or bake the "
+        "file into the image explicitly "
+        "(`image.add_local_file('reference/meta.json', "
+        "'/root/reference/meta.json')`). Verify startup with "
+        "`modal run main.py::<fn>` or a deploy + `/health` probe BEFORE "
+        "relying on the endpoint.\n"
         "  - Use `scaledown_window=120` on `@app.cls` so back-to-back "
         "benchmark calls reuse the warm container (KV cache, CUDA graphs, "
         "compiled grammars, etc. preserved between invocations within the "
