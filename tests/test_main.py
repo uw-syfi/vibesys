@@ -29,6 +29,7 @@ from vibesys.main import (
     parse_cli_invocation,
 )
 from vibesys.profilers import ProfilerKind
+from vs_github import GitHubCLI
 
 
 def _patch_loop_runner(loop_name: str, runner: Mock):
@@ -603,15 +604,35 @@ def test_resume_github_repo_clones_into_exp_env(monkeypatch, tmp_path):
 
     def fake_run(command, **_kwargs):
         commands.append(command)
-        Path(command[-1]).mkdir(parents=True)
+        if command[:3] == ["gh", "repo", "clone"]:
+            Path(command[-1]).mkdir(parents=True)
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "GitHubCLI", lambda: GitHubCLI(_runner=fake_run))
 
     assert _resolve_run_dir("vibesys-playground/trial") == "trial"
     assert commands == [
-        ["gh", "repo", "clone", "vibesys-playground/trial", str(tmp_path / "exp_env/trial")]
+        ["gh", "auth", "status", "--hostname", "github.com"],
+        ["gh", "repo", "clone", "vibesys-playground/trial", str(tmp_path / "exp_env/trial")],
     ]
+
+
+def test_resume_github_repo_explains_missing_authentication(monkeypatch, tmp_path):
+    import vibesys.main as cli
+
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    def fake_run(command, **_kwargs):
+        return subprocess.CompletedProcess(command, 1, "", "not logged into any GitHub hosts")
+
+    monkeypatch.setattr(cli, "GitHubCLI", lambda: GitHubCLI(_runner=fake_run))
+
+    with pytest.raises(ConfigurationError) as exc:
+        _resolve_run_dir("vibesys-playground/trial")
+
+    assert exc.value.diagnostic.code == "resume_clone_failed"
+    assert "gh auth login --hostname github.com" in exc.value.diagnostic.message
+    assert "not logged into any GitHub hosts" in exc.value.diagnostic.message
 
 
 def test_resume_rejects_creating_a_second_repository(tmp_path):

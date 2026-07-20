@@ -48,6 +48,7 @@ from vibesys.sandbox.run_environment import (
     make_run_environment_spec,
 )
 from vibesys.skills import DEFAULT_SKILL_ROOTS, resolve_skill_source_dirs
+from vs_github import GitHubCLI, GitHubCLIError
 
 if TYPE_CHECKING:
     from vibesys.loops.evolve.population import Objective
@@ -514,11 +515,18 @@ def _clone_experiment(remote: str) -> str:
             code="resume_clone_failed",
             stage="resume_resolution",
         )
-    command = (
-        ["gh", "repo", "clone", remote, str(destination)]
-        if REPOSITORY_SLUG.fullmatch(remote)
-        else ["git", "clone", remote, str(destination)]
-    )
+    if REPOSITORY_SLUG.fullmatch(remote):
+        try:
+            GitHubCLI().clone_repository(remote, destination)
+        except GitHubCLIError as exc:
+            _configuration_error(
+                f"Cannot clone experiment repository {remote!r}: {exc}",
+                code="resume_clone_failed",
+                stage="resume_resolution",
+            )
+        return destination.name
+
+    command = ["git", "clone", remote, str(destination)]
     try:
         result = subprocess.run(command, capture_output=True, text=True)
     except FileNotFoundError as exc:

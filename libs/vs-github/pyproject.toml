@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vs-github"
+version = "0.1.0"
+description = "Typed GitHub CLI integration for VibeSys"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["vs_github*"]
+
+[tool.setuptools.package-data]
+vs_github = ["py.typed"]

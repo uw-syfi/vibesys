@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 from vibesys.run import ExperimentRepository, RepositoryVisibility
+from vs_github import GitHubCLI
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -57,7 +58,11 @@ def test_create_remote_uses_configurable_slug_and_visibility(tmp_path, monkeypat
         )
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    repository = ExperimentRepository(experiment, lambda _message: None)
+    repository = ExperimentRepository(
+        experiment,
+        lambda _message: None,
+        github=GitHubCLI(_runner=fake_run),
+    )
     repository.create_remote("vibesys-playground/example", RepositoryVisibility.INTERNAL)
 
     assert commands[-1][:5] == [

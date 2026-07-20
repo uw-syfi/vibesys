@@ -5,10 +5,11 @@ from __future__ import annotations
 import os
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from vibesys.repository import REPOSITORY_SLUG, RepositoryVisibility
+from vs_github import GitHubCLI
 
 _EXPERIMENT_GITIGNORE = """\
 # Runtime logs are useful locally but are noisy and may contain provider output.
@@ -23,6 +24,7 @@ class ExperimentRepository:
 
     root: Path
     log: Callable[[str], None]
+    github: GitHubCLI = field(default_factory=GitHubCLI)
 
     _GIT_IDENTITY = {
         "GIT_AUTHOR_NAME": "vibesys",
@@ -39,19 +41,10 @@ class ExperimentRepository:
             raise ValueError(f"experiment repository already has an origin remote: {self.root}")
 
         self._ensure_gitignore()
-        self._run(
-            [
-                "gh",
-                "repo",
-                "create",
-                slug,
-                f"--{visibility.value}",
-                "--source",
-                str(self.root),
-                "--remote",
-                "origin",
-            ],
-            tool="GitHub CLI",
+        self.github.create_repository(
+            slug,
+            visibility=visibility.value,
+            source=self.root,
         )
         self.log(f"[repo] created GitHub repository {slug}")
 
