@@ -22,6 +22,29 @@ path.
 - Keep compatibility wrappers thin. New behavior should live in the canonical
   implementation module or reusable library.
 
+## Unidirectional Data Flow
+
+Treat unidirectional data flow as the default architecture principle. Inputs
+move through core behavior into typed outputs or events, which consumers then
+interpret. Dependencies should not point back from core behavior into the
+adapters or presentation layers that consume its results.
+
+- Write core orchestration against stable protocols and data contracts, not
+  concrete sandbox, compute backend, renderer, or CLI implementations.
+- Keep most behavior sandbox-strategy-agnostic. Sandbox-specific decisions
+  belong in the sandbox implementations, their factories, or narrowly scoped
+  adapters at the boundary.
+- Treat backend event schemas as the frontend contract. Frontends own rendering
+  and UI state and should consume only published event data; the backend should
+  emit semantic information without knowing how any frontend formats, styles,
+  or displays it.
+- Keep cross-boundary values typed and explicit. Do not reach through an
+  interface to depend on implementation details or branch on concrete
+  implementation names outside the composition layer that selects them.
+- Introduce an abstraction when it creates a genuine ownership boundary,
+  clarifies the direction of data flow, or removes meaningful duplication. Do
+  not add indirection without a concrete contract to protect.
+
 ## Python Code
 
 - Use typed Python 3.11+ patterns already present in the repo.
@@ -45,6 +68,50 @@ path.
   entries together, and use `FeatureFlag.X` at call sites.
 - Avoid implicit fallback behavior for agent-visible contracts unless the
   fallback is documented and tested.
+
+## Contract Ownership And Evolution
+
+- Keep one authoritative definition for cross-language and cross-process
+  contracts. Generate downstream types from it where practical instead of
+  maintaining parallel handwritten schemas.
+- Keep event and protocol payloads semantic rather than presentation-ready.
+  Formatting, truncation, colors, labels, and layout belong to consumers.
+- Prefer backward-compatible, additive contract changes. When a change is
+  incompatible, update the protocol version and make the compatibility boundary
+  explicit.
+- Test serialized contracts at the boundary: round-trip representative payloads
+  and exercise the consumers that depend on them.
+
+## External CLI Tools
+
+Subprocess calls are an integration boundary. When an external CLI interaction
+is repeated, stateful, parsed, or otherwise significant, put it behind a focused
+Python interface instead of spreading command construction and output parsing
+through business logic.
+
+- Give the wrapper typed inputs and domain-level return values. Translate
+  missing executables, timeouts, nonzero exit codes, and malformed output into
+  actionable domain errors.
+- Document the public interface clearly, including prerequisites, side effects,
+  return values, failure modes, and whether operations are idempotent.
+- Build commands as argument sequences rather than interpolated shell strings
+  unless shell behavior is required. Set the working directory, environment,
+  text encoding, and timeout deliberately.
+- Preserve useful command diagnostics, but never expose credentials, tokens, or
+  other sensitive environment values in logs or exceptions.
+- Make the command runner injectable when useful so tests can cover behavior
+  without requiring the real external tool.
+- Keep trivial, one-off process calls local when a wrapper would not clarify a
+  contract or improve testability.
+
+## Resource Lifecycle
+
+- The component that creates a sandbox, subprocess, thread, temporary resource,
+  or event subscription owns its cleanup.
+- Cleanup must be deterministic and cover success, failure, timeout, and
+  cancellation paths. Prefer context managers or explicit `close()` protocols.
+- Make cleanup idempotent when callers may retry or unwind partially completed
+  setup. Do not leave ownership or process lifetime implicit.
 
 ## Prompts, Templates, And Skills
 
@@ -77,6 +144,15 @@ For prompt changes, include the snapshot diff in your review. For config,
 metadata, feature flags, and persisted-state changes, test both valid input and
 failure cases.
 
+- Use shared contract tests for interchangeable implementations, especially
+  sandbox strategies and compute backends.
+- Test external CLI adapters with fake runners and representative success,
+  missing-tool, timeout, nonzero-exit, and malformed-output cases.
+- Test event changes through serialization and each affected consumer, not only
+  at the producer.
+- Prefer assertions about observable contracts over assertions tied to private
+  implementation details.
+
 ## Avoid
 
 - Large unrelated refactors.
@@ -86,4 +162,8 @@ failure cases.
 - Silent acceptance of misspelled config or metadata.
 - Mixing domain knowledge, execution policy, and interface mechanics in one
   place.
+- Concrete sandbox or renderer checks in otherwise strategy-agnostic core code.
+- Presentation formatting in backend event producers.
+- Scattered subprocess command construction and output parsing for the same
+  external tool.
 - Updating generated-looking artifacts without checking what behavior changed.
