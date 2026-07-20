@@ -149,15 +149,17 @@ export class SocketSessionController implements SessionController {
 
   async #drainChatQueue(): Promise<void> {
     try {
-      for (let message = this.#chatQueue.shift(); message; message = this.#chatQueue.shift()) {
+      while (this.#chatQueue.length > 0) {
+        const messages = this.#chatQueue.splice(0);
+        const messageIds = new Set(messages.map(message => message.id));
         this.#setState({
           ...this.#state,
           chatPending: true,
           chatConversation: this.#state.chatConversation.map(entry =>
-            entry.id === message.id ? {...entry, label: 'You'} : entry,
+            messageIds.has(entry.id) ? {...entry, label: 'You'} : entry,
           ),
         });
-        await this.#requestChat(message.text);
+        await this.#requestChat(messages.map(message => message.text).join('\n\n'));
       }
     } finally {
       this.#setState({...this.#state, chatPending: false});

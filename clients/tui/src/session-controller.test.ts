@@ -200,17 +200,19 @@ describe('session controller', () => {
     expect(transport.requests).toEqual([{type: 'query.chat', text: 'why?'}]);
   });
 
-  it('queues messages entered while the chat agent is still working', async () => {
+  it('batches messages queued while the chat agent is still working', async () => {
     const transport = new DeferredChatTransport();
     const controller = new SocketSessionController(transport);
 
     const first = controller.sendChat('first question');
     const second = controller.sendChat('follow-up question');
+    const third = controller.sendChat('one more detail');
 
     expect(transport.requests).toEqual([{type: 'query.chat', text: 'first question'}]);
     expect(controller.state.chatConversation).toMatchObject([
       {kind: 'user', label: 'You', content: 'first question'},
       {kind: 'user', label: 'You · queued', content: 'follow-up question'},
+      {kind: 'user', label: 'You · queued', content: 'one more detail'},
     ]);
 
     transport.resolveNext('first answer');
@@ -219,20 +221,46 @@ describe('session controller', () => {
 
     expect(transport.requests).toEqual([
       {type: 'query.chat', text: 'first question'},
-      {type: 'query.chat', text: 'follow-up question'},
+      {type: 'query.chat', text: 'follow-up question\n\none more detail'},
     ]);
     expect(controller.state.chatConversation[1]?.label).toBe('You');
+    expect(controller.state.chatConversation[2]?.label).toBe('You');
 
     transport.resolveNext('follow-up answer');
-    await Promise.all([first, second]);
+    await Promise.all([first, second, third]);
 
     expect(controller.state.chatPending).toBe(false);
     expect(controller.state.chatConversation.map(entry => entry.content)).toEqual([
       'first question',
       'follow-up question',
+      'one more detail',
       'first answer',
       'follow-up answer',
     ]);
+  });
+
+  it('starts a new batch for messages entered after a queued batch is sent', async () => {
+    const transport = new DeferredChatTransport();
+    const controller = new SocketSessionController(transport);
+
+    const first = controller.sendChat('first');
+    const second = controller.sendChat('second');
+    const third = controller.sendChat('third');
+    transport.resolveNext('first answer');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(transport.requests.at(-1)).toEqual({type: 'query.chat', text: 'second\n\nthird'});
+
+    const fourth = controller.sendChat('fourth');
+    transport.resolveNext('batched answer');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(transport.requests.at(-1)).toEqual({type: 'query.chat', text: 'fourth'});
+
+    transport.resolveNext('fourth answer');
+    await Promise.all([first, second, third, fourth]);
   });
 
   it('shows chat request failures as explicit failed trajectory entries', async () => {
