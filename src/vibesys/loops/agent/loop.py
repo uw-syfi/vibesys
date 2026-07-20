@@ -672,6 +672,7 @@ def _run_framework_accuracy_gate(
 
 
 _FRAMEWORK_BENCHMARK_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
+_FRAMEWORK_BENCHMARK_END_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
 
 
 def _metric_values(value: object, metric: str) -> list[object]:
@@ -709,6 +710,7 @@ def _run_framework_benchmark(
         f"{base_command} {shlex.quote(result_spec.json_argument)} {shlex.quote(output_path)}"
         f" && printf '\\n{_FRAMEWORK_BENCHMARK_MARKER}\\n'"
         f" && cat {shlex.quote(output_path)}"
+        f" && printf '\\n{_FRAMEWORK_BENCHMARK_END_MARKER}\\n'"
     )
     ctx.lprint(f"[framework-benchmark] running: {base_command}")
     metric_value: float | None = None
@@ -732,8 +734,9 @@ def _run_framework_benchmark(
             passed = False
 
     if passed:
-        _, marker, encoded = output.rpartition(_FRAMEWORK_BENCHMARK_MARKER)
-        if not marker:
+        _, marker, framed = output.rpartition(_FRAMEWORK_BENCHMARK_MARKER)
+        encoded, end_marker, _ = framed.partition(_FRAMEWORK_BENCHMARK_END_MARKER)
+        if not marker or not end_marker:
             output = f"{output}\nbenchmark output did not include its result JSON".strip()
             passed = False
         else:

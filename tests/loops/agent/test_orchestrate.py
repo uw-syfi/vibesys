@@ -324,6 +324,7 @@ def test_framework_accuracy_gate_rejects_changes_during_execution(tmp_path):
 def test_framework_benchmark_extracts_declared_metric(tmp_path):
     from vibesys.input_manifest import BenchmarkResult
     from vibesys.loops.agent.loop import (
+        _FRAMEWORK_BENCHMARK_END_MARKER,
         _FRAMEWORK_BENCHMARK_MARKER,
         _run_framework_benchmark,
     )
@@ -334,7 +335,9 @@ def test_framework_benchmark_extracts_declared_metric(tmp_path):
     ctx.judge_backend.execute.return_value = SimpleNamespace(
         exit_code=0,
         output=(
-            f'benchmark diagnostics\n{_FRAMEWORK_BENCHMARK_MARKER}\n[{{"total_ops_per_sec": 42.5}}]'
+            f"benchmark diagnostics\n{_FRAMEWORK_BENCHMARK_MARKER}\n"
+            f'[{{"total_ops_per_sec": 42.5}}]\n{_FRAMEWORK_BENCHMARK_END_MARKER}\n'
+            "[stderr] benchmark diagnostics emitted after stdout"
         ),
     )
 
@@ -354,12 +357,14 @@ def test_framework_benchmark_extracts_declared_metric(tmp_path):
     executed = ctx.judge_backend.execute.call_args.args[0]
     assert "trusted-benchmark --repetitions 3 --output-json" in executed
     assert "cat /tmp/vibesys-framework-benchmark-3-1.json" in executed
+    assert _FRAMEWORK_BENCHMARK_END_MARKER in executed
     assert "total_ops_per_sec**: 42.5" in (tmp_path / "progress.md").read_text()
 
 
 def test_framework_benchmark_rejects_ambiguous_metric(tmp_path):
     from vibesys.input_manifest import BenchmarkResult
     from vibesys.loops.agent.loop import (
+        _FRAMEWORK_BENCHMARK_END_MARKER,
         _FRAMEWORK_BENCHMARK_MARKER,
         _run_framework_benchmark,
     )
@@ -369,7 +374,10 @@ def test_framework_benchmark_rejects_ambiguous_metric(tmp_path):
     ctx.trusted_input_changes.side_effect = [[], []]
     ctx.judge_backend.execute.return_value = SimpleNamespace(
         exit_code=0,
-        output=(f'{_FRAMEWORK_BENCHMARK_MARKER}\n[{{"ops": 1}}, {{"ops": 2}}]'),
+        output=(
+            f'{_FRAMEWORK_BENCHMARK_MARKER}\n[{{"ops": 1}}, {{"ops": 2}}]\n'
+            f"{_FRAMEWORK_BENCHMARK_END_MARKER}"
+        ),
     )
 
     feedback, metric = _run_framework_benchmark(
