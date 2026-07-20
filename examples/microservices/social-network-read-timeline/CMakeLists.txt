@@ -21,6 +21,3 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 
 add_executable(checker accuracy_checker/checker.cpp)
 target_link_libraries(checker CURL::libcurl Threads::Threads nlohmann_json::nlohmann_json)
-
-add_executable(benchmark benchmark/benchmark.cpp)
-target_link_libraries(benchmark CURL::libcurl Threads::Threads nlohmann_json::nlohmann_json)

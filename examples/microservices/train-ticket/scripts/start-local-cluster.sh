@@ -381,9 +381,15 @@ case "${cmd}" in
       --direct-services
     ;;
   bench)
-    python3 "${INPUT_DIR}/benchmark/benchmark.py" \
-      --base-url "http://localhost:${TT_GATEWAY_PORT}" \
-      --direct-services \
+    command -v go >/dev/null || { echo "go is required" >&2; exit 127; }
+    go -C "${REPO_ROOT}/examples/evaluators/microservice" run ./cmd/microbench \
+      --workload "${INPUT_DIR}/benchmark/workload.toml" \
+      --target "config=http://localhost:15679" \
+      --target "station=http://localhost:12345" \
+      --target "train=http://localhost:14567" \
+      --target "travel=http://localhost:12346" \
+      --target "route=http://localhost:11178" \
+      --target "price=http://localhost:16579" \
       --rate "${TT_BENCH_RATE:-10}" \
       --duration "${TT_BENCH_DURATION:-30}" \
       --concurrency "${TT_BENCH_CONCURRENCY:-32}"

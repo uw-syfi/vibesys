@@ -117,7 +117,7 @@ Patches applied and nginx reloaded.
 
 **Important:** It should be noted that this step would have to be repeated every time the nginx container is recreated (i.e. after `docker compose down` + `docker compose up -d`).
 
-To build the checker and benchmark, run the following in the terminal: 
+To build the checker, run the following in the terminal:
 
 ```bash
 mkdir build && cd build
@@ -125,7 +125,8 @@ cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j4
 ```
 
-CMake automatically downloads `nlohmann/json` (v3.11.3) via `FetchContent` during the configure step. This might 10-15 seconds the first time it's run.
+CMake automatically downloads `nlohmann/json` (v3.11.3) via `FetchContent`
+during the configure step. This may take 10–15 seconds the first time.
 
 To run the checker:
 
@@ -158,51 +159,53 @@ Optional flags which can be included with the checker:
 ./checker --base-url http://localhost:8080 --timeout-ms 10000 --poll-ms 200
 ```
 
-For the benchmark, three load levels are available and they can be run individually:
+Run the shared evaluator from the repository root. The checked-in workload uses
+the original medium profile: 300 target RPS, 20 seconds of warmup, 120 seconds
+of measurement, 50 users, and 10 seed posts per user.
 
 ```bash
-./benchmark --base-url http://localhost:8080 --load-level light
-./benchmark --base-url http://localhost:8080 --load-level medium
-./benchmark --base-url http://localhost:8080 --load-level heavy
+go -C examples/evaluators/microservice run ./cmd/microbench \
+  --workload "$PWD/examples/microservices/social-network-read-timeline/benchmark/workload.toml" \
+  --base-url http://localhost:8080 \
+  --output-json /tmp/social-network.json \
+  --output-raw /tmp/social-network.ndjson
 ```
 
-On repeated runs, you can skip the benchmark user setup phase using this:
+On repeated runs against an already-prepared deployment, skip fixture setup:
 
 ```bash
-./benchmark --base-url http://localhost:8080 --load-level medium --skip-setup
+go -C examples/evaluators/microservice run ./cmd/microbench \
+  --workload "$PWD/examples/microservices/social-network-read-timeline/benchmark/workload.toml" \
+  --skip-prepare
 ```
-
-Load level parameters:
-
-
-| Level  | Target RPS | Duration | Warmup | Users |
-| ------ | ---------- | -------- | ------ | ----- |
-| light  | 100        | 60s      | 10s    | 20    |
-| medium | 300        | 120s     | 20s    | 50    |
-| heavy  | 600        | 180s     | 30s    | 100   |
-
 
 ### Output format
 
-The benchmark emits one JSON line per metric, followed by a summary line:
+The benchmark emits a versioned JSON summary and optionally one raw NDJSON
+record per request. The summary includes individual trials, latency and queue
+distributions, offered-load diagnostics, constraints, and the trusted scalar:
 
-```
-{"metric":"p50_ms","value":7.82}
-{"metric":"p95_ms","value":14.40}
-{"metric":"p99_ms","value":21.55}
-{"metric":"p999_ms","value":38.12}
-{"metric":"user_timeline_p50_ms","value":6.31}
-{"metric":"user_timeline_thrift_p50_ms","value":4.10}
-{"metric":"home_timeline_p50_ms","value":6.09}
-{"metric":"home_timeline_thrift_p50_ms","value":2.80}
-...
-{"metric":"throughput_rps","value":298.7}
-{"metric":"success_rate","value":1.0}
-{"metric":"cpu_percent","value":102.9}
-{"metric":"memory_mb","value":812.3}
+```json
+{
+  "schema_version": 1,
+  "primary_value": 3.25,
+  "primary_metric": {
+    "name": "p50_ms",
+    "metric": "latency_ms.p50",
+    "direction": "minimize",
+    "unit": "ms",
+    "tags": ["read"]
+  },
+  "valid": true,
+  "trials": [],
+  "aggregate": {}
+}
 ```
 
-`p50_ms` is the primary metric VibeSys uses to evaluate candidates. `user_timeline_thrift_p50_ms` and `home_timeline_thrift_p50_ms` are intermediate latencies (nginx to first Thrift service hop).
+`primary_value` is the median trial-level p50 scheduled-arrival latency for
+successful operations tagged `read`. A run is invalid unless its success rate
+is 1.0 and the load generator sustains at least 95% of the target rate. Thrift
+timing headers remain available in raw request records as intermediate timings.
 
 ## Rebuilding
 

@@ -3,10 +3,21 @@ version = 1
 [agent]
 domain = "microservices"
 
+[evaluator]
+source = "../../evaluators/microservice"
+
 [accuracy]
 command = ["uv", "run", "python", "accuracy_checker/checker.py"]
 timeout_seconds = 120
 
 [benchmark]
-command = ["uv", "run", "python", "benchmark/benchmark.py"]
+command = [
+  "go", "-C", "_evaluator/microservice",
+  "run", "./cmd/microbench",
+  "--workload", "../../benchmark/workload.toml",
+]
 timeout_seconds = 300
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "primary_value"

@@ -1,0 +1,148 @@
+version = 1
+name = "train-ticket-read-only"
+application = "declarative"
+
+[load]
+model = "open_loop"
+rate = 10
+duration_seconds = 30
+warmup_seconds = 0
+concurrency = 32
+timeout_seconds = 5
+repetitions = 1
+seed = 1
+min_offered_rate_ratio = 0.95
+
+[[targets]]
+name = "station"
+protocol = "http"
+address = "http://localhost:8080"
+session_policy = "new_per_request"
+
+[[targets]]
+name = "train"
+protocol = "http"
+address = "http://localhost:8080"
+session_policy = "new_per_request"
+
+[[targets]]
+name = "travel"
+protocol = "http"
+address = "http://localhost:8080"
+session_policy = "new_per_request"
+
+[[targets]]
+name = "route"
+protocol = "http"
+address = "http://localhost:8080"
+session_policy = "new_per_request"
+
+[[targets]]
+name = "price"
+protocol = "http"
+address = "http://localhost:8080"
+session_policy = "new_per_request"
+
+[[targets]]
+name = "config"
+protocol = "http"
+address = "http://localhost:8080"
+session_policy = "new_per_request"
+
+[[operations]]
+name = "stations"
+target = "station"
+weight = 3
+[operations.http]
+method = "GET"
+path = "/api/v1/stationservice/stations"
+[operations.expect]
+statuses = [200]
+json = true
+json_status_if_present = 1
+json_object_requires_status_or_data = true
+
+[[operations]]
+name = "trains"
+target = "train"
+weight = 3
+[operations.http]
+method = "GET"
+path = "/api/v1/trainservice/trains"
+[operations.expect]
+statuses = [200]
+json = true
+json_status_if_present = 1
+json_object_requires_status_or_data = true
+
+[[operations]]
+name = "trips"
+target = "travel"
+weight = 4
+[operations.http]
+method = "GET"
+path = "/api/v1/travelservice/trips"
+[operations.expect]
+statuses = [200]
+json = true
+json_status_if_present = 1
+json_object_requires_status_or_data = true
+
+[[operations]]
+name = "routes"
+target = "route"
+weight = 2
+[operations.http]
+method = "GET"
+path = "/api/v1/routeservice/routes"
+[operations.expect]
+statuses = [200]
+json = true
+json_status_if_present = 1
+json_object_requires_status_or_data = true
+
+[[operations]]
+name = "prices"
+target = "price"
+weight = 2
+[operations.http]
+method = "GET"
+path = "/api/v1/priceservice/prices"
+[operations.expect]
+statuses = [200]
+json = true
+json_status_if_present = 1
+json_object_requires_status_or_data = true
+
+[[operations]]
+name = "configs"
+target = "config"
+weight = 1
+[operations.http]
+method = "GET"
+path = "/api/v1/configservice/configs"
+[operations.expect]
+statuses = [200]
+json = true
+json_status_if_present = 1
+json_object_requires_status_or_data = true
+
+[[operations]]
+name = "travel_welcome"
+target = "travel"
+weight = 1
+[operations.http]
+method = "GET"
+path = "/api/v1/travelservice/welcome"
+[operations.expect]
+statuses = [200]
+text_contains = "Welcome to [ Travel Service ]"
+
+[objective]
+name = "requests_per_second"
+metric = "requests_per_second"
+direction = "maximize"
+unit = "requests/s"
+
+[constraints]
+max_error_rate = 0.0

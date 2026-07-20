@@ -12,7 +12,7 @@
   "workload": {
     "description": "Read-heavy. 50% user-timeline reads, 40% home-timeline reads, 10% composes to keep content fresh.",
     "primary_metric": "p50_ms (combined read latency)",
-    "secondary_metrics": ["p95_ms", "p99_ms", "p999_ms", "throughput_rps", "success_rate", "cpu_percent", "memory_mb"]
+    "secondary_metrics": ["p90_ms", "p95_ms", "p99_ms", "p999_ms", "queue_wait_ms", "protocol_time_ms", "success_rate", "offered_rate"]
   },
 
   "api": {

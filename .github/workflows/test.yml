@@ -124,7 +124,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: examples/evaluators/queue/go.mod
-          cache-dependency-path: examples/evaluators/queue/go.sum
+          cache-dependency-path: |
+            examples/evaluators/queue/go.sum
+            examples/evaluators/microservice/go.sum
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@1.78.0
@@ -158,6 +160,16 @@ jobs:
       - name: Test queue evaluator
         working-directory: examples/evaluators/queue
         run: go test -race ./...
+
+      - name: Test microservice evaluator
+        working-directory: examples/evaluators/microservice
+        run: go test -race ./...
+
+      - name: Validate microservice workloads
+        working-directory: examples/evaluators/microservice
+        run: |
+          go run ./cmd/microbench --workload ../../microservices/train-ticket/benchmark/workload.toml --validate-only
+          go run ./cmd/microbench --workload ../../microservices/social-network-read-timeline/benchmark/workload.toml --validate-only
 
   test:
     runs-on: ubuntu-latest

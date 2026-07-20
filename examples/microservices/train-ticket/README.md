@@ -1,8 +1,8 @@
-# Train Ticket Scripts
+# Train Ticket Evaluator Inputs
 
-Standalone accuracy and benchmark scripts for a running Train Ticket deployment.
-These scripts can be run directly and do not require a full `vibesys --input`
-optimization run.
+Accuracy and workload inputs for a running Train Ticket deployment. The checker
+is application-specific; the benchmark uses the shared Go microservice evaluator.
+Both can run without a full `vibesys --input` optimization run.
 
 Expected target for a gateway/proxy deployment:
 
@@ -14,13 +14,19 @@ The scripts call `/api/v1/...` endpoints through whichever base URL you pass.
 
 ```bash
 python examples/microservices/train-ticket/accuracy_checker/checker.py --base-url http://localhost:8080
-python examples/microservices/train-ticket/benchmark/benchmark.py --base-url http://localhost:8080 --rate 20 --duration 30 --output-json /tmp/train_ticket_bench.json
+go -C examples/evaluators/microservice run ./cmd/microbench \
+  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --base-url http://localhost:8080 \
+  --rate 20 \
+  --duration 30 \
+  --output-json /tmp/train_ticket_bench.json
 ```
 
-Both scripts use only the Python standard library.
+The checker uses only the Python standard library. The benchmark requires Go;
+its dependencies are pinned by `examples/evaluators/microservice/go.sum`.
 
-For the prebuilt-image local Docker Compose helper below, use
-`--direct-services` or the helper `check`/`bench` commands. The prebuilt
+For the prebuilt-image local Docker Compose helper below, use the helper
+`check`/`bench` commands. The prebuilt
 `codewisdom` 0.2.0 service images predate Nacos support and never register
 with the discovery server, so the published gateway image starts but returns
 `503` for every route — deterministically, not transiently. The gateway path
@@ -123,9 +129,14 @@ python examples/microservices/train-ticket/accuracy_checker/checker.py \
   --base-url http://localhost:18888 \
   --direct-services
 
-python examples/microservices/train-ticket/benchmark/benchmark.py \
-  --base-url http://localhost:18888 \
-  --direct-services \
+go -C examples/evaluators/microservice run ./cmd/microbench \
+  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --target config=http://localhost:15679 \
+  --target station=http://localhost:12345 \
+  --target train=http://localhost:14567 \
+  --target travel=http://localhost:12346 \
+  --target route=http://localhost:11178 \
+  --target price=http://localhost:16579 \
   --rate 10 \
   --duration 30 \
   --concurrency 32
@@ -137,7 +148,8 @@ Manual gateway runs after source-built deployment:
 python examples/microservices/train-ticket/accuracy_checker/checker.py \
   --base-url http://localhost:18888
 
-python examples/microservices/train-ticket/benchmark/benchmark.py \
+go -C examples/evaluators/microservice run ./cmd/microbench \
+  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
   --base-url http://localhost:18888 \
   --rate 10 \
   --duration 30 \
