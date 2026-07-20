@@ -2,6 +2,7 @@ import type {CliRenderer, KeyEvent, ScrollBoxRenderable} from '@opentui/core';
 import type {SessionController} from '../session-controller.js';
 
 export interface KeybindingActions {
+  completeInput(): boolean;
   toggleLatestPrompt(): void;
   selectNextAgent(): void;
   selectPreviousAgent(): void;
@@ -41,6 +42,10 @@ export function bindKeybindings(
     if (key.ctrl && key.name === 'l') {
       controller.live();
       viewport.scrollTo(viewport.scrollHeight);
+      key.preventDefault();
+      return;
+    }
+    if (key.name === 'tab' && !key.shift && actions.completeInput()) {
       key.preventDefault();
       return;
     }

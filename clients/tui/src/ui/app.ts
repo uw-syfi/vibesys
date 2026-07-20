@@ -67,6 +67,7 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
   root.add(main);
   root.add(todoStrip.output);
   root.add(help);
+  root.add(input.suggestions);
   root.add(input.box);
   root.add(overlay.output);
   renderer.root.add(root);
@@ -83,6 +84,7 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
     overlay.render(state);
   };
   const unbindKeys = bindKeybindings(renderer, controller, viewport, {
+    completeInput: () => input.completeSuggestion(),
     toggleLatestPrompt: () => conversation.toggleLatestPrompt(),
     selectNextAgent: () => controller.selectNextAgent(),
     selectPreviousAgent: () => controller.selectPreviousAgent(),

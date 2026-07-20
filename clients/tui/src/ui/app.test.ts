@@ -1,3 +1,4 @@
+import {InputRenderable} from '@opentui/core';
 import {createTestRenderer} from '@opentui/core/testing';
 import {afterEach, describe, expect, it} from 'vitest';
 import type {SessionController} from '../session-controller.js';
@@ -90,6 +91,39 @@ describe('OpenTUI presentation', () => {
     testRenderer.mockInput.pressEnter();
     await testRenderer.waitForFrame(() => controller.submissions.length === 1);
     expect(controller.submissions).toEqual(['/help']);
+  });
+
+  it('suggests and completes slash commands with Tab', async () => {
+    const testRenderer = await createTestRenderer({width: 80, height: 16});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    await testRenderer.mockInput.typeText('/hi');
+    const suggestions = await testRenderer.waitForFrame(value => value.includes('[Tab]'));
+    expect(suggestions).toContain('/history');
+    expect(suggestions).not.toContain('/help  ');
+    expect(suggestions).not.toContain('/perf');
+    expect(suggestions.indexOf('/history')).toBeLessThan(suggestions.indexOf('Ask or command'));
+    expect(testRenderer.renderer.root.findDescendantById('input-box')?.height).toBe(3);
+
+    testRenderer.mockInput.pressKey('TAB');
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.submissions.length === 1);
+    expect(controller.submissions).toEqual(['/history']);
+  });
+
+  it('highlights a leading slash-command token', async () => {
+    const testRenderer = await createTestRenderer({width: 80, height: 16});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    await testRenderer.mockInput.typeText('/steer inspect the cache');
+    const input = testRenderer.renderer.root.findDescendantById('input');
+    expect(input).toBeInstanceOf(InputRenderable);
+    if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
+    expect(input.getLineHighlights(0)).toMatchObject([{start: 0, end: 6}]);
   });
 
   it('exits on the first Ctrl-C even while the input is focused', async () => {
