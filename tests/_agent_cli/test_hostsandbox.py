@@ -124,6 +124,30 @@ class TestBuild:
         finally:
             weights.rmdir()
 
+    def test_codex_auth_file_survives_nested_codex_worktree_filter(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(hostsandbox.sys, "platform", "linux")
+        monkeypatch.setattr(hostsandbox.shutil, "which", lambda *a, **k: "/usr/bin/bwrap")
+        codex_home = tmp_path / ".codex"
+        workspace = codex_home / "worktrees" / "run" / "workspace"
+        workspace.mkdir(parents=True)
+        auth = codex_home / "auth.json"
+        config = codex_home / "config.toml"
+        auth.write_text('{"tokens": {}}\n')
+        config.write_text('model = "gpt-5.4"\n')
+
+        sb = hostsandbox.build(
+            workspace,
+            env={"HOME": str(tmp_path), "CODEX_HOME": str(codex_home)},
+        )
+
+        assert isinstance(sb, hostsandbox.HostSandbox)
+        assert codex_home not in sb.write_paths
+        assert auth in sb.write_paths
+        assert config in sb.write_paths
+        argv = sb.wrap(["codex", "login", "status"])
+        assert _has_pair(argv, "--dir", str(codex_home))
+        assert _has_pair(argv, "--bind-try", str(auth), str(auth))
+
 
 # ---------------------------------------------------------------------------
 # bwrap argv construction (no subprocess)
@@ -426,6 +450,34 @@ def test_sandbox_blocks_escape_but_allows_workspace(tmp_path_factory):
     # Legitimate workspace work is unaffected.
     assert "WS_OK" in out
     assert (workspace / "candidate.txt").read_text().strip() == "ok"
+
+
+@requires_sandbox
+def test_sandbox_exposes_codex_auth_but_not_sibling_worktrees(tmp_path):
+    codex_home = tmp_path / ".codex"
+    workspace = codex_home / "worktrees" / "run-A" / "workspace"
+    sibling = codex_home / "worktrees" / "run-B" / "secret.txt"
+    workspace.mkdir(parents=True)
+    sibling.parent.mkdir(parents=True)
+    sibling.write_text("sibling secret\n")
+    auth = codex_home / "auth.json"
+    auth.write_text("auth token\n")
+    config = codex_home / "config.toml"
+    config.write_text("model = 'gpt-5.4'\n")
+    env = {**os.environ, "HOME": str(tmp_path), "CODEX_HOME": str(codex_home)}
+
+    sandbox = hostsandbox.build(workspace, env=env, binary_path="/bin/sh")
+
+    assert isinstance(sandbox, hostsandbox.HostSandbox)
+    command = sandbox.wrap(
+        [
+            "/bin/sh",
+            "-c",
+            f'test "$(cat {auth})" = "auth token" && test ! -e {sibling}',
+        ]
+    )
+    result = subprocess.run(command, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 @requires_sandbox
