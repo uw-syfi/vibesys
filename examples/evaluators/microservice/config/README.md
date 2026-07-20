@@ -6,7 +6,7 @@ It provides:
 
 - strict decoding that reports unknown fields;
 - defaults for load and target behavior;
-- named load-profile overrides;
+- named load and application-fixture profile overrides;
 - structural and range validation for targets, operations, objectives, and
   constraints; and
 - canonical JSON serialization used to identify the fully resolved workload.

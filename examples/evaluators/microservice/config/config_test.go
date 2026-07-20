@@ -71,6 +71,8 @@ func TestLoadAppliesNamedProfile(t *testing.T) {
 [profiles.quick]
 rate = 3
 duration_seconds = 0.2
+[profiles.quick.application_config]
+users = 20
 `
 	workload, err := Load(writeWorkload(t, contents), "quick")
 	if err != nil {
@@ -78,5 +80,8 @@ duration_seconds = 0.2
 	}
 	if workload.Load.Rate != 3 || workload.Load.DurationSeconds != 0.2 {
 		t.Fatalf("profile not applied: %+v", workload.Load)
+	}
+	if users := workload.ApplicationConfig["users"]; users != int64(20) {
+		t.Fatalf("profile application_config users = %#v, want 20", users)
 	}
 }

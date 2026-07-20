@@ -32,6 +32,14 @@ func Load(path string, profile string) (api.Workload, error) {
 			return api.Workload{}, fmt.Errorf("unknown workload profile %q", profile)
 		}
 		override.Apply(&workload.Load)
+		if len(override.ApplicationConfig) > 0 {
+			if workload.ApplicationConfig == nil {
+				workload.ApplicationConfig = make(map[string]any, len(override.ApplicationConfig))
+			}
+			for key, value := range override.ApplicationConfig {
+				workload.ApplicationConfig[key] = value
+			}
+		}
 	}
 	if err := Validate(workload); err != nil {
 		return api.Workload{}, fmt.Errorf("invalid workload: %w", err)

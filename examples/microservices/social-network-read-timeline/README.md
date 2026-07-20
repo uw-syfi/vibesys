@@ -171,6 +171,17 @@ go -C examples/evaluators/microservice run ./cmd/microbench \
   --output-raw /tmp/social-network.ndjson
 ```
 
+The legacy light, medium, and heavy configurations remain available as named
+profiles. A profile changes both load and fixture size:
+
+| Profile | Target RPS | Duration | Warmup | Users | Seed posts per user |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `light` | 100 | 60s | 10s | 20 | 5 |
+| `medium` | 300 | 120s | 20s | 50 | 10 |
+| `heavy` | 600 | 180s | 30s | 100 | 10 |
+
+Select one with `--profile light`, `--profile medium`, or `--profile heavy`.
+
 On repeated runs against an already-prepared deployment, skip fixture setup:
 
 ```bash

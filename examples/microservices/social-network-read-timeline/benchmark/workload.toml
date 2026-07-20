@@ -56,6 +56,33 @@ user_id_base = 700000
 username_prefix = "rbnch_"
 setup_delay_seconds = 3
 
+[profiles.light]
+rate = 100
+duration_seconds = 60
+warmup_seconds = 10
+concurrency = 200
+[profiles.light.application_config]
+users = 20
+seed_posts_per_user = 5
+
+[profiles.medium]
+rate = 300
+duration_seconds = 120
+warmup_seconds = 20
+concurrency = 256
+[profiles.medium.application_config]
+users = 50
+seed_posts_per_user = 10
+
+[profiles.heavy]
+rate = 600
+duration_seconds = 180
+warmup_seconds = 30
+concurrency = 256
+[profiles.heavy.application_config]
+users = 100
+seed_posts_per_user = 10
+
 [objective]
 name = "p50_ms"
 metric = "latency_ms.p50"

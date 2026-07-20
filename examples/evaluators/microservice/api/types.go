@@ -26,18 +26,19 @@ type Load struct {
 	MinOfferedRateRatio float64 `toml:"min_offered_rate_ratio" json:"min_offered_rate_ratio"`
 }
 
-type LoadOverride struct {
-	Rate                *float64 `toml:"rate"`
-	WarmupSeconds       *float64 `toml:"warmup_seconds"`
-	DurationSeconds     *float64 `toml:"duration_seconds"`
-	Concurrency         *int     `toml:"concurrency"`
-	TimeoutSeconds      *float64 `toml:"timeout_seconds"`
-	Repetitions         *int     `toml:"repetitions"`
-	Seed                *int64   `toml:"seed"`
-	MinOfferedRateRatio *float64 `toml:"min_offered_rate_ratio"`
+type ProfileOverride struct {
+	Rate                *float64       `toml:"rate"`
+	WarmupSeconds       *float64       `toml:"warmup_seconds"`
+	DurationSeconds     *float64       `toml:"duration_seconds"`
+	Concurrency         *int           `toml:"concurrency"`
+	TimeoutSeconds      *float64       `toml:"timeout_seconds"`
+	Repetitions         *int           `toml:"repetitions"`
+	Seed                *int64         `toml:"seed"`
+	MinOfferedRateRatio *float64       `toml:"min_offered_rate_ratio"`
+	ApplicationConfig   map[string]any `toml:"application_config"`
 }
 
-func (o LoadOverride) Apply(load *Load) {
+func (o ProfileOverride) Apply(load *Load) {
 	if o.Rate != nil {
 		load.Rate = *o.Rate
 	}
@@ -133,16 +134,16 @@ type Constraints struct {
 }
 
 type Workload struct {
-	Version           int                     `toml:"version" json:"version"`
-	Name              string                  `toml:"name" json:"name"`
-	Application       string                  `toml:"application" json:"application"`
-	Load              Load                    `toml:"load" json:"load"`
-	Profiles          map[string]LoadOverride `toml:"profiles" json:"-"`
-	Targets           []Target                `toml:"targets" json:"targets"`
-	Operations        []Operation             `toml:"operations" json:"operations"`
-	Objective         Objective               `toml:"objective" json:"objective"`
-	Constraints       Constraints             `toml:"constraints" json:"constraints"`
-	ApplicationConfig map[string]any          `toml:"application_config" json:"application_config,omitempty"`
+	Version           int                        `toml:"version" json:"version"`
+	Name              string                     `toml:"name" json:"name"`
+	Application       string                     `toml:"application" json:"application"`
+	Load              Load                       `toml:"load" json:"load"`
+	Profiles          map[string]ProfileOverride `toml:"profiles" json:"-"`
+	Targets           []Target                   `toml:"targets" json:"targets"`
+	Operations        []Operation                `toml:"operations" json:"operations"`
+	Objective         Objective                  `toml:"objective" json:"objective"`
+	Constraints       Constraints                `toml:"constraints" json:"constraints"`
+	ApplicationConfig map[string]any             `toml:"application_config" json:"application_config,omitempty"`
 }
 
 type Sample struct {
