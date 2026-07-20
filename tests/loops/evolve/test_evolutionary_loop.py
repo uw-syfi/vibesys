@@ -20,6 +20,7 @@ from vibesys.loops.evolve.loop import (
     _candidate_runtime_notes,
     _latest_wip_seed,
     _recent_failure_lessons,
+    _teardown_candidate_app,
     run_evolve_loop,
 )
 from vibesys.loops.evolve.population import (
@@ -632,3 +633,50 @@ def test_candidate_modal_app_name_suffix_and_length():
     name = candidate_modal_app_name(long_base, 12, 7)
     assert name.endswith("-g12c7")
     assert len(name) <= 63
+
+
+# ---------------------------------------------------------------------------
+# Candidate-app teardown
+# ---------------------------------------------------------------------------
+
+
+def test_teardown_candidate_app_delegates_to_run_environment():
+    """The loop stays backend-agnostic: it hands the app name to the run
+    environment, which decides how to release it."""
+    run_env = MagicMock()
+    ctx = SimpleNamespace(run_environment=run_env, lprint=lambda _: None)
+
+    _teardown_candidate_app(ctx, "vibesys-run-g1c2", keep=False)
+
+    run_env.teardown_deployment.assert_called_once_with("vibesys-run-g1c2", log=ctx.lprint)
+
+
+def test_teardown_candidate_app_noop_when_kept_or_no_app():
+    run_env = MagicMock()
+    ctx = SimpleNamespace(run_environment=run_env, lprint=lambda _: None)
+
+    # Opt-out: keep the app for post-hoc inspection.
+    _teardown_candidate_app(ctx, "vibesys-run-g1c2", keep=True)
+    # No per-candidate deployment (non-Modal env).
+    _teardown_candidate_app(ctx, None, keep=False)
+
+    run_env.teardown_deployment.assert_not_called()
+
+
+def test_loop_tears_down_candidate_on_pass_and_fail_paths(tmp_path, ref_file):
+    """Teardown fires exactly once per candidate on every exit path — the
+    bootstrap attempt plus each generation candidate, whether it passes or
+    fails the judge."""
+    # bootstrap passes (1 attempt), gen-1 candidate passes, gen-2 candidate fails.
+    runner = _make_runner(judge_verdicts=["pass", "pass", "fail"])
+    with patch("vibesys.loops.evolve.loop._teardown_candidate_app") as teardown:
+        _invoke_loop(
+            tmp_path,
+            ref_file,
+            runner,
+            max_generations=2,
+            children_per_generation=1,
+        )
+
+    # 1 bootstrap attempt + 2 generation candidates = 3 teardown calls.
+    assert teardown.call_count == 3

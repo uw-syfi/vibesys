@@ -88,6 +88,23 @@ def _discard_working_tree(ctx: LoopContext) -> None:
         ctx.lprint(f"[warn] discard working tree failed: {exc}")
 
 
+def _teardown_candidate_app(ctx: LoopContext, cand_app: str | None, *, keep: bool) -> None:
+    """Release a candidate's per-evaluation deployment once its judge/profiler are done.
+
+    Every candidate deploys its GPU server to its own per-candidate deployment (so the judge
+    never reads a prior candidate's cumulative logs). Once evaluation is over that deployment
+    is dead weight — nothing reuses it — so hand it back to the run environment to release.
+    The environment decides *how* (e.g. Modal stops the app; local envs are a no-op), so the
+    loop stays agnostic to the backend.
+
+    No-op when ``keep`` is set (the ``--keep-modal-apps`` opt-out, for post-hoc log
+    inspection) or when ``cand_app`` is None (no per-candidate deployment).
+    """
+    if keep or not cand_app:
+        return
+    ctx.run_environment.teardown_deployment(cand_app, log=ctx.lprint)
+
+
 # ---------------------------------------------------------------------------
 # Profiler MCP wiring (reused from orchestrate; kept here to avoid an
 # import-time dependency on the orchestrate loop)
@@ -338,6 +355,7 @@ def _bootstrap_seed(
     rng: random.Random,
     population: Population,
     population_path: Path,
+    keep_modal_apps: bool = False,
 ) -> Individual | None:
     """Iterate implementer → judge until a first *passing* seed exists.
 
@@ -382,103 +400,108 @@ def _bootstrap_seed(
         base_desc = "reference" if wip_seed is None else f"repair-seed #{wip_seed.id}"
         ctx.lprint(f"bootstrap base={base_desc}" + (f" modal-app={cand_app}" if cand_app else ""))
 
-        # 1. Implementer (the mutator in cold-start / from-scratch mode).
-        ctx.reselect_gpu()
-        mutator = _run_mutator(
-            ctx,
-            generation=0,
-            child_idx=attempt,
-            objective=objective,
-            parent=None,
-            inspirations=[],
-            modality=modality,
-            is_cold_start=True,
-            objectives=objectives,
-            failed_lessons=failed_lessons,
-            num_failed_attempts=num_failed_attempts,
-            repair_seed=wip_seed is not None,
-            runtime_notes=cand_notes,
-        )
+        # The attempt deploys its per-candidate Modal app during mutate/judge/
+        # profile; stop it once we're done evaluating, on every exit path.
+        try:
+            # 1. Implementer (the mutator in cold-start / from-scratch mode).
+            ctx.reselect_gpu()
+            mutator = _run_mutator(
+                ctx,
+                generation=0,
+                child_idx=attempt,
+                objective=objective,
+                parent=None,
+                inspirations=[],
+                modality=modality,
+                is_cold_start=True,
+                objectives=objectives,
+                failed_lessons=failed_lessons,
+                num_failed_attempts=num_failed_attempts,
+                repair_seed=wip_seed is not None,
+                runtime_notes=cand_notes,
+            )
 
-        # 2. Judge.
-        ctx.reselect_gpu()
-        verdict = _run_judge(
-            ctx,
-            generation=0,
-            child_idx=attempt,
-            modality=modality,
-            objective=objective,
-            pass_criteria=pass_criteria,
-            runtime_notes=cand_notes,
-        )
+            # 2. Judge.
+            ctx.reselect_gpu()
+            verdict = _run_judge(
+                ctx,
+                generation=0,
+                child_idx=attempt,
+                modality=modality,
+                objective=objective,
+                pass_criteria=pass_criteria,
+                runtime_notes=cand_notes,
+            )
 
-        if verdict.verdict != Verdict.PASS:
-            # Snapshot the failed tree so the next attempt repairs it in place.
-            # Only tag a WIP repair-seed when the snapshot actually committed new
-            # work (the tree changed); an unedited tree is nothing to fix-forward.
-            wip_commit = None
-            try:
-                sha_before = ctx.git.current_sha()
-                ctx.snapshot_workspace(f"wip-seed-bootstrap{attempt}")
-                sha_after = ctx.git.current_sha()
-                if sha_after and sha_after != sha_before:
-                    wip_commit = sha_after
-            except Exception as exc:
-                ctx.lprint(f"[warn] wip-seed snapshot failed: {exc}")
-            failed = Individual(
+            if verdict.verdict != Verdict.PASS:
+                # Snapshot the failed tree so the next attempt repairs it in place.
+                # Only tag a WIP repair-seed when the snapshot actually committed new
+                # work (the tree changed); an unedited tree is nothing to fix-forward.
+                wip_commit = None
+                try:
+                    sha_before = ctx.git.current_sha()
+                    ctx.snapshot_workspace(f"wip-seed-bootstrap{attempt}")
+                    sha_after = ctx.git.current_sha()
+                    if sha_after and sha_after != sha_before:
+                        wip_commit = sha_after
+                except Exception as exc:
+                    ctx.lprint(f"[warn] wip-seed snapshot failed: {exc}")
+                failed = Individual(
+                    id=population.next_id(),
+                    generation=0,
+                    parent_id=None,
+                    inspiration_ids=[],
+                    commit=wip_commit,
+                    perf_metric=None,
+                    perf_unit=None,
+                    passed=False,
+                    summary=mutator.summary,
+                    feedback=verdict.feedback,
+                )
+                population.add(failed)
+                population.save(population_path)
+                ctx.lprint(
+                    f"[bootstrap {attempt}] FAILED — feedback: "
+                    f"{(verdict.feedback or '').splitlines()[0][:120] if verdict.feedback else ''}"
+                )
+                continue
+
+            # 3. PASS → profile, snapshot, and record the generation-0 seed.
+            ctx.reselect_gpu()
+            summary = _run_profiler(
+                ctx,
+                generation=0,
+                child_idx=attempt,
+                modality=modality,
+                objective=objective,
+                objectives=objectives,
+                runtime_notes=cand_notes,
+            )
+            ctx.snapshot_workspace("gen-0-seed")
+            commit = ctx.git.current_sha()
+            seed = Individual(
                 id=population.next_id(),
                 generation=0,
                 parent_id=None,
                 inspiration_ids=[],
-                commit=wip_commit,
-                perf_metric=None,
-                perf_unit=None,
-                passed=False,
+                commit=commit,
+                perf_metric=summary.perf_metric if summary else None,
+                perf_unit=summary.perf_unit if summary else None,
+                metrics=dict(summary.metrics) if summary and summary.metrics else {},
+                passed=True,
                 summary=mutator.summary,
                 feedback=verdict.feedback,
             )
-            population.add(failed)
+            population.add(seed)
             population.save(population_path)
             ctx.lprint(
-                f"[bootstrap {attempt}] FAILED — feedback: "
-                f"{(verdict.feedback or '').splitlines()[0][:120] if verdict.feedback else ''}"
+                f"[bootstrap {attempt}] PASSED — seed #{seed.id} "
+                f"perf={seed.perf_metric} {seed.perf_unit or ''} "
+                f"(commit {commit[:8] if commit else 'n/a'})"
             )
-            continue
-
-        # 3. PASS → profile, snapshot, and record the generation-0 seed.
-        ctx.reselect_gpu()
-        summary = _run_profiler(
-            ctx,
-            generation=0,
-            child_idx=attempt,
-            modality=modality,
-            objective=objective,
-            objectives=objectives,
-            runtime_notes=cand_notes,
-        )
-        ctx.snapshot_workspace("gen-0-seed")
-        commit = ctx.git.current_sha()
-        seed = Individual(
-            id=population.next_id(),
-            generation=0,
-            parent_id=None,
-            inspiration_ids=[],
-            commit=commit,
-            perf_metric=summary.perf_metric if summary else None,
-            perf_unit=summary.perf_unit if summary else None,
-            metrics=dict(summary.metrics) if summary and summary.metrics else {},
-            passed=True,
-            summary=mutator.summary,
-            feedback=verdict.feedback,
-        )
-        population.add(seed)
-        population.save(population_path)
-        ctx.lprint(
-            f"[bootstrap {attempt}] PASSED — seed #{seed.id} "
-            f"perf={seed.perf_metric} {seed.perf_unit or ''} "
-            f"(commit {commit[:8] if commit else 'n/a'})"
-        )
-        return seed
+            return seed
+        finally:
+            _teardown_candidate_app(ctx, cand_app, keep=keep_modal_apps)
 
     ctx.lprint(f"[bootstrap] exhausted {max_attempts} attempt(s) without a passing seed.")
     return None
@@ -522,6 +545,7 @@ def run_evolve_loop(
     objectives: list[Objective] | None = None,
     frontier_bias: float = 0.7,
     bootstrap_max_attempts: int = 5,
+    keep_modal_apps: bool = False,
     remote_repo: str | None = None,
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
 ) -> bool:
@@ -589,6 +613,7 @@ def run_evolve_loop(
                 rng=rng,
                 population=population,
                 population_path=population_path,
+                keep_modal_apps=keep_modal_apps,
             )
             if seed_individual is None:
                 ctx.lprint(
@@ -659,98 +684,104 @@ def run_evolve_loop(
                         + f"; inspirations={[i.id for i in inspirations]}"
                     )
 
-                    # 3. Mutator edits the workspace, mutating the passing parent.
-                    ctx.reselect_gpu()
-                    mutator = _run_mutator(
-                        ctx,
-                        generation=generation,
-                        child_idx=child_idx,
-                        objective=objective,
-                        parent=parent,
-                        inspirations=inspirations,
-                        modality=modality,
-                        is_cold_start=False,
-                        objectives=objectives,
-                        runtime_notes=cand_notes,
-                    )
+                    # The candidate deploys its per-candidate Modal app during
+                    # mutate/judge/profile; stop it once evaluation is done, on
+                    # every exit path (fail continue, pass fall-through).
+                    try:
+                        # 3. Mutator edits the workspace, mutating the passing parent.
+                        ctx.reselect_gpu()
+                        mutator = _run_mutator(
+                            ctx,
+                            generation=generation,
+                            child_idx=child_idx,
+                            objective=objective,
+                            parent=parent,
+                            inspirations=inspirations,
+                            modality=modality,
+                            is_cold_start=False,
+                            objectives=objectives,
+                            runtime_notes=cand_notes,
+                        )
 
-                    # 4. Judge.
-                    ctx.reselect_gpu()
-                    verdict = _run_judge(
-                        ctx,
-                        generation=generation,
-                        child_idx=child_idx,
-                        modality=modality,
-                        objective=objective,
-                        pass_criteria=pass_criteria,
-                        runtime_notes=cand_notes,
-                    )
+                        # 4. Judge.
+                        ctx.reselect_gpu()
+                        verdict = _run_judge(
+                            ctx,
+                            generation=generation,
+                            child_idx=child_idx,
+                            modality=modality,
+                            objective=objective,
+                            pass_criteria=pass_criteria,
+                            runtime_notes=cand_notes,
+                        )
 
-                    if verdict.verdict != Verdict.PASS:
-                        # The mutation was a dead end: record the failed child so
-                        # its feedback is visible to future mutators (excluded
-                        # from selection because ``passed`` is False, no commit),
-                        # then revert the dirty tree back to the passing parent.
-                        failed = Individual(
+                        if verdict.verdict != Verdict.PASS:
+                            # The mutation was a dead end: record the failed child so
+                            # its feedback is visible to future mutators (excluded
+                            # from selection because ``passed`` is False, no commit),
+                            # then revert the dirty tree back to the passing parent.
+                            failed = Individual(
+                                id=population.next_id(),
+                                generation=generation,
+                                parent_id=parent.id,
+                                inspiration_ids=[i.id for i in inspirations],
+                                commit=None,
+                                perf_metric=None,
+                                perf_unit=None,
+                                passed=False,
+                                summary=mutator.summary,
+                                feedback=verdict.feedback,
+                            )
+                            population.add(failed)
+                            population.save(population_path)
+                            _discard_working_tree(ctx)
+                            ctx.lprint(
+                                f"[Gen {generation}] Cand {failed.id} FAILED — "
+                                f"feedback: {(verdict.feedback or '').splitlines()[0][:120]}"
+                            )
+                            continue
+
+                        # 5. Profile the offspring to get its fitness.
+                        ctx.reselect_gpu()
+                        summary = _run_profiler(
+                            ctx,
+                            generation=generation,
+                            child_idx=child_idx,
+                            modality=modality,
+                            objective=objective,
+                            objectives=objectives,
+                            runtime_notes=cand_notes,
+                        )
+
+                        # 6. Commit + record.
+                        ctx.snapshot_workspace(f"gen-{generation}-child-{child_idx}")
+                        commit = ctx.git.current_sha()
+                        child = Individual(
                             id=population.next_id(),
                             generation=generation,
                             parent_id=parent.id,
                             inspiration_ids=[i.id for i in inspirations],
-                            commit=None,
-                            perf_metric=None,
-                            perf_unit=None,
-                            passed=False,
+                            commit=commit,
+                            perf_metric=summary.perf_metric if summary else None,
+                            perf_unit=summary.perf_unit if summary else None,
+                            metrics=dict(summary.metrics) if summary and summary.metrics else {},
+                            passed=True,
                             summary=mutator.summary,
                             feedback=verdict.feedback,
                         )
-                        population.add(failed)
+                        population.add(child)
                         population.save(population_path)
-                        _discard_working_tree(ctx)
-                        ctx.lprint(
-                            f"[Gen {generation}] Cand {failed.id} FAILED — "
-                            f"feedback: {(verdict.feedback or '').splitlines()[0][:120]}"
+                        metrics_repr = (
+                            " ".join(f"{k}={v:g}" for k, v in child.metrics.items())
+                            if child.metrics
+                            else f"{child.perf_metric} {child.perf_unit or ''}"
                         )
-                        continue
-
-                    # 5. Profile the offspring to get its fitness.
-                    ctx.reselect_gpu()
-                    summary = _run_profiler(
-                        ctx,
-                        generation=generation,
-                        child_idx=child_idx,
-                        modality=modality,
-                        objective=objective,
-                        objectives=objectives,
-                        runtime_notes=cand_notes,
-                    )
-
-                    # 6. Commit + record.
-                    ctx.snapshot_workspace(f"gen-{generation}-child-{child_idx}")
-                    commit = ctx.git.current_sha()
-                    child = Individual(
-                        id=population.next_id(),
-                        generation=generation,
-                        parent_id=parent.id,
-                        inspiration_ids=[i.id for i in inspirations],
-                        commit=commit,
-                        perf_metric=summary.perf_metric if summary else None,
-                        perf_unit=summary.perf_unit if summary else None,
-                        metrics=dict(summary.metrics) if summary and summary.metrics else {},
-                        passed=True,
-                        summary=mutator.summary,
-                        feedback=verdict.feedback,
-                    )
-                    population.add(child)
-                    population.save(population_path)
-                    metrics_repr = (
-                        " ".join(f"{k}={v:g}" for k, v in child.metrics.items())
-                        if child.metrics
-                        else f"{child.perf_metric} {child.perf_unit or ''}"
-                    )
-                    ctx.lprint(
-                        f"[Gen {generation}] Cand {child.id} PASSED — "
-                        f"{metrics_repr} (parent={parent.id})"
-                    )
+                        ctx.lprint(
+                            f"[Gen {generation}] Cand {child.id} PASSED — "
+                            f"{metrics_repr} (parent={parent.id})"
+                        )
+                    finally:
+                        _teardown_candidate_app(ctx, cand_app, keep=keep_modal_apps)
 
         if objectives:
             front = population.frontier(objectives)

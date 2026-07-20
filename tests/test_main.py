@@ -258,6 +258,17 @@ def test_validate_evolve_rejects_nonpositive_bootstrap_attempts(tmp_path):
         cli._validate_evolve(args)
 
 
+def test_keep_modal_apps_flag_defaults_off_and_parses(tmp_path):
+    """--keep-modal-apps opts out of candidate-app teardown; off by default."""
+    import vibesys.main as cli
+
+    bundle = _write_input_bundle(tmp_path)
+    parser = cli._build_evolve_parser()
+
+    assert parser.parse_args(["--input", str(bundle)]).keep_modal_apps is False
+    assert parser.parse_args(["--keep-modal-apps", "--input", str(bundle)]).keep_modal_apps is True
+
+
 @pytest.mark.parametrize(
     "argv",
     [

@@ -314,3 +314,68 @@ def test_docker_remove_workspace_child_quotes_path(tmp_path, monkeypatch):
     shell_command = calls[0][-1]
     assert "rm -rf -- " in shell_command
     assert "'/workspace/semi;touch hacked'" in shell_command
+
+
+def test_modal_teardown_deployment_stops_app_via_cli(monkeypatch):
+    import sys as _sys
+
+    env = build_run_environment(RunEnvironmentSpec("modal"))
+    calls = []
+    logs = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        result = MagicMock()
+        result.returncode = 0
+        result.stderr = ""
+        return result
+
+    monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", fake_run)
+
+    env.teardown_deployment("vibesys-run-g1c2", log=logs.append)
+
+    assert calls == [[_sys.executable, "-m", "modal", "app", "stop", "vibesys-run-g1c2", "--yes"]]
+    assert any("stopped candidate app vibesys-run-g1c2" in line for line in logs)
+
+
+def test_modal_teardown_deployment_is_best_effort_on_nonzero(monkeypatch):
+    env = build_run_environment(RunEnvironmentSpec("modal"))
+    logs = []
+
+    def fake_run(cmd, **kwargs):
+        result = MagicMock()
+        result.returncode = 1
+        result.stderr = "boom"
+        return result
+
+    monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", fake_run)
+
+    # Must not raise.
+    env.teardown_deployment("vibesys-run-g1c2", log=logs.append)
+    assert any("failed" in line for line in logs)
+
+
+def test_modal_teardown_deployment_is_best_effort_on_exception(monkeypatch):
+    env = build_run_environment(RunEnvironmentSpec("modal"))
+    logs = []
+
+    def fake_run(cmd, **kwargs):
+        raise TimeoutError("stuck")
+
+    monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", fake_run)
+
+    env.teardown_deployment("vibesys-run-g1c2", log=logs.append)
+    assert any("raised" in line for line in logs)
+
+
+@pytest.mark.parametrize("name", ["local", "docker"])
+def test_non_modal_teardown_deployment_is_noop(name, monkeypatch):
+    env = build_run_environment(RunEnvironmentSpec(name))
+
+    def fail_run(*args, **kwargs):
+        raise AssertionError("subprocess.run should not be called for non-Modal envs")
+
+    monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", fail_run)
+
+    # No deployment to stop — must be a silent no-op.
+    env.teardown_deployment("vibesys-run-g1c2", log=lambda _: None)
