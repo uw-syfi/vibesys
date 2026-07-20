@@ -28,8 +28,8 @@ Local server. x86-64 or Apple Silicon. Docker required.
 ## Interface
 
 HTTP on port 8080. Wire-compatible with DeathStarBench socialNetwork nginx API.
-accuracy_checker/checker and benchmark/benchmark can point at any candidate
-without modification.
+`accuracy_checker/checker` and the shared evaluator workload can point at any
+candidate without modification.
 
 ## Optimisation Objective
 

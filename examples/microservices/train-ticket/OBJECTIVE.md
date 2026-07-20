@@ -1,7 +1,8 @@
 Optimize a Train Ticket microservice deployment for read-only API throughput
 while preserving response correctness.
 
-Headline metric: `requests_per_second` from `benchmark/benchmark.py` (maximize).
+Headline metric: `requests_per_second` from the shared evaluator result
+(`primary_value`, maximize).
 
 The target is a running Train Ticket gateway or direct-service deployment. The
 candidate must preserve the existing HTTP API behavior checked by

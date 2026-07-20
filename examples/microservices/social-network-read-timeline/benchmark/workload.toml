@@ -1,0 +1,95 @@
+version = 1
+name = "social-network-read-timeline"
+application = "social-network"
+
+[load]
+model = "open_loop"
+rate = 300
+duration_seconds = 120
+warmup_seconds = 20
+concurrency = 256
+timeout_seconds = 10
+repetitions = 1
+seed = 42
+min_offered_rate_ratio = 0.95
+
+[[targets]]
+name = "gateway"
+protocol = "http"
+address = "http://localhost:8080"
+session_policy = "new_per_request"
+
+[[operations]]
+name = "user_timeline_read"
+target = "gateway"
+weight = 50
+tags = ["read"]
+[[operations.capture_headers]]
+name = "user_timeline_thrift"
+header = "X-UserTimeline-Thrift-Ms"
+unit = "ms"
+
+[[operations]]
+name = "home_timeline_read"
+target = "gateway"
+weight = 40
+tags = ["read"]
+[[operations.capture_headers]]
+name = "home_timeline_thrift"
+header = "X-HomeTimeline-Thrift-Ms"
+unit = "ms"
+
+[[operations]]
+name = "compose_post"
+target = "gateway"
+weight = 10
+tags = ["write"]
+[[operations.capture_headers]]
+name = "compose_thrift"
+header = "X-Compose-Thrift-Ms"
+unit = "ms"
+
+[application_config]
+users = 50
+seed_posts_per_user = 10
+user_id_base = 700000
+username_prefix = "rbnch_"
+setup_delay_seconds = 3
+
+[profiles.light]
+rate = 100
+duration_seconds = 60
+warmup_seconds = 10
+concurrency = 200
+[profiles.light.application_config]
+users = 20
+seed_posts_per_user = 5
+
+[profiles.medium]
+rate = 300
+duration_seconds = 120
+warmup_seconds = 20
+concurrency = 256
+[profiles.medium.application_config]
+users = 50
+seed_posts_per_user = 10
+
+[profiles.heavy]
+rate = 600
+duration_seconds = 180
+warmup_seconds = 30
+concurrency = 256
+[profiles.heavy.application_config]
+users = 100
+seed_posts_per_user = 10
+
+[objective]
+name = "p50_ms"
+metric = "latency_ms.p50"
+direction = "minimize"
+unit = "ms"
+tags = ["read"]
+
+[constraints]
+min_success_rate = 1.0
+max_error_rate = 0.0
