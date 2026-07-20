@@ -29,6 +29,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -130,6 +131,14 @@ class RunEnvironment(Protocol):
     def remove_workspace_child(
         self, workspace: Path, rel_path: str, *, backend: ComputeBackendImpl
     ) -> bool: ...
+    def teardown_deployment(self, name: str, *, log: Callable[[str], None]) -> None:
+        """Tear down a per-evaluation deployment (e.g. a candidate's Modal app).
+
+        Environments that dispatch each evaluation to its own named remote
+        deployment implement this to release it once the evaluation is done;
+        environments that run everything in-process are a no-op.
+        """
+        ...
 
 
 class _NoopWorkspaceRecovery:
@@ -142,6 +151,9 @@ class _NoopWorkspaceRecovery:
         self, workspace: Path, rel_path: str, *, backend: ComputeBackendImpl
     ) -> bool:
         return False
+
+    def teardown_deployment(self, name: str, *, log: Callable[[str], None]) -> None:
+        return
 
 
 @dataclass
@@ -288,6 +300,10 @@ class DockerEnvironment:
         except Exception:
             pass
         return not (target.exists() or target.is_symlink())
+
+    def teardown_deployment(self, name: str, *, log: Callable[[str], None]) -> None:
+        # The editor container is torn down by the session; nothing per-candidate.
+        return
 
 
 @dataclass(frozen=True)
@@ -460,6 +476,36 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             local_path=local_path,
             log=request.log or print,
         )
+
+    def teardown_deployment(self, name: str, *, log: Callable[[str], None]) -> None:
+        """Stop an idle candidate app so deployed apps don't accumulate.
+
+        Each candidate deploys its GPU server to its own ``vibesys-…-g<g>c<c>``
+        Modal app; Modal scales the *containers* to zero after
+        ``scaledown_window`` (no ongoing GPU cost), but the app objects and
+        their web endpoints linger until stopped. We stop it on the host via
+        the Modal CLI — the stable public interface, authenticated by the same
+        ``~/.modal.toml`` the SDK path uses. Best-effort: a failed stop just
+        leaves an idle app behind and must never fail a run.
+        """
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "modal", "app", "stop", name, "--yes"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except Exception as exc:  # timeout, missing binary, etc.
+            log(f"[warn] modal app stop {name} raised: {exc}")
+            return
+        if result.returncode != 0:
+            log(
+                f"[warn] modal app stop {name} failed "
+                f"(exit {result.returncode}): {result.stderr.strip()[:200]}"
+            )
+        else:
+            log(f"[modal] stopped candidate app {name}")
 
 
 def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:

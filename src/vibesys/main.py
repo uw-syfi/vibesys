@@ -986,6 +986,15 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--frontier-bias", type=float, default=0.7)
     parser.add_argument("--bootstrap-max-attempts", type=int, default=5)
+    parser.add_argument(
+        "--keep-modal-apps",
+        action="store_true",
+        help=(
+            "Do not tear down each candidate's Modal app after evaluation "
+            "(default: stop them so idle apps don't accumulate). Keep them for "
+            "post-hoc log inspection."
+        ),
+    )
     parser.add_argument("--modality", default="text_generation", choices=_MODALITIES)
     return parser
 
@@ -1054,6 +1063,7 @@ def _run_evolve(args: argparse.Namespace) -> None:
         objectives=objectives,
         frontier_bias=args.frontier_bias,
         bootstrap_max_attempts=args.bootstrap_max_attempts,
+        keep_modal_apps=args.keep_modal_apps,
         remote_repo=args.repo,
         repo_visibility=args.repo_visibility,
     )
