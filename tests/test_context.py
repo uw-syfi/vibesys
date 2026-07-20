@@ -140,6 +140,23 @@ def test_workspace_snapshot_pushes_remote_experiment_checkpoint(tmp_path):
     ctx._experiment_repository.sync.assert_called_once_with()
 
 
+def test_directory_snapshot_pushes_remote_experiment_checkpoint(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("VALUE = 1\n")
+    ctx = _minimal_copy_context(workspace)
+    ctx.git_tracking = False
+    ctx.workspace_files = MagicMock()
+    ctx._experiment_repository = MagicMock()
+
+    ctx.snapshot_workspace("round-1-implementer")
+
+    snapshot = ctx.log_dir / "snapshots" / "round-1-implementer"
+    assert (snapshot / "main.py").read_text() == "VALUE = 1\n"
+    ctx.workspace_files.replace_external_symlinks.assert_called_once_with(snapshot)
+    ctx._experiment_repository.sync.assert_called_once_with()
+
+
 def test_workspace_snapshot_retries_remote_failure_without_stopping_run(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
