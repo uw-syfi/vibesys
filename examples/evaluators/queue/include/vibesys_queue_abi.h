@@ -17,6 +17,10 @@ typedef uint32_t vsq_status;
 #define VSQ_INVALID 3u
 #define VSQ_INTERNAL_ERROR 4u
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 uint32_t vsq_abi_version(void);
 
 vsq_status vsq_queue_create(
@@ -52,5 +56,9 @@ vsq_status vsq_try_dequeue(
     uint8_t *output,
     uint64_t output_capacity,
     uint64_t *output_length);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
