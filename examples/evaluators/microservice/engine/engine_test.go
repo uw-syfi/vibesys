@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,7 +38,9 @@ func (c fakeClient) Invoke(ctx context.Context, _ api.Invocation) api.ProtocolRe
 
 func (fakeClient) Close() error { return nil }
 
-type fakeApplication struct{}
+type fakeApplication struct {
+	validationDelay time.Duration
+}
 
 func (fakeApplication) Name() string { return "fake-app" }
 func (fakeApplication) Prepare(context.Context, api.Runtime, api.TrialContext) (any, error) {
@@ -49,7 +52,10 @@ func (fakeApplication) BuildOperation(operation api.Operation, _ api.Sample, _ a
 		Target: operation.Target, Operation: operation.Name, Payload: "opaque-schema",
 	}}}, nil
 }
-func (fakeApplication) ValidateOperation(_ api.Operation, _ api.OperationPlan, results []api.ProtocolResult) api.ValidationResult {
+func (a fakeApplication) ValidateOperation(_ api.Operation, _ api.OperationPlan, results []api.ProtocolResult) api.ValidationResult {
+	if a.validationDelay > 0 {
+		time.Sleep(a.validationDelay)
+	}
 	if len(results) != 1 {
 		return api.ValidationResult{ErrorCategory: "result_count", ErrorMessage: "unexpected result count"}
 	}
@@ -151,6 +157,58 @@ func TestEngineClosedLoopMeasuresSaturationThroughput(t *testing.T) {
 	}
 	if trial.Generator.TargetRate != 0 || !trial.Generator.Sustained || trial.Generator.SubmittedOperations == 0 {
 		t.Fatalf("unexpected closed-loop generator report: %+v", trial.Generator)
+	}
+}
+
+func TestClosedLoopThroughputIncludesSemanticValidationTail(t *testing.T) {
+	registered := registry.New()
+	if err := registered.RegisterDriver(fakeDriver{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registered.RegisterApplication("fake-app", func(api.Workload) (api.Application, error) {
+		return fakeApplication{validationDelay: 100 * time.Millisecond}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	configured := workload(0, 0.01, 1, 1)
+	configured.Load.Model = "closed_loop"
+	configured.Objective = api.Objective{
+		Name: "operations_per_second", Metric: "operations_per_second", Direction: "maximize", Unit: "operations/s",
+	}
+	run, err := New(registered, Options{EngineVersion: "test"}).Run(context.Background(), configured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trial := run.Summary.Trials[0]
+	if trial.ElapsedSeconds < 0.09 {
+		t.Fatalf("validation tail was omitted from elapsed time: %+v", trial)
+	}
+	if run.Summary.PrimaryValue == nil || *run.Summary.PrimaryValue > 20 {
+		t.Fatalf("validation tail inflated throughput: %+v", run.Summary)
+	}
+	if got := run.Observations[0].ValidationTimeMS; got < 90 {
+		t.Fatalf("validation duration was not retained: %.2fms", got)
+	}
+}
+
+func TestTrialRequiresConfiguredOperationCoverage(t *testing.T) {
+	configured := workload(1, 1, 1, 1)
+	configured.Operations = append(configured.Operations, api.Operation{
+		Name: "uncovered", Target: "service", Weight: 1,
+	})
+	configured.Constraints.MinOperationsPerType = 1
+	now := time.Now()
+	observation := api.Observation{
+		Operation: "read", ScheduledAt: now, CompletedAt: now.Add(time.Millisecond),
+		ValidatedAt: now.Add(time.Millisecond), ApplicationSuccess: true,
+	}
+	observation.PopulateDurations()
+	trial := summarizeTrial(0, []api.Observation{observation}, GeneratorReport{Sustained: true}, configured)
+	if trial.Valid || trial.PrimaryValue != nil {
+		t.Fatalf("missing operation coverage unexpectedly passed: %+v", trial)
+	}
+	if len(trial.InvalidReasons) == 0 || !strings.Contains(strings.Join(trial.InvalidReasons, " "), "uncovered") {
+		t.Fatalf("missing operation was not identified: %+v", trial.InvalidReasons)
 	}
 }
 

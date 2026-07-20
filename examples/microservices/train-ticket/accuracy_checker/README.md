@@ -11,7 +11,9 @@ and shuffled operation order. It verifies:
 - welcome, list, point-read, and secondary-index routes;
 - connected station, train, route, price, and trip graphs;
 - create, immediate read-your-write, update, and delete behavior;
-- removal of stale station-name indexes after updates and deletes; and
+- removal of stale station-name, route-pair, and price-pair indexes after
+  updates and deletes;
+- delete isolation for the seed catalog and other live runtime graphs; and
 - persistent HTTP connections.
 
 Against an already running candidate:

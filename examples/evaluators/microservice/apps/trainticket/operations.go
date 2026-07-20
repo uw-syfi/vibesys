@@ -17,6 +17,7 @@ const (
 	expectEnvelope expectationKind = iota
 	expectExactData
 	expectEntityList
+	expectEntityAbsent
 )
 
 type stepExpectation struct {
@@ -29,7 +30,7 @@ type stepExpectation struct {
 
 type operationState struct {
 	expectations []stepExpectation
-	locked       *record
+	release      func()
 	commit       func()
 }
 
@@ -39,7 +40,9 @@ func (a *Application) BuildOperation(operation api.Operation, sample api.Sample,
 		return api.OperationPlan{}, fmt.Errorf("Train Ticket fixture is not prepared")
 	}
 	service := serviceFromOperation(operation.Name)
-	item := &data.records[sample.Random%uint64(len(data.records))]
+	itemIndex := sample.Random % uint64(len(data.records))
+	item := &data.records[itemIndex]
+	alternate := &data.records[(itemIndex+1)%uint64(len(data.records))]
 	switch {
 	case operation.Name == "create_read_delete_config":
 		return a.buildEphemeral(operation, sample, data)
@@ -48,7 +51,7 @@ func (a *Application) BuildOperation(operation api.Operation, sample api.Sample,
 	case strings.HasPrefix(operation.Name, "read_"):
 		return a.buildRead(operation, service, item), nil
 	case strings.HasPrefix(operation.Name, "update_read_"):
-		return a.buildUpdateRead(operation, service, item, sample), nil
+		return a.buildUpdateRead(operation, service, item, alternate, sample), nil
 	default:
 		return api.OperationPlan{}, fmt.Errorf("unsupported Train Ticket operation %q", operation.Name)
 	}
@@ -56,9 +59,9 @@ func (a *Application) BuildOperation(operation api.Operation, sample api.Sample,
 
 func (a *Application) FinishOperation(plan api.OperationPlan) {
 	state, ok := plan.State.(*operationState)
-	if ok && state.locked != nil {
-		state.locked.mu.Unlock()
-		state.locked = nil
+	if ok && state.release != nil {
+		state.release()
+		state.release = nil
 	}
 }
 
@@ -68,10 +71,10 @@ func (a *Application) buildList(operation api.Operation, service string, item *r
 		"train": "/api/v1/trainservice/trains", "travel": "/api/v1/travelservice/trips",
 		"route": "/api/v1/routeservice/routes", "price": "/api/v1/priceservice/prices",
 	}
-	item.mu.Lock()
+	item.mu.RLock()
 	return api.OperationPlan{
 		Invocations: []api.Invocation{a.invocation(service, operation.Name, http.MethodGet, paths[service], nil)},
-		State: &operationState{locked: item, expectations: []stepExpectation{{
+		State: &operationState{release: item.mu.RUnlock, expectations: []stepExpectation{{
 			status: http.StatusOK, appStatus: 1, kind: expectEntityList,
 			service: service, expected: listExpectedValue(service, item),
 		}}},
@@ -96,39 +99,72 @@ func listExpectedValue(service string, item *record) any {
 }
 
 func (a *Application) buildRead(operation api.Operation, service string, item *record) api.OperationPlan {
-	item.mu.Lock()
+	item.mu.RLock()
 	path, expected := readPathAndValue(service, item)
 	return api.OperationPlan{
 		Invocations: []api.Invocation{a.invocation(service, operation.Name, http.MethodGet, path, nil)},
-		State: &operationState{locked: item, expectations: []stepExpectation{{
+		State: &operationState{release: item.mu.RUnlock, expectations: []stepExpectation{{
 			status: http.StatusOK, appStatus: 1, kind: expectExactData, service: service, expected: expected,
 		}}},
 	}
 }
 
-func (a *Application) buildUpdateRead(operation api.Operation, service string, item *record, sample api.Sample) api.OperationPlan {
+func (a *Application) buildUpdateRead(operation api.Operation, service string, item, alternate *record, sample api.Sample) api.OperationPlan {
 	item.mu.Lock()
 	version := sample.Random ^ uint64(sample.Counter)*0x9e3779b97f4a7c15
-	method, path, body, readPath, expected, commit := updatedEntity(service, item, version)
+	retiredStationName := item.stationA.Name
+	retiredRouteStart := item.route.StartStationID
+	retiredRouteTerminal := item.route.TerminalStationID
+	retiredPriceRoute := item.price.RouteID
+	retiredPriceTrain := item.price.TrainType
+	method, path, body, readPath, expected, commit := updatedEntity(service, item, alternate, version)
+	invocations := []api.Invocation{
+		a.invocation(service, operation.Name, method, path, body),
+		a.invocation(service, operation.Name, http.MethodGet, readPath, nil),
+	}
+	expectations := []stepExpectation{
+		{status: expectedWriteStatus(service, method), appStatus: 1, kind: expectEnvelope, service: service},
+		{status: http.StatusOK, appStatus: 1, kind: expectExactData, service: service, expected: expected},
+	}
+	switch service {
+	case "station":
+		invocations = append(invocations, a.invocation(
+			service, operation.Name, http.MethodGet,
+			"/api/v1/stationservice/stations/id/"+url.PathEscape(retiredStationName), nil,
+		))
+		expectations = append(expectations, stepExpectation{
+			status: http.StatusOK, appStatus: 0, kind: expectEnvelope, service: service,
+		})
+	case "route":
+		invocations = append(invocations, a.invocation(
+			service, operation.Name, http.MethodGet,
+			"/api/v1/routeservice/routes/"+retiredRouteStart+"/"+retiredRouteTerminal, nil,
+		))
+		expectations = append(expectations, stepExpectation{
+			status: http.StatusOK, appStatus: 0, kind: expectEnvelope, service: service,
+		})
+	case "price":
+		invocations = append(invocations, a.invocation(
+			service, operation.Name, http.MethodGet,
+			"/api/v1/priceservice/prices/"+retiredPriceRoute+"/"+retiredPriceTrain, nil,
+		))
+		expectations = append(expectations, stepExpectation{
+			status: http.StatusOK, appStatus: 0, kind: expectEnvelope, service: service,
+		})
+	}
 	return api.OperationPlan{
-		Invocations: []api.Invocation{
-			a.invocation(service, operation.Name, method, path, body),
-			a.invocation(service, operation.Name, http.MethodGet, readPath, nil),
-		},
+		Invocations: invocations,
 		State: &operationState{
-			locked: item,
-			commit: commit,
-			expectations: []stepExpectation{
-				{status: expectedWriteStatus(service, method), appStatus: 1, kind: expectEnvelope, service: service},
-				{status: http.StatusOK, appStatus: 1, kind: expectExactData, service: service, expected: expected},
-			},
+			release:      item.mu.Unlock,
+			commit:       commit,
+			expectations: expectations,
 		},
 	}
 }
 
 func (a *Application) buildEphemeral(operation api.Operation, sample api.Sample, data *dataset) (api.OperationPlan, error) {
-	token := fmt.Sprintf("%s-ephemeral-%d-%016x", data.namespace, sample.Counter, sample.Random)
-	item := configEntity{Name: token, Value: strconv.FormatUint(sample.Random, 10), Description: token + "-description"}
+	token := fmt.Sprintf("%s%016x%016x", data.namespace, uint64(sample.Counter), sample.Random)
+	item := configEntity{Name: token, Value: strconv.FormatUint(sample.Random, 10), Description: fmt.Sprintf("d-%016x", sample.Random^0xa5a5a5a5a5a5a5a5)}
 	path := "/api/v1/configservice/configs/" + url.PathEscape(item.Name)
 	return api.OperationPlan{
 		Invocations: []api.Invocation{
@@ -136,12 +172,14 @@ func (a *Application) buildEphemeral(operation api.Operation, sample api.Sample,
 			a.invocation("config", operation.Name, http.MethodGet, path, nil),
 			a.invocation("config", operation.Name, http.MethodDelete, path, nil),
 			a.invocation("config", operation.Name, http.MethodGet, path, nil),
+			a.invocation("config", operation.Name, http.MethodGet, "/api/v1/configservice/configs", nil),
 		},
 		State: &operationState{expectations: []stepExpectation{
 			{status: http.StatusCreated, appStatus: 1, kind: expectEnvelope, service: "config"},
 			{status: http.StatusOK, appStatus: 1, kind: expectExactData, service: "config", expected: item},
 			{status: http.StatusOK, appStatus: 1, kind: expectEnvelope, service: "config"},
 			{status: http.StatusOK, appStatus: 0, kind: expectEnvelope, service: "config"},
+			{status: http.StatusOK, appStatus: 1, kind: expectEntityAbsent, service: "config", expected: item},
 		}},
 	}, nil
 }
@@ -163,7 +201,7 @@ func readPathAndValue(service string, item *record) (string, any) {
 	}
 }
 
-func updatedEntity(service string, item *record, version uint64) (method, path string, body any, readPath string, expected any, commit func()) {
+func updatedEntity(service string, item, alternate *record, version uint64) (method, path string, body any, readPath string, expected any, commit func()) {
 	switch service {
 	case "config":
 		updated := item.config
@@ -174,7 +212,8 @@ func updatedEntity(service string, item *record, version uint64) (method, path s
 			func() { item.config = updated }
 	case "station":
 		updated := item.stationA
-		updated.Name = fmt.Sprintf("Station-%016x", version)
+		namePrefixes := []string{"Renamed ", "Transfer Hub ", "换乘站 "}
+		updated.Name = fmt.Sprintf("%s%016x", namePrefixes[version%uint64(len(namePrefixes))], version)
 		updated.StayTime = 1 + int(version%120)
 		return http.MethodPut, "/api/v1/stationservice/stations", updated,
 			"/api/v1/stationservice/stations/name/" + updated.ID, updated.Name,
@@ -189,7 +228,20 @@ func updatedEntity(service string, item *record, version uint64) (method, path s
 	case "route":
 		updatedInput := item.routeIn
 		updatedRoute := item.route
-		updatedRoute.Stations = append([]string(nil), item.route.Stations...)
+		if item.route.StartStationID == item.stationA.ID {
+			updatedRoute.Stations = []string{item.stationB.ID, item.stationA.ID}
+			updatedRoute.StartStationID = item.stationB.ID
+			updatedRoute.TerminalStationID = item.stationA.ID
+			updatedInput.StartStation = item.stationB.ID
+			updatedInput.EndStation = item.stationA.ID
+		} else {
+			updatedRoute.Stations = []string{item.stationA.ID, item.stationB.ID}
+			updatedRoute.StartStationID = item.stationA.ID
+			updatedRoute.TerminalStationID = item.stationB.ID
+			updatedInput.StartStation = item.stationA.ID
+			updatedInput.EndStation = item.stationB.ID
+		}
+		updatedInput.StationList = strings.Join(updatedRoute.Stations, ",")
 		updatedRoute.Distances = append([]int(nil), item.route.Distances...)
 		updatedRoute.Distances[1] = 100 + int(version%1800)
 		updatedInput.DistanceList = fmt.Sprintf("0,%d", updatedRoute.Distances[1])
@@ -198,6 +250,13 @@ func updatedEntity(service string, item *record, version uint64) (method, path s
 			func() { item.routeIn, item.route = updatedInput, updatedRoute }
 	case "price":
 		updated := item.price
+		if updated.RouteID == alternate.route.ID && updated.TrainType == item.train.ID {
+			updated.RouteID = item.route.ID
+			updated.TrainType = item.train.ID
+		} else {
+			updated.RouteID = alternate.route.ID
+			updated.TrainType = item.train.ID
+		}
 		updated.BasicPriceRate = 0.1 + float64(version%8000)/10000
 		updated.FirstClassPriceRate = 0.9 + float64((version>>8)%10000)/10000
 		return http.MethodPut, "/api/v1/priceservice/prices", updated,

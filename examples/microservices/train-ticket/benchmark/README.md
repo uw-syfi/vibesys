@@ -30,11 +30,29 @@ offered-rate ceiling. The resolved random seed is written into the result and
 can be replayed with `--seed <value>`. Override individual service targets with
 repeated `--target name=address` flags.
 
+For diagnostic latency under a fixed offered load, select the open-loop profile
+and choose a rate the candidate can sustain:
+
+```bash
+go -C examples/evaluators/microservice run ./cmd/servicebench \
+  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --profile offered-load \
+  --rate 100 \
+  --base-url http://localhost:8080
+```
+
+The default closed-loop latency fields are saturation response times. They do
+not represent open-loop queueing latency because closed-loop workers issue no
+new arrivals while waiting for a response.
+
 One observation represents one logical operation and may contain multiple HTTP
 invocations. Total latency starts at the scheduled arrival and ends after the
 last response. Queue wait is reported separately, and the result reports both
 logical-operation counts and physical HTTP invocation counts. Any transport,
 schema, response-value, or read-your-write failure invalidates the run.
+Every configured operation type must be sampled at least once. Semantic
+validation completion is included in the throughput denominator, while the
+reported protocol and response latency fields still end at the last response.
 List operations validate every returned record's schema and require the exact
 randomly selected runtime fixture to be present. Delete operations finish with
 a negative point read, so no-op deletes are rejected.

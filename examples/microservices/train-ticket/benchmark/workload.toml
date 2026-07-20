@@ -174,3 +174,9 @@ unit = "operations/s"
 
 [constraints]
 max_error_rate = 0.0
+min_operations_per_type = 1
+
+[profiles.offered-load]
+model = "open_loop"
+rate = 100
+concurrency = 128

@@ -180,6 +180,9 @@ func Validate(workload api.Workload) error {
 			return fmt.Errorf("constraints.max_error_rate must be in [0, 1]")
 		}
 	}
+	if workload.Constraints.MinOperationsPerType < 0 {
+		return fmt.Errorf("constraints.min_operations_per_type must not be negative")
+	}
 	return nil
 }
 

@@ -8,11 +8,11 @@ Its responsibilities include:
 
 - reset, prepare, warmup, measurement, and repetition lifecycle;
 - fixed-rate open-loop arrival scheduling with bounded concurrency;
-- scheduled, dispatched, sent, and completed timestamps;
+- scheduled, dispatched, sent, response-completed, and semantically validated timestamps;
 - queue-wait, protocol-time, and total-latency observations;
 - offered-rate, scheduler-lag, and queue-depth diagnostics;
 - per-operation and per-trial distributions;
-- success/error and load-sustainability constraints; and
+- success/error, operation-coverage, and load-sustainability constraints; and
 - median, MAD, IQR, and bootstrap aggregation across trials.
 
 The engine omits the trusted `primary_value` when any trial is invalid. It must

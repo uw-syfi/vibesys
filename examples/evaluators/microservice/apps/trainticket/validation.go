@@ -3,6 +3,7 @@ package trainticket
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"sort"
 	"strings"
@@ -64,9 +65,12 @@ func validateStep(result api.ProtocolResult, expectation stepExpectation) api.Va
 		if !reflect.DeepEqual(data, expected) {
 			return invalid("response_value", fmt.Sprintf("data mismatch: got %v, want %v", data, expected))
 		}
-	case expectEntityList:
+	case expectEntityList, expectEntityAbsent:
 		items, ok := data.([]any)
-		if !ok || len(items) == 0 {
+		if !ok {
+			return invalid("response_shape", fmt.Sprintf("%s list data must be an array", expectation.service))
+		}
+		if expectation.kind == expectEntityList && len(items) == 0 {
 			return invalid("response_shape", fmt.Sprintf("%s list data must be a non-empty array", expectation.service))
 		}
 		want := entityFields[expectation.service]
@@ -74,7 +78,19 @@ func validateStep(result api.ProtocolResult, expectation stepExpectation) api.Va
 		if err != nil {
 			return invalid("validator", err.Error())
 		}
+		expectedKey := ""
+		if expectation.kind == expectEntityAbsent {
+			expectedObject, objectOK := expected.(map[string]any)
+			if !objectOK {
+				return invalid("validator", fmt.Sprintf("expected %s entity must be an object", expectation.service))
+			}
+			expectedKey, err = entityKey(expectation.service, expectedObject)
+			if err != nil {
+				return invalid("validator", err.Error())
+			}
+		}
 		foundExpected := false
+		seen := make(map[string]struct{}, len(items))
 		for index, item := range items {
 			object, objectOK := item.(map[string]any)
 			if !objectOK {
@@ -88,18 +104,133 @@ func validateStep(result api.ProtocolResult, expectation stepExpectation) api.Va
 			if !reflect.DeepEqual(keys, want) {
 				return invalid("response_schema", fmt.Sprintf("%s list item %d fields %v, want %v", expectation.service, index, keys, want))
 			}
-			if reflect.DeepEqual(item, expected) {
+			if valueErr := validateEntityValue(expectation.service, object); valueErr != nil {
+				return invalid("response_schema", fmt.Sprintf("%s list item %d: %v", expectation.service, index, valueErr))
+			}
+			key, keyErr := entityKey(expectation.service, object)
+			if keyErr != nil {
+				return invalid("response_schema", fmt.Sprintf("%s list item %d: %v", expectation.service, index, keyErr))
+			}
+			if _, duplicate := seen[key]; duplicate {
+				return invalid("response_value", fmt.Sprintf("%s list contains duplicate key %q", expectation.service, key))
+			}
+			seen[key] = struct{}{}
+			if (expectation.kind == expectEntityList && reflect.DeepEqual(item, expected)) ||
+				(expectation.kind == expectEntityAbsent && key == expectedKey) {
 				foundExpected = true
 			}
 		}
-		if !foundExpected {
+		if expectation.kind == expectEntityList && !foundExpected {
 			return invalid(
 				"response_value",
 				fmt.Sprintf("%s list omitted or returned stale selected runtime record", expectation.service),
 			)
 		}
+		if expectation.kind == expectEntityAbsent && foundExpected {
+			return invalid("response_value", fmt.Sprintf("deleted %s record remains visible in list", expectation.service))
+		}
 	}
 	return api.ValidationResult{Success: true}
+}
+
+func validateEntityValue(service string, object map[string]any) error {
+	requireString := func(field string) error {
+		if _, ok := object[field].(string); !ok {
+			return fmt.Errorf("%s must be a string", field)
+		}
+		return nil
+	}
+	requireInteger := func(field string) error {
+		value, ok := object[field].(float64)
+		if !ok || math.Trunc(value) != value {
+			return fmt.Errorf("%s must be an integer", field)
+		}
+		return nil
+	}
+	stringFields := map[string][]string{
+		"config":  {"name", "value", "description"},
+		"station": {"id", "name"},
+		"train":   {"id"},
+		"travel":  {"trainTypeId", "routeId", "startingStationId", "stationsId", "terminalStationId"},
+		"route":   {"id", "startStationId", "terminalStationId"},
+		"price":   {"id", "trainType", "routeId"},
+	}
+	for _, field := range stringFields[service] {
+		if err := requireString(field); err != nil {
+			return err
+		}
+	}
+	switch service {
+	case "station":
+		return requireInteger("stayTime")
+	case "train":
+		for _, field := range []string{"economyClass", "confortClass", "averageSpeed"} {
+			if err := requireInteger(field); err != nil {
+				return err
+			}
+		}
+	case "route":
+		stations, stationsOK := object["stations"].([]any)
+		distances, distancesOK := object["distances"].([]any)
+		if !stationsOK || !distancesOK || len(stations) != len(distances) {
+			return fmt.Errorf("stations and distances must be equal-length arrays")
+		}
+		for _, station := range stations {
+			if _, ok := station.(string); !ok {
+				return fmt.Errorf("stations must contain strings")
+			}
+		}
+		for _, distance := range distances {
+			value, ok := distance.(float64)
+			if !ok || math.Trunc(value) != value {
+				return fmt.Errorf("distances must contain integers")
+			}
+		}
+	case "price":
+		for _, field := range []string{"basicPriceRate", "firstClassPriceRate"} {
+			value, ok := object[field].(float64)
+			if !ok || math.IsNaN(value) || math.IsInf(value, 0) {
+				return fmt.Errorf("%s must be numeric", field)
+			}
+		}
+	case "travel":
+		if _, err := entityKey(service, object); err != nil {
+			return err
+		}
+		for _, field := range []string{"startingTime", "endTime"} {
+			if err := requireInteger(field); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func entityKey(service string, object map[string]any) (string, error) {
+	field := "id"
+	if service == "config" {
+		field = "name"
+	}
+	if service == "travel" {
+		trip, ok := object["tripId"].(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("tripId must be an object")
+		}
+		if len(trip) != 2 {
+			return "", fmt.Errorf("tripId must contain exactly type and number")
+		}
+		kind, kindOK := trip["type"].(string)
+		number, numberOK := trip["number"].(string)
+		if !kindOK || (kind != "G" && kind != "D") || !numberOK || number == "" {
+			return "", fmt.Errorf("tripId must have type G or D and a non-empty string number")
+		}
+		return kind + number, nil
+	}
+	key, ok := object[field].(string)
+	if !ok {
+		return "", fmt.Errorf("%s must be a string", field)
+	}
+	return key, nil
 }
 
 func validateEnvelopeResult(result api.ProtocolResult, httpStatus, appStatus int) api.ValidationResult {

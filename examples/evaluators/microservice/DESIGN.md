@@ -55,7 +55,8 @@ sequenceDiagram
 For open-loop workloads, total latency begins at the scheduled arrival. Client
 queueing therefore remains visible under overload. Semantic validation happens
 after `completed_at`; it can invalidate a request but does not inflate protocol
-latency.
+latency. The separate `validated_at` timestamp bounds logical completion and is
+used for achieved-throughput elapsed time.
 
 The scheduler reports actual offered rate, scheduler lag, and maximum client
 queue depth. A trial is invalid when the client cannot offer the configured
@@ -65,7 +66,8 @@ Closed-loop workloads use the same engine, drivers, observations, and semantic
 validation, but each worker schedules its next logical operation after the
 previous one completes. They are appropriate for saturation-throughput
 objectives where a fixed open-loop rate would cap every successful candidate at
-the same score.
+the same score. Their latency distributions are closed-loop saturation response
+times; use an open-loop workload to characterize queueing under an offered rate.
 
 ## Extension points
 

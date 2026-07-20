@@ -27,6 +27,7 @@ type Load struct {
 }
 
 type ProfileOverride struct {
+	Model               *string        `toml:"model"`
 	Rate                *float64       `toml:"rate"`
 	WarmupSeconds       *float64       `toml:"warmup_seconds"`
 	DurationSeconds     *float64       `toml:"duration_seconds"`
@@ -39,6 +40,9 @@ type ProfileOverride struct {
 }
 
 func (o ProfileOverride) Apply(load *Load) {
+	if o.Model != nil {
+		load.Model = *o.Model
+	}
 	if o.Rate != nil {
 		load.Rate = *o.Rate
 	}
@@ -129,8 +133,9 @@ type Objective struct {
 }
 
 type Constraints struct {
-	MinSuccessRate *float64 `toml:"min_success_rate" json:"min_success_rate,omitempty"`
-	MaxErrorRate   *float64 `toml:"max_error_rate" json:"max_error_rate,omitempty"`
+	MinSuccessRate       *float64 `toml:"min_success_rate" json:"min_success_rate,omitempty"`
+	MaxErrorRate         *float64 `toml:"max_error_rate" json:"max_error_rate,omitempty"`
+	MinOperationsPerType int      `toml:"min_operations_per_type" json:"min_operations_per_type,omitempty"`
 }
 
 type Workload struct {
@@ -223,14 +228,17 @@ type Observation struct {
 	DispatchedAt       time.Time                `json:"dispatched_at"`
 	SentAt             time.Time                `json:"sent_at"`
 	CompletedAt        time.Time                `json:"completed_at"`
+	ValidatedAt        time.Time                `json:"validated_at"`
 	QueueWait          time.Duration            `json:"-"`
 	ClientPrepareTime  time.Duration            `json:"-"`
 	ProtocolTime       time.Duration            `json:"-"`
 	TotalLatency       time.Duration            `json:"-"`
+	ValidationTime     time.Duration            `json:"-"`
 	QueueWaitMS        float64                  `json:"queue_wait_ms"`
 	ClientPrepareMS    float64                  `json:"client_prepare_ms"`
 	ProtocolTimeMS     float64                  `json:"protocol_time_ms"`
 	TotalLatencyMS     float64                  `json:"total_latency_ms"`
+	ValidationTimeMS   float64                  `json:"validation_time_ms"`
 	TransportSuccess   bool                     `json:"transport_success"`
 	ApplicationSuccess bool                     `json:"application_success"`
 	NativeStatus       string                   `json:"native_status"`
@@ -245,14 +253,19 @@ type Observation struct {
 }
 
 func (o *Observation) PopulateDurations() {
+	if o.ValidatedAt.IsZero() {
+		o.ValidatedAt = o.CompletedAt
+	}
 	o.QueueWait = o.DispatchedAt.Sub(o.ScheduledAt)
 	o.ClientPrepareTime = o.SentAt.Sub(o.DispatchedAt)
 	o.ProtocolTime = o.CompletedAt.Sub(o.SentAt)
 	o.TotalLatency = o.CompletedAt.Sub(o.ScheduledAt)
+	o.ValidationTime = o.ValidatedAt.Sub(o.CompletedAt)
 	o.QueueWaitMS = durationMS(o.QueueWait)
 	o.ClientPrepareMS = durationMS(o.ClientPrepareTime)
 	o.ProtocolTimeMS = durationMS(o.ProtocolTime)
 	o.TotalLatencyMS = durationMS(o.TotalLatency)
+	o.ValidationTimeMS = durationMS(o.ValidationTime)
 	if len(o.CustomTimings) > 0 {
 		o.CustomTimingsMS = make(map[string]float64, len(o.CustomTimings))
 		for name, value := range o.CustomTimings {

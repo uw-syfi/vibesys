@@ -2,7 +2,9 @@ package trainticket
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -82,7 +84,8 @@ func (a *Application) Prepare(ctx context.Context, runtime api.Runtime, trial ap
 	if a.active != nil {
 		return nil, fmt.Errorf("previous Train Ticket fixture was not reset")
 	}
-	namespace := fmt.Sprintf("vb%016x%02x", uint64(trial.Seed), trial.Index)
+	namespaceDigest := sha256.Sum256([]byte(fmt.Sprintf("%d/%d", trial.Seed, trial.Index)))
+	namespace := fmt.Sprintf("%x", namespaceDigest[:12])
 	data := &dataset{namespace: namespace, records: makeRecords(namespace, trial.Seed, a.config.Records)}
 	a.active = data
 	for index := range data.records {
@@ -93,50 +96,95 @@ func (a *Application) Prepare(ctx context.Context, runtime api.Runtime, trial ap
 			}
 			return nil, fmt.Errorf("prepare record %d: %w", index, err)
 		}
-		data.prepared++
 	}
 	return data, nil
 }
 
 func (a *Application) Reset(ctx context.Context, runtime api.Runtime, _ api.TrialContext) error {
 	data := a.active
-	a.active = nil
 	if data == nil {
 		return nil
 	}
-	var firstErr error
-	for index := data.prepared - 1; index >= 0; index-- {
-		if err := a.deleteRecord(ctx, runtime, &data.records[index]); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("cleanup record %d: %w", index, err)
+	var cleanupErrors []error
+	for index := len(data.records) - 1; index >= 0; index-- {
+		if err := a.deleteRecord(ctx, runtime, &data.records[index]); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("cleanup record %d: %w", index, err))
 		}
 	}
-	return firstErr
+	if len(cleanupErrors) > 0 {
+		return errors.Join(cleanupErrors...)
+	}
+	a.active = nil
+	return nil
 }
 
 func (a *Application) createRecord(ctx context.Context, runtime api.Runtime, item *record) error {
-	steps := []setupStep{
-		{"config", http.MethodPost, "/api/v1/configservice/configs", item.config, http.StatusCreated},
-		{"station", http.MethodPost, "/api/v1/stationservice/stations", item.stationA, http.StatusCreated},
-		{"station", http.MethodPost, "/api/v1/stationservice/stations", item.stationB, http.StatusCreated},
-		{"train", http.MethodPost, "/api/v1/trainservice/trains", item.train, http.StatusOK},
-		{"route", http.MethodPost, "/api/v1/routeservice/routes", item.routeIn, http.StatusOK},
-		{"price", http.MethodPost, "/api/v1/priceservice/prices", item.price, http.StatusCreated},
-		{"travel", http.MethodPost, "/api/v1/travelservice/trips", item.tripIn, http.StatusCreated},
+	steps := lifecycleSteps(item)
+	for index, step := range steps {
+		if err := a.runStep(ctx, runtime, step.create); err != nil {
+			cleanupErr := a.deleteRecord(ctx, runtime, item)
+			if cleanupErr != nil {
+				return fmt.Errorf("create step %d: %w (partial cleanup: %v)", index, err, cleanupErr)
+			}
+			return fmt.Errorf("create step %d: %w", index, err)
+		}
+		item.created[index] = true
 	}
-	return a.runSetup(ctx, runtime, steps)
+	return nil
 }
 
 func (a *Application) deleteRecord(ctx context.Context, runtime api.Runtime, item *record) error {
-	steps := []setupStep{
-		{"travel", http.MethodDelete, "/api/v1/travelservice/trips/" + item.tripIn.TripID, nil, http.StatusOK},
-		{"price", http.MethodDelete, "/api/v1/priceservice/prices", item.price, http.StatusOK},
-		{"route", http.MethodDelete, "/api/v1/routeservice/routes/" + item.route.ID, nil, http.StatusOK},
-		{"train", http.MethodDelete, "/api/v1/trainservice/trains/" + item.train.ID, nil, http.StatusOK},
-		{"station", http.MethodDelete, "/api/v1/stationservice/stations", item.stationA, http.StatusOK},
-		{"station", http.MethodDelete, "/api/v1/stationservice/stations", item.stationB, http.StatusOK},
-		{"config", http.MethodDelete, "/api/v1/configservice/configs/" + url.PathEscape(item.config.Name), nil, http.StatusOK},
+	steps := lifecycleSteps(item)
+	var cleanupErrors []error
+	for index := len(steps) - 1; index >= 0; index-- {
+		if !item.created[index] {
+			continue
+		}
+		if err := a.runStep(ctx, runtime, steps[index].delete); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("delete step %d: %w", index, err))
+			continue
+		}
+		item.created[index] = false
 	}
-	return a.runSetup(ctx, runtime, steps)
+	return errors.Join(cleanupErrors...)
+}
+
+type lifecycleStep struct {
+	create setupStep
+	delete setupStep
+}
+
+func lifecycleSteps(item *record) []lifecycleStep {
+	return []lifecycleStep{
+		{
+			create: setupStep{"config", http.MethodPost, "/api/v1/configservice/configs", item.config, http.StatusCreated},
+			delete: setupStep{"config", http.MethodDelete, "/api/v1/configservice/configs/" + url.PathEscape(item.config.Name), nil, http.StatusOK},
+		},
+		{
+			create: setupStep{"station", http.MethodPost, "/api/v1/stationservice/stations", item.stationA, http.StatusCreated},
+			delete: setupStep{"station", http.MethodDelete, "/api/v1/stationservice/stations", item.stationA, http.StatusOK},
+		},
+		{
+			create: setupStep{"station", http.MethodPost, "/api/v1/stationservice/stations", item.stationB, http.StatusCreated},
+			delete: setupStep{"station", http.MethodDelete, "/api/v1/stationservice/stations", item.stationB, http.StatusOK},
+		},
+		{
+			create: setupStep{"train", http.MethodPost, "/api/v1/trainservice/trains", item.train, http.StatusOK},
+			delete: setupStep{"train", http.MethodDelete, "/api/v1/trainservice/trains/" + item.train.ID, nil, http.StatusOK},
+		},
+		{
+			create: setupStep{"route", http.MethodPost, "/api/v1/routeservice/routes", item.routeIn, http.StatusOK},
+			delete: setupStep{"route", http.MethodDelete, "/api/v1/routeservice/routes/" + item.route.ID, nil, http.StatusOK},
+		},
+		{
+			create: setupStep{"price", http.MethodPost, "/api/v1/priceservice/prices", item.price, http.StatusCreated},
+			delete: setupStep{"price", http.MethodDelete, "/api/v1/priceservice/prices", item.price, http.StatusOK},
+		},
+		{
+			create: setupStep{"travel", http.MethodPost, "/api/v1/travelservice/trips", item.tripIn, http.StatusCreated},
+			delete: setupStep{"travel", http.MethodDelete, "/api/v1/travelservice/trips/" + item.tripIn.TripID, nil, http.StatusOK},
+		},
+	}
 }
 
 type setupStep struct {
@@ -147,14 +195,12 @@ type setupStep struct {
 	status int
 }
 
-func (a *Application) runSetup(ctx context.Context, runtime api.Runtime, steps []setupStep) error {
-	for _, step := range steps {
-		requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		result := runtime.Invoke(requestCtx, a.invocation(step.target, "fixture", step.method, step.path, step.body))
-		cancel()
-		if validation := validateEnvelopeResult(result, step.status, 1); !validation.Success {
-			return fmt.Errorf("%s %s: %s", step.method, step.path, validation.ErrorMessage)
-		}
+func (a *Application) runStep(ctx context.Context, runtime api.Runtime, step setupStep) error {
+	requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	result := runtime.Invoke(requestCtx, a.invocation(step.target, "fixture", step.method, step.path, step.body))
+	if validation := validateEnvelopeResult(result, step.status, 1); !validation.Success {
+		return fmt.Errorf("%s %s: %s", step.method, step.path, validation.ErrorMessage)
 	}
 	return nil
 }

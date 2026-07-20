@@ -107,21 +107,24 @@ class GraphCase:
     trip_input: dict[str, Any]
     trip: dict[str, Any]
     retired_station_names: dict[str, str] = dataclass_field(default_factory=dict)
+    retired_route_keys: list[tuple[str, str]] = dataclass_field(default_factory=list)
+    retired_price_keys: list[tuple[str, str]] = dataclass_field(default_factory=list)
 
 
 def _b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
-def admin_token(now: int | None = None) -> str:
+def admin_token(now: int | None = None, actor: str | None = None) -> str:
     issued = int(time.time()) if now is None else now
+    identity = actor if actor is not None else secrets.token_hex(12)
     header = _b64url(b'{"alg":"HS256","typ":"JWT"}')
     claims = _b64url(
         json.dumps(
             {
-                "sub": "vibesys-checker",
+                "sub": identity,
                 "roles": ["ROLE_ADMIN"],
-                "id": "vibesys-checker",
+                "id": identity,
                 "iat": issued,
                 "exp": issued + 3600,
             },
@@ -138,7 +141,7 @@ class APIClient:
         default = base_url.rstrip("/")
         self._targets = {name: targets.get(name, default).rstrip("/") for name in SERVICE_PATHS}
         self._timeout = timeout
-        self._token = admin_token()
+        self._token = admin_token(actor=secrets.token_hex(12))
 
     def url(self, service: str, path: str) -> str:
         return self._targets[service] + SERVICE_PATHS[service] + path
@@ -296,9 +299,19 @@ def validate_entity(service: str, item: Any, *, where: str) -> dict[str, Any]:
 
 
 def make_case(rng: random.Random, namespace: str, index: int) -> GraphCase:
-    token = f"{namespace}{index:x}{rng.getrandbits(32):08x}"
-    station_a = {"id": token + "a", "name": "A " + token, "stayTime": rng.randint(1, 40)}
-    station_b = {"id": token + "b", "name": "B " + token, "stayTime": rng.randint(1, 40)}
+    token = f"{namespace}{index:03x}{rng.getrandbits(32):08x}"
+    station_a_names = ("Station A ", "North Hub ", "北站 ")
+    station_b_names = ("Station B ", "South Hub ", "南站 ")
+    station_a = {
+        "id": token + "a",
+        "name": rng.choice(station_a_names) + token,
+        "stayTime": rng.randint(1, 40),
+    }
+    station_b = {
+        "id": token + "b",
+        "name": rng.choice(station_b_names) + token,
+        "stayTime": rng.randint(1, 40),
+    }
     train = {
         "id": "T" + token,
         "economyClass": rng.randint(100, 900),
@@ -344,10 +357,11 @@ def make_case(rng: random.Random, namespace: str, index: int) -> GraphCase:
         "endTime": end_time,
     }
     trip = {**trip_input, "tripId": {"type": trip_type, "number": trip_number}}
+    config_names = (token + "Config", "config " + token, "配置-" + token)
     config = {
-        "name": token + "Config",
-        "value": secrets.token_urlsafe(18),
-        "description": "generated " + secrets.token_urlsafe(22),
+        "name": rng.choice(config_names),
+        "value": f"v-{rng.getrandbits(64):016x}",
+        "description": f"d-{rng.getrandbits(64):016x}",
     }
     return GraphCase(
         config=config,
@@ -409,6 +423,24 @@ def verify_seed_catalog(client: APIClient) -> int:
     return checks
 
 
+def verify_seed_catalog_present(client: APIClient) -> int:
+    checks = 0
+    for service, expected_entities in SEED_CATALOG.items():
+        actual = index_entities(service, client.list_entities(service))
+        for expected_entity in expected_entities:
+            key = entity_key(service, expected_entity)
+            if key not in actual:
+                raise CheckFailure(f"seed {service} {key!r} disappeared after a runtime delete")
+            assert_entity(
+                service,
+                actual[key],
+                expected_entity,
+                where=f"surviving seed {service} {key}",
+            )
+            checks += 1
+    return checks
+
+
 def verify_welcomes_and_http(client: APIClient) -> int:
     checks = 0
     for service, (path, expected) in WELCOME_PATHS.items():
@@ -451,15 +483,19 @@ def verify_welcomes_and_http(client: APIClient) -> int:
 
 
 def create_case(client: APIClient, case: GraphCase) -> int:
-    client.envelope("config", "POST", "/configs", case.config, http_status=201)
-    client.envelope("station", "POST", "/stations", case.station_a, http_status=201)
-    client.envelope("station", "POST", "/stations", case.station_b, http_status=201)
-    client.envelope("train", "POST", "/trains", case.train)
-    route_result = client.envelope("route", "POST", "/routes", case.route_input)
-    assert_entity("route", route_result["data"], case.route, where="route create response")
-    price_result = client.envelope("price", "POST", "/prices", case.price, http_status=201)
-    assert_entity("price", price_result["data"], case.price, where="price create response")
-    client.envelope("travel", "POST", "/trips", case.trip_input, http_status=201)
+    try:
+        client.envelope("config", "POST", "/configs", case.config, http_status=201)
+        client.envelope("station", "POST", "/stations", case.station_a, http_status=201)
+        client.envelope("station", "POST", "/stations", case.station_b, http_status=201)
+        client.envelope("train", "POST", "/trains", case.train)
+        route_result = client.envelope("route", "POST", "/routes", case.route_input)
+        assert_entity("route", route_result["data"], case.route, where="route create response")
+        price_result = client.envelope("price", "POST", "/prices", case.price, http_status=201)
+        assert_entity("price", price_result["data"], case.price, where="price create response")
+        client.envelope("travel", "POST", "/trips", case.trip_input, http_status=201)
+    except Exception:
+        cleanup_cases(client, [case])
+        raise
     return 7
 
 
@@ -471,6 +507,8 @@ def verify_case(client: APIClient, case: GraphCase, rng: random.Random) -> int:
             "config", "GET", "/configs/" + urllib.parse.quote(case.config["name"], safe="")
         )["data"]
         assert_entity("config", data, case.config, where="config read-your-write")
+        listed = index_entities("config", client.list_entities("config"))
+        assert_entity("config", listed[case.config["name"]], case.config, where="config list")
 
     def check_station(item: Mapping[str, Any]) -> None:
         entities = index_entities("station", client.list_entities("station"))
@@ -487,6 +525,8 @@ def verify_case(client: APIClient, case: GraphCase, rng: random.Random) -> int:
     def check_train() -> None:
         data = client.envelope("train", "GET", "/trains/" + case.train["id"])["data"]
         assert_entity("train", data, case.train, where="train read-your-write")
+        listed = index_entities("train", client.list_entities("train"))
+        assert_entity("train", listed[case.train["id"]], case.train, where="train list")
 
     def check_route() -> None:
         data = client.envelope("route", "GET", "/routes/" + case.route["id"])["data"]
@@ -498,6 +538,8 @@ def verify_case(client: APIClient, case: GraphCase, rng: random.Random) -> int:
         )["data"]
         if not isinstance(found, list) or case.route["id"] not in index_entities("route", found):
             raise CheckFailure("route start/terminal lookup omitted the newly written route")
+        listed = index_entities("route", client.list_entities("route"))
+        assert_entity("route", listed[case.route["id"]], case.route, where="route list")
 
     def check_price() -> None:
         data = client.envelope(
@@ -506,11 +548,15 @@ def verify_case(client: APIClient, case: GraphCase, rng: random.Random) -> int:
             f"/prices/{case.price['routeId']}/{case.price['trainType']}",
         )["data"]
         assert_entity("price", data, case.price, where="price read-your-write")
+        listed = index_entities("price", client.list_entities("price"))
+        assert_entity("price", listed[case.price["id"]], case.price, where="price list")
 
     def check_trip() -> None:
         key = case.trip_input["tripId"]
         data = client.envelope("travel", "GET", "/trips/" + key)["data"]
         assert_entity("travel", data, case.trip, where="trip read-your-write")
+        listed = index_entities("travel", client.list_entities("travel"))
+        assert_entity("travel", listed[key], case.trip, where="trip list")
 
     checks.extend(
         (
@@ -523,8 +569,8 @@ def verify_case(client: APIClient, case: GraphCase, rng: random.Random) -> int:
             check_trip,
         )
     )
-    if case.retired_station_names:
-        checks.append(lambda: verify_retired_station_names(client, case))
+    if case.retired_station_names or case.retired_route_keys or case.retired_price_keys:
+        checks.append(lambda: verify_retired_secondary_indexes(client, case))
     rng.shuffle(checks)
     for check in checks:
         check()
@@ -541,23 +587,61 @@ def verify_retired_station_names(client: APIClient, case: GraphCase) -> None:
         )
 
 
-def update_case(client: APIClient, case: GraphCase, rng: random.Random) -> int:
+def verify_retired_secondary_indexes(client: APIClient, case: GraphCase) -> None:
+    verify_retired_station_names(client, case)
+    for start_station, terminal_station in case.retired_route_keys:
+        client.envelope(
+            "route",
+            "GET",
+            f"/routes/{start_station}/{terminal_station}",
+            app_status=0,
+        )
+    for route_id, train_type in case.retired_price_keys:
+        client.envelope(
+            "price",
+            "GET",
+            f"/prices/{route_id}/{train_type}",
+            app_status=0,
+        )
+
+
+def update_case(
+    client: APIClient,
+    case: GraphCase,
+    rng: random.Random,
+) -> int:
     suffix = secrets.token_urlsafe(8)
     case.config["value"] = suffix
     case.config["description"] = "updated " + secrets.token_urlsafe(16)
     case.retired_station_names[case.station_a["name"]] = case.station_a["id"]
     case.retired_station_names[case.station_b["name"]] = case.station_b["id"]
-    case.station_a["name"] = "Updated A " + suffix
+    case.station_a["name"] = rng.choice(("Renamed A ", "Transfer Hub A ", "换乘站甲 ")) + suffix
     case.station_a["stayTime"] = rng.randint(41, 90)
-    case.station_b["name"] = "Updated B " + suffix
+    case.station_b["name"] = rng.choice(("Renamed B ", "Terminal Hub B ", "终点站乙 ")) + suffix
     case.station_b["stayTime"] = rng.randint(41, 90)
     case.train["averageSpeed"] = rng.randint(351, 500)
     case.train["economyClass"] += 7
+    case.retired_route_keys.append((case.route["startStationId"], case.route["terminalStationId"]))
+    case.route["stations"] = [case.station_b["id"], case.station_a["id"]]
+    case.route["startStationId"] = case.station_b["id"]
+    case.route["terminalStationId"] = case.station_a["id"]
     case.route["distances"][1] += rng.randint(1, 99)
+    case.route_input["startStation"] = case.station_b["id"]
+    case.route_input["endStation"] = case.station_a["id"]
+    case.route_input["stationList"] = f"{case.station_b['id']},{case.station_a['id']}"
     case.route_input["distanceList"] = f"0,{case.route['distances'][1]}"
+    case.retired_price_keys.append((case.price["routeId"], case.price["trainType"]))
+    case.price["routeId"] = rng.choice(SEED_CATALOG["route"])["id"]
+    case.price["trainType"] = rng.choice(SEED_CATALOG["train"])["id"]
     case.price["basicPriceRate"] = round(rng.uniform(0.11, 0.89), 4)
     case.price["firstClassPriceRate"] = round(rng.uniform(0.91, 1.89), 4)
     case.trip_input["endTime"] += rng.randint(60_000, 3_600_000)
+    case.trip_input["startingStationId"] = case.station_b["id"]
+    case.trip_input["stationsId"] = case.station_a["id"]
+    case.trip_input["terminalStationId"] = case.station_a["id"]
+    case.trip["startingStationId"] = case.station_b["id"]
+    case.trip["stationsId"] = case.station_a["id"]
+    case.trip["terminalStationId"] = case.station_a["id"]
     case.trip["endTime"] = case.trip_input["endTime"]
 
     operations = [
@@ -608,11 +692,24 @@ def verify_deleted(client: APIClient, case: GraphCase) -> int:
     ]
     for service, path in probes:
         client.envelope(service, "GET", path, app_status=0)
-    stations = index_entities("station", client.list_entities("station"))
+    deleted_entities = {
+        "config": (case.config,),
+        "station": (case.station_a, case.station_b),
+        "train": (case.train,),
+        "route": (case.route,),
+        "price": (case.price,),
+        "travel": (case.trip,),
+    }
+    list_checks = 0
+    for service, entities in deleted_entities.items():
+        listed = index_entities(service, client.list_entities(service))
+        for entity in entities:
+            key = entity_key(service, entity)
+            if key in listed:
+                raise CheckFailure(f"deleted {service} {key!r} remains visible in list")
+            list_checks += 1
     station_checks = 0
     for station in (case.station_a, case.station_b):
-        if station["id"] in stations:
-            raise CheckFailure(f"deleted station {station['id']} remains visible")
         client.envelope("station", "GET", "/stations/name/" + station["id"], app_status=0)
         client.envelope(
             "station",
@@ -629,7 +726,7 @@ def verify_deleted(client: APIClient, case: GraphCase) -> int:
             app_status=0,
         )
         station_checks += 1
-    return len(probes) + station_checks
+    return len(probes) + list_checks + station_checks
 
 
 def cleanup_cases(client: APIClient, cases: Sequence[GraphCase]) -> None:
@@ -711,24 +808,34 @@ class ManagedCandidate:
 
     def stop(self, *, kill: bool) -> None:
         process = self._process
-        self._process = None
         if process is None:
             return
         process_group = process.pid
+        descendants = descendant_processes(process.pid)
         requested_signal = signal.SIGKILL if kill else signal.SIGTERM
         signal_process_group(process_group, requested_signal)
+        signal_processes(descendants, requested_signal)
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             pass
         if not wait_process_group_exit(process_group, timeout=5):
             signal_process_group(process_group, signal.SIGKILL)
+            signal_processes(descendants, signal.SIGKILL)
             try:
                 process.wait(timeout=1)
             except subprocess.TimeoutExpired:
                 pass
             if not wait_process_group_exit(process_group, timeout=5):
                 raise CheckFailure(f"candidate process group {process_group} did not terminate")
+        if not wait_candidate_stopped(self._client, timeout=2):
+            signal_processes(descendants, signal.SIGKILL)
+        if not wait_candidate_stopped(self._client, timeout=2):
+            raise CheckFailure(
+                "candidate endpoints remained ready after its process group terminated; "
+                "a detached child may have escaped crash enforcement"
+            )
+        self._process = None
 
     def crash_restart(self) -> None:
         self.stop(kill=True)
@@ -746,12 +853,70 @@ def signal_process_group(process_group: int, requested_signal: signal.Signals) -
         pass
 
 
+def descendant_processes(root_pid: int) -> set[int]:
+    try:
+        result = subprocess.run(
+            ["ps", "-e", "-o", "pid=,ppid="],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    children: dict[int, list[int]] = {}
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            continue
+        try:
+            pid, parent = (int(field) for field in fields)
+        except ValueError:
+            continue
+        children.setdefault(parent, []).append(pid)
+    descendants: set[int] = set()
+    pending = list(children.get(root_pid, ()))
+    while pending:
+        pid = pending.pop()
+        if pid in descendants:
+            continue
+        descendants.add(pid)
+        pending.extend(children.get(pid, ()))
+    return descendants
+
+
+def signal_processes(processes: Iterable[int], requested_signal: signal.Signals) -> None:
+    for process in processes:
+        try:
+            os.kill(process, requested_signal)
+        except ProcessLookupError:
+            pass
+
+
 def wait_process_group_exit(process_group: int, timeout: float) -> bool:
     deadline = time.monotonic() + timeout
     while True:
         try:
             os.killpg(process_group, 0)
         except ProcessLookupError:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
+def wait_candidate_stopped(client: APIClient, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while True:
+        any_ready = False
+        for service, (path, _) in WELCOME_PATHS.items():
+            try:
+                if client.request(service, "GET", path).status == 200:
+                    any_ready = True
+                    break
+            except Exception:
+                continue
+        if not any_ready:
             return True
         if time.monotonic() >= deadline:
             return False
@@ -815,9 +980,16 @@ def run_suite(
 
         deletion_order = list(cases)
         rng.shuffle(deletion_order)
+        live_cases = list(cases)
         for case in deletion_order:
             checks += delete_case(client, case, rng)
             checks += verify_deleted(client, case)
+            live_cases.remove(case)
+            checks += verify_seed_catalog_present(client)
+            surviving_order = list(live_cases)
+            rng.shuffle(surviving_order)
+            for surviving_case in surviving_order:
+                checks += verify_case(client, surviving_case, rng)
         created.clear()
     finally:
         cleanup_cases(client, created)
@@ -866,7 +1038,7 @@ def main() -> int:
     client = APIClient(args.base_url, targets, args.timeout)
     seed = secrets.randbits(128)
     rng = random.Random(seed)
-    namespace = "vs" + secrets.token_hex(12)
+    namespace = secrets.token_hex(12)
     case_count = rng.randint(args.cases_min, args.cases_max)
     managed: ManagedCandidate | None = None
     temporary_state: tempfile.TemporaryDirectory[str] | None = None

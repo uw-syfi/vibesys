@@ -33,8 +33,12 @@ func summarizeTrial(
 		if observationIndex == 0 || observation.ScheduledAt.UnixNano() < earliest {
 			earliest = observation.ScheduledAt.UnixNano()
 		}
-		if observation.CompletedAt.UnixNano() > latest {
-			latest = observation.CompletedAt.UnixNano()
+		finishedAt := observation.ValidatedAt
+		if finishedAt.IsZero() {
+			finishedAt = observation.CompletedAt
+		}
+		if finishedAt.UnixNano() > latest {
+			latest = finishedAt.UnixNano()
 		}
 		byOperation[observation.Operation] = append(byOperation[observation.Operation], observation)
 		queueWaits = append(queueWaits, observation.QueueWaitMS)
@@ -113,6 +117,18 @@ func summarizeTrial(
 			result.ErrorRate,
 			*maximum,
 		))
+	}
+	if minimum := workload.Constraints.MinOperationsPerType; minimum > 0 {
+		for _, operation := range workload.Operations {
+			if count := len(byOperation[operation.Name]); count < minimum {
+				result.InvalidReasons = append(result.InvalidReasons, fmt.Sprintf(
+					"operation %q has %d samples, below required %d",
+					operation.Name,
+					count,
+					minimum,
+				))
+			}
+		}
 	}
 	result.Valid = len(result.InvalidReasons) == 0
 	if !result.Valid {

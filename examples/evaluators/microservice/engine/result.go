@@ -2,7 +2,7 @@ package engine
 
 import "vibesys/microservice-evaluator/api"
 
-const ResultSchemaVersion = 2
+const ResultSchemaVersion = 3
 
 type Distribution struct {
 	Count int      `json:"count"`
@@ -66,10 +66,11 @@ type Aggregate struct {
 }
 
 type ConstraintResult struct {
-	Passed         bool     `json:"passed"`
-	Reasons        []string `json:"reasons,omitempty"`
-	MinSuccessRate *float64 `json:"min_success_rate,omitempty"`
-	MaxErrorRate   *float64 `json:"max_error_rate,omitempty"`
+	Passed               bool     `json:"passed"`
+	Reasons              []string `json:"reasons,omitempty"`
+	MinSuccessRate       *float64 `json:"min_success_rate,omitempty"`
+	MaxErrorRate         *float64 `json:"max_error_rate,omitempty"`
+	MinOperationsPerType int      `json:"min_operations_per_type,omitempty"`
 }
 
 type Summary struct {

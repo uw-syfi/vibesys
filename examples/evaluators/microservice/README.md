@@ -116,9 +116,11 @@ sequenceDiagram
 ```
 
 Application validation runs after `completed_at`. It can reject a response but
-does not inflate the recorded protocol latency. The engine also reports actual
-offered rate, scheduler lag, and maximum queue depth so a benchmark can
-distinguish target behavior from load-generator saturation.
+does not inflate the recorded protocol latency. `validated_at` records when
+semantic validation finishes; achieved-throughput elapsed time includes that
+tail so validator work cannot inflate the primary metric. The engine also
+reports actual offered rate, scheduler lag, and maximum queue depth so a
+benchmark can distinguish target behavior from load-generator saturation.
 
 ### Closed-loop saturation model
 
@@ -127,7 +129,8 @@ flight for the measurement duration. Each worker schedules its next operation
 only after the previous operation completes. This measures achieved throughput
 without imposing a fixed offered-rate ceiling. Queue wait and scheduler lag are
 zero by construction; total latency still spans every invocation in the logical
-operation.
+operation. These are saturation response-time samples, not open-loop latency:
+they intentionally do not model arrivals queueing during a target stall.
 
 ### Correctness and result validity
 
@@ -141,7 +144,7 @@ bytes remain visible separately. A trial is invalid when it:
 
 - has no successful samples matching the objective;
 - fails to sustain the workload's minimum offered-rate ratio;
-- violates a success-rate or error-rate constraint; or
+- violates a success-rate, error-rate, or per-operation coverage constraint; or
 - fails during reset, setup, execution, or interruption.
 
 An invalid run omits `primary_value`, preventing the optimization loop from

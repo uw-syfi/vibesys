@@ -79,9 +79,10 @@ func (e *Engine) Run(ctx context.Context, workload api.Workload) (RunResult, err
 			Seed:          strconv.FormatInt(workload.Load.Seed, 10),
 			PrimaryMetric: workload.Objective,
 			Constraints: ConstraintResult{
-				Passed:         true,
-				MinSuccessRate: workload.Constraints.MinSuccessRate,
-				MaxErrorRate:   workload.Constraints.MaxErrorRate,
+				Passed:               true,
+				MinSuccessRate:       workload.Constraints.MinSuccessRate,
+				MaxErrorRate:         workload.Constraints.MaxErrorRate,
+				MinOperationsPerType: workload.Constraints.MinOperationsPerType,
 			},
 		},
 	}
@@ -434,6 +435,7 @@ func executeRequest(
 	if buildErr == nil {
 		validation = application.ValidateOperation(item.operation, plan, results)
 	}
+	validated := time.Now()
 	transportSuccess := buildErr == nil
 	var requestBytes, responseBytes int64
 	nativeStatuses := make([]string, 0, len(results))
@@ -477,6 +479,7 @@ func executeRequest(
 		DispatchedAt:       dispatched,
 		SentAt:             sent,
 		CompletedAt:        completed,
+		ValidatedAt:        validated,
 		TransportSuccess:   transportSuccess,
 		ApplicationSuccess: success,
 		NativeStatus:       nativeStatus,
