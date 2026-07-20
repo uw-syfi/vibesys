@@ -5,6 +5,9 @@
 ## Runtime environment
 
 {{ runtime_notes }}
+{% if env_kind == "modal" %}
+> **Per-candidate Modal app name — set it exactly.** The app name in the notes above is unique to *this* offspring. If you are editing an existing `main.py` (repairing a seed or mutating a parent), it will contain a *different* app name from a previous candidate — you MUST update `modal.App(...)` (and any `@modal.fastapi_endpoint(label=...)` / auxiliary-volume prefixes) to the app name given above, exactly. A stale name means your deploy and the judge's health probe target different apps and the offspring fails.
+{% endif %}
 {% endif %}
 
 ## Your role: Mutator in an evolutionary search
@@ -16,6 +19,17 @@ This is not a redo of the parent. It is a **single, focused change** that you be
 ## Objective (verbatim from `OBJECTIVE.md`)
 
 {{ objective }}
+
+## Always-on gates (every offspring is checked against ALL of these)
+
+The judge discards any offspring that fails **any** of the framework's always-on gates, no matter how good its perf number is. These hold for the cold-start seed *and* every mutation:
+
+1. **Unit tests** — `uv run pytest -v` must collect and pass. A repo with **no** tests exits code 5 and is treated as a FAIL, so you must ship at least a minimal `tests/` suite and keep it green as you mutate.
+{% if benchmark_command %}2. **Benchmark sanity** — the server must start, `/health` must return 200, and `{{ benchmark_command }}` must complete at least one request without error (discover flags with `{{ benchmark_command }} --help`).
+{% endif %}{% if accuracy_command %}3. **Accuracy checker** — `{{ accuracy_command }}` must pass when run against the live server. Discover its gates with `{{ accuracy_command }} --help`; do not guess. For this modality it drives the server over HTTP, so a real prompt-conditioned forward pass is required — canned/echoed/templated output fails it.
+{% endif %}
+
+If a change would break any gate, it is not worth the perf win — a failed offspring contributes nothing to the search.
 
 {% if objectives %}
 ## Pareto-frontier mode
@@ -33,14 +47,33 @@ The profiler reports every objective as a numeric value in `metrics`. An offspri
 
 {% if is_cold_start %}
 ## Cold start — no parent yet
+{% if repair_seed %}
+The population is empty, but a **previous cold-start seed's files are already in the workspace** — it failed the judge and was snapshotted for you to fix. **Do NOT rewrite it from scratch and do NOT recreate files that already exist.** Read the current `main.py` / server modules, find why it failed (see the lessons below), and **repair it in place** with the smallest change that clears the gate it tripped. Rebuilding from zero throws away working progress and re-introduces the same bug — fix forward instead.
 
+Your repaired seed must still satisfy all of these:
+{% else %}
 The population is empty. There is no parent to mutate. Your job this round is to write the **first working version** of the server from the reference at `{{ reference_path }}`. Aim for a minimal correct implementation that:
+{% endif %}
 
-- Boots and exposes `/health`.
-- Implements the modality's accuracy-checker contract (e.g. `VibeServeModel.from_pretrained` + the modality's generate / transcribe method).
-- Passes the modality's pass criteria (covered in the modality block above).
+- Boots and exposes `/health` (returns 200 once the model is loaded).
+- Serves the OpenAI-compatible endpoints the objective requires (`/v1/completions` and `/v1/chat/completions`) with correct streaming (SSE) semantics — the accuracy checker and benchmark both drive the server **over HTTP**, so these must work end-to-end against the running server.
+- Runs a real model forward pass with your own layer implementations (per the modality block above); no canned, echoed, or templated output.
+- Ships a minimal `tests/` suite so `uv run pytest -v` collects and passes at least one test (see "Always-on gates" above — an empty repo fails this gate).
+- Clears the always-on accuracy and benchmark-sanity gates listed above.
 
 Skip aggressive optimization in this seed — later generations will mutate it. Producing a clean, correct seed beats producing a clever-but-broken seed: failed seeds give the search nothing to evolve from.
+
+{% if failed_lessons %}
+### Lessons from {{ num_failed_attempts }} previous failed seed attempt(s) — do NOT repeat these
+
+Earlier cold-start seeds were **discarded by the judge** for the reasons below. The population is still empty because of them. Read each one and make sure your implementation does not fall into the same trap — especially recurring model-init / runtime crashes that keep `/health` up but break inference:
+
+{% for lesson in failed_lessons %}
+{{ loop.index }}. {{ lesson }}
+{% endfor %}
+
+Before you finish, sanity-check your seed against every lesson above.
+{% endif %}
 
 {% else %}
 ## Parent (the implementation you are mutating)

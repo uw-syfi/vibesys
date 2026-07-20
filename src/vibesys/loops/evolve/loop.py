@@ -6,8 +6,7 @@ every offspring:
   1. Sample a parent from the passed-population, weighted by perf_metric.
   2. Sample a small set of peer "inspirations" so the mutator sees
      diverse strategies, not just the current best.
-  3. Check the workspace out to the parent's commit (or, on cold start,
-     leave the workspace as the framework seeded it).
+  3. Check the workspace out to the parent's commit.
   4. Run the *Mutator* agent (an LLM acting as the mutation operator) to
      edit code in place.
   5. Run the *Judge* on the result.
@@ -15,10 +14,13 @@ every offspring:
      record an Individual. Else: discard the dirty tree, record a failed
      Individual carrying the judge feedback so future mutators can learn.
 
-Cold start (empty population) bypasses parent selection: the framework
-asks the mutator to write the first working server from the reference,
-just like the cold-start round in ``orchestrate``. Once that first
-individual passes, evolution proper begins on round 2.
+Before the generation loop, a dedicated *bootstrap* phase
+(``_bootstrap_seed``) runs implementer → judge iterations until the first
+judge-passing implementation exists, recorded as a generation-0 seed. So
+the generation loop always starts from a passing parent and never
+cold-starts. The bootstrap phase owns the from-scratch / fix-forward
+repair logic; on ``--resume`` it is skipped when a passing individual is
+already present.
 
 The loop intentionally does NOT have an early-stop signal — generations
 run for the full ``max_generations`` budget. Termination decisions are
@@ -47,6 +49,7 @@ from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.run import LoopContext, RepositoryVisibility
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
+    candidate_modal_app_name,
     make_run_environment_spec,
 )
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
@@ -96,6 +99,79 @@ def _discard_working_tree(ctx: LoopContext) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _recent_failure_lessons(
+    population: Population, *, limit: int = 3, max_chars: int = 700
+) -> list[str]:
+    """Distinct feedback from the most-recent failed individuals.
+
+    While the population has no passing parent, every child is a cold start
+    that re-writes the server from scratch. Without this memory the search
+    repeats the same bug on every seed (e.g. an identical model-init crash),
+    burning generations while the population stays empty. Surfacing the recent
+    distinct failure feedback lets each new seed avoid traps earlier seeds hit.
+
+    De-duplicates on a normalized prefix so N identical failures collapse to a
+    single lesson, and truncates each to keep the prompt bounded.
+    """
+    seen: set[str] = set()
+    lessons: list[str] = []
+    for ind in reversed(population.all):  # most recent first
+        if ind.passed:
+            continue
+        fb = (ind.feedback or "").strip()
+        if not fb:
+            continue
+        key = " ".join(fb[:160].lower().split())
+        if key in seen:
+            continue
+        seen.add(key)
+        lessons.append(fb if len(fb) <= max_chars else fb[:max_chars].rstrip() + " …")
+        if len(lessons) >= limit:
+            break
+    return lessons
+
+
+def _latest_wip_seed(population: Population) -> Individual | None:
+    """Most-recent failed cold-start seed whose work was snapshotted.
+
+    While the population has no passing parent, each round is a cold start.
+    Rather than throw the failed seed away and rebuild from scratch every
+    round (which makes the search re-hit the same bug forever, unable to
+    bootstrap its first green candidate), we snapshot each failed seed to a
+    WIP commit and let the next cold start *repair it in place* — fix-forward
+    instead of restart. This returns that most-recent WIP seed so its tree can
+    be checked out as the base for the next attempt.
+
+    A WIP seed is a failed individual (``passed=False``) with ``parent_id is
+    None`` that nonetheless carries a ``commit`` (its snapshotted tree).
+    """
+    for ind in reversed(population.all):  # most recent first
+        if not ind.passed and ind.parent_id is None and ind.commit:
+            return ind
+    return None
+
+
+def _candidate_runtime_notes(
+    ctx: LoopContext, generation: int, child_idx: int
+) -> tuple[str, str | None]:
+    """Runtime notes for one candidate, with a per-candidate Modal app name.
+
+    In Modal mode every candidate must deploy to its own app so the judge
+    never reads a prior (broken) candidate's cumulative app logs. We derive a
+    ``-g<gen>c<child>`` app name and substitute it for the per-run base name
+    throughout the notes (the base name is a unique token, so a plain replace
+    swaps every occurrence — App name, endpoint labels, aux-volume prefixes).
+    For non-Modal envs the notes are returned unchanged and the app name is
+    ``None``.
+    """
+    base = getattr(ctx.run_environment_view, "modal_app_name", None)
+    notes = ctx.run_environment_view.prompt_notes
+    if not base:
+        return notes, None
+    cand_app = candidate_modal_app_name(base, generation, child_idx)
+    return notes.replace(base, cand_app), cand_app
+
+
 def _run_mutator(
     ctx: LoopContext,
     *,
@@ -107,6 +183,10 @@ def _run_mutator(
     modality: str,
     is_cold_start: bool,
     objectives: list[Objective] | None = None,
+    failed_lessons: list[str] | None = None,
+    num_failed_attempts: int = 0,
+    repair_seed: bool = False,
+    runtime_notes: str | None = None,
 ) -> MutatorResponse:
     system_prompt = _render(
         "mutator_prompt.j2",
@@ -117,8 +197,15 @@ def _run_mutator(
         inspirations=inspirations,
         is_cold_start=is_cold_start,
         objectives=objectives,
-        runtime_notes=ctx.run_environment_view.prompt_notes,
+        runtime_notes=(
+            runtime_notes if runtime_notes is not None else ctx.run_environment_view.prompt_notes
+        ),
         env_kind=ctx.run_environment_view.env_kind,
+        accuracy_command=ctx.judge_accuracy_command,
+        benchmark_command=ctx.judge_benchmark_command,
+        failed_lessons=failed_lessons or [],
+        num_failed_attempts=num_failed_attempts,
+        repair_seed=repair_seed,
     )
     return ctx.invoke(
         kind="implementer",  # mutator reuses the implementer sandbox
@@ -145,6 +232,7 @@ def _run_judge(
     modality: str,
     objective: str,
     pass_criteria: str,
+    runtime_notes: str | None = None,
 ) -> JudgeResponse:
     system_prompt = _render(
         "judge_prompt.j2",
@@ -152,7 +240,9 @@ def _run_judge(
         benchmark_command=ctx.judge_benchmark_command,
         pass_criteria=pass_criteria,
         modality=modality,
-        runtime_notes=ctx.run_environment_view.prompt_notes,
+        runtime_notes=(
+            runtime_notes if runtime_notes is not None else ctx.run_environment_view.prompt_notes
+        ),
         env_kind=ctx.run_environment_view.env_kind,
         objective=objective,
     )
@@ -198,6 +288,7 @@ def _run_profiler(
     modality: str,
     objective: str,
     objectives: list[Objective] | None = None,
+    runtime_notes: str | None = None,
 ) -> ProfilerSummary | None:
     if ctx.profiler_kind is ProfilerKind.NONE:
         return None
@@ -207,7 +298,9 @@ def _run_profiler(
         template,
         benchmark_command=ctx.profiler_benchmark_command,
         modality=modality,
-        runtime_notes=ctx.run_environment_view.prompt_notes,
+        runtime_notes=(
+            runtime_notes if runtime_notes is not None else ctx.run_environment_view.prompt_notes
+        ),
         env_kind=ctx.run_environment_view.env_kind,
         objective=objective,
         profile_focus="Measure the headline metric for this candidate; rank top kernel-level bottlenecks.",
@@ -227,6 +320,168 @@ def _run_profiler(
         round_label=f"gen-{generation}-cand-{child_idx}-profiler",
         fallback_suggestions="n/a",
     )
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap
+# ---------------------------------------------------------------------------
+
+
+def _bootstrap_seed(
+    ctx: LoopContext,
+    *,
+    objective: str,
+    objectives: list[Objective] | None,
+    modality: str,
+    pass_criteria: str,
+    max_attempts: int,
+    rng: random.Random,
+    population: Population,
+    population_path: Path,
+) -> Individual | None:
+    """Iterate implementer → judge until a first *passing* seed exists.
+
+    Runs BEFORE the generation loop so the search never cold-starts. Attempt 1
+    writes a server from scratch; later attempts repair-forward the most-recent
+    failed WIP seed (fix-forward, not restart). On PASS: profile, snapshot, and
+    record a passing generation-0 ``Individual`` (``parent_id=None``), then
+    return it. On FAIL: snapshot the WIP tree and record a failed generation-0
+    ``Individual`` so the next attempt can repair it in place. Returns ``None``
+    if every attempt fails — the caller aborts the run.
+
+    ``rng`` is accepted for signature parity with the generation loop (bootstrap
+    does no parent/inspiration sampling) and forward-compatibility.
+    """
+    ctx.switch_log_file("bootstrap")
+    ctx.lprint(
+        f"\n{'=' * 60}\n  Bootstrap — first passing seed "
+        f"(up to {max_attempts} attempt(s))\n{'=' * 60}\n"
+    )
+
+    for attempt in range(1, max_attempts + 1):
+        ctx.lprint(f"\n--- bootstrap attempt {attempt}/{max_attempts} ---\n")
+
+        # Fix-forward from the most-recent failed WIP seed, if one was
+        # snapshotted; otherwise the workspace stays as the framework seeded it
+        # (the bare reference tree).
+        wip_seed = _latest_wip_seed(population)
+        if wip_seed is not None and wip_seed.commit:
+            if not ctx.git.checkout_tree(wip_seed.commit, clean=True):
+                ctx.lprint(
+                    f"[warn] could not check out WIP seed {wip_seed.id} "
+                    f"(commit {wip_seed.commit[:8]}); starting from reference"
+                )
+                wip_seed = None
+
+        # Per-candidate Modal app name so a failed attempt's cumulative app logs
+        # never poison the next attempt's judge (same isolation the generation
+        # loop uses).
+        cand_notes, cand_app = _candidate_runtime_notes(ctx, 0, attempt)
+        failed_lessons = _recent_failure_lessons(population)
+        num_failed_attempts = sum(1 for i in population.all if not i.passed)
+        base_desc = "reference" if wip_seed is None else f"repair-seed #{wip_seed.id}"
+        ctx.lprint(f"bootstrap base={base_desc}" + (f" modal-app={cand_app}" if cand_app else ""))
+
+        # 1. Implementer (the mutator in cold-start / from-scratch mode).
+        ctx.reselect_gpu()
+        mutator = _run_mutator(
+            ctx,
+            generation=0,
+            child_idx=attempt,
+            objective=objective,
+            parent=None,
+            inspirations=[],
+            modality=modality,
+            is_cold_start=True,
+            objectives=objectives,
+            failed_lessons=failed_lessons,
+            num_failed_attempts=num_failed_attempts,
+            repair_seed=wip_seed is not None,
+            runtime_notes=cand_notes,
+        )
+
+        # 2. Judge.
+        ctx.reselect_gpu()
+        verdict = _run_judge(
+            ctx,
+            generation=0,
+            child_idx=attempt,
+            modality=modality,
+            objective=objective,
+            pass_criteria=pass_criteria,
+            runtime_notes=cand_notes,
+        )
+
+        if verdict.verdict != Verdict.PASS:
+            # Snapshot the failed tree so the next attempt repairs it in place.
+            # Only tag a WIP repair-seed when the snapshot actually committed new
+            # work (the tree changed); an unedited tree is nothing to fix-forward.
+            wip_commit = None
+            try:
+                sha_before = ctx.git.current_sha()
+                ctx.snapshot_workspace(f"wip-seed-bootstrap{attempt}")
+                sha_after = ctx.git.current_sha()
+                if sha_after and sha_after != sha_before:
+                    wip_commit = sha_after
+            except Exception as exc:
+                ctx.lprint(f"[warn] wip-seed snapshot failed: {exc}")
+            failed = Individual(
+                id=population.next_id(),
+                generation=0,
+                parent_id=None,
+                inspiration_ids=[],
+                commit=wip_commit,
+                perf_metric=None,
+                perf_unit=None,
+                passed=False,
+                summary=mutator.summary,
+                feedback=verdict.feedback,
+            )
+            population.add(failed)
+            population.save(population_path)
+            ctx.lprint(
+                f"[bootstrap {attempt}] FAILED — feedback: "
+                f"{(verdict.feedback or '').splitlines()[0][:120] if verdict.feedback else ''}"
+            )
+            continue
+
+        # 3. PASS → profile, snapshot, and record the generation-0 seed.
+        ctx.reselect_gpu()
+        summary = _run_profiler(
+            ctx,
+            generation=0,
+            child_idx=attempt,
+            modality=modality,
+            objective=objective,
+            objectives=objectives,
+            runtime_notes=cand_notes,
+        )
+        ctx.snapshot_workspace("gen-0-seed")
+        commit = ctx.git.current_sha()
+        seed = Individual(
+            id=population.next_id(),
+            generation=0,
+            parent_id=None,
+            inspiration_ids=[],
+            commit=commit,
+            perf_metric=summary.perf_metric if summary else None,
+            perf_unit=summary.perf_unit if summary else None,
+            metrics=dict(summary.metrics) if summary and summary.metrics else {},
+            passed=True,
+            summary=mutator.summary,
+            feedback=verdict.feedback,
+        )
+        population.add(seed)
+        population.save(population_path)
+        ctx.lprint(
+            f"[bootstrap {attempt}] PASSED — seed #{seed.id} "
+            f"perf={seed.perf_metric} {seed.perf_unit or ''} "
+            f"(commit {commit[:8] if commit else 'n/a'})"
+        )
+        return seed
+
+    ctx.lprint(f"[bootstrap] exhausted {max_attempts} attempt(s) without a passing seed.")
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +521,7 @@ def run_evolve_loop(
     modality: str = "text_generation",
     objectives: list[Objective] | None = None,
     frontier_bias: float = 0.7,
+    bootstrap_max_attempts: int = 5,
     remote_repo: str | None = None,
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
 ) -> bool:
@@ -319,6 +575,29 @@ def run_evolve_loop(
     rng = random.Random(seed)
 
     try:
+        # Bootstrap phase: guarantee a passing generation-0 seed before the
+        # generation loop, so evolution never cold-starts. Skipped when a
+        # passing individual already exists (e.g. --resume).
+        if not population.passed:
+            seed_individual = _bootstrap_seed(
+                ctx,
+                objective=objective,
+                objectives=objectives,
+                modality=modality,
+                pass_criteria=pass_criteria,
+                max_attempts=bootstrap_max_attempts,
+                rng=rng,
+                population=population,
+                population_path=population_path,
+            )
+            if seed_individual is None:
+                ctx.lprint(
+                    "[evolutionary] bootstrap could not produce a passing seed in "
+                    f"{bootstrap_max_attempts} attempt(s); aborting before the "
+                    "generation loop."
+                )
+                return False
+
         for generation in range(1, max_generations + 1):
             ctx.switch_log_file(f"gen{generation:03d}")
             ctx.lprint(
@@ -351,24 +630,36 @@ def run_evolve_loop(
                         rng=rng,
                         objectives=objectives,
                     )
-                    is_cold_start = parent is None
-
-                    # 2. Materialize parent's tree (skip on cold start —
-                    # _RunContext seeded the workspace from the reference).
-                    if parent is not None and parent.commit:
-                        if not ctx.git.checkout_tree(parent.commit, clean=True):
-                            ctx.lprint(
-                                f"[warn] could not check out parent {parent.id} "
-                                f"(commit {parent.commit[:8]}); skipping cand"
-                            )
+                    # 2. Materialize the parent's tree. Bootstrap guarantees a
+                    # passing gen-0 seed, so a passing parent always exists.
+                    # select_parent only returns None when no passer has a
+                    # scalar perf_metric (e.g. profiler disabled); fall back to
+                    # the latest passer so the loop never cold-starts.
+                    if parent is None:
+                        passers = population.passed
+                        if not passers:
+                            ctx.lprint("[warn] no passing parent available; skipping candidate")
                             continue
+                        parent = passers[-1]
+                    if parent.commit and not ctx.git.checkout_tree(parent.commit, clean=True):
+                        ctx.lprint(
+                            f"[warn] could not check out parent {parent.id} "
+                            f"(commit {parent.commit[:8]}); skipping cand"
+                        )
+                        continue
+
+                    # Per-candidate runtime notes: in Modal mode this gives the
+                    # mutator/judge/profiler a candidate-unique app name so the
+                    # judge never reads a prior candidate's stale app logs.
+                    cand_notes, cand_app = _candidate_runtime_notes(ctx, generation, child_idx)
 
                     ctx.lprint(
-                        f"parent={'COLD-START' if parent is None else f'#{parent.id} (perf={parent.perf_metric})'}; "
-                        f"inspirations={[i.id for i in inspirations]}"
+                        f"parent=#{parent.id} (perf={parent.perf_metric})"
+                        + (f" modal-app={cand_app}" if cand_app else "")
+                        + f"; inspirations={[i.id for i in inspirations]}"
                     )
 
-                    # 3. Mutator edits the workspace.
+                    # 3. Mutator edits the workspace, mutating the passing parent.
                     ctx.reselect_gpu()
                     mutator = _run_mutator(
                         ctx,
@@ -378,8 +669,9 @@ def run_evolve_loop(
                         parent=parent,
                         inspirations=inspirations,
                         modality=modality,
-                        is_cold_start=is_cold_start,
+                        is_cold_start=False,
                         objectives=objectives,
+                        runtime_notes=cand_notes,
                     )
 
                     # 4. Judge.
@@ -391,15 +683,18 @@ def run_evolve_loop(
                         modality=modality,
                         objective=objective,
                         pass_criteria=pass_criteria,
+                        runtime_notes=cand_notes,
                     )
 
                     if verdict.verdict != Verdict.PASS:
-                        # Record the failed child (no commit) so its feedback
-                        # is visible to future mutators reading the population.
+                        # The mutation was a dead end: record the failed child so
+                        # its feedback is visible to future mutators (excluded
+                        # from selection because ``passed`` is False, no commit),
+                        # then revert the dirty tree back to the passing parent.
                         failed = Individual(
                             id=population.next_id(),
                             generation=generation,
-                            parent_id=parent.id if parent else None,
+                            parent_id=parent.id,
                             inspiration_ids=[i.id for i in inspirations],
                             commit=None,
                             perf_metric=None,
@@ -426,6 +721,7 @@ def run_evolve_loop(
                         modality=modality,
                         objective=objective,
                         objectives=objectives,
+                        runtime_notes=cand_notes,
                     )
 
                     # 6. Commit + record.
@@ -434,7 +730,7 @@ def run_evolve_loop(
                     child = Individual(
                         id=population.next_id(),
                         generation=generation,
-                        parent_id=parent.id if parent else None,
+                        parent_id=parent.id,
                         inspiration_ids=[i.id for i in inspirations],
                         commit=commit,
                         perf_metric=summary.perf_metric if summary else None,
@@ -453,7 +749,7 @@ def run_evolve_loop(
                     )
                     ctx.lprint(
                         f"[Gen {generation}] Cand {child.id} PASSED — "
-                        f"{metrics_repr} (parent={parent.id if parent else 'cold'})"
+                        f"{metrics_repr} (parent={parent.id})"
                     )
 
         if objectives:

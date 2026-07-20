@@ -985,6 +985,7 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
         metavar="NAME:DIRECTION",
     )
     parser.add_argument("--frontier-bias", type=float, default=0.7)
+    parser.add_argument("--bootstrap-max-attempts", type=int, default=5)
     parser.add_argument("--modality", default="text_generation", choices=_MODALITIES)
     return parser
 
@@ -1003,6 +1004,8 @@ def _validate_evolve(args: argparse.Namespace) -> None:
         _configuration_error("--selection-temperature must be > 0.")
     if not (0.0 <= args.frontier_bias <= 1.0):
         _configuration_error("--frontier-bias must be in [0, 1].")
+    if args.bootstrap_max_attempts < 1:
+        _configuration_error("--bootstrap-max-attempts must be >= 1.")
 
 
 def _run_evolve(args: argparse.Namespace) -> None:
@@ -1050,6 +1053,7 @@ def _run_evolve(args: argparse.Namespace) -> None:
         modality=args.modality,
         objectives=objectives,
         frontier_bias=args.frontier_bias,
+        bootstrap_max_attempts=args.bootstrap_max_attempts,
         remote_repo=args.repo,
         repo_visibility=args.repo_visibility,
     )
