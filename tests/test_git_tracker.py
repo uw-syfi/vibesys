@@ -189,7 +189,32 @@ def test_add_worktree_materializes_commit_and_shares_object_store(ws, tmp_path):
     # `git cat-file -e <sha>` in the MAIN repo succeeds → object is shared.
     assert tracker.run(["git", "cat-file", "-e", child_sha], check=False).returncode == 0
 
+    # Untracked files must not block cleanup: the directory is always deleted.
+    (wt / "scratch.log").write_text("editor leftover\n")
     tracker.remove_worktree(wt)
     assert not wt.exists()
     # The child commit object survives worktree removal (shared store).
     assert tracker.run(["git", "cat-file", "-e", child_sha], check=False).returncode == 0
+
+
+def test_remove_worktree_deletes_orphaned_directory(ws, tmp_path):
+    """If `git worktree remove` leaves the directory behind (as observed when a
+    file is still held open by a just-stopped editor container), the explicit
+    recursive delete still clears it."""
+    import shutil
+
+    tracker = _make_tracker(ws)
+    tracker.init(existing=False)
+    base_sha = tracker.current_sha()
+    assert base_sha is not None
+
+    wt = tmp_path / "candidates" / "g2c1"
+    tracker.add_worktree(wt, base_sha)
+    assert wt.exists()
+
+    # Orphan the worktree: drop git's admin registration but leave the tree on
+    # disk. `git worktree remove` then no-ops ("not a working tree"), so only
+    # the rmtree fallback can clear the leftover directory.
+    shutil.rmtree(ws / ".git" / "worktrees")
+    tracker.remove_worktree(wt)
+    assert not wt.exists()

@@ -10,6 +10,7 @@ history; nothing here touches sandboxes or backends.
 
 import os
 import re
+import shutil
 import subprocess
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -131,8 +132,21 @@ class GitTracker:
         self.run(["git", "worktree", "add", "--detach", str(worktree_dir), commit])
 
     def remove_worktree(self, worktree_dir: Path) -> None:
-        """Remove a linked worktree and prune its admin entry (best-effort)."""
+        """Unregister a linked worktree and delete its directory (best-effort).
+
+        ``git worktree remove`` unregisters the worktree, but it can leave the
+        directory on disk — e.g. when the editor container wrote scratch files
+        (``__pycache__``, ``.pytest_cache``) into the bind-mounted tree that
+        ``git`` then declines to delete. Follow up with an explicit recursive
+        delete so per-candidate workspaces don't accumulate across a run, then
+        prune any stale admin entry. Both the ``git`` failure and any
+        undeletable leftovers are non-fatal: unregistration is what matters for
+        correctness, so ``ignore_errors`` keeps a stubborn file from sinking the
+        run.
+        """
         self.run(["git", "worktree", "remove", "--force", str(worktree_dir)], check=False)
+        if Path(worktree_dir).exists():
+            shutil.rmtree(worktree_dir, ignore_errors=True)
         self.run(["git", "worktree", "prune"], check=False)
 
     def snapshot(self, label: str) -> None:
