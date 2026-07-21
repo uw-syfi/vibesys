@@ -17,7 +17,7 @@ func (a *Application) Check(
 	check api.AccuracyContext,
 	recorder api.AccuracyRecorder,
 ) (checkErr error) {
-	client, err := newClient(runtime, a.timeout)
+	client, err := newClient(runtime, a.timeout, a.token)
 	if err != nil {
 		return err
 	}
@@ -41,16 +41,7 @@ func (a *Application) Check(
 		cases = append(cases, makeCase(random, namespace, index))
 	}
 
-	checks, err := a.verifyProtocol(ctx, client)
-	recorder.AddChecks(checks)
-	if err != nil {
-		return err
-	}
-	if err := pass(recorder, "protocol_contract", "persistent_http"); err != nil {
-		return err
-	}
-
-	checks, err = a.verifySeedCatalog(ctx, client)
+	checks, err := a.verifySeedCatalog(ctx, client)
 	recorder.AddChecks(checks)
 	if err != nil {
 		return err
@@ -91,21 +82,24 @@ func (a *Application) Check(
 		return err
 	}
 
-	for _, item := range shuffledCases(random, cases) {
-		checks, err = a.updateCase(ctx, client, journal, item, random)
-		recorder.AddChecks(checks)
-		if err != nil {
-			return err
-		}
-		checks, err = a.verifyCase(ctx, client, item, random)
-		recorder.AddChecks(checks)
-		if err != nil {
-			return err
-		}
-		checks, err = a.verifyExactState(ctx, client, cases)
-		recorder.AddChecks(checks)
-		if err != nil {
-			return err
+	mutationEpochs := 2 + random.Intn(2)
+	for epoch := 0; epoch < mutationEpochs; epoch++ {
+		for _, item := range shuffledCases(random, cases) {
+			checks, err = a.updateCase(ctx, client, journal, item, random)
+			recorder.AddChecks(checks)
+			if err != nil {
+				return fmt.Errorf("mutation epoch %d case %d: %w", epoch, item.index, err)
+			}
+			checks, err = a.verifyCase(ctx, client, item, random)
+			recorder.AddChecks(checks)
+			if err != nil {
+				return fmt.Errorf("verify mutation epoch %d case %d: %w", epoch, item.index, err)
+			}
+			checks, err = a.verifyExactState(ctx, client, cases)
+			recorder.AddChecks(checks)
+			if err != nil {
+				return fmt.Errorf("exact state after mutation epoch %d case %d: %w", epoch, item.index, err)
+			}
 		}
 	}
 	if err := pass(recorder, "updates_visible", "stale_secondary_indexes"); err != nil {

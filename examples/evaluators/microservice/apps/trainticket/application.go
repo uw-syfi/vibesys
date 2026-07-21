@@ -12,6 +12,7 @@ import (
 
 	"vibesys/microservice-evaluator/api"
 	trainticketsupport "vibesys/microservice-evaluator/appsupport/trainticket"
+	"vibesys/microservice-evaluator/sampling"
 	"vibesys/microservice-evaluator/wire/httpjson"
 )
 
@@ -32,6 +33,7 @@ type Config = trainticketsupport.Config
 type Application struct {
 	config Config
 	token  string
+	seed   int64
 	active *dataset
 }
 
@@ -65,10 +67,22 @@ func New(workload api.Workload) (api.Application, error) {
 			return nil, fmt.Errorf("Train Ticket operation %q must not declare operations.http", operation.Name)
 		}
 	}
-	return &Application{config: config, token: makeAdminToken(time.Now())}, nil
+	return &Application{
+		config: config,
+		token:  makeAdminToken(time.Now()),
+		seed:   workload.Load.Seed,
+	}, nil
 }
 
 func (a *Application) Name() string { return "train-ticket" }
+
+func (a *Application) ReadinessProbes() []api.ReadinessProbe {
+	return trainticketsupport.ReadinessProbes(a.seed)
+}
+
+func (a *Application) PreflightProbes() []api.ReadinessProbe {
+	return trainticketsupport.PreflightProbes(a.token)
+}
 
 func (a *Application) Prepare(ctx context.Context, runtime api.Runtime, trial api.TrialContext) (any, error) {
 	if a.active != nil {
@@ -76,7 +90,11 @@ func (a *Application) Prepare(ctx context.Context, runtime api.Runtime, trial ap
 	}
 	namespaceDigest := sha256.Sum256([]byte(fmt.Sprintf("%d/%d", trial.Seed, trial.Index)))
 	namespace := fmt.Sprintf("%x", namespaceDigest[:12])
-	data := &dataset{namespace: namespace, records: makeRecords(namespace, trial.Seed, a.config.Records)}
+	recordCount, err := sampling.CaseCount(trial.Seed, a.config.Records, a.config.Records+3)
+	if err != nil {
+		return nil, err
+	}
+	data := &dataset{namespace: namespace, records: makeRecords(namespace, trial.Seed, recordCount)}
 	a.active = data
 	for index := range data.records {
 		if err := a.createRecord(ctx, runtime, &data.records[index]); err != nil {

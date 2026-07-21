@@ -28,6 +28,11 @@ type namedAccuracyApplication struct{ name string }
 func (a *namedAccuracyApplication) Name() string                        { return a.name }
 func (*namedAccuracyApplication) Properties() []api.AccuracyProperty    { return nil }
 func (*namedAccuracyApplication) ReadinessProbes() []api.ReadinessProbe { return nil }
+func (*namedAccuracyApplication) PreflightProbes() []api.ReadinessProbe { return nil }
+func (*namedAccuracyApplication) PreflightProperties() []string         { return nil }
+func (*namedAccuracyApplication) CasePolicy() api.AccuracyCasePolicy {
+	return api.AccuracyCasePolicy{MinimumCases: 1}
+}
 func (*namedAccuracyApplication) Check(context.Context, api.Runtime, api.AccuracyContext, api.AccuracyRecorder) error {
 	return nil
 }

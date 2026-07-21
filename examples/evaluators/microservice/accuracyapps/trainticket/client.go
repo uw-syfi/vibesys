@@ -25,10 +25,9 @@ type client struct {
 	token   string
 }
 
-func newClient(runtime api.Runtime, timeout time.Duration) (*client, error) {
-	token, err := trainticketsupport.AdminToken(time.Now())
-	if err != nil {
-		return nil, err
+func newClient(runtime api.Runtime, timeout time.Duration, token string) (*client, error) {
+	if token == "" {
+		return nil, fmt.Errorf("accuracy client token is empty")
 	}
 	return &client{runtime: runtime, timeout: timeout, token: token}, nil
 }

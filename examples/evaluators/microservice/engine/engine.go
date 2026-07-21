@@ -12,14 +12,17 @@ import (
 	"time"
 
 	"vibesys/microservice-evaluator/api"
+	"vibesys/microservice-evaluator/probing"
 	"vibesys/microservice-evaluator/registry"
 	"vibesys/microservice-evaluator/transport"
 )
 
 type Options struct {
-	EngineVersion string
-	WorkloadHash  string
-	SkipPrepare   bool
+	EngineVersion  string
+	WorkloadHash   string
+	SkipPrepare    bool
+	StartupTimeout time.Duration
+	ProbeInterval  time.Duration
 }
 
 type Engine struct {
@@ -30,6 +33,12 @@ type Engine struct {
 func New(registry *registry.Registry, options Options) *Engine {
 	if options.EngineVersion == "" {
 		options.EngineVersion = "dev"
+	}
+	if options.StartupTimeout <= 0 {
+		options.StartupTimeout = 15 * time.Second
+	}
+	if options.ProbeInterval <= 0 {
+		options.ProbeInterval = 100 * time.Millisecond
 	}
 	return &Engine{registry: registry, options: options}
 }
@@ -44,6 +53,27 @@ func (e *Engine) Run(ctx context.Context, workload api.Workload) (RunResult, err
 		return RunResult{}, err
 	}
 	defer runtime.Close()
+	if preflight, ok := application.(api.PreflightApplication); ok {
+		readiness := preflight.ReadinessProbes()
+		checks := preflight.PreflightProbes()
+		if err := probing.Validate(readiness, workload.Targets, true); err != nil {
+			return RunResult{}, fmt.Errorf("invalid readiness probes: %w", err)
+		}
+		if err := probing.Validate(checks, workload.Targets, false); err != nil {
+			return RunResult{}, fmt.Errorf("invalid preflight probes: %w", err)
+		}
+		probeOptions := probing.Options{
+			PhaseTimeout: e.options.StartupTimeout,
+			ProbeTimeout: time.Duration(workload.Load.TimeoutSeconds * float64(time.Second)),
+			Interval:     e.options.ProbeInterval,
+		}
+		if err := probing.WaitReady(ctx, runtime, readiness, probeOptions); err != nil {
+			return RunResult{}, err
+		}
+		if err := probing.Run(ctx, runtime, checks, probeOptions); err != nil {
+			return RunResult{}, err
+		}
+	}
 
 	result := RunResult{
 		Summary: Summary{

@@ -24,6 +24,7 @@ type graphCase struct {
 	retiredRouteKeys    [][2]string
 	retiredPriceKeys    [][2]string
 	journalEntries      []string
+	mutationEpoch       int
 }
 
 func makeCase(random *rand.Rand, namespace string, index int) *graphCase {

@@ -18,6 +18,7 @@ func (a *Application) updateCase(
 	item *graphCase,
 	random *rand.Rand,
 ) (int, error) {
+	item.mutationEpoch++
 	version := random.Uint64()
 	suffix := fmt.Sprintf("%016x", version)
 	item.config["value"] = suffix
@@ -29,6 +30,8 @@ func (a *Application) updateCase(
 	item.stationA["stayTime"] = trainticketsupport.UpdatedStationStayTime(version)
 	item.stationB["name"] = trainticketsupport.UpdatedStationName(version, true)
 	item.stationB["stayTime"] = trainticketsupport.UpdatedStationStayTime(version >> 8)
+	delete(item.retiredStationNames, stringValue(item.stationA, "name"))
+	delete(item.retiredStationNames, stringValue(item.stationB, "name"))
 	item.train["averageSpeed"] = trainticketsupport.UpdatedTrainSpeed(version)
 	item.train["economyClass"] = trainticketsupport.UpdatedTrainEconomy(intValue(item.train, "economyClass"))
 
@@ -36,38 +39,48 @@ func (a *Application) updateCase(
 		stringValue(item.route, "startStationId"),
 		stringValue(item.route, "terminalStationId"),
 	})
-	item.route["stations"] = []string{
-		stringValue(item.stationB, "id"), stringValue(item.stationA, "id"),
+	stationAID := stringValue(item.stationA, "id")
+	stationBID := stringValue(item.stationB, "id")
+	startID, terminalID := stationAID, stationBID
+	if stringValue(item.route, "startStationId") == stationAID {
+		startID, terminalID = stationBID, stationAID
 	}
-	item.route["startStationId"] = item.stationB["id"]
-	item.route["terminalStationId"] = item.stationA["id"]
+	item.route["stations"] = []string{startID, terminalID}
+	item.route["startStationId"] = startID
+	item.route["terminalStationId"] = terminalID
+	item.retiredRouteKeys = removePair(item.retiredRouteKeys, [2]string{startID, terminalID})
 	distance := item.route["distances"].([]int)
 	distance[1] = trainticketsupport.UpdatedRouteDistance(distance[1], version)
 	item.route["distances"] = distance
-	item.routeInput["startStation"] = item.stationB["id"]
-	item.routeInput["endStation"] = item.stationA["id"]
-	item.routeInput["stationList"] = fmt.Sprintf("%s,%s", item.stationB["id"], item.stationA["id"])
+	item.routeInput["startStation"] = startID
+	item.routeInput["endStation"] = terminalID
+	item.routeInput["stationList"] = fmt.Sprintf("%s,%s", startID, terminalID)
 	item.routeInput["distanceList"] = fmt.Sprintf("0,%d", distance[1])
 
 	item.retiredPriceKeys = append(item.retiredPriceKeys, [2]string{
 		stringValue(item.price, "routeId"), stringValue(item.price, "trainType"),
 	})
-	seedRoute := a.catalog["route"][random.Intn(len(a.catalog["route"]))]
-	seedTrain := a.catalog["train"][random.Intn(len(a.catalog["train"]))]
 	// Keep one runtime-unique component so the new compound key cannot collide
 	// with the seeded price catalog or a different randomized graph.
 	if item.index%2 == 0 {
-		item.price["routeId"] = seedRoute["id"]
+		item.price["routeId"] = differentCatalogID(
+			random, a.catalog["route"], stringValue(item.price, "routeId"),
+		)
 		item.price["trainType"] = item.train["id"]
 	} else {
 		item.price["routeId"] = item.route["id"]
-		item.price["trainType"] = seedTrain["id"]
+		item.price["trainType"] = differentCatalogID(
+			random, a.catalog["train"], stringValue(item.price, "trainType"),
+		)
 	}
+	item.retiredPriceKeys = removePair(item.retiredPriceKeys, [2]string{
+		stringValue(item.price, "routeId"), stringValue(item.price, "trainType"),
+	})
 	item.price["basicPriceRate"], item.price["firstClassPriceRate"] = trainticketsupport.UpdatedPriceRates(version)
 	if err := recordCleanup(
 		journal,
 		item,
-		fmt.Sprintf("case-%d/price-updated", item.index),
+		fmt.Sprintf("case-%d/price-updated-%d", item.index, item.mutationEpoch),
 		client,
 		"price",
 		http.MethodDelete,
@@ -79,12 +92,12 @@ func (a *Application) updateCase(
 	}
 
 	item.tripInput["endTime"] = trainticketsupport.UpdatedTripEnd(int64Value(item.tripInput, "endTime"), version)
-	item.tripInput["startingStationId"] = item.stationB["id"]
-	item.tripInput["stationsId"] = item.stationA["id"]
-	item.tripInput["terminalStationId"] = item.stationA["id"]
-	item.trip["startingStationId"] = item.stationB["id"]
-	item.trip["stationsId"] = item.stationA["id"]
-	item.trip["terminalStationId"] = item.stationA["id"]
+	item.tripInput["startingStationId"] = startID
+	item.tripInput["stationsId"] = terminalID
+	item.tripInput["terminalStationId"] = terminalID
+	item.trip["startingStationId"] = startID
+	item.trip["stationsId"] = terminalID
+	item.trip["terminalStationId"] = terminalID
 	item.trip["endTime"] = item.tripInput["endTime"]
 
 	operations := []func() error{
@@ -126,6 +139,27 @@ func (a *Application) updateCase(
 		}
 	}
 	return len(operations), nil
+}
+
+func differentCatalogID(random *rand.Rand, catalog []map[string]any, current string) string {
+	start := random.Intn(len(catalog))
+	for offset := range catalog {
+		candidate := catalog[(start+offset)%len(catalog)]["id"].(string)
+		if candidate != current {
+			return candidate
+		}
+	}
+	panic("trusted seed catalog does not contain a different ID")
+}
+
+func removePair(values [][2]string, remove [2]string) [][2]string {
+	filtered := values[:0]
+	for _, value := range values {
+		if value != remove {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered
 }
 
 func verifyRetiredSecondaryIndexes(

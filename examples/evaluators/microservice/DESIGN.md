@@ -21,13 +21,14 @@ flowchart LR
 
 The benchmark engine owns arrival scheduling, timestamp placement, trial
 lifecycle, aggregation, constraint enforcement, and output. The accuracy
-runner owns readiness, managed lifecycle transitions, required-property
-enforcement, and correctness result reporting. Both use the same target runtime
-and protocol drivers. Their application-specific semantic oracles remain
-separate so one validator bug cannot silently bless both qualification and
-scoring. They share only observable request encoding, authentication, and fuzz
-grammars that must not reveal which evaluator mode is running; response schemas
-and expected values are explicitly excluded from that shared support.
+runner owns managed lifecycle transitions, required-property enforcement, case
+floors, and correctness result reporting. Both use the same target runtime,
+protocol drivers, aggregate-deadline readiness runner, and mode-neutral
+protocol preflight. Their application-specific entity and state-transition
+oracles remain separate so one validator bug cannot silently bless both
+qualification and scoring. Observable request encoding, authentication, fuzz
+grammars, readiness ordering, and protocol-level expectations are shared so an
+avoidable preamble does not reveal which evaluator mode is running.
 
 Managed crash recovery fails closed unless the candidate can run in a dedicated
 Bubblewrap PID namespace. Process groups and sampled descendant PIDs are not a
@@ -41,6 +42,7 @@ The dependency rule is:
 cmd -> concrete applications and drivers
 engine -> api interfaces only
 accuracy runner -> api interfaces and generic validation only
+engine and accuracy runner -> shared probing and sampling primitives
 drivers -> api protocol payloads only
 applications -> api protocol payloads only
 benchmark and accuracy adapters -> mode-neutral app support, never shared oracles
@@ -101,6 +103,13 @@ validates their collected results. A plan may contain one or more invocations;
 the engine always issues and accounts for each invocation itself.
 The declarative adapter covers ordinary HTTP operations. The Social Network
 adapter demonstrates the typed escape hatch for dynamic users and setup.
+
+Applications with mode-neutral startup requirements implement
+`api.PreflightApplication`. The probing framework requires readiness coverage
+for every configured target, transport-gates semantic validators, and executes
+the same sequential protocol checks in benchmark and accuracy modes. Accuracy
+applications additionally declare a framework-enforced minimum randomized case
+volume; CLI bounds may increase it but cannot reduce it.
 
 ## Result validity
 

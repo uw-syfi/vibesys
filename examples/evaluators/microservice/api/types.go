@@ -237,6 +237,23 @@ type ReadinessProbe struct {
 	Validate   func(ProtocolResult) error
 }
 
+// PreflightApplication exposes mode-neutral traffic that must run before an
+// application is evaluated. Benchmark and accuracy adapters for the same
+// application should return the same readiness and protocol probes so the
+// evaluator mode is not disclosed by an avoidable fixed preamble.
+type PreflightApplication interface {
+	ReadinessProbes() []ReadinessProbe
+	PreflightProbes() []ReadinessProbe
+}
+
+// AccuracyCasePolicy is an application-owned lower bound that command-line
+// case flags cannot weaken. RandomExtraCases ensures that an evaluator does
+// not always expose one fixed fixture cardinality.
+type AccuracyCasePolicy struct {
+	MinimumCases     int
+	RandomExtraCases int
+}
+
 type AccuracyContext struct {
 	Seed           int64
 	Cases          int
@@ -257,6 +274,9 @@ type AccuracyApplication interface {
 	Name() string
 	Properties() []AccuracyProperty
 	ReadinessProbes() []ReadinessProbe
+	PreflightProbes() []ReadinessProbe
+	PreflightProperties() []string
+	CasePolicy() AccuracyCasePolicy
 	Check(context.Context, Runtime, AccuracyContext, AccuracyRecorder) error
 }
 

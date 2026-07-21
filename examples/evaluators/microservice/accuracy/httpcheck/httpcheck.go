@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"strconv"
 
 	"vibesys/microservice-evaluator/api"
@@ -12,7 +13,7 @@ import (
 
 type Envelope struct {
 	Status int
-	Msg    any
+	Msg    string
 	Data   any
 }
 
@@ -113,7 +114,11 @@ func ParseEnvelope(result api.ProtocolResult, expectedHTTPStatus int) (Envelope,
 	if err != nil {
 		return Envelope{}, fmt.Errorf("response envelope status: %w", err)
 	}
-	return Envelope{Status: int(status), Msg: object["msg"], Data: object["data"]}, nil
+	message, ok := object["msg"].(string)
+	if !ok {
+		return Envelope{}, fmt.Errorf("response envelope msg: expected string, got %T", object["msg"])
+	}
+	return Envelope{Status: int(status), Msg: message, Data: object["data"]}, nil
 }
 
 func DecodeJSON(raw []byte) (any, error) {
@@ -154,11 +159,11 @@ func Integer(value any) (int64, error) {
 	if !ok {
 		return 0, fmt.Errorf("expected integer, got %T (%v)", value, value)
 	}
-	integer, err := strconv.ParseInt(string(number), 10, 64)
-	if err != nil {
+	rational, valid := new(big.Rat).SetString(string(number))
+	if !valid || rational.Denom().Cmp(big.NewInt(1)) != 0 || !rational.Num().IsInt64() {
 		return 0, fmt.Errorf("expected integer, got %q", number)
 	}
-	return integer, nil
+	return rational.Num().Int64(), nil
 }
 
 func Number(value any) (float64, error) {

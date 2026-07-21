@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"vibesys/microservice-evaluator/api"
+	"vibesys/microservice-evaluator/probing"
 	"vibesys/microservice-evaluator/registry"
 )
 
@@ -50,6 +51,9 @@ type runnerApplication struct {
 	permissive bool
 	panicCheck bool
 	properties []api.AccuracyProperty
+	minimum    int
+	extra      int
+	capacity   int
 }
 
 func (runnerApplication) Name() string { return "runner-test" }
@@ -58,6 +62,7 @@ func (a runnerApplication) Properties() []api.AccuracyProperty {
 		return a.properties
 	}
 	return []api.AccuracyProperty{
+		{Name: "preflight", Required: true},
 		{Name: "required", Required: true},
 		{Name: "restart", Required: false},
 	}
@@ -85,6 +90,31 @@ func (a runnerApplication) ReadinessProbes() []api.ReadinessProbe {
 	}
 	return probes
 }
+func (a runnerApplication) PreflightProbes() []api.ReadinessProbe {
+	return []api.ReadinessProbe{{
+		Name:       "protocol",
+		Invocation: api.Invocation{Target: "service"},
+		Validate: func(result api.ProtocolResult) error {
+			if !result.TransportSuccess {
+				return errors.New("protocol unavailable")
+			}
+			return nil
+		},
+	}}
+}
+func (a runnerApplication) PreflightProperties() []string {
+	if a.properties != nil {
+		return []string{"optional"}
+	}
+	return []string{"preflight"}
+}
+func (a runnerApplication) CasePolicy() api.AccuracyCasePolicy {
+	minimum := a.minimum
+	if minimum == 0 {
+		minimum = 1
+	}
+	return api.AccuracyCasePolicy{MinimumCases: minimum, RandomExtraCases: a.extra}
+}
 func (a runnerApplication) Check(
 	ctx context.Context,
 	_ api.Runtime,
@@ -93,6 +123,9 @@ func (a runnerApplication) Check(
 ) error {
 	if a.panicCheck {
 		panic("injected adapter panic")
+	}
+	if a.capacity > 0 && check.Cases > a.capacity {
+		return fmt.Errorf("bounded candidate rejected case %d", check.Cases)
 	}
 	recorder.AddChecks(1)
 	if a.pass {
@@ -225,6 +258,32 @@ func TestRunnerLeavesUnavailableOptionalPropertyFalse(t *testing.T) {
 	}
 }
 
+func TestRunnerEnforcesApplicationCaseFloorAndJitter(t *testing.T) {
+	serving := &atomic.Bool{}
+	serving.Store(true)
+	result := runTestAccuracy(
+		t, runnerApplication{pass: true, minimum: 7, extra: 2}, nil, serving,
+	)
+	if !result.Valid || result.RandomCases < 7 || result.RandomCases > 9 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestRunnerCaseFloorExposesBoundedCandidate(t *testing.T) {
+	serving := &atomic.Bool{}
+	serving.Store(true)
+	result := runTestAccuracy(
+		t,
+		runnerApplication{pass: true, minimum: 7, extra: 2, capacity: 5},
+		nil,
+		serving,
+	)
+	if result.Valid || result.RandomCases < 7 ||
+		!strings.Contains(result.Error, "bounded candidate") {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
 func TestRunnerProvesStopBeforeRestart(t *testing.T) {
 	serving := &atomic.Bool{}
 	result := runTestAccuracy(
@@ -305,18 +364,18 @@ func TestReadinessProbeDeclarationsCoverKnownTargets(t *testing.T) {
 			Validate: func(api.ProtocolResult) error { return nil },
 		}
 	}
-	if err := validateProbes([]api.ReadinessProbe{probe("one", "one")}, targets); err == nil ||
-		!strings.Contains(err.Error(), "do not cover") {
+	if err := probing.Validate([]api.ReadinessProbe{probe("one", "one")}, targets, true); err == nil ||
+		!strings.Contains(err.Error(), "does not cover") {
 		t.Fatalf("missing-target error=%v", err)
 	}
-	if err := validateProbes([]api.ReadinessProbe{
+	if err := probing.Validate([]api.ReadinessProbe{
 		probe("one", "one"), probe("unknown", "unknown"),
-	}, targets); err == nil || !strings.Contains(err.Error(), "unknown target") {
+	}, targets, true); err == nil || !strings.Contains(err.Error(), "unknown target") {
 		t.Fatalf("unknown-target error=%v", err)
 	}
-	if err := validateProbes([]api.ReadinessProbe{
+	if err := probing.Validate([]api.ReadinessProbe{
 		probe("one", "one"), probe("two", "two"),
-	}, targets); err != nil {
+	}, targets, true); err != nil {
 		t.Fatal(err)
 	}
 }

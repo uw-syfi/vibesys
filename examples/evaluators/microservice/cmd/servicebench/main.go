@@ -97,12 +97,15 @@ func run() error {
 	flag.StringVar(&seed, "seed", "", "override deterministic random seed, or use 'random'")
 	flag.IntVar(&casesMin, "cases-min", 2, "minimum randomized cases in accuracy mode")
 	flag.IntVar(&casesMax, "cases-max", 5, "maximum randomized cases in accuracy mode")
-	flag.Float64Var(&startupTimeout, "startup-timeout", 15, "candidate readiness timeout in seconds for accuracy mode")
+	flag.Float64Var(&startupTimeout, "startup-timeout", 15, "candidate readiness timeout in seconds")
 	flag.StringVar(&runCommandJSON, "run-command-json", "", "managed candidate command as a JSON string array in accuracy mode")
 	flag.StringVar(&candidateDir, "candidate-dir", ".", "managed candidate working directory in accuracy mode")
 	flag.StringVar(&stateDir, "state-dir", "", "managed candidate persistent state directory in accuracy mode")
 	flag.StringVar(&stateEnv, "state-env", "VIBESYS_STATE_DIR", "environment variable receiving --state-dir in accuracy mode")
 	flag.Parse()
+	if startupTimeout <= 0 {
+		return fmt.Errorf("--startup-timeout must be positive")
+	}
 	if mode != "benchmark" && mode != "accuracy" {
 		return fmt.Errorf("--mode must be benchmark or accuracy, got %q", mode)
 	}
@@ -245,9 +248,10 @@ func run() error {
 		)
 	}
 	runner := engine.New(registry, engine.Options{
-		EngineVersion: version,
-		WorkloadHash:  hex.EncodeToString(hash[:]),
-		SkipPrepare:   skipPrepare,
+		EngineVersion:  version,
+		WorkloadHash:   hex.EncodeToString(hash[:]),
+		SkipPrepare:    skipPrepare,
+		StartupTimeout: time.Duration(startupTimeout * float64(time.Second)),
 	})
 	runResult, err := runner.Run(ctx, workload)
 	if err != nil {

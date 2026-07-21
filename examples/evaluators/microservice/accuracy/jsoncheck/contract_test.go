@@ -101,3 +101,22 @@ func TestExactListRejectsMissingUnexpectedStaleAndDuplicateExpectedRows(t *testi
 		})
 	}
 }
+
+func TestEqualUsesMathematicalJSONNumberEquality(t *testing.T) {
+	actual := decode(t, `{"integer":1e0,"fraction":0.1000,"list":[2.00]}`)
+	expected := decode(t, `{"integer":1,"fraction":0.1,"list":[2]}`)
+	equal, err := Equal(actual, expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !equal {
+		t.Fatal("mathematically equivalent JSON numbers compared unequal")
+	}
+	unequal, err := Equal(actual, decode(t, `{"integer":1,"fraction":0.2,"list":[2]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unequal {
+		t.Fatal("different JSON numbers compared equal")
+	}
+}

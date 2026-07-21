@@ -18,12 +18,22 @@ func TestExactEnvelopeRejectsSchemaAndTypeSubstitution(t *testing.T) {
 		`{"status":1,"msg":"ok"}`,
 		`{"status":1,"msg":"ok","data":{},"extra":true}`,
 		`{"status":"1","msg":"ok","data":{}}`,
-		`{"status":1.0,"msg":"ok","data":{}}`,
+		`{"status":1,"msg":{},"data":{}}`,
 		`{"status":1,"msg":"ok","data":{}} {}`,
 	}
 	for _, body := range tests {
 		if _, err := ExactEnvelope(response(body), 200, 1); err == nil {
 			t.Fatalf("accepted invalid envelope %s", body)
+		}
+	}
+}
+
+func TestExactEnvelopeAcceptsEquivalentIntegerRepresentations(t *testing.T) {
+	for _, status := range []string{"1", "1.0", "1e0"} {
+		if _, err := ExactEnvelope(
+			response(`{"status":`+status+`,"msg":"ok","data":{}}`), 200, 1,
+		); err != nil {
+			t.Fatalf("status %s: %v", status, err)
 		}
 	}
 }

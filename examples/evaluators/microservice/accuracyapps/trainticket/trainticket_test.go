@@ -158,7 +158,7 @@ func TestUpdatesRetainAndProbeOldSecondaryKeys(t *testing.T) {
 		}
 		return envelopeResult(200, status, nil)
 	})
-	client, err := newClient(runtime, time.Second)
+	client, err := newClient(runtime, time.Second, "test-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,6 +176,83 @@ func TestUpdatesRetainAndProbeOldSecondaryKeys(t *testing.T) {
 	}
 	assertPath(t, paths, servicePath("route", "/routes/"+oldRoute[0]+"/"+oldRoute[1]))
 	assertPath(t, paths, servicePath("price", "/prices/"+oldPrice[0]+"/"+oldPrice[1]))
+}
+
+func TestRepeatedUpdatesRetireOnlyInactiveSecondaryKeys(t *testing.T) {
+	catalog, err := loadSeedCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := makeCase(rand.New(rand.NewSource(17)), "namespace", 0)
+	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
+		spec := invocation.Payload.(api.HTTPRequestSpec)
+		if spec.Method == http.MethodGet {
+			return envelopeResult(200, 0, nil)
+		}
+		return envelopeResult(200, 1, nil)
+	})
+	client, err := newClient(runtime, time.Second, "test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := &Application{catalog: catalog, timeout: time.Second}
+	journal := accuracy.NewJournal()
+	random := rand.New(rand.NewSource(19))
+	for epoch := 0; epoch < 3; epoch++ {
+		if _, err := application.updateCase(
+			context.Background(), client, journal, item, random,
+		); err != nil {
+			t.Fatal(err)
+		}
+		currentRoute := [2]string{
+			stringValue(item.route, "startStationId"),
+			stringValue(item.route, "terminalStationId"),
+		}
+		currentPrice := [2]string{
+			stringValue(item.price, "routeId"), stringValue(item.price, "trainType"),
+		}
+		for _, retired := range item.retiredRouteKeys {
+			if retired == currentRoute {
+				t.Fatalf("current route key %v remains retired", currentRoute)
+			}
+		}
+		for _, retired := range item.retiredPriceKeys {
+			if retired == currentPrice {
+				t.Fatalf("current price key %v remains retired", currentPrice)
+			}
+		}
+		if _, err := verifyRetiredSecondaryIndexes(context.Background(), client, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestSeedCatalogRejectsListsWithoutQueryableIndexes(t *testing.T) {
+	catalog, err := loadSeedCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
+		spec := invocation.Payload.(api.HTTPRequestSpec)
+		if spec.Method == http.MethodGet && strings.HasSuffix(spec.Path, listPaths[invocation.Target]) {
+			items := make([]any, 0, len(catalog[invocation.Target]))
+			for _, item := range catalog[invocation.Target] {
+				items = append(items, item)
+			}
+			return envelopeResult(200, 1, items)
+		}
+		return envelopeResult(200, 0, nil)
+	})
+	client, err := newClient(runtime, time.Second, "test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := &Application{catalog: catalog}
+	if _, err := application.verifySeedCatalog(
+		context.Background(), client,
+	); err == nil || !strings.Contains(err.Error(), "application status") {
+		t.Fatalf("synthetic seed lists error=%v", err)
+	}
 }
 
 func TestPartialCreateUsesJournaledReverseCleanup(t *testing.T) {
@@ -201,7 +278,7 @@ func TestPartialCreateUsesJournaledReverseCleanup(t *testing.T) {
 		}
 		return envelopeResult(status, 1, nil)
 	})
-	client, err := newClient(runtime, time.Second)
+	client, err := newClient(runtime, time.Second, "test-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +314,7 @@ func TestCleanupSnapshotsMutablePriceIdentity(t *testing.T) {
 		}
 		return envelopeResult(200, 1, []any{})
 	})
-	client, err := newClient(runtime, time.Second)
+	client, err := newClient(runtime, time.Second, "test-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +343,7 @@ func TestCleanupRejectsAcknowledgedNoOpDelete(t *testing.T) {
 		}
 		return envelopeResult(200, 1, []any{item.price})
 	})
-	client, err := newClient(runtime, time.Second)
+	client, err := newClient(runtime, time.Second, "test-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +391,7 @@ func TestCleanupDistinguishesOldAndNewPriceCompoundKeys(t *testing.T) {
 		}
 		return envelopeResult(200, 1, items)
 	})
-	client, err := newClient(runtime, time.Second)
+	client, err := newClient(runtime, time.Second, "test-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +426,7 @@ func TestDeleteVerificationRejectsEntityRetainedOnlyInList(t *testing.T) {
 		}
 		return envelopeResult(200, 0, nil)
 	})
-	client, err := newClient(runtime, time.Second)
+	client, err := newClient(runtime, time.Second, "test-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +452,7 @@ func TestDeleteIsolationRejectsMissingSeedRecord(t *testing.T) {
 		}
 		return envelopeResult(200, 1, items)
 	})
-	client, err := newClient(runtime, time.Second)
+	client, err := newClient(runtime, time.Second, "test-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +478,7 @@ func TestExactStateRejectsUnexpectedSchemaValidRecord(t *testing.T) {
 		}
 		return envelopeResult(200, 1, items)
 	})
-	client, err := newClient(runtime, time.Second)
+	client, err := newClient(runtime, time.Second, "test-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +499,7 @@ func TestRouteSecondaryLookupRejectsUnrelatedRoute(t *testing.T) {
 		}
 		return envelopeResult(200, 1, []any{item.route, unrelated})
 	})
-	client, err := newClient(runtime, time.Second)
+	client, err := newClient(runtime, time.Second, "test-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +525,7 @@ func TestDeleteVerificationRejectsCurrentRouteSecondaryIndex(t *testing.T) {
 		}
 		return envelopeResult(200, 0, nil)
 	})
-	client, err := newClient(runtime, time.Second)
+	client, err := newClient(runtime, time.Second, "test-token")
 	if err != nil {
 		t.Fatal(err)
 	}

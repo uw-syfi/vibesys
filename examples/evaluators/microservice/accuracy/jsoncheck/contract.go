@@ -3,6 +3,7 @@ package jsoncheck
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"reflect"
 
 	"vibesys/microservice-evaluator/accuracy/httpcheck"
@@ -130,7 +131,7 @@ func (c Contract) ExactList(
 		if !exists {
 			return nil, fmt.Errorf("%s: missing key %q", where, key)
 		}
-		if !reflect.DeepEqual(actualObject, expectedObject) {
+		if !equalJSON(actualObject, expectedObject) {
 			return nil, fmt.Errorf(
 				"%s: value mismatch for key %q: got %v, want %v",
 				where,
@@ -161,7 +162,48 @@ func Equal(actual, expected any) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return reflect.DeepEqual(actual, normalized), nil
+	return equalJSON(actual, normalized), nil
+}
+
+func equalJSON(left, right any) bool {
+	leftNumber, leftIsNumber := left.(json.Number)
+	rightNumber, rightIsNumber := right.(json.Number)
+	if leftIsNumber || rightIsNumber {
+		if !leftIsNumber || !rightIsNumber {
+			return false
+		}
+		leftRational, leftOK := new(big.Rat).SetString(string(leftNumber))
+		rightRational, rightOK := new(big.Rat).SetString(string(rightNumber))
+		return leftOK && rightOK && leftRational.Cmp(rightRational) == 0
+	}
+	leftObject, leftIsObject := left.(map[string]any)
+	rightObject, rightIsObject := right.(map[string]any)
+	if leftIsObject || rightIsObject {
+		if !leftIsObject || !rightIsObject || len(leftObject) != len(rightObject) {
+			return false
+		}
+		for key, leftValue := range leftObject {
+			rightValue, exists := rightObject[key]
+			if !exists || !equalJSON(leftValue, rightValue) {
+				return false
+			}
+		}
+		return true
+	}
+	leftList, leftIsList := left.([]any)
+	rightList, rightIsList := right.([]any)
+	if leftIsList || rightIsList {
+		if !leftIsList || !rightIsList || len(leftList) != len(rightList) {
+			return false
+		}
+		for index := range leftList {
+			if !equalJSON(leftList[index], rightList[index]) {
+				return false
+			}
+		}
+		return true
+	}
+	return reflect.DeepEqual(left, right)
 }
 
 func String(value any) error {

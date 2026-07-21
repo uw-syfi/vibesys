@@ -3,32 +3,20 @@ package trainticket
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"time"
 
-	"vibesys/microservice-evaluator/accuracy/httpcheck"
 	"vibesys/microservice-evaluator/api"
 	trainticketsupport "vibesys/microservice-evaluator/appsupport/trainticket"
-	"vibesys/microservice-evaluator/wire/httpjson"
 )
 
 var services = trainticketsupport.Services()
 
-var welcomePaths = map[string]struct {
-	path string
-	text string
-}{
-	"config":  {"/welcome", "Welcome to [ Config Service ] !"},
-	"station": {"/welcome", "Welcome to [ Station Service ] !"},
-	"train":   {"/trains/welcome", "Welcome to [ Train Service ] !"},
-	"travel":  {"/welcome", "Welcome to [ Travel Service ] !"},
-	"route":   {"/welcome", "Welcome to [ Route Service ] !"},
-	"price":   {"/prices/welcome", "Welcome to [ Price Service ] !"},
-}
-
 type Application struct {
 	timeout time.Duration
 	catalog map[string][]map[string]any
+	config  trainticketsupport.Config
+	seed    int64
+	token   string
 }
 
 func New(workload api.Workload) (api.AccuracyApplication, error) {
@@ -55,16 +43,24 @@ func New(workload api.Workload) (api.AccuracyApplication, error) {
 			)
 		}
 	}
-	if _, err := trainticketsupport.ParseConfig(workload.ApplicationConfig); err != nil {
+	config, err := trainticketsupport.ParseConfig(workload.ApplicationConfig)
+	if err != nil {
 		return nil, err
 	}
 	catalog, err := loadSeedCatalog()
 	if err != nil {
 		return nil, err
 	}
+	token, err := trainticketsupport.AdminToken(time.Now())
+	if err != nil {
+		return nil, err
+	}
 	return &Application{
 		timeout: time.Duration(workload.Load.TimeoutSeconds * float64(time.Second)),
 		catalog: catalog,
+		config:  config,
+		seed:    workload.Load.Seed,
+		token:   token,
 	}, nil
 }
 
@@ -88,25 +84,19 @@ func (a *Application) Properties() []api.AccuracyProperty {
 }
 
 func (a *Application) ReadinessProbes() []api.ReadinessProbe {
-	probes := make([]api.ReadinessProbe, 0, len(services))
-	for _, service := range services {
-		service := service
-		welcome := welcomePaths[service]
-		probes = append(probes, api.ReadinessProbe{
-			Name: service,
-			Invocation: api.Invocation{
-				Target:    service,
-				Operation: "accuracy-readiness",
-				Payload: httpjson.MustRequest(
-					http.MethodGet, servicePath(service, welcome.path), nil, "",
-				),
-			},
-			Validate: func(result api.ProtocolResult) error {
-				return httpcheck.ExactText(result, http.StatusOK, welcome.text)
-			},
-		})
-	}
-	return probes
+	return trainticketsupport.ReadinessProbes(a.seed)
+}
+
+func (a *Application) PreflightProbes() []api.ReadinessProbe {
+	return trainticketsupport.PreflightProbes(a.token)
+}
+
+func (a *Application) PreflightProperties() []string {
+	return []string{"protocol_contract", "persistent_http"}
+}
+
+func (a *Application) CasePolicy() api.AccuracyCasePolicy {
+	return api.AccuracyCasePolicy{MinimumCases: a.config.Records, RandomExtraCases: 3}
 }
 
 func pass(recorder api.AccuracyRecorder, properties ...string) error {

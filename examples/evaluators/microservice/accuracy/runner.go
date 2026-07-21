@@ -4,13 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"math/rand"
-	"sort"
 	"strconv"
 	"time"
 
 	"vibesys/microservice-evaluator/api"
+	"vibesys/microservice-evaluator/probing"
 	"vibesys/microservice-evaluator/registry"
+	"vibesys/microservice-evaluator/sampling"
 	"vibesys/microservice-evaluator/transport"
 )
 
@@ -111,8 +111,33 @@ func (r *Runner) Run(ctx context.Context, workload api.Workload) (result Result)
 	}
 	result.Checks, result.Properties = recorder.snapshot()
 	probes := application.ReadinessProbes()
-	if err := validateProbes(probes, workload.Targets); err != nil {
-		result.Error = err.Error()
+	preflight := application.PreflightProbes()
+	if err := probing.Validate(probes, workload.Targets, true); err != nil {
+		result.Error = fmt.Sprintf("invalid readiness probes: %v", err)
+		return result
+	}
+	if err := probing.Validate(preflight, workload.Targets, false); err != nil {
+		result.Error = fmt.Sprintf("invalid preflight probes: %v", err)
+		return result
+	}
+	casePolicy := application.CasePolicy()
+	if casePolicy.MinimumCases < 1 {
+		result.Error = fmt.Sprintf(
+			"accuracy application case minimum must be positive, got %d",
+			casePolicy.MinimumCases,
+		)
+		return result
+	}
+	if casePolicy.RandomExtraCases < 0 {
+		result.Error = fmt.Sprintf(
+			"accuracy application random extra cases must be non-negative, got %d",
+			casePolicy.RandomExtraCases,
+		)
+		return result
+	}
+	preflightProperties := application.PreflightProperties()
+	if len(preflightProperties) == 0 {
+		result.Error = "accuracy application declares no preflight properties"
 		return result
 	}
 	runtime, err := transport.Open(ctx, r.registry, workload.Targets)
@@ -139,26 +164,45 @@ func (r *Runner) Run(ctx context.Context, workload api.Workload) (result Result)
 			}
 		}()
 	}
-	if err := r.waitReady(ctx, runtime, probes); err != nil {
+	probeOptions := probing.Options{
+		PhaseTimeout: r.options.StartupTimeout,
+		ProbeTimeout: r.options.ProbeTimeout,
+		Interval:     r.options.ProbeInterval,
+	}
+	if err := probing.WaitReady(ctx, runtime, probes, probeOptions); err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	if err := probing.Run(ctx, runtime, preflight, probeOptions); err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	recorder.AddChecks(len(preflight))
+	if err := recorder.Pass(preflightProperties...); err != nil {
 		result.Error = err.Error()
 		return result
 	}
 
-	random := rand.New(rand.NewSource(r.options.Seed))
-	result.RandomCases = r.options.CasesMin + random.Intn(r.options.CasesMax-r.options.CasesMin+1)
+	minimumCases := max(r.options.CasesMin, casePolicy.MinimumCases)
+	maximumCases := max(r.options.CasesMax, minimumCases+casePolicy.RandomExtraCases)
+	result.RandomCases, err = sampling.CaseCount(r.options.Seed, minimumCases, maximumCases)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
 	var restart func(context.Context) error
 	if r.options.Lifecycle != nil {
 		restart = func(restartContext context.Context) error {
 			if err := r.options.Lifecycle.Stop(restartContext, true); err != nil {
 				return fmt.Errorf("crash candidate: %w", err)
 			}
-			if err := r.waitStopped(restartContext, runtime, probes); err != nil {
+			if err := probing.WaitStopped(restartContext, runtime, probes, probeOptions); err != nil {
 				return err
 			}
 			if err := r.options.Lifecycle.Start(restartContext); err != nil {
 				return fmt.Errorf("restart candidate: %w", err)
 			}
-			return r.waitReady(restartContext, runtime, probes)
+			return probing.WaitReady(restartContext, runtime, probes, probeOptions)
 		}
 	}
 	err = application.Check(ctx, runtime, api.AccuracyContext{
@@ -182,141 +226,7 @@ func (r *Runner) Run(ctx context.Context, workload api.Workload) (result Result)
 	return result
 }
 
-func (r *Runner) waitReady(
-	ctx context.Context,
-	runtime api.Runtime,
-	probes []api.ReadinessProbe,
-) error {
-	phaseContext, cancelPhase := context.WithTimeout(ctx, r.options.StartupTimeout)
-	defer cancelPhase()
-	last := "not attempted"
-	for {
-		if err := phaseContext.Err(); err != nil {
-			return fmt.Errorf("candidate did not become ready within %s: %s", r.options.StartupTimeout, last)
-		}
-		allReady := true
-		for _, probe := range probes {
-			probeContext, cancel := context.WithTimeout(phaseContext, r.options.ProbeTimeout)
-			result := runtime.Invoke(probeContext, probe.Invocation)
-			cancel()
-			if !result.TransportSuccess {
-				allReady = false
-				last = fmt.Sprintf(
-					"%s: transport failed (%s): %s",
-					probe.Name,
-					result.ErrorCategory,
-					result.ErrorMessage,
-				)
-				break
-			}
-			if err := probe.Validate(result); err != nil {
-				allReady = false
-				last = fmt.Sprintf("%s: %v", probe.Name, err)
-				break
-			}
-		}
-		if allReady {
-			if err := phaseContext.Err(); err != nil {
-				return fmt.Errorf("candidate did not become ready within %s: %s", r.options.StartupTimeout, last)
-			}
-			return nil
-		}
-		if err := sleepContext(phaseContext, r.options.ProbeInterval); err != nil {
-			return fmt.Errorf("candidate did not become ready within %s: %s", r.options.StartupTimeout, last)
-		}
-	}
-}
-
-func (r *Runner) waitStopped(
-	ctx context.Context,
-	runtime api.Runtime,
-	probes []api.ReadinessProbe,
-) error {
-	phaseContext, cancelPhase := context.WithTimeout(ctx, r.options.StartupTimeout)
-	defer cancelPhase()
-	for {
-		if err := phaseContext.Err(); err != nil {
-			return fmt.Errorf("candidate did not stop within %s", r.options.StartupTimeout)
-		}
-		serving := make([]string, 0)
-		for _, probe := range probes {
-			probeContext, cancel := context.WithTimeout(phaseContext, r.options.ProbeTimeout)
-			result := runtime.Invoke(probeContext, probe.Invocation)
-			cancel()
-			if result.TransportSuccess {
-				serving = append(serving, probe.Name)
-			}
-		}
-		if len(serving) == 0 {
-			if err := phaseContext.Err(); err != nil {
-				return fmt.Errorf("candidate did not stop within %s", r.options.StartupTimeout)
-			}
-			return nil
-		}
-		if err := sleepContext(phaseContext, r.options.ProbeInterval); err != nil {
-			return fmt.Errorf("candidate endpoints remained reachable after stop: %v", serving)
-		}
-	}
-}
-
-func validateProbes(probes []api.ReadinessProbe, targets []api.Target) error {
-	if len(probes) == 0 {
-		return fmt.Errorf("accuracy application declares no readiness probes")
-	}
-	requiredTargets := make(map[string]struct{}, len(targets))
-	for _, target := range targets {
-		requiredTargets[target.Name] = struct{}{}
-	}
-	coveredTargets := make(map[string]struct{}, len(targets))
-	seen := make(map[string]struct{}, len(probes))
-	for index, probe := range probes {
-		if probe.Name == "" {
-			return fmt.Errorf("readiness probe %d has an empty name", index)
-		}
-		if probe.Validate == nil {
-			return fmt.Errorf("readiness probe %q has no validator", probe.Name)
-		}
-		if probe.Invocation.Target == "" {
-			return fmt.Errorf("readiness probe %q has an empty target", probe.Name)
-		}
-		if _, exists := requiredTargets[probe.Invocation.Target]; !exists {
-			return fmt.Errorf(
-				"readiness probe %q references unknown target %q",
-				probe.Name,
-				probe.Invocation.Target,
-			)
-		}
-		if _, duplicate := seen[probe.Name]; duplicate {
-			return fmt.Errorf("readiness probe %q is duplicated", probe.Name)
-		}
-		seen[probe.Name] = struct{}{}
-		coveredTargets[probe.Invocation.Target] = struct{}{}
-	}
-	missing := make([]string, 0)
-	for target := range requiredTargets {
-		if _, covered := coveredTargets[target]; !covered {
-			missing = append(missing, target)
-		}
-	}
-	if len(missing) > 0 {
-		sort.Strings(missing)
-		return fmt.Errorf("readiness probes do not cover targets: %v", missing)
-	}
-	return nil
-}
-
 func seedHash(seed int64) string {
 	digest := sha256.Sum256([]byte(strconv.FormatInt(seed, 10)))
 	return fmt.Sprintf("%x", digest[:])
-}
-
-func sleepContext(ctx context.Context, duration time.Duration) error {
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
 }

@@ -13,42 +13,167 @@ import (
 	"vibesys/microservice-evaluator/accuracy/jsoncheck"
 )
 
-func (a *Application) verifyProtocol(ctx context.Context, client *client) (int, error) {
+func (a *Application) verifySeedCatalog(ctx context.Context, client *client) (int, error) {
+	checks, err := a.verifyExactState(ctx, client, nil)
+	if err != nil {
+		return checks, err
+	}
+	queried, err := a.verifySeedQueries(ctx, client)
+	return checks + queried, err
+}
+
+// verifySeedQueries prevents a candidate from synthesizing the known seed
+// lists while omitting the point and secondary indexes used by benchmark
+// traffic. Every seeded entity is proved through each public query shape.
+func (a *Application) verifySeedQueries(ctx context.Context, client *client) (int, error) {
 	checks := 0
-	for _, service := range services {
-		welcome := welcomePaths[service]
-		result := client.request(ctx, service, http.MethodGet, welcome.path, nil, true)
-		if err := httpcheck.ExactText(result, http.StatusOK, welcome.text); err != nil {
-			return checks, fmt.Errorf("%s welcome: %w", service, err)
+	for _, expected := range a.catalog["config"] {
+		name := expected["name"].(string)
+		data, err := client.envelope(
+			ctx, "config", http.MethodGet, "/configs/"+url.PathEscape(name), nil, 200, 1,
+		)
+		if err != nil {
+			return checks, err
+		}
+		if err := assertEntity("config", data, expected, "seed config point lookup"); err != nil {
+			return checks, err
 		}
 		checks++
 	}
-	cacheResult := client.request(ctx, "station", http.MethodGet, "/stations", nil, true)
-	if _, err := httpcheck.ExactEnvelope(cacheResult, http.StatusOK, 1); err != nil {
-		return checks, fmt.Errorf("station cache probe: %w", err)
+	for _, expected := range a.catalog["station"] {
+		id := expected["id"].(string)
+		name := expected["name"].(string)
+		byID, err := client.envelope(
+			ctx, "station", http.MethodGet, "/stations/name/"+url.PathEscape(id), nil, 200, 1,
+		)
+		if err != nil {
+			return checks, err
+		}
+		if byID != name {
+			return checks, fmt.Errorf("seed station %q name lookup returned %v, expected %q", id, byID, name)
+		}
+		checks++
+		byName, err := client.envelope(
+			ctx, "station", http.MethodGet, "/stations/id/"+url.PathEscape(name), nil, 200, 1,
+		)
+		if err != nil {
+			return checks, err
+		}
+		if byName != id {
+			return checks, fmt.Errorf("seed station %q ID lookup returned %v, expected %q", name, byName, id)
+		}
+		checks++
 	}
-	cacheControl := strings.ToLower(httpcheck.Header(cacheResult, "Cache-Control"))
-	if strings.Contains(cacheControl, "public") || strings.Contains(cacheControl, "immutable") {
-		return checks, fmt.Errorf("mutable station collection has unsafe Cache-Control %q", cacheControl)
+	for _, expected := range a.catalog["train"] {
+		id := expected["id"].(string)
+		data, err := client.envelope(
+			ctx, "train", http.MethodGet, "/trains/"+url.PathEscape(id), nil, 200, 1,
+		)
+		if err != nil {
+			return checks, err
+		}
+		if err := assertEntity("train", data, expected, "seed train point lookup"); err != nil {
+			return checks, err
+		}
+		checks++
 	}
-	checks++
-
-	first := client.request(ctx, "station", http.MethodGet, "/stations", nil, true)
-	if _, err := httpcheck.ExactEnvelope(first, http.StatusOK, 1); err != nil {
-		return checks, fmt.Errorf("first persistent HTTP request: %w", err)
+	routeGroups := make(map[string][]any)
+	routeGroupOrder := make([]string, 0)
+	for _, expected := range a.catalog["route"] {
+		id := expected["id"].(string)
+		data, err := client.envelope(
+			ctx, "route", http.MethodGet, "/routes/"+url.PathEscape(id), nil, 200, 1,
+		)
+		if err != nil {
+			return checks, err
+		}
+		if err := assertEntity("route", data, expected, "seed route point lookup"); err != nil {
+			return checks, err
+		}
+		checks++
+		key := expected["startStationId"].(string) + "\x00" + expected["terminalStationId"].(string)
+		if _, exists := routeGroups[key]; !exists {
+			routeGroupOrder = append(routeGroupOrder, key)
+			routeGroups[key] = nil
+		}
 	}
-	second := client.request(ctx, "station", http.MethodGet, "/stations", nil, true)
-	if _, err := httpcheck.ExactEnvelope(second, http.StatusOK, 1); err != nil {
-		return checks, fmt.Errorf("second persistent HTTP request: %w", err)
+	for _, key := range routeGroupOrder {
+		parts := strings.SplitN(key, "\x00", 2)
+		for _, candidate := range a.catalog["route"] {
+			if routeContainsOrderedPair(candidate, parts[0], parts[1]) {
+				routeGroups[key] = append(routeGroups[key], candidate)
+			}
+		}
+		data, err := client.envelope(
+			ctx,
+			"route",
+			http.MethodGet,
+			"/routes/"+url.PathEscape(parts[0])+"/"+url.PathEscape(parts[1]),
+			nil,
+			200,
+			1,
+		)
+		if err != nil {
+			return checks, err
+		}
+		if _, err := contracts["route"].ExactList(
+			data, routeGroups[key], "seed route secondary lookup",
+		); err != nil {
+			return checks, err
+		}
+		checks++
 	}
-	if !second.ConnectionKnown || !second.ConnectionReused {
-		return checks, fmt.Errorf("HTTP connection was not reused for two sequential requests")
+	for _, expected := range a.catalog["price"] {
+		routeID := expected["routeId"].(string)
+		trainType := expected["trainType"].(string)
+		data, err := client.envelope(
+			ctx,
+			"price",
+			http.MethodGet,
+			"/prices/"+url.PathEscape(routeID)+"/"+url.PathEscape(trainType),
+			nil,
+			200,
+			1,
+		)
+		if err != nil {
+			return checks, err
+		}
+		if err := assertEntity("price", data, expected, "seed price secondary lookup"); err != nil {
+			return checks, err
+		}
+		checks++
 	}
-	return checks + 2, nil
+	for _, expected := range a.catalog["travel"] {
+		id, err := tripKey(expected)
+		if err != nil {
+			return checks, err
+		}
+		data, err := client.envelope(
+			ctx, "travel", http.MethodGet, "/trips/"+url.PathEscape(id), nil, 200, 1,
+		)
+		if err != nil {
+			return checks, err
+		}
+		if err := assertEntity("travel", data, expected, "seed trip point lookup"); err != nil {
+			return checks, err
+		}
+		checks++
+	}
+	return checks, nil
 }
 
-func (a *Application) verifySeedCatalog(ctx context.Context, client *client) (int, error) {
-	return a.verifyExactState(ctx, client, nil)
+func routeContainsOrderedPair(route map[string]any, start, terminal string) bool {
+	stations := route["stations"].([]any)
+	startIndex := -1
+	for index, station := range stations {
+		if station == start && startIndex < 0 {
+			startIndex = index
+		}
+		if station == terminal && startIndex >= 0 && index > startIndex {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Application) verifyExactState(
