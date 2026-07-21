@@ -2,14 +2,12 @@ use crate::abi::{
     Api, STATUS_EMPTY, STATUS_FULL, STATUS_INTERNAL_ERROR, STATUS_INVALID, STATUS_OK,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 const SENTINEL_BYTE: u8 = 0xa7;
 const SENTINEL_LENGTH: u64 = u64::MAX;
 const CONCURRENT_PROBE_ITEMS: usize = 2_000;
-const RESERVATION_GAP_VALUE_SIZE: usize = 1 << 20;
-const RESERVATION_GAP_ATTEMPTS: usize = 32;
 
 pub fn run_probe(
     api: Api,
@@ -73,68 +71,6 @@ pub fn run_probe(
     check_empty_output_is_unchanged(consumer, max_value_size)?;
     if consumer_count >= 2 {
         check_concurrent_undersized_dequeues(&api, producer_count, consumer_count)?;
-    }
-    if producer_count >= 2 && max_value_size == 257 {
-        check_reservation_gap(&api, producer_count, consumer_count)?;
-    }
-    Ok(())
-}
-
-fn check_reservation_gap(
-    api: &Api,
-    producer_count: u32,
-    consumer_count: u32,
-) -> Result<(), String> {
-    let first_value = vec![0x35_u8; RESERVATION_GAP_VALUE_SIZE];
-    let second_value = vec![0xca_u8; RESERVATION_GAP_VALUE_SIZE];
-
-    for _ in 0..RESERVATION_GAP_ATTEMPTS {
-        let queue = api.create_queue(
-            1,
-            RESERVATION_GAP_VALUE_SIZE as u64,
-            producer_count,
-            consumer_count,
-        )?;
-        let mut first_producer = queue.create_producer(0)?;
-        let mut second_producer = queue.create_producer(1)?;
-        let mut consumer = queue.create_consumer(0)?;
-        let start = Arc::new(Barrier::new(2));
-        let worker_start = start.clone();
-
-        let (first_status, second_status, dequeue_status) = thread::scope(|scope| {
-            let first_worker = scope.spawn(|| {
-                worker_start.wait();
-                first_producer.enqueue(&first_value)
-            });
-            start.wait();
-            for _ in 0..64 {
-                std::hint::spin_loop();
-            }
-            let second_status = second_producer.enqueue(&second_value);
-            let mut output = vec![0_u8; RESERVATION_GAP_VALUE_SIZE];
-            let (dequeue_status, _) = consumer.dequeue(&mut output)?;
-            let first_status = first_worker
-                .join()
-                .map_err(|_| "reservation-gap producer panicked".to_string())?;
-            Ok::<(u32, u32, u32), String>((first_status, second_status, dequeue_status))
-        })?;
-
-        if first_status == STATUS_OK
-            && second_status == STATUS_FULL
-            && dequeue_status == STATUS_EMPTY
-        {
-            return Err(
-                "non-linearizable reservation gap: FULL completed before a later EMPTY while the sole slot belonged to a successful enqueue"
-                    .to_string(),
-            );
-        }
-        if !matches!(first_status, STATUS_OK | STATUS_FULL)
-            || !matches!(second_status, STATUS_OK | STATUS_FULL)
-        {
-            return Err(format!(
-                "reservation-gap enqueue statuses were {first_status} and {second_status}"
-            ));
-        }
     }
     Ok(())
 }

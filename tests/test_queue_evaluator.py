@@ -227,7 +227,7 @@ def test_mpmc_locked_ring_baseline_builds_and_passes_accuracy(tmp_path):
         capture_output=True,
         text=True,
     )
-    assert "PASS - mpmc linearizable" in completed.stdout
+    assert "PASS - mpmc reservation-aware bounded FIFO" in completed.stdout
 
 
 def test_mpmc_locked_ring_baseline_has_atomic_publication_region():
@@ -287,7 +287,12 @@ def test_materialized_rust_starter_builds_and_passes_accuracy(tmp_path, input_na
     )
     expected = ["spsc", "mpsc", "mpmc"] if scenario == "all" else [scenario]
     for checked_scenario in expected:
-        assert f"PASS - {checked_scenario} linearizable" in completed.stdout
+        contract = (
+            "reservation-aware bounded FIFO"
+            if checked_scenario == "mpmc"
+            else "linearizable bounded FIFO"
+        )
+        assert f"PASS - {checked_scenario} {contract}" in completed.stdout
 
 
 def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):

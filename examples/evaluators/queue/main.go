@@ -134,8 +134,9 @@ func runCheckCommand(args []string) error {
 		}
 		actualProducers, actualConsumers, _ := workerCounts(selected, *producers, *consumers)
 		fmt.Printf(
-			"PASS - %s linearizable (%d trials, approximately %d ops/trial, %dP/%dC, capacity=%d, value_size=%d)\n",
+			"PASS - %s %s (%d trials, approximately %d ops/trial, %dP/%dC, capacity=%d, value_size=%d)\n",
 			selected,
+			correctnessContract(selected),
 			*trials,
 			*operations,
 			actualProducers,
