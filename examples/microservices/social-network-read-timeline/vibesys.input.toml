@@ -13,8 +13,9 @@ timeout_seconds = 120
 [benchmark]
 command = [
   "go", "-C", "_evaluator/microservice",
-  "run", "./cmd/microbench",
+  "run", "./cmd/servicebench",
   "--workload", "../../benchmark/workload.toml",
+	"--fixture-seed", "random",
 ]
 timeout_seconds = 300
 

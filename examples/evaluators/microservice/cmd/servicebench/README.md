@@ -1,4 +1,4 @@
-# `microbench` command
+# `servicebench` command
 
 This package is the CLI entry point for running a microservice workload. It is
 the composition root that registers the built-in HTTP driver and application
@@ -6,7 +6,8 @@ adapters before invoking the shared engine.
 
 The command is responsible for:
 
-- workload, profile, target, load, seed, and output flags;
+- workload, profile, target, load, independent schedule/fixture seed, and output
+  flags;
 - validating command-line overrides and registered extensions;
 - hashing the fully resolved workload;
 - signal-aware execution;

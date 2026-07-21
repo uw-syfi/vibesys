@@ -25,6 +25,7 @@ func Load(path string, profile string) (api.Workload, error) {
 		sort.Strings(keys)
 		return api.Workload{}, fmt.Errorf("workload contains unknown fields: %s", strings.Join(keys, ", "))
 	}
+	fixtureSeedDefined := metadata.IsDefined("load", "fixture_seed")
 	applyDefaults(&workload)
 	if profile != "" {
 		override, ok := workload.Profiles[profile]
@@ -32,6 +33,7 @@ func Load(path string, profile string) (api.Workload, error) {
 			return api.Workload{}, fmt.Errorf("unknown workload profile %q", profile)
 		}
 		override.Apply(&workload.Load)
+		fixtureSeedDefined = fixtureSeedDefined || override.FixtureSeed != nil
 		if len(override.ApplicationConfig) > 0 {
 			if workload.ApplicationConfig == nil {
 				workload.ApplicationConfig = make(map[string]any, len(override.ApplicationConfig))
@@ -40,6 +42,9 @@ func Load(path string, profile string) (api.Workload, error) {
 				workload.ApplicationConfig[key] = value
 			}
 		}
+	}
+	if !fixtureSeedDefined {
+		workload.Load.FixtureSeed = workload.Load.Seed
 	}
 	if err := Validate(workload); err != nil {
 		return api.Workload{}, fmt.Errorf("invalid workload: %w", err)
@@ -85,11 +90,14 @@ func Validate(workload api.Workload) error {
 	if strings.TrimSpace(workload.Application) == "" {
 		return fmt.Errorf("application must not be empty")
 	}
-	if workload.Load.Model != "open_loop" {
-		return fmt.Errorf("load.model must be open_loop, got %q", workload.Load.Model)
+	if workload.Load.Model != "open_loop" && workload.Load.Model != "closed_loop" {
+		return fmt.Errorf("load.model must be open_loop or closed_loop, got %q", workload.Load.Model)
 	}
-	if workload.Load.Rate <= 0 {
-		return fmt.Errorf("load.rate must be greater than zero")
+	if workload.Load.Model == "open_loop" && workload.Load.Rate <= 0 {
+		return fmt.Errorf("load.rate must be greater than zero for open_loop workloads")
+	}
+	if workload.Load.Model == "closed_loop" && workload.Load.Rate != 0 {
+		return fmt.Errorf("load.rate must be zero for closed_loop workloads")
 	}
 	if workload.Load.DurationSeconds <= 0 {
 		return fmt.Errorf("load.duration_seconds must be greater than zero")
@@ -161,8 +169,8 @@ func Validate(workload api.Workload) error {
 	if workload.Objective.Name == "" {
 		return fmt.Errorf("objective.name must not be empty")
 	}
-	if workload.Objective.Metric != "latency_ms.p50" && workload.Objective.Metric != "requests_per_second" {
-		return fmt.Errorf("objective.metric must be latency_ms.p50 or requests_per_second")
+	if workload.Objective.Metric != "latency_ms.p50" && workload.Objective.Metric != "operations_per_second" && workload.Objective.Metric != "requests_per_second" {
+		return fmt.Errorf("objective.metric must be latency_ms.p50, operations_per_second, or the legacy requests_per_second alias")
 	}
 	if workload.Objective.Direction != "minimize" && workload.Objective.Direction != "maximize" {
 		return fmt.Errorf("objective.direction must be minimize or maximize")
@@ -176,6 +184,9 @@ func Validate(workload api.Workload) error {
 		if *workload.Constraints.MaxErrorRate < 0 || *workload.Constraints.MaxErrorRate > 1 {
 			return fmt.Errorf("constraints.max_error_rate must be in [0, 1]")
 		}
+	}
+	if workload.Constraints.MinOperationsPerType < 0 {
+		return fmt.Errorf("constraints.min_operations_per_type must not be negative")
 	}
 	return nil
 }

@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"context"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -19,6 +21,7 @@ import (
 	"vibesys/microservice-evaluator/api"
 	"vibesys/microservice-evaluator/apps/declarative"
 	"vibesys/microservice-evaluator/apps/socialnetwork"
+	"vibesys/microservice-evaluator/apps/trainticket"
 	"vibesys/microservice-evaluator/config"
 	"vibesys/microservice-evaluator/drivers/httpdriver"
 	"vibesys/microservice-evaluator/engine"
@@ -44,7 +47,7 @@ func (o *targetOverrides) Set(value string) error {
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "microbench:", err)
+		fmt.Fprintln(os.Stderr, "servicebench:", err)
 		os.Exit(1)
 	}
 }
@@ -64,21 +67,23 @@ func run() error {
 	var concurrency int
 	var repetitions int
 	var seed string
+	var fixtureSeed string
 
 	flag.StringVar(&workloadPath, "workload", "", "path to the workload TOML file")
 	flag.StringVar(&profile, "profile", "", "optional named workload profile")
 	flag.StringVar(&outputJSON, "output-json", "", "optional structured result path")
-	flag.StringVar(&outputRaw, "output-raw", "", "optional per-request NDJSON path")
+	flag.StringVar(&outputRaw, "output-raw", "", "optional per-operation NDJSON path")
 	flag.StringVar(&baseURL, "base-url", "", "override every HTTP target address")
 	flag.BoolVar(&skipPrepare, "skip-prepare", false, "skip application fixture preparation")
 	flag.BoolVar(&validateOnly, "validate-only", false, "validate configuration and registered extensions without connecting")
 	flag.Var(&overrides, "target", "override a target address as NAME=ADDRESS (repeatable)")
-	flag.Float64Var(&rate, "rate", 0, "override target requests per second")
+	flag.Float64Var(&rate, "rate", 0, "override open-loop target logical operations per second")
 	flag.Float64Var(&duration, "duration", 0, "override measured duration in seconds")
 	flag.Float64Var(&warmup, "warmup", -1, "override warmup duration in seconds")
-	flag.IntVar(&concurrency, "concurrency", 0, "override maximum in-flight requests")
+	flag.IntVar(&concurrency, "concurrency", 0, "override maximum in-flight logical operations")
 	flag.IntVar(&repetitions, "repetitions", 0, "override independent trial count")
-	flag.StringVar(&seed, "seed", "", "override deterministic random seed")
+	flag.StringVar(&seed, "seed", "", "override deterministic random seed, or use 'random'")
+	flag.StringVar(&fixtureSeed, "fixture-seed", "", "override the fixture namespace seed, or use 'random'")
 	flag.Parse()
 	if workloadPath == "" {
 		return errors.New("--workload is required")
@@ -104,11 +109,18 @@ func run() error {
 		workload.Load.Repetitions = repetitions
 	}
 	if seed != "" {
-		parsed, parseErr := strconv.ParseInt(seed, 10, 64)
+		parsed, parseErr := parseSeed(seed, "--seed")
 		if parseErr != nil {
-			return fmt.Errorf("invalid --seed: %w", parseErr)
+			return parseErr
 		}
 		workload.Load.Seed = parsed
+	}
+	if fixtureSeed != "" {
+		parsed, parseErr := parseSeed(fixtureSeed, "--fixture-seed")
+		if parseErr != nil {
+			return parseErr
+		}
+		workload.Load.FixtureSeed = parsed
 	}
 	for index := range workload.Targets {
 		if baseURL != "" && workload.Targets[index].Protocol == "http" {
@@ -141,6 +153,9 @@ func run() error {
 	if err := registry.RegisterApplication("social-network", socialnetwork.New); err != nil {
 		return err
 	}
+	if err := registry.RegisterApplication("train-ticket", trainticket.New); err != nil {
+		return err
+	}
 	if _, err := registry.Application(workload); err != nil {
 		return err
 	}
@@ -152,7 +167,7 @@ func run() error {
 
 	fmt.Fprintf(
 		os.Stderr,
-		"workload=%s application=%s model=%s rate=%.2f duration=%.2fs warmup=%.2fs concurrency=%d repetitions=%d seed=%d\n",
+		"workload=%s application=%s model=%s rate=%.2f duration=%.2fs warmup=%.2fs concurrency=%d repetitions=%d seed=%d fixture_seed=%d\n",
 		workload.Name,
 		workload.Application,
 		workload.Load.Model,
@@ -162,6 +177,7 @@ func run() error {
 		workload.Load.Concurrency,
 		workload.Load.Repetitions,
 		workload.Load.Seed,
+		workload.Load.FixtureSeed,
 	)
 	for _, target := range workload.Targets {
 		fmt.Fprintf(os.Stderr, "target=%s protocol=%s address=%s session_policy=%s\n", target.Name, target.Protocol, target.Address, target.SessionPolicy)
@@ -203,6 +219,21 @@ func run() error {
 	return nil
 }
 
+func parseSeed(value, flagName string) (int64, error) {
+	if value == "random" {
+		var raw [8]byte
+		if _, err := cryptorand.Read(raw[:]); err != nil {
+			return 0, fmt.Errorf("generate random %s: %w", flagName, err)
+		}
+		return int64(binary.LittleEndian.Uint64(raw[:]) & uint64(^uint64(0)>>1)), nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s: %w", flagName, err)
+	}
+	return parsed, nil
+}
+
 func writeNDJSON(path string, observations []api.Observation) error {
 	file, err := os.Create(path)
 	if err != nil {
@@ -228,7 +259,7 @@ func writeNDJSON(path string, observations []api.Observation) error {
 
 func writeAtomic(path string, data []byte) error {
 	directory := filepath.Dir(path)
-	temporary, err := os.CreateTemp(directory, ".microbench-result-*")
+	temporary, err := os.CreateTemp(directory, ".servicebench-result-*")
 	if err != nil {
 		return fmt.Errorf("create temporary result in %s: %w", directory, err)
 	}

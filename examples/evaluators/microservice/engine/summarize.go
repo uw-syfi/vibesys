@@ -16,7 +16,7 @@ func summarizeTrial(
 	result := TrialResult{
 		Index:            index,
 		Valid:            true,
-		TotalRequests:    len(observations),
+		TotalOperations:  len(observations),
 		ByOperation:      make(map[string]OperationResult),
 		ErrorsByCategory: make(map[string]int),
 		Generator:        generator,
@@ -29,11 +29,16 @@ func summarizeTrial(
 	byOperation := make(map[string][]api.Observation)
 	var earliest, latest int64
 	for observationIndex, observation := range observations {
+		result.HTTPInvocations += observation.InvocationCount
 		if observationIndex == 0 || observation.ScheduledAt.UnixNano() < earliest {
 			earliest = observation.ScheduledAt.UnixNano()
 		}
-		if observation.CompletedAt.UnixNano() > latest {
-			latest = observation.CompletedAt.UnixNano()
+		finishedAt := observation.ValidatedAt
+		if finishedAt.IsZero() {
+			finishedAt = observation.CompletedAt
+		}
+		if finishedAt.UnixNano() > latest {
+			latest = finishedAt.UnixNano()
 		}
 		byOperation[observation.Operation] = append(byOperation[observation.Operation], observation)
 		queueWaits = append(queueWaits, observation.QueueWaitMS)
@@ -42,13 +47,13 @@ func summarizeTrial(
 			customTimings[name] = append(customTimings[name], value)
 		}
 		if observation.ApplicationSuccess {
-			result.SuccessfulRequests++
+			result.SuccessfulOperations++
 			totalLatencies = append(totalLatencies, observation.TotalLatencyMS)
 			if hasAllTags(observation.Tags, workload.Objective.Tags) {
 				objectiveLatencies = append(objectiveLatencies, observation.TotalLatencyMS)
 			}
 		} else {
-			result.FailedRequests++
+			result.FailedOperations++
 			category := observation.ErrorCategory
 			if category == "" {
 				category = "unknown"
@@ -60,8 +65,8 @@ func summarizeTrial(
 		result.ElapsedSeconds = float64(latest-earliest) / 1e9
 	}
 	if len(observations) > 0 {
-		result.SuccessRate = float64(result.SuccessfulRequests) / float64(len(observations))
-		result.ErrorRate = float64(result.FailedRequests) / float64(len(observations))
+		result.SuccessRate = float64(result.SuccessfulOperations) / float64(len(observations))
+		result.ErrorRate = float64(result.FailedOperations) / float64(len(observations))
 	}
 	result.LatencyMS = distribution(totalLatencies)
 	result.QueueWaitMS = distribution(queueWaits)
@@ -85,16 +90,16 @@ func summarizeTrial(
 			sort.Float64s(objectiveLatencies)
 			result.PrimaryValue = pointer(percentile(objectiveLatencies, 50))
 		}
-	case "requests_per_second":
+	case "operations_per_second", "requests_per_second":
 		if result.ElapsedSeconds <= 0 {
 			result.InvalidReasons = append(result.InvalidReasons, "measurement elapsed time is zero")
 		} else {
-			result.PrimaryValue = pointer(float64(result.SuccessfulRequests) / result.ElapsedSeconds)
+			result.PrimaryValue = pointer(float64(result.SuccessfulOperations) / result.ElapsedSeconds)
 		}
 	}
 	if !generator.Sustained {
 		result.InvalidReasons = append(result.InvalidReasons, fmt.Sprintf(
-			"offered rate %.2f is below required %.2f requests/s",
+			"offered rate %.2f is below required %.2f operations/s",
 			generator.OfferedRate,
 			generator.MinOfferedRate,
 		))
@@ -113,6 +118,18 @@ func summarizeTrial(
 			*maximum,
 		))
 	}
+	if minimum := workload.Constraints.MinOperationsPerType; minimum > 0 {
+		for _, operation := range workload.Operations {
+			if count := len(byOperation[operation.Name]); count < minimum {
+				result.InvalidReasons = append(result.InvalidReasons, fmt.Sprintf(
+					"operation %q has %d samples, below required %d",
+					operation.Name,
+					count,
+					minimum,
+				))
+			}
+		}
+	}
 	result.Valid = len(result.InvalidReasons) == 0
 	if !result.Valid {
 		result.PrimaryValue = nil
@@ -121,10 +138,11 @@ func summarizeTrial(
 }
 
 func summarizeOperation(observations []api.Observation) OperationResult {
-	result := OperationResult{Requests: len(observations)}
+	result := OperationResult{Operations: len(observations)}
 	var latencies, waits, protocolTimes []float64
 	customTimings := make(map[string][]float64)
 	for _, observation := range observations {
+		result.HTTPInvocations += observation.InvocationCount
 		waits = append(waits, observation.QueueWaitMS)
 		protocolTimes = append(protocolTimes, observation.ProtocolTimeMS)
 		for name, value := range observation.CustomTimingsMS {

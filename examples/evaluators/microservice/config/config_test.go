@@ -69,7 +69,8 @@ func TestLoadRejectsUnknownField(t *testing.T) {
 func TestLoadAppliesNamedProfile(t *testing.T) {
 	contents := validWorkload + `
 [profiles.quick]
-rate = 3
+model = "closed_loop"
+rate = 0
 duration_seconds = 0.2
 [profiles.quick.application_config]
 users = 20
@@ -78,10 +79,42 @@ users = 20
 	if err != nil {
 		t.Fatal(err)
 	}
-	if workload.Load.Rate != 3 || workload.Load.DurationSeconds != 0.2 {
+	if workload.Load.Model != "closed_loop" || workload.Load.Rate != 0 || workload.Load.DurationSeconds != 0.2 {
 		t.Fatalf("profile not applied: %+v", workload.Load)
 	}
 	if users := workload.ApplicationConfig["users"]; users != int64(20) {
 		t.Fatalf("profile application_config users = %#v, want 20", users)
+	}
+}
+
+func TestLoadPreservesIndependentFixtureSeed(t *testing.T) {
+	contents := strings.Replace(
+		validWorkload,
+		"duration_seconds = 1",
+		"duration_seconds = 1\nseed = 42\nfixture_seed = 99",
+		1,
+	)
+	workload, err := Load(writeWorkload(t, contents), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workload.Load.Seed != 42 || workload.Load.FixtureSeed != 99 {
+		t.Fatalf("load and fixture seeds were coupled: %+v", workload.Load)
+	}
+}
+
+func TestLoadPreservesExplicitZeroFixtureSeed(t *testing.T) {
+	contents := strings.Replace(
+		validWorkload,
+		"duration_seconds = 1",
+		"duration_seconds = 1\nseed = 42\nfixture_seed = 0",
+		1,
+	)
+	workload, err := Load(writeWorkload(t, contents), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workload.Load.Seed != 42 || workload.Load.FixtureSeed != 0 {
+		t.Fatalf("explicit zero fixture seed was rewritten: %+v", workload.Load)
 	}
 }

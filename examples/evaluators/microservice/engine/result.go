@@ -2,7 +2,7 @@ package engine
 
 import "vibesys/microservice-evaluator/api"
 
-const ResultSchemaVersion = 1
+const ResultSchemaVersion = 3
 
 type Distribution struct {
 	Count int      `json:"count"`
@@ -16,7 +16,8 @@ type Distribution struct {
 }
 
 type OperationResult struct {
-	Requests        int                     `json:"requests"`
+	Operations      int                     `json:"operations"`
+	HTTPInvocations int                     `json:"http_invocations"`
 	Successes       int                     `json:"successes"`
 	Failures        int                     `json:"failures"`
 	LatencyMS       Distribution            `json:"latency_ms"`
@@ -26,33 +27,34 @@ type OperationResult struct {
 }
 
 type GeneratorReport struct {
-	TargetRate        float64      `json:"target_rate"`
-	OfferedRate       float64      `json:"offered_rate"`
-	MinOfferedRate    float64      `json:"min_offered_rate"`
-	SubmittedRequests int          `json:"submitted_requests"`
-	MaxQueueDepth     int          `json:"max_queue_depth"`
-	SchedulerLagMS    Distribution `json:"scheduler_lag_ms"`
-	Sustained         bool         `json:"sustained"`
+	TargetRate          float64      `json:"target_operations_per_second"`
+	OfferedRate         float64      `json:"offered_operations_per_second"`
+	MinOfferedRate      float64      `json:"min_offered_operations_per_second"`
+	SubmittedOperations int          `json:"submitted_operations"`
+	MaxQueueDepth       int          `json:"max_queue_depth"`
+	SchedulerLagMS      Distribution `json:"scheduler_lag_ms"`
+	Sustained           bool         `json:"sustained"`
 }
 
 type TrialResult struct {
-	Index              int                        `json:"index"`
-	Valid              bool                       `json:"valid"`
-	InvalidReasons     []string                   `json:"invalid_reasons,omitempty"`
-	PrimaryValue       *float64                   `json:"primary_value,omitempty"`
-	ElapsedSeconds     float64                    `json:"elapsed_seconds"`
-	TotalRequests      int                        `json:"total_requests"`
-	SuccessfulRequests int                        `json:"successful_requests"`
-	FailedRequests     int                        `json:"failed_requests"`
-	SuccessRate        float64                    `json:"success_rate"`
-	ErrorRate          float64                    `json:"error_rate"`
-	LatencyMS          Distribution               `json:"latency_ms"`
-	QueueWaitMS        Distribution               `json:"queue_wait_ms"`
-	ProtocolTimeMS     Distribution               `json:"protocol_time_ms"`
-	CustomTimingsMS    map[string]Distribution    `json:"custom_timings_ms,omitempty"`
-	ByOperation        map[string]OperationResult `json:"by_operation"`
-	ErrorsByCategory   map[string]int             `json:"errors_by_category,omitempty"`
-	Generator          GeneratorReport            `json:"load_generator"`
+	Index                int                        `json:"index"`
+	Valid                bool                       `json:"valid"`
+	InvalidReasons       []string                   `json:"invalid_reasons,omitempty"`
+	PrimaryValue         *float64                   `json:"primary_value,omitempty"`
+	ElapsedSeconds       float64                    `json:"elapsed_seconds"`
+	TotalOperations      int                        `json:"total_operations"`
+	SuccessfulOperations int                        `json:"successful_operations"`
+	FailedOperations     int                        `json:"failed_operations"`
+	HTTPInvocations      int                        `json:"http_invocations"`
+	SuccessRate          float64                    `json:"success_rate"`
+	ErrorRate            float64                    `json:"error_rate"`
+	LatencyMS            Distribution               `json:"latency_ms"`
+	QueueWaitMS          Distribution               `json:"queue_wait_ms"`
+	ProtocolTimeMS       Distribution               `json:"protocol_time_ms"`
+	CustomTimingsMS      map[string]Distribution    `json:"custom_timings_ms,omitempty"`
+	ByOperation          map[string]OperationResult `json:"by_operation"`
+	ErrorsByCategory     map[string]int             `json:"errors_by_category,omitempty"`
+	Generator            GeneratorReport            `json:"load_generator"`
 }
 
 type Aggregate struct {
@@ -64,10 +66,11 @@ type Aggregate struct {
 }
 
 type ConstraintResult struct {
-	Passed         bool     `json:"passed"`
-	Reasons        []string `json:"reasons,omitempty"`
-	MinSuccessRate *float64 `json:"min_success_rate,omitempty"`
-	MaxErrorRate   *float64 `json:"max_error_rate,omitempty"`
+	Passed               bool     `json:"passed"`
+	Reasons              []string `json:"reasons,omitempty"`
+	MinSuccessRate       *float64 `json:"min_success_rate,omitempty"`
+	MaxErrorRate         *float64 `json:"max_error_rate,omitempty"`
+	MinOperationsPerType int      `json:"min_operations_per_type,omitempty"`
 }
 
 type Summary struct {
@@ -75,6 +78,8 @@ type Summary struct {
 	EngineVersion string           `json:"engine_version"`
 	WorkloadName  string           `json:"workload_name"`
 	WorkloadHash  string           `json:"workload_hash"`
+	Seed          string           `json:"seed"`
+	FixtureSeed   string           `json:"fixture_seed"`
 	PrimaryValue  *float64         `json:"primary_value,omitempty"`
 	PrimaryMetric api.Objective    `json:"primary_metric"`
 	Valid         bool             `json:"valid"`
