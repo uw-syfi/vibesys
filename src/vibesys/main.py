@@ -785,6 +785,15 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         help="Use deterministic local agent responses for fast TUI smoke tests.",
     )
     parser.add_argument("--start-round", type=int, default=None, metavar="N")
+    parser.add_argument(
+        "--trusted-input-baseline",
+        default=None,
+        metavar="REV",
+        help=(
+            "operator-authorized commit containing refreshed evaluator-owned inputs "
+            "for a resumed run; later trusted-input changes still fail closed"
+        ),
+    )
     parser.add_argument("--modality", default=None, choices=_MODALITIES)
     parser.add_argument(
         "--interface",
@@ -836,6 +845,12 @@ def _validate_agent(args: argparse.Namespace) -> None:
         )
     if args.max_retries_per_round < 1:
         _configuration_error("Error: --max-retries-per-round must be >= 1.")
+    if args.trusted_input_baseline is not None and args.resume is None:
+        _configuration_error(
+            "Error: --trusted-input-baseline requires --resume.",
+            code="invalid_arguments",
+            stage="argument_parsing",
+        )
     _validate_target_inputs(args)
 
 
@@ -895,6 +910,7 @@ def _run_agent(args: argparse.Namespace) -> None:
         max_retries_per_round=args.max_retries_per_round,
         start_round=start_round,
         existing=existing,
+        trusted_input_baseline=args.trusted_input_baseline,
         debug=args.debug,
         profiler_kind=args.profiler,
         skills_dirs=skills,

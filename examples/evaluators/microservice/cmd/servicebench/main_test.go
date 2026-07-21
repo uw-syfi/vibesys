@@ -2,6 +2,26 @@ package main
 
 import "testing"
 
+func TestParseCommandJSONRejectsMalformedAndEmptyArguments(t *testing.T) {
+	for _, raw := range []string{
+		`"./run.sh"`,
+		`[]`,
+		`["./run.sh",""]`,
+		`["./run.sh",1]`,
+	} {
+		if _, err := parseCommandJSON(raw); err == nil {
+			t.Fatalf("accepted invalid command %s", raw)
+		}
+	}
+	command, err := parseCommandJSON(`["./run.sh","--port","8080"]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(command) != 3 || command[0] != "./run.sh" {
+		t.Fatalf("command=%v", command)
+	}
+}
+
 func TestParseSeed(t *testing.T) {
 	if seed, err := parseSeed("42", "--fixture-seed"); err != nil || seed != 42 {
 		t.Fatalf("parseSeed() = %d, %v", seed, err)
@@ -12,5 +32,79 @@ func TestParseSeed(t *testing.T) {
 	first, err := parseSeed("random", "--fixture-seed")
 	if err != nil || first < 0 {
 		t.Fatalf("random seed = %d, %v", first, err)
+	}
+}
+
+func TestValidateModeFlagsRejectsIgnoredOrMalformedCombinations(t *testing.T) {
+	validAccuracy := modeFlagConfig{
+		mode: "accuracy", casesMin: 2, casesMax: 5, startupTimeout: 15,
+		stateEnv: "VIBESYS_STATE_DIR",
+	}
+	validBenchmark := modeFlagConfig{mode: "benchmark", startupTimeout: 15}
+	tests := []struct {
+		name   string
+		config modeFlagConfig
+	}{
+		{
+			name: "accuracy output raw",
+			config: modeFlagConfig{
+				mode: "accuracy", explicit: map[string]bool{"output-raw": true},
+				outputRaw: "raw.ndjson", casesMin: 2, casesMax: 5, startupTimeout: 15,
+				stateEnv: "VIBESYS_STATE_DIR",
+			},
+		},
+		{
+			name: "accuracy malformed command",
+			config: modeFlagConfig{
+				mode: "accuracy", runCommandJSON: `"./run.sh"`,
+				casesMin: 2, casesMax: 5, startupTimeout: 15, stateEnv: "VIBESYS_STATE_DIR",
+			},
+		},
+		{
+			name: "accuracy state without command",
+			config: modeFlagConfig{
+				mode: "accuracy", stateDir: "/tmp/state",
+				casesMin: 2, casesMax: 5, startupTimeout: 15, stateEnv: "VIBESYS_STATE_DIR",
+			},
+		},
+		{
+			name: "benchmark accuracy flag",
+			config: modeFlagConfig{
+				mode: "benchmark", explicit: map[string]bool{"cases-min": true}, startupTimeout: 15,
+			},
+		},
+		{
+			name: "accuracy benchmark flag",
+			config: modeFlagConfig{
+				mode: "accuracy", explicit: map[string]bool{"skip-prepare": true},
+				casesMin: 2, casesMax: 5, startupTimeout: 15, stateEnv: "VIBESYS_STATE_DIR",
+			},
+		},
+		{
+			name: "invalid case bounds",
+			config: modeFlagConfig{
+				mode: "accuracy", casesMin: 5, casesMax: 2, startupTimeout: 15,
+				stateEnv: "VIBESYS_STATE_DIR",
+			},
+		},
+		{
+			name: "invalid startup timeout",
+			config: modeFlagConfig{
+				mode: "benchmark", startupTimeout: 0,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateModeFlags(test.config); err == nil {
+				t.Fatal("invalid flag combination was accepted")
+			}
+		})
+	}
+	if err := validateModeFlags(validAccuracy); err != nil {
+		t.Fatalf("valid accuracy flags: %v", err)
+	}
+	if err := validateModeFlags(validBenchmark); err != nil {
+		t.Fatalf("valid benchmark flags: %v", err)
 	}
 }

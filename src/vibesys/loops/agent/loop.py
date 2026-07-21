@@ -742,7 +742,14 @@ def _run_framework_benchmark(
         else:
             try:
                 payload = json.loads(encoded.strip())
-                values = _metric_values(payload, result_spec.metric)
+                # A result object owns its top-level metric. Rich benchmark
+                # reports may repeat that name in per-trial diagnostics, which
+                # must not make the declared aggregate ambiguous. Preserve the
+                # recursive lookup for legacy list-shaped result payloads.
+                if isinstance(payload, dict) and result_spec.metric in payload:
+                    values = [payload[result_spec.metric]]
+                else:
+                    values = _metric_values(payload, result_spec.metric)
                 if len(values) != 1:
                     raise ValueError(
                         f"expected exactly one {result_spec.metric!r} field, found {len(values)}"
@@ -844,6 +851,7 @@ def run_agent_loop(
     max_retries_per_round: int = 3,
     start_round: int = 1,
     existing: bool = False,
+    trusted_input_baseline: str | None = None,
     debug: bool = False,
     profiler_kind: ProfilerKind = ProfilerKind.AUTO,
     skills_dirs: list[str] | None = None,
@@ -910,6 +918,7 @@ def run_agent_loop(
         workspace_seed=workspace_seed,
         evaluator_path=evaluator_path,
         existing=existing,
+        trusted_input_baseline=trusted_input_baseline,
         debug=debug,
         profiler_kind=profiler_kind,
         profiler_domain=domain_definition.name,

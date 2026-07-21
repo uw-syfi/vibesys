@@ -310,7 +310,10 @@ standard wrapper filenames. VibeSys copies the input bundle into the
 experiment workspace and tells agents to run the manifest commands. The
 optional `benchmark.result` block opts a single-metric benchmark into trusted
 framework scoring: VibeSys appends `json_argument`, reads the resulting JSON,
-and requires exactly one numeric field named by `metric`. Omit it for
+and requires a finite numeric field named by `metric`. For a JSON object, that
+field must be at the top level and is authoritative even when per-trial
+diagnostics repeat the same name. Legacy list-shaped results remain supported
+when they contain exactly one field with that name. Omit the result block for
 multi-profile or multi-objective benchmarks whose result cannot be represented
 by one scalar. Named profiles and benchmark parameter schemas are not part of
 manifest version 1.
@@ -328,6 +331,20 @@ resolve inside `examples/evaluators/`. On a fresh run, VibeSys copies it to
 integrity checks reject accuracy and benchmark gates after it is modified.
 Resumed runs keep the evaluator snapshot from the original run instead of
 refreshing it from repository source.
+
+To intentionally upgrade evaluator-owned inputs in an existing experiment,
+commit the authorized refresh before resuming and pass that immutable revision:
+
+```bash
+./vs --outer-loop agent \
+  --resume /path/to/experiment \
+  --trusted-input-baseline <refresh-commit>
+```
+
+The revision must be an ancestor of the current experiment `HEAD`. The guard
+continues to reject pending trusted-input edits and every trusted-input change
+committed after that baseline. Omitting the flag retains the original initial
+workspace baseline, so ordinary resumes cannot silently bless agent tampering.
 
 ## Common Commands
 

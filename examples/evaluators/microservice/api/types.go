@@ -185,6 +185,8 @@ type ProtocolResult struct {
 	Payload          any
 	ErrorCategory    string
 	ErrorMessage     string
+	ConnectionKnown  bool
+	ConnectionReused bool
 }
 
 type ValidationResult struct {
@@ -221,6 +223,67 @@ type Application interface {
 	BuildOperation(Operation, Sample, any) (OperationPlan, error)
 	ValidateOperation(Operation, OperationPlan, []ProtocolResult) ValidationResult
 	FinishOperation(OperationPlan)
+}
+
+// AccuracyProperty declares one independently reported correctness property.
+// Required properties must be explicitly passed before an accuracy run can be
+// valid. Optional properties remain false when their prerequisite (for
+// example, a candidate lifecycle hook) is unavailable.
+type AccuracyProperty struct {
+	Name     string
+	Required bool
+}
+
+// ReadinessProbe is an application-owned request that the shared accuracy
+// runner uses to prove that every required endpoint is ready, and that none of
+// them remains reachable before a managed candidate is restarted.
+type ReadinessProbe struct {
+	Name       string
+	Invocation Invocation
+	Validate   func(ProtocolResult) error
+}
+
+// PreflightApplication exposes mode-neutral traffic that must run before an
+// application is evaluated. Benchmark and accuracy adapters for the same
+// application should return the same readiness and protocol probes so the
+// evaluator mode is not disclosed by an avoidable fixed preamble.
+type PreflightApplication interface {
+	ReadinessProbes() []ReadinessProbe
+	PreflightProbes() []ReadinessProbe
+}
+
+// AccuracyCasePolicy is an application-owned lower bound that command-line
+// case flags cannot weaken. RandomExtraCases ensures that an evaluator does
+// not always expose one fixed fixture cardinality.
+type AccuracyCasePolicy struct {
+	MinimumCases     int
+	RandomExtraCases int
+}
+
+type AccuracyContext struct {
+	Seed           int64
+	Cases          int
+	CleanupTimeout time.Duration
+	Restart        func(context.Context) error
+}
+
+type AccuracyRecorder interface {
+	AddChecks(int)
+	Pass(...string) error
+}
+
+// AccuracyApplication owns application-specific fixtures, scenarios, and
+// semantic assertions. Transport sessions, readiness polling, lifecycle
+// transitions, result reporting, and required-property enforcement remain in
+// the shared accuracy framework.
+type AccuracyApplication interface {
+	Name() string
+	Properties() []AccuracyProperty
+	ReadinessProbes() []ReadinessProbe
+	PreflightProbes() []ReadinessProbe
+	PreflightProperties() []string
+	CasePolicy() AccuracyCasePolicy
+	Check(context.Context, Runtime, AccuracyContext, AccuracyRecorder) error
 }
 
 type Observation struct {

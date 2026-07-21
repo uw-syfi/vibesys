@@ -9,6 +9,7 @@ import (
 
 	"vibesys/microservice-evaluator/api"
 	"vibesys/microservice-evaluator/registry"
+	"vibesys/microservice-evaluator/transport"
 )
 
 type fakeDriver struct {
@@ -275,10 +276,17 @@ func (a *multiStepApplication) FinishOperation(api.OperationPlan) { a.finished++
 
 func TestExecuteRequestAccountsForEveryInvocationInLogicalOperation(t *testing.T) {
 	application := &multiStepApplication{}
-	runtime := &runtime{
-		clients:   map[string]api.Client{"service": fakeClient{delay: time.Millisecond}},
-		protocols: map[string]string{"service": "fake-rpc"},
+	registered := registry.New()
+	if err := registered.RegisterDriver(fakeDriver{delay: time.Millisecond}); err != nil {
+		t.Fatal(err)
 	}
+	runtime, err := transport.Open(context.Background(), registered, []api.Target{{
+		Name: "service", Protocol: "fake-rpc", Address: "fake://service",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
 	observation := executeRequest(
 		context.Background(), api.PhaseMeasurement, 0,
 		api.Load{TimeoutSeconds: 1},

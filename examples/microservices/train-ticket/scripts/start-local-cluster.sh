@@ -374,8 +374,11 @@ case "${cmd}" in
     echo "  TT_NAMESPACE=${TT_BUILD_REPO} TT_TAG=${TT_BUILD_TAG} TT_GATEWAY_TAG=${TT_BUILD_TAG} TT_SKIP_PULL=1 $0 start"
     ;;
   check)
-    python3 "${INPUT_DIR}/accuracy_checker/checker.py" \
-      --base-url "http://localhost:${TT_GATEWAY_PORT}" \
+    command -v go >/dev/null || { echo "go is required" >&2; exit 127; }
+    go -C "${REPO_ROOT}/examples/evaluators/microservice" run ./cmd/servicebench \
+      --mode accuracy \
+      --workload "${INPUT_DIR}/benchmark/workload.toml" \
+      --seed random \
       --target "config=http://localhost:15679" \
       --target "station=http://localhost:12345" \
       --target "train=http://localhost:14567" \

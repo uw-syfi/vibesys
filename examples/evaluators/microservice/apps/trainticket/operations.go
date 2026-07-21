@@ -6,9 +6,9 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"vibesys/microservice-evaluator/api"
+	trainticketsupport "vibesys/microservice-evaluator/appsupport/trainticket"
 )
 
 type expectationKind int
@@ -66,14 +66,9 @@ func (a *Application) FinishOperation(plan api.OperationPlan) {
 }
 
 func (a *Application) buildList(operation api.Operation, service string, item *record) api.OperationPlan {
-	paths := map[string]string{
-		"config": "/api/v1/configservice/configs", "station": "/api/v1/stationservice/stations",
-		"train": "/api/v1/trainservice/trains", "travel": "/api/v1/travelservice/trips",
-		"route": "/api/v1/routeservice/routes", "price": "/api/v1/priceservice/prices",
-	}
 	item.mu.RLock()
 	return api.OperationPlan{
-		Invocations: []api.Invocation{a.invocation(service, operation.Name, http.MethodGet, paths[service], nil)},
+		Invocations: []api.Invocation{a.invocation(service, operation.Name, http.MethodGet, trainticketsupport.MustCollectionPath(service), nil)},
 		State: &operationState{release: item.mu.RUnlock, expectations: []stepExpectation{{
 			status: http.StatusOK, appStatus: 1, kind: expectEntityList,
 			service: service, expected: listExpectedValue(service, item),
@@ -130,7 +125,7 @@ func (a *Application) buildUpdateRead(operation api.Operation, service string, i
 	case "station":
 		invocations = append(invocations, a.invocation(
 			service, operation.Name, http.MethodGet,
-			"/api/v1/stationservice/stations/id/"+url.PathEscape(retiredStationName), nil,
+			servicePath("station", "/stations/id/"+url.PathEscape(retiredStationName)), nil,
 		))
 		expectations = append(expectations, stepExpectation{
 			status: http.StatusOK, appStatus: 0, kind: expectEnvelope, service: service,
@@ -138,7 +133,7 @@ func (a *Application) buildUpdateRead(operation api.Operation, service string, i
 	case "route":
 		invocations = append(invocations, a.invocation(
 			service, operation.Name, http.MethodGet,
-			"/api/v1/routeservice/routes/"+retiredRouteStart+"/"+retiredRouteTerminal, nil,
+			servicePath("route", "/routes/"+retiredRouteStart+"/"+retiredRouteTerminal), nil,
 		))
 		expectations = append(expectations, stepExpectation{
 			status: http.StatusOK, appStatus: 0, kind: expectEnvelope, service: service,
@@ -146,7 +141,7 @@ func (a *Application) buildUpdateRead(operation api.Operation, service string, i
 	case "price":
 		invocations = append(invocations, a.invocation(
 			service, operation.Name, http.MethodGet,
-			"/api/v1/priceservice/prices/"+retiredPriceRoute+"/"+retiredPriceTrain, nil,
+			servicePath("price", "/prices/"+retiredPriceRoute+"/"+retiredPriceTrain), nil,
 		))
 		expectations = append(expectations, stepExpectation{
 			status: http.StatusOK, appStatus: 0, kind: expectEnvelope, service: service,
@@ -165,14 +160,14 @@ func (a *Application) buildUpdateRead(operation api.Operation, service string, i
 func (a *Application) buildEphemeral(operation api.Operation, sample api.Sample, data *dataset) (api.OperationPlan, error) {
 	token := fmt.Sprintf("%s%016x%016x", data.namespace, uint64(sample.Counter), sample.Random)
 	item := configEntity{Name: token, Value: strconv.FormatUint(sample.Random, 10), Description: fmt.Sprintf("d-%016x", sample.Random^0xa5a5a5a5a5a5a5a5)}
-	path := "/api/v1/configservice/configs/" + url.PathEscape(item.Name)
+	path := servicePath("config", "/configs/"+url.PathEscape(item.Name))
 	return api.OperationPlan{
 		Invocations: []api.Invocation{
-			a.invocation("config", operation.Name, http.MethodPost, "/api/v1/configservice/configs", item),
+			a.invocation("config", operation.Name, http.MethodPost, trainticketsupport.MustCollectionPath("config"), item),
 			a.invocation("config", operation.Name, http.MethodGet, path, nil),
 			a.invocation("config", operation.Name, http.MethodDelete, path, nil),
 			a.invocation("config", operation.Name, http.MethodGet, path, nil),
-			a.invocation("config", operation.Name, http.MethodGet, "/api/v1/configservice/configs", nil),
+			a.invocation("config", operation.Name, http.MethodGet, trainticketsupport.MustCollectionPath("config"), nil),
 		},
 		State: &operationState{expectations: []stepExpectation{
 			{status: http.StatusCreated, appStatus: 1, kind: expectEnvelope, service: "config"},
@@ -187,17 +182,17 @@ func (a *Application) buildEphemeral(operation api.Operation, sample api.Sample,
 func readPathAndValue(service string, item *record) (string, any) {
 	switch service {
 	case "config":
-		return "/api/v1/configservice/configs/" + url.PathEscape(item.config.Name), item.config
+		return servicePath("config", "/configs/"+url.PathEscape(item.config.Name)), item.config
 	case "station":
-		return "/api/v1/stationservice/stations/name/" + item.stationA.ID, item.stationA.Name
+		return servicePath("station", "/stations/name/"+item.stationA.ID), item.stationA.Name
 	case "train":
-		return "/api/v1/trainservice/trains/" + item.train.ID, item.train
+		return servicePath("train", "/trains/"+item.train.ID), item.train
 	case "route":
-		return "/api/v1/routeservice/routes/" + item.route.ID, item.route
+		return servicePath("route", "/routes/"+item.route.ID), item.route
 	case "price":
-		return "/api/v1/priceservice/prices/" + item.price.RouteID + "/" + item.price.TrainType, item.price
+		return servicePath("price", "/prices/"+item.price.RouteID+"/"+item.price.TrainType), item.price
 	default:
-		return "/api/v1/travelservice/trips/" + item.tripIn.TripID, item.trip
+		return servicePath("travel", "/trips/"+item.tripIn.TripID), item.trip
 	}
 }
 
@@ -207,23 +202,22 @@ func updatedEntity(service string, item, alternate *record, version uint64) (met
 		updated := item.config
 		updated.Value = fmt.Sprintf("v-%016x", version)
 		updated.Description = fmt.Sprintf("d-%016x", version^0xa5a5a5a5a5a5a5a5)
-		return http.MethodPut, "/api/v1/configservice/configs", updated,
-			"/api/v1/configservice/configs/" + url.PathEscape(updated.Name), updated,
+		return http.MethodPut, trainticketsupport.MustCollectionPath("config"), updated,
+			servicePath("config", "/configs/"+url.PathEscape(updated.Name)), updated,
 			func() { item.config = updated }
 	case "station":
 		updated := item.stationA
-		namePrefixes := []string{"Renamed ", "Transfer Hub ", "换乘站 "}
-		updated.Name = fmt.Sprintf("%s%016x", namePrefixes[version%uint64(len(namePrefixes))], version)
-		updated.StayTime = 1 + int(version%120)
-		return http.MethodPut, "/api/v1/stationservice/stations", updated,
-			"/api/v1/stationservice/stations/name/" + updated.ID, updated.Name,
+		updated.Name = trainticketsupport.UpdatedStationName(version, false)
+		updated.StayTime = trainticketsupport.UpdatedStationStayTime(version)
+		return http.MethodPut, trainticketsupport.MustCollectionPath("station"), updated,
+			servicePath("station", "/stations/name/"+updated.ID), updated.Name,
 			func() { item.stationA = updated }
 	case "train":
 		updated := item.train
-		updated.AverageSpeed = 80 + int(version%420)
-		updated.EconomyClass = 100 + int((version>>8)%900)
-		return http.MethodPut, "/api/v1/trainservice/trains", updated,
-			"/api/v1/trainservice/trains/" + updated.ID, updated,
+		updated.AverageSpeed = trainticketsupport.UpdatedTrainSpeed(version)
+		updated.EconomyClass = trainticketsupport.UpdatedTrainEconomy(updated.EconomyClass)
+		return http.MethodPut, trainticketsupport.MustCollectionPath("train"), updated,
+			servicePath("train", "/trains/"+updated.ID), updated,
 			func() { item.train = updated }
 	case "route":
 		updatedInput := item.routeIn
@@ -243,10 +237,10 @@ func updatedEntity(service string, item, alternate *record, version uint64) (met
 		}
 		updatedInput.StationList = strings.Join(updatedRoute.Stations, ",")
 		updatedRoute.Distances = append([]int(nil), item.route.Distances...)
-		updatedRoute.Distances[1] = 100 + int(version%1800)
+		updatedRoute.Distances[1] = trainticketsupport.UpdatedRouteDistance(updatedRoute.Distances[1], version)
 		updatedInput.DistanceList = fmt.Sprintf("0,%d", updatedRoute.Distances[1])
-		return http.MethodPost, "/api/v1/routeservice/routes", updatedInput,
-			"/api/v1/routeservice/routes/" + updatedRoute.ID, updatedRoute,
+		return http.MethodPost, trainticketsupport.MustCollectionPath("route"), updatedInput,
+			servicePath("route", "/routes/"+updatedRoute.ID), updatedRoute,
 			func() { item.routeIn, item.route = updatedInput, updatedRoute }
 	case "price":
 		updated := item.price
@@ -257,18 +251,17 @@ func updatedEntity(service string, item, alternate *record, version uint64) (met
 			updated.RouteID = alternate.route.ID
 			updated.TrainType = item.train.ID
 		}
-		updated.BasicPriceRate = 0.1 + float64(version%8000)/10000
-		updated.FirstClassPriceRate = 0.9 + float64((version>>8)%10000)/10000
-		return http.MethodPut, "/api/v1/priceservice/prices", updated,
-			"/api/v1/priceservice/prices/" + updated.RouteID + "/" + updated.TrainType, updated,
+		updated.BasicPriceRate, updated.FirstClassPriceRate = trainticketsupport.UpdatedPriceRates(version)
+		return http.MethodPut, trainticketsupport.MustCollectionPath("price"), updated,
+			servicePath("price", "/prices/"+updated.RouteID+"/"+updated.TrainType), updated,
 			func() { item.price = updated }
 	default:
 		updatedInput := item.tripIn
 		updated := item.trip
-		updatedInput.EndTime = updatedInput.StartingTime + int64(time.Minute/time.Millisecond)*int64(60+version%600)
+		updatedInput.EndTime = trainticketsupport.UpdatedTripEnd(updatedInput.EndTime, version)
 		updated.EndTime = updatedInput.EndTime
-		return http.MethodPut, "/api/v1/travelservice/trips", updatedInput,
-			"/api/v1/travelservice/trips/" + updatedInput.TripID, updated,
+		return http.MethodPut, trainticketsupport.MustCollectionPath("travel"), updatedInput,
+			servicePath("travel", "/trips/"+updatedInput.TripID), updated,
 			func() { item.tripIn, item.trip = updatedInput, updated }
 	}
 }

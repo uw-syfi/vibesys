@@ -77,10 +77,14 @@ func TestSessionPolicyControlsConnectionReuse(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			var second api.ProtocolResult
 			for index := 0; index < 2; index++ {
 				result := opened.Invoke(context.Background(), api.Invocation{Payload: api.HTTPRequestSpec{Method: "GET", Path: "/"}})
 				if !result.TransportSuccess {
 					t.Fatalf("request %d failed: %+v", index, result)
+				}
+				if index == 1 {
+					second = result
 				}
 			}
 			_ = opened.Close()
@@ -89,6 +93,9 @@ func TestSessionPolicyControlsConnectionReuse(t *testing.T) {
 			mutex.Unlock()
 			if got != test.wantUnique {
 				t.Fatalf("unique connections = %d, want %d", got, test.wantUnique)
+			}
+			if !second.ConnectionKnown || second.ConnectionReused != (test.policy == "reuse") {
+				t.Fatalf("connection trace = known:%v reused:%v", second.ConnectionKnown, second.ConnectionReused)
 			}
 		})
 	}

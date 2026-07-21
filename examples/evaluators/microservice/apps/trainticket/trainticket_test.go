@@ -179,7 +179,7 @@ func TestFixtureCleanupContinuesAfterDeleteFailure(t *testing.T) {
 	for index := range item.created {
 		item.created[index] = true
 	}
-	runtime := &fixtureRuntime{failDeletePath: "/api/v1/travelservice/trips/" + item.tripIn.TripID}
+	runtime := &fixtureRuntime{failDeletePath: servicePath("travel", "/trips/"+item.tripIn.TripID)}
 
 	if err := application.deleteRecord(context.Background(), runtime, item); err == nil {
 		t.Fatal("injected fixture delete failure unexpectedly passed")

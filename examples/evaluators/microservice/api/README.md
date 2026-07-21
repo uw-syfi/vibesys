@@ -11,6 +11,10 @@ The main contracts are:
 - `Driver` and `Client`, which isolate protocol sessions and invocations;
 - `Application`, which owns fixture lifecycle, request construction, and
   semantic response validation;
+- `AccuracyApplication`, which owns an independent exhaustive application
+  oracle while the shared runner enforces readiness and required properties;
+- `PreflightApplication`, which exposes mode-neutral readiness and protocol
+  probes shared by benchmark and accuracy execution;
 - `OperationPlan`, `Invocation`, and `ProtocolResult`, which let one scheduled
   logical operation contain one or more engine-accounted protocol calls; and
 - `Observation`, which records common logical-operation outcome and timing

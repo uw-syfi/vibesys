@@ -3,7 +3,6 @@ package trainticket
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,9 +11,12 @@ import (
 	"time"
 
 	"vibesys/microservice-evaluator/api"
+	trainticketsupport "vibesys/microservice-evaluator/appsupport/trainticket"
+	"vibesys/microservice-evaluator/sampling"
+	"vibesys/microservice-evaluator/wire/httpjson"
 )
 
-var services = []string{"config", "station", "train", "travel", "route", "price"}
+var services = trainticketsupport.Services()
 
 var operationTargets = map[string]string{
 	"list_config": "config", "list_station": "station", "list_train": "train",
@@ -26,13 +28,12 @@ var operationTargets = map[string]string{
 	"create_read_delete_config": "config",
 }
 
-type Config struct {
-	Records int
-}
+type Config = trainticketsupport.Config
 
 type Application struct {
 	config Config
 	token  string
+	seed   int64
 	active *dataset
 }
 
@@ -50,18 +51,9 @@ func New(workload api.Workload) (api.Application, error) {
 			return nil, fmt.Errorf("Train Ticket target %q must use HTTP, got %q", service, target.Protocol)
 		}
 	}
-	config := Config{Records: 32}
-	for key := range workload.ApplicationConfig {
-		if key != "records" {
-			return nil, fmt.Errorf("unknown application_config field %q", key)
-		}
-	}
-	if raw, ok := workload.ApplicationConfig["records"]; ok {
-		value, ok := integer(raw)
-		if !ok || value < 2 {
-			return nil, fmt.Errorf("application_config.records must be an integer greater than one")
-		}
-		config.Records = value
+	config, err := trainticketsupport.ParseConfig(workload.ApplicationConfig)
+	if err != nil {
+		return nil, err
 	}
 	for _, operation := range workload.Operations {
 		target, ok := operationTargets[operation.Name]
@@ -75,18 +67,37 @@ func New(workload api.Workload) (api.Application, error) {
 			return nil, fmt.Errorf("Train Ticket operation %q must not declare operations.http", operation.Name)
 		}
 	}
-	return &Application{config: config, token: makeAdminToken(time.Now())}, nil
+	return &Application{
+		config: config,
+		token:  makeAdminToken(time.Now()),
+		seed:   workload.Load.Seed,
+	}, nil
 }
 
 func (a *Application) Name() string { return "train-ticket" }
+
+func (a *Application) ReadinessProbes() []api.ReadinessProbe {
+	return trainticketsupport.ReadinessProbes(a.seed)
+}
+
+func (a *Application) PreflightProbes() []api.ReadinessProbe {
+	return trainticketsupport.PreflightProbes(a.token)
+}
 
 func (a *Application) Prepare(ctx context.Context, runtime api.Runtime, trial api.TrialContext) (any, error) {
 	if a.active != nil {
 		return nil, fmt.Errorf("previous Train Ticket fixture was not reset")
 	}
-	namespaceDigest := sha256.Sum256([]byte(fmt.Sprintf("%d/%d", trial.Seed, trial.Index)))
+	namespaceDigest := sha256.Sum256([]byte(fmt.Sprintf("%d/%d", trial.FixtureSeed, trial.Index)))
 	namespace := fmt.Sprintf("%x", namespaceDigest[:12])
-	data := &dataset{namespace: namespace, records: makeRecords(namespace, trial.Seed, a.config.Records)}
+	recordCount, err := sampling.CaseCount(trial.FixtureSeed, a.config.Records, a.config.Records+3)
+	if err != nil {
+		return nil, err
+	}
+	data := &dataset{
+		namespace: namespace,
+		records:   makeRecords(namespace, trial.FixtureSeed, recordCount),
+	}
 	a.active = data
 	for index := range data.records {
 		if err := a.createRecord(ctx, runtime, &data.records[index]); err != nil {
@@ -157,34 +168,38 @@ type lifecycleStep struct {
 func lifecycleSteps(item *record) []lifecycleStep {
 	return []lifecycleStep{
 		{
-			create: setupStep{"config", http.MethodPost, "/api/v1/configservice/configs", item.config, http.StatusCreated},
-			delete: setupStep{"config", http.MethodDelete, "/api/v1/configservice/configs/" + url.PathEscape(item.config.Name), nil, http.StatusOK},
+			create: setupStep{"config", http.MethodPost, servicePath("config", "/configs"), item.config, http.StatusCreated},
+			delete: setupStep{"config", http.MethodDelete, servicePath("config", "/configs/"+url.PathEscape(item.config.Name)), nil, http.StatusOK},
 		},
 		{
-			create: setupStep{"station", http.MethodPost, "/api/v1/stationservice/stations", item.stationA, http.StatusCreated},
-			delete: setupStep{"station", http.MethodDelete, "/api/v1/stationservice/stations", item.stationA, http.StatusOK},
+			create: setupStep{"station", http.MethodPost, servicePath("station", "/stations"), item.stationA, http.StatusCreated},
+			delete: setupStep{"station", http.MethodDelete, servicePath("station", "/stations"), item.stationA, http.StatusOK},
 		},
 		{
-			create: setupStep{"station", http.MethodPost, "/api/v1/stationservice/stations", item.stationB, http.StatusCreated},
-			delete: setupStep{"station", http.MethodDelete, "/api/v1/stationservice/stations", item.stationB, http.StatusOK},
+			create: setupStep{"station", http.MethodPost, servicePath("station", "/stations"), item.stationB, http.StatusCreated},
+			delete: setupStep{"station", http.MethodDelete, servicePath("station", "/stations"), item.stationB, http.StatusOK},
 		},
 		{
-			create: setupStep{"train", http.MethodPost, "/api/v1/trainservice/trains", item.train, http.StatusOK},
-			delete: setupStep{"train", http.MethodDelete, "/api/v1/trainservice/trains/" + item.train.ID, nil, http.StatusOK},
+			create: setupStep{"train", http.MethodPost, servicePath("train", "/trains"), item.train, http.StatusOK},
+			delete: setupStep{"train", http.MethodDelete, servicePath("train", "/trains/"+item.train.ID), nil, http.StatusOK},
 		},
 		{
-			create: setupStep{"route", http.MethodPost, "/api/v1/routeservice/routes", item.routeIn, http.StatusOK},
-			delete: setupStep{"route", http.MethodDelete, "/api/v1/routeservice/routes/" + item.route.ID, nil, http.StatusOK},
+			create: setupStep{"route", http.MethodPost, servicePath("route", "/routes"), item.routeIn, http.StatusOK},
+			delete: setupStep{"route", http.MethodDelete, servicePath("route", "/routes/"+item.route.ID), nil, http.StatusOK},
 		},
 		{
-			create: setupStep{"price", http.MethodPost, "/api/v1/priceservice/prices", item.price, http.StatusCreated},
-			delete: setupStep{"price", http.MethodDelete, "/api/v1/priceservice/prices", item.price, http.StatusOK},
+			create: setupStep{"price", http.MethodPost, servicePath("price", "/prices"), item.price, http.StatusCreated},
+			delete: setupStep{"price", http.MethodDelete, servicePath("price", "/prices"), item.price, http.StatusOK},
 		},
 		{
-			create: setupStep{"travel", http.MethodPost, "/api/v1/travelservice/trips", item.tripIn, http.StatusCreated},
-			delete: setupStep{"travel", http.MethodDelete, "/api/v1/travelservice/trips/" + item.tripIn.TripID, nil, http.StatusOK},
+			create: setupStep{"travel", http.MethodPost, servicePath("travel", "/trips"), item.tripIn, http.StatusCreated},
+			delete: setupStep{"travel", http.MethodDelete, servicePath("travel", "/trips/"+item.tripIn.TripID), nil, http.StatusOK},
 		},
 	}
+}
+
+func servicePath(service, suffix string) string {
+	return trainticketsupport.MustPath(service, suffix)
 }
 
 type setupStep struct {
@@ -206,32 +221,8 @@ func (a *Application) runStep(ctx context.Context, runtime api.Runtime, step set
 }
 
 func (a *Application) invocation(target, operation, method, path string, body any) api.Invocation {
-	spec := api.HTTPRequestSpec{
-		Method: method, Path: path,
-		Headers: map[string]string{"Accept": "application/json", "Authorization": "Bearer " + a.token},
-	}
-	if body != nil {
-		encoded, err := json.Marshal(body)
-		if err != nil {
-			panic(fmt.Sprintf("marshal trusted Train Ticket entity: %v", err))
-		}
-		spec.Body = string(encoded)
-		spec.Headers["Content-Type"] = "application/json"
-	}
+	spec := httpjson.MustRequest(method, path, body, "Bearer "+a.token)
 	return api.Invocation{Target: target, Operation: operation, Payload: spec}
-}
-
-func integer(value any) (int, bool) {
-	switch number := value.(type) {
-	case int64:
-		return int(number), int64(int(number)) == number
-	case int:
-		return number, true
-	case float64:
-		return int(number), number == float64(int(number))
-	default:
-		return 0, false
-	}
 }
 
 func serviceFromOperation(name string) string {

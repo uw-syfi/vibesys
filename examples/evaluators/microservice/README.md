@@ -46,6 +46,12 @@ implements `api.Driver` and `api.Client`; a new application implements
 `api.Application`. The command registers concrete implementations at startup,
 and the workload selects them by name.
 
+When an application implements `api.PreflightApplication`, benchmark and
+accuracy execution use the same readiness and protocol-probe plans before
+mode-specific work. Accuracy applications also declare an unskippable minimum
+case volume and randomized extra range, so low CLI bounds or one fixed fixture
+count cannot silently weaken capacity coverage.
+
 ### Trial lifecycle
 
 Each repetition is an independent aggregation unit. The application gets a
@@ -163,16 +169,23 @@ retains one observation per measured logical operation for diagnosis.
 | Directory | Responsibility |
 | --- | --- |
 | [`api/`](api/) | Shared workload, extension, and observation contracts |
+| [`accuracy/`](accuracy/) | Accuracy orchestration and fail-closed validation primitives |
+| [`accuracyapps/`](accuracyapps/) | Independent application-specific accuracy oracles |
+| [`appsupport/`](appsupport/) | Mode-neutral topology, preflight, input, and authentication grammars |
 | [`apps/`](apps/) | Application-adapter extension layer |
 | [`apps/declarative/`](apps/declarative/) | Declarative HTTP request and response adapter |
 | [`apps/socialnetwork/`](apps/socialnetwork/) | Typed DeathStarBench Social Network adapter |
 | [`cmd/`](cmd/) | Executable composition roots |
-| [`cmd/servicebench/`](cmd/servicebench/) | Benchmark CLI |
+| [`cmd/servicebench/`](cmd/servicebench/) | Benchmark and accuracy CLI |
 | [`config/`](config/) | Strict TOML decoding, defaults, profiles, and canonical serialization |
 | [`drivers/`](drivers/) | Protocol-driver extension layer |
 | [`drivers/httpdriver/`](drivers/httpdriver/) | HTTP transport and connection policy |
 | [`engine/`](engine/) | Scheduler, trial lifecycle, statistics, and results |
+| [`probing/`](probing/) | Shared readiness and protocol-preflight execution |
 | [`registry/`](registry/) | Driver and application registration |
+| [`sampling/`](sampling/) | Shared deterministic case-volume sampling |
+| [`transport/`](transport/) | Shared target runtime used by benchmark and accuracy modes |
+| [`wire/httpjson/`](wire/httpjson/) | Canonical JSON-over-HTTP request construction |
 
 Every directory has its own README with its ownership boundary and extension
 guidance.

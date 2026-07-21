@@ -17,20 +17,36 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
+	"vibesys/microservice-evaluator/accuracy"
+	accuracytrainticket "vibesys/microservice-evaluator/accuracyapps/trainticket"
 	"vibesys/microservice-evaluator/api"
 	"vibesys/microservice-evaluator/apps/declarative"
 	"vibesys/microservice-evaluator/apps/socialnetwork"
-	"vibesys/microservice-evaluator/apps/trainticket"
+	benchmarktrainticket "vibesys/microservice-evaluator/apps/trainticket"
 	"vibesys/microservice-evaluator/config"
 	"vibesys/microservice-evaluator/drivers/httpdriver"
 	"vibesys/microservice-evaluator/engine"
+	"vibesys/microservice-evaluator/lifecycle"
 	"vibesys/microservice-evaluator/registry"
 )
 
 var version = "dev"
 
 type targetOverrides map[string]string
+
+type modeFlagConfig struct {
+	mode           string
+	explicit       map[string]bool
+	outputRaw      string
+	casesMin       int
+	casesMax       int
+	startupTimeout float64
+	runCommandJSON string
+	stateDir       string
+	stateEnv       string
+}
 
 func (o *targetOverrides) String() string {
 	return fmt.Sprint(map[string]string(*o))
@@ -53,6 +69,7 @@ func main() {
 }
 
 func run() error {
+	var mode string
 	var workloadPath string
 	var profile string
 	var outputJSON string
@@ -68,7 +85,15 @@ func run() error {
 	var repetitions int
 	var seed string
 	var fixtureSeed string
+	var casesMin int
+	var casesMax int
+	var startupTimeout float64
+	var runCommandJSON string
+	var candidateDir string
+	var stateDir string
+	var stateEnv string
 
+	flag.StringVar(&mode, "mode", "benchmark", "execution mode: benchmark or accuracy")
 	flag.StringVar(&workloadPath, "workload", "", "path to the workload TOML file")
 	flag.StringVar(&profile, "profile", "", "optional named workload profile")
 	flag.StringVar(&outputJSON, "output-json", "", "optional structured result path")
@@ -84,7 +109,23 @@ func run() error {
 	flag.IntVar(&repetitions, "repetitions", 0, "override independent trial count")
 	flag.StringVar(&seed, "seed", "", "override deterministic random seed, or use 'random'")
 	flag.StringVar(&fixtureSeed, "fixture-seed", "", "override the fixture namespace seed, or use 'random'")
+	flag.IntVar(&casesMin, "cases-min", 2, "minimum randomized cases in accuracy mode")
+	flag.IntVar(&casesMax, "cases-max", 5, "maximum randomized cases in accuracy mode")
+	flag.Float64Var(&startupTimeout, "startup-timeout", 15, "candidate readiness timeout in seconds")
+	flag.StringVar(&runCommandJSON, "run-command-json", "", "managed candidate command as a JSON string array in accuracy mode")
+	flag.StringVar(&candidateDir, "candidate-dir", ".", "managed candidate working directory in accuracy mode")
+	flag.StringVar(&stateDir, "state-dir", "", "managed candidate persistent state directory in accuracy mode")
+	flag.StringVar(&stateEnv, "state-env", "VIBESYS_STATE_DIR", "environment variable receiving --state-dir in accuracy mode")
 	flag.Parse()
+	explicitFlags := make(map[string]bool)
+	flag.Visit(func(used *flag.Flag) { explicitFlags[used.Name] = true })
+	if err := validateModeFlags(modeFlagConfig{
+		mode: mode, explicit: explicitFlags, outputRaw: outputRaw,
+		casesMin: casesMin, casesMax: casesMax, startupTimeout: startupTimeout,
+		runCommandJSON: runCommandJSON, stateDir: stateDir, stateEnv: stateEnv,
+	}); err != nil {
+		return err
+	}
 	if workloadPath == "" {
 		return errors.New("--workload is required")
 	}
@@ -153,11 +194,20 @@ func run() error {
 	if err := registry.RegisterApplication("social-network", socialnetwork.New); err != nil {
 		return err
 	}
-	if err := registry.RegisterApplication("train-ticket", trainticket.New); err != nil {
+	if err := registry.RegisterApplication("train-ticket", benchmarktrainticket.New); err != nil {
 		return err
 	}
-	if _, err := registry.Application(workload); err != nil {
+	if err := registry.RegisterAccuracyApplication("train-ticket", accuracytrainticket.New); err != nil {
 		return err
+	}
+	if mode == "benchmark" {
+		if _, err := registry.Application(workload); err != nil {
+			return err
+		}
+	} else {
+		if _, err := registry.AccuracyApplication(workload); err != nil {
+			return err
+		}
 	}
 	for _, target := range workload.Targets {
 		if _, err := registry.Driver(target.Protocol); err != nil {
@@ -165,9 +215,17 @@ func run() error {
 		}
 	}
 
+	seedDisplay := strconv.FormatInt(workload.Load.Seed, 10)
+	fixtureSeedDisplay := strconv.FormatInt(workload.Load.FixtureSeed, 10)
+	if mode == "accuracy" {
+		seedDigest := sha256.Sum256([]byte(seedDisplay))
+		seedDisplay = fmt.Sprintf("sha256:%x", seedDigest[:8])
+		fixtureSeedDigest := sha256.Sum256([]byte(fixtureSeedDisplay))
+		fixtureSeedDisplay = fmt.Sprintf("sha256:%x", fixtureSeedDigest[:8])
+	}
 	fmt.Fprintf(
 		os.Stderr,
-		"workload=%s application=%s model=%s rate=%.2f duration=%.2fs warmup=%.2fs concurrency=%d repetitions=%d seed=%d fixture_seed=%d\n",
+		"workload=%s application=%s model=%s rate=%.2f duration=%.2fs warmup=%.2fs concurrency=%d repetitions=%d seed=%s fixture_seed=%s\n",
 		workload.Name,
 		workload.Application,
 		workload.Load.Model,
@@ -176,23 +234,39 @@ func run() error {
 		workload.Load.WarmupSeconds,
 		workload.Load.Concurrency,
 		workload.Load.Repetitions,
-		workload.Load.Seed,
-		workload.Load.FixtureSeed,
+		seedDisplay,
+		fixtureSeedDisplay,
 	)
 	for _, target := range workload.Targets {
 		fmt.Fprintf(os.Stderr, "target=%s protocol=%s address=%s session_policy=%s\n", target.Name, target.Protocol, target.Address, target.SessionPolicy)
 	}
 	if validateOnly {
-		fmt.Println("workload is valid")
+		fmt.Printf("workload is valid for %s mode\n", mode)
 		return nil
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if mode == "accuracy" {
+		return runAccuracy(
+			ctx,
+			registry,
+			workload,
+			outputJSON,
+			casesMin,
+			casesMax,
+			startupTimeout,
+			runCommandJSON,
+			candidateDir,
+			stateDir,
+			stateEnv,
+		)
+	}
 	runner := engine.New(registry, engine.Options{
-		EngineVersion: version,
-		WorkloadHash:  hex.EncodeToString(hash[:]),
-		SkipPrepare:   skipPrepare,
+		EngineVersion:  version,
+		WorkloadHash:   hex.EncodeToString(hash[:]),
+		SkipPrepare:    skipPrepare,
+		StartupTimeout: time.Duration(startupTimeout * float64(time.Second)),
 	})
 	runResult, err := runner.Run(ctx, workload)
 	if err != nil {
@@ -217,6 +291,162 @@ func run() error {
 		return errors.New("benchmark result is invalid; inspect constraints and trial invalid_reasons")
 	}
 	return nil
+}
+
+func validateModeFlags(config modeFlagConfig) error {
+	if config.mode != "benchmark" && config.mode != "accuracy" {
+		return fmt.Errorf("--mode must be benchmark or accuracy, got %q", config.mode)
+	}
+	if config.startupTimeout <= 0 {
+		return fmt.Errorf("--startup-timeout must be positive")
+	}
+	accuracyOnly := []string{
+		"cases-min", "cases-max", "run-command-json", "candidate-dir", "state-dir", "state-env",
+	}
+	benchmarkOnly := []string{
+		"output-raw", "skip-prepare", "fixture-seed", "rate", "duration", "warmup", "concurrency", "repetitions",
+	}
+	if config.mode == "benchmark" {
+		for _, name := range accuracyOnly {
+			if config.explicit[name] {
+				return fmt.Errorf("--%s is only available in accuracy mode", name)
+			}
+		}
+		if config.runCommandJSON != "" || config.stateDir != "" {
+			return errors.New("managed candidate flags are only available in accuracy mode")
+		}
+		return nil
+	}
+	for _, name := range benchmarkOnly {
+		if config.explicit[name] {
+			return fmt.Errorf("--%s is only available in benchmark mode", name)
+		}
+	}
+	if config.outputRaw != "" {
+		return errors.New("--output-raw is only available in benchmark mode")
+	}
+	if config.casesMin < 1 || config.casesMax < config.casesMin {
+		return fmt.Errorf(
+			"accuracy case bounds must satisfy 1 <= min <= max, got %d..%d",
+			config.casesMin,
+			config.casesMax,
+		)
+	}
+	if config.runCommandJSON != "" {
+		if _, err := parseCommandJSON(config.runCommandJSON); err != nil {
+			return err
+		}
+		if config.stateEnv == "" {
+			return errors.New("--state-env must not be empty")
+		}
+		return nil
+	}
+	if config.stateDir != "" {
+		return errors.New("--state-dir requires --run-command-json")
+	}
+	for _, name := range []string{"candidate-dir", "state-env"} {
+		if config.explicit[name] {
+			return fmt.Errorf("--%s requires --run-command-json", name)
+		}
+	}
+	return nil
+}
+
+func runAccuracy(
+	ctx context.Context,
+	registered *registry.Registry,
+	workload api.Workload,
+	outputJSON string,
+	casesMin int,
+	casesMax int,
+	startupTimeoutSeconds float64,
+	runCommandJSON string,
+	candidateDir string,
+	stateDir string,
+	stateEnv string,
+) error {
+	var candidate accuracy.CandidateLifecycle
+	var temporaryState string
+	if runCommandJSON != "" {
+		command, err := parseCommandJSON(runCommandJSON)
+		if err != nil {
+			return err
+		}
+		if stateDir == "" {
+			temporaryState, err = os.MkdirTemp("", "microservice-state-*")
+			if err != nil {
+				return fmt.Errorf("create temporary candidate state directory: %w", err)
+			}
+			defer os.RemoveAll(temporaryState)
+			stateDir = temporaryState
+		}
+		resolvedState, err := filepath.Abs(stateDir)
+		if err != nil {
+			return fmt.Errorf("resolve candidate state directory: %w", err)
+		}
+		if err := os.MkdirAll(resolvedState, 0o755); err != nil {
+			return fmt.Errorf("create candidate state directory: %w", err)
+		}
+		stateDir = resolvedState
+		if stateEnv == "" {
+			return errors.New("--state-env must not be empty")
+		}
+		managed, err := lifecycle.NewManagedCandidate(
+			command,
+			candidateDir,
+			map[string]string{stateEnv: stateDir},
+		)
+		if err != nil {
+			return err
+		}
+		candidate = managed
+	} else if stateDir != "" {
+		return errors.New("--state-dir requires --run-command-json")
+	}
+	runner, err := accuracy.NewRunner(registered, accuracy.Options{
+		EngineVersion:  version,
+		Seed:           workload.Load.Seed,
+		CasesMin:       casesMin,
+		CasesMax:       casesMax,
+		StartupTimeout: time.Duration(startupTimeoutSeconds * float64(time.Second)),
+		ProbeTimeout:   time.Duration(workload.Load.TimeoutSeconds * float64(time.Second)),
+		ProbeInterval:  100 * time.Millisecond,
+		Lifecycle:      candidate,
+	})
+	if err != nil {
+		return err
+	}
+	result := runner.Run(ctx, workload)
+	encoded, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode accuracy result: %w", err)
+	}
+	if outputJSON != "" {
+		if err := writeAtomic(outputJSON, append(encoded, '\n')); err != nil {
+			return err
+		}
+	}
+	fmt.Println(string(encoded))
+	if !result.Valid {
+		return errors.New("accuracy result is invalid")
+	}
+	return nil
+}
+
+func parseCommandJSON(raw string) ([]string, error) {
+	var command []string
+	if err := json.Unmarshal([]byte(raw), &command); err != nil {
+		return nil, fmt.Errorf("--run-command-json must be a JSON string array: %w", err)
+	}
+	if len(command) == 0 {
+		return nil, errors.New("--run-command-json must be a non-empty JSON string array")
+	}
+	for index, argument := range command {
+		if argument == "" {
+			return nil, fmt.Errorf("--run-command-json argument %d is empty", index)
+		}
+	}
+	return command, nil
 }
 
 func parseSeed(value, flagName string) (int64, error) {

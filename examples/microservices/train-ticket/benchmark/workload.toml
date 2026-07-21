@@ -9,7 +9,7 @@ duration_seconds = 30
 warmup_seconds = 2
 concurrency = 128
 timeout_seconds = 5
-repetitions = 1
+repetitions = 3
 seed = 1
 min_offered_rate_ratio = 0.95
 

@@ -154,6 +154,37 @@ def test_trusted_input_changes_reports_committed_and_pending_edits(ws):
     assert tracker.trusted_input_changes() == ["accuracy_checker/checker.py"]
 
 
+def test_resume_can_authorize_immutable_trusted_input_baseline(ws):
+    (ws / "accuracy_checker").mkdir()
+    checker = ws / "accuracy_checker" / "checker.py"
+    checker.write_text("print('v1')\n")
+    tracker = _make_tracker(ws)
+    tracker.init(existing=False)
+
+    checker.write_text("print('operator-authorized v2')\n")
+    tracker.snapshot("refresh trusted evaluator")
+    refresh_commit = tracker.current_sha()
+    assert refresh_commit is not None
+
+    resumed = _make_tracker(ws)
+    resumed.init(existing=True, trusted_input_baseline=refresh_commit)
+    assert resumed.trusted_input_changes() == []
+
+    checker.write_text("print('agent tampering')\n")
+    assert resumed.trusted_input_changes() == ["accuracy_checker/checker.py"]
+    resumed.snapshot("later committed tampering")
+    assert resumed.trusted_input_changes() == ["accuracy_checker/checker.py"]
+
+
+def test_resume_rejects_invalid_trusted_input_baseline(ws):
+    tracker = _make_tracker(ws)
+    tracker.init(existing=False)
+
+    resumed = _make_tracker(ws)
+    with pytest.raises(ValueError, match="is not a commit"):
+        resumed.init(existing=True, trusted_input_baseline="not-a-revision")
+
+
 def test_run_is_a_public_escape_hatch(ws):
     tracker = _make_tracker(ws)
     tracker.init(existing=False)

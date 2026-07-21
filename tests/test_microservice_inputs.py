@@ -34,10 +34,13 @@ def test_microservice_scenario_uses_shared_evaluator(scenario_path: Path) -> Non
     assert bundle.benchmark_result is not None
     assert bundle.benchmark_result.json_argument == "--output-json"
     assert bundle.benchmark_result.metric == "primary_value"
-    if scenario_path.name == "social-network-read-timeline":
-        assert bundle.benchmark_command[-2:] == ("--fixture-seed", "random")
-    else:
-        assert bundle.benchmark_command[-2:] == ("--seed", "random")
+    assert bundle.benchmark_command[-2:] == ("--fixture-seed", "random")
+    if scenario_path.name == "train-ticket":
+        assert ("--seed", "random") in zip(
+            bundle.benchmark_command,
+            bundle.benchmark_command[1:],
+            strict=False,
+        )
 
 
 def test_microservice_scenarios_are_discovered() -> None:
@@ -45,6 +48,22 @@ def test_microservice_scenarios_are_discovered() -> None:
         "social-network-read-timeline",
         "train-ticket",
     }
+
+
+def test_train_ticket_accuracy_uses_shared_evaluator() -> None:
+    bundle = load_input_bundle(
+        MICROSERVICE_ROOT / "train-ticket",
+        project_root=PROJECT_ROOT,
+    )
+
+    assert bundle.accuracy_command[:5] == (
+        "go",
+        "-C",
+        "_evaluator/microservice",
+        "run",
+        "./cmd/servicebench",
+    )
+    assert bundle.accuracy_command[5:7] == ("--mode", "accuracy")
 
 
 @pytest.mark.parametrize(

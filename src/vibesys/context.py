@@ -171,6 +171,7 @@ def create_run_context(
     workspace_seed: Path | None = None,
     evaluator_path: Path | None = None,
     existing: bool = False,
+    trusted_input_baseline: str | None = None,
     debug: bool = False,
     profiler_kind: ProfilerKind = ProfilerKind.AUTO,
     profiler_domain: DomainName = DomainName.LLM_SERVING,
@@ -366,7 +367,7 @@ def create_run_context(
         excluded_dirs=workspace_files.excluded_dirs,
     )
     if git_tracking:
-        git.init(existing)
+        git.init(existing, trusted_input_baseline=trusted_input_baseline)
 
     session = teardown_stack.enter_context(
         environment.open(
@@ -979,7 +980,7 @@ class _RunContext:
                 self.lprint(f"[warn] experiment repository checkpoint push failed: {exc}")
 
     def trusted_input_changes(self) -> list[str]:
-        """Return evaluator-owned paths changed since workspace initialization."""
+        """Return evaluator-owned paths changed since the trusted baseline."""
         if not self.git_tracking:
             return []
         return self.git.trusted_input_changes()

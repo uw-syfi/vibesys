@@ -608,6 +608,20 @@ def test_validate_target_inputs_requires_input():
     assert "missing required target input: --input" in exc.value.diagnostic.message
 
 
+def test_trusted_input_baseline_requires_resume(tmp_path):
+    from vibesys.main import _build_agent_parser, _validate_agent
+
+    bundle = _write_input_bundle(tmp_path)
+    args = _build_agent_parser().parse_args(
+        ["--input", str(bundle), "--trusted-input-baseline", "HEAD"]
+    )
+
+    with pytest.raises(ConfigurationError) as exc:
+        _validate_agent(args)
+
+    assert "--trusted-input-baseline requires --resume" in exc.value.diagnostic.message
+
+
 def test_stub_agent_smoke_defaults_supply_input_and_unique_exp_name():
     argv = _prepare_stub_agent_smoke_defaults(["--stub-agent", "--max-rounds", "1"])
 

@@ -1,8 +1,9 @@
 # Train Ticket Evaluator Inputs
 
-Accuracy and workload inputs for a running Train Ticket deployment. The checker
-is application-specific; the benchmark uses the shared Go service evaluator.
-Both can run without a full `vibesys --input` optimization run.
+Accuracy and workload inputs for a running Train Ticket deployment. The shared
+Go service evaluator runs both modes; independent Train Ticket benchmark and
+accuracy adapters retain separate application-specific semantic oracles.
+Both modes can run without a full `vibesys --input` optimization run.
 
 Expected target for a gateway/proxy deployment:
 
@@ -13,7 +14,11 @@ Expected target for a gateway/proxy deployment:
 The scripts call `/api/v1/...` endpoints through whichever base URL you pass.
 
 ```bash
-python examples/microservices/train-ticket/accuracy_checker/checker.py --base-url http://localhost:8080
+go -C examples/evaluators/microservice run ./cmd/servicebench \
+  --mode accuracy \
+  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --base-url http://localhost:8080 \
+  --seed random
 go -C examples/evaluators/microservice run ./cmd/servicebench \
   --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
   --base-url http://localhost:8080 \
@@ -21,8 +26,8 @@ go -C examples/evaluators/microservice run ./cmd/servicebench \
   --output-json /tmp/train_ticket_bench.json
 ```
 
-The checker uses only the Python standard library. The benchmark requires Go;
-its dependencies are pinned by `examples/evaluators/microservice/go.sum`.
+Both modes require Go; dependencies are pinned by
+`examples/evaluators/microservice/go.sum`.
 
 For the prebuilt-image local Docker Compose helper below, use the helper
 `check`/`bench` commands. The prebuilt
@@ -124,8 +129,10 @@ Compose tries to pull `localtrain/...` from Docker Hub.
 Manual direct-service runs:
 
 ```bash
-python examples/microservices/train-ticket/accuracy_checker/checker.py \
-  --base-url http://localhost:18888 \
+go -C examples/evaluators/microservice run ./cmd/servicebench \
+  --mode accuracy \
+  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --seed random \
   --target config=http://localhost:15679 \
   --target station=http://localhost:12345 \
   --target train=http://localhost:14567 \
@@ -148,8 +155,11 @@ go -C examples/evaluators/microservice run ./cmd/servicebench \
 Manual gateway runs after source-built deployment:
 
 ```bash
-python examples/microservices/train-ticket/accuracy_checker/checker.py \
-  --base-url http://localhost:18888
+go -C examples/evaluators/microservice run ./cmd/servicebench \
+  --mode accuracy \
+  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --base-url http://localhost:18888 \
+  --seed random
 
 go -C examples/evaluators/microservice run ./cmd/servicebench \
   --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
@@ -159,4 +169,6 @@ go -C examples/evaluators/microservice run ./cmd/servicebench \
 ```
 
 The checker requires the exact v0.2.0 seed catalog and does not silently accept
-empty or structurally different startup data.
+empty or structurally different startup data. The committed benchmark workload
+runs three independent repetitions and uses their median as `primary_value` so
+normal host variance does not steer optimization from a single trial.

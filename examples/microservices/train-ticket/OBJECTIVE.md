@@ -7,7 +7,7 @@ HTTP requests; update/read and create/read/delete sequences are counted once.
 
 The candidate may use any implementation language, process topology, database,
 persistence format, or caching strategy. It must preserve the public HTTP
-contract checked by `accuracy_checker/checker.py`, including the startup
+contract checked by `servicebench --mode accuracy`, including the startup
 catalog, exact entity schemas, referential integrity, acknowledged mutations,
 read-your-write, deletes, and—when a restart hook is provided—crash recovery.
 
