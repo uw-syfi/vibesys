@@ -1,148 +1,182 @@
 version = 1
-name = "train-ticket-read-only"
-application = "declarative"
+name = "train-ticket-stateful-randomized"
+application = "train-ticket"
 
 [load]
-model = "open_loop"
-rate = 10
+model = "closed_loop"
+rate = 0
 duration_seconds = 30
-warmup_seconds = 0
-concurrency = 32
+warmup_seconds = 2
+concurrency = 128
 timeout_seconds = 5
 repetitions = 1
 seed = 1
 min_offered_rate_ratio = 0.95
 
-[[targets]]
-name = "station"
-protocol = "http"
-address = "http://localhost:8080"
-session_policy = "new_per_request"
-
-[[targets]]
-name = "train"
-protocol = "http"
-address = "http://localhost:8080"
-session_policy = "new_per_request"
-
-[[targets]]
-name = "travel"
-protocol = "http"
-address = "http://localhost:8080"
-session_policy = "new_per_request"
-
-[[targets]]
-name = "route"
-protocol = "http"
-address = "http://localhost:8080"
-session_policy = "new_per_request"
-
-[[targets]]
-name = "price"
-protocol = "http"
-address = "http://localhost:8080"
-session_policy = "new_per_request"
+[application_config]
+records = 32
 
 [[targets]]
 name = "config"
 protocol = "http"
 address = "http://localhost:8080"
-session_policy = "new_per_request"
+session_policy = "reuse"
+
+[[targets]]
+name = "station"
+protocol = "http"
+address = "http://localhost:8080"
+session_policy = "reuse"
+
+[[targets]]
+name = "train"
+protocol = "http"
+address = "http://localhost:8080"
+session_policy = "reuse"
+
+[[targets]]
+name = "travel"
+protocol = "http"
+address = "http://localhost:8080"
+session_policy = "reuse"
+
+[[targets]]
+name = "route"
+protocol = "http"
+address = "http://localhost:8080"
+session_policy = "reuse"
+
+[[targets]]
+name = "price"
+protocol = "http"
+address = "http://localhost:8080"
+session_policy = "reuse"
 
 [[operations]]
-name = "stations"
+name = "list_config"
+target = "config"
+weight = 6
+tags = ["read", "list"]
+
+[[operations]]
+name = "list_station"
 target = "station"
-weight = 3
-[operations.http]
-method = "GET"
-path = "/api/v1/stationservice/stations"
-[operations.expect]
-statuses = [200]
-json = true
-json_status_if_present = 1
-json_object_requires_status_or_data = true
+weight = 6
+tags = ["read", "list"]
 
 [[operations]]
-name = "trains"
+name = "list_train"
 target = "train"
-weight = 3
-[operations.http]
-method = "GET"
-path = "/api/v1/trainservice/trains"
-[operations.expect]
-statuses = [200]
-json = true
-json_status_if_present = 1
-json_object_requires_status_or_data = true
+weight = 6
+tags = ["read", "list"]
 
 [[operations]]
-name = "trips"
+name = "list_travel"
+target = "travel"
+weight = 6
+tags = ["read", "list"]
+
+[[operations]]
+name = "list_route"
+target = "route"
+weight = 6
+tags = ["read", "list"]
+
+[[operations]]
+name = "list_price"
+target = "price"
+weight = 5
+tags = ["read", "list"]
+
+[[operations]]
+name = "read_config"
+target = "config"
+weight = 5
+tags = ["read", "point"]
+
+[[operations]]
+name = "read_station"
+target = "station"
+weight = 4
+tags = ["read", "secondary-index"]
+
+[[operations]]
+name = "read_train"
+target = "train"
+weight = 4
+tags = ["read", "point"]
+
+[[operations]]
+name = "read_travel"
 target = "travel"
 weight = 4
-[operations.http]
-method = "GET"
-path = "/api/v1/travelservice/trips"
-[operations.expect]
-statuses = [200]
-json = true
-json_status_if_present = 1
-json_object_requires_status_or_data = true
+tags = ["read", "point"]
 
 [[operations]]
-name = "routes"
+name = "read_route"
 target = "route"
-weight = 2
-[operations.http]
-method = "GET"
-path = "/api/v1/routeservice/routes"
-[operations.expect]
-statuses = [200]
-json = true
-json_status_if_present = 1
-json_object_requires_status_or_data = true
+weight = 4
+tags = ["read", "point"]
 
 [[operations]]
-name = "prices"
+name = "read_price"
 target = "price"
-weight = 2
-[operations.http]
-method = "GET"
-path = "/api/v1/priceservice/prices"
-[operations.expect]
-statuses = [200]
-json = true
-json_status_if_present = 1
-json_object_requires_status_or_data = true
+weight = 4
+tags = ["read", "secondary-index"]
 
 [[operations]]
-name = "configs"
+name = "update_read_config"
 target = "config"
-weight = 1
-[operations.http]
-method = "GET"
-path = "/api/v1/configservice/configs"
-[operations.expect]
-statuses = [200]
-json = true
-json_status_if_present = 1
-json_object_requires_status_or_data = true
+weight = 6
+tags = ["write", "read-your-write"]
 
 [[operations]]
-name = "travel_welcome"
+name = "update_read_station"
+target = "station"
+weight = 6
+tags = ["write", "read-your-write", "secondary-index"]
+
+[[operations]]
+name = "update_read_train"
+target = "train"
+weight = 6
+tags = ["write", "read-your-write"]
+
+[[operations]]
+name = "update_read_travel"
 target = "travel"
-weight = 1
-[operations.http]
-method = "GET"
-path = "/api/v1/travelservice/welcome"
-[operations.expect]
-statuses = [200]
-text_contains = "Welcome to [ Travel Service ]"
+weight = 6
+tags = ["write", "read-your-write"]
+
+[[operations]]
+name = "update_read_route"
+target = "route"
+weight = 6
+tags = ["write", "read-your-write"]
+
+[[operations]]
+name = "update_read_price"
+target = "price"
+weight = 5
+tags = ["write", "read-your-write", "secondary-index"]
+
+[[operations]]
+name = "create_read_delete_config"
+target = "config"
+weight = 5
+tags = ["write", "read-your-write", "delete"]
 
 [objective]
-name = "requests_per_second"
-metric = "requests_per_second"
+name = "logical_operations_per_second"
+metric = "operations_per_second"
 direction = "maximize"
-unit = "requests/s"
+unit = "operations/s"
 
 [constraints]
 max_error_rate = 0.0
+min_operations_per_type = 1
+
+[profiles.offered-load]
+model = "open_loop"
+rate = 100
+concurrency = 128

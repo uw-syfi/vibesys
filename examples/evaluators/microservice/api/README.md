@@ -11,9 +11,10 @@ The main contracts are:
 - `Driver` and `Client`, which isolate protocol sessions and invocations;
 - `Application`, which owns fixture lifecycle, request construction, and
   semantic response validation;
-- `Invocation` and `ProtocolResult`, which carry protocol-specific payloads
-  through a protocol-neutral engine; and
-- `Observation`, which records common request outcome and timing fields.
+- `OperationPlan`, `Invocation`, and `ProtocolResult`, which let one scheduled
+  logical operation contain one or more engine-accounted protocol calls; and
+- `Observation`, which records common logical-operation outcome and timing
+  fields together with physical invocation counts.
 
 Protocol-specific data belongs in an invocation payload or protocol result.
 Application-specific data belongs in the application adapter. Adding either to

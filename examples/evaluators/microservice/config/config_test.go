@@ -69,7 +69,8 @@ func TestLoadRejectsUnknownField(t *testing.T) {
 func TestLoadAppliesNamedProfile(t *testing.T) {
 	contents := validWorkload + `
 [profiles.quick]
-rate = 3
+model = "closed_loop"
+rate = 0
 duration_seconds = 0.2
 [profiles.quick.application_config]
 users = 20
@@ -78,7 +79,7 @@ users = 20
 	if err != nil {
 		t.Fatal(err)
 	}
-	if workload.Load.Rate != 3 || workload.Load.DurationSeconds != 0.2 {
+	if workload.Load.Model != "closed_loop" || workload.Load.Rate != 0 || workload.Load.DurationSeconds != 0.2 {
 		t.Fatalf("profile not applied: %+v", workload.Load)
 	}
 	if users := workload.ApplicationConfig["users"]; users != int64(20) {

@@ -28,7 +28,7 @@ def test_microservice_scenario_uses_shared_evaluator(scenario_path: Path) -> Non
         "-C",
         "_evaluator/microservice",
         "run",
-        "./cmd/microbench",
+        "./cmd/servicebench",
     )
     assert bundle.benchmark_result is not None
     assert bundle.benchmark_result.json_argument == "--output-json"
