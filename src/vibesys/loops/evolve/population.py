@@ -126,6 +126,8 @@ class Individual:
     passed: bool = False
     summary: str = ""
     feedback: str = ""
+    policy_parent_id: str | None = None
+    policy_target_island: int | None = None
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -144,6 +146,8 @@ class Individual:
             passed=bool(data.get("passed", False)),
             summary=data.get("summary", ""),
             feedback=data.get("feedback", ""),
+            policy_parent_id=data.get("policy_parent_id"),
+            policy_target_island=data.get("policy_target_island"),
         )
 
 

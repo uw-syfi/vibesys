@@ -9,6 +9,7 @@ are patched out — same pattern as ``tests/test_orchestrate.py``.
 
 from __future__ import annotations
 
+import json
 import random
 import threading
 import time
@@ -25,9 +26,11 @@ from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.domains.registry import resolve_domain
 from vibesys.loops.evolve import loop as evolve_loop
 from vibesys.loops.evolve.loop import (
+    _candidate_code,
     _candidate_runtime_notes,
     _CandidateOutcome,
     _evaluate_in_subcontext,
+    _initialize_search_policy,
     _latest_wip_seed,
     _plan_candidate,
     _recent_failure_lessons,
@@ -40,7 +43,14 @@ from vibesys.loops.evolve.population import (
     Objective,
     Population,
 )
+from vibesys.loops.evolve.search_policy import (
+    OpenEvolveSearchConfig,
+    OpenEvolveSearchPolicy,
+    SearchSelection,
+    VibeSysSearchPolicy,
+)
 from vibesys.profilers import ProfilerKind
+from vibesys.run import GitTracker
 from vibesys.sandbox.run_environment import RunEnvironmentSpec, candidate_modal_app_name
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
 
@@ -598,6 +608,130 @@ def test_generic_domain_prompts_exclude_llm_serving_contracts(tmp_path, ref_file
     assert "OpenAI-compatible" not in combined
 
 
+def test_openevolve_policy_persists_multi_file_search_state(tmp_path, ref_file):
+    runner = _make_runner(mutator_writes=True)
+
+    result = _invoke_loop(
+        tmp_path,
+        ref_file,
+        runner,
+        domain=DomainName.GENERIC,
+        modality=None,
+        profiler_kind=ProfilerKind.NONE,
+        search_policy="openevolve",
+        openevolve_config=OpenEvolveSearchConfig(
+            population_size=10,
+            archive_size=5,
+            num_islands=2,
+            migration_interval=1,
+            migration_rate=1.0,
+        ),
+        max_generations=1,
+        children_per_generation=1,
+    )
+
+    assert result is True
+    run_dir = next((tmp_path / "exp_env").iterdir())
+    state_dir = run_dir / "logs" / "openevolve"
+    snapshot_dir = state_dir / "snapshots" / (state_dir / "CURRENT").read_text()
+    metadata = json.loads((snapshot_dir / "metadata.json").read_text())
+    programs = [json.loads(path.read_text()) for path in (snapshot_dir / "programs").glob("*.json")]
+    mapped = [program for program in programs if program["id"].startswith("vibesys-")]
+    population = json.loads((run_dir / "logs" / "population.json").read_text())
+    child = next(individual for individual in population if individual["generation"] == 1)
+    assert {program["metadata"]["vibesys_individual_id"] for program in mapped} == {1, 2}
+    assert all("diff --git" in program["code"] for program in mapped)
+    assert metadata["island_generations"] == [1, 0]
+    assert child["policy_parent_id"] == "vibesys-1"
+    assert child["policy_target_island"] == 0
+
+
+def test_candidate_code_is_multi_file_but_excludes_runtime_logs(tmp_path):
+    tracker = GitTracker(tmp_path, log=lambda _message: None)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "src" / "lib.rs").write_text("baseline\n")
+    (tmp_path / "src" / "ffi.rs").write_text("baseline\n")
+    (tmp_path / "logs" / "profile.txt").write_text("baseline\n")
+    tracker.init(existing=False)
+
+    (tmp_path / "src" / "lib.rs").write_text("optimized lib\n")
+    (tmp_path / "src" / "ffi.rs").write_text("optimized ffi\n")
+    (tmp_path / "logs" / "profile.txt").write_text("nondeterministic counters\n")
+    tracker.snapshot("candidate")
+    commit = tracker.current_sha()
+
+    assert commit is not None
+    code = _candidate_code(SimpleNamespace(git=tracker), commit)
+    assert "src/lib.rs" in code
+    assert "src/ffi.rs" in code
+    assert "logs/profile.txt" not in code
+
+
+def test_search_policy_initialization_failure_closes_context(tmp_path):
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    ctx = MagicMock(
+        run_log_path=log_dir / "run.log",
+        exp_dir=tmp_path,
+        log_dir=log_dir,
+    )
+
+    with (
+        patch.object(evolve_loop, "create_run_context", return_value=ctx),
+        patch.object(
+            evolve_loop,
+            "OpenEvolveSearchPolicy",
+            side_effect=ValueError("incompatible saved topology"),
+        ),
+    ):
+        result = run_evolve_loop(
+            MagicMock(),
+            "test",
+            "input",
+            "check",
+            "benchmark",
+            "objective",
+            domain=DomainName.GENERIC,
+            search_policy="openevolve",
+        )
+
+    assert result is False
+    ctx.close.assert_called_once_with()
+
+
+def test_programmatic_openevolve_config_infers_policy(tmp_path):
+    ctx = SimpleNamespace(log_dir=tmp_path)
+    config = OpenEvolveSearchConfig(num_islands=1)
+
+    name, policy = _initialize_search_policy(
+        ctx,
+        Population(),
+        requested=None,
+        seed=1,
+        config=config,
+        objectives=None,
+    )
+
+    assert name.value == "openevolve"
+    assert isinstance(policy, OpenEvolveSearchPolicy)
+    assert policy.config == config
+
+
+def test_programmatic_openevolve_config_rejects_vibesys_policy(tmp_path):
+    ctx = SimpleNamespace(log_dir=tmp_path)
+
+    with pytest.raises(ValueError, match="requires the OpenEvolve search policy"):
+        _initialize_search_policy(
+            ctx,
+            Population(),
+            requested="vibesys",
+            seed=1,
+            config=OpenEvolveSearchConfig(),
+            objectives=None,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Helper units: failure lessons, WIP-seed lookup, per-candidate Modal app
 # ---------------------------------------------------------------------------
@@ -769,8 +903,7 @@ def test_plan_candidate_falls_back_to_latest_passer_then_none():
         frontier_bias=0.7,
     )
     assert plan is not None
-    parent, _inspirations = plan
-    assert parent.id == 1
+    assert plan.parent.id == 1
 
 
 def test_run_generation_parallel_bounds_concurrency_and_records_all(tmp_path, monkeypatch):
@@ -828,6 +961,7 @@ def test_run_generation_parallel_bounds_concurrency_and_records_all(tmp_path, mo
         domain_definition=_LLM_SERVING_DOMAIN,
         pass_criteria="crit",
         keep_modal_apps=False,
+        search_policy=VibeSysSearchPolicy(),
     )
 
     # Cap respected, never exceeded.
@@ -854,7 +988,7 @@ def test_run_generation_parallel_skips_parent_without_commit(tmp_path, monkeypat
     monkeypatch.setattr(
         evolve_loop,
         "_plan_candidate",
-        lambda *a, **k: (seed, []),
+        lambda *a, **k: SearchSelection(parent=seed, inspirations=[]),
     )
     called = False
 
@@ -886,6 +1020,7 @@ def test_run_generation_parallel_skips_parent_without_commit(tmp_path, monkeypat
         domain_definition=_LLM_SERVING_DOMAIN,
         pass_criteria="crit",
         keep_modal_apps=False,
+        search_policy=VibeSysSearchPolicy(),
     )
 
     assert called is False  # commit-less parent never dispatched
@@ -919,6 +1054,8 @@ def test_evaluate_in_subcontext_skips_parent_without_commit():
         domain_definition=_LLM_SERVING_DOMAIN,
         pass_criteria="crit",
         keep_modal_apps=False,
+        policy_parent_id=None,
+        target_island=None,
         worktree_lock=threading.Lock(),
     )
 
@@ -978,6 +1115,8 @@ def test_evaluate_in_subcontext_builds_worktree_and_evaluates(tmp_path, ref_file
             domain_definition=_LLM_SERVING_DOMAIN,
             pass_criteria="be faster",
             keep_modal_apps=False,
+            policy_parent_id=None,
+            target_island=None,
             worktree_lock=threading.Lock(),
         )
 

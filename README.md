@@ -289,6 +289,10 @@ resources/                        # framework-owned assets exposed to agent runs
   The input bundle's domain supplies role prompts, environment hooks, and
   profiler compatibility. No early stop; runs the full
   `--max-generations × --children-per-generation`.
+  Pass `--search-policy openevolve` to delegate population sampling,
+  MAP-Elites archiving, islands, and migration to pinned OpenEvolve 0.3.1;
+  VibeSys still owns agent mutation and multi-file evaluation. See
+  [`docs/openevolve.md`](docs/openevolve.md).
 
 ## Development
 

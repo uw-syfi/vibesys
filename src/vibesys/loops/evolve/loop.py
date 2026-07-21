@@ -50,6 +50,14 @@ from vibesys.loops.evolve.population import (
     Objective,
     Population,
 )
+from vibesys.loops.evolve.search_policy import (
+    OpenEvolveSearchConfig,
+    OpenEvolveSearchPolicy,
+    SearchPolicy,
+    SearchPolicyName,
+    SearchSelection,
+    VibeSysSearchPolicy,
+)
 from vibesys.loops.profiler import invoke_profiler
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.run import LoopContext, RepositoryVisibility
@@ -107,6 +115,33 @@ def _discard_working_tree(ctx: LoopContext) -> None:
         ctx.git.run(["git", "clean", "-fd"], check=False)
     except Exception as exc:
         ctx.lprint(f"[warn] discard working tree failed: {exc}")
+
+
+def _candidate_code(ctx: LoopContext, commit: str) -> str:
+    """Canonical multi-file patch used as OpenEvolve's program representation."""
+    roots = (
+        ctx.git.run(
+            ["git", "rev-list", "--max-parents=0", "--reverse", commit],
+        )
+        .stdout.decode(errors="replace")
+        .splitlines()
+    )
+    if not roots:
+        raise ValueError(f"cannot resolve workspace baseline for commit {commit}")
+    return ctx.git.run(
+        [
+            "git",
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "--full-index",
+            roots[0],
+            commit,
+            "--",
+            ".",
+            ":(exclude)logs/**",
+        ]
+    ).stdout.decode(errors="replace")
 
 
 def _teardown_candidate_app(ctx: LoopContext, cand_app: str | None, *, keep: bool) -> None:
@@ -407,6 +442,8 @@ class _CandidateOutcome:
     perf_metric: float | None = None
     perf_unit: str | None = None
     metrics: dict[str, float] = field(default_factory=dict)
+    policy_parent_id: str | None = None
+    target_island: int | None = None
 
 
 def _evaluate_candidate(
@@ -422,6 +459,8 @@ def _evaluate_candidate(
     domain_definition: DomainDefinition,
     pass_criteria: str,
     keep_modal_apps: bool,
+    policy_parent_id: str | None = None,
+    target_island: int | None = None,
     isolated_app: bool = False,
 ) -> _CandidateOutcome:
     """Mutate → judge → (profile → commit) one candidate on ``ctx``.
@@ -489,6 +528,8 @@ def _evaluate_candidate(
                 inspiration_ids=inspiration_ids,
                 summary=mutator.summary,
                 feedback=verdict.feedback,
+                policy_parent_id=policy_parent_id,
+                target_island=target_island,
             )
 
         # 3. Profile the offspring to get its fitness.
@@ -516,6 +557,8 @@ def _evaluate_candidate(
             perf_metric=summary.perf_metric if summary else None,
             perf_unit=summary.perf_unit if summary else None,
             metrics=dict(summary.metrics) if summary and summary.metrics else {},
+            policy_parent_id=policy_parent_id,
+            target_island=target_island,
         )
     finally:
         _teardown_candidate_app(ctx, cand_app, keep=keep_modal_apps)
@@ -528,6 +571,8 @@ def _record_outcome(
     outcome: _CandidateOutcome,
     *,
     generation: int,
+    search_policy: SearchPolicy,
+    objectives: list[Objective] | None,
 ) -> Individual:
     """Assign an id, add the individual to the population, and persist it.
 
@@ -547,10 +592,22 @@ def _record_outcome(
         passed=outcome.passed,
         summary=outcome.summary,
         feedback=outcome.feedback or "",
+        policy_parent_id=outcome.policy_parent_id,
+        policy_target_island=outcome.target_island,
     )
     population.add(individual)
     population.save(population_path)
     if outcome.passed:
+        if individual.commit:
+            search_policy.record(
+                individual,
+                code=(
+                    _candidate_code(ctx, individual.commit) if search_policy.requires_code else ""
+                ),
+                policy_parent_id=outcome.policy_parent_id,
+                target_island=outcome.target_island,
+                objectives=objectives,
+            )
         metrics_repr = (
             " ".join(f"{k}={v:g}" for k, v in individual.metrics.items())
             if individual.metrics
@@ -578,7 +635,8 @@ def _plan_candidate(
     selection_temperature: float,
     objectives: list[Objective] | None,
     frontier_bias: float,
-) -> tuple[Individual, list[Individual]] | None:
+    search_policy: SearchPolicy | None = None,
+) -> SearchSelection | None:
     """Select a (parent, inspirations) pair from the current population.
 
     Reads ``population`` and advances ``rng`` — must be called from a single
@@ -589,26 +647,19 @@ def _plan_candidate(
     profiler disabled), in which case we fall back to the latest passer so the
     loop never cold-starts.
     """
-    parent = population.select_parent(
+    policy = search_policy or VibeSysSearchPolicy()
+    selection = policy.select(
+        population,
         rng=rng,
-        temperature=selection_temperature,
+        k_top_inspirations=k_top_inspirations,
+        k_random_inspirations=k_random_inspirations,
+        selection_temperature=selection_temperature,
         objectives=objectives,
         frontier_bias=frontier_bias,
     )
-    inspirations = population.select_inspirations(
-        parent_id=parent.id if parent else None,
-        k_top=k_top_inspirations,
-        k_random=k_random_inspirations,
-        rng=rng,
-        objectives=objectives,
-    )
-    if parent is None:
-        passers = population.passed
-        if not passers:
-            ctx.lprint("[warn] no passing parent available; skipping candidate")
-            return None
-        parent = passers[-1]
-    return parent, inspirations
+    if selection is None:
+        ctx.lprint("[warn] no passing parent available; skipping candidate")
+    return selection
 
 
 def _run_generation_serial(
@@ -630,6 +681,7 @@ def _run_generation_serial(
     domain_definition: DomainDefinition,
     pass_criteria: str,
     keep_modal_apps: bool,
+    search_policy: SearchPolicy,
 ) -> None:
     """Evaluate a generation's candidates one at a time on the shared context."""
     for child_idx in range(1, children_per_generation + 1):
@@ -647,10 +699,12 @@ def _run_generation_serial(
                 selection_temperature=selection_temperature,
                 objectives=objectives,
                 frontier_bias=frontier_bias,
+                search_policy=search_policy,
             )
             if plan is None:
                 continue
-            parent, inspirations = plan
+            parent = plan.parent
+            inspirations = plan.inspirations
             if parent.commit and not ctx.git.checkout_tree(parent.commit, clean=True):
                 ctx.lprint(
                     f"[warn] could not check out parent {parent.id} "
@@ -670,8 +724,18 @@ def _run_generation_serial(
                 domain_definition=domain_definition,
                 pass_criteria=pass_criteria,
                 keep_modal_apps=keep_modal_apps,
+                policy_parent_id=plan.policy_parent_id,
+                target_island=plan.target_island,
             )
-            _record_outcome(ctx, population, population_path, outcome, generation=generation)
+            _record_outcome(
+                ctx,
+                population,
+                population_path,
+                outcome,
+                generation=generation,
+                search_policy=search_policy,
+                objectives=objectives,
+            )
             if not outcome.passed:
                 # Dead-end mutation: revert the dirty tree back to the passing
                 # parent for the next candidate.
@@ -694,6 +758,8 @@ def _evaluate_in_subcontext(
     domain_definition: DomainDefinition,
     pass_criteria: str,
     keep_modal_apps: bool,
+    policy_parent_id: str | None,
+    target_island: int | None,
     worktree_lock: threading.Lock,
 ) -> _CandidateOutcome:
     """Run one candidate in its own isolated sub-context (worker thread).
@@ -749,6 +815,8 @@ def _evaluate_in_subcontext(
             domain_definition=domain_definition,
             pass_criteria=pass_criteria,
             keep_modal_apps=keep_modal_apps,
+            policy_parent_id=policy_parent_id,
+            target_island=target_island,
             isolated_app=True,
         )
     except Exception as exc:
@@ -789,6 +857,7 @@ def _run_generation_parallel(
     domain_definition: DomainDefinition,
     pass_criteria: str,
     keep_modal_apps: bool,
+    search_policy: SearchPolicy,
 ) -> None:
     """Evaluate a generation's candidates concurrently in isolated sub-contexts.
 
@@ -799,7 +868,7 @@ def _run_generation_parallel(
     after the pool drains — so id assignment and ``Population`` mutation stay on
     one thread.
     """
-    plans: list[tuple[int, Individual, list[Individual]]] = []
+    plans: list[tuple[int, SearchSelection]] = []
     for child_idx in range(1, children_per_generation + 1):
         plan = _plan_candidate(
             parent_ctx,
@@ -810,17 +879,18 @@ def _run_generation_parallel(
             selection_temperature=selection_temperature,
             objectives=objectives,
             frontier_bias=frontier_bias,
+            search_policy=search_policy,
         )
         if plan is None:
             continue
-        parent, inspirations = plan
+        parent = plan.parent
         if not parent.commit:
             parent_ctx.lprint(
                 f"[warn] parent {parent.id} has no commit; cannot isolate "
                 f"candidate g{generation}c{child_idx}; skipping"
             )
             continue
-        plans.append((child_idx, parent, inspirations))
+        plans.append((child_idx, plan))
 
     if not plans:
         return
@@ -842,17 +912,19 @@ def _run_generation_parallel(
                 cli_provider=cli_provider,
                 generation=generation,
                 child_idx=child_idx,
-                parent=parent,
-                inspirations=inspirations,
+                parent=plan.parent,
+                inspirations=plan.inspirations,
                 objective=objective,
                 objectives=objectives,
                 modality=modality,
                 domain_definition=domain_definition,
                 pass_criteria=pass_criteria,
                 keep_modal_apps=keep_modal_apps,
+                policy_parent_id=plan.policy_parent_id,
+                target_island=plan.target_island,
                 worktree_lock=worktree_lock,
             ): child_idx
-            for (child_idx, parent, inspirations) in plans
+            for (child_idx, plan) in plans
         }
         for future in as_completed(futures):
             outcomes[futures[future]] = future.result()
@@ -860,7 +932,13 @@ def _run_generation_parallel(
     # Record serially, in child order, on this (single) thread.
     for child_idx in sorted(outcomes):
         _record_outcome(
-            parent_ctx, population, population_path, outcomes[child_idx], generation=generation
+            parent_ctx,
+            population,
+            population_path,
+            outcomes[child_idx],
+            generation=generation,
+            search_policy=search_policy,
+            objectives=objectives,
         )
 
 
@@ -881,6 +959,7 @@ def _bootstrap_seed(
     rng: random.Random,
     population: Population,
     population_path: Path,
+    search_policy: SearchPolicy,
     keep_modal_apps: bool = False,
 ) -> Individual | None:
     """Iterate implementer → judge until a first *passing* seed exists.
@@ -1023,6 +1102,14 @@ def _bootstrap_seed(
             )
             population.add(seed)
             population.save(population_path)
+            if commit:
+                search_policy.record(
+                    seed,
+                    code=_candidate_code(ctx, commit) if search_policy.requires_code else "",
+                    policy_parent_id=None,
+                    target_island=None,
+                    objectives=objectives,
+                )
             ctx.lprint(
                 f"[bootstrap {attempt}] PASSED — seed #{seed.id} "
                 f"perf={seed.perf_metric} {seed.perf_unit or ''} "
@@ -1039,6 +1126,51 @@ def _bootstrap_seed(
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
+
+
+def _initialize_search_policy(
+    ctx: LoopContext,
+    population: Population,
+    *,
+    requested: SearchPolicyName | str | None,
+    seed: int | None,
+    config: OpenEvolveSearchConfig | None,
+    objectives: list[Objective] | None,
+) -> tuple[SearchPolicyName, SearchPolicy]:
+    state_dir = ctx.log_dir / "openevolve"
+    if requested is None:
+        policy_name = (
+            SearchPolicyName.OPENEVOLVE
+            if config is not None or OpenEvolveSearchPolicy.has_state(state_dir)
+            else SearchPolicyName.VIBESYS
+        )
+    else:
+        policy_name = SearchPolicyName(requested)
+        if policy_name is SearchPolicyName.VIBESYS and config is not None:
+            raise ValueError("OpenEvolve configuration requires the OpenEvolve search policy")
+    if policy_name is not SearchPolicyName.OPENEVOLVE:
+        return policy_name, VibeSysSearchPolicy()
+
+    policy = OpenEvolveSearchPolicy(
+        state_dir=state_dir,
+        seed=seed,
+        config=config,
+        objectives=objectives,
+    )
+    for individual in population.passed:
+        if not individual.commit:
+            continue
+        policy.record(
+            individual,
+            code=_candidate_code(ctx, individual.commit),
+            policy_parent_id=(
+                individual.policy_parent_id
+                or (f"vibesys-{individual.parent_id}" if individual.parent_id is not None else None)
+            ),
+            target_island=individual.policy_target_island,
+            objectives=objectives,
+        )
+    return policy_name, policy
 
 
 def run_evolve_loop(
@@ -1077,6 +1209,8 @@ def run_evolve_loop(
     bootstrap_max_attempts: int = 5,
     keep_modal_apps: bool = False,
     max_parallelism: int = 1,
+    search_policy: SearchPolicyName | str | None = None,
+    openevolve_config: OpenEvolveSearchConfig | None = None,
     remote_repo: str | None = None,
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
 ) -> bool:
@@ -1131,7 +1265,25 @@ def run_evolve_loop(
         ctx.lprint("[log] single-objective mode (no Pareto frontier)")
 
     population_path = ctx.log_dir / "population.json"
-    population = Population.load(population_path)
+    try:
+        population = Population.load(population_path)
+        policy_name, policy = _initialize_search_policy(
+            ctx,
+            population,
+            requested=search_policy,
+            seed=seed,
+            config=openevolve_config,
+            objectives=objectives,
+        )
+    except KeyboardInterrupt:
+        ctx.lprint("[evolutionary] interrupted during search-policy initialization.")
+        ctx.close()
+        return False
+    except Exception as exc:
+        ctx.lprint(f"[evolutionary] search-policy initialization failed: {exc}")
+        ctx.close()
+        return False
+    ctx.lprint(f"[log] search policy: {policy_name.value}")
 
     rng = random.Random(seed)
 
@@ -1151,6 +1303,7 @@ def run_evolve_loop(
                 rng=rng,
                 population=population,
                 population_path=population_path,
+                search_policy=policy,
                 keep_modal_apps=keep_modal_apps,
             )
             if seed_individual is None:
@@ -1204,6 +1357,7 @@ def run_evolve_loop(
                     domain_definition=domain_definition,
                     pass_criteria=pass_criteria,
                     keep_modal_apps=keep_modal_apps,
+                    search_policy=policy,
                 )
             else:
                 _run_generation_serial(
@@ -1224,7 +1378,10 @@ def run_evolve_loop(
                     domain_definition=domain_definition,
                     pass_criteria=pass_criteria,
                     keep_modal_apps=keep_modal_apps,
+                    search_policy=policy,
                 )
+
+            policy.finish_generation(generation)
 
         if objectives:
             front = population.frontier(objectives)
