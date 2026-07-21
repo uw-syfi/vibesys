@@ -610,6 +610,7 @@ def _run_framework_accuracy_gate(
     round_number: int,
     retry: int,
     progress_path: Path,
+    timeout_seconds: int | None = None,
 ) -> str | None:
     """Run the immutable manifest accuracy command after an agent reports PASS."""
     changed = ctx.trusted_input_changes()
@@ -632,7 +633,10 @@ def _run_framework_accuracy_gate(
 
     ctx.lprint(f"[framework-accuracy] running: {command}")
     try:
-        result = ctx.judge_backend.execute(command)
+        if timeout_seconds is None:
+            result = ctx.judge_backend.execute(command)
+        else:
+            result = ctx.judge_backend.execute(command, timeout=timeout_seconds)
         output = result.output.strip()
         passed = result.exit_code == 0
         _publish_subprocess_output(
@@ -696,6 +700,7 @@ def _run_framework_benchmark(
     round_number: int,
     retry: int,
     progress_path: Path,
+    timeout_seconds: int | None = None,
 ) -> tuple[str | None, float | None]:
     """Run and parse an opt-in trusted benchmark result contract."""
     if result_spec is None:
@@ -720,7 +725,10 @@ def _run_framework_benchmark(
         passed = False
     else:
         try:
-            result = ctx.judge_backend.execute(command)
+            if timeout_seconds is None:
+                result = ctx.judge_backend.execute(command)
+            else:
+                result = ctx.judge_backend.execute(command, timeout=timeout_seconds)
             output = result.output.strip()
             passed = result.exit_code == 0
             _publish_subprocess_output(
@@ -811,6 +819,8 @@ def _run_framework_gates(
     round_number: int,
     retry: int,
     progress_path: Path,
+    accuracy_timeout_seconds: int | None = None,
+    benchmark_timeout_seconds: int | None = None,
 ) -> tuple[str | None, float | None]:
     if ctx.agent_runner.backend_name == "stub":
         return None, None
@@ -819,6 +829,7 @@ def _run_framework_gates(
         round_number=round_number,
         retry=retry,
         progress_path=progress_path,
+        timeout_seconds=accuracy_timeout_seconds,
     )
     if feedback is not None:
         return feedback, None
@@ -828,6 +839,7 @@ def _run_framework_gates(
         round_number=round_number,
         retry=retry,
         progress_path=progress_path,
+        timeout_seconds=benchmark_timeout_seconds,
     )
 
 
@@ -847,6 +859,8 @@ def run_agent_loop(
     workspace_seed: Path | None = None,
     evaluator_path: Path | None = None,
     benchmark_result: BenchmarkResult | None = None,
+    accuracy_timeout_seconds: int | None = None,
+    benchmark_timeout_seconds: int | None = None,
     max_rounds: int = 24,
     max_retries_per_round: int = 3,
     start_round: int = 1,
@@ -1080,6 +1094,8 @@ def run_agent_loop(
                                 round_number=round_number,
                                 retry=retry,
                                 progress_path=progress_path,
+                                accuracy_timeout_seconds=accuracy_timeout_seconds,
+                                benchmark_timeout_seconds=benchmark_timeout_seconds,
                             )
                             if gate_feedback is None:
                                 passed = True
@@ -1109,6 +1125,8 @@ def run_agent_loop(
                                 round_number=round_number,
                                 retry=retry,
                                 progress_path=progress_path,
+                                accuracy_timeout_seconds=accuracy_timeout_seconds,
+                                benchmark_timeout_seconds=benchmark_timeout_seconds,
                             )
                             if gate_feedback is None:
                                 passed = True

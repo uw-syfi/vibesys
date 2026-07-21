@@ -16,3 +16,8 @@ state cardinality and should execute repeated mutation epochs where benchmark
 traffic can revisit the same records. Seed catalogs must be verified through
 their public point and secondary query paths as well as exact list membership;
 a synthesized list is not proof of a usable index.
+
+Applications without a public cleanup API, such as Hotel Reservation, must use
+collision-resistant fixture namespaces and state the residual-mutation contract
+explicitly. They must not register fictional cleanup callbacks or report a
+property as restored when persistent state remains.

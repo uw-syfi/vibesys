@@ -20,9 +20,11 @@ import (
 	"time"
 
 	"vibesys/microservice-evaluator/accuracy"
+	accuracyhotel "vibesys/microservice-evaluator/accuracyapps/hotel"
 	accuracytrainticket "vibesys/microservice-evaluator/accuracyapps/trainticket"
 	"vibesys/microservice-evaluator/api"
 	"vibesys/microservice-evaluator/apps/declarative"
+	benchmarkhotel "vibesys/microservice-evaluator/apps/hotel"
 	"vibesys/microservice-evaluator/apps/socialnetwork"
 	benchmarktrainticket "vibesys/microservice-evaluator/apps/trainticket"
 	"vibesys/microservice-evaluator/config"
@@ -37,15 +39,17 @@ var version = "dev"
 type targetOverrides map[string]string
 
 type modeFlagConfig struct {
-	mode           string
-	explicit       map[string]bool
-	outputRaw      string
-	casesMin       int
-	casesMax       int
-	startupTimeout float64
-	runCommandJSON string
-	stateDir       string
-	stateEnv       string
+	mode               string
+	explicit           map[string]bool
+	outputRaw          string
+	casesMin           int
+	casesMax           int
+	startupTimeout     float64
+	runCommandJSON     string
+	stopCommandJSON    string
+	cleanupCommandJSON string
+	stateDir           string
+	stateEnv           string
 }
 
 func (o *targetOverrides) String() string {
@@ -68,7 +72,7 @@ func main() {
 	}
 }
 
-func run() error {
+func run() (resultErr error) {
 	var mode string
 	var workloadPath string
 	var profile string
@@ -89,6 +93,8 @@ func run() error {
 	var casesMax int
 	var startupTimeout float64
 	var runCommandJSON string
+	var stopCommandJSON string
+	var cleanupCommandJSON string
 	var candidateDir string
 	var stateDir string
 	var stateEnv string
@@ -112,8 +118,10 @@ func run() error {
 	flag.IntVar(&casesMin, "cases-min", 2, "minimum randomized cases in accuracy mode")
 	flag.IntVar(&casesMax, "cases-max", 5, "maximum randomized cases in accuracy mode")
 	flag.Float64Var(&startupTimeout, "startup-timeout", 15, "candidate readiness timeout in seconds")
-	flag.StringVar(&runCommandJSON, "run-command-json", "", "managed candidate command as a JSON string array in accuracy mode")
-	flag.StringVar(&candidateDir, "candidate-dir", ".", "managed candidate working directory in accuracy mode")
+	flag.StringVar(&runCommandJSON, "run-command-json", "", "managed candidate command as a JSON string array")
+	flag.StringVar(&stopCommandJSON, "stop-command-json", "", "managed candidate stop or restart command as a JSON string array")
+	flag.StringVar(&cleanupCommandJSON, "cleanup-command-json", "", "managed candidate final cleanup command as a JSON string array")
+	flag.StringVar(&candidateDir, "candidate-dir", ".", "managed candidate working directory")
 	flag.StringVar(&stateDir, "state-dir", "", "managed candidate persistent state directory in accuracy mode")
 	flag.StringVar(&stateEnv, "state-env", "VIBESYS_STATE_DIR", "environment variable receiving --state-dir in accuracy mode")
 	flag.Parse()
@@ -122,7 +130,9 @@ func run() error {
 	if err := validateModeFlags(modeFlagConfig{
 		mode: mode, explicit: explicitFlags, outputRaw: outputRaw,
 		casesMin: casesMin, casesMax: casesMax, startupTimeout: startupTimeout,
-		runCommandJSON: runCommandJSON, stateDir: stateDir, stateEnv: stateEnv,
+		runCommandJSON: runCommandJSON, stopCommandJSON: stopCommandJSON,
+		cleanupCommandJSON: cleanupCommandJSON,
+		stateDir:           stateDir, stateEnv: stateEnv,
 	}); err != nil {
 		return err
 	}
@@ -191,6 +201,9 @@ func run() error {
 	if err := registry.RegisterApplication("declarative", declarative.New); err != nil {
 		return err
 	}
+	if err := registry.RegisterApplication("hotel", benchmarkhotel.New); err != nil {
+		return err
+	}
 	if err := registry.RegisterApplication("social-network", socialnetwork.New); err != nil {
 		return err
 	}
@@ -198,6 +211,9 @@ func run() error {
 		return err
 	}
 	if err := registry.RegisterAccuracyApplication("train-ticket", accuracytrainticket.New); err != nil {
+		return err
+	}
+	if err := registry.RegisterAccuracyApplication("hotel", accuracyhotel.New); err != nil {
 		return err
 	}
 	if mode == "benchmark" {
@@ -257,10 +273,45 @@ func run() error {
 			casesMax,
 			startupTimeout,
 			runCommandJSON,
+			stopCommandJSON,
+			cleanupCommandJSON,
 			candidateDir,
 			stateDir,
 			stateEnv,
 		)
+	}
+	var managed *lifecycle.ManagedCandidate
+	if runCommandJSON != "" {
+		command, parseErr := parseCommandJSON(runCommandJSON, "--run-command-json")
+		if parseErr != nil {
+			return parseErr
+		}
+		var stopCommand []string
+		if stopCommandJSON != "" {
+			stopCommand, parseErr = parseCommandJSON(stopCommandJSON, "--stop-command-json")
+			if parseErr != nil {
+				return parseErr
+			}
+		}
+		var cleanupCommand []string
+		if cleanupCommandJSON != "" {
+			cleanupCommand, parseErr = parseCommandJSON(cleanupCommandJSON, "--cleanup-command-json")
+			if parseErr != nil {
+				return parseErr
+			}
+		}
+		managed, err = lifecycle.NewManagedCandidate(command, stopCommand, cleanupCommand, candidateDir, nil)
+		if err != nil {
+			return err
+		}
+		if err := managed.Prepare(ctx); err != nil {
+			return fmt.Errorf("prepare managed candidate: %w", err)
+		}
+		defer func() {
+			if closeErr := managed.Close(context.WithoutCancel(ctx)); closeErr != nil && resultErr == nil {
+				resultErr = fmt.Errorf("close managed candidate: %w", closeErr)
+			}
+		}()
 	}
 	runner := engine.New(registry, engine.Options{
 		EngineVersion:  version,
@@ -300,9 +351,7 @@ func validateModeFlags(config modeFlagConfig) error {
 	if config.startupTimeout <= 0 {
 		return fmt.Errorf("--startup-timeout must be positive")
 	}
-	accuracyOnly := []string{
-		"cases-min", "cases-max", "run-command-json", "candidate-dir", "state-dir", "state-env",
-	}
+	accuracyOnly := []string{"cases-min", "cases-max", "state-dir", "state-env"}
 	benchmarkOnly := []string{
 		"output-raw", "skip-prepare", "fixture-seed", "rate", "duration", "warmup", "concurrency", "repetitions",
 	}
@@ -312,37 +361,50 @@ func validateModeFlags(config modeFlagConfig) error {
 				return fmt.Errorf("--%s is only available in accuracy mode", name)
 			}
 		}
-		if config.runCommandJSON != "" || config.stateDir != "" {
-			return errors.New("managed candidate flags are only available in accuracy mode")
+	} else {
+		for _, name := range benchmarkOnly {
+			if config.explicit[name] {
+				return fmt.Errorf("--%s is only available in benchmark mode", name)
+			}
 		}
-		return nil
-	}
-	for _, name := range benchmarkOnly {
-		if config.explicit[name] {
-			return fmt.Errorf("--%s is only available in benchmark mode", name)
+		if config.outputRaw != "" {
+			return errors.New("--output-raw is only available in benchmark mode")
 		}
-	}
-	if config.outputRaw != "" {
-		return errors.New("--output-raw is only available in benchmark mode")
-	}
-	if config.casesMin < 1 || config.casesMax < config.casesMin {
-		return fmt.Errorf(
-			"accuracy case bounds must satisfy 1 <= min <= max, got %d..%d",
-			config.casesMin,
-			config.casesMax,
-		)
+		if config.casesMin < 1 || config.casesMax < config.casesMin {
+			return fmt.Errorf(
+				"accuracy case bounds must satisfy 1 <= min <= max, got %d..%d",
+				config.casesMin,
+				config.casesMax,
+			)
+		}
 	}
 	if config.runCommandJSON != "" {
-		if _, err := parseCommandJSON(config.runCommandJSON); err != nil {
+		if _, err := parseCommandJSON(config.runCommandJSON, "--run-command-json"); err != nil {
 			return err
 		}
-		if config.stateEnv == "" {
+		if config.stopCommandJSON != "" {
+			if _, err := parseCommandJSON(config.stopCommandJSON, "--stop-command-json"); err != nil {
+				return err
+			}
+		}
+		if config.cleanupCommandJSON != "" {
+			if _, err := parseCommandJSON(config.cleanupCommandJSON, "--cleanup-command-json"); err != nil {
+				return err
+			}
+		}
+		if config.mode == "accuracy" && config.stateEnv == "" {
 			return errors.New("--state-env must not be empty")
 		}
 		return nil
 	}
 	if config.stateDir != "" {
 		return errors.New("--state-dir requires --run-command-json")
+	}
+	if config.stopCommandJSON != "" {
+		return errors.New("--stop-command-json requires --run-command-json")
+	}
+	if config.cleanupCommandJSON != "" {
+		return errors.New("--cleanup-command-json requires --run-command-json")
 	}
 	for _, name := range []string{"candidate-dir", "state-env"} {
 		if config.explicit[name] {
@@ -361,6 +423,8 @@ func runAccuracy(
 	casesMax int,
 	startupTimeoutSeconds float64,
 	runCommandJSON string,
+	stopCommandJSON string,
+	cleanupCommandJSON string,
 	candidateDir string,
 	stateDir string,
 	stateEnv string,
@@ -368,9 +432,23 @@ func runAccuracy(
 	var candidate accuracy.CandidateLifecycle
 	var temporaryState string
 	if runCommandJSON != "" {
-		command, err := parseCommandJSON(runCommandJSON)
+		command, err := parseCommandJSON(runCommandJSON, "--run-command-json")
 		if err != nil {
 			return err
+		}
+		var stopCommand []string
+		if stopCommandJSON != "" {
+			stopCommand, err = parseCommandJSON(stopCommandJSON, "--stop-command-json")
+			if err != nil {
+				return err
+			}
+		}
+		var cleanupCommand []string
+		if cleanupCommandJSON != "" {
+			cleanupCommand, err = parseCommandJSON(cleanupCommandJSON, "--cleanup-command-json")
+			if err != nil {
+				return err
+			}
 		}
 		if stateDir == "" {
 			temporaryState, err = os.MkdirTemp("", "microservice-state-*")
@@ -393,6 +471,8 @@ func runAccuracy(
 		}
 		managed, err := lifecycle.NewManagedCandidate(
 			command,
+			stopCommand,
+			cleanupCommand,
 			candidateDir,
 			map[string]string{stateEnv: stateDir},
 		)
@@ -433,17 +513,17 @@ func runAccuracy(
 	return nil
 }
 
-func parseCommandJSON(raw string) ([]string, error) {
+func parseCommandJSON(raw, flagName string) ([]string, error) {
 	var command []string
 	if err := json.Unmarshal([]byte(raw), &command); err != nil {
-		return nil, fmt.Errorf("--run-command-json must be a JSON string array: %w", err)
+		return nil, fmt.Errorf("%s must be a JSON string array: %w", flagName, err)
 	}
 	if len(command) == 0 {
-		return nil, errors.New("--run-command-json must be a non-empty JSON string array")
+		return nil, fmt.Errorf("%s must be a non-empty JSON string array", flagName)
 	}
 	for index, argument := range command {
 		if argument == "" {
-			return nil, fmt.Errorf("--run-command-json argument %d is empty", index)
+			return nil, fmt.Errorf("%s argument %d is empty", flagName, index)
 		}
 	}
 	return command, nil

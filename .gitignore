@@ -232,6 +232,7 @@ agent.toml
 
 # Experiment environments
 exp_env/
+examples/microservices/hotel-reservation/hotelReservation/
 
 # HuggingFace model cache
 .hf_cache/

@@ -180,6 +180,8 @@ jobs:
           go run ./cmd/servicebench --mode accuracy --workload ../../microservices/train-ticket/benchmark/workload.toml --validate-only
           go run ./cmd/servicebench --workload ../../microservices/train-ticket/benchmark/workload.toml --profile offered-load --validate-only
           go run ./cmd/servicebench --workload ../../microservices/social-network-read-timeline/benchmark/workload.toml --validate-only
+          go run ./cmd/servicebench --workload ../../microservices/hotel-reservation/benchmark/workload.toml --validate-only
+          go run ./cmd/servicebench --mode accuracy --workload ../../microservices/hotel-reservation/benchmark/workload.toml --validate-only
 
   test:
     runs-on: ubuntu-latest
