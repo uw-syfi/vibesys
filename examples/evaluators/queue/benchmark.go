@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"strconv"
 	"time"
 )
+
+var nativeBenchmarkShutdownGrace = 15 * time.Second
 
 type benchmarkConfig struct {
 	candidateConfig
@@ -72,12 +75,21 @@ func runNativeBenchmark(config benchmarkConfig) (benchmarkResult, error) {
 		"--duration-ns", strconv.FormatInt(config.duration.Nanoseconds(), 10),
 		"--output", outputPath,
 	)
-	command := exec.Command(runner, args...)
+	timeout := config.warmup + config.duration + nativeBenchmarkShutdownGrace
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	command := exec.CommandContext(ctx, runner, args...)
 	command.Dir = config.workspace
 	log := newBoundedLog(64 * 1024)
 	command.Stdout = io.Writer(log)
 	command.Stderr = io.Writer(log)
 	if err := command.Run(); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return benchmarkResult{}, fmt.Errorf(
+				"native benchmark timed out after %s; candidate operation or shutdown did not complete",
+				timeout,
+			)
+		}
 		return benchmarkResult{}, fmt.Errorf(
 			"native benchmark failed: %w\nnative runner output:\n%s",
 			err,

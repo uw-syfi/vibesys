@@ -2,9 +2,33 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestNativeBenchmarkTimesOutStuckCandidate(t *testing.T) {
+	workspace := compileCandidateFixtureWithDefines(t, "VSQ_TEST_HANG_CAPACITY_ONE")
+	previousGrace := nativeBenchmarkShutdownGrace
+	nativeBenchmarkShutdownGrace = 100 * time.Millisecond
+	t.Cleanup(func() { nativeBenchmarkShutdownGrace = previousGrace })
+
+	_, err := runNativeBenchmark(benchmarkConfig{
+		candidateConfig: candidateConfig{
+			workspace: workspace,
+			candidate: "queue-candidate.so",
+			scenario:  scenarioSPSC,
+			capacity:  1,
+			valueSize: 8,
+		},
+		producers: 1,
+		consumers: 1,
+		duration:  20 * time.Millisecond,
+	})
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("stuck benchmark error = %v, want timeout", err)
+	}
+}
 
 func TestNativeReferenceBenchmark(t *testing.T) {
 	result, err := runNativeBenchmark(benchmarkConfig{

@@ -68,8 +68,18 @@ sufficient dequeue output, only `VSQ_OK` and `VSQ_EMPTY` are normal results.
 `VSQ_INTERNAL_ERROR`, or `VSQ_INVALID` for otherwise valid arguments, fails
 evaluation.
 
-All operations are nonblocking. Successful operations must form a linearizable
+Operations are try-style: they do not wait for space to become free or for an
+item to arrive. They may synchronize with an operation whose reservation is
+already externally observable. Successful operations must form a linearizable
 bounded FIFO queue. Full and empty observations are part of that history.
+
+Internal reservation is not publication. A reserve-then-copy implementation
+must not let one enqueue complete with `VSQ_FULL` merely because another
+producer reserved the last slot if a later dequeue can still complete with
+`VSQ_EMPTY` before the reserved value is published. The ABI has no `BUSY`
+result, so those completed observations would force contradictory
+linearization orders. An implementation must serialize, wait for, or safely
+help an in-flight publication before returning an externally visible status.
 
 ## Value-size guarantees
 
@@ -85,8 +95,9 @@ the measured implementation.
 
 The correctness gate probes actual lengths 0, 1, 7, 8, 9, intermediate, and
 maximum for 8-byte, 257-byte, and 1 MiB queue profiles. It also checks input
-retention, undersized-output retry, and unchanged output on empty and invalid
-dequeues before running concurrent Porcupine histories.
+retention, undersized-output retry, concurrent short/full-buffer consumers,
+reservation-gap histories, and unchanged output on empty and invalid dequeues
+before running concurrent Porcupine histories.
 
 The evaluator may run multiple independent benchmark repetitions. Its
 `total_ops_per_sec` field is the median repetition, and the JSON output includes
