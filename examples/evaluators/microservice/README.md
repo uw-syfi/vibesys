@@ -174,6 +174,7 @@ retains one observation per measured logical operation for diagnosis.
 | [`appsupport/`](appsupport/) | Mode-neutral topology, preflight, input, and authentication grammars |
 | [`apps/`](apps/) | Application-adapter extension layer |
 | [`apps/declarative/`](apps/declarative/) | Declarative HTTP request and response adapter |
+| [`apps/hotel/`](apps/hotel/) | Typed DeathStarBench Hotel Reservation adapter |
 | [`apps/socialnetwork/`](apps/socialnetwork/) | Typed DeathStarBench Social Network adapter |
 | [`cmd/`](cmd/) | Executable composition roots |
 | [`cmd/servicebench/`](cmd/servicebench/) | Benchmark and accuracy CLI |
@@ -213,6 +214,7 @@ See the checked-in workloads for complete examples:
 
 - `../../microservices/train-ticket/benchmark/workload.toml`
 - `../../microservices/social-network-read-timeline/benchmark/workload.toml`
+- `../../microservices/hotel-reservation/benchmark/workload.toml`
 
 ## Running the evaluator
 
@@ -236,6 +238,13 @@ go -C examples/evaluators/microservice run ./cmd/servicebench \
 
 Use `go run ./cmd/servicebench --help` from this directory for target, load,
 profile, fixture, and output overrides.
+
+Managed accuracy and benchmark runs may pair `--run-command-json` with
+`--stop-command-json` and `--cleanup-command-json`. The stop command runs from
+the candidate directory whenever the contained process is stopped, including
+accuracy restarts. The cleanup command runs once when the managed lifecycle
+closes, allowing an external supervisor such as Docker Compose to remove the
+remaining project resources after restart-sensitive checks are complete.
 
 ## Testing
 

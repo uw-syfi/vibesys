@@ -44,10 +44,12 @@ done
 // constructor fails closed when bubblewrap is unavailable: process-tree
 // sampling cannot prove that a fast daemon did not escape before a crash.
 type ManagedCandidate struct {
-	command []string
-	cwd     string
-	env     map[string]string
-	bwrap   string
+	command        []string
+	stopCommand    []string
+	cleanupCommand []string
+	cwd            string
+	env            map[string]string
+	bwrap          string
 
 	mu        sync.Mutex
 	cmd       *exec.Cmd
@@ -60,6 +62,8 @@ type ManagedCandidate struct {
 
 func NewManagedCandidate(
 	command []string,
+	stopCommand []string,
+	cleanupCommand []string,
 	cwd string,
 	environment map[string]string,
 ) (*ManagedCandidate, error) {
@@ -69,6 +73,16 @@ func NewManagedCandidate(
 	for index, argument := range command {
 		if argument == "" {
 			return nil, fmt.Errorf("managed candidate command argument %d is empty", index)
+		}
+	}
+	for index, argument := range stopCommand {
+		if argument == "" {
+			return nil, fmt.Errorf("managed candidate stop command argument %d is empty", index)
+		}
+	}
+	for index, argument := range cleanupCommand {
+		if argument == "" {
+			return nil, fmt.Errorf("managed candidate cleanup command argument %d is empty", index)
 		}
 	}
 	absCWD, err := filepath.Abs(cwd)
@@ -99,12 +113,14 @@ func NewManagedCandidate(
 		return nil, fmt.Errorf("create candidate log: %w", err)
 	}
 	return &ManagedCandidate{
-		command: append([]string(nil), command...),
-		cwd:     absCWD,
-		env:     cloneEnvironment(environment),
-		bwrap:   bwrap,
-		log:     log,
-		logPath: log.Name(),
+		command:        append([]string(nil), command...),
+		stopCommand:    append([]string(nil), stopCommand...),
+		cleanupCommand: append([]string(nil), cleanupCommand...),
+		cwd:            absCWD,
+		env:            cloneEnvironment(environment),
+		bwrap:          bwrap,
+		log:            log,
+		logPath:        log.Name(),
 	}, nil
 }
 
@@ -198,7 +214,7 @@ func (m *ManagedCandidate) Stop(ctx context.Context, hard bool) error {
 	select {
 	case <-waitDone:
 		m.clear(command)
-		return nil
+		return m.runStopCommand(ctx)
 	default:
 	}
 
@@ -216,8 +232,34 @@ func (m *ManagedCandidate) Stop(ctx context.Context, hard bool) error {
 		return fmt.Errorf("contained candidate did not terminate after %s", stopTimeout)
 	}
 	m.clear(command)
+	if err := m.runStopCommand(ctx); err != nil {
+		return err
+	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (m *ManagedCandidate) runStopCommand(ctx context.Context) error {
+	return m.runCommand(ctx, m.stopCommand, "stop")
+}
+
+func (m *ManagedCandidate) runCommand(ctx context.Context, arguments []string, name string) error {
+	if len(arguments) == 0 {
+		return nil
+	}
+	command := exec.CommandContext(ctx, arguments[0], arguments[1:]...)
+	command.Dir = m.cwd
+	command.Env = environmentWithOverrides(os.Environ(), m.env)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf(
+			"managed candidate %s command failed: %w: %s",
+			name,
+			err,
+			strings.TrimSpace(string(output)),
+		)
 	}
 	return nil
 }
@@ -245,9 +287,10 @@ func (m *ManagedCandidate) clear(command *exec.Cmd) {
 func (m *ManagedCandidate) Close(ctx context.Context) error {
 	m.closeOnce.Do(func() {
 		stopErr := m.Stop(ctx, false)
+		cleanupErr := m.runCommand(ctx, m.cleanupCommand, "cleanup")
 		logErr := m.log.Close()
 		removeErr := os.Remove(m.logPath)
-		m.closeErr = errors.Join(stopErr, logErr, removeErr)
+		m.closeErr = errors.Join(stopErr, cleanupErr, logErr, removeErr)
 	})
 	return m.closeErr
 }

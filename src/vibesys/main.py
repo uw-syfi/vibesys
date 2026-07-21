@@ -905,6 +905,8 @@ def _run_agent(args: argparse.Namespace) -> None:
         workspace_seed=bundle.workspace_seed_path,
         evaluator_path=bundle.evaluator_path,
         benchmark_result=bundle.benchmark_result,
+        accuracy_timeout_seconds=bundle.manifest.accuracy.timeout_seconds,
+        benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
         objective=objective,
         max_rounds=args.max_rounds,
         max_retries_per_round=args.max_retries_per_round,

@@ -1,0 +1,11 @@
+{
+  "scenario": "hotel-reservation",
+  "target": "DeathStarBench hotelReservation",
+  "repo": "https://github.com/delimitrou/DeathStarBench",
+  "revision": "6ecb09706140f8730b5385c08f1386c654c3c526",
+  "subdir": "hotelReservation",
+  "frontend_port": 5000,
+  "deploy_cmd": "docker compose up -d --build",
+  "teardown_cmd": "docker compose down -v",
+  "primary_metric": "logical operations per second"
+}

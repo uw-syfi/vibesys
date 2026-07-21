@@ -28,6 +28,12 @@ func TestManagedCandidateHelper(t *testing.T) {
 	}
 	mode := os.Args[separator+1]
 	pidFile := os.Args[separator+2]
+	if mode == "stop" {
+		if err := os.WriteFile(pidFile, []byte("stopped"), 0o600); err != nil {
+			os.Exit(3)
+		}
+		return
+	}
 	if mode == "child" {
 		if err := os.WriteFile(pidFile, []byte("ready"), 0o600); err != nil {
 			os.Exit(3)
@@ -66,17 +72,20 @@ func TestManagedCandidateKillsImmediatelyDetachedDescendant(t *testing.T) {
 	}
 	t.Setenv("GO_MANAGED_CANDIDATE_HELPER", "1")
 	pidFile := t.TempDir() + "/child.pid"
+	stopFile := t.TempDir() + "/stopped"
+	cleanupFile := t.TempDir() + "/cleaned"
 	managed, err := NewManagedCandidate(
 		[]string{
 			os.Args[0], "-test.run=TestManagedCandidateHelper", "--", "launcher", pidFile,
 		},
+		[]string{os.Args[0], "-test.run=TestManagedCandidateHelper", "--", "stop", stopFile},
+		[]string{os.Args[0], "-test.run=TestManagedCandidateHelper", "--", "stop", cleanupFile},
 		t.TempDir(),
 		map[string]string{"VIBESYS_STATE_DIR": t.TempDir()},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer managed.Close(context.Background())
 	if err := managed.Prepare(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -97,6 +106,9 @@ func TestManagedCandidateKillsImmediatelyDetachedDescendant(t *testing.T) {
 	if err := managed.Stop(context.Background(), true); err != nil {
 		t.Fatalf("stop managed candidate: %v; log=%s", err, managed.LogTail(4000))
 	}
+	if contents, err := os.ReadFile(stopFile); err != nil || string(contents) != "stopped" {
+		t.Fatalf("stop command output=%q error=%v", contents, err)
+	}
 	deadline = time.Now().Add(2 * time.Second)
 	for pidExists(childPID) && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
@@ -105,11 +117,17 @@ func TestManagedCandidateKillsImmediatelyDetachedDescendant(t *testing.T) {
 		_ = syscall.Kill(childPID, syscall.SIGKILL)
 		t.Fatalf("immediately detached child %d survived", childPID)
 	}
+	if err := managed.Close(context.Background()); err != nil {
+		t.Fatalf("close managed candidate: %v", err)
+	}
+	if contents, err := os.ReadFile(cleanupFile); err != nil || string(contents) != "stopped" {
+		t.Fatalf("cleanup command output=%q error=%v", contents, err)
+	}
 }
 
 func TestManagedCandidateFailsClosedWithoutPIDNamespaceLauncher(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	if _, err := NewManagedCandidate([]string{os.Args[0]}, t.TempDir(), nil); err == nil ||
+	if _, err := NewManagedCandidate([]string{os.Args[0]}, nil, nil, t.TempDir(), nil); err == nil ||
 		!strings.Contains(err.Error(), "requires bubblewrap") {
 		t.Fatalf("containment error=%v", err)
 	}

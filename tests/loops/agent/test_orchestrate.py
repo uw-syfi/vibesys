@@ -285,6 +285,26 @@ def test_framework_accuracy_gate_rejects_checker_failure(tmp_path):
     assert "bad history" in feedback
 
 
+def test_framework_accuracy_gate_uses_manifest_timeout(tmp_path):
+    from vibesys.loops.agent.loop import _run_framework_accuracy_gate
+
+    ctx = MagicMock()
+    ctx.trusted_input_changes.return_value = []
+    ctx.judge_accuracy_command = "trusted-check"
+    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=0, output="PASS")
+
+    feedback = _run_framework_accuracy_gate(
+        ctx,
+        round_number=1,
+        retry=1,
+        progress_path=tmp_path / "progress.md",
+        timeout_seconds=300,
+    )
+
+    assert feedback is None
+    ctx.judge_backend.execute.assert_called_once_with("trusted-check", timeout=300)
+
+
 def test_framework_accuracy_gate_rejects_evaluator_changes_without_execution(tmp_path):
     from vibesys.loops.agent.loop import _run_framework_accuracy_gate
 
@@ -350,11 +370,13 @@ def test_framework_benchmark_extracts_declared_metric(tmp_path):
         round_number=3,
         retry=1,
         progress_path=tmp_path / "progress.md",
+        timeout_seconds=300,
     )
 
     assert feedback is None
     assert metric == 42.5
     executed = ctx.judge_backend.execute.call_args.args[0]
+    assert ctx.judge_backend.execute.call_args.kwargs == {"timeout": 300}
     assert "trusted-benchmark --repetitions 3 --output-json" in executed
     assert "cat /tmp/vibesys-framework-benchmark-3-1.json" in executed
     assert _FRAMEWORK_BENCHMARK_END_MARKER in executed

@@ -1,0 +1,80 @@
+version = 1
+name = "hotel-reservation-canonical-mixed"
+application = "hotel"
+
+[load]
+model = "closed_loop"
+rate = 0
+duration_seconds = 30
+warmup_seconds = 10
+concurrency = 32
+timeout_seconds = 10
+repetitions = 3
+seed = 48
+fixture_seed = 48
+min_offered_rate_ratio = 0.95
+
+[[targets]]
+name = "gateway"
+protocol = "http"
+address = "http://localhost:5000"
+session_policy = "reuse"
+
+[[operations]]
+name = "search_hotels"
+target = "gateway"
+weight = 600
+tags = ["read", "search"]
+
+[[operations]]
+name = "recommend_distance"
+target = "gateway"
+weight = 130
+tags = ["read", "recommendation"]
+
+[[operations]]
+name = "recommend_rate"
+target = "gateway"
+weight = 130
+tags = ["read", "recommendation"]
+
+[[operations]]
+name = "recommend_price"
+target = "gateway"
+weight = 130
+tags = ["read", "recommendation"]
+
+[[operations]]
+name = "login_valid"
+target = "gateway"
+weight = 3
+tags = ["read", "authentication"]
+
+[[operations]]
+name = "login_invalid"
+target = "gateway"
+weight = 2
+tags = ["read", "authentication"]
+
+[[operations]]
+name = "reserve_capacity"
+target = "gateway"
+weight = 5
+tags = ["write", "read-your-write"]
+
+[profiles.quick]
+duration_seconds = 5
+warmup_seconds = 1
+concurrency = 8
+repetitions = 1
+
+[objective]
+name = "logical_operations_per_second"
+metric = "operations_per_second"
+direction = "maximize"
+unit = "operations/s"
+
+[constraints]
+min_success_rate = 1.0
+max_error_rate = 0.0
+min_operations_per_type = 1
