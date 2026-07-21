@@ -1,6 +1,6 @@
 # Queue Evaluator Design
 
-This document describes the v1 architecture for the linearizable queue inputs:
+This document describes the v1 architecture for the bounded queue inputs:
 `queue-spsc`, `queue-mpsc`, and `queue-mpmc`. It explains the trust boundary and
 the split between VibeSys, the Go checker, the Rust native runner, and the
 candidate shared library.
@@ -12,14 +12,14 @@ The exact candidate function contract is specified separately in
 
 - Let a candidate use any language that can export a C ABI.
 - Keep candidate lifetime and ownership requirements simple and explicit.
-- Check bounded FIFO linearizability without trusting candidate-generated
-  histories, timestamps, values, or verdicts.
+- Check each scenario's bounded FIFO history semantics without trusting
+  candidate-generated histories, timestamps, values, or verdicts.
 - Contain ordinary candidate crashes during correctness checking.
 - Measure native queue throughput without per-operation IPC or language-runtime
   overhead in the timed path.
 - Keep benchmark configuration, timing, counters, payload validation, and score
   extraction in evaluator-owned code.
-- Give every linearizable queue input the same editable but untrusted baseline.
+- Give every bounded queue input the same editable but untrusted baseline.
 
 ## Non-goals
 
@@ -153,11 +153,6 @@ output space while the other can accept every value. The probe checks that
 concurrent `INVALID`/`EMPTY` results leave caller storage untouched and that
 all successfully enqueued values are returned exactly once without corruption.
 
-A capacity-one reservation-gap litmus also overlaps two large enqueues, then
-dequeues while the first producer may still be copying. It rejects the
-contradictory completed history `OK`, `FULL`, `EMPTY` that a reserve-then-copy
-ring can otherwise expose when reservation is mistaken for publication.
-
 Each probe process can fail without corrupting Go-owned checker state. Probe
 processes have a trusted wall-clock deadline.
 
@@ -195,17 +190,33 @@ Go, not the candidate, owns:
 Histories are limited to 32 approximate operations. Increasing the number of
 trials provides more schedules without making one Porcupine search intractable.
 
-### Queue Model
+### Queue Models
 
-The Porcupine state is a slice representing the bounded FIFO contents.
+SPSC and MPSC use the exact bounded FIFO model. Its Porcupine state is a slice
+of published values:
 
-- A successful enqueue is legal only below capacity and appends its value.
-- A full enqueue is legal only at capacity and leaves state unchanged.
-- A successful dequeue must return and remove the oldest value.
-- An empty dequeue is legal only when the model state is empty.
+- a successful enqueue is legal only below capacity and appends its value;
+- a full enqueue is legal only at capacity and leaves state unchanged;
+- a successful dequeue must return and remove the oldest value;
+- an empty dequeue is legal only when the state is empty.
 
-Porcupine searches for a sequential ordering that satisfies this model and the
-real-time precedence implied by non-overlapping call/return intervals.
+MPMC uses a reservation-aware model with two state components: a set of
+reserved values and the FIFO sequence of published values. Before checking,
+each successful enqueue is expanded into a reservation event followed by a
+publication event. Both events retain the original operation's call/return
+interval, and the model requires reservation before publication.
+
+- reservation is legal only while reserved plus published items are below
+  capacity;
+- publication moves the value from the reservation set to the FIFO tail;
+- full is legal when reserved plus published items equal capacity;
+- a successful dequeue removes the oldest published value;
+- empty is legal when the published FIFO is empty, regardless of reservations.
+
+Porcupine searches for event orderings that satisfy the selected model and the
+real-time precedence implied by non-overlapping call/return intervals. The MPMC
+expansion captures the two externally relevant points of reserve-copy-publish
+queues without exposing implementation-specific state through the ABI.
 
 ## Correctness Worker Protocol
 

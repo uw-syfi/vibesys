@@ -2,10 +2,8 @@
 
 #include <pthread.h>
 #include <stdbool.h>
-#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 struct item {
     uint8_t *data;
@@ -21,15 +19,10 @@ struct vsq_queue {
     uint64_t size;
     uint32_t producer_count;
     uint32_t consumer_count;
-#ifdef VSQ_TEST_RESERVATION_GAP
-    atomic_bool producer_one_created;
-    atomic_bool reserved;
-#endif
 };
 
 struct vsq_producer {
     struct vsq_queue *queue;
-    uint32_t id;
 };
 
 struct vsq_consumer {
@@ -98,12 +91,6 @@ vsq_status vsq_producer_create(
         return VSQ_INTERNAL_ERROR;
     }
     producer->queue = queue;
-    producer->id = producer_id;
-#ifdef VSQ_TEST_RESERVATION_GAP
-    if (producer_id == 1) {
-        atomic_store_explicit(&queue->producer_one_created, true, memory_order_release);
-    }
-#endif
     *producer_out = producer;
     return VSQ_OK;
 }
@@ -137,29 +124,6 @@ vsq_status vsq_try_enqueue(vsq_producer *producer, const uint8_t *data, uint64_t
         length > producer->queue->max_value_size) {
         return VSQ_INVALID;
     }
-#ifdef VSQ_TEST_RESERVATION_GAP
-    struct vsq_queue *reservation_queue = producer->queue;
-    if (reservation_queue->capacity == 1 &&
-        reservation_queue->max_value_size == (1u << 20) &&
-        atomic_load_explicit(&reservation_queue->producer_one_created,
-                             memory_order_acquire)) {
-        if (producer->id == 0) {
-            atomic_store_explicit(&reservation_queue->reserved, true,
-                                  memory_order_release);
-            const struct timespec delay = {.tv_sec = 0, .tv_nsec = 25000000};
-            (void)nanosleep(&delay, NULL);
-        } else {
-            const struct timespec delay = {.tv_sec = 0, .tv_nsec = 1000000};
-            for (unsigned int attempt = 0; attempt < 100; ++attempt) {
-                if (atomic_load_explicit(&reservation_queue->reserved,
-                                         memory_order_acquire)) {
-                    return VSQ_FULL;
-                }
-                (void)nanosleep(&delay, NULL);
-            }
-        }
-    }
-#endif
 #ifdef VSQ_TEST_HANG_CAPACITY_ONE
     if (producer->queue->capacity == 1) {
         volatile unsigned int keep_running = 1;

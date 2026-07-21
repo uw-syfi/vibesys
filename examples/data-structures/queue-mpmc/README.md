@@ -1,7 +1,9 @@
 # Queue MPMC Input
 
-This input targets a multi-producer, multi-consumer bounded FIFO queue. The
-manifest invokes the trusted Go evaluator directly. Candidates implement the
+This input targets a multi-producer, multi-consumer reservation-aware bounded
+FIFO queue. Successful enqueues reserve capacity before publication; `FULL`
+counts reservations while `EMPTY` observes only published items. The manifest
+invokes the trusted Go evaluator directly. Candidates implement the
 copying C ABI documented at `_evaluator/queue/CANDIDATE_CONTRACT.md` and
 export it from `./queue-candidate.so`.
 
