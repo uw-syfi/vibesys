@@ -41,7 +41,53 @@ func TestScenarioModelsApplyDistinctReservationSemantics(t *testing.T) {
 	if checkScenarioHistory(scenarioSPSC, 1, history) {
 		t.Fatal("exact SPSC model accepted FULL and EMPTY around an unpublished enqueue")
 	}
+	if checkScenarioHistory(scenarioMPSC, 1, history) {
+		t.Fatal("exact MPSC model accepted FULL and EMPTY around an unpublished enqueue")
+	}
 	if !checkScenarioHistory(scenarioMPMC, 1, history) {
 		t.Fatal("reservation-aware MPMC model rejected a reserved but unpublished enqueue")
+	}
+}
+
+func TestModelsAgreeOnSequentialHistories(t *testing.T) {
+	tests := map[string][]recordedOperation{
+		"valid bounded fifo": {
+			enqueueRecord(0, 10, true, 1),
+			enqueueRecord(0, 20, false, 3),
+			dequeueRecord(0, value(10), 5),
+			dequeueRecord(0, nil, 7),
+		},
+		"duplicate payloads": {
+			enqueueRecord(0, 10, true, 1),
+			dequeueRecord(0, value(10), 3),
+			enqueueRecord(0, 10, true, 5),
+			dequeueRecord(0, value(10), 7),
+		},
+		"false full": {
+			enqueueRecord(0, 10, false, 1),
+		},
+		"false empty": {
+			enqueueRecord(0, 10, true, 1),
+			dequeueRecord(0, nil, 3),
+		},
+		"fifo violation": {
+			enqueueRecord(0, 10, true, 1),
+			enqueueRecord(0, 20, true, 3),
+			dequeueRecord(0, value(20), 5),
+		},
+	}
+
+	for name, history := range tests {
+		t.Run(name, func(t *testing.T) {
+			exact := checkExactFIFOHistory(1, history)
+			reservationAware := checkReservationAwareFIFOHistory(1, history)
+			if exact != reservationAware {
+				t.Fatalf(
+					"sequential verdicts differ: exact=%t reservation-aware=%t",
+					exact,
+					reservationAware,
+				)
+			}
+		})
 	}
 }

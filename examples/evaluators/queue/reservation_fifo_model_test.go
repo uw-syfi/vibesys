@@ -19,10 +19,14 @@ func TestReservationAwareModelRejectsInvalidHistories(t *testing.T) {
 		"fabricated value": {
 			dequeueRecord(0, value(99), 1),
 		},
-		"duplicate value": {
+		"duplicate dequeue": {
 			enqueueRecord(0, 10, true, 1),
 			dequeueRecord(1, value(10), 3),
 			dequeueRecord(2, value(10), 5),
+		},
+		"capacity overflow": {
+			enqueueRecord(0, 10, true, 1),
+			enqueueRecord(1, 20, true, 3),
 		},
 	}
 
@@ -30,6 +34,67 @@ func TestReservationAwareModelRejectsInvalidHistories(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if checkReservationAwareFIFOHistory(1, history) {
 				t.Fatal("invalid reservation-aware history was accepted")
+			}
+		})
+	}
+}
+
+func TestReservationAwareModelAcceptsDuplicateOutstandingReservations(t *testing.T) {
+	first := enqueueRecord(0, 10, true, 1)
+	first.Return = 10
+	second := enqueueRecord(1, 10, true, 2)
+	second.Return = 9
+	full := enqueueRecord(2, 20, false, 3)
+	empty := dequeueRecord(3, nil, 5)
+
+	if !checkReservationAwareFIFOHistory(
+		2,
+		[]recordedOperation{first, second, full, empty},
+	) {
+		t.Fatal("valid reservations with duplicate payloads were rejected")
+	}
+}
+
+func TestReservationAwareModelUsesPublicationOrderForFIFO(t *testing.T) {
+	first := enqueueRecord(0, 10, true, 1)
+	first.Return = 10
+	second := enqueueRecord(1, 20, true, 2)
+	second.Return = 5
+	dequeueSecond := dequeueRecord(2, value(20), 6)
+	dequeueFirst := dequeueRecord(2, value(10), 11)
+
+	if !checkReservationAwareFIFOHistory(
+		2,
+		[]recordedOperation{first, second, dequeueSecond, dequeueFirst},
+	) {
+		t.Fatal("valid FIFO history ordered by publication was rejected")
+	}
+}
+
+func TestReservationAwareModelRejectsMalformedHistories(t *testing.T) {
+	ok := true
+	payload := uint64(10)
+	tests := map[string][]recordedOperation{
+		"enqueue without value": {{
+			Input:  queueInput{Kind: "enqueue"},
+			Output: queueOutput{EnqueueOK: &ok},
+		}},
+		"enqueue without result": {{
+			Input: queueInput{Kind: "enqueue", Value: &payload},
+		}},
+		"contradictory dequeue": {{
+			Input:  queueInput{Kind: "dequeue"},
+			Output: queueOutput{DequeueNone: true, DequeueVal: &payload},
+		}},
+		"unknown operation": {{
+			Input: queueInput{Kind: "peek"},
+		}},
+	}
+
+	for name, history := range tests {
+		t.Run(name, func(t *testing.T) {
+			if checkReservationAwareFIFOHistory(1, history) {
+				t.Fatal("malformed history was accepted")
 			}
 		})
 	}

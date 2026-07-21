@@ -200,15 +200,17 @@ of published values:
 - a successful dequeue must return and remove the oldest value;
 - an empty dequeue is legal only when the state is empty.
 
-MPMC uses a reservation-aware model with two state components: a set of
-reserved values and the FIFO sequence of published values. Before checking,
-each successful enqueue is expanded into a reservation event followed by a
+MPMC uses a reservation-aware model with two state components: unpublished
+reservations identified by enqueue operation and the FIFO sequence of published
+values. Keeping reservation identity separate from payload contents permits
+multiple outstanding enqueues of the same value. Before checking, each
+successful enqueue is expanded into a reservation event followed by a
 publication event. Both events retain the original operation's call/return
 interval, and the model requires reservation before publication.
 
 - reservation is legal only while reserved plus published items are below
   capacity;
-- publication moves the value from the reservation set to the FIFO tail;
+- publication moves the reservation's value to the FIFO tail;
 - full is legal when reserved plus published items equal capacity;
 - a successful dequeue removes the oldest published value;
 - empty is legal when the published FIFO is empty, regardless of reservations.
