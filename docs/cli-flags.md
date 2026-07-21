@@ -304,6 +304,20 @@ integrity checks reject accuracy and benchmark gates after it is modified.
 Resumed runs keep the evaluator snapshot from the original run instead of
 refreshing it from repository source.
 
+To intentionally upgrade evaluator-owned inputs in an existing experiment,
+commit the authorized refresh before resuming and pass that immutable revision:
+
+```bash
+./vs --outer-loop agent \
+  --resume /path/to/experiment \
+  --trusted-input-baseline <refresh-commit>
+```
+
+The revision must be an ancestor of the current experiment `HEAD`. The guard
+continues to reject pending trusted-input edits and every trusted-input change
+committed after that baseline. Omitting the flag retains the original initial
+workspace baseline, so ordinary resumes cannot silently bless agent tampering.
+
 ## Common Commands
 
 Default agent loop on local CUDA-compatible host:

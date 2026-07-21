@@ -64,6 +64,7 @@ class GitTracker:
         self.root = root
         self._log = log
         self._excluded_dirs = frozenset(excluded_dirs)
+        self._trusted_input_baseline: str | None = None
 
     @property
     def _GIT_ENV(self) -> dict[str, str]:
@@ -89,7 +90,7 @@ class GitTracker:
             result.check_returncode()
         return result
 
-    def init(self, existing: bool) -> None:
+    def init(self, existing: bool, *, trusted_input_baseline: str | None = None) -> None:
         """Initialize or validate Git tracking for the unified workspace.
 
         Experiment directories are themselves Git repositories. When the
@@ -102,7 +103,17 @@ class GitTracker:
                 raise ValueError(
                     f"--git-tracking with --resume but no git repository in {self.root}"
                 )
+            if trusted_input_baseline is not None:
+                self._trusted_input_baseline = self._resolve_trusted_input_baseline(
+                    trusted_input_baseline
+                )
+                self._log(
+                    f"[git-tracking] trusted input baseline: {self._trusted_input_baseline[:12]}"
+                )
             return
+
+        if trusted_input_baseline is not None:
+            raise ValueError("trusted input baseline is only valid when resuming a run")
 
         if not self._inside_work_tree():
             self.run(["git", "init"])
@@ -193,26 +204,27 @@ class GitTracker:
             return False
 
     def trusted_input_changes(self) -> list[str]:
-        """Return evaluator-owned paths changed since workspace initialization."""
-        baseline = self.run(
-            [
-                "git",
-                "log",
-                "--diff-filter=A",
-                "--format=%H",
-                "--reverse",
-                "--",
-                *self._TRUSTED_INPUT_PATHS,
-            ]
-        )
-        initial_commit = baseline.stdout.decode().splitlines()[0:1]
-        if not initial_commit:
-            return ["unable to resolve the initial workspace commit"]
+        """Return evaluator-owned paths changed since the trusted baseline."""
+        initial_commit = self._trusted_input_baseline
+        if initial_commit is None:
+            baseline = self.run(
+                [
+                    "git",
+                    "log",
+                    "--diff-filter=A",
+                    "--format=%H",
+                    "--reverse",
+                    "--",
+                    *self._TRUSTED_INPUT_PATHS,
+                ]
+            )
+            commits = baseline.stdout.decode().splitlines()[0:1]
+            if not commits:
+                return ["unable to resolve the initial workspace commit"]
+            initial_commit = commits[0]
 
         pathspec = ["--", *self._TRUSTED_INPUT_PATHS]
-        committed = self.run(
-            ["git", "diff", "--name-only", f"{initial_commit[0]}..HEAD", *pathspec]
-        )
+        committed = self.run(["git", "diff", "--name-only", f"{initial_commit}..HEAD", *pathspec])
         pending = self.run(
             [
                 "git",
@@ -240,6 +252,28 @@ class GitTracker:
             if len(line) > 3
         )
         return sorted(changes)
+
+    def _resolve_trusted_input_baseline(self, revision: str) -> str:
+        """Resolve an operator-authorized trusted-input baseline revision.
+
+        The revision must already be an ancestor of the resumed workspace's
+        current HEAD. Pending trusted-input edits are still reported, and any
+        later committed edits remain visible in the baseline-to-HEAD diff.
+        """
+        resolved = self.run(
+            ["git", "rev-parse", "--verify", f"{revision}^{{commit}}"],
+            check=False,
+        )
+        if resolved.returncode != 0:
+            raise ValueError(f"trusted input baseline {revision!r} is not a commit")
+        commit = resolved.stdout.decode(errors="replace").strip()
+        ancestor = self.run(
+            ["git", "merge-base", "--is-ancestor", commit, "HEAD"],
+            check=False,
+        )
+        if ancestor.returncode != 0:
+            raise ValueError(f"trusted input baseline {revision!r} is not an ancestor of HEAD")
+        return commit
 
     def _workspace_gitignore(self) -> str:
         """Contents of the workspace ``.gitignore`` (excluded dirs + artifacts)."""
