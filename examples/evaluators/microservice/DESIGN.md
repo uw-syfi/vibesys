@@ -5,25 +5,32 @@
 ```mermaid
 flowchart LR
     W["Workload TOML"] --> C["Strict config loader"]
-    C --> E["Shared scheduler and trial engine"]
-    A["Application adapter"] --> E
-    E --> D["Protocol driver"]
+    C --> B["Benchmark scheduler"]
+    C --> K["Accuracy runner"]
+    BA["Benchmark adapter"] --> B
+    AA["Independent accuracy adapter"] --> K
+    B --> R["Shared target runtime"]
+    K --> R
+    R --> D["Protocol driver"]
     D --> T["Running target"]
     D --> O["Common observations"]
     O --> S["Statistics and result contract"]
 ```
 
-The engine owns arrival scheduling, timestamp placement, trial lifecycle,
-aggregation, constraint enforcement, and output. Drivers own protocol sessions
-and wire behavior. Application adapters own fixtures, request construction, and
-semantic response validation. Workload files own traffic mix and objective
-policy.
+The benchmark engine owns arrival scheduling, timestamp placement, trial
+lifecycle, aggregation, constraint enforcement, and output. The accuracy
+runner owns readiness, managed lifecycle transitions, required-property
+enforcement, and correctness result reporting. Both use the same target runtime
+and protocol drivers. Their application-specific semantic oracles remain
+separate so one validator bug cannot silently bless both qualification and
+scoring.
 
 The dependency rule is:
 
 ```text
 cmd -> concrete applications and drivers
 engine -> api interfaces only
+accuracy runner -> api interfaces and generic validation only
 drivers -> api protocol payloads only
 applications -> api protocol payloads only
 stats/result -> observations only

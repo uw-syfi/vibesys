@@ -18,3 +18,7 @@ composition root.
 The Train Ticket adapter demonstrates dependent multi-invocation operations.
 It describes update/read and create/read/delete plans, while the engine retains
 exclusive ownership of issuing and measuring every HTTP request.
+
+Accuracy adapters live separately under `accuracyapps/`. They may share the
+transport and generic validation framework, but must not reuse a benchmark
+adapter's application-specific expected-value calculations.

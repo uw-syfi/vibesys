@@ -1,0 +1,274 @@
+package trainticket
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"math/rand"
+	"net/http"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"vibesys/microservice-evaluator/accuracy"
+	"vibesys/microservice-evaluator/api"
+)
+
+type runtimeFunc func(context.Context, api.Invocation) api.ProtocolResult
+
+func (function runtimeFunc) Invoke(ctx context.Context, invocation api.Invocation) api.ProtocolResult {
+	return function(ctx, invocation)
+}
+
+func envelopeResult(httpStatus, appStatus int, data any) api.ProtocolResult {
+	body, _ := json.Marshal(map[string]any{"status": appStatus, "msg": "ok", "data": data})
+	return api.ProtocolResult{
+		TransportSuccess: true,
+		Payload:          api.HTTPResponse{StatusCode: httpStatus, Body: body},
+	}
+}
+
+func TestRandomCaseIsReferentiallyConsistentAndStrictlyTyped(t *testing.T) {
+	item := makeCase(rand.New(rand.NewSource(7)), "namespace", 3)
+	if item.route["id"] != item.price["routeId"] || item.route["id"] != item.trip["routeId"] {
+		t.Fatal("route relationship is inconsistent")
+	}
+	if item.train["id"] != item.price["trainType"] || item.train["id"] != item.trip["trainTypeId"] {
+		t.Fatal("train relationship is inconsistent")
+	}
+	for service, values := range map[string][]entity{
+		"config": {item.config}, "station": {item.stationA, item.stationB},
+		"train": {item.train}, "route": {item.route}, "price": {item.price},
+		"travel": {item.trip},
+	} {
+		for _, value := range values {
+			normalized, err := normalizedObject(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := contracts[service].Validate(normalized, service); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+func TestEmbeddedSeedCatalogIsExactAndUnique(t *testing.T) {
+	catalog, err := loadSeedCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := 0
+	for service, values := range catalog {
+		seen := make(map[string]struct{}, len(values))
+		for _, value := range values {
+			key, err := contracts[service].Key(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, duplicate := seen[key]; duplicate {
+				t.Fatalf("duplicate %s key %q", service, key)
+			}
+			seen[key] = struct{}{}
+			total++
+		}
+	}
+	if total != 45 {
+		t.Fatalf("seed entity count=%d, want 45", total)
+	}
+}
+
+func TestAdminTokenUsesRandomModeNeutralIdentity(t *testing.T) {
+	first, err := adminToken(time.Unix(1_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := adminToken(time.Unix(1_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("accuracy identities were reused")
+	}
+	parts := strings.Split(first, ".")
+	if len(parts) != 3 {
+		t.Fatalf("token has %d parts", len(parts))
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		t.Fatal(err)
+	}
+	identity := claims["sub"].(string)
+	if claims["id"] != identity || len(identity) != 24 {
+		t.Fatalf("claims=%v", claims)
+	}
+	if strings.Contains(identity, "checker") || strings.Contains(identity, "benchmark") {
+		t.Fatalf("mode leaked into identity %q", identity)
+	}
+}
+
+func TestConfigurationRejectsUnknownFieldsAndNonReusableStationSession(t *testing.T) {
+	workload := api.Workload{
+		Load:              api.Load{TimeoutSeconds: 1},
+		ApplicationConfig: map[string]any{"unknown": int64(1)},
+	}
+	for _, service := range services {
+		workload.Targets = append(workload.Targets, api.Target{
+			Name: service, Protocol: "http", SessionPolicy: "reuse",
+		})
+	}
+	if _, err := New(workload); err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("unknown field error=%v", err)
+	}
+	workload.ApplicationConfig = nil
+	for index := range workload.Targets {
+		if workload.Targets[index].Name == "station" {
+			workload.Targets[index].SessionPolicy = "new_per_request"
+		}
+	}
+	if _, err := New(workload); err == nil || !strings.Contains(err.Error(), "session_policy") {
+		t.Fatalf("session policy error=%v", err)
+	}
+}
+
+func TestUpdatesRetainAndProbeOldSecondaryKeys(t *testing.T) {
+	catalog, err := loadSeedCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := makeCase(rand.New(rand.NewSource(7)), "namespace", 0)
+	oldStationNames := []string{stringValue(item.stationA, "name"), stringValue(item.stationB, "name")}
+	oldRoute := [2]string{
+		stringValue(item.route, "startStationId"), stringValue(item.route, "terminalStationId"),
+	}
+	oldPrice := [2]string{stringValue(item.price, "routeId"), stringValue(item.price, "trainType")}
+	var paths []string
+	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
+		spec := invocation.Payload.(api.HTTPRequestSpec)
+		paths = append(paths, spec.Path)
+		status := 1
+		if spec.Method == http.MethodGet {
+			status = 0
+		}
+		return envelopeResult(200, status, nil)
+	})
+	client, err := newClient(runtime, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := &Application{catalog: catalog, timeout: time.Second}
+	if _, err := application.updateCase(context.Background(), client, item, rand.New(rand.NewSource(9))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifyRetiredSecondaryIndexes(context.Background(), client, item); err != nil {
+		t.Fatal(err)
+	}
+	for _, oldName := range oldStationNames {
+		assertPath(t, paths, servicePaths["station"]+"/stations/id/"+url.PathEscape(oldName))
+	}
+	assertPath(t, paths, servicePaths["route"]+"/routes/"+oldRoute[0]+"/"+oldRoute[1])
+	assertPath(t, paths, servicePaths["price"]+"/prices/"+oldPrice[0]+"/"+oldPrice[1])
+}
+
+func TestPartialCreateUsesJournaledReverseCleanup(t *testing.T) {
+	item := makeCase(rand.New(rand.NewSource(7)), "namespace", 0)
+	requests := 0
+	var deletes []string
+	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
+		spec := invocation.Payload.(api.HTTPRequestSpec)
+		requests++
+		if spec.Method == http.MethodDelete {
+			deletes = append(deletes, spec.Path)
+			return envelopeResult(200, 1, nil)
+		}
+		if requests == 3 {
+			return api.ProtocolResult{ErrorCategory: "injected", ErrorMessage: "create failed"}
+		}
+		status := 200
+		if spec.Method == http.MethodPost {
+			status = 201
+		}
+		return envelopeResult(status, 1, nil)
+	})
+	client, err := newClient(runtime, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := accuracy.NewJournal()
+	application := &Application{}
+	if _, err := application.createCase(context.Background(), client, journal, item); err == nil {
+		t.Fatal("injected create failure was accepted")
+	}
+	if journal.Active() != 2 {
+		t.Fatalf("journal active=%d, want two successful creates", journal.Active())
+	}
+	if err := journal.Cleanup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(deletes) != 2 || !strings.Contains(deletes[0], "/stations") || !strings.Contains(deletes[1], "/configs/") {
+		t.Fatalf("cleanup order=%v", deletes)
+	}
+}
+
+func TestDeleteVerificationRejectsEntityRetainedOnlyInList(t *testing.T) {
+	item := makeCase(rand.New(rand.NewSource(7)), "namespace", 0)
+	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
+		spec := invocation.Payload.(api.HTTPRequestSpec)
+		if spec.Method == http.MethodGet && spec.Path == servicePaths["train"]+listPaths["train"] {
+			return envelopeResult(200, 1, []any{item.train})
+		}
+		if spec.Method == http.MethodGet && strings.HasSuffix(spec.Path, listPaths[invocation.Target]) {
+			return envelopeResult(200, 1, []any{})
+		}
+		return envelopeResult(200, 0, nil)
+	})
+	client, err := newClient(runtime, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := &Application{}
+	if _, err := application.verifyDeleted(context.Background(), client, item); err == nil || !strings.Contains(err.Error(), "remains visible") {
+		t.Fatalf("retained list entity error=%v", err)
+	}
+}
+
+func TestDeleteIsolationRejectsMissingSeedRecord(t *testing.T) {
+	catalog, err := loadSeedCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
+		service := invocation.Target
+		items := make([]any, 0, len(catalog[service]))
+		for index, item := range catalog[service] {
+			if service == "config" && index == 0 {
+				continue
+			}
+			items = append(items, item)
+		}
+		return envelopeResult(200, 1, items)
+	})
+	client, err := newClient(runtime, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := &Application{catalog: catalog}
+	if _, err := application.verifySeedCatalogPresent(context.Background(), client); err == nil || !strings.Contains(err.Error(), "disappeared") {
+		t.Fatalf("over-delete error=%v", err)
+	}
+}
+
+func assertPath(t *testing.T, paths []string, want string) {
+	t.Helper()
+	for _, path := range paths {
+		if path == want {
+			return
+		}
+	}
+	t.Fatalf("path %q not found in %v", want, paths)
+}

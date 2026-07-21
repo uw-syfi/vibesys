@@ -13,6 +13,7 @@ import (
 
 	"vibesys/microservice-evaluator/api"
 	"vibesys/microservice-evaluator/registry"
+	"vibesys/microservice-evaluator/transport"
 )
 
 type Options struct {
@@ -33,42 +34,16 @@ func New(registry *registry.Registry, options Options) *Engine {
 	return &Engine{registry: registry, options: options}
 }
 
-type runtime struct {
-	clients   map[string]api.Client
-	protocols map[string]string
-}
-
-func (r *runtime) Invoke(ctx context.Context, invocation api.Invocation) api.ProtocolResult {
-	client, ok := r.clients[invocation.Target]
-	if !ok {
-		return api.ProtocolResult{
-			ErrorCategory: "unknown_target",
-			ErrorMessage:  fmt.Sprintf("invocation references unknown target %q", invocation.Target),
-		}
-	}
-	return client.Invoke(ctx, invocation)
-}
-
-func (r *runtime) close() error {
-	var first error
-	for target, client := range r.clients {
-		if err := client.Close(); err != nil && first == nil {
-			first = fmt.Errorf("close target %q: %w", target, err)
-		}
-	}
-	return first
-}
-
 func (e *Engine) Run(ctx context.Context, workload api.Workload) (RunResult, error) {
 	application, err := e.registry.Application(workload)
 	if err != nil {
 		return RunResult{}, err
 	}
-	runtime, err := e.openTargets(ctx, workload.Targets)
+	runtime, err := transport.Open(ctx, e.registry, workload.Targets)
 	if err != nil {
 		return RunResult{}, err
 	}
-	defer runtime.close()
+	defer runtime.Close()
 
 	result := RunResult{
 		Summary: Summary{
@@ -186,28 +161,6 @@ func (e *Engine) Run(ctx context.Context, workload api.Workload) (RunResult, err
 	return result, nil
 }
 
-func (e *Engine) openTargets(ctx context.Context, targets []api.Target) (*runtime, error) {
-	runtime := &runtime{
-		clients:   make(map[string]api.Client, len(targets)),
-		protocols: make(map[string]string, len(targets)),
-	}
-	for _, target := range targets {
-		driver, err := e.registry.Driver(target.Protocol)
-		if err != nil {
-			runtime.close()
-			return nil, fmt.Errorf("target %q: %w", target.Name, err)
-		}
-		client, err := driver.Open(ctx, target)
-		if err != nil {
-			runtime.close()
-			return nil, fmt.Errorf("open target %q: %w", target.Name, err)
-		}
-		runtime.clients[target.Name] = client
-		runtime.protocols[target.Name] = target.Protocol
-	}
-	return runtime, nil
-}
-
 type scheduledSample struct {
 	operation api.Operation
 	sample    api.Sample
@@ -220,7 +173,7 @@ func (e *Engine) runPhase(
 	trial int,
 	workload api.Workload,
 	application api.Application,
-	runtime *runtime,
+	runtime *transport.Runtime,
 	dataset any,
 	durationSeconds float64,
 	seed int64,
@@ -334,7 +287,7 @@ func (e *Engine) runClosedLoopPhase(
 	trial int,
 	workload api.Workload,
 	application api.Application,
-	runtime *runtime,
+	runtime *transport.Runtime,
 	dataset any,
 	durationSeconds float64,
 	seed int64,
@@ -409,7 +362,7 @@ func executeRequest(
 	load api.Load,
 	item scheduledSample,
 	application api.Application,
-	runtime *runtime,
+	runtime *transport.Runtime,
 	dataset any,
 ) api.Observation {
 	dispatched := time.Now()
@@ -473,7 +426,7 @@ func executeRequest(
 		Phase:              phase,
 		Operation:          item.operation.Name,
 		Target:             item.operation.Target,
-		Protocol:           runtime.protocols[item.operation.Target],
+		Protocol:           protocolFor(runtime, item.operation.Target),
 		Tags:               append([]string(nil), item.operation.Tags...),
 		ScheduledAt:        item.scheduled,
 		DispatchedAt:       dispatched,
@@ -493,6 +446,11 @@ func executeRequest(
 	}
 	observation.PopulateDurations()
 	return observation
+}
+
+func protocolFor(runtime *transport.Runtime, target string) string {
+	protocol, _ := runtime.Protocol(target)
+	return protocol
 }
 
 func sleepUntil(ctx context.Context, deadline time.Time) error {

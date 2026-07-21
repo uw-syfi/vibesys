@@ -8,17 +8,37 @@ import (
 )
 
 type ApplicationFactory func(api.Workload) (api.Application, error)
+type AccuracyApplicationFactory func(api.Workload) (api.AccuracyApplication, error)
 
 type Registry struct {
 	drivers      map[string]api.Driver
 	applications map[string]ApplicationFactory
+	accuracy     map[string]AccuracyApplicationFactory
 }
 
 func New() *Registry {
 	return &Registry{
 		drivers:      make(map[string]api.Driver),
 		applications: make(map[string]ApplicationFactory),
+		accuracy:     make(map[string]AccuracyApplicationFactory),
 	}
+}
+
+func (r *Registry) RegisterAccuracyApplication(
+	name string,
+	factory AccuracyApplicationFactory,
+) error {
+	if name == "" {
+		return fmt.Errorf("accuracy application name must not be empty")
+	}
+	if factory == nil {
+		return fmt.Errorf("accuracy application %q factory must not be nil", name)
+	}
+	if _, exists := r.accuracy[name]; exists {
+		return fmt.Errorf("accuracy application %q is already registered", name)
+	}
+	r.accuracy[name] = factory
+	return nil
 }
 
 func (r *Registry) RegisterDriver(driver api.Driver) error {
@@ -63,6 +83,22 @@ func (r *Registry) Application(workload api.Workload) (api.Application, error) {
 	application, err := factory(workload)
 	if err != nil {
 		return nil, fmt.Errorf("configure application %q: %w", workload.Application, err)
+	}
+	return application, nil
+}
+
+func (r *Registry) AccuracyApplication(workload api.Workload) (api.AccuracyApplication, error) {
+	factory, ok := r.accuracy[workload.Application]
+	if !ok {
+		return nil, fmt.Errorf(
+			"unsupported accuracy application %q (registered: %v)",
+			workload.Application,
+			sortedKeys(r.accuracy),
+		)
+	}
+	application, err := factory(workload)
+	if err != nil {
+		return nil, fmt.Errorf("configure accuracy application %q: %w", workload.Application, err)
 	}
 	return application, nil
 }

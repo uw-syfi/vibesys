@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strconv"
 	"strings"
@@ -117,6 +118,13 @@ func (c *client) Invoke(ctx context.Context, invocation api.Invocation) api.Prot
 	for key, value := range spec.Headers {
 		request.Header.Set(key, value)
 	}
+	connectionKnown := false
+	connectionReused := false
+	trace := &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) {
+		connectionKnown = true
+		connectionReused = info.Reused
+	}}
+	request = request.WithContext(httptrace.WithClientTrace(request.Context(), trace))
 	if len(spec.Form) > 0 && request.Header.Get("Content-Type") == "" {
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
@@ -152,6 +160,8 @@ func (c *client) Invoke(ctx context.Context, invocation api.Invocation) api.Prot
 			StatusCode: response.StatusCode,
 			Body:       responseBody,
 		},
+		ConnectionKnown:  connectionKnown,
+		ConnectionReused: connectionReused,
 	}
 }
 

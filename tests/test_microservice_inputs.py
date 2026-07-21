@@ -42,6 +42,22 @@ def test_microservice_scenarios_are_discovered() -> None:
     }
 
 
+def test_train_ticket_accuracy_uses_shared_evaluator() -> None:
+    bundle = load_input_bundle(
+        MICROSERVICE_ROOT / "train-ticket",
+        project_root=PROJECT_ROOT,
+    )
+
+    assert bundle.accuracy_command[:5] == (
+        "go",
+        "-C",
+        "_evaluator/microservice",
+        "run",
+        "./cmd/servicebench",
+    )
+    assert bundle.accuracy_command[5:7] == ("--mode", "accuracy")
+
+
 @pytest.mark.parametrize(
     "scenario_path",
     MICROSERVICE_SCENARIOS,

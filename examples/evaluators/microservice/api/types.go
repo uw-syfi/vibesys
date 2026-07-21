@@ -180,6 +180,8 @@ type ProtocolResult struct {
 	Payload          any
 	ErrorCategory    string
 	ErrorMessage     string
+	ConnectionKnown  bool
+	ConnectionReused bool
 }
 
 type ValidationResult struct {
@@ -215,6 +217,46 @@ type Application interface {
 	BuildOperation(Operation, Sample, any) (OperationPlan, error)
 	ValidateOperation(Operation, OperationPlan, []ProtocolResult) ValidationResult
 	FinishOperation(OperationPlan)
+}
+
+// AccuracyProperty declares one independently reported correctness property.
+// Required properties must be explicitly passed before an accuracy run can be
+// valid. Optional properties remain false when their prerequisite (for
+// example, a candidate lifecycle hook) is unavailable.
+type AccuracyProperty struct {
+	Name     string
+	Required bool
+}
+
+// ReadinessProbe is an application-owned request that the shared accuracy
+// runner uses to prove that every required endpoint is ready, and that none of
+// them remains reachable before a managed candidate is restarted.
+type ReadinessProbe struct {
+	Name       string
+	Invocation Invocation
+	Validate   func(ProtocolResult) error
+}
+
+type AccuracyContext struct {
+	Seed    int64
+	Cases   int
+	Restart func(context.Context) error
+}
+
+type AccuracyRecorder interface {
+	AddChecks(int)
+	Pass(string) error
+}
+
+// AccuracyApplication owns application-specific fixtures, scenarios, and
+// semantic assertions. Transport sessions, readiness polling, lifecycle
+// transitions, result reporting, and required-property enforcement remain in
+// the shared accuracy framework.
+type AccuracyApplication interface {
+	Name() string
+	Properties() []AccuracyProperty
+	ReadinessProbes() []ReadinessProbe
+	Check(context.Context, Runtime, AccuracyContext, AccuracyRecorder) error
 }
 
 type Observation struct {

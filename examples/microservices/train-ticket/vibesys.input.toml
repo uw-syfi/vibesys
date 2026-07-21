@@ -7,7 +7,13 @@ domain = "microservices"
 source = "../../evaluators/microservice"
 
 [accuracy]
-command = ["uv", "run", "python", "accuracy_checker/checker.py"]
+command = [
+  "go", "-C", "_evaluator/microservice",
+  "run", "./cmd/servicebench",
+  "--mode", "accuracy",
+	"--workload", "../../benchmark/workload.toml",
+	"--seed", "random",
+]
 timeout_seconds = 120
 
 [benchmark]
