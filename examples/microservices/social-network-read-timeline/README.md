@@ -10,7 +10,9 @@ vibesys --input examples/microservices/social-network-read-timeline
 
 **Target:** DeathStarBench socialNetwork: Go microservices stack deployed via Docker Compose. 
 
-**Workload:** Read-heavy, specifically for this issue. 50% user-timeline reads, 40% home-timeline reads, 10% compose to keep content fresh.
+**Workload:** Read-heavy, specifically for this issue. 50% user-timeline reads,
+40% home-timeline reads, and 10% stateful compose + user-timeline read-your-write
+sequences to keep content fresh.
 
 **Primary metric:** `p50_ms` (combined read latency).
 
@@ -160,8 +162,10 @@ Optional flags which can be included with the checker:
 ```
 
 Run the shared evaluator from the repository root. The checked-in workload uses
-the original medium profile: 300 target RPS, 20 seconds of warmup, 120 seconds
-of measurement, 50 users, and 10 seed posts per user.
+the original medium profile: 300 target logical operations/s, 20 seconds of
+warmup, 120 seconds of measurement, 50 users, and 10 seed posts per user. Each
+VibeSys invocation supplies a random evaluator seed, which produces independent
+user IDs, usernames, and post markers on a long-lived candidate deployment.
 
 ```bash
 go -C examples/evaluators/microservice run ./cmd/servicebench \
@@ -174,7 +178,7 @@ go -C examples/evaluators/microservice run ./cmd/servicebench \
 The legacy light, medium, and heavy configurations remain available as named
 profiles. A profile changes both load and fixture size:
 
-| Profile | Target RPS | Duration | Warmup | Users | Seed posts per user |
+| Profile | Target operations/s | Duration | Warmup | Users | Seed posts per user |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `light` | 100 | 60s | 10s | 20 | 5 |
 | `medium` | 300 | 120s | 20s | 50 | 10 |
@@ -193,7 +197,7 @@ go -C examples/evaluators/microservice run ./cmd/servicebench \
 ### Output format
 
 The benchmark emits a versioned JSON summary and optionally one raw NDJSON
-record per request. The summary includes individual trials, latency and queue
+record per logical operation. The summary includes individual trials, latency and queue
 distributions, offered-load diagnostics, constraints, and the trusted scalar:
 
 ```json
@@ -214,9 +218,13 @@ distributions, offered-load diagnostics, constraints, and the trusted scalar:
 ```
 
 `primary_value` is the median trial-level p50 scheduled-arrival latency for
-successful operations tagged `read`. A run is invalid unless its success rate
-is 1.0 and the load generator sustains at least 95% of the target rate. Thrift
-timing headers remain available in raw request records as intermediate timings.
+successful operations tagged `read`. Timeline reads must return non-empty,
+bounded, newest-first arrays with the exact DeathStarBench post schema and the
+expected creator identity. A compose sequence counts once and succeeds only if
+the acknowledged post marker is immediately visible in that user's timeline.
+A run is invalid unless its success rate is 1.0, every operation type was
+sampled, and the load generator sustains at least 95% of the target rate. Thrift
+timing headers remain available in raw operation records as intermediate timings.
 
 ## Rebuilding
 

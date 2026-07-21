@@ -40,13 +40,17 @@ header = "X-HomeTimeline-Thrift-Ms"
 unit = "ms"
 
 [[operations]]
-name = "compose_post"
+name = "compose_user_timeline"
 target = "gateway"
 weight = 10
-tags = ["write"]
+tags = ["write", "read-your-write"]
 [[operations.capture_headers]]
 name = "compose_thrift"
 header = "X-Compose-Thrift-Ms"
+unit = "ms"
+[[operations.capture_headers]]
+name = "compose_user_timeline_thrift"
+header = "X-UserTimeline-Thrift-Ms"
 unit = "ms"
 
 [application_config]
@@ -54,6 +58,7 @@ users = 50
 seed_posts_per_user = 10
 user_id_base = 700000
 username_prefix = "rbnch_"
+timeline_limit = 10
 setup_delay_seconds = 3
 
 [profiles.light]
@@ -93,3 +98,4 @@ tags = ["read"]
 [constraints]
 min_success_rate = 1.0
 max_error_rate = 0.0
+min_operations_per_type = 1

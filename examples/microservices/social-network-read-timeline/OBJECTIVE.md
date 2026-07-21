@@ -19,7 +19,8 @@ Repo: https://github.com/delimitrou/DeathStarBench/tree/master/socialNetwork
 Read-heavy mixed load against nginx on port 8080:
 - 50% user-timeline reads: GET /wrk2-api/user-timeline/read
 - 40% home-timeline reads: GET /wrk2-api/home-timeline/read
-- 10% compose: POST /wrk2-api/post/compose (keeps content fresh during run)
+- 10% compose + user-timeline read-your-write sequences (keeps content fresh
+  and rejects acknowledged writes that do not become visible)
 
 ## Hardware Target
 
@@ -34,7 +35,9 @@ candidate without modification.
 ## Optimisation Objective
 
 Minimise **p50 combined read latency** (`p50_ms` from benchmark output).
-`success_rate` must stay at 1.0 and all 11 correctness checks defined for application validation must pass.
+`success_rate` must stay at 1.0, every workload operation must be exercised,
+measured timeline responses must preserve schema/order/identity semantics, and
+all 11 standalone correctness checks must pass.
 
 Key optimisation directions which could be explored:
 - Redis hit rate for UserTimeline and HomeTimeline services
