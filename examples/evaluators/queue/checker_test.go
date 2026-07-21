@@ -5,8 +5,60 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 )
+
+func TestAccuracyTimesOutStuckCandidateOperation(t *testing.T) {
+	workspace := compileCandidateFixtureWithDefines(t, "VSQ_TEST_HANG_CAPACITY_ONE")
+	previousTimeout := candidateOperationTimeout
+	candidateOperationTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { candidateOperationTimeout = previousTimeout })
+
+	started := time.Now()
+	err := runAccuracy(accuracyConfig{
+		candidateConfig: candidateConfig{
+			workspace: workspace,
+			candidate: "queue-candidate.so",
+			scenario:  scenarioSPSC,
+			capacity:  4,
+			valueSize: 64,
+		},
+		operations: 8,
+		trials:     1,
+		producers:  1,
+		consumers:  1,
+		seed:       7,
+	})
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("stuck candidate error = %v, want operation timeout", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("stuck candidate took %s to reject", elapsed)
+	}
+}
+
+func TestAccuracyRejectsReservationGapCandidate(t *testing.T) {
+	workspace := compileCandidateFixtureWithDefines(t, "VSQ_TEST_RESERVATION_GAP")
+	err := runAccuracy(accuracyConfig{
+		candidateConfig: candidateConfig{
+			workspace: workspace,
+			candidate: "queue-candidate.so",
+			scenario:  scenarioMPMC,
+			capacity:  4,
+			valueSize: 64,
+		},
+		operations: 8,
+		trials:     1,
+		producers:  2,
+		consumers:  2,
+		seed:       7,
+	})
+	if err == nil || !strings.Contains(err.Error(), "reservation gap") {
+		t.Fatalf("reservation-gap candidate error = %v, want reservation-gap rejection", err)
+	}
+}
 
 func enqueueRecord(client int, value uint64, ok bool, call int64) recordedOperation {
 	return recordedOperation{

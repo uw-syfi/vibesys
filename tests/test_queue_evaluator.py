@@ -186,6 +186,66 @@ def test_spsc_rigtorp_baseline_uses_pinned_upstream_header():
     assert "rigtorp::SPSCQueue<QueueEntry> entries" in adapter
 
 
+def test_mpmc_locked_ring_baseline_builds_and_passes_accuracy(tmp_path):
+    if shutil.which("go") is None or shutil.which("cc") is None:
+        pytest.skip("Go and a C compiler are required by the MPMC baseline")
+
+    project_root = Path(__file__).parents[1]
+    baseline_source = project_root / "examples" / "baselines" / "queue-mpmc-locked-ring"
+    baseline = tmp_path / "queue-mpmc-locked-ring"
+    shutil.copytree(baseline_source, baseline)
+    evaluator = project_root / "examples" / "evaluators" / "queue"
+    abi_header = evaluator / "include" / "vibesys_queue_abi.h"
+
+    subprocess.run(
+        ["make", "clean", "all", f"ABI_HEADER={abi_header}"],
+        cwd=baseline,
+        check=True,
+    )
+    completed = subprocess.run(
+        [
+            "go",
+            "-C",
+            str(evaluator),
+            "run",
+            ".",
+            "check",
+            "--workspace",
+            str(baseline),
+            "--scenario",
+            "mpmc",
+            "--capacity",
+            "17",
+            "--value-size",
+            "64",
+            "--operations",
+            "16",
+            "--trials",
+            "12",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "PASS - mpmc linearizable" in completed.stdout
+
+
+def test_mpmc_locked_ring_baseline_has_atomic_publication_region():
+    project_root = Path(__file__).parents[1]
+    baseline = project_root / "examples" / "baselines" / "queue-mpmc-locked-ring"
+    adapter = (baseline / "locked_ring.c").read_text()
+
+    enqueue = adapter[adapter.index("vsq_status vsq_try_enqueue") :]
+    enqueue = enqueue[: enqueue.index("vsq_status vsq_try_dequeue")]
+    dequeue = adapter[adapter.index("vsq_status vsq_try_dequeue") :]
+    assert "pthread_mutex_lock(&queue->lock)" in enqueue
+    assert "memcpy(" in enqueue
+    assert enqueue.index("pthread_mutex_lock") < enqueue.index("memcpy(")
+    assert "pthread_mutex_lock(&queue->lock)" in dequeue
+    assert "memcpy(" in dequeue
+    assert dequeue.index("pthread_mutex_lock") < dequeue.index("memcpy(")
+
+
 @pytest.mark.parametrize(("input_name", "scenario"), LINEARIZABLE_QUEUE_INPUTS.items())
 def test_materialized_rust_starter_builds_and_passes_accuracy(tmp_path, input_name, scenario):
     if shutil.which("go") is None or shutil.which("cargo") is None:

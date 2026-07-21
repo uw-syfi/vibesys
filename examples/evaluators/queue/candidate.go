@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
+)
+
+var (
+	candidateOperationTimeout = 5 * time.Second
+	abiProbeTimeout           = 15 * time.Second
 )
 
 type boundedLog struct {
@@ -55,6 +62,8 @@ type candidateSession struct {
 	waitErr   error
 	closeOnce sync.Once
 	closeErr  error
+	process   *os.Process
+	abortOnce sync.Once
 }
 
 type candidateConfig struct {
@@ -115,12 +124,17 @@ func runCandidateABIProbe(config candidateConfig) error {
 		"--producers", strconv.Itoa(config.producerCount),
 		"--consumers", strconv.Itoa(config.consumerCount),
 	)
-	command := exec.Command(runner, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), abiProbeTimeout)
+	defer cancel()
+	command := exec.CommandContext(ctx, runner, args...)
 	command.Dir = config.workspace
 	log := newBoundedLog(64 * 1024)
 	command.Stdout = io.Writer(log)
 	command.Stderr = io.Writer(log)
 	if err := command.Run(); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("native ABI probe timed out after %s", abiProbeTimeout)
+		}
 		return fmt.Errorf(
 			"native ABI probe failed: %w\nnative runner output:\n%s",
 			err,
@@ -204,6 +218,7 @@ func startCandidate(config candidateConfig) (*candidateSession, error) {
 		valueSize: config.valueSize,
 		done:      make(chan struct{}),
 		log:       log,
+		process:   command.Process,
 	}
 	for lane, conn := range trustedConnections {
 		session.lanes[lane].conn = conn
@@ -216,6 +231,14 @@ func startCandidate(config candidateConfig) (*candidateSession, error) {
 		close(session.done)
 	}()
 	return session, nil
+}
+
+func (s *candidateSession) abortWorker() {
+	s.abortOnce.Do(func() {
+		if s.process != nil {
+			_ = s.process.Kill()
+		}
+	})
 }
 
 func (s *candidateSession) waitError() error {
@@ -254,11 +277,29 @@ func (s *candidateSession) invoke(laneIndex int, req request) (response, error) 
 	lane := &s.lanes[laneIndex]
 	lane.mu.Lock()
 	defer lane.mu.Unlock()
+	if err := lane.conn.SetDeadline(time.Now().Add(candidateOperationTimeout)); err != nil {
+		return response{}, fmt.Errorf("set candidate operation deadline: %w", err)
+	}
+	defer func() { _ = lane.conn.SetDeadline(time.Time{}) }()
 	if err := writeRequest(lane.conn, req, s.valueSize); err != nil {
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			s.abortWorker()
+			return response{}, fmt.Errorf(
+				"candidate operation timed out after %s while sending a request",
+				candidateOperationTimeout,
+			)
+		}
 		return response{}, s.communicationError("send a correctness request", err)
 	}
 	resp, err := readResponse(lane.conn, s.valueSize)
 	if err != nil {
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			s.abortWorker()
+			return response{}, fmt.Errorf(
+				"candidate operation timed out after %s while waiting for a response",
+				candidateOperationTimeout,
+			)
+		}
 		return response{}, s.communicationError("read a correctness response", err)
 	}
 	if resp.status == statusError {

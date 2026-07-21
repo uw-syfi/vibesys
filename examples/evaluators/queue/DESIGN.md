@@ -147,7 +147,19 @@ and 1 MiB. It also tests:
 - valid queue and handle lifecycle behavior;
 - status and output-length validation.
 
-Each probe process can fail without corrupting Go-owned checker state.
+MPMC profiles additionally race two consumer handles against one producer with
+alternating 16-byte and 64-byte values. One consumer has only 32 bytes of
+output space while the other can accept every value. The probe checks that
+concurrent `INVALID`/`EMPTY` results leave caller storage untouched and that
+all successfully enqueued values are returned exactly once without corruption.
+
+A capacity-one reservation-gap litmus also overlaps two large enqueues, then
+dequeues while the first producer may still be copying. It rejects the
+contradictory completed history `OK`, `FULL`, `EMPTY` that a reserve-then-copy
+ring can otherwise expose when reservation is mistaken for publication.
+
+Each probe process can fail without corrupting Go-owned checker state. Probe
+processes have a trusted wall-clock deadline.
 
 ### Boundary Histories
 
@@ -221,6 +233,9 @@ correctness. It is deliberately absent from the benchmark hot path.
 Closing all Go-side lanes tells the worker to finish. Early worker exit, broken
 sockets, malformed frames, invalid ABI statuses, and candidate crashes all
 become checker failures with bounded worker logs attached.
+Each correctness request also has a trusted deadline; a candidate operation
+that does not return is terminated and reported as a timeout rather than
+hanging the checker.
 
 ## Benchmark Flow
 
@@ -240,6 +255,10 @@ consumer threads:
 6. Validate every dequeued payload.
 7. Stop all threads, drain the queue, and validate conservation.
 8. Write evaluator-owned JSON for Go to validate and aggregate.
+
+Each native repetition has a deadline derived from its configured warmup and
+measured duration plus a fixed shutdown grace, so a candidate that deadlocks
+during the timed phase or final drain cannot hang the outer evaluator.
 
 Two keyed commutative fingerprints compare the multiset of successfully
 enqueued values with values dequeued during measurement and final drain. Counts
