@@ -285,7 +285,10 @@ standard wrapper filenames. VibeSys copies the input bundle into the
 experiment workspace and tells agents to run the manifest commands. The
 optional `benchmark.result` block opts a single-metric benchmark into trusted
 framework scoring: VibeSys appends `json_argument`, reads the resulting JSON,
-and requires exactly one numeric field named by `metric`. Omit it for
+and requires a finite numeric field named by `metric`. For a JSON object, that
+field must be at the top level and is authoritative even when per-trial
+diagnostics repeat the same name. Legacy list-shaped results remain supported
+when they contain exactly one field with that name. Omit the result block for
 multi-profile or multi-objective benchmarks whose result cannot be represented
 by one scalar. Named profiles and benchmark parameter schemas are not part of
 manifest version 1.

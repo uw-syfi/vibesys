@@ -361,6 +361,39 @@ def test_framework_benchmark_extracts_declared_metric(tmp_path):
     assert "total_ops_per_sec**: 42.5" in (tmp_path / "progress.md").read_text()
 
 
+def test_framework_benchmark_prefers_top_level_metric_over_trial_diagnostics(tmp_path):
+    from vibesys.input_manifest import BenchmarkResult
+    from vibesys.loops.agent.loop import (
+        _FRAMEWORK_BENCHMARK_END_MARKER,
+        _FRAMEWORK_BENCHMARK_MARKER,
+        _run_framework_benchmark,
+    )
+
+    ctx = MagicMock()
+    ctx.judge_benchmark_command = "trusted-benchmark"
+    ctx.trusted_input_changes.side_effect = [[], []]
+    ctx.judge_backend.execute.return_value = SimpleNamespace(
+        exit_code=0,
+        output=(
+            f"{_FRAMEWORK_BENCHMARK_MARKER}\n"
+            '{"primary_value": 42.5, "trials": [{"primary_value": 41.0}, '
+            '{"primary_value": 44.0}]}\n'
+            f"{_FRAMEWORK_BENCHMARK_END_MARKER}"
+        ),
+    )
+
+    feedback, metric = _run_framework_benchmark(
+        ctx,
+        result_spec=BenchmarkResult(json_argument="--json", metric="primary_value"),
+        round_number=1,
+        retry=1,
+        progress_path=tmp_path / "progress.md",
+    )
+
+    assert feedback is None
+    assert metric == 42.5
+
+
 def test_framework_benchmark_rejects_ambiguous_metric(tmp_path):
     from vibesys.input_manifest import BenchmarkResult
     from vibesys.loops.agent.loop import (
