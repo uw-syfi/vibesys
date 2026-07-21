@@ -2,6 +2,7 @@ package registry
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 
 	"vibesys/microservice-evaluator/api"
@@ -84,6 +85,16 @@ func (r *Registry) Application(workload api.Workload) (api.Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("configure application %q: %w", workload.Application, err)
 	}
+	if isNil(application) {
+		return nil, fmt.Errorf("configure application %q: factory returned nil", workload.Application)
+	}
+	if actual := application.Name(); actual != workload.Application {
+		return nil, fmt.Errorf(
+			"configure application %q: factory returned application named %q",
+			workload.Application,
+			actual,
+		)
+	}
 	return application, nil
 }
 
@@ -100,7 +111,30 @@ func (r *Registry) AccuracyApplication(workload api.Workload) (api.AccuracyAppli
 	if err != nil {
 		return nil, fmt.Errorf("configure accuracy application %q: %w", workload.Application, err)
 	}
+	if isNil(application) {
+		return nil, fmt.Errorf("configure accuracy application %q: factory returned nil", workload.Application)
+	}
+	if actual := application.Name(); actual != workload.Application {
+		return nil, fmt.Errorf(
+			"configure accuracy application %q: factory returned application named %q",
+			workload.Application,
+			actual,
+		)
+	}
 	return application, nil
+}
+
+func isNil(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
 }
 
 func sortedKeys[T any](values map[string]T) []string {

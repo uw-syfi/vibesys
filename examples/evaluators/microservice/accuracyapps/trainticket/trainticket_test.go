@@ -172,10 +172,10 @@ func TestUpdatesRetainAndProbeOldSecondaryKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, oldName := range oldStationNames {
-		assertPath(t, paths, servicePaths["station"]+"/stations/id/"+url.PathEscape(oldName))
+		assertPath(t, paths, servicePath("station", "/stations/id/"+url.PathEscape(oldName)))
 	}
-	assertPath(t, paths, servicePaths["route"]+"/routes/"+oldRoute[0]+"/"+oldRoute[1])
-	assertPath(t, paths, servicePaths["price"]+"/prices/"+oldPrice[0]+"/"+oldPrice[1])
+	assertPath(t, paths, servicePath("route", "/routes/"+oldRoute[0]+"/"+oldRoute[1]))
+	assertPath(t, paths, servicePath("price", "/prices/"+oldPrice[0]+"/"+oldPrice[1]))
 }
 
 func TestPartialCreateUsesJournaledReverseCleanup(t *testing.T) {
@@ -341,7 +341,7 @@ func TestDeleteVerificationRejectsEntityRetainedOnlyInList(t *testing.T) {
 	item := makeCase(rand.New(rand.NewSource(7)), "namespace", 0)
 	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
 		spec := invocation.Payload.(api.HTTPRequestSpec)
-		if spec.Method == http.MethodGet && spec.Path == servicePaths["train"]+listPaths["train"] {
+		if spec.Method == http.MethodGet && spec.Path == servicePath("train", listPaths["train"]) {
 			return envelopeResult(200, 1, []any{item.train})
 		}
 		if spec.Method == http.MethodGet && strings.HasSuffix(spec.Path, listPaths[invocation.Target]) {
@@ -417,7 +417,7 @@ func TestRouteSecondaryLookupRejectsUnrelatedRoute(t *testing.T) {
 	unrelated["id"] = "unrelated-route"
 	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
 		spec := invocation.Payload.(api.HTTPRequestSpec)
-		if spec.Path == servicePaths["route"]+"/routes/"+stringValue(item.route, "id") {
+		if spec.Path == servicePath("route", "/routes/"+stringValue(item.route, "id")) {
 			return envelopeResult(200, 1, item.route)
 		}
 		return envelopeResult(200, 1, []any{item.route, unrelated})
@@ -433,9 +433,11 @@ func TestRouteSecondaryLookupRejectsUnrelatedRoute(t *testing.T) {
 
 func TestDeleteVerificationRejectsCurrentRouteSecondaryIndex(t *testing.T) {
 	item := makeCase(rand.New(rand.NewSource(7)), "namespace", 0)
-	stalePath := servicePaths["route"] + "/routes/" +
-		stringValue(item.route, "startStationId") + "/" +
-		stringValue(item.route, "terminalStationId")
+	stalePath := servicePath(
+		"route",
+		"/routes/"+stringValue(item.route, "startStationId")+"/"+
+			stringValue(item.route, "terminalStationId"),
+	)
 	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
 		spec := invocation.Payload.(api.HTTPRequestSpec)
 		if spec.Path == stalePath {

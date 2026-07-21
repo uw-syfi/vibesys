@@ -47,6 +47,8 @@ type runnerApplication struct {
 	restart    bool
 	pass       bool
 	probeCount int
+	permissive bool
+	panicCheck bool
 	properties []api.AccuracyProperty
 }
 
@@ -71,6 +73,9 @@ func (a runnerApplication) ReadinessProbes() []api.ReadinessProbe {
 			Name:       fmt.Sprintf("service-%d", index),
 			Invocation: api.Invocation{Target: "service"},
 			Validate: func(result api.ProtocolResult) error {
+				if a.permissive {
+					return nil
+				}
 				if !result.TransportSuccess {
 					return errors.New("not ready")
 				}
@@ -86,6 +91,9 @@ func (a runnerApplication) Check(
 	check api.AccuracyContext,
 	recorder api.AccuracyRecorder,
 ) error {
+	if a.panicCheck {
+		panic("injected adapter panic")
+	}
 	recorder.AddChecks(1)
 	if a.pass {
 		if err := recorder.Pass("required"); err != nil {
@@ -164,6 +172,15 @@ func TestRunnerRejectsUnpassedRequiredProperty(t *testing.T) {
 	serving.Store(true)
 	result := runTestAccuracy(t, runnerApplication{}, nil, serving)
 	if result.Valid || !strings.Contains(result.Error, "required accuracy properties") {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestRunnerConvertsAdapterPanicIntoInvalidResult(t *testing.T) {
+	serving := &atomic.Bool{}
+	serving.Store(true)
+	result := runTestAccuracy(t, runnerApplication{panicCheck: true}, nil, serving)
+	if result.Valid || !strings.Contains(result.Error, "injected adapter panic") {
 		t.Fatalf("result=%+v", result)
 	}
 }
@@ -267,5 +284,39 @@ func TestReadinessUsesAggregateStartupDeadline(t *testing.T) {
 	}
 	if elapsed > 90*time.Millisecond {
 		t.Fatalf("aggregate readiness deadline took %s", elapsed)
+	}
+}
+
+func TestReadinessRejectsTransportFailureBeforePermissiveValidator(t *testing.T) {
+	serving := &atomic.Bool{}
+	result := runTestAccuracy(
+		t, runnerApplication{pass: true, permissive: true}, nil, serving,
+	)
+	if result.Valid || !strings.Contains(result.Error, "transport failed") {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestReadinessProbeDeclarationsCoverKnownTargets(t *testing.T) {
+	targets := []api.Target{{Name: "one"}, {Name: "two"}}
+	probe := func(name, target string) api.ReadinessProbe {
+		return api.ReadinessProbe{
+			Name: name, Invocation: api.Invocation{Target: target},
+			Validate: func(api.ProtocolResult) error { return nil },
+		}
+	}
+	if err := validateProbes([]api.ReadinessProbe{probe("one", "one")}, targets); err == nil ||
+		!strings.Contains(err.Error(), "do not cover") {
+		t.Fatalf("missing-target error=%v", err)
+	}
+	if err := validateProbes([]api.ReadinessProbe{
+		probe("one", "one"), probe("unknown", "unknown"),
+	}, targets); err == nil || !strings.Contains(err.Error(), "unknown target") {
+		t.Fatalf("unknown-target error=%v", err)
+	}
+	if err := validateProbes([]api.ReadinessProbe{
+		probe("one", "one"), probe("two", "two"),
+	}, targets); err != nil {
+		t.Fatal(err)
 	}
 }

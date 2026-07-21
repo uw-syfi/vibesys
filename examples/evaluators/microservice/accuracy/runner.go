@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"math/rand"
+	"sort"
 	"strconv"
 	"time"
 
@@ -84,6 +85,12 @@ func NewRunner(registry *registry.Registry, options Options) (*Runner, error) {
 }
 
 func (r *Runner) Run(ctx context.Context, workload api.Workload) (result Result) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result.Valid = false
+			result.Error = fmt.Sprintf("accuracy evaluation panicked: %v", recovered)
+		}
+	}()
 	result = Result{
 		SchemaVersion: ResultSchemaVersion,
 		EngineVersion: r.options.EngineVersion,
@@ -104,7 +111,7 @@ func (r *Runner) Run(ctx context.Context, workload api.Workload) (result Result)
 	}
 	result.Checks, result.Properties = recorder.snapshot()
 	probes := application.ReadinessProbes()
-	if err := validateProbes(probes); err != nil {
+	if err := validateProbes(probes, workload.Targets); err != nil {
 		result.Error = err.Error()
 		return result
 	}
@@ -192,6 +199,16 @@ func (r *Runner) waitReady(
 			probeContext, cancel := context.WithTimeout(phaseContext, r.options.ProbeTimeout)
 			result := runtime.Invoke(probeContext, probe.Invocation)
 			cancel()
+			if !result.TransportSuccess {
+				allReady = false
+				last = fmt.Sprintf(
+					"%s: transport failed (%s): %s",
+					probe.Name,
+					result.ErrorCategory,
+					result.ErrorMessage,
+				)
+				break
+			}
 			if err := probe.Validate(result); err != nil {
 				allReady = false
 				last = fmt.Sprintf("%s: %v", probe.Name, err)
@@ -242,10 +259,15 @@ func (r *Runner) waitStopped(
 	}
 }
 
-func validateProbes(probes []api.ReadinessProbe) error {
+func validateProbes(probes []api.ReadinessProbe, targets []api.Target) error {
 	if len(probes) == 0 {
 		return fmt.Errorf("accuracy application declares no readiness probes")
 	}
+	requiredTargets := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		requiredTargets[target.Name] = struct{}{}
+	}
+	coveredTargets := make(map[string]struct{}, len(targets))
 	seen := make(map[string]struct{}, len(probes))
 	for index, probe := range probes {
 		if probe.Name == "" {
@@ -254,10 +276,31 @@ func validateProbes(probes []api.ReadinessProbe) error {
 		if probe.Validate == nil {
 			return fmt.Errorf("readiness probe %q has no validator", probe.Name)
 		}
+		if probe.Invocation.Target == "" {
+			return fmt.Errorf("readiness probe %q has an empty target", probe.Name)
+		}
+		if _, exists := requiredTargets[probe.Invocation.Target]; !exists {
+			return fmt.Errorf(
+				"readiness probe %q references unknown target %q",
+				probe.Name,
+				probe.Invocation.Target,
+			)
+		}
 		if _, duplicate := seen[probe.Name]; duplicate {
 			return fmt.Errorf("readiness probe %q is duplicated", probe.Name)
 		}
 		seen[probe.Name] = struct{}{}
+		coveredTargets[probe.Invocation.Target] = struct{}{}
+	}
+	missing := make([]string, 0)
+	for target := range requiredTargets {
+		if _, covered := coveredTargets[target]; !covered {
+			missing = append(missing, target)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Errorf("readiness probes do not cover targets: %v", missing)
 	}
 	return nil
 }

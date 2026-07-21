@@ -22,3 +22,7 @@ collections.
 Application endpoint mappings, seed oracles, entity relationships, and state
 transitions do not belong here. They live in `accuracyapps/` and remain
 independent of benchmark application validation.
+
+The runner rejects readiness declarations that omit or invent workload targets
+and transport-gates every semantic readiness validator. Registry composition
+also requires a factory's application identity to match its workload key.

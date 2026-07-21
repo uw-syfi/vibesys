@@ -13,15 +13,10 @@ import (
 	"vibesys/microservice-evaluator/wire/httpjson"
 )
 
-var servicePaths = map[string]string{
-	"config": "/api/v1/configservice", "station": "/api/v1/stationservice",
-	"train": "/api/v1/trainservice", "travel": "/api/v1/travelservice",
-	"route": "/api/v1/routeservice", "price": "/api/v1/priceservice",
-}
-
 var listPaths = map[string]string{
-	"config": "/configs", "station": "/stations", "train": "/trains",
-	"travel": "/trips", "route": "/routes", "price": "/prices",
+	"config": trainticketsupport.MustCollectionSuffix("config"), "station": trainticketsupport.MustCollectionSuffix("station"),
+	"train": trainticketsupport.MustCollectionSuffix("train"), "travel": trainticketsupport.MustCollectionSuffix("travel"),
+	"route": trainticketsupport.MustCollectionSuffix("route"), "price": trainticketsupport.MustCollectionSuffix("price"),
 }
 
 type client struct {
@@ -48,7 +43,7 @@ func (c *client) request(
 	if authenticated {
 		authorization = "Bearer " + c.token
 	}
-	spec, err := httpjson.Request(method, servicePaths[service]+path, body, authorization)
+	spec, err := httpjson.Request(method, servicePath(service, path), body, authorization)
 	if err != nil {
 		return api.ProtocolResult{ErrorCategory: "request_json", ErrorMessage: err.Error()}
 	}
@@ -57,6 +52,10 @@ func (c *client) request(
 	return c.runtime.Invoke(requestContext, api.Invocation{
 		Target: service, Operation: "accuracy", Payload: spec,
 	})
+}
+
+func servicePath(service, suffix string) string {
+	return trainticketsupport.MustPath(service, suffix)
 }
 
 func (c *client) envelope(

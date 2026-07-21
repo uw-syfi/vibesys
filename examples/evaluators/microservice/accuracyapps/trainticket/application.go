@@ -8,10 +8,11 @@ import (
 
 	"vibesys/microservice-evaluator/accuracy/httpcheck"
 	"vibesys/microservice-evaluator/api"
+	trainticketsupport "vibesys/microservice-evaluator/appsupport/trainticket"
 	"vibesys/microservice-evaluator/wire/httpjson"
 )
 
-var services = []string{"config", "station", "train", "travel", "route", "price"}
+var services = trainticketsupport.Services()
 
 var welcomePaths = map[string]struct {
 	path string
@@ -54,10 +55,8 @@ func New(workload api.Workload) (api.AccuracyApplication, error) {
 			)
 		}
 	}
-	for key := range workload.ApplicationConfig {
-		if key != "records" {
-			return nil, fmt.Errorf("unknown Train Ticket application_config field %q", key)
-		}
+	if _, err := trainticketsupport.ParseConfig(workload.ApplicationConfig); err != nil {
+		return nil, err
 	}
 	catalog, err := loadSeedCatalog()
 	if err != nil {
@@ -99,7 +98,7 @@ func (a *Application) ReadinessProbes() []api.ReadinessProbe {
 				Target:    service,
 				Operation: "accuracy-readiness",
 				Payload: httpjson.MustRequest(
-					http.MethodGet, servicePaths[service]+welcome.path, nil, "",
+					http.MethodGet, servicePath(service, welcome.path), nil, "",
 				),
 			},
 			Validate: func(result api.ProtocolResult) error {
