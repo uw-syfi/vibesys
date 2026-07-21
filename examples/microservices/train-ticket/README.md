@@ -169,4 +169,6 @@ go -C examples/evaluators/microservice run ./cmd/servicebench \
 ```
 
 The checker requires the exact v0.2.0 seed catalog and does not silently accept
-empty or structurally different startup data.
+empty or structurally different startup data. The committed benchmark workload
+runs three independent repetitions and uses their median as `primary_value` so
+normal host variance does not steer optimization from a single trial.
