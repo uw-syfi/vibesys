@@ -99,6 +99,7 @@ type createStep struct {
 	httpStatus int
 	created    func(any) error
 	cleanup    func() (string, string, any)
+	expected   entity
 }
 
 func (a *Application) createCase(
@@ -110,35 +111,35 @@ func (a *Application) createCase(
 	steps := []createStep{
 		{
 			name: "config", service: "config", method: http.MethodPost, path: "/configs",
-			body: item.config, httpStatus: http.StatusCreated,
+			body: item.config, httpStatus: http.StatusCreated, expected: item.config,
 			cleanup: func() (string, string, any) {
 				return http.MethodDelete, "/configs/" + url.PathEscape(stringValue(item.config, "name")), nil
 			},
 		},
 		{
 			name: "station-a", service: "station", method: http.MethodPost, path: "/stations",
-			body: item.stationA, httpStatus: http.StatusCreated,
+			body: item.stationA, httpStatus: http.StatusCreated, expected: item.stationA,
 			cleanup: func() (string, string, any) {
 				return http.MethodDelete, "/stations", item.stationA
 			},
 		},
 		{
 			name: "station-b", service: "station", method: http.MethodPost, path: "/stations",
-			body: item.stationB, httpStatus: http.StatusCreated,
+			body: item.stationB, httpStatus: http.StatusCreated, expected: item.stationB,
 			cleanup: func() (string, string, any) {
 				return http.MethodDelete, "/stations", item.stationB
 			},
 		},
 		{
 			name: "train", service: "train", method: http.MethodPost, path: "/trains",
-			body: item.train, httpStatus: http.StatusOK,
+			body: item.train, httpStatus: http.StatusOK, expected: item.train,
 			cleanup: func() (string, string, any) {
 				return http.MethodDelete, "/trains/" + stringValue(item.train, "id"), nil
 			},
 		},
 		{
 			name: "route", service: "route", method: http.MethodPost, path: "/routes",
-			body: item.routeInput, httpStatus: http.StatusOK,
+			body: item.routeInput, httpStatus: http.StatusOK, expected: item.route,
 			created: func(data any) error {
 				return assertEntity("route", data, item.route, "route create response")
 			},
@@ -148,7 +149,7 @@ func (a *Application) createCase(
 		},
 		{
 			name: "price", service: "price", method: http.MethodPost, path: "/prices",
-			body: item.price, httpStatus: http.StatusCreated,
+			body: item.price, httpStatus: http.StatusCreated, expected: item.price,
 			created: func(data any) error {
 				return assertEntity("price", data, item.price, "price create response")
 			},
@@ -158,7 +159,7 @@ func (a *Application) createCase(
 		},
 		{
 			name: "travel", service: "travel", method: http.MethodPost, path: "/trips",
-			body: item.tripInput, httpStatus: http.StatusCreated,
+			body: item.tripInput, httpStatus: http.StatusCreated, expected: item.trip,
 			cleanup: func() (string, string, any) {
 				return http.MethodDelete, "/trips/" + stringValue(item.tripInput, "tripId"), nil
 			},
@@ -167,18 +168,15 @@ func (a *Application) createCase(
 	checks := 0
 	for _, step := range steps {
 		entryName := fmt.Sprintf("case-%d/%s", item.index, step.name)
-		step := step
+		cleanupMethod, cleanupPath, cleanupBody := step.cleanup()
 		// Own cleanup before issuing a mutating request. A timeout or malformed
 		// response cannot prove that the server did not apply the create.
-		if err := journal.Record(entryName, func(cleanupContext context.Context) error {
-			method, path, body := step.cleanup()
-			result := client.request(cleanupContext, step.service, method, path, body, true)
-			_, responseErr := httpcheck.Response(result, http.StatusOK)
-			return responseErr
-		}); err != nil {
+		if err := recordCleanup(
+			journal, item, entryName, client, step.service,
+			cleanupMethod, cleanupPath, cleanupBody, step.expected,
+		); err != nil {
 			return checks, err
 		}
-		item.journalEntries = append(item.journalEntries, entryName)
 		data, err := client.envelope(
 			ctx, step.service, step.method, step.path, step.body, step.httpStatus, 1,
 		)
@@ -193,6 +191,82 @@ func (a *Application) createCase(
 		checks++
 	}
 	return checks, nil
+}
+
+func recordCleanup(
+	journal *accuracy.Journal,
+	item *graphCase,
+	name string,
+	client *client,
+	service, method, path string,
+	body any,
+	expected entity,
+) error {
+	ownedBody := snapshotValue(body)
+	ownedEntity := cloneEntity(expected)
+	if err := journal.Record(name, func(cleanupContext context.Context) error {
+		return cleanupOwnedEntity(
+			cleanupContext, client, service, method, path, ownedBody, ownedEntity,
+		)
+	}); err != nil {
+		return err
+	}
+	item.journalEntries = append(item.journalEntries, name)
+	return nil
+}
+
+func snapshotValue(value any) any {
+	if object, ok := value.(entity); ok {
+		return cloneEntity(object)
+	}
+	return value
+}
+
+func cleanupOwnedEntity(
+	ctx context.Context,
+	client *client,
+	service, method, path string,
+	body any,
+	expected entity,
+) error {
+	result := client.request(ctx, service, method, path, body, true)
+	if _, err := httpcheck.EnvelopeStatusIn(result, http.StatusOK, 0, 1); err != nil {
+		return err
+	}
+	listed, err := client.list(ctx, service)
+	if err != nil {
+		return err
+	}
+	expectedObject, err := normalizedObject(expected)
+	if err != nil {
+		return err
+	}
+	expectedIdentity, err := cleanupIdentity(service, expectedObject)
+	if err != nil {
+		return err
+	}
+	for _, actual := range listed {
+		identity, identityErr := cleanupIdentity(service, actual)
+		if identityErr != nil {
+			return identityErr
+		}
+		if identity == expectedIdentity {
+			return fmt.Errorf("cleanup %s identity %q remains visible", service, expectedIdentity)
+		}
+	}
+	return nil
+}
+
+func cleanupIdentity(service string, object map[string]any) (string, error) {
+	if service == "price" {
+		route, routeOK := object["routeId"].(string)
+		train, trainOK := object["trainType"].(string)
+		if !routeOK || !trainOK {
+			return "", fmt.Errorf("cleanup price compound identity is malformed")
+		}
+		return route + "\x00" + train, nil
+	}
+	return contracts[service].Key(object)
 }
 
 func (a *Application) verifyCase(

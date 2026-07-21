@@ -23,7 +23,11 @@ func (a *Application) Check(
 	}
 	journal := accuracy.NewJournal()
 	defer func() {
-		cleanupErr := journal.Cleanup(context.WithoutCancel(ctx))
+		cleanupContext, cancelCleanup := context.WithTimeout(
+			context.WithoutCancel(ctx), check.CleanupTimeout,
+		)
+		defer cancelCleanup()
+		cleanupErr := journal.Cleanup(cleanupContext)
 		if cleanupErr != nil {
 			checkErr = errors.Join(checkErr, fmt.Errorf("fixture cleanup: %w", cleanupErr))
 		}
@@ -88,7 +92,7 @@ func (a *Application) Check(
 	}
 
 	for _, item := range shuffledCases(random, cases) {
-		checks, err = a.updateCase(ctx, client, item, random)
+		checks, err = a.updateCase(ctx, client, journal, item, random)
 		recorder.AddChecks(checks)
 		if err != nil {
 			return err

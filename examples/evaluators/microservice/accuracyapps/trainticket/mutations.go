@@ -14,6 +14,7 @@ import (
 func (a *Application) updateCase(
 	ctx context.Context,
 	client *client,
+	journal *accuracy.Journal,
 	item *graphCase,
 	random *rand.Rand,
 ) (int, error) {
@@ -63,6 +64,19 @@ func (a *Application) updateCase(
 		item.price["trainType"] = seedTrain["id"]
 	}
 	item.price["basicPriceRate"], item.price["firstClassPriceRate"] = trainticketsupport.UpdatedPriceRates(version)
+	if err := recordCleanup(
+		journal,
+		item,
+		fmt.Sprintf("case-%d/price-updated", item.index),
+		client,
+		"price",
+		http.MethodDelete,
+		"/prices",
+		item.price,
+		item.price,
+	); err != nil {
+		return 0, err
+	}
 
 	item.tripInput["endTime"] = trainticketsupport.UpdatedTripEnd(int64Value(item.tripInput, "endTime"), version)
 	item.tripInput["startingStationId"] = item.stationB["id"]

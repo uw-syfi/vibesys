@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestJournalCleansInReverseAndContinuesAfterFailure(t *testing.T) {
@@ -49,5 +50,31 @@ func TestJournalRejectsDuplicateActiveEntries(t *testing.T) {
 	}
 	if err := journal.Record("same", cleanup); err == nil {
 		t.Fatal("duplicate active cleanup entry was accepted")
+	}
+}
+
+func TestJournalStopsAtAggregateCleanupDeadline(t *testing.T) {
+	journal := NewJournal()
+	runs := make([]string, 0, 2)
+	if err := journal.Record("not-run", func(context.Context) error {
+		runs = append(runs, "not-run")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Record("blocking", func(ctx context.Context) error {
+		runs = append(runs, "blocking")
+		<-ctx.Done()
+		return ctx.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := journal.Cleanup(ctx); err == nil {
+		t.Fatal("cleanup deadline was discarded")
+	}
+	if !reflect.DeepEqual(runs, []string{"blocking"}) || journal.Active() != 2 {
+		t.Fatalf("runs=%v active=%d", runs, journal.Active())
 	}
 }

@@ -45,3 +45,13 @@ func TestExactEnvelopePreservesNumberTypes(t *testing.T) {
 		t.Fatal("fractional number accepted as integer")
 	}
 }
+
+func TestEnvelopeStatusInAcceptsOnlyDeclaredStatuses(t *testing.T) {
+	result := response(`{"status":0,"msg":"absent","data":null}`)
+	if _, err := EnvelopeStatusIn(result, 200, 0, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnvelopeStatusIn(result, 200, 1); err == nil {
+		t.Fatal("undeclared application status was accepted")
+	}
+}

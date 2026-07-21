@@ -30,6 +30,7 @@ type Options struct {
 	StartupTimeout time.Duration
 	ProbeTimeout   time.Duration
 	ProbeInterval  time.Duration
+	CleanupTimeout time.Duration
 	Lifecycle      CandidateLifecycle
 }
 
@@ -72,6 +73,12 @@ func NewRunner(registry *registry.Registry, options Options) (*Runner, error) {
 	}
 	if options.ProbeInterval <= 0 {
 		return nil, fmt.Errorf("accuracy probe interval must be positive")
+	}
+	if options.CleanupTimeout == 0 {
+		options.CleanupTimeout = options.StartupTimeout
+	}
+	if options.CleanupTimeout < 0 {
+		return nil, fmt.Errorf("accuracy cleanup timeout must be positive")
 	}
 	return &Runner{registry: registry, options: options}, nil
 }
@@ -148,9 +155,10 @@ func (r *Runner) Run(ctx context.Context, workload api.Workload) (result Result)
 		}
 	}
 	err = application.Check(ctx, runtime, api.AccuracyContext{
-		Seed:    r.options.Seed,
-		Cases:   result.RandomCases,
-		Restart: restart,
+		Seed:           r.options.Seed,
+		Cases:          result.RandomCases,
+		CleanupTimeout: r.options.CleanupTimeout,
+		Restart:        restart,
 	}, recorder)
 	result.Checks, result.Properties = recorder.snapshot()
 	if err == nil {
@@ -172,12 +180,16 @@ func (r *Runner) waitReady(
 	runtime api.Runtime,
 	probes []api.ReadinessProbe,
 ) error {
-	deadline := time.Now().Add(r.options.StartupTimeout)
+	phaseContext, cancelPhase := context.WithTimeout(ctx, r.options.StartupTimeout)
+	defer cancelPhase()
 	last := "not attempted"
 	for {
+		if err := phaseContext.Err(); err != nil {
+			return fmt.Errorf("candidate did not become ready within %s: %s", r.options.StartupTimeout, last)
+		}
 		allReady := true
 		for _, probe := range probes {
-			probeContext, cancel := context.WithTimeout(ctx, r.options.ProbeTimeout)
+			probeContext, cancel := context.WithTimeout(phaseContext, r.options.ProbeTimeout)
 			result := runtime.Invoke(probeContext, probe.Invocation)
 			cancel()
 			if err := probe.Validate(result); err != nil {
@@ -187,13 +199,13 @@ func (r *Runner) waitReady(
 			}
 		}
 		if allReady {
+			if err := phaseContext.Err(); err != nil {
+				return fmt.Errorf("candidate did not become ready within %s: %s", r.options.StartupTimeout, last)
+			}
 			return nil
 		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("candidate did not become ready: %s", last)
-		}
-		if err := sleepContext(ctx, r.options.ProbeInterval); err != nil {
-			return err
+		if err := sleepContext(phaseContext, r.options.ProbeInterval); err != nil {
+			return fmt.Errorf("candidate did not become ready within %s: %s", r.options.StartupTimeout, last)
 		}
 	}
 }
@@ -203,11 +215,15 @@ func (r *Runner) waitStopped(
 	runtime api.Runtime,
 	probes []api.ReadinessProbe,
 ) error {
-	deadline := time.Now().Add(r.options.StartupTimeout)
+	phaseContext, cancelPhase := context.WithTimeout(ctx, r.options.StartupTimeout)
+	defer cancelPhase()
 	for {
+		if err := phaseContext.Err(); err != nil {
+			return fmt.Errorf("candidate did not stop within %s", r.options.StartupTimeout)
+		}
 		serving := make([]string, 0)
 		for _, probe := range probes {
-			probeContext, cancel := context.WithTimeout(ctx, r.options.ProbeTimeout)
+			probeContext, cancel := context.WithTimeout(phaseContext, r.options.ProbeTimeout)
 			result := runtime.Invoke(probeContext, probe.Invocation)
 			cancel()
 			if result.TransportSuccess {
@@ -215,13 +231,13 @@ func (r *Runner) waitStopped(
 			}
 		}
 		if len(serving) == 0 {
+			if err := phaseContext.Err(); err != nil {
+				return fmt.Errorf("candidate did not stop within %s", r.options.StartupTimeout)
+			}
 			return nil
 		}
-		if time.Now().After(deadline) {
+		if err := sleepContext(phaseContext, r.options.ProbeInterval); err != nil {
 			return fmt.Errorf("candidate endpoints remained reachable after stop: %v", serving)
-		}
-		if err := sleepContext(ctx, r.options.ProbeInterval); err != nil {
-			return err
 		}
 	}
 }

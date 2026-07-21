@@ -238,9 +238,10 @@ type ReadinessProbe struct {
 }
 
 type AccuracyContext struct {
-	Seed    int64
-	Cases   int
-	Restart func(context.Context) error
+	Seed           int64
+	Cases          int
+	CleanupTimeout time.Duration
+	Restart        func(context.Context) error
 }
 
 type AccuracyRecorder interface {

@@ -4,12 +4,13 @@ This package owns mechanics common to accuracy checking across microservice
 applications:
 
 - target session creation through the same drivers as benchmarking;
-- readiness and complete-stop polling across every declared endpoint;
-- managed candidate crash/restart orchestration;
+- aggregate-deadline readiness and complete-stop polling across every declared
+  endpoint;
+- fail-closed PID-namespace candidate crash/restart orchestration;
 - required-property registration, fresh-evidence binding, and enforcement;
 - versioned result reporting with hidden replay-seed hashes; and
-- reverse-order, retryable fixture cleanup journals that can take ownership
-  before an ambiguously successful mutation is issued.
+- aggregate-deadline, reverse-order, retryable fixture cleanup journals that
+  can take ownership before an ambiguously successful mutation is issued.
 
 `httpcheck` strictly validates HTTP responses and exact envelopes.
 `jsoncheck` validates every collection row, exact object fields, field types,

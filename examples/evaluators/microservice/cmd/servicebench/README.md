@@ -18,7 +18,8 @@ The command is responsible for:
 targets, transport sessions, random seed handling, and atomic JSON output but
 runs the application's independent exhaustive accuracy adapter. Managed
 candidate mode additionally proves that every readiness endpoint stops before
-restarting after a process-group crash.
+restarting after an OS-contained crash. Managed candidates require Bubblewrap;
+the command fails closed when a dedicated PID namespace cannot be created.
 
 It should contain orchestration only. Protocol behavior belongs in `drivers/`,
 application behavior in `apps/`, and measurement behavior in `engine/`.

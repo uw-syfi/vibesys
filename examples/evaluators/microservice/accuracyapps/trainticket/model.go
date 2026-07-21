@@ -99,9 +99,34 @@ func makeCase(random *rand.Rand, namespace string, index int) *graphCase {
 func cloneEntity(source entity) entity {
 	cloned := make(entity, len(source))
 	for key, value := range source {
-		cloned[key] = value
+		cloned[key] = cloneValue(value)
 	}
 	return cloned
+}
+
+func cloneValue(value any) any {
+	switch typed := value.(type) {
+	case entity:
+		return cloneEntity(typed)
+	case map[string]any:
+		cloned := make(map[string]any, len(typed))
+		for key, item := range typed {
+			cloned[key] = cloneValue(item)
+		}
+		return cloned
+	case []string:
+		return append([]string(nil), typed...)
+	case []int:
+		return append([]int(nil), typed...)
+	case []any:
+		cloned := make([]any, len(typed))
+		for index, item := range typed {
+			cloned[index] = cloneValue(item)
+		}
+		return cloned
+	default:
+		return value
+	}
 }
 
 func stringValue(item entity, field string) string {

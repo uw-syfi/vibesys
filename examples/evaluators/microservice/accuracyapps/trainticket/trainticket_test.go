@@ -163,7 +163,9 @@ func TestUpdatesRetainAndProbeOldSecondaryKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	application := &Application{catalog: catalog, timeout: time.Second}
-	if _, err := application.updateCase(context.Background(), client, item, rand.New(rand.NewSource(9))); err != nil {
+	if _, err := application.updateCase(
+		context.Background(), client, accuracy.NewJournal(), item, rand.New(rand.NewSource(9)),
+	); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := verifyRetiredSecondaryIndexes(context.Background(), client, item); err != nil {
@@ -186,6 +188,9 @@ func TestPartialCreateUsesJournaledReverseCleanup(t *testing.T) {
 		if spec.Method == http.MethodDelete {
 			deletes = append(deletes, spec.Path)
 			return envelopeResult(200, 1, nil)
+		}
+		if spec.Method == http.MethodGet && strings.HasSuffix(spec.Path, listPaths[invocation.Target]) {
+			return envelopeResult(200, 1, []any{})
 		}
 		if requests == 3 {
 			return api.ProtocolResult{ErrorCategory: "injected", ErrorMessage: "create failed"}
@@ -213,6 +218,122 @@ func TestPartialCreateUsesJournaledReverseCleanup(t *testing.T) {
 	}
 	if len(deletes) != 3 || !strings.Contains(deletes[0], "/stations") || !strings.Contains(deletes[2], "/configs/") {
 		t.Fatalf("cleanup order=%v", deletes)
+	}
+}
+
+func TestCleanupSnapshotsMutablePriceIdentity(t *testing.T) {
+	item := makeCase(rand.New(rand.NewSource(7)), "namespace", 0)
+	originalRoute := stringValue(item.price, "routeId")
+	deletedRoute := ""
+	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
+		spec := invocation.Payload.(api.HTTPRequestSpec)
+		if spec.Method == http.MethodDelete {
+			var body map[string]any
+			if err := json.Unmarshal([]byte(spec.Body), &body); err != nil {
+				t.Fatal(err)
+			}
+			deletedRoute, _ = body["routeId"].(string)
+			return envelopeResult(200, 1, nil)
+		}
+		return envelopeResult(200, 1, []any{})
+	})
+	client, err := newClient(runtime, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := accuracy.NewJournal()
+	if err := recordCleanup(
+		journal, item, "price", client, "price", http.MethodDelete, "/prices",
+		item.price, item.price,
+	); err != nil {
+		t.Fatal(err)
+	}
+	item.price["routeId"] = "mutated-route"
+	if err := journal.Cleanup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if deletedRoute != originalRoute {
+		t.Fatalf("cleanup route=%q, want snapshotted %q", deletedRoute, originalRoute)
+	}
+}
+
+func TestCleanupRejectsAcknowledgedNoOpDelete(t *testing.T) {
+	item := makeCase(rand.New(rand.NewSource(7)), "namespace", 0)
+	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
+		spec := invocation.Payload.(api.HTTPRequestSpec)
+		if spec.Method == http.MethodDelete {
+			return envelopeResult(200, 1, nil)
+		}
+		return envelopeResult(200, 1, []any{item.price})
+	})
+	client, err := newClient(runtime, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := accuracy.NewJournal()
+	if err := recordCleanup(
+		journal, item, "price", client, "price", http.MethodDelete, "/prices",
+		item.price, item.price,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Cleanup(context.Background()); err == nil || !strings.Contains(err.Error(), "remains visible") {
+		t.Fatalf("no-op cleanup error=%v", err)
+	}
+	if journal.Active() != 1 {
+		t.Fatalf("failed cleanup active=%d, want 1", journal.Active())
+	}
+}
+
+func TestCleanupDistinguishesOldAndNewPriceCompoundKeys(t *testing.T) {
+	item := makeCase(rand.New(rand.NewSource(7)), "namespace", 0)
+	oldPrice := cloneEntity(item.price)
+	newPrice := cloneEntity(item.price)
+	newPrice["routeId"] = "new-route"
+	current := []entity{oldPrice}
+	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
+		spec := invocation.Payload.(api.HTTPRequestSpec)
+		if spec.Method == http.MethodDelete {
+			var requested entity
+			if err := json.Unmarshal([]byte(spec.Body), &requested); err != nil {
+				t.Fatal(err)
+			}
+			status := 0
+			for index, price := range current {
+				if price["routeId"] == requested["routeId"] && price["trainType"] == requested["trainType"] {
+					current = append(current[:index], current[index+1:]...)
+					status = 1
+					break
+				}
+			}
+			return envelopeResult(200, status, nil)
+		}
+		items := make([]any, 0, len(current))
+		for _, price := range current {
+			items = append(items, price)
+		}
+		return envelopeResult(200, 1, items)
+	})
+	client, err := newClient(runtime, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := accuracy.NewJournal()
+	if err := recordCleanup(
+		journal, item, "old", client, "price", http.MethodDelete, "/prices", oldPrice, oldPrice,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordCleanup(
+		journal, item, "new", client, "price", http.MethodDelete, "/prices", newPrice, newPrice,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Cleanup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(current) != 0 || journal.Active() != 0 {
+		t.Fatalf("current=%v active=%d", current, journal.Active())
 	}
 }
 

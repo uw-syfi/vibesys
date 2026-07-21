@@ -29,6 +29,12 @@ scoring. They share only observable request encoding, authentication, and fuzz
 grammars that must not reveal which evaluator mode is running; response schemas
 and expected values are explicitly excluded from that shared support.
 
+Managed crash recovery fails closed unless the candidate can run in a dedicated
+Bubblewrap PID namespace. Process groups and sampled descendant PIDs are not a
+containment boundary: a daemon can change sessions before sampling, and a bare
+PID can be reused. Terminating the namespace init instead gives the kernel
+ownership of all descendants, including immediate double-forks.
+
 The dependency rule is:
 
 ```text

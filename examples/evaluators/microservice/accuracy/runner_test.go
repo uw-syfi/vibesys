@@ -3,6 +3,7 @@ package accuracy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,16 +13,29 @@ import (
 	"vibesys/microservice-evaluator/registry"
 )
 
-type runnerDriver struct{ serving *atomic.Bool }
+type runnerDriver struct {
+	serving *atomic.Bool
+	delay   time.Duration
+}
 
 func (runnerDriver) Protocol() string { return "test" }
 func (d runnerDriver) Open(context.Context, api.Target) (api.Client, error) {
-	return runnerClient{serving: d.serving}, nil
+	return runnerClient{serving: d.serving, delay: d.delay}, nil
 }
 
-type runnerClient struct{ serving *atomic.Bool }
+type runnerClient struct {
+	serving *atomic.Bool
+	delay   time.Duration
+}
 
-func (c runnerClient) Invoke(context.Context, api.Invocation) api.ProtocolResult {
+func (c runnerClient) Invoke(ctx context.Context, _ api.Invocation) api.ProtocolResult {
+	if c.delay > 0 {
+		select {
+		case <-ctx.Done():
+			return api.ProtocolResult{ErrorCategory: "transport", ErrorMessage: ctx.Err().Error()}
+		case <-time.After(c.delay):
+		}
+	}
 	if !c.serving.Load() {
 		return api.ProtocolResult{ErrorCategory: "transport", ErrorMessage: "stopped"}
 	}
@@ -32,6 +46,7 @@ func (runnerClient) Close() error { return nil }
 type runnerApplication struct {
 	restart    bool
 	pass       bool
+	probeCount int
 	properties []api.AccuracyProperty
 }
 
@@ -45,16 +60,25 @@ func (a runnerApplication) Properties() []api.AccuracyProperty {
 		{Name: "restart", Required: false},
 	}
 }
-func (runnerApplication) ReadinessProbes() []api.ReadinessProbe {
-	return []api.ReadinessProbe{{
-		Name: "service", Invocation: api.Invocation{Target: "service"},
-		Validate: func(result api.ProtocolResult) error {
-			if !result.TransportSuccess {
-				return errors.New("not ready")
-			}
-			return nil
-		},
-	}}
+func (a runnerApplication) ReadinessProbes() []api.ReadinessProbe {
+	count := a.probeCount
+	if count == 0 {
+		count = 1
+	}
+	probes := make([]api.ReadinessProbe, 0, count)
+	for index := 0; index < count; index++ {
+		probes = append(probes, api.ReadinessProbe{
+			Name:       fmt.Sprintf("service-%d", index),
+			Invocation: api.Invocation{Target: "service"},
+			Validate: func(result api.ProtocolResult) error {
+				if !result.TransportSuccess {
+					return errors.New("not ready")
+				}
+				return nil
+			},
+		})
+	}
+	return probes
 }
 func (a runnerApplication) Check(
 	ctx context.Context,
@@ -207,5 +231,41 @@ func TestRunnerRejectsNoOpStop(t *testing.T) {
 	)
 	if result.Valid || !strings.Contains(result.Error, "remained reachable") {
 		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestReadinessUsesAggregateStartupDeadline(t *testing.T) {
+	serving := &atomic.Bool{}
+	serving.Store(true)
+	registered := registry.New()
+	if err := registered.RegisterDriver(runnerDriver{
+		serving: serving, delay: 30 * time.Millisecond,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	application := runnerApplication{pass: true, probeCount: 2}
+	if err := registered.RegisterAccuracyApplication(
+		"runner-test",
+		func(api.Workload) (api.AccuracyApplication, error) { return application, nil },
+	); err != nil {
+		t.Fatal(err)
+	}
+	runner, err := NewRunner(registered, Options{
+		Seed: 7, CasesMin: 1, CasesMax: 1,
+		StartupTimeout: 40 * time.Millisecond,
+		ProbeTimeout:   100 * time.Millisecond,
+		ProbeInterval:  time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	result := runner.Run(context.Background(), runnerWorkload())
+	elapsed := time.Since(started)
+	if result.Valid || !strings.Contains(result.Error, "within 40ms") {
+		t.Fatalf("result=%+v", result)
+	}
+	if elapsed > 90*time.Millisecond {
+		t.Fatalf("aggregate readiness deadline took %s", elapsed)
 	}
 }

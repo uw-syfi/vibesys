@@ -65,6 +65,10 @@ func (j *Journal) Cleanup(ctx context.Context) error {
 
 	var cleanupErrors []error
 	for index := len(entries) - 1; index >= 0; index-- {
+		if err := ctx.Err(); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("cleanup deadline: %w", err))
+			break
+		}
 		entry := entries[index]
 		j.mu.Lock()
 		active := entry.active

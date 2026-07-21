@@ -2,11 +2,11 @@ package lifecycle
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"os"
 	"os/exec"
-	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -29,7 +29,7 @@ func TestManagedCandidateHelper(t *testing.T) {
 	mode := os.Args[separator+1]
 	pidFile := os.Args[separator+2]
 	if mode == "child" {
-		if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		if err := os.WriteFile(pidFile, []byte("ready"), 0o600); err != nil {
 			os.Exit(3)
 		}
 		time.Sleep(time.Minute)
@@ -46,13 +46,16 @@ func TestManagedCandidateHelper(t *testing.T) {
 	if err := child.Start(); err != nil {
 		os.Exit(5)
 	}
-	time.Sleep(time.Minute)
 	os.Exit(0)
 }
 
-func TestManagedCandidateKillsDetachedDescendant(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("detached descendant process-state assertion is Linux-specific")
+func TestManagedCandidateKillsImmediatelyDetachedDescendant(t *testing.T) {
+	bwrap, err := exec.LookPath("bwrap")
+	if err != nil {
+		t.Skip("bubblewrap is unavailable")
+	}
+	if err := probePIDNamespace(bwrap); err != nil {
+		t.Skipf("PID namespaces are unavailable: %v", err)
 	}
 	t.Setenv("GO_MANAGED_CANDIDATE_HELPER", "1")
 	pidFile := t.TempDir() + "/child.pid"
@@ -73,10 +76,9 @@ func TestManagedCandidateKillsDetachedDescendant(t *testing.T) {
 	var childPID int
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		raw, readErr := os.ReadFile(pidFile)
-		if readErr == nil {
-			childPID, err = strconv.Atoi(string(raw))
-			if err == nil {
+		if _, readErr := os.ReadFile(pidFile); readErr == nil {
+			childPID = helperHostPID(pidFile)
+			if childPID > 0 {
 				break
 			}
 		}
@@ -89,11 +91,45 @@ func TestManagedCandidateKillsDetachedDescendant(t *testing.T) {
 		t.Fatalf("stop managed candidate: %v; log=%s", err, managed.LogTail(4000))
 	}
 	deadline = time.Now().Add(2 * time.Second)
-	for processExists(childPID) && time.Now().Before(deadline) {
+	for pidExists(childPID) && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
-	if processExists(childPID) {
+	if pidExists(childPID) {
 		_ = syscall.Kill(childPID, syscall.SIGKILL)
-		t.Fatal(fmt.Sprintf("detached child %d survived", childPID))
+		t.Fatalf("immediately detached child %d survived", childPID)
 	}
+}
+
+func TestManagedCandidateFailsClosedWithoutPIDNamespaceLauncher(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if _, err := NewManagedCandidate([]string{os.Args[0]}, t.TempDir(), nil); err == nil ||
+		!strings.Contains(err.Error(), "requires bubblewrap") {
+		t.Fatalf("containment error=%v", err)
+	}
+}
+
+func pidExists(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || !errors.Is(err, syscall.ESRCH)
+}
+
+func helperHostPID(pidFile string) int {
+	output, err := exec.Command("ps", "-e", "-o", "pid=,args=").Output()
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		if !strings.Contains(line, "-- child "+pidFile) {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		pid, parseErr := strconv.Atoi(fields[0])
+		if parseErr == nil {
+			return pid
+		}
+	}
+	return 0
 }

@@ -55,6 +55,45 @@ func ExactEnvelope(
 	expectedHTTPStatus int,
 	expectedApplicationStatus int,
 ) (Envelope, error) {
+	envelope, err := ParseEnvelope(result, expectedHTTPStatus)
+	if err != nil {
+		return Envelope{}, err
+	}
+	if envelope.Status != expectedApplicationStatus {
+		return Envelope{}, fmt.Errorf(
+			"application status %d, expected %d",
+			envelope.Status,
+			expectedApplicationStatus,
+		)
+	}
+	return envelope, nil
+}
+
+// EnvelopeStatusIn strictly parses an envelope and accepts only the listed
+// application statuses. It supports idempotent cleanup, where both deleted and
+// already absent are valid but malformed acknowledgements are not.
+func EnvelopeStatusIn(
+	result api.ProtocolResult,
+	expectedHTTPStatus int,
+	allowedApplicationStatuses ...int,
+) (Envelope, error) {
+	envelope, err := ParseEnvelope(result, expectedHTTPStatus)
+	if err != nil {
+		return Envelope{}, err
+	}
+	for _, allowed := range allowedApplicationStatuses {
+		if envelope.Status == allowed {
+			return envelope, nil
+		}
+	}
+	return Envelope{}, fmt.Errorf(
+		"application status %d, expected one of %v",
+		envelope.Status,
+		allowedApplicationStatuses,
+	)
+}
+
+func ParseEnvelope(result api.ProtocolResult, expectedHTTPStatus int) (Envelope, error) {
 	response, err := Response(result, expectedHTTPStatus)
 	if err != nil {
 		return Envelope{}, err
@@ -73,13 +112,6 @@ func ExactEnvelope(
 	status, err := Integer(object["status"])
 	if err != nil {
 		return Envelope{}, fmt.Errorf("response envelope status: %w", err)
-	}
-	if status != int64(expectedApplicationStatus) {
-		return Envelope{}, fmt.Errorf(
-			"application status %d, expected %d",
-			status,
-			expectedApplicationStatus,
-		)
 	}
 	return Envelope{Status: int(status), Msg: object["msg"], Data: object["data"]}, nil
 }
