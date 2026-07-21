@@ -20,7 +20,9 @@ import pytest
 
 from vibesys.agents import AgentRunner
 from vibesys.context import create_run_context
+from vibesys.domains.base import DomainName
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
+from vibesys.domains.registry import resolve_domain
 from vibesys.loops.evolve import loop as evolve_loop
 from vibesys.loops.evolve.loop import (
     _candidate_runtime_notes,
@@ -40,6 +42,8 @@ from vibesys.loops.evolve.population import (
 )
 from vibesys.sandbox.run_environment import RunEnvironmentSpec, candidate_modal_app_name
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
+
+_LLM_SERVING_DOMAIN = resolve_domain(DomainName.LLM_SERVING)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -67,6 +71,8 @@ def _make_runner(
     judge_verdicts: list[str] | None = None,
     profiler_responses: list[ProfilerSummary] | None = None,
     capture_mutator_prompts: list[str] | None = None,
+    capture_judge_prompts: list[str] | None = None,
+    capture_profiler_prompts: list[str] | None = None,
     mutator_writes: bool = False,
 ):
     """Build a MagicMock AgentRunner with scripted responses.
@@ -103,6 +109,8 @@ def _make_runner(
                 expected_behavior="ok",
             )
         if kind == "judge":
+            if capture_judge_prompts is not None:
+                capture_judge_prompts.append(system_prompt)
             idx = counters["judge"]
             counters["judge"] += 1
             v = judge_q[idx] if idx < len(judge_q) else "pass"
@@ -112,6 +120,8 @@ def _make_runner(
                 verdict=Verdict.PASS if v == "pass" else Verdict.FAIL,
             )
         if kind == "profiler":
+            if capture_profiler_prompts is not None:
+                capture_profiler_prompts.append(system_prompt)
             idx = counters["profiler"]
             counters["profiler"] += 1
             if idx < len(prof_q):
@@ -144,6 +154,7 @@ def _invoke_loop(tmp_path, ref_file, runner, **kwargs):
         max_generations=2,
         children_per_generation=1,
         seed=0,
+        domain=DomainName.LLM_SERVING,
     )
     defaults.update(kwargs)
     with (
@@ -313,8 +324,9 @@ def test_bootstrap_prompt_uses_cold_start_section(tmp_path, ref_file):
     )
     assert len(captured) == 1
     prompt = captured[0]
-    assert "Cold start" in prompt
-    assert "Parent (the implementation you are mutating)" not in prompt
+    assert "Bootstrap the first passing seed" in prompt
+    assert "## Parent" not in prompt
+    assert "Model weights are at `/model`" in prompt
 
 
 def test_evolve_with_preexisting_passing_seed_skips_bootstrap(tmp_path, ref_file):
@@ -547,11 +559,43 @@ def test_second_child_prompt_includes_parent_block(tmp_path, ref_file):
     )
     assert len(captured) == 2  # bootstrap (cold-start) + gen-1 (parent block)
     gen1_prompt = captured[1]
-    assert "Cold start" not in gen1_prompt
-    assert "Parent (the implementation you are mutating)" in gen1_prompt
+    assert "Bootstrap the first passing seed" not in gen1_prompt
+    assert "## Parent" in gen1_prompt
     # The seed's perf_metric (10.0) was emitted by the profiler and should
     # appear in the parent block.
     assert "10.0" in gen1_prompt
+
+
+def test_generic_domain_prompts_exclude_llm_serving_contracts(tmp_path, ref_file):
+    """The evolve loop uses registered domain sections instead of baking the
+    LLM-serving contract into its mutator and judge base prompts."""
+    mutator_prompts: list[str] = []
+    judge_prompts: list[str] = []
+    profiler_prompts: list[str] = []
+    runner = _make_runner(
+        capture_mutator_prompts=mutator_prompts,
+        capture_judge_prompts=judge_prompts,
+        capture_profiler_prompts=profiler_prompts,
+    )
+
+    result = _invoke_loop(
+        tmp_path,
+        ref_file,
+        runner,
+        domain=DomainName.GENERIC,
+        modality=None,
+        max_generations=0,
+    )
+
+    assert result is True
+    assert len(mutator_prompts) == len(judge_prompts) == len(profiler_prompts) == 1
+    combined = "\n".join(mutator_prompts + judge_prompts + profiler_prompts)
+    assert "uv run python accuracy_checker/checker.py" in combined
+    assert "uv run python benchmark/benchmark.py" in combined
+    assert "Model weights are at `/model`" not in combined
+    assert "serving-systems" not in combined
+    assert "/health" not in combined
+    assert "OpenAI-compatible" not in combined
 
 
 # ---------------------------------------------------------------------------
@@ -781,6 +825,7 @@ def test_run_generation_parallel_bounds_concurrency_and_records_all(tmp_path, mo
         objectives=None,
         frontier_bias=0.7,
         modality="text_generation",
+        domain_definition=_LLM_SERVING_DOMAIN,
         pass_criteria="crit",
         keep_modal_apps=False,
     )
@@ -838,6 +883,7 @@ def test_run_generation_parallel_skips_parent_without_commit(tmp_path, monkeypat
         objectives=None,
         frontier_bias=0.7,
         modality="text_generation",
+        domain_definition=_LLM_SERVING_DOMAIN,
         pass_criteria="crit",
         keep_modal_apps=False,
     )
@@ -870,6 +916,7 @@ def test_evaluate_in_subcontext_skips_parent_without_commit():
         objective="obj",
         objectives=None,
         modality="text_generation",
+        domain_definition=_LLM_SERVING_DOMAIN,
         pass_criteria="crit",
         keep_modal_apps=False,
         worktree_lock=threading.Lock(),
@@ -928,6 +975,7 @@ def test_evaluate_in_subcontext_builds_worktree_and_evaluates(tmp_path, ref_file
             objective="Maximize tok/s throughput.",
             objectives=None,
             modality="text_generation",
+            domain_definition=_LLM_SERVING_DOMAIN,
             pass_criteria="be faster",
             keep_modal_apps=False,
             worktree_lock=threading.Lock(),

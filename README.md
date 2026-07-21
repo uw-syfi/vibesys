@@ -286,7 +286,9 @@ resources/                        # framework-owned assets exposed to agent runs
 - **evolve**: per generation × child: select parent (Pareto frontier with
   `--frontier-bias`, scalar softmax otherwise) + inspirations →
   `git checkout` parent tree → mutator → judge → profiler → commit.
-  No early stop; runs the full `--max-generations × --children-per-generation`.
+  The input bundle's domain supplies role prompts, environment hooks, and
+  profiler compatibility. No early stop; runs the full
+  `--max-generations × --children-per-generation`.
 
 ## Development
 

@@ -7,6 +7,10 @@ threads, scheduling evidence, and the limits of conclusions without hardware cou
 
 Benchmark command: {{ benchmark_command }}
 
+{% if domain_profiler %}
+{{ domain_profiler }}
+
+{% endif %}
 Return exactly one JSON object matching the requested ProfilerSummary schema. Keep the
 analysis bounded: summarize the most important hot paths and diagnostics rather than
 embedding the raw report.
