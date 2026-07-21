@@ -3,7 +3,6 @@ package trainticket
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"vibesys/microservice-evaluator/api"
+	"vibesys/microservice-evaluator/wire/httpjson"
 )
 
 var services = []string{"config", "station", "train", "travel", "route", "price"}
@@ -206,18 +206,7 @@ func (a *Application) runStep(ctx context.Context, runtime api.Runtime, step set
 }
 
 func (a *Application) invocation(target, operation, method, path string, body any) api.Invocation {
-	spec := api.HTTPRequestSpec{
-		Method: method, Path: path,
-		Headers: map[string]string{"Accept": "application/json", "Authorization": "Bearer " + a.token},
-	}
-	if body != nil {
-		encoded, err := json.Marshal(body)
-		if err != nil {
-			panic(fmt.Sprintf("marshal trusted Train Ticket entity: %v", err))
-		}
-		spec.Body = string(encoded)
-		spec.Headers["Content-Type"] = "application/json"
-	}
+	spec := httpjson.MustRequest(method, path, body, "Bearer "+a.token)
 	return api.Invocation{Target: target, Operation: operation, Payload: spec}
 }
 

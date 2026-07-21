@@ -11,6 +11,7 @@ import (
 type Recorder struct {
 	mu         sync.Mutex
 	checks     int
+	claimed    int
 	properties map[string]bool
 	required   map[string]struct{}
 }
@@ -35,6 +36,9 @@ func newRecorder(properties []api.AccuracyProperty) (*Recorder, error) {
 	if len(properties) == 0 {
 		return nil, fmt.Errorf("accuracy application declares no properties")
 	}
+	if len(recorder.required) == 0 {
+		return nil, fmt.Errorf("accuracy application declares no required properties")
+	}
 	return recorder, nil
 }
 
@@ -47,17 +51,33 @@ func (r *Recorder) AddChecks(count int) {
 	r.mu.Unlock()
 }
 
-func (r *Recorder) Pass(name string) error {
+func (r *Recorder) Pass(names ...string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	passed, exists := r.properties[name]
-	if !exists {
-		return fmt.Errorf("accuracy application passed undeclared property %q", name)
+	if len(names) == 0 {
+		return fmt.Errorf("accuracy application passed an empty property group")
 	}
-	if passed {
-		return fmt.Errorf("accuracy property %q was passed more than once", name)
+	if r.checks <= r.claimed {
+		return fmt.Errorf("accuracy property group %v has no newly recorded checks", names)
 	}
-	r.properties[name] = true
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		passed, exists := r.properties[name]
+		if !exists {
+			return fmt.Errorf("accuracy application passed undeclared property %q", name)
+		}
+		if passed {
+			return fmt.Errorf("accuracy property %q was passed more than once", name)
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return fmt.Errorf("accuracy property %q is duplicated in a pass group", name)
+		}
+		seen[name] = struct{}{}
+	}
+	for _, name := range names {
+		r.properties[name] = true
+	}
+	r.claimed = r.checks
 	return nil
 }
 

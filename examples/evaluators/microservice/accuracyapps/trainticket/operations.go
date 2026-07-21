@@ -48,70 +48,46 @@ func (a *Application) verifyProtocol(ctx context.Context, client *client) (int, 
 }
 
 func (a *Application) verifySeedCatalog(ctx context.Context, client *client) (int, error) {
+	return a.verifyExactState(ctx, client, nil)
+}
+
+func (a *Application) verifyExactState(
+	ctx context.Context,
+	client *client,
+	live []*graphCase,
+) (int, error) {
 	checks := 0
 	for _, service := range services {
-		actual, err := client.list(ctx, service)
-		if err != nil {
+		expected := make([]any, 0, len(a.catalog[service])+2*len(live))
+		for _, seed := range a.catalog[service] {
+			expected = append(expected, seed)
+		}
+		for _, item := range live {
+			expected = append(expected, caseEntities(service, item)...)
+		}
+		if err := client.exactList(ctx, service, expected, "exact "+service+" state"); err != nil {
 			return checks, err
 		}
-		expected := a.catalog[service]
-		if len(actual) != len(expected) {
-			return checks, fmt.Errorf(
-				"%s seed count is %d, expected exactly %d",
-				service,
-				len(actual),
-				len(expected),
-			)
-		}
-		for _, expectedEntity := range expected {
-			key, err := contracts[service].Key(expectedEntity)
-			if err != nil {
-				return checks, fmt.Errorf("embedded %s seed key: %w", service, err)
-			}
-			actualEntity, exists := actual[key]
-			if !exists {
-				return checks, fmt.Errorf("%s seed key %q is missing", service, key)
-			}
-			if err := assertEntity(service, actualEntity, expectedEntity, "seed "+service+" "+key); err != nil {
-				return checks, err
-			}
-			checks++
-		}
+		checks += len(expected) + 1
 	}
 	return checks, nil
 }
 
-func (a *Application) verifySeedCatalogPresent(
-	ctx context.Context,
-	client *client,
-) (int, error) {
-	checks := 0
-	for _, service := range services {
-		actual, err := client.list(ctx, service)
-		if err != nil {
-			return checks, err
-		}
-		for _, expectedEntity := range a.catalog[service] {
-			key, err := contracts[service].Key(expectedEntity)
-			if err != nil {
-				return checks, err
-			}
-			actualEntity, exists := actual[key]
-			if !exists {
-				return checks, fmt.Errorf("seed %s %q disappeared after a runtime delete", service, key)
-			}
-			if err := assertEntity(
-				service,
-				actualEntity,
-				expectedEntity,
-				"surviving seed "+service+" "+key,
-			); err != nil {
-				return checks, err
-			}
-			checks++
-		}
+func caseEntities(service string, item *graphCase) []any {
+	switch service {
+	case "config":
+		return []any{item.config}
+	case "station":
+		return []any{item.stationA, item.stationB}
+	case "train":
+		return []any{item.train}
+	case "route":
+		return []any{item.route}
+	case "price":
+		return []any{item.price}
+	default:
+		return []any{item.trip}
 	}
-	return checks, nil
 }
 
 type createStep struct {
@@ -188,31 +164,35 @@ func (a *Application) createCase(
 			},
 		},
 	}
+	checks := 0
 	for _, step := range steps {
-		data, err := client.envelope(
-			ctx, step.service, step.method, step.path, step.body, step.httpStatus, 1,
-		)
-		if err != nil {
-			return len(item.journalEntries), err
-		}
-		if step.created != nil {
-			if err := step.created(data); err != nil {
-				return len(item.journalEntries), err
-			}
-		}
 		entryName := fmt.Sprintf("case-%d/%s", item.index, step.name)
 		step := step
+		// Own cleanup before issuing a mutating request. A timeout or malformed
+		// response cannot prove that the server did not apply the create.
 		if err := journal.Record(entryName, func(cleanupContext context.Context) error {
 			method, path, body := step.cleanup()
 			result := client.request(cleanupContext, step.service, method, path, body, true)
 			_, responseErr := httpcheck.Response(result, http.StatusOK)
 			return responseErr
 		}); err != nil {
-			return len(item.journalEntries), err
+			return checks, err
 		}
 		item.journalEntries = append(item.journalEntries, entryName)
+		data, err := client.envelope(
+			ctx, step.service, step.method, step.path, step.body, step.httpStatus, 1,
+		)
+		if err != nil {
+			return checks, err
+		}
+		if step.created != nil {
+			if err := step.created(data); err != nil {
+				return checks, err
+			}
+		}
+		checks++
 	}
-	return len(steps), nil
+	return checks, nil
 }
 
 func (a *Application) verifyCase(
@@ -309,12 +289,10 @@ func verifyRoute(ctx context.Context, client *client, item *graphCase) error {
 	if err != nil {
 		return err
 	}
-	indexed, err := contracts["route"].IndexList(found, "route secondary lookup")
-	if err != nil {
+	if _, err := contracts["route"].ExactList(
+		found, []any{item.route}, "route secondary lookup",
+	); err != nil {
 		return err
-	}
-	if _, exists := indexed[routeID]; !exists {
-		return fmt.Errorf("route start/terminal lookup omitted newly written route %q", routeID)
 	}
 	return assertListed(ctx, client, "route", item.route, "route list")
 }

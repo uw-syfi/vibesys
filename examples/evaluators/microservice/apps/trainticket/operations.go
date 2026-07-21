@@ -6,9 +6,9 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"vibesys/microservice-evaluator/api"
+	trainticketsupport "vibesys/microservice-evaluator/appsupport/trainticket"
 )
 
 type expectationKind int
@@ -212,16 +212,15 @@ func updatedEntity(service string, item, alternate *record, version uint64) (met
 			func() { item.config = updated }
 	case "station":
 		updated := item.stationA
-		namePrefixes := []string{"Renamed ", "Transfer Hub ", "换乘站 "}
-		updated.Name = fmt.Sprintf("%s%016x", namePrefixes[version%uint64(len(namePrefixes))], version)
-		updated.StayTime = 1 + int(version%120)
+		updated.Name = trainticketsupport.UpdatedStationName(version, false)
+		updated.StayTime = trainticketsupport.UpdatedStationStayTime(version)
 		return http.MethodPut, "/api/v1/stationservice/stations", updated,
 			"/api/v1/stationservice/stations/name/" + updated.ID, updated.Name,
 			func() { item.stationA = updated }
 	case "train":
 		updated := item.train
-		updated.AverageSpeed = 80 + int(version%420)
-		updated.EconomyClass = 100 + int((version>>8)%900)
+		updated.AverageSpeed = trainticketsupport.UpdatedTrainSpeed(version)
+		updated.EconomyClass = trainticketsupport.UpdatedTrainEconomy(updated.EconomyClass)
 		return http.MethodPut, "/api/v1/trainservice/trains", updated,
 			"/api/v1/trainservice/trains/" + updated.ID, updated,
 			func() { item.train = updated }
@@ -243,7 +242,7 @@ func updatedEntity(service string, item, alternate *record, version uint64) (met
 		}
 		updatedInput.StationList = strings.Join(updatedRoute.Stations, ",")
 		updatedRoute.Distances = append([]int(nil), item.route.Distances...)
-		updatedRoute.Distances[1] = 100 + int(version%1800)
+		updatedRoute.Distances[1] = trainticketsupport.UpdatedRouteDistance(updatedRoute.Distances[1], version)
 		updatedInput.DistanceList = fmt.Sprintf("0,%d", updatedRoute.Distances[1])
 		return http.MethodPost, "/api/v1/routeservice/routes", updatedInput,
 			"/api/v1/routeservice/routes/" + updatedRoute.ID, updatedRoute,
@@ -257,15 +256,14 @@ func updatedEntity(service string, item, alternate *record, version uint64) (met
 			updated.RouteID = alternate.route.ID
 			updated.TrainType = item.train.ID
 		}
-		updated.BasicPriceRate = 0.1 + float64(version%8000)/10000
-		updated.FirstClassPriceRate = 0.9 + float64((version>>8)%10000)/10000
+		updated.BasicPriceRate, updated.FirstClassPriceRate = trainticketsupport.UpdatedPriceRates(version)
 		return http.MethodPut, "/api/v1/priceservice/prices", updated,
 			"/api/v1/priceservice/prices/" + updated.RouteID + "/" + updated.TrainType, updated,
 			func() { item.price = updated }
 	default:
 		updatedInput := item.tripIn
 		updated := item.trip
-		updatedInput.EndTime = updatedInput.StartingTime + int64(time.Minute/time.Millisecond)*int64(60+version%600)
+		updatedInput.EndTime = trainticketsupport.UpdatedTripEnd(updatedInput.EndTime, version)
 		updated.EndTime = updatedInput.EndTime
 		return http.MethodPut, "/api/v1/travelservice/trips", updatedInput,
 			"/api/v1/travelservice/trips/" + updatedInput.TripID, updated,

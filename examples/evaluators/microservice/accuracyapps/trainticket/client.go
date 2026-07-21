@@ -2,12 +2,6 @@ package trainticket
 
 import (
 	"context"
-	"crypto/hmac"
-	cryptorand "crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -15,6 +9,8 @@ import (
 	"vibesys/microservice-evaluator/accuracy/httpcheck"
 	"vibesys/microservice-evaluator/accuracy/jsoncheck"
 	"vibesys/microservice-evaluator/api"
+	trainticketsupport "vibesys/microservice-evaluator/appsupport/trainticket"
+	"vibesys/microservice-evaluator/wire/httpjson"
 )
 
 var servicePaths = map[string]string{
@@ -35,7 +31,7 @@ type client struct {
 }
 
 func newClient(runtime api.Runtime, timeout time.Duration) (*client, error) {
-	token, err := adminToken(time.Now())
+	token, err := trainticketsupport.AdminToken(time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -48,23 +44,13 @@ func (c *client) request(
 	body any,
 	authenticated bool,
 ) api.ProtocolResult {
-	spec := api.HTTPRequestSpec{
-		Method: method,
-		Path:   servicePaths[service] + path,
-		Headers: map[string]string{
-			"Accept": "application/json,text/plain,*/*",
-		},
-	}
+	authorization := ""
 	if authenticated {
-		spec.Headers["Authorization"] = "Bearer " + c.token
+		authorization = "Bearer " + c.token
 	}
-	if body != nil {
-		encoded, err := json.Marshal(body)
-		if err != nil {
-			return api.ProtocolResult{ErrorCategory: "request_json", ErrorMessage: err.Error()}
-		}
-		spec.Body = string(encoded)
-		spec.Headers["Content-Type"] = "application/json"
+	spec, err := httpjson.Request(method, servicePaths[service]+path, body, authorization)
+	if err != nil {
+		return api.ProtocolResult{ErrorCategory: "request_json", ErrorMessage: err.Error()}
 	}
 	requestContext, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
@@ -102,25 +88,18 @@ func (c *client) list(
 	return indexed, nil
 }
 
-func adminToken(now time.Time) (string, error) {
-	identityBytes := make([]byte, 12)
-	if _, err := cryptorand.Read(identityBytes); err != nil {
-		return "", fmt.Errorf("generate accuracy identity: %w", err)
-	}
-	identity := hex.EncodeToString(identityBytes)
-	headerJSON := "{\"alg\":\"HS256\",\"typ\":\"JWT\"}"
-	header := base64.RawURLEncoding.EncodeToString([]byte(headerJSON))
-	claimsRaw, err := json.Marshal(map[string]any{
-		"sub": identity, "roles": []string{"ROLE_ADMIN"}, "id": identity,
-		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
-	})
+func (c *client) exactList(
+	ctx context.Context,
+	service string,
+	expected []any,
+	where string,
+) error {
+	data, err := c.envelope(ctx, service, http.MethodGet, listPaths[service], nil, 200, 1)
 	if err != nil {
-		return "", fmt.Errorf("encode accuracy token: %w", err)
+		return err
 	}
-	claims := base64.RawURLEncoding.EncodeToString(claimsRaw)
-	input := header + "." + claims
-	signer := hmac.New(sha256.New, []byte("secret"))
-	_, _ = signer.Write([]byte(input))
-	signature := base64.RawURLEncoding.EncodeToString(signer.Sum(nil))
-	return input + "." + signature, nil
+	if _, err := contracts[service].ExactList(data, expected, where); err != nil {
+		return err
+	}
+	return nil
 }

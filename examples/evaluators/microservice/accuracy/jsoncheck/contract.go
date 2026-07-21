@@ -20,6 +20,9 @@ type Contract struct {
 }
 
 func (c Contract) Validate(value any, where string) (Object, error) {
+	if err := c.ValidateDefinition(); err != nil {
+		return nil, err
+	}
 	object, ok := value.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("%s: expected object, got %T", where, value)
@@ -41,13 +44,31 @@ func (c Contract) Validate(value any, where string) (Object, error) {
 			return nil, fmt.Errorf("%s: %w", where, err)
 		}
 	}
-	if c.Key == nil {
-		return nil, fmt.Errorf("%s contract has no key function", c.Name)
-	}
 	if _, err := c.Key(object); err != nil {
 		return nil, fmt.Errorf("%s key: %w", where, err)
 	}
 	return object, nil
+}
+
+func (c Contract) ValidateDefinition() error {
+	if c.Name == "" {
+		return fmt.Errorf("JSON contract name must not be empty")
+	}
+	if len(c.Fields) == 0 {
+		return fmt.Errorf("%s contract declares no fields", c.Name)
+	}
+	for field, validate := range c.Fields {
+		if field == "" {
+			return fmt.Errorf("%s contract declares an empty field name", c.Name)
+		}
+		if validate == nil {
+			return fmt.Errorf("%s contract field %q has no validator", c.Name, field)
+		}
+	}
+	if c.Key == nil {
+		return fmt.Errorf("%s contract has no key function", c.Name)
+	}
+	return nil
 }
 
 func (c Contract) IndexList(value any, where string) (map[string]Object, error) {
@@ -71,6 +92,60 @@ func (c Contract) IndexList(value any, where string) (map[string]Object, error) 
 		indexed[key] = object
 	}
 	return indexed, nil
+}
+
+// ExactList validates every actual and expected row, rejects duplicate keys,
+// and requires exact key membership and values. Adapters should prefer this to
+// presence-only list checks whenever they own the complete expected state.
+func (c Contract) ExactList(
+	actualValue any,
+	expectedValues []any,
+	where string,
+) (map[string]Object, error) {
+	actual, err := c.IndexList(actualValue, where)
+	if err != nil {
+		return nil, err
+	}
+	expected := make(map[string]Object, len(expectedValues))
+	for index, value := range expectedValues {
+		normalized, err := Normalize(value)
+		if err != nil {
+			return nil, fmt.Errorf("%s expected item %d: %w", where, index, err)
+		}
+		object, err := c.Validate(normalized, fmt.Sprintf("%s expected item %d", where, index))
+		if err != nil {
+			return nil, err
+		}
+		key, err := c.Key(object)
+		if err != nil {
+			return nil, fmt.Errorf("%s expected item %d key: %w", where, index, err)
+		}
+		if _, duplicate := expected[key]; duplicate {
+			return nil, fmt.Errorf("%s: duplicate expected key %q at item %d", where, key, index)
+		}
+		expected[key] = object
+	}
+	for key, expectedObject := range expected {
+		actualObject, exists := actual[key]
+		if !exists {
+			return nil, fmt.Errorf("%s: missing key %q", where, key)
+		}
+		if !reflect.DeepEqual(actualObject, expectedObject) {
+			return nil, fmt.Errorf(
+				"%s: value mismatch for key %q: got %v, want %v",
+				where,
+				key,
+				actualObject,
+				expectedObject,
+			)
+		}
+	}
+	for key := range actual {
+		if _, exists := expected[key]; !exists {
+			return nil, fmt.Errorf("%s: unexpected key %q", where, key)
+		}
+	}
+	return actual, nil
 }
 
 func Normalize(value any) (any, error) {

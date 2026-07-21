@@ -161,16 +161,21 @@ retains one observation per measured logical operation for diagnosis.
 | Directory | Responsibility |
 | --- | --- |
 | [`api/`](api/) | Shared workload, extension, and observation contracts |
+| [`accuracy/`](accuracy/) | Accuracy orchestration and fail-closed validation primitives |
+| [`accuracyapps/`](accuracyapps/) | Independent application-specific accuracy oracles |
+| [`appsupport/`](appsupport/) | Mode-neutral application input and authentication grammars |
 | [`apps/`](apps/) | Application-adapter extension layer |
 | [`apps/declarative/`](apps/declarative/) | Declarative HTTP request and response adapter |
 | [`apps/socialnetwork/`](apps/socialnetwork/) | Typed DeathStarBench Social Network adapter |
 | [`cmd/`](cmd/) | Executable composition roots |
-| [`cmd/servicebench/`](cmd/servicebench/) | Benchmark CLI |
+| [`cmd/servicebench/`](cmd/servicebench/) | Benchmark and accuracy CLI |
 | [`config/`](config/) | Strict TOML decoding, defaults, profiles, and canonical serialization |
 | [`drivers/`](drivers/) | Protocol-driver extension layer |
 | [`drivers/httpdriver/`](drivers/httpdriver/) | HTTP transport and connection policy |
 | [`engine/`](engine/) | Scheduler, trial lifecycle, statistics, and results |
 | [`registry/`](registry/) | Driver and application registration |
+| [`transport/`](transport/) | Shared target runtime used by benchmark and accuracy modes |
+| [`wire/httpjson/`](wire/httpjson/) | Canonical JSON-over-HTTP request construction |
 
 Every directory has its own README with its ownership boundary and extension
 guidance.

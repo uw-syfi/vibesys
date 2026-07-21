@@ -15,9 +15,10 @@ type journalEntry struct {
 	active  bool
 }
 
-// Journal records successful fixture mutations immediately. Cleanup runs in
-// reverse order, continues after errors, and keeps failed entries active so a
-// caller can retry cleanup rather than silently losing ownership.
+// Journal records ownership of fixture mutations. Callers should record before
+// issuing a mutation whose transport outcome could be ambiguous. Cleanup runs
+// in reverse order, continues after errors, and keeps failed entries active so
+// a caller can retry cleanup rather than silently losing ownership.
 type Journal struct {
 	mu      sync.Mutex
 	entries []*journalEntry

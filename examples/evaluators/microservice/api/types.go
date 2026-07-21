@@ -245,7 +245,7 @@ type AccuracyContext struct {
 
 type AccuracyRecorder interface {
 	AddChecks(int)
-	Pass(string) error
+	Pass(...string) error
 }
 
 // AccuracyApplication owns application-specific fixtures, scenarios, and

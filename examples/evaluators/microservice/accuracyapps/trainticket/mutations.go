@@ -8,6 +8,7 @@ import (
 	"net/url"
 
 	"vibesys/microservice-evaluator/accuracy"
+	trainticketsupport "vibesys/microservice-evaluator/appsupport/trainticket"
 )
 
 func (a *Application) updateCase(
@@ -16,18 +17,19 @@ func (a *Application) updateCase(
 	item *graphCase,
 	random *rand.Rand,
 ) (int, error) {
-	suffix := fmt.Sprintf("%016x", random.Uint64())
+	version := random.Uint64()
+	suffix := fmt.Sprintf("%016x", version)
 	item.config["value"] = suffix
 	item.config["description"] = fmt.Sprintf("updated-%016x", random.Uint64())
 
 	item.retiredStationNames[stringValue(item.stationA, "name")] = stringValue(item.stationA, "id")
 	item.retiredStationNames[stringValue(item.stationB, "name")] = stringValue(item.stationB, "id")
-	item.stationA["name"] = choose(random, "Renamed A ", "Transfer Hub A ", "换乘站甲 ") + suffix
-	item.stationA["stayTime"] = 41 + random.Intn(50)
-	item.stationB["name"] = choose(random, "Renamed B ", "Terminal Hub B ", "终点站乙 ") + suffix
-	item.stationB["stayTime"] = 41 + random.Intn(50)
-	item.train["averageSpeed"] = 351 + random.Intn(150)
-	item.train["economyClass"] = intValue(item.train, "economyClass") + 7
+	item.stationA["name"] = trainticketsupport.UpdatedStationName(version, false)
+	item.stationA["stayTime"] = trainticketsupport.UpdatedStationStayTime(version)
+	item.stationB["name"] = trainticketsupport.UpdatedStationName(version, true)
+	item.stationB["stayTime"] = trainticketsupport.UpdatedStationStayTime(version >> 8)
+	item.train["averageSpeed"] = trainticketsupport.UpdatedTrainSpeed(version)
+	item.train["economyClass"] = trainticketsupport.UpdatedTrainEconomy(intValue(item.train, "economyClass"))
 
 	item.retiredRouteKeys = append(item.retiredRouteKeys, [2]string{
 		stringValue(item.route, "startStationId"),
@@ -39,7 +41,7 @@ func (a *Application) updateCase(
 	item.route["startStationId"] = item.stationB["id"]
 	item.route["terminalStationId"] = item.stationA["id"]
 	distance := item.route["distances"].([]int)
-	distance[1] += 1 + random.Intn(99)
+	distance[1] = trainticketsupport.UpdatedRouteDistance(distance[1], version)
 	item.route["distances"] = distance
 	item.routeInput["startStation"] = item.stationB["id"]
 	item.routeInput["endStation"] = item.stationA["id"]
@@ -60,10 +62,9 @@ func (a *Application) updateCase(
 		item.price["routeId"] = item.route["id"]
 		item.price["trainType"] = seedTrain["id"]
 	}
-	item.price["basicPriceRate"] = round4(0.11 + random.Float64()*0.78)
-	item.price["firstClassPriceRate"] = round4(0.91 + random.Float64()*0.98)
+	item.price["basicPriceRate"], item.price["firstClassPriceRate"] = trainticketsupport.UpdatedPriceRates(version)
 
-	item.tripInput["endTime"] = int64Value(item.tripInput, "endTime") + int64(60_000+random.Intn(3_540_001))
+	item.tripInput["endTime"] = trainticketsupport.UpdatedTripEnd(int64Value(item.tripInput, "endTime"), version)
 	item.tripInput["startingStationId"] = item.stationB["id"]
 	item.tripInput["stationsId"] = item.stationA["id"]
 	item.tripInput["terminalStationId"] = item.stationA["id"]
@@ -225,6 +226,11 @@ func (a *Application) verifyDeleted(
 		{"config", "/configs/" + url.PathEscape(stringValue(item.config, "name"))},
 		{"train", "/trains/" + stringValue(item.train, "id")},
 		{"route", "/routes/" + stringValue(item.route, "id")},
+		{
+			"route",
+			"/routes/" + stringValue(item.route, "startStationId") + "/" +
+				stringValue(item.route, "terminalStationId"),
+		},
 		{"price", "/prices/" + stringValue(item.price, "routeId") + "/" + stringValue(item.price, "trainType")},
 		{"travel", "/trips/" + stringValue(item.tripInput, "tripId")},
 	}

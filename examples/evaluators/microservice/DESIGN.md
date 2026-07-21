@@ -9,6 +9,8 @@ flowchart LR
     C --> K["Accuracy runner"]
     BA["Benchmark adapter"] --> B
     AA["Independent accuracy adapter"] --> K
+    AS["Mode-neutral app input support"] --> BA
+    AS --> AA
     B --> R["Shared target runtime"]
     K --> R
     R --> D["Protocol driver"]
@@ -23,7 +25,9 @@ runner owns readiness, managed lifecycle transitions, required-property
 enforcement, and correctness result reporting. Both use the same target runtime
 and protocol drivers. Their application-specific semantic oracles remain
 separate so one validator bug cannot silently bless both qualification and
-scoring.
+scoring. They share only observable request encoding, authentication, and fuzz
+grammars that must not reveal which evaluator mode is running; response schemas
+and expected values are explicitly excluded from that shared support.
 
 The dependency rule is:
 
@@ -33,6 +37,7 @@ engine -> api interfaces only
 accuracy runner -> api interfaces and generic validation only
 drivers -> api protocol payloads only
 applications -> api protocol payloads only
+benchmark and accuracy adapters -> mode-neutral app support, never shared oracles
 stats/result -> observations only
 ```
 

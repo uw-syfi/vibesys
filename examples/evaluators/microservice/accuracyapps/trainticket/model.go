@@ -2,8 +2,9 @@ package trainticket
 
 import (
 	"fmt"
-	"math"
 	"math/rand"
+
+	trainticketsupport "vibesys/microservice-evaluator/appsupport/trainticket"
 )
 
 type entity map[string]any
@@ -26,25 +27,25 @@ type graphCase struct {
 }
 
 func makeCase(random *rand.Rand, namespace string, index int) *graphCase {
-	token := fmt.Sprintf("%s%03x%08x", namespace, index, random.Uint32())
+	token := trainticketsupport.Token(random, namespace, index)
 	stationA := entity{
 		"id":       token + "a",
-		"name":     choose(random, "Station A ", "North Hub ", "北站 ") + token,
-		"stayTime": 1 + random.Intn(40),
+		"name":     trainticketsupport.StationName(random, false, token),
+		"stayTime": trainticketsupport.StationStayTime(random),
 	}
 	stationB := entity{
 		"id":       token + "b",
-		"name":     choose(random, "Station B ", "South Hub ", "南站 ") + token,
-		"stayTime": 1 + random.Intn(40),
+		"name":     trainticketsupport.StationName(random, true, token),
+		"stayTime": trainticketsupport.StationStayTime(random),
 	}
 	train := entity{
 		"id":           "T" + token,
-		"economyClass": 100 + random.Intn(801),
-		"confortClass": 50 + random.Intn(251),
-		"averageSpeed": 80 + random.Intn(271),
+		"economyClass": trainticketsupport.TrainEconomyClass(random),
+		"confortClass": trainticketsupport.TrainConfortClass(random),
+		"averageSpeed": trainticketsupport.TrainAverageSpeed(random),
 	}
-	routeID := randomUUID(random)
-	distance := 100 + random.Intn(1701)
+	routeID := trainticketsupport.UUID(random)
+	distance := trainticketsupport.RouteDistance(random)
 	routeInput := entity{
 		"id":           routeID,
 		"startStation": stationA["id"],
@@ -59,18 +60,17 @@ func makeCase(random *rand.Rand, namespace string, index int) *graphCase {
 		"startStationId":    stationA["id"],
 		"terminalStationId": stationB["id"],
 	}
+	basicRate, firstClassRate := trainticketsupport.PriceRates(random)
 	price := entity{
-		"id":                  randomUUID(random),
+		"id":                  trainticketsupport.UUID(random),
 		"trainType":           train["id"],
 		"routeId":             routeID,
-		"basicPriceRate":      round4(0.1 + random.Float64()*0.8),
-		"firstClassPriceRate": round4(0.9 + random.Float64()),
+		"basicPriceRate":      basicRate,
+		"firstClassPriceRate": firstClassRate,
 	}
-	tripType := choose(random, "G", "D")
-	tripNumber := fmt.Sprintf("%07d", 1_000_000+random.Intn(9_000_000))
+	tripType, tripNumber := trainticketsupport.TripIdentity(random)
 	tripID := tripType + tripNumber
-	startingTime := int64(1_600_000_000_000) + random.Int63n(300_000_000_001)
-	endTime := startingTime + int64(3_600_000+random.Intn(39_600_001))
+	startingTime, endTime := trainticketsupport.TripTimes(random)
 	tripInput := entity{
 		"tripId":            tripID,
 		"trainTypeId":       train["id"],
@@ -84,7 +84,7 @@ func makeCase(random *rand.Rand, namespace string, index int) *graphCase {
 	trip := cloneEntity(tripInput)
 	trip["tripId"] = entity{"type": tripType, "number": tripNumber}
 	config := entity{
-		"name":        choose(random, token+"Config", "config "+token, "配置-"+token),
+		"name":        trainticketsupport.ConfigName(random, token),
 		"value":       fmt.Sprintf("v-%016x", random.Uint64()),
 		"description": fmt.Sprintf("d-%016x", random.Uint64()),
 	}
@@ -94,25 +94,6 @@ func makeCase(random *rand.Rand, namespace string, index int) *graphCase {
 		tripInput: tripInput, trip: trip,
 		retiredStationNames: make(map[string]string),
 	}
-}
-
-func randomUUID(random *rand.Rand) string {
-	var value [16]byte
-	_, _ = random.Read(value[:])
-	value[6] = (value[6] & 0x0f) | 0x40
-	value[8] = (value[8] & 0x3f) | 0x80
-	return fmt.Sprintf(
-		"%08x-%04x-%04x-%04x-%012x",
-		value[0:4], value[4:6], value[6:8], value[8:10], value[10:16],
-	)
-}
-
-func choose(random *rand.Rand, values ...string) string {
-	return values[random.Intn(len(values))]
-}
-
-func round4(value float64) float64 {
-	return math.Round(value*10_000) / 10_000
 }
 
 func cloneEntity(source entity) entity {

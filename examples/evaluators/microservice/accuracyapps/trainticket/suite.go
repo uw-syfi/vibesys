@@ -56,11 +56,18 @@ func (a *Application) Check(
 	}
 
 	creationOrder := shuffledCases(random, cases)
+	live := make([]*graphCase, 0, len(cases))
 	for _, item := range creationOrder {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
 		checks, err = a.createCase(ctx, client, journal, item)
+		recorder.AddChecks(checks)
+		if err != nil {
+			return err
+		}
+		live = append(live, item)
+		checks, err = a.verifyExactState(ctx, client, live)
 		recorder.AddChecks(checks)
 		if err != nil {
 			return err
@@ -91,6 +98,11 @@ func (a *Application) Check(
 		if err != nil {
 			return err
 		}
+		checks, err = a.verifyExactState(ctx, client, cases)
+		recorder.AddChecks(checks)
+		if err != nil {
+			return err
+		}
 	}
 	if err := pass(recorder, "updates_visible", "stale_secondary_indexes"); err != nil {
 		return err
@@ -107,12 +119,17 @@ func (a *Application) Check(
 				return fmt.Errorf("post-crash persistence: %w", err)
 			}
 		}
+		checks, err = a.verifyExactState(ctx, client, cases)
+		recorder.AddChecks(checks)
+		if err != nil {
+			return fmt.Errorf("post-crash exact state: %w", err)
+		}
 		if err := recorder.Pass("crash_recovery"); err != nil {
 			return err
 		}
 	}
 
-	live := append([]*graphCase(nil), cases...)
+	live = append([]*graphCase(nil), cases...)
 	for _, item := range shuffledCases(random, cases) {
 		checks, err = a.deleteCase(ctx, client, item, random)
 		recorder.AddChecks(checks)
@@ -125,7 +142,7 @@ func (a *Application) Check(
 			return err
 		}
 		live = removeCase(live, item)
-		checks, err = a.verifySeedCatalogPresent(ctx, client)
+		checks, err = a.verifyExactState(ctx, client, live)
 		recorder.AddChecks(checks)
 		if err != nil {
 			return err
@@ -143,6 +160,11 @@ func (a *Application) Check(
 	}
 	if journal.Active() != 0 {
 		return fmt.Errorf("accuracy fixture journal retained %d entries after verified deletion", journal.Active())
+	}
+	checks, err = a.verifyExactState(ctx, client, nil)
+	recorder.AddChecks(checks)
+	if err != nil {
+		return fmt.Errorf("final seed restoration: %w", err)
 	}
 	return pass(recorder, "deletes_visible", "delete_isolation")
 }

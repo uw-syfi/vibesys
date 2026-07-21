@@ -75,6 +75,7 @@ func (a runnerApplication) Check(
 		if err := check.Restart(ctx); err != nil {
 			return err
 		}
+		recorder.AddChecks(1)
 		return recorder.Pass("restart")
 	}
 	return nil
@@ -140,6 +141,37 @@ func TestRunnerRejectsUnpassedRequiredProperty(t *testing.T) {
 	result := runTestAccuracy(t, runnerApplication{}, nil, serving)
 	if result.Valid || !strings.Contains(result.Error, "required accuracy properties") {
 		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestRunnerRejectsApplicationWithoutRequiredProperties(t *testing.T) {
+	serving := &atomic.Bool{}
+	serving.Store(true)
+	result := runTestAccuracy(t, runnerApplication{
+		properties: []api.AccuracyProperty{{Name: "optional", Required: false}},
+	}, nil, serving)
+	if result.Valid || !strings.Contains(result.Error, "no required properties") {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestRecorderRequiresFreshEvidenceForEachPropertyGroup(t *testing.T) {
+	recorder, err := newRecorder([]api.AccuracyProperty{
+		{Name: "one", Required: true}, {Name: "two", Required: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder.AddChecks(1)
+	if err := recorder.Pass("one"); err != nil {
+		t.Fatal(err)
+	}
+	if err := recorder.Pass("two"); err == nil || !strings.Contains(err.Error(), "no newly recorded checks") {
+		t.Fatalf("unsubstantiated property error=%v", err)
+	}
+	recorder.AddChecks(1)
+	if err := recorder.Pass("two"); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 
 	"vibesys/microservice-evaluator/accuracy"
 	"vibesys/microservice-evaluator/api"
+	trainticketsupport "vibesys/microservice-evaluator/appsupport/trainticket"
 )
 
 type runtimeFunc func(context.Context, api.Invocation) api.ProtocolResult
@@ -80,11 +81,11 @@ func TestEmbeddedSeedCatalogIsExactAndUnique(t *testing.T) {
 }
 
 func TestAdminTokenUsesRandomModeNeutralIdentity(t *testing.T) {
-	first, err := adminToken(time.Unix(1_000, 0))
+	first, err := trainticketsupport.AdminToken(time.Unix(1_000, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := adminToken(time.Unix(1_000, 0))
+	second, err := trainticketsupport.AdminToken(time.Unix(1_000, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,13 +205,13 @@ func TestPartialCreateUsesJournaledReverseCleanup(t *testing.T) {
 	if _, err := application.createCase(context.Background(), client, journal, item); err == nil {
 		t.Fatal("injected create failure was accepted")
 	}
-	if journal.Active() != 2 {
-		t.Fatalf("journal active=%d, want two successful creates", journal.Active())
+	if journal.Active() != 3 {
+		t.Fatalf("journal active=%d, want three possibly applied creates", journal.Active())
 	}
 	if err := journal.Cleanup(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(deletes) != 2 || !strings.Contains(deletes[0], "/stations") || !strings.Contains(deletes[1], "/configs/") {
+	if len(deletes) != 3 || !strings.Contains(deletes[0], "/stations") || !strings.Contains(deletes[2], "/configs/") {
 		t.Fatalf("cleanup order=%v", deletes)
 	}
 }
@@ -258,8 +259,79 @@ func TestDeleteIsolationRejectsMissingSeedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	application := &Application{catalog: catalog}
-	if _, err := application.verifySeedCatalogPresent(context.Background(), client); err == nil || !strings.Contains(err.Error(), "disappeared") {
+	if _, err := application.verifyExactState(context.Background(), client, nil); err == nil || !strings.Contains(err.Error(), "missing key") {
 		t.Fatalf("over-delete error=%v", err)
+	}
+}
+
+func TestExactStateRejectsUnexpectedSchemaValidRecord(t *testing.T) {
+	catalog, err := loadSeedCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
+		service := invocation.Target
+		items := make([]any, 0, len(catalog[service])+1)
+		for _, item := range catalog[service] {
+			items = append(items, item)
+		}
+		if service == "config" {
+			items = append(items, entity{"name": "junk", "value": "valid", "description": "unexpected"})
+		}
+		return envelopeResult(200, 1, items)
+	})
+	client, err := newClient(runtime, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := &Application{catalog: catalog}
+	if _, err := application.verifyExactState(context.Background(), client, nil); err == nil || !strings.Contains(err.Error(), "unexpected key") {
+		t.Fatalf("unexpected-record error=%v", err)
+	}
+}
+
+func TestRouteSecondaryLookupRejectsUnrelatedRoute(t *testing.T) {
+	item := makeCase(rand.New(rand.NewSource(7)), "namespace", 0)
+	unrelated := cloneEntity(item.route)
+	unrelated["id"] = "unrelated-route"
+	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
+		spec := invocation.Payload.(api.HTTPRequestSpec)
+		if spec.Path == servicePaths["route"]+"/routes/"+stringValue(item.route, "id") {
+			return envelopeResult(200, 1, item.route)
+		}
+		return envelopeResult(200, 1, []any{item.route, unrelated})
+	})
+	client, err := newClient(runtime, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyRoute(context.Background(), client, item); err == nil || !strings.Contains(err.Error(), "unexpected key") {
+		t.Fatalf("unrelated-route error=%v", err)
+	}
+}
+
+func TestDeleteVerificationRejectsCurrentRouteSecondaryIndex(t *testing.T) {
+	item := makeCase(rand.New(rand.NewSource(7)), "namespace", 0)
+	stalePath := servicePaths["route"] + "/routes/" +
+		stringValue(item.route, "startStationId") + "/" +
+		stringValue(item.route, "terminalStationId")
+	runtime := runtimeFunc(func(_ context.Context, invocation api.Invocation) api.ProtocolResult {
+		spec := invocation.Payload.(api.HTTPRequestSpec)
+		if spec.Path == stalePath {
+			return envelopeResult(200, 1, []any{item.route})
+		}
+		if spec.Method == http.MethodGet && strings.HasSuffix(spec.Path, listPaths[invocation.Target]) {
+			return envelopeResult(200, 1, []any{})
+		}
+		return envelopeResult(200, 0, nil)
+	})
+	client, err := newClient(runtime, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := &Application{}
+	if _, err := application.verifyDeleted(context.Background(), client, item); err == nil || !strings.Contains(err.Error(), "application status") {
+		t.Fatalf("stale route secondary error=%v", err)
 	}
 }
 

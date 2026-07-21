@@ -1,16 +1,12 @@
 package trainticket
 
 import (
-	"crypto/hmac"
-	cryptorand "crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"sync"
 	"time"
+
+	trainticketsupport "vibesys/microservice-evaluator/appsupport/trainticket"
 )
 
 type configEntity struct {
@@ -106,29 +102,23 @@ func makeRecords(namespace string, seed int64, count int) []record {
 	rng := rand.New(rand.NewSource(seed))
 	records := make([]record, count)
 	for index := range records {
-		token := fmt.Sprintf("%s%03x%08x", namespace, index, rng.Uint32())
-		stationANames := []string{"Station A ", "North Hub ", "北站 "}
-		stationBNames := []string{"Station B ", "South Hub ", "南站 "}
-		stationA := stationEntity{ID: token + "a", Name: stationANames[rng.Intn(len(stationANames))] + token, StayTime: 1 + rng.Intn(40)}
-		stationB := stationEntity{ID: token + "b", Name: stationBNames[rng.Intn(len(stationBNames))] + token, StayTime: 1 + rng.Intn(40)}
-		train := trainEntity{ID: "T" + token, EconomyClass: 100 + rng.Intn(800), ConfortClass: 50 + rng.Intn(250), AverageSpeed: 80 + rng.Intn(270)}
-		routeID := deterministicUUID(rng)
-		distance := 100 + rng.Intn(1700)
+		token := trainticketsupport.Token(rng, namespace, index)
+		stationA := stationEntity{ID: token + "a", Name: trainticketsupport.StationName(rng, false, token), StayTime: trainticketsupport.StationStayTime(rng)}
+		stationB := stationEntity{ID: token + "b", Name: trainticketsupport.StationName(rng, true, token), StayTime: trainticketsupport.StationStayTime(rng)}
+		train := trainEntity{ID: "T" + token, EconomyClass: trainticketsupport.TrainEconomyClass(rng), ConfortClass: trainticketsupport.TrainConfortClass(rng), AverageSpeed: trainticketsupport.TrainAverageSpeed(rng)}
+		routeID := trainticketsupport.UUID(rng)
+		distance := trainticketsupport.RouteDistance(rng)
 		route := routeEntity{ID: routeID, Stations: []string{stationA.ID, stationB.ID}, Distances: []int{0, distance}, StartStationID: stationA.ID, TerminalStationID: stationB.ID}
 		routeIn := routeInput{ID: routeID, StartStation: stationA.ID, EndStation: stationB.ID, StationList: stationA.ID + "," + stationB.ID, DistanceList: fmt.Sprintf("0,%d", distance)}
-		price := priceEntity{ID: deterministicUUID(rng), TrainType: train.ID, RouteID: routeID, BasicPriceRate: 0.1 + rng.Float64()*0.8, FirstClassPriceRate: 0.9 + rng.Float64()}
-		kind := "G"
-		if rng.Intn(2) == 0 {
-			kind = "D"
-		}
-		number := fmt.Sprintf("%07d", 1_000_000+rng.Intn(8_999_999))
+		basicRate, firstClassRate := trainticketsupport.PriceRates(rng)
+		price := priceEntity{ID: trainticketsupport.UUID(rng), TrainType: train.ID, RouteID: routeID, BasicPriceRate: basicRate, FirstClassPriceRate: firstClassRate}
+		kind, number := trainticketsupport.TripIdentity(rng)
 		tripString := kind + number
-		start := int64(1_700_000_000_000 + rng.Intn(100_000_000))
-		tripIn := tripInput{TripID: tripString, TrainTypeID: train.ID, RouteID: routeID, StartingTime: start, StartingStationID: stationA.ID, StationsID: stationB.ID, TerminalStationID: stationB.ID, EndTime: start + int64(time.Hour/time.Millisecond)}
+		start, end := trainticketsupport.TripTimes(rng)
+		tripIn := tripInput{TripID: tripString, TrainTypeID: train.ID, RouteID: routeID, StartingTime: start, StartingStationID: stationA.ID, StationsID: stationB.ID, TerminalStationID: stationB.ID, EndTime: end}
 		trip := tripEntity{TripID: tripID{Type: kind, Number: number}, TrainTypeID: train.ID, RouteID: routeID, StartingTime: start, StartingStationID: stationA.ID, StationsID: stationB.ID, TerminalStationID: stationB.ID, EndTime: tripIn.EndTime}
-		configNames := []string{token + "Config", "config " + token, "配置-" + token}
 		records[index] = record{
-			config:   configEntity{Name: configNames[rng.Intn(len(configNames))], Value: fmt.Sprintf("v-%016x", rng.Uint64()), Description: fmt.Sprintf("d-%016x", rng.Uint64())},
+			config:   configEntity{Name: trainticketsupport.ConfigName(rng, token), Value: fmt.Sprintf("v-%016x", rng.Uint64()), Description: fmt.Sprintf("d-%016x", rng.Uint64())},
 			stationA: stationA, stationB: stationB, train: train,
 			routeIn: routeIn, route: route, price: price, tripIn: tripIn, trip: trip,
 		}
@@ -136,36 +126,10 @@ func makeRecords(namespace string, seed int64, count int) []record {
 	return records
 }
 
-func deterministicUUID(rng *rand.Rand) string {
-	var raw [16]byte
-	for index := range raw {
-		raw[index] = byte(rng.Intn(256))
-	}
-	raw[6] = (raw[6] & 0x0f) | 0x40
-	raw[8] = (raw[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		binary.BigEndian.Uint32(raw[0:4]),
-		binary.BigEndian.Uint16(raw[4:6]),
-		binary.BigEndian.Uint16(raw[6:8]),
-		binary.BigEndian.Uint16(raw[8:10]),
-		raw[10:16],
-	)
-}
-
 func makeAdminToken(now time.Time) string {
-	var identityBytes [12]byte
-	if _, err := cryptorand.Read(identityBytes[:]); err != nil {
-		panic(fmt.Sprintf("generate Train Ticket benchmark identity: %v", err))
+	token, err := trainticketsupport.AdminToken(now)
+	if err != nil {
+		panic(err)
 	}
-	identity := fmt.Sprintf("%x", identityBytes)
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
-	claims, _ := json.Marshal(map[string]any{
-		"sub": identity, "roles": []string{"ROLE_ADMIN"},
-		"id": identity, "iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
-	})
-	payload := base64.RawURLEncoding.EncodeToString(claims)
-	input := header + "." + payload
-	mac := hmac.New(sha256.New, []byte("secret"))
-	_, _ = mac.Write([]byte(input))
-	return input + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return token
 }

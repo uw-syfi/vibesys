@@ -8,6 +8,7 @@ import (
 
 	"vibesys/microservice-evaluator/accuracy/httpcheck"
 	"vibesys/microservice-evaluator/api"
+	"vibesys/microservice-evaluator/wire/httpjson"
 )
 
 var services = []string{"config", "station", "train", "travel", "route", "price"}
@@ -97,13 +98,9 @@ func (a *Application) ReadinessProbes() []api.ReadinessProbe {
 			Invocation: api.Invocation{
 				Target:    service,
 				Operation: "accuracy-readiness",
-				Payload: api.HTTPRequestSpec{
-					Method: http.MethodGet,
-					Path:   servicePaths[service] + welcome.path,
-					Headers: map[string]string{
-						"Accept": "text/plain,*/*",
-					},
-				},
+				Payload: httpjson.MustRequest(
+					http.MethodGet, servicePaths[service]+welcome.path, nil, "",
+				),
 			},
 			Validate: func(result api.ProtocolResult) error {
 				return httpcheck.ExactText(result, http.StatusOK, welcome.text)
@@ -114,12 +111,7 @@ func (a *Application) ReadinessProbes() []api.ReadinessProbe {
 }
 
 func pass(recorder api.AccuracyRecorder, properties ...string) error {
-	for _, property := range properties {
-		if err := recorder.Pass(property); err != nil {
-			return err
-		}
-	}
-	return nil
+	return recorder.Pass(properties...)
 }
 
 func checkContext(ctx context.Context) error {
