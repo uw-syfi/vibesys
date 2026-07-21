@@ -30,6 +30,7 @@ dependencies = [
     "vs-github",
     "vs-issue-board",
     "vs-sandbox",
+    "openevolve==0.3.1",
 ]
 
 [project.scripts]

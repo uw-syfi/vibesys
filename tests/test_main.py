@@ -279,6 +279,163 @@ def test_evolve_modality_defaults_to_domain_resolution(tmp_path):
     assert parser.parse_args(["--input", str(bundle)]).modality is None
 
 
+def test_evolve_search_policy_defaults_and_openevolve_overrides(tmp_path):
+    import vibesys.main as cli
+
+    bundle = _write_input_bundle(tmp_path)
+    parser = cli._build_evolve_parser()
+
+    defaults = parser.parse_args(["--input", str(bundle)])
+    assert defaults.search_policy is None
+    assert defaults.openevolve_num_islands is None
+
+    configured = parser.parse_args(
+        [
+            "--input",
+            str(bundle),
+            "--search-policy",
+            "openevolve",
+            "--openevolve-num-islands",
+            "3",
+            "--openevolve-population-size",
+            "40",
+            "--openevolve-archive-size",
+            "20",
+            "--openevolve-migration-interval",
+            "4",
+            "--openevolve-migration-rate",
+            "0.25",
+        ]
+    )
+    assert configured.search_policy == "openevolve"
+    assert configured.openevolve_num_islands == 3
+    assert configured.openevolve_population_size == 40
+    assert configured.openevolve_archive_size == 20
+    assert configured.openevolve_migration_interval == 4
+    assert configured.openevolve_migration_rate == 0.25
+
+
+def test_openevolve_partial_resume_options_merge_with_saved_config(tmp_path):
+    import vibesys.main as cli
+    from vibesys.loops.evolve.search_policy import (
+        OpenEvolveSearchConfig,
+        OpenEvolveSearchPolicy,
+    )
+
+    bundle = _write_input_bundle(tmp_path)
+    run_dir = tmp_path / "run"
+    saved = OpenEvolveSearchConfig(
+        population_size=40,
+        archive_size=20,
+        num_islands=3,
+        migration_interval=4,
+        migration_rate=0.25,
+    )
+    OpenEvolveSearchPolicy(
+        state_dir=run_dir / "logs" / "openevolve",
+        seed=1,
+        config=saved,
+    )
+    args = cli._build_evolve_parser().parse_args(
+        ["--input", str(bundle), "--openevolve-migration-rate", "0.25"]
+    )
+
+    with patch.object(cli, "_resume_exp_dir", return_value=run_dir):
+        policy_name, resolved = cli._resolve_openevolve_options(
+            args,
+            existing=True,
+            exp_name="run",
+        )
+
+    assert policy_name == "openevolve"
+    assert resolved == saved
+
+
+def test_openevolve_resume_restores_flag_defined_objectives(tmp_path):
+    import vibesys.main as cli
+    from vibesys.loops.evolve.population import Objective
+    from vibesys.loops.evolve.search_policy import OpenEvolveSearchPolicy
+
+    run_dir = tmp_path / "run"
+    expected = [Objective("latency_ms", "min"), Objective("throughput", "max")]
+    OpenEvolveSearchPolicy(
+        state_dir=run_dir / "logs" / "openevolve",
+        seed=1,
+        config=None,
+        objectives=expected,
+    )
+
+    with patch.object(cli, "_resume_exp_dir", return_value=run_dir):
+        restored = cli._restore_openevolve_objectives(
+            [],
+            existing=True,
+            exp_name="run",
+        )
+
+    assert restored == expected
+
+
+def test_openevolve_override_selects_policy_on_new_run(tmp_path):
+    import vibesys.main as cli
+
+    bundle = _write_input_bundle(tmp_path)
+    args = cli._build_evolve_parser().parse_args(
+        ["--input", str(bundle), "--openevolve-num-islands", "3"]
+    )
+
+    policy_name, resolved = cli._resolve_openevolve_options(
+        args,
+        existing=False,
+        exp_name="new",
+    )
+
+    assert policy_name == "openevolve"
+    assert resolved is not None
+    assert resolved.num_islands == 3
+
+
+def test_validate_evolve_rejects_openevolve_knob_with_vibesys_policy(tmp_path):
+    import vibesys.main as cli
+
+    bundle = _write_input_bundle(tmp_path)
+    args = cli._build_evolve_parser().parse_args(
+        [
+            "--input",
+            str(bundle),
+            "--search-policy",
+            "vibesys",
+            "--openevolve-num-islands",
+            "3",
+        ]
+    )
+
+    with pytest.raises(ConfigurationError):
+        cli._validate_evolve(args)
+
+
+@pytest.mark.parametrize(
+    "flag,value",
+    [
+        ("--openevolve-population-size", "0"),
+        ("--openevolve-archive-size", "0"),
+        ("--openevolve-num-islands", "0"),
+        ("--openevolve-migration-interval", "0"),
+        ("--openevolve-migration-rate", "-0.1"),
+        ("--openevolve-migration-rate", "1.1"),
+    ],
+)
+def test_validate_evolve_rejects_invalid_openevolve_config(tmp_path, flag, value):
+    import vibesys.main as cli
+
+    bundle = _write_input_bundle(tmp_path)
+    args = cli._build_evolve_parser().parse_args(
+        ["--input", str(bundle), "--search-policy", "openevolve", flag, value]
+    )
+
+    with pytest.raises(ConfigurationError):
+        cli._validate_evolve(args)
+
+
 def test_max_parallelism_defaults_to_one_and_parses(tmp_path):
     """--max-parallelism is serial (1) by default and accepts an int override."""
     import vibesys.main as cli

@@ -39,6 +39,31 @@ launcher. For installed npm users, the same launcher is exposed as `vs` and
 `vibesys`.
 Use `./vs --outer-loop <kind> --help` for loop-specific flags.
 
+### Evolve search policies
+
+`--search-policy vibesys` (the default) uses VibeSys's scalar softmax or Pareto
+frontier selection. `--search-policy openevolve` imports pinned OpenEvolve 0.3.1
+and delegates MAP-Elites archiving, island selection, population limits, and
+migration to its `ProgramDatabase`. It does not use OpenEvolve's one-shot LLM
+mutation path; VibeSys's coding agent continues to mutate the checked-out
+multi-file workspace.
+
+| Flag | Default | Meaning under `--search-policy openevolve` |
+| --- | ---: | --- |
+| `--openevolve-population-size` | `1000` | Maximum upstream program population. |
+| `--openevolve-archive-size` | `100` | Elite archive size. |
+| `--openevolve-num-islands` | `5` | Number of island populations sampled round-robin. |
+| `--openevolve-migration-interval` | `50` | Per-island admitted generations between migrations. |
+| `--openevolve-migration-rate` | `0.1` | Fraction of island elites copied during migration. |
+
+OpenEvolve state is stored under `logs/openevolve/` and loaded on resume. See
+[`docs/openevolve.md`](openevolve.md) for the adapter boundary and metric
+semantics. On resume the policy and saved settings are restored when these
+flags are omitted; partial explicit settings are merged with the saved values,
+flag-defined objectives are restored, and incompatible changes are rejected.
+On a new run, supplying any
+`--openevolve-*` setting also selects the OpenEvolve policy.
+
 ## Remote Experiment Repositories
 
 Configure interactive defaults in `agent.toml`:

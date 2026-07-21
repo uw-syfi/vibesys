@@ -53,6 +53,7 @@ from vs_github import GitHubCLI, GitHubCLIError
 
 if TYPE_CHECKING:
     from vibesys.loops.evolve.population import Objective
+    from vibesys.loops.evolve.search_policy import OpenEvolveSearchConfig
 
 _OUTER_LOOPS = ("agent", "plain", "evolve")
 _MODALITIES = (
@@ -979,6 +980,45 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
     parser.add_argument("--selection-temperature", type=float, default=0.5)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument(
+        "--search-policy",
+        choices=("vibesys", "openevolve"),
+        default=None,
+        help=(
+            "Population selection policy (default: vibesys for new runs; restored "
+            "from OpenEvolve state on resume)."
+        ),
+    )
+    parser.add_argument(
+        "--openevolve-population-size",
+        type=int,
+        default=None,
+        help="Maximum upstream program population (OpenEvolve only; default: 1000).",
+    )
+    parser.add_argument(
+        "--openevolve-archive-size",
+        type=int,
+        default=None,
+        help="Maximum upstream elite archive size (OpenEvolve only; default: 100).",
+    )
+    parser.add_argument(
+        "--openevolve-num-islands",
+        type=int,
+        default=None,
+        help="Number of island populations (OpenEvolve only; default: 5).",
+    )
+    parser.add_argument(
+        "--openevolve-migration-interval",
+        type=int,
+        default=None,
+        help="Admitted island generations between migrations (default: 50).",
+    )
+    parser.add_argument(
+        "--openevolve-migration-rate",
+        type=float,
+        default=None,
+        help="Fraction of island elites migrated; 0 disables migration (default: 0.1).",
+    )
+    parser.add_argument(
         "--objective",
         action="append",
         default=[],
@@ -1023,6 +1063,29 @@ def _validate_evolve(args: argparse.Namespace) -> None:
         _configuration_error("--max-generations must be >= 1.")
     if args.selection_temperature <= 0:
         _configuration_error("--selection-temperature must be > 0.")
+    if args.search_policy == "vibesys" and any(
+        value is not None
+        for value in (
+            args.openevolve_population_size,
+            args.openevolve_archive_size,
+            args.openevolve_num_islands,
+            args.openevolve_migration_interval,
+            args.openevolve_migration_rate,
+        )
+    ):
+        _configuration_error("--openevolve-* settings cannot be used with --search-policy vibesys.")
+    if args.openevolve_population_size is not None and args.openevolve_population_size < 1:
+        _configuration_error("--openevolve-population-size must be >= 1.")
+    if args.openevolve_archive_size is not None and args.openevolve_archive_size < 1:
+        _configuration_error("--openevolve-archive-size must be >= 1.")
+    if args.openevolve_num_islands is not None and args.openevolve_num_islands < 1:
+        _configuration_error("--openevolve-num-islands must be >= 1.")
+    if args.openevolve_migration_interval is not None and args.openevolve_migration_interval < 1:
+        _configuration_error("--openevolve-migration-interval must be >= 1.")
+    if args.openevolve_migration_rate is not None and not (
+        0.0 <= args.openevolve_migration_rate <= 1.0
+    ):
+        _configuration_error("--openevolve-migration-rate must be in [0, 1].")
     if not (0.0 <= args.frontier_bias <= 1.0):
         _configuration_error("--frontier-bias must be in [0, 1].")
     if args.bootstrap_max_attempts < 1:
@@ -1036,6 +1099,68 @@ def _validate_evolve(args: argparse.Namespace) -> None:
         )
 
 
+def _resolve_openevolve_options(
+    args: argparse.Namespace,
+    *,
+    existing: bool,
+    exp_name: str,
+) -> tuple[str | None, OpenEvolveSearchConfig | None]:
+    from vibesys.loops.evolve.search_policy import (
+        OpenEvolveSearchConfig,
+        OpenEvolveSearchPolicy,
+    )
+
+    openevolve_defaults = OpenEvolveSearchConfig()
+    if existing:
+        openevolve_defaults = (
+            OpenEvolveSearchPolicy.persisted_config(
+                _resume_exp_dir(exp_name) / "logs" / "openevolve"
+            )
+            or openevolve_defaults
+        )
+    openevolve_values = (
+        args.openevolve_population_size,
+        args.openevolve_archive_size,
+        args.openevolve_num_islands,
+        args.openevolve_migration_interval,
+        args.openevolve_migration_rate,
+    )
+    openevolve_config = (
+        OpenEvolveSearchConfig(
+            population_size=args.openevolve_population_size or openevolve_defaults.population_size,
+            archive_size=args.openevolve_archive_size or openevolve_defaults.archive_size,
+            num_islands=args.openevolve_num_islands or openevolve_defaults.num_islands,
+            migration_interval=args.openevolve_migration_interval
+            or openevolve_defaults.migration_interval,
+            migration_rate=(
+                args.openevolve_migration_rate
+                if args.openevolve_migration_rate is not None
+                else openevolve_defaults.migration_rate
+            ),
+        )
+        if any(value is not None for value in openevolve_values)
+        else None
+    )
+    search_policy = args.search_policy or ("openevolve" if openevolve_config is not None else None)
+    return search_policy, openevolve_config
+
+
+def _restore_openevolve_objectives(
+    objectives: list[Objective],
+    *,
+    existing: bool,
+    exp_name: str,
+) -> list[Objective]:
+    if not existing or objectives:
+        return objectives
+    from vibesys.loops.evolve.search_policy import OpenEvolveSearchPolicy
+
+    persisted = OpenEvolveSearchPolicy.persisted_objectives(
+        _resume_exp_dir(exp_name) / "logs" / "openevolve"
+    )
+    return objectives if persisted is None else persisted
+
+
 def _run_evolve(args: argparse.Namespace) -> None:
     bundle: InputBundle = args.input_bundle
     config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
@@ -1043,9 +1168,6 @@ def _run_evolve(args: argparse.Namespace) -> None:
 
     objective = _load_objective(bundle)
     objectives = _resolve_objectives(args)
-    if objectives:
-        spec = ", ".join(f"{o.name}({o.direction})" for o in objectives)
-        print(f"Pareto mode active: [{spec}]; frontier_bias={args.frontier_bias}")
 
     existing = False
     exp_name = args.exp_name
@@ -1054,6 +1176,21 @@ def _run_evolve(args: argparse.Namespace) -> None:
         exp_name = run_dir_name
         existing = True
         print(f"Resuming evolve run: exp_env/{run_dir_name}/")
+
+    objectives = _restore_openevolve_objectives(
+        objectives,
+        existing=existing,
+        exp_name=exp_name,
+    )
+    if objectives:
+        spec = ", ".join(f"{o.name}({o.direction})" for o in objectives)
+        print(f"Pareto mode active: [{spec}]; frontier_bias={args.frontier_bias}")
+
+    search_policy, openevolve_config = _resolve_openevolve_options(
+        args,
+        existing=existing,
+        exp_name=exp_name,
+    )
 
     success = run_evolve_loop(
         config=config,
@@ -1085,6 +1222,8 @@ def _run_evolve(args: argparse.Namespace) -> None:
         bootstrap_max_attempts=args.bootstrap_max_attempts,
         keep_modal_apps=args.keep_modal_apps,
         max_parallelism=args.max_parallelism,
+        search_policy=search_policy,
+        openevolve_config=openevolve_config,
         remote_repo=args.repo,
         repo_visibility=args.repo_visibility,
     )
