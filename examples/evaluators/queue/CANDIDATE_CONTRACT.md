@@ -47,7 +47,8 @@ queue. It drains the queue before normal destruction.
 `vsq_try_enqueue` receives a byte pointer and length:
 
 - `VSQ_OK` means the value was copied into the queue.
-- `VSQ_FULL` means the queue was full and retained nothing.
+- `VSQ_FULL` means all item capacity was occupied or reserved and the call
+  retained nothing.
 - The input pointer is valid only for the duration of the call. The candidate
   must not retain or access it after returning.
 - Length must not exceed the configured maximum value size.
@@ -56,8 +57,8 @@ queue. It drains the queue before normal destruction.
 
 - `VSQ_OK` means the complete oldest value was copied to `output` and
   `output_length` was set.
-- `VSQ_EMPTY` means the queue was empty. Output storage and `output_length`
-  must remain unchanged.
+- `VSQ_EMPTY` means no published item was available. Output storage and
+  `output_length` must remain unchanged.
 - `VSQ_INVALID` means the output is null or too small for the oldest value. The
   value remains queued, and output storage and `output_length` remain unchanged.
 - The candidate must not retain the output pointer after returning.
@@ -69,17 +70,29 @@ sufficient dequeue output, only `VSQ_OK` and `VSQ_EMPTY` are normal results.
 evaluation.
 
 Operations are try-style: they do not wait for space to become free or for an
-item to arrive. They may synchronize with an operation whose reservation is
-already externally observable. Successful operations must form a linearizable
-bounded FIFO queue. Full and empty observations are part of that history.
+item to arrive. Successful operations preserve one global FIFO order and every
+successfully enqueued item is returned exactly once.
 
-Internal reservation is not publication. A reserve-then-copy implementation
-must not let one enqueue complete with `VSQ_FULL` merely because another
-producer reserved the last slot if a later dequeue can still complete with
-`VSQ_EMPTY` before the reserved value is published. The ABI has no `BUSY`
-result, so those completed observations would force contradictory
-linearization orders. An implementation must serialize, wait for, or safely
-help an in-flight publication before returning an externally visible status.
+SPSC and MPSC use an exact linearizable bounded-queue model. A successful
+enqueue atomically appends an item, `VSQ_FULL` is legal only when the abstract
+queue is at capacity, a successful dequeue atomically removes the oldest item,
+and `VSQ_EMPTY` is legal only when the abstract queue is empty.
+
+MPMC uses a reservation-aware bounded-queue model to match queues that acquire
+capacity before copying and publishing an item. A successful enqueue has two
+ordered internal events within its call interval:
+
+1. reservation consumes one item of capacity;
+2. publication makes the copied item visible at the FIFO tail.
+
+`VSQ_FULL` is legal when published items plus unpublished reservations equal
+capacity. `VSQ_EMPTY` is legal when no item has been published, even if an
+enqueue currently holds a reservation. Consequently, a capacity-one MPMC
+history may contain an in-flight enqueue that later returns `VSQ_OK`, an
+overlapping enqueue that returns `VSQ_FULL`, and an intervening dequeue that
+returns `VSQ_EMPTY`. Publication order defines the global FIFO order. Both
+reservation and publication must occur within the successful enqueue call, so
+a completed enqueue is visible to every later non-overlapping dequeue.
 
 ## Value-size guarantees
 
@@ -95,9 +108,9 @@ the measured implementation.
 
 The correctness gate probes actual lengths 0, 1, 7, 8, 9, intermediate, and
 maximum for 8-byte, 257-byte, and 1 MiB queue profiles. It also checks input
-retention, undersized-output retry, concurrent short/full-buffer consumers,
-reservation-gap histories, and unchanged output on empty and invalid dequeues
-before running concurrent Porcupine histories.
+retention, undersized-output retry, concurrent short/full-buffer consumers, and
+unchanged output on empty and invalid dequeues before running concurrent
+Porcupine histories.
 
 The evaluator may run multiple independent benchmark repetitions. Its
 `total_ops_per_sec` field is the median repetition, and the JSON output includes

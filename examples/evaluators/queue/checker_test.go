@@ -39,27 +39,6 @@ func TestAccuracyTimesOutStuckCandidateOperation(t *testing.T) {
 	}
 }
 
-func TestAccuracyRejectsReservationGapCandidate(t *testing.T) {
-	workspace := compileCandidateFixtureWithDefines(t, "VSQ_TEST_RESERVATION_GAP")
-	err := runAccuracy(accuracyConfig{
-		candidateConfig: candidateConfig{
-			workspace: workspace,
-			candidate: "queue-candidate.so",
-			scenario:  scenarioMPMC,
-			capacity:  4,
-			valueSize: 64,
-		},
-		operations: 8,
-		trials:     1,
-		producers:  2,
-		consumers:  2,
-		seed:       7,
-	})
-	if err == nil || !strings.Contains(err.Error(), "reservation gap") {
-		t.Fatalf("reservation-gap candidate error = %v, want reservation-gap rejection", err)
-	}
-}
-
 func enqueueRecord(client int, value uint64, ok bool, call int64) recordedOperation {
 	return recordedOperation{
 		ClientID: client,
@@ -99,7 +78,7 @@ func TestQueueModelAcceptsBoundedFIFOHistory(t *testing.T) {
 		dequeueRecord(0, value(20), 11),
 		dequeueRecord(0, nil, 13),
 	}
-	if !isLinearizable(2, history) {
+	if !checkExactFIFOHistory(2, history) {
 		t.Fatal("valid bounded FIFO history was rejected")
 	}
 }
@@ -130,10 +109,80 @@ func TestQueueModelRejectsIncorrectHistories(t *testing.T) {
 
 	for name, history := range tests {
 		t.Run(name, func(t *testing.T) {
-			if isLinearizable(1, history) {
+			if checkExactFIFOHistory(1, history) {
 				t.Fatal("invalid history was accepted")
 			}
 		})
+	}
+}
+
+func TestScenarioModelsApplyDistinctReservationSemantics(t *testing.T) {
+	first := enqueueRecord(0, 10, true, 1)
+	first.Return = 8
+	full := enqueueRecord(1, 20, false, 3)
+	empty := dequeueRecord(2, nil, 5)
+	history := []recordedOperation{first, full, empty}
+
+	if checkScenarioHistory(scenarioSPSC, 1, history) {
+		t.Fatal("exact SPSC model accepted FULL and EMPTY around an unpublished enqueue")
+	}
+	if !checkScenarioHistory(scenarioMPMC, 1, history) {
+		t.Fatal("reservation-aware MPMC model rejected a reserved but unpublished enqueue")
+	}
+}
+
+func TestReservationAwareModelRejectsInvalidHistories(t *testing.T) {
+	tests := map[string][]recordedOperation{
+		"full without used capacity": {
+			enqueueRecord(0, 10, false, 1),
+		},
+		"empty with published item": {
+			enqueueRecord(0, 10, true, 1),
+			dequeueRecord(1, nil, 3),
+		},
+		"fifo violation": {
+			enqueueRecord(0, 10, true, 1),
+			enqueueRecord(1, 20, true, 3),
+			dequeueRecord(2, value(20), 5),
+		},
+		"fabricated value": {
+			dequeueRecord(0, value(99), 1),
+		},
+		"duplicate value": {
+			enqueueRecord(0, 10, true, 1),
+			dequeueRecord(1, value(10), 3),
+			dequeueRecord(2, value(10), 5),
+		},
+	}
+
+	for name, history := range tests {
+		t.Run(name, func(t *testing.T) {
+			if checkReservationAwareFIFOHistory(1, history) {
+				t.Fatal("invalid reservation-aware history was accepted")
+			}
+		})
+	}
+}
+
+func TestReservationAwareFullCountsAllUsedCapacity(t *testing.T) {
+	first := enqueueRecord(0, 10, true, 1)
+	first.Return = 8
+	full := enqueueRecord(1, 20, false, 3)
+	history := []recordedOperation{first, full}
+
+	if checkReservationAwareFIFOHistory(2, history) {
+		t.Fatal("FULL was accepted with one reservation and two slots of capacity")
+	}
+
+	published := enqueueRecord(0, 5, true, 1)
+	reserved := enqueueRecord(1, 10, true, 3)
+	reserved.Return = 10
+	full = enqueueRecord(2, 20, false, 5)
+	if !checkReservationAwareFIFOHistory(
+		2,
+		[]recordedOperation{published, reserved, full},
+	) {
+		t.Fatal("FULL was rejected when published plus reserved items reached capacity")
 	}
 }
 
