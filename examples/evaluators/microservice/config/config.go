@@ -25,6 +25,7 @@ func Load(path string, profile string) (api.Workload, error) {
 		sort.Strings(keys)
 		return api.Workload{}, fmt.Errorf("workload contains unknown fields: %s", strings.Join(keys, ", "))
 	}
+	fixtureSeedDefined := metadata.IsDefined("load", "fixture_seed")
 	applyDefaults(&workload)
 	if profile != "" {
 		override, ok := workload.Profiles[profile]
@@ -32,6 +33,7 @@ func Load(path string, profile string) (api.Workload, error) {
 			return api.Workload{}, fmt.Errorf("unknown workload profile %q", profile)
 		}
 		override.Apply(&workload.Load)
+		fixtureSeedDefined = fixtureSeedDefined || override.FixtureSeed != nil
 		if len(override.ApplicationConfig) > 0 {
 			if workload.ApplicationConfig == nil {
 				workload.ApplicationConfig = make(map[string]any, len(override.ApplicationConfig))
@@ -40,6 +42,9 @@ func Load(path string, profile string) (api.Workload, error) {
 				workload.ApplicationConfig[key] = value
 			}
 		}
+	}
+	if !fixtureSeedDefined {
+		workload.Load.FixtureSeed = workload.Load.Seed
 	}
 	if err := Validate(workload); err != nil {
 		return api.Workload{}, fmt.Errorf("invalid workload: %w", err)

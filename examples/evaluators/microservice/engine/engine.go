@@ -64,6 +64,9 @@ func (e *Engine) Run(ctx context.Context, workload api.Workload) (RunResult, err
 	if err != nil {
 		return RunResult{}, err
 	}
+	if policy, ok := application.(interface{ SupportsSkipPrepare() bool }); e.options.SkipPrepare && ok && !policy.SupportsSkipPrepare() {
+		return RunResult{}, fmt.Errorf("application %q does not support --skip-prepare", application.Name())
+	}
 	runtime, err := e.openTargets(ctx, workload.Targets)
 	if err != nil {
 		return RunResult{}, err
@@ -77,6 +80,7 @@ func (e *Engine) Run(ctx context.Context, workload api.Workload) (RunResult, err
 			WorkloadName:  workload.Name,
 			WorkloadHash:  e.options.WorkloadHash,
 			Seed:          strconv.FormatInt(workload.Load.Seed, 10),
+			FixtureSeed:   strconv.FormatInt(workload.Load.FixtureSeed, 10),
 			PrimaryMetric: workload.Objective,
 			Constraints: ConstraintResult{
 				Passed:               true,
@@ -90,7 +94,11 @@ func (e *Engine) Run(ctx context.Context, workload api.Workload) (RunResult, err
 	allValid := true
 
 	for trialIndex := 0; trialIndex < workload.Load.Repetitions; trialIndex++ {
-		trialContext := api.TrialContext{Index: trialIndex, Seed: workload.Load.Seed + int64(trialIndex)}
+		trialContext := api.TrialContext{
+			Index:       trialIndex,
+			Seed:        workload.Load.Seed + int64(trialIndex),
+			FixtureSeed: workload.Load.FixtureSeed + int64(trialIndex),
+		}
 		if err := application.Reset(ctx, runtime, trialContext); err != nil {
 			return RunResult{}, fmt.Errorf("reset trial %d: %w", trialIndex, err)
 		}

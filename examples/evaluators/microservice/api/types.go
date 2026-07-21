@@ -23,6 +23,7 @@ type Load struct {
 	TimeoutSeconds      float64 `toml:"timeout_seconds" json:"timeout_seconds"`
 	Repetitions         int     `toml:"repetitions" json:"repetitions"`
 	Seed                int64   `toml:"seed" json:"seed"`
+	FixtureSeed         int64   `toml:"fixture_seed" json:"fixture_seed"`
 	MinOfferedRateRatio float64 `toml:"min_offered_rate_ratio" json:"min_offered_rate_ratio"`
 }
 
@@ -35,6 +36,7 @@ type ProfileOverride struct {
 	TimeoutSeconds      *float64       `toml:"timeout_seconds"`
 	Repetitions         *int           `toml:"repetitions"`
 	Seed                *int64         `toml:"seed"`
+	FixtureSeed         *int64         `toml:"fixture_seed"`
 	MinOfferedRateRatio *float64       `toml:"min_offered_rate_ratio"`
 	ApplicationConfig   map[string]any `toml:"application_config"`
 }
@@ -63,6 +65,9 @@ func (o ProfileOverride) Apply(load *Load) {
 	}
 	if o.Seed != nil {
 		load.Seed = *o.Seed
+	}
+	if o.FixtureSeed != nil {
+		load.FixtureSeed = *o.FixtureSeed
 	}
 	if o.MinOfferedRateRatio != nil {
 		load.MinOfferedRateRatio = *o.MinOfferedRateRatio
@@ -204,8 +209,9 @@ type Runtime interface {
 }
 
 type TrialContext struct {
-	Index int
-	Seed  int64
+	Index       int
+	Seed        int64
+	FixtureSeed int64
 }
 
 type Application interface {

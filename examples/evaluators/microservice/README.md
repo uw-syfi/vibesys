@@ -87,9 +87,11 @@ sequenceDiagram
     Engine-->>CLI: Aggregate result
 ```
 
-The workload seed controls operation selection and adapter samples. Each trial
-derives a deterministic seed, and the resolved workload is recorded as a
-canonical hash in the result.
+The workload seed controls operation selection and adapter samples. A separate
+fixture seed controls persistent fixture namespaces, so repeated evaluations
+can isolate state while preserving an identical request schedule. Each trial
+derives deterministic load and fixture seeds, and both resolved seeds plus the
+canonical workload hash are recorded in the result.
 
 ### Open-loop timing model
 
@@ -186,7 +188,7 @@ A workload declares:
 - one or more named protocol targets;
 - weighted operations and optional objective tags;
 - open- or closed-loop model, rate, duration, warmup, concurrency, timeout,
-  seed, and repetitions;
+  load seed, fixture seed, and repetitions;
 - the primary metric and direction; and
 - correctness and offered-load constraints.
 
