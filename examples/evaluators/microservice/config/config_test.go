@@ -86,3 +86,35 @@ users = 20
 		t.Fatalf("profile application_config users = %#v, want 20", users)
 	}
 }
+
+func TestLoadPreservesIndependentFixtureSeed(t *testing.T) {
+	contents := strings.Replace(
+		validWorkload,
+		"duration_seconds = 1",
+		"duration_seconds = 1\nseed = 42\nfixture_seed = 99",
+		1,
+	)
+	workload, err := Load(writeWorkload(t, contents), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workload.Load.Seed != 42 || workload.Load.FixtureSeed != 99 {
+		t.Fatalf("load and fixture seeds were coupled: %+v", workload.Load)
+	}
+}
+
+func TestLoadPreservesExplicitZeroFixtureSeed(t *testing.T) {
+	contents := strings.Replace(
+		validWorkload,
+		"duration_seconds = 1",
+		"duration_seconds = 1\nseed = 42\nfixture_seed = 0",
+		1,
+	)
+	workload, err := Load(writeWorkload(t, contents), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workload.Load.Seed != 42 || workload.Load.FixtureSeed != 0 {
+		t.Fatalf("explicit zero fixture seed was rewritten: %+v", workload.Load)
+	}
+}

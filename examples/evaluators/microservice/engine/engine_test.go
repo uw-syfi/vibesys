@@ -68,6 +68,10 @@ func (a fakeApplication) ValidateOperation(_ api.Operation, _ api.OperationPlan,
 }
 func (fakeApplication) FinishOperation(api.OperationPlan) {}
 
+type noSkipApplication struct{ fakeApplication }
+
+func (noSkipApplication) SupportsSkipPrepare() bool { return false }
+
 func workload(rate float64, duration float64, concurrency int, repetitions int) api.Workload {
 	zero := 0.0
 	return api.Workload{
@@ -98,13 +102,32 @@ func newTestEngine(t *testing.T, delay time.Duration) *Engine {
 	return New(registered, Options{EngineVersion: "test", WorkloadHash: "hash"})
 }
 
+func TestEngineRejectsUnsupportedSkipPrepareBeforeOpeningTargets(t *testing.T) {
+	registered := registry.New()
+	if err := registered.RegisterApplication("fake-app", func(api.Workload) (api.Application, error) {
+		return noSkipApplication{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := New(registered, Options{SkipPrepare: true}).Run(context.Background(), workload(1, 0.01, 1, 1))
+	if err == nil || !strings.Contains(err.Error(), "does not support --skip-prepare") {
+		t.Fatalf("unsupported skip prepare error = %v", err)
+	}
+}
+
 func TestEngineSupportsProtocolThroughDriverContract(t *testing.T) {
-	run, err := newTestEngine(t, time.Millisecond).Run(context.Background(), workload(20, 0.11, 2, 3))
+	configured := workload(20, 0.11, 2, 3)
+	configured.Load.Seed = 42
+	configured.Load.FixtureSeed = 99
+	run, err := newTestEngine(t, time.Millisecond).Run(context.Background(), configured)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !run.Summary.Valid || run.Summary.PrimaryValue == nil {
 		t.Fatalf("unexpected summary: %+v", run.Summary)
+	}
+	if run.Summary.Seed != "42" || run.Summary.FixtureSeed != "99" {
+		t.Fatalf("independent seeds not recorded: %+v", run.Summary)
 	}
 	if len(run.Summary.Trials) != 3 || len(run.Observations) != 9 {
 		t.Fatalf("unexpected result counts: trials=%d observations=%d", len(run.Summary.Trials), len(run.Observations))

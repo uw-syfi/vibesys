@@ -88,13 +88,16 @@ func (a *Application) Prepare(ctx context.Context, runtime api.Runtime, trial ap
 	if a.active != nil {
 		return nil, fmt.Errorf("previous Train Ticket fixture was not reset")
 	}
-	namespaceDigest := sha256.Sum256([]byte(fmt.Sprintf("%d/%d", trial.Seed, trial.Index)))
+	namespaceDigest := sha256.Sum256([]byte(fmt.Sprintf("%d/%d", trial.FixtureSeed, trial.Index)))
 	namespace := fmt.Sprintf("%x", namespaceDigest[:12])
-	recordCount, err := sampling.CaseCount(trial.Seed, a.config.Records, a.config.Records+3)
+	recordCount, err := sampling.CaseCount(trial.FixtureSeed, a.config.Records, a.config.Records+3)
 	if err != nil {
 		return nil, err
 	}
-	data := &dataset{namespace: namespace, records: makeRecords(namespace, trial.Seed, recordCount)}
+	data := &dataset{
+		namespace: namespace,
+		records:   makeRecords(namespace, trial.FixtureSeed, recordCount),
+	}
 	a.active = data
 	for index := range data.records {
 		if err := a.createRecord(ctx, runtime, &data.records[index]); err != nil {

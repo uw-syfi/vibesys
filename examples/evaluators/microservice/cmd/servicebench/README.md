@@ -7,7 +7,8 @@ invoking the selected shared runner.
 
 The command is responsible for:
 
-- workload, profile, target, load, seed, and output flags;
+- workload, profile, target, load, independent schedule/fixture seed, and output
+  flags;
 - validating command-line overrides and registered extensions;
 - hashing the fully resolved workload;
 - signal-aware execution;

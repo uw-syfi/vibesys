@@ -43,6 +43,9 @@ func (r *Registry) RegisterAccuracyApplication(
 }
 
 func (r *Registry) RegisterDriver(driver api.Driver) error {
+	if isNil(driver) {
+		return fmt.Errorf("driver must not be nil")
+	}
 	name := driver.Protocol()
 	if name == "" {
 		return fmt.Errorf("driver protocol must not be empty")

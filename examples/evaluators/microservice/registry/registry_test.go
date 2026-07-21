@@ -10,6 +10,13 @@ import (
 
 type namedApplication struct{ name string }
 
+type namedDriver struct{ protocol string }
+
+func (driver *namedDriver) Protocol() string { return driver.protocol }
+func (*namedDriver) Open(context.Context, api.Target) (api.Client, error) {
+	return nil, nil
+}
+
 func (a *namedApplication) Name() string { return a.name }
 func (*namedApplication) Prepare(context.Context, api.Runtime, api.TrialContext) (any, error) {
 	return nil, nil
@@ -79,5 +86,16 @@ func TestRegistryRejectsNilAndMismatchedApplicationFactories(t *testing.T) {
 				t.Fatalf("factory error=%v", err)
 			}
 		})
+	}
+}
+
+func TestRegistryRejectsNilDrivers(t *testing.T) {
+	registered := New()
+	if err := registered.RegisterDriver(nil); err == nil || !strings.Contains(err.Error(), "nil") {
+		t.Fatalf("nil driver error=%v", err)
+	}
+	var driver *namedDriver
+	if err := registered.RegisterDriver(driver); err == nil || !strings.Contains(err.Error(), "nil") {
+		t.Fatalf("typed nil driver error=%v", err)
 	}
 }

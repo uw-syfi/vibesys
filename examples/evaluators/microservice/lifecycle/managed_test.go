@@ -50,11 +50,18 @@ func TestManagedCandidateHelper(t *testing.T) {
 }
 
 func TestManagedCandidateKillsImmediatelyDetachedDescendant(t *testing.T) {
+	requireContainment := os.Getenv("VIBESYS_REQUIRE_MANAGED_CANDIDATE_TESTS") == "1"
 	bwrap, err := exec.LookPath("bwrap")
 	if err != nil {
+		if requireContainment {
+			t.Fatalf("bubblewrap is required in this environment: %v", err)
+		}
 		t.Skip("bubblewrap is unavailable")
 	}
 	if err := probePIDNamespace(bwrap); err != nil {
+		if requireContainment {
+			t.Fatalf("PID namespaces are required in this environment: %v", err)
+		}
 		t.Skipf("PID namespaces are unavailable: %v", err)
 	}
 	t.Setenv("GO_MANAGED_CANDIDATE_HELPER", "1")
