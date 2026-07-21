@@ -29,8 +29,8 @@ func (a *Application) ValidateOperation(operation api.Operation, plan api.Operat
 		return invalid("invalid_plan", fmt.Sprintf("plan kind %q does not match operation %q", state.kind, operation.Name))
 	}
 	wantResults := 1
-	if state.kind == composeUserTimeline {
-		wantResults = 2
+	if state.kind == legacyComposePost || state.kind == composeUserTimeline {
+		wantResults = 3
 	}
 	if len(results) != wantResults {
 		return invalid("result_count", fmt.Sprintf("got %d protocol results, want %d", len(results), wantResults))
@@ -39,22 +39,36 @@ func (a *Application) ValidateOperation(operation api.Operation, plan api.Operat
 		if validation := validateCompose(results[0]); !validation.Success {
 			return validation
 		}
-	}
-	if state.kind != legacyComposePost {
-		resultIndex := 0
-		if state.kind == composeUserTimeline {
-			resultIndex = 1
+		if !state.committed {
+			state.user.expected = prependExpected(state.marker, state.user.expected)
+			state.committed = true
 		}
-		validation := validateTimeline(results[resultIndex], state.user, state.marker, state.timelineSize)
+	}
+	resultIndex := 0
+	if state.kind == composeUserTimeline || state.kind == legacyComposePost {
+		resultIndex = 1
+	}
+	learnIdentity := state.kind == composeUserTimeline || state.kind == legacyComposePost
+	validation := validateTimeline(results[resultIndex], state.user, state.expected, state.timelineSize, learnIdentity)
+	if !validation.Success {
+		if state.kind == composeUserTimeline || state.kind == legacyComposePost {
+			validation.ErrorCategory = "read_your_write"
+			validation.ErrorMessage = "user timeline step: " + validation.ErrorMessage
+		}
+		return validation
+	}
+	if learnIdentity {
+		state.user.expected = append([]expectedPost(nil), state.expected...)
+	}
+	if state.kind == composeUserTimeline || state.kind == legacyComposePost {
+		validation = validateTimeline(results[2], state.user, state.expected, state.timelineSize, false)
 		if !validation.Success {
-			if state.kind == composeUserTimeline {
-				validation.ErrorCategory = "read_your_write"
-				validation.ErrorMessage = "step 2: " + validation.ErrorMessage
-			}
+			validation.ErrorCategory = "read_your_write"
+			validation.ErrorMessage = "follower home timeline step: " + validation.ErrorMessage
 			return validation
 		}
 	}
-	custom, validation := captureTimings(operation, results)
+	custom, validation := captureTimings(operation, state.kind, results)
 	if !validation.Success {
 		return validation
 	}
@@ -72,7 +86,7 @@ func validateCompose(result api.ProtocolResult) api.ValidationResult {
 	return api.ValidationResult{Success: true}
 }
 
-func validateTimeline(result api.ProtocolResult, user *benchmarkUser, marker string, limit int) api.ValidationResult {
+func validateTimeline(result api.ProtocolResult, user *benchmarkUser, expected []expectedPost, limit int, learnIdentity bool) api.ValidationResult {
 	response, validation := validateHTTP(result)
 	if !validation.Success {
 		return validation
@@ -81,15 +95,15 @@ func validateTimeline(result api.ProtocolResult, user *benchmarkUser, marker str
 	if err := json.Unmarshal(response.Body, &posts); err != nil {
 		return invalid("response_json", fmt.Sprintf("timeline must be a JSON array: %v", err))
 	}
-	if len(posts) == 0 {
-		return invalid("response_value", "timeline must contain at least one seeded post")
+	wantPosts := len(expected)
+	if wantPosts > limit {
+		wantPosts = limit
 	}
-	if len(posts) > limit {
-		return invalid("response_value", fmt.Sprintf("timeline contains %d posts, requested at most %d", len(posts), limit))
+	if len(posts) != wantPosts {
+		return invalid("response_value", fmt.Sprintf("timeline contains %d posts, want exact newest window of %d", len(posts), wantPosts))
 	}
 	seenPostIDs := make(map[string]struct{}, len(posts))
 	previousTimestamp := int64(math.MaxInt64)
-	markerFound := marker == ""
 	for index, post := range posts {
 		keys := make([]string, 0, len(post))
 		for key := range post {
@@ -114,8 +128,8 @@ func validateTimeline(result api.ProtocolResult, user *benchmarkUser, marker str
 		if !ok {
 			return invalid("response_schema", fmt.Sprintf("post %d text must be a non-empty string", index))
 		}
-		if text == marker {
-			markerFound = true
+		if text != expected[index].text {
+			return invalid("response_value", fmt.Sprintf("post %d text = %q, want %q", index, text, expected[index].text))
 		}
 		timestampString, ok := nonEmptyString(post["timestamp"])
 		if !ok {
@@ -129,6 +143,17 @@ func validateTimeline(result api.ProtocolResult, user *benchmarkUser, marker str
 			return invalid("response_order", fmt.Sprintf("post %d timestamp %d follows older timestamp %d", index, timestamp, previousTimestamp))
 		}
 		previousTimestamp = timestamp
+		if expected[index].postID == "" && learnIdentity {
+			expected[index].postID = postID
+			expected[index].requestID = post["req_id"].(string)
+			expected[index].timestamp = timestampString
+		} else if postID != expected[index].postID || post["req_id"] != expected[index].requestID || timestampString != expected[index].timestamp {
+			return invalid("response_value", fmt.Sprintf(
+				"post %d identity = (%q, %q, %q), want (%q, %q, %q)",
+				index, postID, post["req_id"], timestampString,
+				expected[index].postID, expected[index].requestID, expected[index].timestamp,
+			))
+		}
 		creator, ok := post["creator"].(map[string]any)
 		if !ok || len(creator) != 2 {
 			return invalid("response_schema", fmt.Sprintf("post %d creator must contain exactly user_id and username", index))
@@ -147,9 +172,6 @@ func validateTimeline(result api.ProtocolResult, user *benchmarkUser, marker str
 			}
 		}
 	}
-	if !markerFound {
-		return invalid("response_value", fmt.Sprintf("composed marker %q is absent from the user timeline", marker))
-	}
 	return api.ValidationResult{Success: true}
 }
 
@@ -167,27 +189,50 @@ func validateHTTP(result api.ProtocolResult) (api.HTTPResponse, api.ValidationRe
 	return response, api.ValidationResult{Success: true}
 }
 
-func captureTimings(operation api.Operation, results []api.ProtocolResult) (map[string]time.Duration, api.ValidationResult) {
+func captureTimings(operation api.Operation, kind string, results []api.ProtocolResult) (map[string]time.Duration, api.ValidationResult) {
 	custom := make(map[string]time.Duration)
 	for _, capture := range operation.CaptureHeaders {
-		var values []string
-		for _, result := range results {
-			values = append(values, result.Metadata[http.CanonicalHeaderKey(capture.Header)]...)
+		expectedIndex, ok := timingInvocation(kind, capture.Header)
+		if !ok || expectedIndex >= len(results) {
+			return nil, invalid("timing_header", fmt.Sprintf("header %s has no valid protocol step for operation %s", capture.Header, kind))
 		}
-		if len(values) == 0 {
-			continue
+		canonical := http.CanonicalHeaderKey(capture.Header)
+		for index, result := range results {
+			if index != expectedIndex && len(result.Metadata[canonical]) != 0 {
+				return nil, invalid("timing_header", fmt.Sprintf("header %s appeared on protocol step %d, want step %d", capture.Header, index+1, expectedIndex+1))
+			}
 		}
+		values := results[expectedIndex].Metadata[canonical]
 		if len(values) != 1 {
-			return nil, invalid("timing_header", fmt.Sprintf("header %s has %d values across the operation, want one", capture.Header, len(values)))
+			return nil, invalid("timing_header", fmt.Sprintf("header %s has %d values on protocol step %d, want one", capture.Header, len(values), expectedIndex+1))
 		}
 		milliseconds, err := strconv.ParseFloat(values[0], 64)
-		maximum := float64(math.MaxInt64) / float64(time.Millisecond)
-		if err != nil || math.IsNaN(milliseconds) || math.IsInf(milliseconds, 0) || milliseconds < 0 || milliseconds > maximum {
+		duration, valid := checkedDuration(milliseconds, time.Millisecond)
+		if err != nil || !valid {
 			return nil, invalid("timing_header", fmt.Sprintf("header %s is not a non-negative finite duration: %q", capture.Header, values[0]))
 		}
-		custom[capture.Name] = time.Duration(milliseconds * float64(time.Millisecond))
+		custom[capture.Name] = duration
 	}
 	return custom, api.ValidationResult{Success: true}
+}
+
+func timingInvocation(operationName, header string) (int, bool) {
+	switch http.CanonicalHeaderKey(header) {
+	case "X-Compose-Thrift-Ms":
+		return 0, operationName == composeUserTimeline || operationName == legacyComposePost
+	case "X-Usertimeline-Thrift-Ms", "X-User-Timeline-Thrift-Ms":
+		if operationName == userTimelineRead {
+			return 0, true
+		}
+		return 1, operationName == composeUserTimeline || operationName == legacyComposePost
+	case "X-Hometimeline-Thrift-Ms", "X-Home-Timeline-Thrift-Ms":
+		if operationName == homeTimelineRead {
+			return 0, true
+		}
+		return 2, operationName == composeUserTimeline || operationName == legacyComposePost
+	default:
+		return 0, false
+	}
 }
 
 func nonEmptyString(value any) (string, bool) {

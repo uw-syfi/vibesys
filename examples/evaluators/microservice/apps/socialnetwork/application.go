@@ -31,8 +31,8 @@ type Config struct {
 }
 
 type Application struct {
-	config Config
-	seed   int64
+	config    Config
+	needsHome bool
 }
 
 func New(workload api.Workload) (api.Application, error) {
@@ -90,27 +90,24 @@ func New(workload api.Workload) (api.Application, error) {
 	}
 	if value, ok := workload.ApplicationConfig["setup_delay_seconds"]; ok {
 		seconds, numberOK := number(value)
-		maximumSeconds := float64(math.MaxInt64) / float64(time.Second)
-		if !numberOK || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds < 0 || seconds > maximumSeconds {
+		delay, valid := checkedDuration(seconds, time.Second)
+		if !numberOK || !valid {
 			return nil, fmt.Errorf("application_config.setup_delay_seconds must be a non-negative number")
 		}
-		config.SetupDelay = time.Duration(seconds * float64(time.Second))
-	}
-	if config.Users < 2 {
-		return nil, fmt.Errorf("application_config.users must be at least 2 so every home timeline has a followee")
-	}
-	if config.SeedPostsPerUser <= 0 {
-		return nil, fmt.Errorf("application_config.seed_posts_per_user must be positive")
+		config.SetupDelay = delay
 	}
 	if config.UserIDBase <= 0 {
 		return nil, fmt.Errorf("application_config.user_id_base must be positive")
 	}
-	if config.UserIDBase > math.MaxInt-1_000_000_000-config.Users {
+	const maximumSafeInteger = 1<<53 - 1
+	if config.UserIDBase > maximumSafeInteger-config.Users {
 		return nil, fmt.Errorf("application_config.user_id_base is too large for namespaced user IDs")
 	}
 	if config.TimelineLimit <= 0 {
 		return nil, fmt.Errorf("application_config.timeline_limit must be positive")
 	}
+	needsHome := false
+	needsSeedPosts := false
 	for _, operation := range workload.Operations {
 		if operation.Target != "gateway" {
 			return nil, fmt.Errorf("Social Network operation %q must target gateway", operation.Name)
@@ -119,15 +116,38 @@ func New(workload api.Workload) (api.Application, error) {
 			return nil, fmt.Errorf("Social Network operation %q must not declare operations.http", operation.Name)
 		}
 		switch operation.Name {
-		case userTimelineRead, homeTimelineRead, composeUserTimeline, legacyComposePost:
+		case userTimelineRead:
+			needsSeedPosts = true
+		case homeTimelineRead, composeUserTimeline:
+			needsHome = true
+			needsSeedPosts = true
+		case legacyComposePost:
+			needsHome = true
 		default:
 			return nil, fmt.Errorf("unknown Social Network operation %q", operation.Name)
 		}
+		for _, capture := range operation.CaptureHeaders {
+			if _, ok := timingInvocation(operation.Name, capture.Header); !ok {
+				return nil, fmt.Errorf("operation %q capture header %q is not emitted by one of its protocol steps", operation.Name, capture.Header)
+			}
+		}
 	}
-	return &Application{config: config, seed: workload.Load.Seed}, nil
+	minimumUsers := 1
+	if needsHome {
+		minimumUsers = 2
+	}
+	if config.Users < minimumUsers {
+		return nil, fmt.Errorf("application_config.users must be at least %d for the selected operations", minimumUsers)
+	}
+	if config.SeedPostsPerUser < 0 || (needsSeedPosts && config.SeedPostsPerUser == 0) {
+		return nil, fmt.Errorf("application_config.seed_posts_per_user must be positive for timeline reads")
+	}
+	return &Application{config: config, needsHome: needsHome}, nil
 }
 
 func (a *Application) Name() string { return "social-network" }
+
+func (a *Application) SupportsSkipPrepare() bool { return false }
 
 func (a *Application) Reset(context.Context, api.Runtime, api.TrialContext) error {
 	// DeathStarBench does not expose a topology-neutral user or post deletion
@@ -153,9 +173,11 @@ func (a *Application) Prepare(ctx context.Context, runtime api.Runtime, trial ap
 			return nil, fmt.Errorf("register benchmark user %d: %w", index, err)
 		}
 	}
-	for index := range data.users {
-		if err := a.follow(ctx, runtime, &data.users[index], &data.users[data.users[index].followee]); err != nil {
-			return nil, err
+	if a.needsHome {
+		for index := range data.users {
+			if err := a.follow(ctx, runtime, &data.users[index], &data.users[data.users[index].followee]); err != nil {
+				return nil, err
+			}
 		}
 	}
 	for userIndex := range data.users {
@@ -164,29 +186,61 @@ func (a *Application) Prepare(ctx context.Context, runtime api.Runtime, trial ap
 			if err := invokeSetup(ctx, runtime, a.composeRequest(&data.users[userIndex], text), true); err != nil {
 				return nil, fmt.Errorf("seed post %d for user %d: %w", post, userIndex, err)
 			}
+			data.users[userIndex].expected = prependExpected(text, data.users[userIndex].expected)
 		}
 	}
 	if err := waitFor(ctx, a.config.SetupDelay); err != nil {
+		return nil, err
+	}
+	if err := a.verifyFixture(ctx, runtime, data); err != nil {
 		return nil, err
 	}
 	return data, nil
 }
 
 func (a *Application) makeDataset(trial api.TrialContext) *dataset {
-	digest := sha256.Sum256([]byte(fmt.Sprintf("%d/%d", trial.Seed, trial.Index)))
+	fixtureSeed := trial.FixtureSeed
+	digest := sha256.Sum256([]byte(fmt.Sprintf("%d/%d", fixtureSeed, trial.Index)))
 	namespace := fmt.Sprintf("%x", digest[:6])
-	// Keep IDs in the range commonly accepted by DeathStarBench while giving
-	// every random optimization run an independent namespace.
-	offset := int(binary.BigEndian.Uint32(digest[6:10]) % 1_000_000_000)
+	// Allocate an aligned block in JavaScript's exactly representable integer
+	// range. Alignment means distinct blocks can never partially overlap.
+	const maximumSafeInteger = 1<<53 - 1
+	blockCount := uint64((maximumSafeInteger - a.config.UserIDBase + 1) / a.config.Users)
+	block := binary.BigEndian.Uint64(digest[6:14]) % blockCount
+	offset := int(block) * a.config.Users
 	users := make([]benchmarkUser, a.config.Users)
 	for index := range users {
 		users[index] = benchmarkUser{
 			id:       a.config.UserIDBase + offset + index,
 			username: fmt.Sprintf("%s%s_%d", a.config.UsernamePrefix, namespace, index),
 			followee: (index - 1 + len(users)) % len(users),
+			follower: (index + 1) % len(users),
 		}
 	}
 	return &dataset{namespace: namespace, users: users}
+}
+
+func (a *Application) verifyFixture(ctx context.Context, runtime api.Runtime, data *dataset) error {
+	operation := api.Operation{Name: "setup_verify", Target: "gateway"}
+	for index := range data.users {
+		user := &data.users[index]
+		result := runtime.Invoke(ctx, a.timelineInvocation(operation, userTimelineRead, user))
+		if validation := validateTimeline(result, user, user.expected, a.config.TimelineLimit, true); !validation.Success {
+			return fmt.Errorf("verify user timeline %d: %s: %s", index, validation.ErrorCategory, validation.ErrorMessage)
+		}
+	}
+	if !a.needsHome {
+		return nil
+	}
+	for index := range data.users {
+		user := &data.users[index]
+		followee := &data.users[user.followee]
+		result := runtime.Invoke(ctx, a.timelineInvocation(operation, homeTimelineRead, user))
+		if validation := validateTimeline(result, followee, followee.expected, a.config.TimelineLimit, false); !validation.Success {
+			return fmt.Errorf("verify home timeline %d: %s: %s", index, validation.ErrorCategory, validation.ErrorMessage)
+		}
+	}
+	return nil
 }
 
 func (a *Application) follow(ctx context.Context, runtime api.Runtime, user, followee *benchmarkUser) error {
@@ -260,6 +314,24 @@ func waitFor(ctx context.Context, delay time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+func checkedDuration(value float64, unit time.Duration) (time.Duration, bool) {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0, false
+	}
+	scaled := value * float64(unit)
+	if math.IsInf(scaled, 0) || scaled >= float64(math.MaxInt64) {
+		return 0, false
+	}
+	return time.Duration(scaled), true
+}
+
+func prependExpected(text string, values []expectedPost) []expectedPost {
+	result := make([]expectedPost, len(values)+1)
+	result[0] = expectedPost{text: text}
+	copy(result[1:], values)
+	return result
 }
 
 func integer(values map[string]any, key string, defaultValue int) (int, error) {

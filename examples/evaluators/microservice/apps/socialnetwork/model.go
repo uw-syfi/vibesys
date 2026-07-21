@@ -7,6 +7,15 @@ type benchmarkUser struct {
 	id       int
 	username string
 	followee int
+	follower int
+	expected []expectedPost
+}
+
+type expectedPost struct {
+	text      string
+	postID    string
+	requestID string
+	timestamp string
 }
 
 type dataset struct {
@@ -19,5 +28,7 @@ type operationState struct {
 	user         *benchmarkUser
 	marker       string
 	timelineSize int
+	expected     []expectedPost
+	committed    bool
 	release      func()
 }

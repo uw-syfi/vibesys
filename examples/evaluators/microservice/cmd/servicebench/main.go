@@ -67,6 +67,7 @@ func run() error {
 	var concurrency int
 	var repetitions int
 	var seed string
+	var fixtureSeed string
 
 	flag.StringVar(&workloadPath, "workload", "", "path to the workload TOML file")
 	flag.StringVar(&profile, "profile", "", "optional named workload profile")
@@ -82,6 +83,7 @@ func run() error {
 	flag.IntVar(&concurrency, "concurrency", 0, "override maximum in-flight logical operations")
 	flag.IntVar(&repetitions, "repetitions", 0, "override independent trial count")
 	flag.StringVar(&seed, "seed", "", "override deterministic random seed, or use 'random'")
+	flag.StringVar(&fixtureSeed, "fixture-seed", "", "override the fixture namespace seed, or use 'random'")
 	flag.Parse()
 	if workloadPath == "" {
 		return errors.New("--workload is required")
@@ -107,21 +109,18 @@ func run() error {
 		workload.Load.Repetitions = repetitions
 	}
 	if seed != "" {
-		var parsed int64
-		if seed == "random" {
-			var raw [8]byte
-			if _, randomErr := cryptorand.Read(raw[:]); randomErr != nil {
-				return fmt.Errorf("generate random --seed: %w", randomErr)
-			}
-			parsed = int64(binary.LittleEndian.Uint64(raw[:]) & uint64(^uint64(0)>>1))
-		} else {
-			var parseErr error
-			parsed, parseErr = strconv.ParseInt(seed, 10, 64)
-			if parseErr != nil {
-				return fmt.Errorf("invalid --seed: %w", parseErr)
-			}
+		parsed, parseErr := parseSeed(seed, "--seed")
+		if parseErr != nil {
+			return parseErr
 		}
 		workload.Load.Seed = parsed
+	}
+	if fixtureSeed != "" {
+		parsed, parseErr := parseSeed(fixtureSeed, "--fixture-seed")
+		if parseErr != nil {
+			return parseErr
+		}
+		workload.Load.FixtureSeed = parsed
 	}
 	for index := range workload.Targets {
 		if baseURL != "" && workload.Targets[index].Protocol == "http" {
@@ -168,7 +167,7 @@ func run() error {
 
 	fmt.Fprintf(
 		os.Stderr,
-		"workload=%s application=%s model=%s rate=%.2f duration=%.2fs warmup=%.2fs concurrency=%d repetitions=%d seed=%d\n",
+		"workload=%s application=%s model=%s rate=%.2f duration=%.2fs warmup=%.2fs concurrency=%d repetitions=%d seed=%d fixture_seed=%d\n",
 		workload.Name,
 		workload.Application,
 		workload.Load.Model,
@@ -178,6 +177,7 @@ func run() error {
 		workload.Load.Concurrency,
 		workload.Load.Repetitions,
 		workload.Load.Seed,
+		workload.Load.FixtureSeed,
 	)
 	for _, target := range workload.Targets {
 		fmt.Fprintf(os.Stderr, "target=%s protocol=%s address=%s session_policy=%s\n", target.Name, target.Protocol, target.Address, target.SessionPolicy)
@@ -217,6 +217,21 @@ func run() error {
 		return errors.New("benchmark result is invalid; inspect constraints and trial invalid_reasons")
 	}
 	return nil
+}
+
+func parseSeed(value, flagName string) (int64, error) {
+	if value == "random" {
+		var raw [8]byte
+		if _, err := cryptorand.Read(raw[:]); err != nil {
+			return 0, fmt.Errorf("generate random %s: %w", flagName, err)
+		}
+		return int64(binary.LittleEndian.Uint64(raw[:]) & uint64(^uint64(0)>>1)), nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s: %w", flagName, err)
+	}
+	return parsed, nil
 }
 
 func writeNDJSON(path string, observations []api.Observation) error {

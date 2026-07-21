@@ -10,11 +10,7 @@ import (
 
 func (a *Application) BuildOperation(operation api.Operation, sample api.Sample, prepared any) (api.OperationPlan, error) {
 	data, ok := prepared.(*dataset)
-	if prepared == nil {
-		data = a.makeDataset(api.TrialContext{Seed: a.seed})
-		ok = true
-	}
-	if !ok || data == nil || len(data.users) < 2 {
+	if !ok || data == nil || len(data.users) == 0 {
 		return api.OperationPlan{}, fmt.Errorf("Social Network fixture is not prepared")
 	}
 	user := &data.users[sample.Random%uint64(len(data.users))]
@@ -24,7 +20,8 @@ func (a *Application) BuildOperation(operation api.Operation, sample api.Sample,
 		return api.OperationPlan{
 			Invocations: []api.Invocation{a.timelineInvocation(operation, userTimelineRead, user)},
 			State: &operationState{
-				kind: userTimelineRead, user: user, timelineSize: a.config.TimelineLimit, release: user.mu.RUnlock,
+				kind: userTimelineRead, user: user, expected: append([]expectedPost(nil), user.expected...),
+				timelineSize: a.config.TimelineLimit, release: user.mu.RUnlock,
 			},
 		}, nil
 	case homeTimelineRead:
@@ -33,31 +30,23 @@ func (a *Application) BuildOperation(operation api.Operation, sample api.Sample,
 		return api.OperationPlan{
 			Invocations: []api.Invocation{a.timelineInvocation(operation, homeTimelineRead, user)},
 			State: &operationState{
-				kind: homeTimelineRead, user: followee, timelineSize: a.config.TimelineLimit, release: followee.mu.RUnlock,
+				kind: homeTimelineRead, user: followee, expected: append([]expectedPost(nil), followee.expected...),
+				timelineSize: a.config.TimelineLimit, release: followee.mu.RUnlock,
 			},
 		}, nil
-	case composeUserTimeline:
+	case composeUserTimeline, legacyComposePost:
 		user.mu.Lock()
 		marker := fmt.Sprintf("live_%s_%016x_%016x", data.namespace, uint64(sample.Counter), sample.Random)
-		return api.OperationPlan{
-			Invocations: []api.Invocation{
-				{Target: operation.Target, Operation: operation.Name, Payload: a.composeRequest(user, marker)},
-				a.timelineInvocation(operation, userTimelineRead, user),
-			},
-			State: &operationState{
-				kind: composeUserTimeline, user: user, marker: marker,
-				timelineSize: a.config.TimelineLimit, release: user.mu.Unlock,
-			},
-		}, nil
-	case legacyComposePost:
-		user.mu.Lock()
-		marker := fmt.Sprintf("live_%s_%016x_%016x", data.namespace, uint64(sample.Counter), sample.Random)
-		return api.OperationPlan{
-			Invocations: []api.Invocation{{
-				Target: operation.Target, Operation: operation.Name, Payload: a.composeRequest(user, marker),
-			}},
-			State: &operationState{kind: legacyComposePost, user: user, marker: marker, release: user.mu.Unlock},
-		}, nil
+		invocations := []api.Invocation{{
+			Target: operation.Target, Operation: operation.Name, Payload: a.composeRequest(user, marker),
+		}, a.timelineInvocation(operation, userTimelineRead, user)}
+		state := &operationState{
+			kind: operation.Name, user: user, marker: marker,
+			expected: prependExpected(marker, user.expected), timelineSize: a.config.TimelineLimit, release: user.mu.Unlock,
+		}
+		follower := &data.users[user.follower]
+		invocations = append(invocations, a.timelineInvocation(operation, homeTimelineRead, follower))
+		return api.OperationPlan{Invocations: invocations, State: state}, nil
 	default:
 		return api.OperationPlan{}, fmt.Errorf("unknown Social Network operation %q", operation.Name)
 	}

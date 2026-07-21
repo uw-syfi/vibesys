@@ -11,8 +11,8 @@ vibesys --input examples/microservices/social-network-read-timeline
 **Target:** DeathStarBench socialNetwork: Go microservices stack deployed via Docker Compose. 
 
 **Workload:** Read-heavy, specifically for this issue. 50% user-timeline reads,
-40% home-timeline reads, and 10% stateful compose + user-timeline read-your-write
-sequences to keep content fresh.
+40% home-timeline reads, and 10% stateful compose + user- and follower-home-
+timeline read-your-write sequences to keep content fresh.
 
 **Primary metric:** `p50_ms` (combined read latency).
 
@@ -164,8 +164,10 @@ Optional flags which can be included with the checker:
 Run the shared evaluator from the repository root. The checked-in workload uses
 the original medium profile: 300 target logical operations/s, 20 seconds of
 warmup, 120 seconds of measurement, 50 users, and 10 seed posts per user. Each
-VibeSys invocation supplies a random evaluator seed, which produces independent
-user IDs, usernames, and post markers on a long-lived candidate deployment.
+VibeSys invocation supplies a random fixture seed, which produces
+collision-resistant user IDs, usernames, and post markers on a long-lived
+candidate deployment. The load seed stays fixed, so every candidate receives
+the same operation and user selection sequence.
 
 ```bash
 go -C examples/evaluators/microservice run ./cmd/servicebench \
@@ -186,13 +188,9 @@ profiles. A profile changes both load and fixture size:
 
 Select one with `--profile light`, `--profile medium`, or `--profile heavy`.
 
-On repeated runs against an already-prepared deployment, skip fixture setup:
-
-```bash
-go -C examples/evaluators/microservice run ./cmd/servicebench \
-  --workload "$PWD/examples/microservices/social-network-read-timeline/benchmark/workload.toml" \
-  --skip-prepare
-```
+This stateful adapter intentionally rejects `--skip-prepare`: once measured
+writes have run, their exact content cannot be reconstructed safely in a new
+evaluator process. Use a fresh random fixture seed for each evaluation instead.
 
 ### Output format
 
@@ -218,10 +216,12 @@ distributions, offered-load diagnostics, constraints, and the trusted scalar:
 ```
 
 `primary_value` is the median trial-level p50 scheduled-arrival latency for
-successful operations tagged `read`. Timeline reads must return non-empty,
-bounded, newest-first arrays with the exact DeathStarBench post schema and the
-expected creator identity. A compose sequence counts once and succeeds only if
-the acknowledged post marker is immediately visible in that user's timeline.
+successful operations tagged `read`. Timeline reads must return the exact
+newest expected content window with the DeathStarBench post schema, descending
+timestamps, stable post/request identity, and creator identity. A compose
+sequence counts once and succeeds
+only if the acknowledged post marker is immediately visible in the author's
+timeline and the follower's home timeline.
 A run is invalid unless its success rate is 1.0, every operation type was
 sampled, and the load generator sustains at least 95% of the target rate. Thrift
 timing headers remain available in raw operation records as intermediate timings.

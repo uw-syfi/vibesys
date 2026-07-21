@@ -79,6 +79,7 @@ type Summary struct {
 	WorkloadName  string           `json:"workload_name"`
 	WorkloadHash  string           `json:"workload_hash"`
 	Seed          string           `json:"seed"`
+	FixtureSeed   string           `json:"fixture_seed"`
 	PrimaryValue  *float64         `json:"primary_value,omitempty"`
 	PrimaryMetric api.Objective    `json:"primary_metric"`
 	Valid         bool             `json:"valid"`

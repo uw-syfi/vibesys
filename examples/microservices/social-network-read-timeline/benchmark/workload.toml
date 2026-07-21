@@ -11,6 +11,7 @@ concurrency = 256
 timeout_seconds = 10
 repetitions = 1
 seed = 42
+fixture_seed = 42
 min_offered_rate_ratio = 0.95
 
 [[targets]]
@@ -51,6 +52,10 @@ unit = "ms"
 [[operations.capture_headers]]
 name = "compose_user_timeline_thrift"
 header = "X-UserTimeline-Thrift-Ms"
+unit = "ms"
+[[operations.capture_headers]]
+name = "compose_home_timeline_thrift"
+header = "X-HomeTimeline-Thrift-Ms"
 unit = "ms"
 
 [application_config]
