@@ -91,9 +91,11 @@ files and commands are trusted infrastructure: inspect them to understand the
 contract, but do not edit or bypass them.
 
 - Accuracy command: `uv run python accuracy_checker/checker.py`. Discover supported flags with
-  `uv run python accuracy_checker/checker.py --help`; do not guess.
+  `uv run python accuracy_checker/checker.py --help`; do not guess. The help invocation is
+  informational, so its exit status is not a correctness result.
 - Benchmark command: `uv run python benchmark/benchmark.py`. Use it for a short sanity run and
   discover supported flags with `uv run python benchmark/benchmark.py --help`.
+  The help invocation is informational, so ignore its exit status.
 
 
 ## Bootstrap the first passing seed

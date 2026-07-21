@@ -32,10 +32,13 @@ Review and test the candidate as-is. Do not modify candidate or evaluator files.
 The candidate must obey the input bundle's documented contract, and evaluator-
 owned code must remain unmodified.
 
+Commands suffixed with `--help` are informational flag-discovery probes. Ignore
+their exit status; only the actual accuracy and benchmark executions are gates.
+
 {% if accuracy_command %}
 1. Run the required accuracy command: `{{ accuracy_command }}`. Discover its
-   supported flags with `{{ accuracy_command }} --help`; a non-zero exit is a
-   failure.
+   supported flags with `{{ accuracy_command }} --help`. A non-zero exit from
+   the actual accuracy command is a failure.
 {% endif %}
 {% if benchmark_command %}
 2. Run a short benchmark sanity check with `{{ benchmark_command }}`. Discover

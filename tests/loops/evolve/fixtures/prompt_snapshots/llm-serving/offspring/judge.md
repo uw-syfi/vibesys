@@ -85,9 +85,12 @@ Review and test the candidate as-is. Do not modify candidate or evaluator files.
 The candidate must obey the input bundle's documented contract, and evaluator-
 owned code must remain unmodified.
 
+Commands suffixed with `--help` are informational flag-discovery probes. Ignore
+their exit status; only the actual accuracy and benchmark executions are gates.
+
 1. Run the required accuracy command: `uv run python accuracy_checker/checker.py`. Discover its
-   supported flags with `uv run python accuracy_checker/checker.py --help`; a non-zero exit is a
-   failure.
+   supported flags with `uv run python accuracy_checker/checker.py --help`. A non-zero exit from
+   the actual accuracy command is a failure.
 2. Run a short benchmark sanity check with `uv run python benchmark/benchmark.py`. Discover
    supported flags with `uv run python benchmark/benchmark.py --help`; do not invent flags.
 

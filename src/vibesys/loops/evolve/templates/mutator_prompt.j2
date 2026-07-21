@@ -29,11 +29,13 @@ contract, but do not edit or bypass them.
 
 {% if accuracy_command %}
 - Accuracy command: `{{ accuracy_command }}`. Discover supported flags with
-  `{{ accuracy_command }} --help`; do not guess.
+  `{{ accuracy_command }} --help`; do not guess. The help invocation is
+  informational, so its exit status is not a correctness result.
 {% endif %}
 {% if benchmark_command %}
 - Benchmark command: `{{ benchmark_command }}`. Use it for a short sanity run and
   discover supported flags with `{{ benchmark_command }} --help`.
+  The help invocation is informational, so ignore its exit status.
 {% endif %}
 
 {% if objectives %}

@@ -21,9 +21,12 @@ Review and test the candidate as-is. Do not modify candidate or evaluator files.
 The candidate must obey the input bundle's documented contract, and evaluator-
 owned code must remain unmodified.
 
+Commands suffixed with `--help` are informational flag-discovery probes. Ignore
+their exit status; only the actual accuracy and benchmark executions are gates.
+
 1. Run the required accuracy command: `go run ./_evaluator/queue/cmd/accuracy --candidate ./queue-candidate.so`. Discover its
-   supported flags with `go run ./_evaluator/queue/cmd/accuracy --candidate ./queue-candidate.so --help`; a non-zero exit is a
-   failure.
+   supported flags with `go run ./_evaluator/queue/cmd/accuracy --candidate ./queue-candidate.so --help`. A non-zero exit from
+   the actual accuracy command is a failure.
 2. Run a short benchmark sanity check with `go run ./_evaluator/queue/cmd/benchmark --candidate ./queue-candidate.so`. Discover
    supported flags with `go run ./_evaluator/queue/cmd/benchmark --candidate ./queue-candidate.so --help`; do not invent flags.
 

@@ -19,9 +19,11 @@ files and commands are trusted infrastructure: inspect them to understand the
 contract, but do not edit or bypass them.
 
 - Accuracy command: `go run ./_evaluator/queue/cmd/accuracy --candidate ./queue-candidate.so`. Discover supported flags with
-  `go run ./_evaluator/queue/cmd/accuracy --candidate ./queue-candidate.so --help`; do not guess.
+  `go run ./_evaluator/queue/cmd/accuracy --candidate ./queue-candidate.so --help`; do not guess. The help invocation is
+  informational, so its exit status is not a correctness result.
 - Benchmark command: `go run ./_evaluator/queue/cmd/benchmark --candidate ./queue-candidate.so`. Use it for a short sanity run and
   discover supported flags with `go run ./_evaluator/queue/cmd/benchmark --candidate ./queue-candidate.so --help`.
+  The help invocation is informational, so ignore its exit status.
 
 
 ## Bootstrap the first passing seed
