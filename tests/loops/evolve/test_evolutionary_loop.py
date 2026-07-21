@@ -40,6 +40,7 @@ from vibesys.loops.evolve.population import (
     Objective,
     Population,
 )
+from vibesys.profilers import ProfilerKind
 from vibesys.sandbox.run_environment import RunEnvironmentSpec, candidate_modal_app_name
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
 
@@ -571,11 +572,9 @@ def test_generic_domain_prompts_exclude_llm_serving_contracts(tmp_path, ref_file
     LLM-serving contract into its mutator and judge base prompts."""
     mutator_prompts: list[str] = []
     judge_prompts: list[str] = []
-    profiler_prompts: list[str] = []
     runner = _make_runner(
         capture_mutator_prompts=mutator_prompts,
         capture_judge_prompts=judge_prompts,
-        capture_profiler_prompts=profiler_prompts,
     )
 
     result = _invoke_loop(
@@ -584,12 +583,13 @@ def test_generic_domain_prompts_exclude_llm_serving_contracts(tmp_path, ref_file
         runner,
         domain=DomainName.GENERIC,
         modality=None,
+        profiler_kind=ProfilerKind.NONE,
         max_generations=0,
     )
 
     assert result is True
-    assert len(mutator_prompts) == len(judge_prompts) == len(profiler_prompts) == 1
-    combined = "\n".join(mutator_prompts + judge_prompts + profiler_prompts)
+    assert len(mutator_prompts) == len(judge_prompts) == 1
+    combined = "\n".join(mutator_prompts + judge_prompts)
     assert "uv run python accuracy_checker/checker.py" in combined
     assert "uv run python benchmark/benchmark.py" in combined
     assert "Model weights are at `/model`" not in combined
