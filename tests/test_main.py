@@ -269,6 +269,16 @@ def test_keep_modal_apps_flag_defaults_off_and_parses(tmp_path):
     assert parser.parse_args(["--keep-modal-apps", "--input", str(bundle)]).keep_modal_apps is True
 
 
+def test_evolve_modality_defaults_to_domain_resolution(tmp_path):
+    """A non-serving domain must not inherit the text-generation modality."""
+    import vibesys.main as cli
+
+    bundle = _write_input_bundle(tmp_path)
+    parser = cli._build_evolve_parser()
+
+    assert parser.parse_args(["--input", str(bundle)]).modality is None
+
+
 def test_max_parallelism_defaults_to_one_and_parses(tmp_path):
     """--max-parallelism is serial (1) by default and accepts an int override."""
     import vibesys.main as cli

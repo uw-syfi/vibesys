@@ -106,8 +106,8 @@ Example (inside `judge.md`):
    needs setup/teardown behavior such as mounts or copy exclusions, implement
    `EnvironmentHooks` in that package and attach it to the definition.
 7. Register the definition in `vibesys.domains.registry.DOMAINS`.
-8. Add `[agent].domain = "<name>"` to the input manifest and run
-   `vibesys --outer-loop agent ...`.
+8. Add `[agent].domain = "<name>"` to the input manifest and run either
+   `vibesys --outer-loop agent ...` or `vibesys --outer-loop evolve ...`.
 
 Domains are registered explicitly so prompt context, environment hooks, and tests
 stay tied to the same domain identity.

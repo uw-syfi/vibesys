@@ -42,7 +42,9 @@ from vibesys.agents.progress import CandidateProgress
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibesys.context import create_candidate_context, create_run_context
-from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
+from vibesys.domains.base import DomainDefinition, DomainName, DomainRole
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
 from vibesys.loops.evolve.population import (
     Individual,
     Objective,
@@ -60,12 +62,11 @@ from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Ver
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 _AGENT_TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "agent" / "templates"
+_INTERFACE = "inprocess"
 
-# Templates here include the orchestrate loop's modality fragments (e.g.
-# `_modality/text_generation/implementer.j2`) and reuse its profiler
-# prompts verbatim. A Jinja env with both search paths lets us keep the
-# evolutionary-specific top-level templates here while leaning on the
-# orchestrate package for the bits that don't need to diverge.
+# Evolve owns its top-level mutator and judge prompts but reuses the agent
+# loop's modality fragments and profiler prompts. Domain role files are rendered
+# separately and injected into both sets of neutral templates.
 _jinja_env = Environment(
     loader=FileSystemLoader([str(_TEMPLATE_DIR), str(_AGENT_TEMPLATE_DIR)]),
     keep_trailing_newline=True,
@@ -76,6 +77,22 @@ _jinja_env = Environment(
 
 def _render(name: str, **kwargs: object) -> str:
     return _jinja_env.get_template(name).render(**kwargs)
+
+
+def _domain_render_context(
+    ctx: LoopContext, modality: str | None, *, runtime_notes: str | None = None
+) -> dict[str, object]:
+    """Return the uniform context understood by every domain role file."""
+    return {
+        "modality": modality,
+        "interface": _INTERFACE,
+        "reference_path": ctx.ref_name,
+        "benchmark_command": ctx.judge_benchmark_command,
+        "accuracy_command": ctx.judge_accuracy_command,
+        "runtime_notes": (
+            runtime_notes if runtime_notes is not None else ctx.run_environment_view.prompt_notes
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +218,8 @@ def _run_mutator(
     objective: str,
     parent: Individual | None,
     inspirations: list[Individual],
-    modality: str,
+    modality: str | None,
+    domain_definition: DomainDefinition,
     is_cold_start: bool,
     objectives: list[Objective] | None = None,
     failed_lessons: list[str] | None = None,
@@ -209,6 +227,14 @@ def _run_mutator(
     repair_seed: bool = False,
     runtime_notes: str | None = None,
 ) -> MutatorResponse:
+    prompt_runtime_notes = (
+        runtime_notes if runtime_notes is not None else ctx.run_environment_view.prompt_notes
+    )
+    domain_implementer = render_domain_section(
+        domain_definition,
+        DomainRole.IMPLEMENTER,
+        **_domain_render_context(ctx, modality, runtime_notes=prompt_runtime_notes),
+    )
     system_prompt = _render(
         "mutator_prompt.j2",
         reference_path=ctx.ref_name,
@@ -218,9 +244,9 @@ def _run_mutator(
         inspirations=inspirations,
         is_cold_start=is_cold_start,
         objectives=objectives,
-        runtime_notes=(
-            runtime_notes if runtime_notes is not None else ctx.run_environment_view.prompt_notes
-        ),
+        interface=_INTERFACE,
+        domain_implementer=domain_implementer,
+        runtime_notes=prompt_runtime_notes,
         env_kind=ctx.run_environment_view.env_kind,
         accuracy_command=ctx.judge_accuracy_command,
         benchmark_command=ctx.judge_benchmark_command,
@@ -250,20 +276,29 @@ def _run_judge(
     *,
     generation: int,
     child_idx: int,
-    modality: str,
+    modality: str | None,
+    domain_definition: DomainDefinition,
     objective: str,
     pass_criteria: str,
     runtime_notes: str | None = None,
 ) -> JudgeResponse:
+    prompt_runtime_notes = (
+        runtime_notes if runtime_notes is not None else ctx.run_environment_view.prompt_notes
+    )
+    domain_judge = render_domain_section(
+        domain_definition,
+        DomainRole.JUDGE,
+        **_domain_render_context(ctx, modality, runtime_notes=prompt_runtime_notes),
+    )
     system_prompt = _render(
         "judge_prompt.j2",
         accuracy_command=ctx.judge_accuracy_command,
         benchmark_command=ctx.judge_benchmark_command,
         pass_criteria=pass_criteria,
         modality=modality,
-        runtime_notes=(
-            runtime_notes if runtime_notes is not None else ctx.run_environment_view.prompt_notes
-        ),
+        interface=_INTERFACE,
+        domain_judge=domain_judge,
+        runtime_notes=prompt_runtime_notes,
         env_kind=ctx.run_environment_view.env_kind,
         objective=objective,
     )
@@ -306,7 +341,8 @@ def _run_profiler(
     *,
     generation: int,
     child_idx: int,
-    modality: str,
+    modality: str | None,
+    domain_definition: DomainDefinition,
     objective: str,
     objectives: list[Objective] | None = None,
     runtime_notes: str | None = None,
@@ -315,13 +351,21 @@ def _run_profiler(
         return None
     definition = profiler_definition(ctx.profiler_kind)
     template = definition.prompt_template
+    prompt_runtime_notes = (
+        runtime_notes if runtime_notes is not None else ctx.run_environment_view.prompt_notes
+    )
+    domain_profiler = render_domain_section(
+        domain_definition,
+        DomainRole.PROFILER,
+        **_domain_render_context(ctx, modality, runtime_notes=prompt_runtime_notes),
+    )
     base_prompt = _render(
         template,
         benchmark_command=ctx.profiler_benchmark_command,
         modality=modality,
-        runtime_notes=(
-            runtime_notes if runtime_notes is not None else ctx.run_environment_view.prompt_notes
-        ),
+        interface=_INTERFACE,
+        domain_profiler=domain_profiler,
+        runtime_notes=prompt_runtime_notes,
         env_kind=ctx.run_environment_view.env_kind,
         objective=objective,
         profile_focus="Measure the headline metric for this candidate; rank top kernel-level bottlenecks.",
@@ -374,7 +418,8 @@ def _evaluate_candidate(
     inspirations: list[Individual],
     objective: str,
     objectives: list[Objective] | None,
-    modality: str,
+    modality: str | None,
+    domain_definition: DomainDefinition,
     pass_criteria: str,
     keep_modal_apps: bool,
     isolated_app: bool = False,
@@ -418,6 +463,7 @@ def _evaluate_candidate(
             parent=parent,
             inspirations=inspirations,
             modality=modality,
+            domain_definition=domain_definition,
             is_cold_start=False,
             objectives=objectives,
             runtime_notes=cand_notes,
@@ -430,6 +476,7 @@ def _evaluate_candidate(
             generation=generation,
             child_idx=child_idx,
             modality=modality,
+            domain_definition=domain_definition,
             objective=objective,
             pass_criteria=pass_criteria,
             runtime_notes=cand_notes,
@@ -451,6 +498,7 @@ def _evaluate_candidate(
             generation=generation,
             child_idx=child_idx,
             modality=modality,
+            domain_definition=domain_definition,
             objective=objective,
             objectives=objectives,
             runtime_notes=cand_notes,
@@ -578,7 +626,8 @@ def _run_generation_serial(
     objective: str,
     objectives: list[Objective] | None,
     frontier_bias: float,
-    modality: str,
+    modality: str | None,
+    domain_definition: DomainDefinition,
     pass_criteria: str,
     keep_modal_apps: bool,
 ) -> None:
@@ -618,6 +667,7 @@ def _run_generation_serial(
                 objective=objective,
                 objectives=objectives,
                 modality=modality,
+                domain_definition=domain_definition,
                 pass_criteria=pass_criteria,
                 keep_modal_apps=keep_modal_apps,
             )
@@ -640,7 +690,8 @@ def _evaluate_in_subcontext(
     inspirations: list[Individual],
     objective: str,
     objectives: list[Objective] | None,
-    modality: str,
+    modality: str | None,
+    domain_definition: DomainDefinition,
     pass_criteria: str,
     keep_modal_apps: bool,
     worktree_lock: threading.Lock,
@@ -695,6 +746,7 @@ def _evaluate_in_subcontext(
             objective=objective,
             objectives=objectives,
             modality=modality,
+            domain_definition=domain_definition,
             pass_criteria=pass_criteria,
             keep_modal_apps=keep_modal_apps,
             isolated_app=True,
@@ -733,7 +785,8 @@ def _run_generation_parallel(
     objective: str,
     objectives: list[Objective] | None,
     frontier_bias: float,
-    modality: str,
+    modality: str | None,
+    domain_definition: DomainDefinition,
     pass_criteria: str,
     keep_modal_apps: bool,
 ) -> None:
@@ -794,6 +847,7 @@ def _run_generation_parallel(
                 objective=objective,
                 objectives=objectives,
                 modality=modality,
+                domain_definition=domain_definition,
                 pass_criteria=pass_criteria,
                 keep_modal_apps=keep_modal_apps,
                 worktree_lock=worktree_lock,
@@ -820,7 +874,8 @@ def _bootstrap_seed(
     *,
     objective: str,
     objectives: list[Objective] | None,
-    modality: str,
+    modality: str | None,
+    domain_definition: DomainDefinition,
     pass_criteria: str,
     max_attempts: int,
     rng: random.Random,
@@ -884,6 +939,7 @@ def _bootstrap_seed(
                 parent=None,
                 inspirations=[],
                 modality=modality,
+                domain_definition=domain_definition,
                 is_cold_start=True,
                 objectives=objectives,
                 failed_lessons=failed_lessons,
@@ -899,6 +955,7 @@ def _bootstrap_seed(
                 generation=0,
                 child_idx=attempt,
                 modality=modality,
+                domain_definition=domain_definition,
                 objective=objective,
                 pass_criteria=pass_criteria,
                 runtime_notes=cand_notes,
@@ -944,6 +1001,7 @@ def _bootstrap_seed(
                 generation=0,
                 child_idx=attempt,
                 modality=modality,
+                domain_definition=domain_definition,
                 objective=objective,
                 objectives=objectives,
                 runtime_notes=cand_notes,
@@ -1000,9 +1058,9 @@ def run_evolve_loop(
     selection_temperature: float = 0.5,
     seed: int | None = None,
     pass_criteria: str = (
-        "The server starts, /health returns 200, the accuracy checker "
-        "passes, and the benchmark sanity step completes. Code must "
-        "actually run inference (no schema-synthesizing reward hacks)."
+        "The candidate obeys the input bundle's contract, the accuracy "
+        "command passes, and the benchmark sanity step completes without "
+        "modifying evaluator-owned files."
     ),
     existing: bool = False,
     debug: bool = False,
@@ -1012,7 +1070,8 @@ def run_evolve_loop(
     agent_backend: str | None = None,
     cli_provider: str | None = None,
     backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
-    modality: str = "text_generation",
+    modality: str | None = None,
+    domain: DomainName | None = None,
     objectives: list[Objective] | None = None,
     frontier_bias: float = 0.7,
     bootstrap_max_attempts: int = 5,
@@ -1034,6 +1093,11 @@ def run_evolve_loop(
     single-objective mode using ``perf_metric`` only — the legacy
     behavior, kept for back-compat.
     """
+    if domain is None:
+        raise ValueError("domain is required; declare [agent].domain in vibesys.input.toml")
+    domain_definition = resolve_domain(domain)
+    if modality is None and domain_definition.name is DomainName.LLM_SERVING:
+        modality = "text_generation"
     run_environment = run_environment or make_run_environment_spec()
     ctx = create_run_context(
         config=config,
@@ -1046,13 +1110,14 @@ def run_evolve_loop(
         existing=existing,
         debug=debug,
         profiler_kind=profiler_kind,
+        profiler_domain=domain_definition.name,
         skills_dirs=skills_dirs,
         run_environment=run_environment,
         git_tracking=True,
         agent_backend=agent_backend,
         cli_provider=cli_provider,
         backend=backend,
-        environment_hooks=LLMServingEnvironmentHooks(),
+        environment_hooks=domain_definition.environment_hooks,
         remote_repo=remote_repo,
         repo_visibility=repo_visibility,
     )
@@ -1080,6 +1145,7 @@ def run_evolve_loop(
                 objective=objective,
                 objectives=objectives,
                 modality=modality,
+                domain_definition=domain_definition,
                 pass_criteria=pass_criteria,
                 max_attempts=bootstrap_max_attempts,
                 rng=rng,
@@ -1135,6 +1201,7 @@ def run_evolve_loop(
                     objectives=objectives,
                     frontier_bias=frontier_bias,
                     modality=modality,
+                    domain_definition=domain_definition,
                     pass_criteria=pass_criteria,
                     keep_modal_apps=keep_modal_apps,
                 )
@@ -1154,6 +1221,7 @@ def run_evolve_loop(
                     objectives=objectives,
                     frontier_bias=frontier_bias,
                     modality=modality,
+                    domain_definition=domain_definition,
                     pass_criteria=pass_criteria,
                     keep_modal_apps=keep_modal_apps,
                 )

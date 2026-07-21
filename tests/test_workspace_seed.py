@@ -11,6 +11,7 @@ import pytest
 
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND
 from vibesys.context import _RunContext, create_run_context
+from vibesys.domains.base import DomainName
 from vibesys.domains.environment import NoopEnvironmentHooks
 from vibesys.input_manifest import load_input_bundle
 from vibesys.main import main
@@ -434,3 +435,5 @@ def test_cli_forwards_workspace_sources_to_every_outer_loop(tmp_path, outer_loop
 
     assert runner.call_args.kwargs["workspace_seed"] == seed.resolve()
     assert runner.call_args.kwargs["evaluator_path"] == evaluator.resolve()
+    if outer_loop in {"agent", "evolve"}:
+        assert runner.call_args.kwargs["domain"] is DomainName.GENERIC

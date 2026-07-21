@@ -1007,7 +1007,7 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
             "container + Modal app; local/docker backends stay serial."
         ),
     )
-    parser.add_argument("--modality", default="text_generation", choices=_MODALITIES)
+    parser.add_argument("--modality", default=None, choices=_MODALITIES)
     return parser
 
 
@@ -1079,6 +1079,7 @@ def _run_evolve(args: argparse.Namespace) -> None:
         cli_provider=args.cli_provider,
         backend=backend,
         modality=args.modality,
+        domain=bundle.domain,
         objectives=objectives,
         frontier_bias=args.frontier_bias,
         bootstrap_max_attempts=args.bootstrap_max_attempts,

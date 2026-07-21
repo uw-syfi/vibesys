@@ -15,7 +15,7 @@ Several flags look independent, but they combine into one execution contract:
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, or `cpu`. |
 | Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, Docker container, or Modal-backed workflow. |
 | Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, `macos_cpu`, `linux_cpu`, or `auto`. |
-| Domain | `[agent].domain` in `vibesys.input.toml` | Agent-loop problem-space package, such as `llm-serving` or `generic`. |
+| Domain | `[agent].domain` in `vibesys.input.toml` | Problem-space package used by the agent and evolve loops, such as `llm-serving` or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--no-skills` | Candidate skill roots and the ablation switch that disables skill loading. |
 | Target inputs | `--input` | Target bundle directory with manifest-declared correctness and benchmark commands. |
@@ -31,7 +31,7 @@ come from the domain and input bundle, not the interface mode.
 | --- | --- | --- |
 | `agent` | Orchestrator-driven loop with implementer, judge, and profiler roles. | Default. Supports `--interface` and `--inner-loop`. |
 | `plain` | Issue-board loop with deterministic issue draining and perf evaluation. | Uses backend prompt fragments from `src/vibesys/templates/_backend/`. |
-| `evolve` | Evolutionary search over candidate implementations. | Uses mutator, judge, and profiler roles. |
+| `evolve` | Evolutionary search over candidate implementations. | Uses domain-aware mutator, judge, and profiler roles. |
 
 From a source checkout, use `./vs` for the commands below. It prepares a current
 interactive client when needed and forwards every argument to the TypeScript
@@ -181,7 +181,7 @@ symbols. Reports must state when unavailable Apple hardware counters limit concl
 ## Domain and Modality
 
 `[agent].domain` in `vibesys.input.toml` supplies cross-cutting problem-space
-context for the agent loop. Registered domains include:
+context for the agent and evolve loops. Registered domains include:
 
 | Domain | Meaning |
 | --- | --- |
