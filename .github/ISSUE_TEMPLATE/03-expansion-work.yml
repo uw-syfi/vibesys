@@ -1,0 +1,93 @@
+name: Expansion scenario or harness
+description: Propose a new VibeSys workload scenario, shared contract, or reusable harness.
+labels:
+  - vibeserve-expansion
+projects:
+  - uw-syfi/1
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Work item type
+      options:
+        - Scenario
+        - Shared contract or semantics
+        - Reference, benchmark, and checker harness
+    validations:
+      required: true
+
+  - type: input
+    id: parent
+    attributes:
+      label: Parent issue
+      description: Identify the area, application, or data-structure parent.
+      placeholder: "#37"
+    validations:
+      required: true
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: Purpose and motivation
+      description: What realistic system or workload does this represent, and why is it useful?
+    validations:
+      required: true
+
+  - type: textarea
+    id: contract
+    attributes:
+      label: Required behavior or semantic contract
+      description: State what implementations must preserve. Avoid prescribing an optimization strategy.
+      placeholder: |
+        - ...
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: correctness
+    attributes:
+      label: Correctness checks
+      description: What must the checker validate, including failure and concurrency behavior?
+      placeholder: |
+        - ...
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: benchmark
+    attributes:
+      label: Benchmark dimensions
+      description: Identify important workload parameters and reported metrics.
+      placeholder: |
+        Workload parameters:
+        - ...
+
+        Metrics:
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: Explicitly exclude adjacent behavior and implementation requirements.
+      placeholder: |
+        - No prescribed implementation strategy.
+        - ...
+
+  - type: textarea
+    id: anchors
+    attributes:
+      label: Research or implementation anchors
+      description: Optional papers, systems, artifacts, or existing examples. These are informative, not prescribed solutions.
+
+  - type: checkboxes
+    id: contract_check
+    attributes:
+      label: Contract check
+      options:
+        - label: The issue defines required behavior without prescribing the implementation.
+          required: true

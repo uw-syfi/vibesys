@@ -1,0 +1,78 @@
+name: Research experiment
+description: Propose a bounded experiment intended to answer a specific question.
+projects:
+  - uw-syfi/1
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Research question and hypothesis
+      description: State the question and the expected result.
+      placeholder: |
+        Question:
+        Hypothesis:
+    validations:
+      required: true
+
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision this experiment informs
+      description: What will we do differently depending on the result?
+    validations:
+      required: true
+
+  - type: textarea
+    id: baseline
+    attributes:
+      label: Baseline
+      description: Identify the reference implementation, configuration, and current measurements.
+    validations:
+      required: true
+
+  - type: textarea
+    id: metrics
+    attributes:
+      label: Metrics and success criteria
+      description: Define primary metrics and the threshold for a meaningful result.
+      placeholder: |
+        Primary metric:
+        Secondary metrics:
+        Success threshold:
+    validations:
+      required: true
+
+  - type: textarea
+    id: protocol
+    attributes:
+      label: Experimental protocol
+      description: Describe inputs, hardware, configuration, repetitions, and controlled variables.
+    validations:
+      required: true
+
+  - type: textarea
+    id: stopping
+    attributes:
+      label: Stopping condition
+      description: Define the time, round, cost, or statistical limit that bounds the experiment.
+    validations:
+      required: true
+
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: Required artifacts
+      description: What must be retained so the result can be reviewed or reproduced?
+      placeholder: |
+        - Configuration and commands
+        - Raw measurements
+        - Logs or profiles
+        - Summary and conclusion
+    validations:
+      required: true
+
+  - type: input
+    id: parent
+    attributes:
+      label: Parent or related issue
+      placeholder: "#123"
