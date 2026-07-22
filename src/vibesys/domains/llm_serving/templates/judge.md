@@ -5,7 +5,9 @@ You are reviewing an **ML inference server** implementation.
 In addition to the orchestrator's criteria, the following must all hold for a **pass** verdict:
 
 1. **Unit tests** — run `uv run pytest -v`. All tests must pass.
-{% if benchmark_command %}
+{% if benchmark_command and hidden_evaluator_configured %}
+2. **Benchmark sanity** — the benchmark command is backed by a framework-hidden evaluator. You may run `{{ benchmark_command }} --help` and inspect the visible shim, but do not fail solely because `VIBESYS_HIDDEN_EVALUATOR_DIR` / `VIBESYS_TRACELAB_EVALUATOR_DIR` is absent in your reviewer container. Instead, verify the live service protocol that the benchmark depends on (health, streaming `/v1/completions`, token-id prompts when relevant, usage fields, and reward-hack probes). The VibeSys framework runs the real hidden benchmark gate after your pass verdict.
+{% elif benchmark_command %}
 2. **Benchmark sanity** — start the server, wait for `/health`, run `{{ benchmark_command }}` with a short sanity workload, and confirm at least one request succeeds. Discover supported flags with `{{ benchmark_command }} --help`; do NOT guess. Kill the server after. If /health never returns 200, read `/tmp/server.log` for the error.
 {% endif %}
 {% if accuracy_command %}

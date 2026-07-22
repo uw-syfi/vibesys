@@ -34,6 +34,7 @@ class LoopContext(Protocol):
     supervisor: Any
     agent_runner: Any
     judge_backend: Any
+    framework_judge_backend: Any
     run_environment: Any
     run_environment_view: Any
     git: GitTracker

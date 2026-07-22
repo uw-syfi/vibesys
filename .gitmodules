@@ -25,3 +25,6 @@
 [submodule "3rd_party/train-ticket"]
 	path = 3rd_party/train-ticket
 	url = git@github.com:FudanSELab/train-ticket.git
+[submodule "examples/evaluators/tracelab-replay/tracelab"]
+	path = examples/evaluators/tracelab-replay/tracelab
+	url = https://github.com/uw-syfi/TraceLab.git

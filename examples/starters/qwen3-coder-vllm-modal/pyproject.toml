@@ -1,0 +1,22 @@
+[project]
+name = "workspace"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.139.2",
+    "modal>=1.5.2",
+    "transformers>=5.14.1",
+    "vllm>=0.22.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.uv]
+managed = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["third_party", ".venv", ".pytest_cache"]

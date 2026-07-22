@@ -70,7 +70,7 @@ _NODE_TARBALL_INSTALL = (
 
 
 _MCP_PYTHON_INSTALL = [
-    _apt_install("python3 python3-pip"),
+    _apt_install("python3 python3-pip ripgrep", check_bin="rg"),
     "python3 -m pip install --quiet 'mcp>=1.0'",
 ]
 

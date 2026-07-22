@@ -1,0 +1,7 @@
+# Relative paths under third_party/vllm/vllm to overlay onto the installed
+# vLLM wheel inside the Modal image.
+#
+# Keep this empty unless a round intentionally edits a vLLM Python source file.
+# Listing only touched files preserves the wheel's compiled extensions and
+# version-matched package internals while still making targeted source edits
+# active at runtime.

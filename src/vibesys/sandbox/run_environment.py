@@ -362,6 +362,8 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
 
         bind_mounts, docker_symlinks, passthrough = _container_mount_plan(request)
         extra_init_commands, cli_provider_env = _cli_container_setup(request)
+        app_name = _modal_app_name(request.workspace, fallback=self.config.app)
+        cli_provider_env["VIBESYS_MODAL_APP_NAME"] = app_name
 
         # Mount host Modal auth so `modal run` inside the container
         # authenticates as the host user.
@@ -398,7 +400,6 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         # DOCKER-kind sandboxes always implement start().
         sandbox.start()  # pyright: ignore[reportAttributeAccessIssue]
 
-        app_name = _modal_app_name(request.workspace, fallback=self.config.app)
         return _DefaultRunEnvironmentSession(
             sandbox=sandbox,
             view=RunEnvironmentView(

@@ -1,0 +1,33 @@
+version = 1
+
+[agent]
+domain = "llm-serving"
+
+[workspace]
+seed = "../../starters/qwen3-coder-vllm-modal"
+
+[accuracy]
+command = ["uv", "run", "python", "accuracy_checker/checker.py"]
+timeout_seconds = 900
+
+[benchmark]
+command = [
+  "uv",
+  "run",
+  "--with",
+  "duckdb",
+  "--with",
+  "numpy",
+  "--with",
+  "huggingface_hub",
+  "python",
+  "benchmark/benchmark.py",
+]
+timeout_seconds = 3600
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "aggregate_output_tokens_per_second"
+
+[hidden_evaluator]
+source = "../../evaluators/tracelab-replay"
