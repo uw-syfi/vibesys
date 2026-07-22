@@ -5,6 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from vibesys.agents import cli_docker
+from vibesys.agents.cli_docker import DockerAuthPath
 from vibesys.backends import SandboxKind
 from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.sandbox.run_environment import (
@@ -85,6 +87,27 @@ def test_docker_environment_opens_one_started_sandbox_with_agent_paths(tmp_path)
 
     session.close()
     backend.sandbox.stop.assert_called_once()
+
+
+def test_docker_environment_copies_cli_auth_from_readonly_staging(tmp_path, monkeypatch):
+    backend = FakeBackend()
+    env = build_run_environment(RunEnvironmentSpec("docker"))
+    auth_file = tmp_path / "synthetic-codex-home" / "auth.json"
+    auth_file.parent.mkdir()
+    auth_file.write_text('{"synthetic": true}\n')
+    monkeypatch.setitem(
+        cli_docker.DOCKER_AUTH_PATHS,
+        "codex",
+        [DockerAuthPath(auth_file, "/root/.codex/auth.json")],
+    )
+
+    env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
+
+    kwargs = backend.calls[0][1]
+    assert (str(auth_file), "/opt/vibesys-auth/0", True) in kwargs["bind_mounts"]
+    assert kwargs["extra_init_commands"][0] == (
+        "mkdir -p /root/.codex && cp -a /opt/vibesys-auth/0 /root/.codex/auth.json"
+    )
 
 
 def test_docker_environment_uses_environment_bind_mounts(tmp_path):

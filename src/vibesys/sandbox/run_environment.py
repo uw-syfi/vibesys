@@ -784,10 +784,11 @@ def _container_mount_plan(
 ) -> tuple[list[tuple[str, str, bool]], list[tuple[str, str]], list[str]]:
     """Build the bind mounts + setup symlinks for a sandbox.
 
-    ``include_cli_provider_mounts`` controls whether CLI auth dirs and the
-    full project tree are added under ``/root`` and ``/opt/vibesys``.
-    Defaults to True; both supported environments (local Docker and the
-    Modal-via-Docker mode) bind-mount these directly.
+    ``include_cli_provider_mounts`` controls whether CLI auth state and the
+    full project tree are added under ``/opt/vibesys-auth`` and
+    ``/opt/vibesys``. Defaults to True; both supported environments (local
+    Docker and the Modal-via-Docker mode) bind-mount these read-only and copy
+    auth state into the container's writable layer during setup.
     """
     bind_mounts: list[tuple[str, str, bool]] = []
     symlinks: list[tuple[str, str]] = []
@@ -859,12 +860,13 @@ def _cli_container_setup(
         return [], {}
     from vibesys.agents.cli_docker import (
         DOCKER_PROVIDER_ENV,
+        auth_copy_commands,
         docker_init_commands,
     )
 
     provider = request.cli_provider
     env = dict(DOCKER_PROVIDER_ENV.get(provider, {}))
-    commands = docker_init_commands(provider)
+    commands = [*auth_copy_commands(provider), *docker_init_commands(provider)]
     return commands, env
 
 
