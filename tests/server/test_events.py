@@ -1,11 +1,14 @@
 """Serialization tests for the run-event wire contract."""
 
 import pytest
+from pydantic import ValidationError
 
 from vibesys.server.events import (
     AgentOutputChunkData,
     AgentStatusData,
+    BenchmarkResultData,
     EventType,
+    RoundFinishedData,
     RunEvent,
     TodoItemData,
     TodoUpdateData,
@@ -104,3 +107,20 @@ class TestBackwardCompatibility:
         )
         with pytest.raises(ValueError):
             RunEvent.model_validate_json(raw)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_benchmark_result_rejects_non_finite_value(value):
+    with pytest.raises(ValidationError, match="finite number"):
+        BenchmarkResultData(metric="throughput", value=value, unit="req/s")
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_round_finished_rejects_non_finite_perf_metric(value):
+    with pytest.raises(ValidationError, match="finite number"):
+        RoundFinishedData(
+            attempts=1,
+            judge_verdict="pass",
+            perf_metric=value,
+            perf_unit="req/s",
+        )

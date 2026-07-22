@@ -9,7 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError
 
 
 class EventType(StrEnum):
@@ -188,7 +188,7 @@ class JudgeResultData(BaseModel):
 class BenchmarkResultData(BaseModel):
     kind: Literal["benchmark_result"] = "benchmark_result"
     metric: str
-    value: float
+    value: FiniteFloat
     unit: str
 
 
@@ -196,7 +196,7 @@ class RoundFinishedData(BaseModel):
     kind: Literal["round_finished"] = "round_finished"
     attempts: int
     judge_verdict: Literal["pass", "fail"]
-    perf_metric: float | None = None
+    perf_metric: FiniteFloat | None = None
     perf_unit: str | None = None
 
 

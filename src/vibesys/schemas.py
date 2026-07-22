@@ -24,7 +24,7 @@ schemas in without dragging in the rest of the agent runtime.
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, FiniteFloat
 
 # ===========================================================================
 # Enums
@@ -76,29 +76,29 @@ class JudgeResponse(BaseModel):
 class LatencyStats(BaseModel):
     """Percentile breakdown for a latency metric (all values in milliseconds)."""
 
-    mean_ms: float = Field(description="Mean latency in milliseconds.")
-    p50_ms: float = Field(description="50th percentile (median) latency in milliseconds.")
-    p90_ms: float = Field(description="90th percentile latency in milliseconds.")
-    p95_ms: float = Field(description="95th percentile latency in milliseconds.")
-    p99_ms: float = Field(description="99th percentile latency in milliseconds.")
+    mean_ms: FiniteFloat = Field(description="Mean latency in milliseconds.")
+    p50_ms: FiniteFloat = Field(description="50th percentile (median) latency in milliseconds.")
+    p90_ms: FiniteFloat = Field(description="90th percentile latency in milliseconds.")
+    p95_ms: FiniteFloat = Field(description="95th percentile latency in milliseconds.")
+    p99_ms: FiniteFloat = Field(description="99th percentile latency in milliseconds.")
 
 
 class ThroughputStats(BaseModel):
     """Throughput metrics at a given load level."""
 
-    request_throughput: float = Field(description="Requests per second.")
-    token_throughput: float = Field(description="Output tokens per second.")
+    request_throughput: FiniteFloat = Field(description="Requests per second.")
+    token_throughput: FiniteFloat = Field(description="Output tokens per second.")
 
 
 class LoadLevelMetrics(BaseModel):
     """Metrics collected at a single load level (request rate)."""
 
-    target_rate: float = Field(description="Target request rate in req/s.")
-    actual_rate: float = Field(description="Achieved request rate in req/s.")
+    target_rate: FiniteFloat = Field(description="Target request rate in req/s.")
+    actual_rate: FiniteFloat = Field(description="Achieved request rate in req/s.")
     num_requests: int = Field(description="Total requests sent.")
     num_completed: int = Field(description="Requests that completed successfully.")
     num_failed: int = Field(description="Requests that failed.")
-    duration: float = Field(description="Wall-clock duration in seconds.")
+    duration: FiniteFloat = Field(description="Wall-clock duration in seconds.")
     throughput: ThroughputStats
     ttft: LatencyStats | None = Field(default=None, description="Time to first token stats.")
     tpot: LatencyStats | None = Field(default=None, description="Time per output token stats.")
@@ -168,7 +168,7 @@ class ProfilerSummary(BaseModel):
     analysis: str = Field(description="Detailed interpretation of the profile data.")
     bottlenecks: str = Field(description="Ranked bottlenecks with concrete numbers.")
     suggestions: str = Field(description="Actionable optimization suggestions tied to bottlenecks.")
-    perf_metric: float | None = Field(
+    perf_metric: FiniteFloat | None = Field(
         default=None,
         description="Primary performance metric collected during profiling (higher is better). None when unavailable.",
     )
@@ -176,7 +176,7 @@ class ProfilerSummary(BaseModel):
         default=None,
         description="Unit of perf_metric (e.g. 'req/s', 'tok/s'). None when perf_metric is None.",
     )
-    metrics: dict[str, float] = Field(
+    metrics: dict[str, FiniteFloat] = Field(
         default_factory=dict,
         description=(
             "Optional multi-metric dict keyed by metric name (e.g. "
@@ -334,7 +334,7 @@ class SingleAgentRoundResponse(BaseModel):
         description="Actionable optimization suggestions for the next round, tied to bottlenecks."
     )
     profile_analysis: str = Field(description="Detailed interpretation of the captured profile.")
-    perf_metric: float | None = Field(
+    perf_metric: FiniteFloat | None = Field(
         default=None,
         description="Headline perf metric from the benchmark (per OBJECTIVE.md). None if not measured.",
     )

@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from vibesys.server.events import RunEvent
 
@@ -95,7 +95,7 @@ class ChatResult(ProtocolModel):
 
 class PerformanceRound(ProtocolModel):
     round: int
-    perf_metric: float
+    perf_metric: FiniteFloat
     perf_unit: str
     passed: bool
     profile_skipped: bool = False

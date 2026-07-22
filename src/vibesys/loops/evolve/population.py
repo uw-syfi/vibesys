@@ -129,6 +129,11 @@ class Individual:
     policy_parent_id: str | None = None
     policy_target_island: int | None = None
 
+    def __post_init__(self) -> None:
+        _require_finite_metric(self.perf_metric, "perf_metric")
+        for name, value in self.metrics.items():
+            _require_finite_metric(value, f"metrics[{name!r}]")
+
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -351,7 +356,9 @@ class Population:
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps([i.to_json() for i in self._individuals], indent=2))
+        path.write_text(
+            json.dumps([i.to_json() for i in self._individuals], indent=2, allow_nan=False)
+        )
 
     @classmethod
     def load(cls, path: Path) -> Population:
@@ -359,3 +366,10 @@ class Population:
             return cls()
         data = json.loads(path.read_text())
         return cls([Individual.from_json(d) for d in data])
+
+
+def _require_finite_metric(value: float | None, field_name: str) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool) or not math.isfinite(value):
+        raise ValueError(f"{field_name} must be a finite number")

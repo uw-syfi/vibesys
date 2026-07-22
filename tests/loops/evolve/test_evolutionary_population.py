@@ -471,3 +471,39 @@ def test_population_save_writes_valid_json(tmp_path):
     assert isinstance(data, list)
     assert data[0]["id"] == 1
     assert data[0]["perf_metric"] == 10.0
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_individual_rejects_non_finite_perf_metric(value):
+    with pytest.raises(ValueError, match="perf_metric must be a finite number"):
+        _passed(1, value)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_individual_rejects_non_finite_multi_objective_metric(value):
+    with pytest.raises(ValueError, match=r"metrics\['throughput'\] must be a finite number"):
+        Individual(
+            id=1,
+            generation=1,
+            parent_id=None,
+            commit="sha-1",
+            perf_metric=10.0,
+            metrics={"throughput": value},
+            passed=True,
+        )
+
+
+def test_population_save_rejects_non_finite_metric_added_after_construction(tmp_path):
+    individual = _passed(1, 10.0)
+    individual.perf_metric = float("nan")
+
+    with pytest.raises(ValueError, match="Out of range float values"):
+        Population([individual]).save(tmp_path / "population.json")
+
+
+def test_population_load_rejects_non_finite_metric(tmp_path):
+    path = tmp_path / "population.json"
+    path.write_text('[{"id": 1, "generation": 1, "parent_id": null, "perf_metric": NaN}]')
+
+    with pytest.raises(ValueError, match="perf_metric must be a finite number"):
+        Population.load(path)
