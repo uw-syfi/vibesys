@@ -22,7 +22,7 @@ from vibesys.context import create_run_context
 from vibesys.domains.base import DomainDefinition, DomainName, DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
-from vibesys.input_manifest import BenchmarkResult
+from vibesys.input_manifest import BenchmarkResult, WorkspaceSource
 from vibesys.loops.agent import issue_board
 from vibesys.loops.profiler import invoke_profiler
 from vibesys.profilers import (
@@ -857,6 +857,7 @@ def run_agent_loop(
     objective: str,
     *,
     workspace_seed: Path | None = None,
+    workspace_sources: tuple[WorkspaceSource, ...] = (),
     evaluator_path: Path | None = None,
     benchmark_result: BenchmarkResult | None = None,
     accuracy_timeout_seconds: int | None = None,
@@ -930,6 +931,7 @@ def run_agent_loop(
         accuracy_command=accuracy_command,
         benchmark_command=benchmark_command,
         workspace_seed=workspace_seed,
+        workspace_sources=workspace_sources,
         evaluator_path=evaluator_path,
         existing=existing,
         trusted_input_baseline=trusted_input_baseline,
