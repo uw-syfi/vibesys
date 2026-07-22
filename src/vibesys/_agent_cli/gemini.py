@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -81,31 +80,25 @@ class GeminiCodingAgent(CLICodingAgent[GeminiGenerationSession]):
         )
 
     def install_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:
-        """Write ``<workspace>/.gemini/settings.json`` so Gemini CLI
-        auto-discovers the MCP servers from cwd. ``trust: true`` skips
+        """Merge servers into ``<workspace>/.gemini/settings.json``.
+
+        Gemini CLI discovers the servers from cwd. ``trust: true`` skips
         Gemini's per-tool approval prompts for these servers."""
-        gemini_dir = workspace / ".gemini"
-        gemini_dir.mkdir(parents=True, exist_ok=True)
-        config: dict[str, Any] = {
-            "mcpServers": {
-                s.name: {
-                    "command": s.command,
-                    "args": list(s.args),
-                    "trust": True,
-                    **({"env": dict(s.env)} if s.env else {}),
-                }
-                for s in servers
+        server_config: dict[str, dict[str, Any]] = {
+            s.name: {
+                "command": s.command,
+                "args": list(s.args),
+                "trust": True,
+                **({"env": dict(s.env)} if s.env else {}),
             }
+            for s in servers
         }
-        (gemini_dir / "settings.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+        self._install_mcp_config_file(
+            workspace / ".gemini" / "settings.json",
+            server_key="mcpServers",
+            server_config=server_config,
+        )
 
     def uninstall_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:
-        """Remove ``<workspace>/.gemini/settings.json``. Leaves the
-        ``.gemini/`` directory itself in place because Gemini also writes
-        session data into it (e.g. ``.gemini/tmp/``)."""
-        target = workspace / ".gemini" / "settings.json"
-        if target.exists():
-            try:
-                target.unlink()
-            except OSError:
-                pass
+        """Restore the original settings, leaving ``.gemini/`` in place."""
+        self._restore_mcp_config_file(workspace / ".gemini" / "settings.json")

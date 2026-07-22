@@ -192,6 +192,7 @@ def _make_fake_agent_class(
     generate_returns: str,
     captured: list,
     generate_raises: type[BaseException] | None = None,
+    uninstall_raises: type[Exception] | None = None,
     session_state: dict | None = None,
 ):
     """Build a fake provider class that records its instances and constructor args.
@@ -224,6 +225,8 @@ def _make_fake_agent_class(
         def uninstall_mcp_servers(self, workspace, servers):
             self.uninstall_calls.append({"workspace": workspace, "servers": list(servers)})
             self.event_log.append("uninstall")
+            if uninstall_raises is not None:
+                raise uninstall_raises("cleanup boom")
 
         def generate(self, prompt, cwd=None, timeout=300, silent=False):
             self.generate_calls.append(
@@ -1166,6 +1169,45 @@ class TestCliAgentRunner:
 
         agent = captured[0]
         assert agent.event_log == ["install", "generate", "uninstall"]
+
+    def test_cli_runner_preserves_generate_error_when_uninstall_also_raises(
+        self, monkeypatch, tmp_path
+    ):
+        from vibesys._agent_cli.base import MCPServerSpec
+
+        captured: list = []
+        fake_cls = _make_fake_agent_class(
+            generate_returns="",
+            captured=captured,
+            generate_raises=RuntimeError,
+            uninstall_raises=OSError,
+        )
+        monkeypatch.setitem(
+            __import__(
+                "vibesys.agents.cli_runner",
+                fromlist=["_PROVIDER_CLASSES"],
+            )._PROVIDER_CLASSES,
+            "claude",
+            fake_cls,
+        )
+        runner = CliAgentRunner(provider="claude", model="m", run_log_file=None)
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        spec = MCPServerSpec(name="vibesys-issues", command="python", args=["-m", "x"])
+
+        with pytest.raises(RuntimeError, match="boom"):
+            runner.invoke(
+                kind="judge",
+                workspace=workspace,
+                system_prompt="sys",
+                user_prompt="usr",
+                response_cls=JudgeResponse,
+                fallback_factory=_judge_fallback,
+                round_label="judge #1",
+                mcp_servers=[spec],
+            )
+
+        assert captured[0].event_log == ["install", "generate", "uninstall"]
 
     def test_cli_runner_skips_install_uninstall_when_no_mcp_servers(self, monkeypatch, tmp_path):
         """When mcp_servers is None or omitted, install/uninstall hooks are
