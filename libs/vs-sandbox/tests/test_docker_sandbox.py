@@ -154,6 +154,36 @@ class TestStart:
         cmd_str = " ".join(cmd)
         assert "pip install uv" in cmd_str
 
+    @patch("subprocess.run")
+    def test_init_failure_stops_and_removes_created_container(self, mock_run, tmp_path):
+        from vs_sandbox.docker_sandbox import _live_containers
+
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="test-image",
+            extra_init_commands=["install-required-tool"],
+        )
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(
+                args=[], returncode=17, stdout="partial output", stderr="install failed"
+            ),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+        ]
+
+        try:
+            with pytest.raises(RuntimeError, match="Container init command failed"):
+                sandbox.start()
+
+            assert sandbox._container_id is None
+            assert "abc123" not in _live_containers
+            assert mock_run.call_args_list[-2][0][0] == ["docker", "stop", "abc123"]
+            assert mock_run.call_args_list[-1][0][0] == ["docker", "rm", "abc123"]
+        finally:
+            _live_containers.pop("abc123", None)
+
 
 class TestExecute:
     @patch("subprocess.run")
@@ -285,6 +315,41 @@ class TestSetupFns:
         s.start()
         s.start()
         assert calls == 2
+
+    @patch("subprocess.run")
+    def test_setup_failure_preserves_error_when_stop_fails(self, mock_run, tmp_path):
+        from vs_sandbox.docker_sandbox import _live_containers
+
+        def fail_setup(_sandbox: DockerSandbox) -> None:
+            raise ValueError("setup exploded")
+
+        def run(cmd, **_kwargs):
+            if cmd[:2] == ["docker", "run"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="abc123\n", stderr=""
+                )
+            if cmd[:2] == ["docker", "stop"]:
+                raise OSError("Docker daemon disconnected")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="test-image",
+            setup_fns=[fail_setup],
+        )
+
+        try:
+            with pytest.raises(ValueError, match="setup exploded"):
+                sandbox.start()
+
+            assert sandbox._container_id is None
+            assert "abc123" not in _live_containers
+            commands = [call.args[0] for call in mock_run.call_args_list]
+            assert ["docker", "stop", "abc123"] in commands
+            assert ["docker", "rm", "abc123"] in commands
+        finally:
+            _live_containers.pop("abc123", None)
 
 
 class TestStop:

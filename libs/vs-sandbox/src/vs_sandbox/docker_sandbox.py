@@ -390,6 +390,18 @@ class DockerSandbox(BaseSandbox):
         self._container_id = result.stdout.strip()
         _live_containers[self._container_id] = self._container_name
 
+        try:
+            self._initialize_started_container()
+        except BaseException:
+            self._discard_started_container()
+            raise
+
+    def _initialize_started_container(self) -> None:
+        """Finish startup after Docker has created and registered the container."""
+        container_id = self._container_id
+        if container_id is None:
+            raise RuntimeError("Container was not created before initialization")
+
         # Save metadata for vibesys-shell to reconstruct the environment
         self._metadata = {
             "image": self._image,
@@ -404,7 +416,7 @@ class DockerSandbox(BaseSandbox):
         self._save_metadata()
 
         # Install uv (with timeout to avoid hanging on network issues)
-        uv_cmd = ["docker", "exec", self._container_id, "bash", "-c", "pip install uv"]
+        uv_cmd = ["docker", "exec", container_id, "bash", "-c", "pip install uv"]
         try:
             uv_result = subprocess.run(
                 uv_cmd,
@@ -424,7 +436,7 @@ class DockerSandbox(BaseSandbox):
             init_cmd = [
                 "docker",
                 "exec",
-                self._container_id,
+                container_id,
                 "bash",
                 "-c",
                 init_cmd_str,
@@ -457,6 +469,38 @@ class DockerSandbox(BaseSandbox):
         for fn in self._setup_fns:
             fn(self)
 
+    def _discard_started_container(self) -> None:
+        """Best-effort rollback for a container whose startup did not finish."""
+        if self._container_id is None:
+            return
+
+        container_id = self._container_id
+        self._container_id = None
+        _live_containers.pop(container_id, None)
+        self._stop_and_remove_container(container_id, suppress_errors=True)
+
+    def _stop_and_remove_container(self, container_id: str, *, suppress_errors: bool) -> None:
+        """Run both cleanup commands, optionally preserving an earlier error."""
+        errors: list[BaseException] = []
+        for cmd in (["docker", "stop", container_id], ["docker", "rm", container_id]):
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self._log_cmd(cmd, result)
+            except BaseException as exc:
+                errors.append(exc)
+                try:
+                    self._log_cmd(cmd, error=f"container cleanup failed: {exc}")
+                except BaseException:
+                    pass
+
+        if errors and not suppress_errors:
+            raise errors[0]
+
     def _save_metadata(self) -> None:
         """Write metadata to the host workspace (best-effort)."""
         try:
@@ -478,23 +522,7 @@ class DockerSandbox(BaseSandbox):
         container_id = self._container_id
         self._container_id = None
         _live_containers.pop(container_id, None)
-
-        stop_cmd = ["docker", "stop", container_id]
-        stop_result = subprocess.run(
-            stop_cmd,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self._log_cmd(stop_cmd, stop_result)
-        rm_cmd = ["docker", "rm", container_id]
-        rm_result = subprocess.run(
-            rm_cmd,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self._log_cmd(rm_cmd, rm_result)
+        self._stop_and_remove_container(container_id, suppress_errors=False)
 
     @property
     def id(self) -> str:
