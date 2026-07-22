@@ -497,8 +497,43 @@ def test_population_save_rejects_non_finite_metric_added_after_construction(tmp_
     individual = _passed(1, 10.0)
     individual.perf_metric = float("nan")
 
-    with pytest.raises(ValueError, match="Out of range float values"):
+    with pytest.raises(ValueError, match="perf_metric must be a finite number"):
         Population([individual]).save(tmp_path / "population.json")
+
+
+def test_best_revalidates_mutated_fitness_before_ranking():
+    individual = _passed(1, 10.0)
+    population = Population([individual])
+    individual.perf_metric = float("nan")
+
+    with pytest.raises(ValueError, match="perf_metric must be a finite number"):
+        population.best()
+
+
+def test_frontier_revalidates_mutated_metrics_before_comparison():
+    individual = Individual(
+        id=1,
+        generation=1,
+        parent_id=None,
+        commit="sha-1",
+        perf_metric=10.0,
+        metrics={"throughput": 10.0},
+        passed=True,
+    )
+    population = Population([individual])
+    individual.metrics["throughput"] = float("inf")
+
+    with pytest.raises(ValueError, match=r"metrics\['throughput'\] must be a finite number"):
+        population.frontier([Objective("throughput", "max")])
+
+
+def test_softmax_revalidates_mutated_fitness_before_sampling():
+    individual = _passed(1, 10.0)
+    population = Population([individual])
+    individual.perf_metric = float("-inf")
+
+    with pytest.raises(ValueError, match="perf_metric must be a finite number"):
+        population.select_parent(rng=random.Random(0))
 
 
 def test_population_load_rejects_non_finite_metric(tmp_path):
