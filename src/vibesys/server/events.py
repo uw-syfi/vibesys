@@ -250,7 +250,7 @@ class EventStore:
         self.run_id = run_id
         self._lock = threading.RLock()
         self._changed = threading.Condition(self._lock)
-        self._events = self._read_unlocked()
+        self._events, self._malformed_tail_offset = self._read_unlocked()
         self._sequences = [event.sequence for event in self._events]
         self._sequences_monotonic = all(
             previous <= current
@@ -259,11 +259,16 @@ class EventStore:
         self._next_sequence = max(self._sequences, default=0) + 1
 
     def append(self, event: RunEvent) -> RunEvent:
-        with self._changed, self.path.open("a", encoding="utf-8") as stream:
+        with self._changed:
+            if self._malformed_tail_offset is not None:
+                with self.path.open("r+b") as stream:
+                    stream.truncate(self._malformed_tail_offset)
+                self._malformed_tail_offset = None
             event = event.model_copy(
                 update={"sequence": self._next_sequence, "run_id": self.run_id}
             )
-            stream.write(event.model_dump_json() + "\n")
+            with self.path.open("a", encoding="utf-8") as stream:
+                stream.write(event.model_dump_json() + "\n")
             self._next_sequence += 1
             self._events.append(event.model_copy(deep=True))
             self._sequences.append(event.sequence)
@@ -298,12 +303,15 @@ class EventStore:
             events = [event for event in self._events if event.sequence > after_sequence]
         return [event.model_copy(deep=True) for event in events]
 
-    def _read_unlocked(self) -> list[RunEvent]:
+    def _read_unlocked(self) -> tuple[list[RunEvent], int | None]:
         if not self.path.exists():
-            return []
-        lines = self.path.read_text(encoding="utf-8").splitlines()
-        events = []
+            return [], None
+        lines = self.path.read_bytes().splitlines(keepends=True)
+        events: list[RunEvent] = []
+        offset = 0
         for index, line in enumerate(lines):
+            record_offset = offset
+            offset += len(line)
             try:
                 event = RunEvent.model_validate_json(line)
                 events.append(event)
@@ -311,9 +319,9 @@ class EventStore:
                 # Preserve access to earlier audit history if a process was
                 # interrupted during its final append.
                 if index == len(lines) - 1:
-                    continue
+                    return events, record_offset
                 raise
-        return events
+        return events, None
 
 
 def make_event(event_type: EventType, text: str = "", **fields: Any) -> RunEvent:

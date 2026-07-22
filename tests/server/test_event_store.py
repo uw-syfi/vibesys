@@ -83,6 +83,21 @@ class TestEventStore:
 
         assert [event.text for event in store.read()] == ["complete"]
 
+    @pytest.mark.parametrize("tail", ['{"protocol_version":1', '{"protocol_version":1\n'])
+    def test_append_repairs_ignored_malformed_tail_before_writing(self, tmp_path, tail):
+        path = tmp_path / "events.jsonl"
+        valid = _persisted_event(1, "complete").model_dump_json()
+        path.write_text(valid + "\n" + tail)
+        store = EventStore(path, run_id="active-run")
+
+        store.append(make_event(EventType.OUTPUT, "after repair"))
+        reopened = EventStore(path, run_id="reopened-run")
+
+        assert [(event.sequence, event.text) for event in reopened.read()] == [
+            (1, "complete"),
+            (2, "after repair"),
+        ]
+
     def test_rejects_a_malformed_record_before_the_tail(self, tmp_path):
         path = tmp_path / "events.jsonl"
         first = _persisted_event(1).model_dump_json()
@@ -119,3 +134,31 @@ class TestEventStore:
 
         assert appended.text == "durable"
         assert store.read()[0].text == "durable"
+
+    def test_append_does_not_publish_cache_state_when_file_close_fails(self, tmp_path, monkeypatch):
+        path = tmp_path / "events.jsonl"
+        store = EventStore(path, run_id="active-run")
+        real_open = Path.open
+
+        class FailingCloseStream:
+            def __enter__(self):
+                return self
+
+            def write(self, _text):
+                return None
+
+            def __exit__(self, *_args):
+                raise OSError("close failed")
+
+        def open_with_close_failure(target, mode="r", *args, **kwargs):
+            if target == path and mode == "a":
+                return FailingCloseStream()
+            return real_open(target, mode, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", open_with_close_failure)
+
+        with pytest.raises(OSError, match="close failed"):
+            store.append(make_event(EventType.OUTPUT, "ghost"))
+
+        assert store.read() == []
+        assert store.last_sequence == 0
