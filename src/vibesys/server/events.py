@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+from bisect import bisect_right
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -249,17 +250,23 @@ class EventStore:
         self.run_id = run_id
         self._lock = threading.RLock()
         self._changed = threading.Condition(self._lock)
-        self._next_sequence = (
-            max((event.sequence for event in self._read_unlocked()), default=0) + 1
+        self._events = self._read_unlocked()
+        self._sequences = [event.sequence for event in self._events]
+        self._sequences_monotonic = all(
+            previous <= current
+            for previous, current in zip(self._sequences, self._sequences[1:], strict=False)
         )
+        self._next_sequence = max(self._sequences, default=0) + 1
 
     def append(self, event: RunEvent) -> RunEvent:
         with self._changed, self.path.open("a", encoding="utf-8") as stream:
             event = event.model_copy(
                 update={"sequence": self._next_sequence, "run_id": self.run_id}
             )
-            self._next_sequence += 1
             stream.write(event.model_dump_json() + "\n")
+            self._next_sequence += 1
+            self._events.append(event.model_copy(deep=True))
+            self._sequences.append(event.sequence)
             self._changed.notify_all()
             return event
 
@@ -270,16 +277,26 @@ class EventStore:
 
     def read(self, after_sequence: int = 0) -> list[RunEvent]:
         with self._lock:
-            return [event for event in self._read_unlocked() if event.sequence > after_sequence]
+            return self._events_after_unlocked(after_sequence)
 
     def wait(self, after_sequence: int, timeout: float | None = None) -> list[RunEvent]:
         """Block until replayable events exist after a client's cursor."""
         with self._changed:
-            events = [event for event in self._read_unlocked() if event.sequence > after_sequence]
+            events = self._events_after_unlocked(after_sequence)
             if events:
                 return events
             self._changed.wait(timeout)
-            return [event for event in self._read_unlocked() if event.sequence > after_sequence]
+            return self._events_after_unlocked(after_sequence)
+
+    def _events_after_unlocked(self, after_sequence: int) -> list[RunEvent]:
+        if self._sequences_monotonic:
+            start = bisect_right(self._sequences, after_sequence)
+            events = self._events[start:]
+        else:
+            # Preserve the historical file-order filtering semantics for a
+            # manually edited or legacy log whose sequences are not sorted.
+            events = [event for event in self._events if event.sequence > after_sequence]
+        return [event.model_copy(deep=True) for event in events]
 
     def _read_unlocked(self) -> list[RunEvent]:
         if not self.path.exists():
