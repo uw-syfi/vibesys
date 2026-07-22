@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create GitHub Issue"
+  short_description: "File well-scoped VibeSys issues"
+  default_prompt: "Use $create-issue to investigate and file a well-scoped VibeSys GitHub issue."

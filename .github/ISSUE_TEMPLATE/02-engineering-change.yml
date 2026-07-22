@@ -1,0 +1,80 @@
+name: Engineering change
+description: Propose a feature, refactor, performance improvement, or developer-experience change.
+labels:
+  - enhancement
+projects:
+  - uw-syfi/1
+body:
+  - type: dropdown
+    id: workstream
+    attributes:
+      label: Workstream
+      options:
+        - Core/runtime
+        - Platform/backends
+        - CLI/DX
+        - Expansion
+        - Unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is difficult, slow, fragile, missing, or unnecessarily expensive today?
+      placeholder: Include evidence, measurements, code references, or examples when available.
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the observable result without unnecessarily prescribing the implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List specific, testable conditions for closing this issue.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+        - [ ] Relevant tests or validation pass
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      placeholder: |
+        In scope:
+        - ...
+
+        Not in scope:
+        - ...
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints or design considerations
+      description: Record compatibility, architecture, safety, or performance constraints. Proposed solutions are optional.
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification approach
+      description: How should we prove the change works?
+      placeholder: Tests, benchmarks, checker runs, smoke tests, or manual validation.
+    validations:
+      required: true
+
+  - type: input
+    id: dependencies
+    attributes:
+      label: Parent, dependencies, or related work
+      placeholder: "Parent: #123; blocked by: #456"

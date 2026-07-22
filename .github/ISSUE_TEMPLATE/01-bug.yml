@@ -1,0 +1,99 @@
+name: Bug report
+description: Report incorrect or unexpected VibeSys behavior.
+labels:
+  - bug
+projects:
+  - uw-syfi/1
+body:
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: What happened? Include the exact failure or incorrect result.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest command, configuration, or sequence that reproduces the problem.
+      placeholder: |
+        1. Run ...
+        2. Configure ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Affected subsystem
+      options:
+        - CLI and packaging
+        - Optimization loop and agents
+        - Backend or execution environment
+        - Profiler or performance evaluation
+        - Evaluator or correctness checker
+        - Example workload
+        - Unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include commit or version, OS, hardware, backend, profiler, and relevant tool versions.
+      placeholder: |
+        Commit:
+        OS:
+        Hardware:
+        Backend:
+        Profiler:
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      description: Describe impact rather than desired priority.
+      options:
+        - Blocks normal use
+        - Major functionality is impaired
+        - Workaround exists
+        - Minor or cosmetic
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Remove credentials, tokens, private paths, and sensitive content.
+      render: shell
+
+  - type: input
+    id: related
+    attributes:
+      label: Related issues or pull requests
+      placeholder: "#123, #456"
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched for an existing issue describing this problem.
+          required: true
+        - label: I removed sensitive information from this report.
+          required: true
