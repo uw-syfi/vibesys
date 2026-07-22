@@ -8,6 +8,7 @@ agent execution lifecycle.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import shutil
@@ -314,9 +315,8 @@ class OpenEvolveSearchPolicy:
             self._rng.setstate(random.getstate())
             random.setstate(process_state)
 
-    @contextmanager
-    def _deterministic_upstream_iteration(self) -> Generator[None, None, None]:
-        """Normalize unordered OpenEvolve collections for replayable sampling."""
+    def _normalize_upstream_collections(self) -> None:
+        """Normalize unordered OpenEvolve collections for replayable operations."""
         self._database.programs = dict(sorted(self._database.programs.items()))
         self._database.islands = [
             island if isinstance(island, _SortedIterationSet) else _SortedIterationSet(island)
@@ -324,7 +324,67 @@ class OpenEvolveSearchPolicy:
         ]
         if not isinstance(self._database.archive, _SortedIterationSet):
             self._database.archive = _SortedIterationSet(self._database.archive)
-        yield
+
+    def _canonicalize_new_upstream_programs(self, program_ids_before: set[str]) -> None:
+        """Replace upstream random IDs and timestamps with state-derived values."""
+        new_programs = [
+            program
+            for program_id, program in self._database.programs.items()
+            if program_id not in program_ids_before
+            and (program.metadata.get("migrant") or not program_id.startswith("vibesys-"))
+        ]
+        replacements: dict[str, str] = {}
+        for program in new_programs:
+            kind = "migrant" if program.metadata.get("migrant") else "island-copy"
+            identity = json.dumps(
+                {
+                    "kind": kind,
+                    "parent_id": program.parent_id,
+                    "island": program.metadata.get("island"),
+                    "generation": program.generation,
+                    "iteration_found": program.iteration_found,
+                    "code_sha256": hashlib.sha256(program.code.encode()).hexdigest(),
+                },
+                sort_keys=True,
+            )
+            canonical_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"vibesys-openevolve:{identity}"))
+            if canonical_id in self._database.programs or canonical_id in replacements.values():
+                raise RuntimeError(f"duplicate deterministic OpenEvolve program ID: {canonical_id}")
+            replacements[program.id] = canonical_id
+            program.id = canonical_id
+            program.timestamp = float(program.iteration_found or self._database.last_iteration)
+
+        if not replacements:
+            return
+
+        for old_id, canonical_id in replacements.items():
+            program = self._database.programs.pop(old_id)
+            self._database.programs[canonical_id] = program
+        for program in self._database.programs.values():
+            if program.parent_id in replacements:
+                program.parent_id = replacements[program.parent_id]
+        for island in self._database.islands:
+            for old_id, canonical_id in replacements.items():
+                if old_id in island:
+                    island.discard(old_id)
+                    island.add(canonical_id)
+        for feature_map in self._database.island_feature_maps:
+            for feature, program_id in list(feature_map.items()):
+                feature_map[feature] = replacements.get(program_id, program_id)
+        self._database.archive = _SortedIterationSet(
+            replacements.get(program_id, program_id) for program_id in self._database.archive
+        )
+        if self._database.best_program_id in replacements:
+            self._database.best_program_id = replacements[self._database.best_program_id]
+        self._database.island_best_programs = [
+            replacements.get(program_id, program_id) if program_id is not None else None
+            for program_id in self._database.island_best_programs
+        ]
+        if self._database.prompts_by_program:
+            for old_id, canonical_id in replacements.items():
+                prompts = self._database.prompts_by_program.pop(old_id, None)
+                if prompts is not None:
+                    self._database.prompts_by_program[canonical_id] = prompts
 
     def select(
         self,
@@ -345,11 +405,12 @@ class OpenEvolveSearchPolicy:
         program_ids_before = set(self._database.programs)
         inspiration_count = k_top_inspirations + k_random_inspirations
         with self._upstream_random():
-            with self._deterministic_upstream_iteration():
-                parent_program, inspiration_programs = self._database.sample_from_island(
-                    island,
-                    num_inspirations=inspiration_count,
-                )
+            self._normalize_upstream_collections()
+            parent_program, inspiration_programs = self._database.sample_from_island(
+                island,
+                num_inspirations=inspiration_count,
+            )
+        self._canonicalize_new_upstream_programs(program_ids_before)
         self._database.next_island()
 
         individuals_by_id = {individual.id: individual for individual in population.passed}
@@ -405,6 +466,7 @@ class OpenEvolveSearchPolicy:
             language="multi-file",
             parent_id=policy_parent_id,
             generation=individual.generation,
+            timestamp=float(individual.id),
             metrics=metrics,
             metadata={
                 self._INDIVIDUAL_ID: individual.id,
@@ -412,7 +474,9 @@ class OpenEvolveSearchPolicy:
                 "perf_unit": individual.perf_unit,
             },
         )
+        program_ids_before = set(self._database.programs)
         with self._upstream_random():
+            self._normalize_upstream_collections()
             self._database.add(
                 program,
                 iteration=individual.id,
@@ -427,6 +491,7 @@ class OpenEvolveSearchPolicy:
                 self._database.increment_island_generation(island)
                 if self.config.migration_rate > 0.0 and self._database.should_migrate():
                     self._database.migrate_programs()
+        self._canonicalize_new_upstream_programs(program_ids_before)
         prospective_ids = self._admitted_individual_ids | {individual.id}
         self._save_full_state(admitted_individual_ids=prospective_ids)
         self._admitted_individual_ids = prospective_ids
