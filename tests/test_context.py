@@ -1,11 +1,13 @@
 import subprocess
 import sys
+from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from vibesys.context import (
+    _close_after_construction_failure,
     _RunContext,
     create_candidate_context,
     create_run_context,
@@ -542,6 +544,28 @@ def test_candidate_context_cleans_up_when_agent_runner_construction_fails(tmp_pa
     parent.git.remove_worktree.assert_called_once_with(workspace)
 
 
+def test_candidate_context_cleans_up_when_add_worktree_partially_fails(tmp_path):
+    workspace = tmp_path / "candidates" / f"{tmp_path.name}-g1c2" / "workspace"
+    parent = SimpleNamespace(exp_dir=tmp_path, git=MagicMock())
+
+    def partially_add(path, _commit):
+        path.mkdir(parents=True)
+        raise RuntimeError("git add failed")
+
+    parent.git.add_worktree.side_effect = partially_add
+
+    with pytest.raises(RuntimeError, match="git add failed"):
+        create_candidate_context(
+            parent,
+            config={"model": {"name": "claude-sonnet-4-6"}},
+            generation=1,
+            child_idx=2,
+            parent_commit="deadbeef",
+        )
+
+    parent.git.remove_worktree.assert_called_once_with(workspace)
+
+
 def test_run_context_cleans_up_when_agent_runner_construction_fails(tmp_path):
     project_root = tmp_path / "project"
     ref = _write_ref(tmp_path)
@@ -569,6 +593,49 @@ def test_run_context_cleans_up_when_agent_runner_construction_fails(tmp_path):
 
     assert sys.stderr is original_stderr
     hooks.teardown.assert_called_once()
+
+
+def test_run_context_tears_down_prepared_hooks_when_workspace_setup_fails(tmp_path):
+    project_root = tmp_path / "project"
+    ref = _write_ref(tmp_path)
+    hooks = MagicMock()
+    hooks.prepare.return_value = EnvironmentPatch()
+
+    with (
+        patch("vibesys.context.PROJECT_ROOT", project_root),
+        patch("vibesys.context.build_model", return_value="mock-model"),
+        patch("vibesys.context.backends.get", return_value=_FakeBackend()),
+        patch("vibesys.context.Workspace.setup", side_effect=RuntimeError("setup failed")),
+        pytest.raises(RuntimeError, match="setup failed"),
+    ):
+        create_run_context(
+            config={"model": {"name": "claude-sonnet-4-6"}},
+            exp_name="failed-workspace-setup",
+            input_path=str(ref.parent),
+            accuracy_command="check-accuracy",
+            benchmark_command="run-benchmark",
+            skills_dirs=[],
+            run_environment=RunEnvironmentSpec("local"),
+            environment_hooks=hooks,
+        )
+
+    hooks.teardown.assert_called_once()
+
+
+def test_partial_construction_cleanup_does_not_replace_original_error():
+    stack = ExitStack()
+
+    def fail_cleanup() -> None:
+        raise OSError("cleanup failed")
+
+    stack.callback(fail_cleanup)
+    construction_error = RuntimeError("construction failed")
+
+    _close_after_construction_failure(stack, construction_error)
+
+    assert construction_error.__notes__ == [
+        "Additional error while cleaning up partial context construction: OSError: cleanup failed"
+    ]
 
 
 def test_run_context_materializes_input_project_path_dependencies(tmp_path):
