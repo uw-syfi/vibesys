@@ -61,10 +61,13 @@ def test_log_switch_retargets_stderr_tee_and_restores_on_close(tmp_path):
         workspace=tmp_path / "workspace",
         run_log_path=ctx.logger.path,
     )
-    original_log = ctx.run_log_file
+    original_file = ctx.logger.file
+    ctx.agent_runner = SimpleNamespace(_run_log_file=ctx.run_log_file)
 
     ctx.switch_log_file("round001")
 
+    assert original_file.closed
+    assert ctx.agent_runner._run_log_file is ctx.run_log_file
     # The unconditional tee mirrors stderr into the *current* log file,
     # stripped of ANSI escapes, while writes still reach the real stderr.
     print("\033[31mcolored diagnostic\033[0m", file=sys.stderr)
@@ -74,7 +77,6 @@ def test_log_switch_retargets_stderr_tee_and_restores_on_close(tmp_path):
     assert sys.stderr is original_stderr
     assert "colored diagnostic" in ctx.run_log_path.read_text()
     assert "\033[31m" not in ctx.run_log_path.read_text()
-    original_log.close()
 
 
 def test_input_copy_respects_source_gitignore(tmp_path):
