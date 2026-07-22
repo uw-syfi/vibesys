@@ -16,9 +16,9 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 _STORE_VERSION = 1
 
@@ -67,6 +67,20 @@ class Issue(BaseModel):
     closed_iter: int | None = None
 
 
+class IssueBoardLoadError(ValueError):
+    """Raised when persisted issue-board state cannot be loaded safely."""
+
+
+class _IssueBoardData(BaseModel):
+    """Versioned persistence contract for an issue board."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal[1]
+    next_id: int = Field(ge=1)
+    issues: list[Issue]
+
+
 class IssueBoard:
     """Atomic JSON-backed issue tracker."""
 
@@ -84,16 +98,37 @@ class IssueBoard:
             "next_id": 1,
             "issues": [],
         }
-        if self.path.is_file():
-            try:
-                loaded = json.loads(self.path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict) and loaded.get("version") == _STORE_VERSION:
-                    self._data = loaded
-            except (json.JSONDecodeError, ValueError):
-                pass
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._save_locked()
+        if self.path.is_file():
+            self._data = self._load_from_disk()
+        else:
+            self._save_locked()
         self._on_change = on_change
+
+    def _load_from_disk(self) -> dict[str, Any]:
+        try:
+            loaded = json.loads(self.path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise IssueBoardLoadError(
+                f"cannot load issue board {self.path}: invalid JSON: {exc}"
+            ) from exc
+        if not isinstance(loaded, dict):
+            raise IssueBoardLoadError(
+                f"cannot load issue board {self.path}: expected a JSON object"
+            )
+        version = loaded.get("version")
+        if version != _STORE_VERSION:
+            raise IssueBoardLoadError(
+                f"cannot load issue board {self.path}: unsupported version "
+                f"{version!r}; expected {_STORE_VERSION}"
+            )
+        try:
+            data = _IssueBoardData.model_validate(loaded)
+        except ValidationError as exc:
+            raise IssueBoardLoadError(
+                f"cannot load issue board {self.path}: invalid store structure: {exc}"
+            ) from exc
+        return data.model_dump(mode="json")
 
     def _save_locked(self) -> None:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
@@ -112,14 +147,7 @@ class IssueBoard:
     def reload(self) -> None:
         """Re-read the JSON file from disk, discarding the in-memory copy."""
         with self._lock:
-            if not self.path.is_file():
-                return
-            try:
-                loaded = json.loads(self.path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, ValueError):
-                return
-            if isinstance(loaded, dict) and loaded.get("version") == _STORE_VERSION:
-                self._data = loaded
+            self._data = self._load_from_disk()
 
     def _issue_from_dict(self, raw: dict[str, Any]) -> Issue:
         return Issue.model_validate(raw)

@@ -1,6 +1,7 @@
 from vs_issue_board.core import (
     Issue,
     IssueBoard,
+    IssueBoardLoadError,
     IssueEvent,
     IssueStatus,
     IssueType,
@@ -17,6 +18,7 @@ __all__ = [
     "CreateIssuePolicy",
     "Issue",
     "IssueBoard",
+    "IssueBoardLoadError",
     "IssueEvent",
     "IssueStatus",
     "IssueType",

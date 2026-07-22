@@ -2,6 +2,7 @@
 
 import json
 import time
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from vs_issue_board import (
     Issue,
     IssueBoard,
+    IssueBoardLoadError,
     IssueStatus,
     IssueType,
 )
@@ -76,17 +78,59 @@ class TestCreate:
 
 
 class TestLoadCorrupt:
-    def test_load_corrupt_json_starts_empty(self, tmp_path):
+    def test_load_corrupt_json_raises_without_replacing_file(self, tmp_path):
         path = tmp_path / "issues.json"
         path.write_text("not json", encoding="utf-8")
-        store = IssueBoard(path)
-        assert store.list() == []
+        original = path.read_bytes()
 
-    def test_load_wrong_version_starts_empty(self, tmp_path):
+        with pytest.raises(IssueBoardLoadError, match="invalid JSON"):
+            IssueBoard(path)
+
+        assert path.read_bytes() == original
+
+    def test_load_wrong_version_raises_without_replacing_file(self, tmp_path):
         path = tmp_path / "issues.json"
         path.write_text(json.dumps({"version": 999, "next_id": 1, "issues": []}), encoding="utf-8")
-        store = IssueBoard(path)
-        assert store.list() == []
+        original = path.read_bytes()
+
+        with pytest.raises(IssueBoardLoadError, match="unsupported version 999"):
+            IssueBoard(path)
+
+        assert path.read_bytes() == original
+
+    def test_load_invalid_store_structure_raises_without_replacing_file(self, tmp_path):
+        path = tmp_path / "issues.json"
+        path.write_text(
+            json.dumps({"version": 1, "next_id": 1, "issues": "not-a-list"}),
+            encoding="utf-8",
+        )
+        original = path.read_bytes()
+
+        with pytest.raises(IssueBoardLoadError, match="invalid store structure"):
+            IssueBoard(path)
+
+        assert path.read_bytes() == original
+
+    def test_open_existing_does_not_overwrite_concurrent_write(self, tmp_path, monkeypatch):
+        path = tmp_path / "issues.json"
+        writer = IssueBoard(path)
+        _create(writer, title="existing")
+        original_read_text = Path.read_text
+        wrote_concurrently = False
+
+        def read_then_write(target, *args, **kwargs):
+            nonlocal wrote_concurrently
+            content = original_read_text(target, *args, **kwargs)
+            if target == path and not wrote_concurrently:
+                wrote_concurrently = True
+                _create(writer, title="concurrent")
+            return content
+
+        monkeypatch.setattr(Path, "read_text", read_then_write)
+        opened = IssueBoard(path)
+
+        assert [issue.title for issue in opened.list()] == ["existing"]
+        assert [issue.title for issue in IssueBoard(path).list()] == ["existing", "concurrent"]
 
 
 class TestReload:
@@ -99,6 +143,35 @@ class TestReload:
         store_b.reload()
         assert len(store_b.list()) == 1
         assert store_b.list()[0].title == "written by a"
+
+    def test_reload_corrupt_json_raises_and_preserves_last_valid_snapshot(self, tmp_path):
+        path = tmp_path / "issues.json"
+        store = IssueBoard(path)
+        _create(store, title="last valid")
+        path.write_text("not json", encoding="utf-8")
+        corrupt = path.read_bytes()
+
+        with pytest.raises(IssueBoardLoadError, match="invalid JSON"):
+            store.reload()
+
+        assert [issue.title for issue in store.list()] == ["last valid"]
+        assert path.read_bytes() == corrupt
+
+    def test_reload_wrong_version_raises_and_preserves_last_valid_snapshot(self, tmp_path):
+        path = tmp_path / "issues.json"
+        store = IssueBoard(path)
+        _create(store, title="last valid")
+        path.write_text(
+            json.dumps({"version": 2, "next_id": 1, "issues": []}),
+            encoding="utf-8",
+        )
+        incompatible = path.read_bytes()
+
+        with pytest.raises(IssueBoardLoadError, match="unsupported version 2"):
+            store.reload()
+
+        assert [issue.title for issue in store.list()] == ["last valid"]
+        assert path.read_bytes() == incompatible
 
 
 # ---------------------------------------------------------------------------
