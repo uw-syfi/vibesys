@@ -1,0 +1,26 @@
+version = 1
+
+[agent]
+domain = "llm-serving"
+
+[accuracy]
+command = ["uv", "run", "python", "accuracy_checker/checker.py"]
+timeout_seconds = 300
+
+[benchmark]
+command = ["uv", "run", "python", "benchmark/benchmark.py"]
+timeout_seconds = 600
+
+[workspace]
+seed = "../../starters/vllm-h100"
+
+[[workspace.sources]]
+name = "vllm"
+repo = "https://github.com/vllm-project/vllm.git"
+commit = "6d8d0a24c02bfd84d46b3016b865a44f048ae84b"
+dest = "vllm"
+strip_git = true
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "aggregate_throughput"

@@ -1,0 +1,4 @@
+torch
+transformers==4.53.2
+accelerate
+httpx>=0.27
