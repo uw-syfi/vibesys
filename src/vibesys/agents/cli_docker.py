@@ -123,25 +123,75 @@ class DockerAuthPath:
     container_path: str
 
 
-# Provider state is mounted read-only under ``/opt/vibesys-auth`` and copied
-# into the container's ephemeral writable layer before the CLI starts. This
-# preserves login state without allowing an agent to mutate persistent host
-# credentials, configuration, or history.
+# Authentication and user configuration are mounted read-only under
+# ``/opt/vibesys-auth`` and copied into the container's ephemeral writable
+# layer before the CLI starts. Keep this list to provider-owned leaf files:
+# provider homes also contain large caches, worktrees, session history, package
+# installations, and databases that are neither required for authentication
+# nor appropriate to duplicate for every sandbox.
 DOCKER_AUTH_PATHS: dict[str, list[DockerAuthPath]] = {
     "claude": [
-        DockerAuthPath(Path.home() / ".claude", "/root/.claude"),
-        DockerAuthPath(Path.home() / ".claude.json", "/root/.claude.json"),
-    ],
-    "gemini": [DockerAuthPath(Path.home() / ".gemini", "/root/.gemini")],
-    "codex": [DockerAuthPath(Path.home() / ".codex", "/root/.codex")],
-    "opencode": [
         DockerAuthPath(
-            Path.home() / ".local" / "share" / "opencode",
-            "/root/.local/share/opencode",
+            Path.home() / ".claude" / ".credentials.json",
+            "/root/.claude/.credentials.json",
         ),
         DockerAuthPath(
-            Path.home() / ".config" / "opencode",
-            "/root/.config/opencode",
+            Path.home() / ".claude" / "settings.json",
+            "/root/.claude/settings.json",
+        ),
+        DockerAuthPath(
+            Path.home() / ".claude" / "settings.local.json",
+            "/root/.claude/settings.local.json",
+        ),
+        DockerAuthPath(Path.home() / ".claude.json", "/root/.claude.json"),
+    ],
+    "gemini": [
+        DockerAuthPath(
+            Path.home() / ".gemini" / "oauth_creds.json",
+            "/root/.gemini/oauth_creds.json",
+        ),
+        DockerAuthPath(
+            Path.home() / ".gemini" / "google_accounts.json",
+            "/root/.gemini/google_accounts.json",
+        ),
+        DockerAuthPath(
+            Path.home() / ".gemini" / "settings.json",
+            "/root/.gemini/settings.json",
+        ),
+        DockerAuthPath(Path.home() / ".gemini" / ".env", "/root/.gemini/.env"),
+    ],
+    "codex": [
+        DockerAuthPath(Path.home() / ".codex" / "auth.json", "/root/.codex/auth.json"),
+        DockerAuthPath(
+            Path.home() / ".codex" / "config.toml",
+            "/root/.codex/config.toml",
+        ),
+    ],
+    "opencode": [
+        DockerAuthPath(
+            Path.home() / ".local" / "share" / "opencode" / "auth.json",
+            "/root/.local/share/opencode/auth.json",
+        ),
+        DockerAuthPath(
+            Path.home() / ".config" / "opencode" / "opencode.json",
+            "/root/.config/opencode/opencode.json",
+        ),
+        DockerAuthPath(
+            Path.home() / ".config" / "opencode" / "opencode.jsonc",
+            "/root/.config/opencode/opencode.jsonc",
+        ),
+        # Older OpenCode releases used config.json/config.jsonc.
+        DockerAuthPath(
+            Path.home() / ".config" / "opencode" / "config.json",
+            "/root/.config/opencode/config.json",
+        ),
+        DockerAuthPath(
+            Path.home() / ".config" / "opencode" / "config.jsonc",
+            "/root/.config/opencode/config.jsonc",
+        ),
+        DockerAuthPath(
+            Path.home() / ".config" / "opencode" / ".env",
+            "/root/.config/opencode/.env",
         ),
     ],
 }

@@ -92,21 +92,21 @@ def test_docker_environment_opens_one_started_sandbox_with_agent_paths(tmp_path)
 def test_docker_environment_copies_cli_auth_from_readonly_staging(tmp_path, monkeypatch):
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
-    codex_home = tmp_path / "synthetic-codex-home"
-    codex_home.mkdir()
-    (codex_home / "auth.json").write_text('{"synthetic": true}\n')
+    auth_file = tmp_path / "synthetic-codex-home" / "auth.json"
+    auth_file.parent.mkdir()
+    auth_file.write_text('{"synthetic": true}\n')
     monkeypatch.setitem(
         cli_docker.DOCKER_AUTH_PATHS,
         "codex",
-        [DockerAuthPath(codex_home, "/root/.codex")],
+        [DockerAuthPath(auth_file, "/root/.codex/auth.json")],
     )
 
     env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     kwargs = backend.calls[0][1]
-    assert (str(codex_home), "/opt/vibesys-auth/0", True) in kwargs["bind_mounts"]
+    assert (str(auth_file), "/opt/vibesys-auth/0", True) in kwargs["bind_mounts"]
     assert kwargs["extra_init_commands"][0] == (
-        "mkdir -p /root/.codex && cp -a /opt/vibesys-auth/0/. /root/.codex/"
+        "mkdir -p /root/.codex && cp -a /opt/vibesys-auth/0 /root/.codex/auth.json"
     )
 
 

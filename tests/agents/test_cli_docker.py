@@ -32,14 +32,59 @@ def test_auth_import_copies_directories_and_files_to_private_writable_paths(
 
 def test_auth_import_uses_provider_native_container_paths():
     assert {
-        provider: [spec.container_path for spec in specs]
+        provider: [
+            (spec.host_path.relative_to(Path.home()).as_posix(), spec.container_path)
+            for spec in specs
+        ]
         for provider, specs in cli_docker.DOCKER_AUTH_PATHS.items()
     } == {
-        "claude": ["/root/.claude", "/root/.claude.json"],
-        "gemini": ["/root/.gemini"],
-        "codex": ["/root/.codex"],
+        "claude": [
+            (".claude/.credentials.json", "/root/.claude/.credentials.json"),
+            (".claude/settings.json", "/root/.claude/settings.json"),
+            (".claude/settings.local.json", "/root/.claude/settings.local.json"),
+            (".claude.json", "/root/.claude.json"),
+        ],
+        "gemini": [
+            (".gemini/oauth_creds.json", "/root/.gemini/oauth_creds.json"),
+            (".gemini/google_accounts.json", "/root/.gemini/google_accounts.json"),
+            (".gemini/settings.json", "/root/.gemini/settings.json"),
+            (".gemini/.env", "/root/.gemini/.env"),
+        ],
+        "codex": [
+            (".codex/auth.json", "/root/.codex/auth.json"),
+            (".codex/config.toml", "/root/.codex/config.toml"),
+        ],
         "opencode": [
-            "/root/.local/share/opencode",
-            "/root/.config/opencode",
+            (
+                ".local/share/opencode/auth.json",
+                "/root/.local/share/opencode/auth.json",
+            ),
+            (".config/opencode/opencode.json", "/root/.config/opencode/opencode.json"),
+            (
+                ".config/opencode/opencode.jsonc",
+                "/root/.config/opencode/opencode.jsonc",
+            ),
+            (".config/opencode/config.json", "/root/.config/opencode/config.json"),
+            (
+                ".config/opencode/config.jsonc",
+                "/root/.config/opencode/config.jsonc",
+            ),
+            (".config/opencode/.env", "/root/.config/opencode/.env"),
         ],
     }
+
+
+def test_provider_auth_imports_exclude_bulk_runtime_roots():
+    configured_sources = {
+        spec.host_path for specs in cli_docker.DOCKER_AUTH_PATHS.values() for spec in specs
+    }
+
+    assert configured_sources.isdisjoint(
+        {
+            Path.home() / ".claude",
+            Path.home() / ".gemini",
+            Path.home() / ".codex",
+            Path.home() / ".local" / "share" / "opencode",
+            Path.home() / ".config" / "opencode",
+        }
+    )
