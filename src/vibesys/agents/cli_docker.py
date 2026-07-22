@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shlex
+from dataclasses import dataclass
 from pathlib import Path
 
 # Per-provider environment variables to set inside the container.  Used as
@@ -113,29 +115,70 @@ def docker_init_commands(provider: str) -> list[str]:
     return list(_DOCKER_INSTALL_COMMANDS.get(provider, []))
 
 
-# Host paths to bind-mount RW so the in-container CLI inherits the host's
-# login state.  Only entries that actually exist on the host are mounted.
-# Claude paths are well-tested; the other three are best-guesses that may
-# need adjustment after first real run.
-DOCKER_AUTH_PATHS: dict[str, list[Path]] = {
-    "claude": [Path.home() / ".claude", Path.home() / ".claude.json"],
-    "gemini": [Path.home() / ".gemini"],
-    "codex": [Path.home() / ".codex"],
+@dataclass(frozen=True)
+class DockerAuthPath:
+    """Host provider state and its writable location inside the container."""
+
+    host_path: Path
+    container_path: str
+
+
+# Provider state is mounted read-only under ``/opt/vibesys-auth`` and copied
+# into the container's ephemeral writable layer before the CLI starts. This
+# preserves login state without allowing an agent to mutate persistent host
+# credentials, configuration, or history.
+DOCKER_AUTH_PATHS: dict[str, list[DockerAuthPath]] = {
+    "claude": [
+        DockerAuthPath(Path.home() / ".claude", "/root/.claude"),
+        DockerAuthPath(Path.home() / ".claude.json", "/root/.claude.json"),
+    ],
+    "gemini": [DockerAuthPath(Path.home() / ".gemini", "/root/.gemini")],
+    "codex": [DockerAuthPath(Path.home() / ".codex", "/root/.codex")],
     "opencode": [
-        Path.home() / ".local" / "share" / "opencode",
-        Path.home() / ".config" / "opencode",
+        DockerAuthPath(
+            Path.home() / ".local" / "share" / "opencode",
+            "/root/.local/share/opencode",
+        ),
+        DockerAuthPath(
+            Path.home() / ".config" / "opencode",
+            "/root/.config/opencode",
+        ),
     ],
 }
 
 
 def auth_bind_mounts(provider: str) -> list[tuple[str, str, bool]]:
-    """Return ``(host_path, container_path, readonly=False)`` for existing auth paths.
-
-    Auth dirs are mounted into ``/root`` since we run as root inside the
-    container.
-    """
+    """Return read-only staging mounts for existing provider state."""
     out: list[tuple[str, str, bool]] = []
-    for host in DOCKER_AUTH_PATHS.get(provider, []):
-        if host.exists():
-            out.append((str(host), "/root/" + host.name, False))
+    for index, spec in enumerate(DOCKER_AUTH_PATHS.get(provider, [])):
+        if spec.host_path.exists():
+            out.append(
+                (
+                    str(spec.host_path),
+                    f"/opt/vibesys-auth/{index}",
+                    True,
+                )
+            )
     return out
+
+
+def auth_copy_commands(provider: str) -> list[str]:
+    """Return commands that copy staged provider state into writable storage.
+
+    Directories contain runtime state such as sessions and history, so mounting
+    them read-only at their final locations can break otherwise valid CLI runs.
+    Copying from read-only staging keeps those writes inside the disposable
+    container layer.
+    """
+    commands: list[str] = []
+    for index, spec in enumerate(DOCKER_AUTH_PATHS.get(provider, [])):
+        if not spec.host_path.exists():
+            continue
+        source = shlex.quote(f"/opt/vibesys-auth/{index}")
+        destination = shlex.quote(spec.container_path)
+        parent = shlex.quote(str(Path(spec.container_path).parent))
+        if spec.host_path.is_dir():
+            commands.append(f"mkdir -p {destination} && cp -a {source}/. {destination}/")
+        else:
+            commands.append(f"mkdir -p {parent} && cp -a {source} {destination}")
+    return commands
