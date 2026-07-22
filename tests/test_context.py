@@ -54,12 +54,12 @@ def test_log_switch_retargets_stderr_tee_and_restores_on_close(tmp_path):
         workspace=tmp_path / "workspace",
         run_log_path=ctx.logger.path,
     )
-    original_log = ctx.run_log_file
-    ctx.agent_runner = SimpleNamespace(_run_log_file=original_log)
+    original_file = ctx.logger.file
+    ctx.agent_runner = SimpleNamespace(_run_log_file=ctx.run_log_file)
 
     ctx.switch_log_file("round001")
 
-    assert original_log.closed
+    assert original_file.closed
     assert ctx.agent_runner._run_log_file is ctx.run_log_file
     # The unconditional tee mirrors stderr into the *current* log file,
     # stripped of ANSI escapes, while writes still reach the real stderr.

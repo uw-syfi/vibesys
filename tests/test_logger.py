@@ -50,3 +50,17 @@ def test_switch_closes_each_superseded_log_file(tmp_path):
     logger.close()
     assert third.closed
     logger.close()  # Cleanup remains idempotent.
+
+
+def test_stable_writer_follows_switch_after_old_file_is_closed(tmp_path):
+    logger = RunLogger(tmp_path, tee_stderr=False)
+    writer = logger.writer
+    first = logger.file
+
+    logger.switch("round001")
+    writer.write("written after switch\n")
+    writer.flush()
+
+    assert first.closed
+    assert "written after switch" in logger.path.read_text()
+    logger.close()

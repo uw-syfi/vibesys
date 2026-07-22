@@ -438,7 +438,7 @@ def create_run_context(
         skill_source_dirs=skill_source_paths,
         model=model,
         model_name=model_name,
-        run_log_file=logger.file,
+        run_log_file=logger.writer,
         use_docker=(session.view.cli_sandboxed and not session.view.cli_modal_sandboxed),
         use_modal=session.view.cli_modal_sandboxed,
         log_dir=log_dir,
@@ -587,7 +587,7 @@ def create_candidate_context(
         skill_source_dirs=parent.skill_source_paths,
         model=parent.model,
         model_name=parent.model_name,
-        run_log_file=logger.file,
+        run_log_file=logger.writer,
         use_docker=(session.view.cli_sandboxed and not session.view.cli_modal_sandboxed),
         use_modal=session.view.cli_modal_sandboxed,
         log_dir=log_dir,
@@ -756,7 +756,7 @@ class _RunContext:
     @property
     def run_log_file(self) -> TextIO:
         """The current open log file handle (owned by ``RunLogger``)."""
-        return self.logger.file
+        return self.logger.writer
 
     @property
     def skill_source_paths(self) -> list[Path]:
@@ -1015,12 +1015,12 @@ class _RunContext:
 
     def switch_log_file(self, label: int | str) -> None:
         """Switch to a per-phase log file — see :meth:`RunLogger.switch`."""
-        new_file = self.logger.switch(label)
+        self.logger.switch(label)
         self._paths = replace(self._paths, run_log_path=self.logger.path)
         # Update the agent runner's log file handle so subsequent
         # invoke() calls write to the new step log.
         if hasattr(self, "agent_runner") and hasattr(self.agent_runner, "_run_log_file"):
-            self.agent_runner._run_log_file = new_file  # pyright: ignore[reportAttributeAccessIssue]
+            self.agent_runner._run_log_file = self.logger.writer  # pyright: ignore[reportAttributeAccessIssue]
 
     def reselect_gpu(self) -> None:
         """Delegate mid-run device rebalance — see :meth:`DeviceLease.reselect`."""
