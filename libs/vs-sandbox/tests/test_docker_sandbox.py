@@ -180,7 +180,7 @@ class TestStart:
             assert sandbox._container_id is None
             assert "abc123" not in _live_containers
             assert mock_run.call_args_list[-2][0][0] == ["docker", "stop", "abc123"]
-            assert mock_run.call_args_list[-1][0][0] == ["docker", "rm", "abc123"]
+            assert mock_run.call_args_list[-1][0][0] == ["docker", "rm", "-f", "abc123"]
         finally:
             _live_containers.pop("abc123", None)
 
@@ -347,9 +347,49 @@ class TestSetupFns:
             assert "abc123" not in _live_containers
             commands = [call.args[0] for call in mock_run.call_args_list]
             assert ["docker", "stop", "abc123"] in commands
-            assert ["docker", "rm", "abc123"] in commands
+            assert ["docker", "rm", "-f", "abc123"] in commands
         finally:
             _live_containers.pop("abc123", None)
+
+    @pytest.mark.parametrize("cleanup_mode", ["raises", "nonzero"])
+    @patch("subprocess.run")
+    def test_setup_failure_retains_container_for_retry_when_removal_fails(
+        self, mock_run, cleanup_mode, tmp_path
+    ):
+        from vs_sandbox.docker_sandbox import _live_containers
+
+        def fail_setup(_sandbox: DockerSandbox) -> None:
+            raise ValueError("setup exploded")
+
+        def run(cmd, **_kwargs):
+            if cmd[:2] == ["docker", "run"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="abc123\n", stderr=""
+                )
+            if cmd[:2] in (["docker", "stop"], ["docker", "rm"]):
+                if cleanup_mode == "raises":
+                    raise OSError("Docker daemon disconnected")
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr="daemon unavailable"
+                )
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="test-image",
+            setup_fns=[fail_setup],
+        )
+
+        try:
+            with pytest.raises(ValueError, match="setup exploded"):
+                sandbox.start()
+
+            assert sandbox._container_id == "abc123"
+            assert "abc123" in _live_containers
+        finally:
+            _live_containers.pop("abc123", None)
+            sandbox._container_id = None
 
 
 class TestStop:
