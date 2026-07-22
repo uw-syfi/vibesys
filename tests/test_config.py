@@ -25,7 +25,6 @@ provider = "vertex-ai"
 
 [thinking]
 level = "medium"
-budget = 1024
 
 [providers.vertex-ai]
 json = "~/keys/vertex.json"
@@ -40,7 +39,7 @@ region = "us-east5"
         assert config.model.name == "claude-sonnet-4-6"
         assert config.model.provider == "vertex-ai"
         assert config.thinking.level == "medium"
-        assert config.thinking.budget == 1024
+        assert config.thinking.budget is None
         assert config.providers.vertex_ai.json_path == "~/keys/vertex.json"
         assert config.providers.vertex_ai.project == "my-project"
         assert config.providers.vertex_ai.region == "us-east5"
@@ -243,7 +242,21 @@ EMPTY=
 
 
 class TestLoadConfigThinking:
-    def test_thinking_parsed(self, tmp_path):
+    @pytest.mark.parametrize("budget", [-1, 0, 2048])
+    def test_thinking_budget_parsed(self, tmp_path, budget):
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text(f"""\
+[model]
+name = "gemini-2.5-pro"
+
+[thinking]
+budget = {budget}
+""")
+        config = load_config(cfg_file)
+        assert config.thinking.level is None
+        assert config.thinking.budget == budget
+
+    def test_thinking_level_and_budget_are_rejected(self, tmp_path):
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text("""\
 [model]
@@ -253,9 +266,22 @@ name = "gemini-2.5-pro"
 level = "high"
 budget = 2048
 """)
-        config = load_config(cfg_file)
-        assert config.thinking.level == "high"
-        assert config.thinking.budget == 2048
+
+        with pytest.raises(ValueError, match=r"thinking\.level.*thinking\.budget"):
+            load_config(cfg_file)
+
+    def test_thinking_budget_below_dynamic_sentinel_is_rejected(self, tmp_path):
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text("""\
+[model]
+name = "gemini-2.5-pro"
+
+[thinking]
+budget = -2
+""")
+
+        with pytest.raises(ValueError, match="budget"):
+            load_config(cfg_file)
 
 
 class TestLoadConfigAgentSection:
@@ -285,6 +311,20 @@ cli_timeout = 1800
         assert config.agent.backend is None
         assert config.agent.cli_provider is None
         assert config.agent.cli_timeout is None
+
+    @pytest.mark.parametrize("cli_timeout", [0, -1])
+    def test_non_positive_cli_timeout_is_rejected(self, tmp_path, cli_timeout):
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text(f"""\
+[model]
+name = "claude-sonnet-4-6"
+
+[agent]
+cli_timeout = {cli_timeout}
+""")
+
+        with pytest.raises(ValueError, match="cli_timeout"):
+            load_config(cfg_file)
 
 
 class TestLoadConfigRepositorySection:
@@ -345,3 +385,21 @@ max_tokens = 256
         cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
         config = load_config(cfg_file)
         assert config.perf_eval.load_levels is None
+
+    @pytest.mark.parametrize("field", ["rate", "duration", "max_tokens"])
+    @pytest.mark.parametrize("value", [0, -1])
+    def test_non_positive_load_level_value_is_rejected(self, tmp_path, field, value):
+        load_level = {"rate": 1, "duration": 20, "max_tokens": 128}
+        load_level[field] = value
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text(
+            "[model]\n"
+            'name = "claude-sonnet-4-6"\n\n'
+            "[[perf_eval.load_levels]]\n"
+            f"rate = {load_level['rate']}\n"
+            f"duration = {load_level['duration']}\n"
+            f"max_tokens = {load_level['max_tokens']}\n"
+        )
+
+        with pytest.raises(ValueError, match=field):
+            load_config(cfg_file)

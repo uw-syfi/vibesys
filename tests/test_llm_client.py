@@ -183,22 +183,19 @@ class TestVertexAIProvider:
 
     @patch("google.oauth2.service_account.Credentials.from_service_account_info")
     @patch("langchain_google_genai.ChatGoogleGenerativeAI")
-    def test_vertex_gemini_thinking_level_takes_precedence(
-        self, mock_chat_cls, mock_from_sa, key_file
-    ):
+    def test_vertex_gemini_zero_thinking_budget(self, mock_chat_cls, mock_from_sa, key_file):
         mock_creds = MagicMock()
         mock_from_sa.return_value = mock_creds
         config = _make_config(
             "gemini-2.5-pro",
             provider="vertex-ai",
-            thinking={"level": "high", "budget": 1024},
+            thinking={"budget": 0},
             providers={"vertex-ai": {"json": str(key_file), "project": None, "region": "us-east5"}},
         )
         build_model(config)
         call_kwargs = mock_chat_cls.call_args[1]
-        assert call_kwargs["thinking_level"] == "high"
+        assert call_kwargs["thinking_budget"] == 0
         assert call_kwargs["include_thoughts"] is True
-        assert "thinking_budget" not in call_kwargs
 
     def test_vertex_missing_json_key_raises(self):
         config = _make_config(
@@ -307,7 +304,7 @@ class TestThinkingNotSupported:
             build_model(config)
 
     def test_openai_with_thinking_raises(self):
-        config = _make_config("gpt-4o", provider="openai", thinking={"level": "high"})
+        config = _make_config("gpt-4o", provider="openai", thinking={"budget": 0})
         with pytest.raises(ValueError, match="[Tt]hinking.*not supported"):
             build_model(config)
 
