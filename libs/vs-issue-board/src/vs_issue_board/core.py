@@ -112,6 +112,10 @@ class IssueBoard:
             raise IssueBoardLoadError(
                 f"cannot load issue board {self.path}: invalid JSON: {exc}"
             ) from exc
+        except OSError as exc:
+            raise IssueBoardLoadError(
+                f"cannot load issue board {self.path}: cannot read store: {exc}"
+            ) from exc
         if not isinstance(loaded, dict):
             raise IssueBoardLoadError(
                 f"cannot load issue board {self.path}: expected a JSON object"

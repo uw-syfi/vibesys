@@ -173,6 +173,17 @@ class TestReload:
         assert [issue.title for issue in store.list()] == ["last valid"]
         assert path.read_bytes() == incompatible
 
+    def test_reload_missing_file_raises_and_preserves_last_valid_snapshot(self, tmp_path):
+        path = tmp_path / "issues.json"
+        store = IssueBoard(path)
+        _create(store, title="last valid")
+        path.unlink()
+
+        with pytest.raises(IssueBoardLoadError, match="cannot read store"):
+            store.reload()
+
+        assert [issue.title for issue in store.list()] == ["last valid"]
+
 
 # ---------------------------------------------------------------------------
 # list / filter

@@ -19,6 +19,8 @@ orchestration around it.
 - Opening or reloading malformed, structurally invalid, or unsupported-version
   state raises `IssueBoardLoadError` without replacing the file or the last
   valid in-memory snapshot.
+- Reloading a store that has disappeared or cannot be read raises the same
+  error and preserves the last valid in-memory snapshot.
 - `on_change` lets applications attach derived views such as markdown mirrors
   without making rendering part of the core library.
 - `CreateIssuePolicy` keeps role-specific create limits out of application
