@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import random
+import shutil
+from collections.abc import Iterable, Iterator
 from importlib.metadata import version
 from pathlib import Path
 
@@ -14,6 +16,17 @@ from vibesys.loops.evolve.search_policy import (
     OpenEvolveSearchConfig,
     OpenEvolveSearchPolicy,
 )
+
+
+class _IterationOrderSet(set[str]):
+    """Set whose iteration order can model a differently reconstructed process."""
+
+    def __init__(self, values: Iterable[str], iteration_order: Iterable[str]) -> None:
+        super().__init__(values)
+        self._iteration_order = tuple(iteration_order)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._iteration_order)
 
 
 def _individual(
@@ -311,6 +324,68 @@ def test_empty_island_copy_resolves_through_vibesys_ancestry(tmp_path) -> None:
     assert copy.metadata["vibesys_individual_id"] == seed.id
 
 
+def test_empty_island_copy_has_same_identity_after_resume(tmp_path) -> None:
+    config = _config(migration_interval=50, migration_rate=0.0)
+    seed = _individual(1)
+    population = Population([seed])
+    policy = OpenEvolveSearchPolicy(state_dir=tmp_path, seed=2, config=config)
+    policy.record(seed, code="seed", policy_parent_id=None, target_island=0, objectives=None)
+    resumed = OpenEvolveSearchPolicy(state_dir=tmp_path, seed=999, config=None)
+    for candidate in (policy, resumed):
+        candidate._database.set_current_island(1)
+        candidate._database.config.exploration_ratio = 1.0
+        candidate._database.config.exploitation_ratio = 0.0
+
+    selection_args = {
+        "rng": random.Random(1),
+        "k_top_inspirations": 0,
+        "k_random_inspirations": 0,
+        "selection_temperature": 0.5,
+        "objectives": None,
+        "frontier_bias": 0.7,
+    }
+    uninterrupted_selection = policy.select(population, **selection_args)
+    resumed_selection = resumed.select(population, **selection_args)
+
+    assert uninterrupted_selection is not None and resumed_selection is not None
+    assert resumed_selection.policy_parent_id == uninterrupted_selection.policy_parent_id
+
+
+def test_migration_has_same_program_identity_after_resume(tmp_path) -> None:
+    initial_dir = tmp_path / "initial"
+    config = _config(num_islands=2, migration_interval=1, migration_rate=1.0)
+    seed = _individual(1)
+    initial = OpenEvolveSearchPolicy(state_dir=initial_dir, seed=3, config=config)
+    initial.record(seed, code="seed", policy_parent_id=None, target_island=0, objectives=None)
+    uninterrupted_dir = tmp_path / "uninterrupted"
+    resumed_dir = tmp_path / "resumed"
+    shutil.copytree(initial_dir, uninterrupted_dir)
+    shutil.copytree(initial_dir, resumed_dir)
+    uninterrupted = OpenEvolveSearchPolicy(state_dir=uninterrupted_dir, seed=3, config=None)
+    resumed = OpenEvolveSearchPolicy(state_dir=resumed_dir, seed=999, config=None)
+    child = _individual(2, parent_id=1, generation=1)
+
+    uninterrupted.record(
+        child,
+        code="child",
+        policy_parent_id="vibesys-1",
+        target_island=0,
+        objectives=None,
+    )
+    resumed.record(
+        child,
+        code="child",
+        policy_parent_id="vibesys-1",
+        target_island=0,
+        objectives=None,
+    )
+
+    assert set(uninterrupted._database.programs) == set(resumed._database.programs)
+    assert {
+        program.id: program.timestamp for program in uninterrupted._database.programs.values()
+    } == {program.id: program.timestamp for program in resumed._database.programs.values()}
+
+
 def test_resume_continues_upstream_random_stream_without_touching_global_rng(tmp_path) -> None:
     config = _config(num_islands=1, migration_rate=0.0)
     population = Population([_individual(individual_id) for individual_id in range(1, 6)])
@@ -335,6 +410,14 @@ def test_resume_continues_upstream_random_stream_without_touching_global_rng(tmp
     }
     policy.select(population, **selection_args)
     resumed = OpenEvolveSearchPolicy(state_dir=tmp_path, seed=19, config=None)
+    program_ids = sorted(policy._database.programs)
+    policy._database.config.exploration_ratio = 1.0
+    resumed._database.config.exploration_ratio = 1.0
+    policy._database.islands[0] = _IterationOrderSet(program_ids, program_ids)
+    resumed._database.islands[0] = _IterationOrderSet(
+        program_ids,
+        program_ids[1:] + program_ids[:1],
+    )
     uninterrupted_next = policy.select(population, **selection_args)
     resumed_next = resumed.select(population, **selection_args)
 
