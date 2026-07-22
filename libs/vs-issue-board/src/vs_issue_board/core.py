@@ -16,9 +16,9 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from threading import RLock
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 _STORE_VERSION = 1
 
@@ -42,6 +42,8 @@ _TYPE_RANK = {IssueType.BUG: 0, IssueType.FEATURE: 1, IssueType.PERF: 2}
 class IssueEvent(BaseModel):
     """A single state-transition or comment record on an issue."""
 
+    model_config = ConfigDict(extra="forbid")
+
     timestamp: str
     actor: str
     action: str
@@ -53,7 +55,9 @@ class IssueEvent(BaseModel):
 class Issue(BaseModel):
     """A single tracker entry persisted as JSON."""
 
-    id: int
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(ge=1)
     type: IssueType
     title: str
     description: str
@@ -79,6 +83,15 @@ class _IssueBoardData(BaseModel):
     version: Literal[1]
     next_id: int = Field(ge=1)
     issues: list[Issue]
+
+    @model_validator(mode="after")
+    def _valid_issue_identity(self) -> Self:
+        issue_ids = [issue.id for issue in self.issues]
+        if len(issue_ids) != len(set(issue_ids)):
+            raise ValueError("issue IDs must be unique")
+        if issue_ids and self.next_id <= max(issue_ids):
+            raise ValueError("next_id must be greater than every persisted issue ID")
+        return self
 
 
 class IssueBoard:

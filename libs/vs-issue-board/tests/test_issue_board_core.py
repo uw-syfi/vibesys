@@ -111,6 +111,62 @@ class TestLoadCorrupt:
 
         assert path.read_bytes() == original
 
+    @pytest.mark.parametrize(
+        ("next_id", "issue_ids", "message"),
+        [
+            (1, [1], "next_id must be greater"),
+            (3, [1, 1], "issue IDs must be unique"),
+            (2, [0], "greater than or equal to 1"),
+        ],
+    )
+    def test_load_rejects_invalid_issue_identity(
+        self, tmp_path, next_id, issue_ids, message
+    ):
+        path = tmp_path / "issues.json"
+        issues = [
+            {
+                "id": issue_id,
+                "type": "bug",
+                "title": f"issue {index}",
+                "description": "description",
+                "status": "open",
+                "created_by": "agent",
+                "created_iter": 1,
+                "created_at": "2026-01-01",
+                "updated_at": "2026-01-01",
+                "history": [],
+            }
+            for index, issue_id in enumerate(issue_ids)
+        ]
+        path.write_text(json.dumps({"version": 1, "next_id": next_id, "issues": issues}))
+        original = path.read_bytes()
+
+        with pytest.raises(IssueBoardLoadError, match=message):
+            IssueBoard(path)
+
+        assert path.read_bytes() == original
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            lambda payload: payload["issues"][0].update({"external_metadata": "unknown"}),
+            lambda payload: payload["issues"][0]["history"][0].update({"trace_id": "unknown"}),
+        ],
+    )
+    def test_load_rejects_unknown_nested_fields(self, tmp_path, mutate):
+        path = tmp_path / "issues.json"
+        board = IssueBoard(path)
+        _create(board, title="existing")
+        payload = json.loads(path.read_text())
+        mutate(payload)
+        path.write_text(json.dumps(payload))
+        original = path.read_bytes()
+
+        with pytest.raises(IssueBoardLoadError, match="invalid store structure"):
+            IssueBoard(path)
+
+        assert path.read_bytes() == original
+
     def test_open_existing_does_not_overwrite_concurrent_write(self, tmp_path, monkeypatch):
         path = tmp_path / "issues.json"
         writer = IssueBoard(path)
