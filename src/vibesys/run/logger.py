@@ -80,11 +80,12 @@ class RunLogger:
         Callers that want a different prefix (e.g. ``round007``) should pass
         a string.
 
-        The previous log file is flushed but kept open. A new file becomes
-        ``file``. The stderr tee is updated to write to the new file as
-        well.  Returns the new file handle.
+        The previous log file is flushed and closed after the new file becomes
+        ``file``. The stderr tee is updated to write to the new file as well.
+        Returns the new file handle.
         """
-        self.file.flush()
+        previous_file = self.file
+        previous_file.flush()
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
         suffix = f"step{label}" if isinstance(label, int) else label
         new_path = self.log_dir / f"run-{ts}-{suffix}.log"
@@ -93,6 +94,7 @@ class RunLogger:
         self.file = new_file
         if self._tee_stderr:
             sys.stderr = _TeeWriter(self._original_stderr, new_file)
+        previous_file.close()
         return new_file
 
     def close(self) -> None:
