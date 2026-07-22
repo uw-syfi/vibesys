@@ -79,6 +79,8 @@ class TestStart:
 
     @patch("subprocess.run")
     def test_start_failure_removes_created_container(self, mock_run, sandbox):
+        from vs_sandbox.docker_sandbox import _live_containers
+
         mock_run.side_effect = [
             subprocess.CompletedProcess(
                 args=[],
@@ -87,13 +89,48 @@ class TestStart:
                 stderr="gpu error",
             ),
             subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
         ]
 
         with pytest.raises(RuntimeError, match="Failed to start Docker container"):
             sandbox.start()
 
-        rm_cmd = mock_run.call_args_list[1][0][0]
-        assert rm_cmd == ["docker", "rm", "abc123container"]
+        stop_call, rm_call = mock_run.call_args_list[1:]
+        assert stop_call.args[0] == ["docker", "stop", "abc123container"]
+        assert stop_call.kwargs["timeout"] == 30
+        assert rm_call.args[0] == ["docker", "rm", "-f", "abc123container"]
+        assert rm_call.kwargs["timeout"] == 10
+        assert sandbox._container_id is None
+        assert "abc123container" not in _live_containers
+
+    @patch("subprocess.run")
+    def test_start_failure_retains_created_container_when_removal_fails(
+        self, mock_run, sandbox
+    ):
+        from vs_sandbox.docker_sandbox import _live_containers
+
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(
+                args=[],
+                returncode=125,
+                stdout="abc123container\n",
+                stderr="gpu error",
+            ),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="", stderr="daemon unavailable"
+            ),
+        ]
+
+        try:
+            with pytest.raises(RuntimeError, match="Failed to start Docker container"):
+                sandbox.start()
+
+            assert sandbox._container_id == "abc123container"
+            assert "abc123container" in _live_containers
+        finally:
+            _live_containers.pop("abc123container", None)
+            sandbox._container_id = None
 
     @patch.dict("os.environ", {"CUDA_VISIBLE_DEVICES": "3,5,7"})
     @patch("subprocess.run")
@@ -153,6 +190,36 @@ class TestStart:
         assert "exec" in cmd
         cmd_str = " ".join(cmd)
         assert "pip install uv" in cmd_str
+
+    @patch("subprocess.run")
+    def test_init_failure_stops_and_removes_created_container(self, mock_run, tmp_path):
+        from vs_sandbox.docker_sandbox import _live_containers
+
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="test-image",
+            extra_init_commands=["install-required-tool"],
+        )
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(
+                args=[], returncode=17, stdout="partial output", stderr="install failed"
+            ),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+        ]
+
+        try:
+            with pytest.raises(RuntimeError, match="Container init command failed"):
+                sandbox.start()
+
+            assert sandbox._container_id is None
+            assert "abc123" not in _live_containers
+            assert mock_run.call_args_list[-2][0][0] == ["docker", "stop", "abc123"]
+            assert mock_run.call_args_list[-1][0][0] == ["docker", "rm", "-f", "abc123"]
+        finally:
+            _live_containers.pop("abc123", None)
 
 
 class TestExecute:
@@ -286,6 +353,81 @@ class TestSetupFns:
         s.start()
         assert calls == 2
 
+    @patch("subprocess.run")
+    def test_setup_failure_preserves_error_when_stop_fails(self, mock_run, tmp_path):
+        from vs_sandbox.docker_sandbox import _live_containers
+
+        def fail_setup(_sandbox: DockerSandbox) -> None:
+            raise ValueError("setup exploded")
+
+        def run(cmd, **_kwargs):
+            if cmd[:2] == ["docker", "run"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="abc123\n", stderr=""
+                )
+            if cmd[:2] == ["docker", "stop"]:
+                raise OSError("Docker daemon disconnected")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="test-image",
+            setup_fns=[fail_setup],
+        )
+
+        try:
+            with pytest.raises(ValueError, match="setup exploded"):
+                sandbox.start()
+
+            assert sandbox._container_id is None
+            assert "abc123" not in _live_containers
+            commands = [call.args[0] for call in mock_run.call_args_list]
+            assert ["docker", "stop", "abc123"] in commands
+            assert ["docker", "rm", "-f", "abc123"] in commands
+        finally:
+            _live_containers.pop("abc123", None)
+
+    @pytest.mark.parametrize("cleanup_mode", ["raises", "nonzero"])
+    @patch("subprocess.run")
+    def test_setup_failure_retains_container_for_retry_when_removal_fails(
+        self, mock_run, cleanup_mode, tmp_path
+    ):
+        from vs_sandbox.docker_sandbox import _live_containers
+
+        def fail_setup(_sandbox: DockerSandbox) -> None:
+            raise ValueError("setup exploded")
+
+        def run(cmd, **_kwargs):
+            if cmd[:2] == ["docker", "run"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout="abc123\n", stderr=""
+                )
+            if cmd[:2] in (["docker", "stop"], ["docker", "rm"]):
+                if cleanup_mode == "raises":
+                    raise OSError("Docker daemon disconnected")
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr="daemon unavailable"
+                )
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="test-image",
+            setup_fns=[fail_setup],
+        )
+
+        try:
+            with pytest.raises(ValueError, match="setup exploded"):
+                sandbox.start()
+
+            assert sandbox._container_id == "abc123"
+            assert "abc123" in _live_containers
+        finally:
+            _live_containers.pop("abc123", None)
+            sandbox._container_id = None
+
 
 class TestStop:
     @patch("subprocess.run")
@@ -325,6 +467,97 @@ class TestStop:
         # Second stop should be a no-op
         sandbox.stop()
         assert mock_run.call_count == 0
+
+    @pytest.mark.parametrize("cleanup_mode", ["raises", "nonzero"])
+    @patch("subprocess.run")
+    def test_failed_removal_retains_ownership_and_can_be_retried(
+        self, mock_run, cleanup_mode, sandbox
+    ):
+        from vs_sandbox.docker_sandbox import _live_containers
+
+        sandbox._container_id = "abc123"
+        _live_containers["abc123"] = "vibesys-test"
+
+        def fail_removal(cmd, **_kwargs):
+            if cmd[1] == "rm":
+                if cleanup_mode == "raises":
+                    raise OSError("Docker daemon disconnected")
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr="daemon unavailable"
+                )
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = fail_removal
+        try:
+            expected_error = OSError if cleanup_mode == "raises" else RuntimeError
+            with pytest.raises(expected_error):
+                sandbox.stop()
+
+            assert sandbox._container_id == "abc123"
+            assert "abc123" in _live_containers
+
+            mock_run.side_effect = None
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+            sandbox.stop()
+
+            assert sandbox._container_id is None
+            assert "abc123" not in _live_containers
+        finally:
+            _live_containers.pop("abc123", None)
+            sandbox._container_id = None
+
+    @patch("subprocess.run")
+    def test_stop_failure_does_not_prevent_forced_removal(self, mock_run, sandbox):
+        from vs_sandbox.docker_sandbox import _live_containers
+
+        sandbox._container_id = "abc123"
+        _live_containers["abc123"] = "vibesys-test"
+        mock_run.side_effect = [
+            OSError("Docker daemon disconnected"),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+        ]
+
+        sandbox.stop()
+
+        assert mock_run.call_args_list[1].args[0] == ["docker", "rm", "-f", "abc123"]
+        assert sandbox._container_id is None
+        assert "abc123" not in _live_containers
+
+    @patch("subprocess.run")
+    def test_already_absent_container_clears_ownership(self, mock_run, sandbox):
+        from vs_sandbox.docker_sandbox import _live_containers
+
+        sandbox._container_id = "abc123"
+        _live_containers["abc123"] = "vibesys-test"
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="Error: No such container: abc123"
+        )
+
+        sandbox.stop()
+
+        assert sandbox._container_id is None
+        assert "abc123" not in _live_containers
+
+    @patch("subprocess.run")
+    def test_keyboard_interrupt_is_not_swallowed(self, mock_run, sandbox):
+        from vs_sandbox.docker_sandbox import _live_containers
+
+        sandbox._container_id = "abc123"
+        _live_containers["abc123"] = "vibesys-test"
+        mock_run.side_effect = KeyboardInterrupt()
+
+        try:
+            with pytest.raises(KeyboardInterrupt):
+                sandbox.stop()
+
+            assert mock_run.call_count == 1
+            assert sandbox._container_id == "abc123"
+            assert "abc123" in _live_containers
+        finally:
+            _live_containers.pop("abc123", None)
+            sandbox._container_id = None
 
 
 class TestIdProperty:
@@ -510,6 +743,46 @@ class TestCleanupOnExit:
         rm_calls = [c for c in mock_run.call_args_list if "rm" in c[0][0]]
         assert len(stop_calls) == 1
         assert len(rm_calls) == 1
+
+    @pytest.mark.parametrize("cleanup_mode", ["raises", "nonzero"])
+    @patch("subprocess.run")
+    def test_cleanup_retains_failed_removal_for_retry(self, mock_run, cleanup_mode):
+        from vs_sandbox.docker_sandbox import _cleanup_containers, _live_containers
+
+        _live_containers["abc123"] = "vibesys-test"
+
+        def fail_removal(cmd, **_kwargs):
+            if cmd[1] == "rm":
+                if cleanup_mode == "raises":
+                    raise OSError("Docker daemon disconnected")
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr="daemon unavailable"
+                )
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = fail_removal
+
+        _cleanup_containers()
+
+        assert "abc123" in _live_containers
+        rm_call = mock_run.call_args_list[1]
+        assert rm_call.args[0] == ["docker", "rm", "-f", "abc123"]
+        assert rm_call.kwargs["timeout"] == 10
+
+    @patch("subprocess.run")
+    def test_cleanup_forces_removal_after_stop_exception(self, mock_run):
+        from vs_sandbox.docker_sandbox import _cleanup_containers, _live_containers
+
+        _live_containers["abc123"] = "vibesys-test"
+        mock_run.side_effect = [
+            OSError("Docker daemon disconnected"),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+        ]
+
+        _cleanup_containers()
+
+        assert mock_run.call_args_list[1].args[0] == ["docker", "rm", "-f", "abc123"]
+        assert "abc123" not in _live_containers
 
 
 class TestWrite:
