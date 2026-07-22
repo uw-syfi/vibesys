@@ -24,7 +24,7 @@ def _is_openai_model(model_name: str) -> bool:
 
 
 def _has_thinking(thinking: ThinkingCfg) -> bool:
-    return bool(thinking.level or thinking.budget)
+    return thinking.level is not None or thinking.budget is not None
 
 
 def build_model(config: Config):

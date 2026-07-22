@@ -16,10 +16,10 @@ import os
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
 from vibesys.features import FeatureFlag
@@ -52,14 +52,23 @@ class ThinkingCfg(_Strict):
         default=None,
         description=(
             "Reasoning effort level passed to the model (provider-specific, e.g. "
-            "'low'/'medium'/'high'). For Gemini on Vertex, mutually exclusive with "
-            "budget."
+            "'low'/'medium'/'high'). Mutually exclusive with budget."
         ),
     )
     budget: int | None = Field(
         default=None,
-        description="Thinking token budget (provider-specific). Alternative to level.",
+        ge=-1,
+        description=(
+            "Thinking token budget (provider-specific). Alternative to level; -1 requests "
+            "a dynamic budget and 0 disables thinking where supported."
+        ),
     )
+
+    @model_validator(mode="after")
+    def _one_thinking_control(self) -> Self:
+        if self.level is not None and self.budget is not None:
+            raise ValueError("thinking.level and thinking.budget are mutually exclusive")
+        return self
 
 
 class VertexCfg(_Strict):
@@ -163,6 +172,7 @@ class AgentCfg(_Strict):
     )
     cli_timeout: int | None = Field(
         default=None,
+        gt=0,
         description=(
             "Per-invocation timeout for the CLI agent, in seconds. None → the runner default."
         ),
@@ -199,9 +209,9 @@ class LoadLevelCfg(_Strict):
     Distinct from the ``LoadLevelMetrics`` *output* schema in ``schemas.py``.
     """
 
-    rate: int = Field(description="Request rate (requests/sec) for this load level.")
-    duration: int = Field(description="Benchmark duration in seconds at this load level.")
-    max_tokens: int = Field(description="Max output tokens per request at this load level.")
+    rate: int = Field(gt=0, description="Request rate (requests/sec) for this load level.")
+    duration: int = Field(gt=0, description="Benchmark duration in seconds at this load level.")
+    max_tokens: int = Field(gt=0, description="Max output tokens per request at this load level.")
 
 
 class PerfEvalCfg(_Strict):
