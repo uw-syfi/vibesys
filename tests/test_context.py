@@ -5,9 +5,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibesys.context import _RunContext, create_run_context, setup_exp_dir
+from vibesys.context import (
+    _RunContext,
+    create_candidate_context,
+    create_run_context,
+    setup_exp_dir,
+)
 from vibesys.domains.base import DomainName
-from vibesys.domains.environment import NoopEnvironmentHooks
+from vibesys.domains.environment import EnvironmentPatch, NoopEnvironmentHooks
 from vibesys.errors import ConfigurationError
 from vibesys.profilers import ACTIVE_PROFILER_KINDS, ProfilerKind, ProfilerPreflightResult
 from vibesys.run import GitTracker, RunLogger, RunPaths, Workspace
@@ -487,6 +492,83 @@ def test_run_context_noop_environment_hooks_do_not_require_model_artifacts(tmp_p
     ):
         assert (ctx.workspace / "reference" / "reference.py").is_file()
         assert not (ref_dir / "model").exists()
+
+
+def test_candidate_context_cleans_up_when_agent_runner_construction_fails(tmp_path):
+    workspace = tmp_path / "candidates" / f"{tmp_path.name}-g1c2" / "workspace"
+    parent = SimpleNamespace(
+        exp_dir=tmp_path,
+        git=MagicMock(),
+        run_environment=MagicMock(),
+        backend_impl=_FakeBackend(),
+        EXCLUDED_WORKSPACE_DIRS={".git", "target"},
+        accuracy_command="check-accuracy",
+        benchmark_command="run-benchmark",
+        profiler_support_path=None,
+        profiler_support_name=None,
+        environment_patch=SimpleNamespace(bind_mounts=()),
+        skill_source_paths=[],
+        model="mock-model",
+        model_name="claude-sonnet-4-6",
+    )
+    parent.git.add_worktree.side_effect = lambda path, _commit: path.mkdir(parents=True)
+    session = MagicMock()
+    session.__enter__.return_value = session
+    session.view = SimpleNamespace(
+        paths=SimpleNamespace(
+            accuracy_command="check-accuracy",
+            benchmark_command="run-benchmark",
+            profiler_support=None,
+        ),
+        cli_sandboxed=False,
+        cli_modal_sandboxed=False,
+    )
+    session.sandbox = MagicMock()
+    parent.run_environment.open.return_value = session
+
+    with (
+        patch("vibesys.context.build_agent_runner", side_effect=SystemExit("boom")),
+        pytest.raises(SystemExit, match="boom"),
+    ):
+        create_candidate_context(
+            parent,
+            config={"model": {"name": "claude-sonnet-4-6"}},
+            generation=1,
+            child_idx=2,
+            parent_commit="deadbeef",
+        )
+
+    session.__exit__.assert_called_once()
+    parent.git.remove_worktree.assert_called_once_with(workspace)
+
+
+def test_run_context_cleans_up_when_agent_runner_construction_fails(tmp_path):
+    project_root = tmp_path / "project"
+    ref = _write_ref(tmp_path)
+    hooks = MagicMock()
+    hooks.prepare.return_value = EnvironmentPatch()
+    original_stderr = sys.stderr
+
+    with (
+        patch("vibesys.context.PROJECT_ROOT", project_root),
+        patch("vibesys.context.build_model", return_value="mock-model"),
+        patch("vibesys.context.build_agent_runner", side_effect=RuntimeError("boom")),
+        patch("vibesys.context.backends.get", return_value=_FakeBackend()),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        create_run_context(
+            config={"model": {"name": "claude-sonnet-4-6"}},
+            exp_name="failed-construction",
+            input_path=str(ref.parent),
+            accuracy_command="check-accuracy",
+            benchmark_command="run-benchmark",
+            skills_dirs=[],
+            run_environment=RunEnvironmentSpec("local"),
+            environment_hooks=hooks,
+        )
+
+    assert sys.stderr is original_stderr
+    hooks.teardown.assert_called_once()
 
 
 def test_run_context_materializes_input_project_path_dependencies(tmp_path):
