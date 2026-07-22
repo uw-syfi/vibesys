@@ -147,6 +147,13 @@ class VibeSysSearchPolicy:
         return None
 
 
+class _SortedIterationSet(set[str]):
+    """Set semantics with deterministic iteration for replaying OpenEvolve."""
+
+    def __iter__(self):
+        return iter(sorted(super().__iter__()))
+
+
 class OpenEvolveSearchPolicy:
     """Adapter around OpenEvolve 0.3.1's MAP-Elites/island database.
 
@@ -307,6 +314,18 @@ class OpenEvolveSearchPolicy:
             self._rng.setstate(random.getstate())
             random.setstate(process_state)
 
+    @contextmanager
+    def _deterministic_upstream_iteration(self) -> Generator[None, None, None]:
+        """Normalize unordered OpenEvolve collections for replayable sampling."""
+        self._database.programs = dict(sorted(self._database.programs.items()))
+        self._database.islands = [
+            island if isinstance(island, _SortedIterationSet) else _SortedIterationSet(island)
+            for island in self._database.islands
+        ]
+        if not isinstance(self._database.archive, _SortedIterationSet):
+            self._database.archive = _SortedIterationSet(self._database.archive)
+        yield
+
     def select(
         self,
         population: Population,
@@ -326,10 +345,11 @@ class OpenEvolveSearchPolicy:
         program_ids_before = set(self._database.programs)
         inspiration_count = k_top_inspirations + k_random_inspirations
         with self._upstream_random():
-            parent_program, inspiration_programs = self._database.sample_from_island(
-                island,
-                num_inspirations=inspiration_count,
-            )
+            with self._deterministic_upstream_iteration():
+                parent_program, inspiration_programs = self._database.sample_from_island(
+                    island,
+                    num_inspirations=inspiration_count,
+                )
         self._database.next_island()
 
         individuals_by_id = {individual.id: individual for individual in population.passed}
