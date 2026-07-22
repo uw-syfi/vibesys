@@ -377,14 +377,9 @@ class DockerSandbox(BaseSandbox):
         if result.returncode != 0:
             container_id = result.stdout.strip()
             if container_id:
-                rm_cmd = ["docker", "rm", container_id]
-                rm_result = subprocess.run(
-                    rm_cmd,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                self._log_cmd(rm_cmd, rm_result)
+                self._container_id = container_id
+                _live_containers[container_id] = self._container_name
+                self._discard_started_container()
             raise RuntimeError(
                 f"Failed to start Docker container (exit {result.returncode}):\n"
                 f"  stdout: {result.stdout.strip()}\n"
@@ -485,7 +480,7 @@ class DockerSandbox(BaseSandbox):
 
     def _stop_and_remove_container(self, container_id: str, *, suppress_errors: bool) -> bool:
         """Stop and remove a container, retaining ownership until removal succeeds."""
-        cleanup_error: BaseException | None = None
+        cleanup_error: Exception | None = None
         commands = (
             (["docker", "stop", container_id], 30),
             (["docker", "rm", "-f", container_id], 10),
@@ -510,12 +505,12 @@ class DockerSandbox(BaseSandbox):
                             f"Failed to remove Docker container {container_id} "
                             f"(exit {result.returncode}): {result.stderr.strip()}"
                         )
-            except BaseException as exc:
+            except Exception as exc:
                 if cmd[1] == "rm":
                     cleanup_error = exc
                 try:
                     self._log_cmd(cmd, error=f"container cleanup failed: {exc}")
-                except BaseException:
+                except Exception:
                     pass
 
         if not removed and cleanup_error is not None and not suppress_errors:
