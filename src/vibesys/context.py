@@ -193,6 +193,75 @@ def create_run_context(
     and agent-runner build.  ``_RunContext.__init__`` itself only assigns
     the assembled components.
     """
+    teardown_stack = ExitStack()
+    try:
+        return _assemble_run_context(
+            teardown_stack=teardown_stack,
+            config=config,
+            exp_name=exp_name,
+            input_path=input_path,
+            accuracy_command=accuracy_command,
+            benchmark_command=benchmark_command,
+            workspace_seed=workspace_seed,
+            evaluator_path=evaluator_path,
+            existing=existing,
+            trusted_input_baseline=trusted_input_baseline,
+            debug=debug,
+            profiler_kind=profiler_kind,
+            profiler_domain=profiler_domain,
+            skills_dirs=skills_dirs,
+            run_environment=run_environment,
+            git_tracking=git_tracking,
+            agent_backend=agent_backend,
+            cli_provider=cli_provider,
+            backend=backend,
+            environment_hooks=environment_hooks,
+            remote_repo=remote_repo,
+            repo_visibility=repo_visibility,
+        )
+    except BaseException as construction_error:
+        _close_after_construction_failure(teardown_stack, construction_error)
+        raise
+
+
+def _close_after_construction_failure(
+    teardown_stack: ExitStack, construction_error: BaseException
+) -> None:
+    """Unwind partial construction without replacing its root-cause error."""
+    try:
+        teardown_stack.close()
+    except BaseException as cleanup_error:
+        construction_error.add_note(
+            "Additional error while cleaning up partial context construction: "
+            f"{type(cleanup_error).__name__}: {cleanup_error}"
+        )
+
+
+def _assemble_run_context(
+    *,
+    teardown_stack: ExitStack,
+    config: Config,
+    exp_name: str,
+    input_path: str,
+    accuracy_command: str,
+    benchmark_command: str,
+    workspace_seed: Path | None,
+    evaluator_path: Path | None,
+    existing: bool,
+    trusted_input_baseline: str | None,
+    debug: bool,
+    profiler_kind: ProfilerKind,
+    profiler_domain: DomainName,
+    skills_dirs: list[str] | None,
+    run_environment: RunEnvironmentSpec | None,
+    git_tracking: bool,
+    agent_backend: str | None,
+    cli_provider: str | None,
+    backend: ComputeBackend,
+    environment_hooks: EnvironmentHooks | None,
+    remote_repo: str | None,
+    repo_visibility: RepositoryVisibility,
+) -> "_RunContext":
     config = as_config(config)
     run_environment_spec = run_environment or make_run_environment_spec()
     environment = build_run_environment(run_environment_spec)
@@ -213,14 +282,12 @@ def create_run_context(
     # One teardown stack for the whole context: every component with
     # cleanup registers here, and close() unwinds it in reverse
     # construction order (device → environment hooks → session → logs).
-    teardown_stack = ExitStack()
     teardown_stack.callback(logger.close)
     experiment_repository = ExperimentRepository(exp_dir, logger.lprint)
     if remote_repo is not None:
         try:
             experiment_repository.create_remote(remote_repo, repo_visibility)
         except Exception as exc:
-            teardown_stack.close()
             raise ConfigurationError(
                 ConfigurationDiagnostic(
                     code="repository_setup_failed",
@@ -344,6 +411,14 @@ def create_run_context(
     )
     environment_patch = hooks.prepare(environment_context)
 
+    def _teardown_environment_hooks() -> None:
+        try:
+            hooks.teardown(environment_context)
+        except Exception as exc:
+            logger.lprint(f"[warn] environment hook teardown failed: {exc}")
+
+    teardown_stack.callback(_teardown_environment_hooks)
+
     # When resuming an existing run, the plan skips full workspace file
     # setup — the workspace already contains reference files, skills, etc.
     # from the previous run.  Only skills are refreshed and profiler
@@ -397,18 +472,10 @@ def create_run_context(
         profiler_benchmark_command=session.view.paths.benchmark_command,
     )
 
-    def _teardown_environment_hooks() -> None:
-        try:
-            hooks.teardown(environment_context)
-        except Exception as exc:
-            logger.lprint(f"[warn] environment hook teardown failed: {exc}")
-
-    teardown_stack.callback(_teardown_environment_hooks)
-
     # Start backend-specific background monitoring (CUDA: nvidia-smi).
     device = DeviceLease(backend_impl, log_dir=log_dir, run_environment_view=session.view)
-    device.start_monitor()
     teardown_stack.callback(device.close)
+    device.start_monitor()
 
     # Build the backend-agnostic agent runner. Loops invoke this instead
     # of calling create_deep_agent / vibesys._agent_cli directly. The cli
@@ -508,6 +575,34 @@ def create_candidate_context(
     returned context (or use it as a context manager) to stop the container and
     remove the worktree.
     """
+    teardown_stack = ExitStack()
+    try:
+        return _assemble_candidate_context(
+            teardown_stack=teardown_stack,
+            parent=parent,
+            config=config,
+            generation=generation,
+            child_idx=child_idx,
+            parent_commit=parent_commit,
+            agent_backend=agent_backend,
+            cli_provider=cli_provider,
+        )
+    except BaseException as construction_error:
+        _close_after_construction_failure(teardown_stack, construction_error)
+        raise
+
+
+def _assemble_candidate_context(
+    *,
+    teardown_stack: ExitStack,
+    parent: "_RunContext",
+    config: Config,
+    generation: int,
+    child_idx: int,
+    parent_commit: str,
+    agent_backend: str | None,
+    cli_provider: str | None,
+) -> "_RunContext":
     config = as_config(config)
     cand_root = parent.exp_dir / "candidates" / f"{parent.exp_dir.name}-g{generation}c{child_idx}"
     workspace = cand_root / "workspace"
@@ -517,14 +612,13 @@ def create_candidate_context(
     # Materialize the parent's tree in an isolated worktree (shared object
     # store). `git worktree add` touches the main repo's admin area, so the
     # caller serializes this; the container/agent work afterward is isolated.
+    # Remove the worktree only after it has been materialized, including when
+    # git itself reports failure after partially materializing its admin state.
+    teardown_stack.callback(lambda: parent.git.remove_worktree(workspace))
     parent.git.add_worktree(workspace, parent_commit)
 
     logger = RunLogger(log_dir, tee_stderr=False)
-    teardown_stack = ExitStack()
     teardown_stack.callback(logger.close)
-    # Remove the worktree *after* the session's container is stopped: register
-    # the removal before entering the session so it unwinds afterward (LIFO).
-    teardown_stack.callback(lambda: parent.git.remove_worktree(workspace))
 
     resolved_backend = agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND
     resolved_cli_provider = cli_provider or config.agent.cli_provider or "codex"
