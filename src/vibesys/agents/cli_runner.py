@@ -449,6 +449,7 @@ class CliAgentRunner:
         #    if generate() raises) and the per-invocation usage record
         #    (tokens were spent either way, and an audit gap on failure
         #    defeats the purpose).
+        agent_error: BaseException | None = None
         try:
             try:
                 text = agent.generate(
@@ -480,16 +481,27 @@ class CliAgentRunner:
                     timeout=self._timeout,
                     silent=True,
                 )
-        except Exception as exc:
-            log_and_print(
-                f"\n=== {label} ROUND ERROR: {round_label} ===",
-                self._run_log_file,
-            )
-            log_and_print(f"{type(exc).__name__}: {exc}", self._run_log_file)
+        except BaseException as exc:
+            agent_error = exc
+            if isinstance(exc, Exception):
+                log_and_print(
+                    f"\n=== {label} ROUND ERROR: {round_label} ===",
+                    self._run_log_file,
+                )
+                log_and_print(f"{type(exc).__name__}: {exc}", self._run_log_file)
             raise
         finally:
             if mcp_servers:
-                agent.uninstall_mcp_servers(workspace, mcp_servers)
+                try:
+                    agent.uninstall_mcp_servers(workspace, mcp_servers)
+                except Exception as cleanup_exc:
+                    if agent_error is None:
+                        raise
+                    log_and_print(
+                        f"[{label}] MCP config cleanup failed while preserving the "
+                        f"original agent error: {cleanup_exc}",
+                        self._run_log_file,
+                    )
             self._write_usage_record(kind=kind, round_label=round_label, agent=agent)
         return text
 

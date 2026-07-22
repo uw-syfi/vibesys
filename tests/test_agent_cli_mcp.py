@@ -20,6 +20,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from vibesys._agent_cli.base import MCPServerSpec
 from vibesys._agent_cli.claude import ClaudeCodeCodingAgent
 from vibesys._agent_cli.codex import CodexCodingAgent
@@ -105,6 +107,60 @@ class TestClaudeMCP:
 
         agent.uninstall_mcp_servers(tmp_path, [_spec()])
         assert target.read_bytes() == original
+
+    def test_uninstall_preserves_config_edits_made_during_invocation(self, tmp_path: Path):
+        target = tmp_path / ".mcp.json"
+        target.write_text('{"theme":"light","mcpServers":{"existing":{"command":"user"}}}')
+        agent = self._agent()
+        agent.install_mcp_servers(tmp_path, [_spec()])
+
+        config = json.loads(target.read_text())
+        config["theme"] = "dark"
+        config["new_setting"] = True
+        target.write_text(json.dumps(config))
+
+        agent.uninstall_mcp_servers(tmp_path, [_spec()])
+
+        restored = json.loads(target.read_text())
+        assert restored == {
+            "theme": "dark",
+            "new_setting": True,
+            "mcpServers": {"existing": {"command": "user"}},
+        }
+
+    def test_uninstall_preserves_an_in_run_edit_to_an_injected_server(self, tmp_path: Path):
+        target = tmp_path / ".mcp.json"
+        target.write_text('{"mcpServers":{"vibesys-issues":{"command":"user"}}}')
+        agent = self._agent()
+        agent.install_mcp_servers(tmp_path, [_spec()])
+
+        config = json.loads(target.read_text())
+        config["mcpServers"]["vibesys-issues"] = {"command": "agent-edited"}
+        target.write_text(json.dumps(config))
+
+        agent.uninstall_mcp_servers(tmp_path, [_spec()])
+
+        assert json.loads(target.read_text())["mcpServers"]["vibesys-issues"] == {
+            "command": "agent-edited"
+        }
+
+    def test_install_replace_failure_leaves_original_config_intact(
+        self, tmp_path: Path, monkeypatch
+    ):
+        target = tmp_path / ".mcp.json"
+        original = b'{"theme":"dark"}\n'
+        target.write_bytes(original)
+        agent = self._agent()
+
+        def fail_replace(source, destination):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("vibesys._agent_cli.base.os.replace", fail_replace)
+        with pytest.raises(OSError, match="disk full"):
+            agent.install_mcp_servers(tmp_path, [_spec()])
+
+        assert target.read_bytes() == original
+        assert target not in getattr(agent, "_mcp_config_backups", {})
 
     def test_uninstall_removes_file(self, tmp_path: Path):
         agent = self._agent()
