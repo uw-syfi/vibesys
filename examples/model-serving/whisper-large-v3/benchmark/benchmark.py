@@ -58,9 +58,7 @@ async def _one_request(client, url, wav_bytes, filename):
     data = {"model": "whisper-large-v3", "response_format": "json"}
     t0 = time.perf_counter()
     try:
-        resp = await client.post(
-            f"{url}/v1/audio/transcriptions", files=files, data=data
-        )
+        resp = await client.post(f"{url}/v1/audio/transcriptions", files=files, data=data)
         resp.raise_for_status()
         return {"latency_s": time.perf_counter() - t0, "error": None}
     except Exception as exc:  # noqa: BLE001
@@ -116,8 +114,10 @@ async def run_offline(args, pool):
     print(f"                {audio_seconds / wall:.1f} audio-s / wall-s")
     if lats:
         mean = sum(lats) / len(lats)
-        print(f"Latency (s):    mean {mean:.3f}  p50 {pct(50):.3f}  "
-              f"p95 {pct(95):.3f}  p99 {pct(99):.3f}")
+        print(
+            f"Latency (s):    mean {mean:.3f}  p50 {pct(50):.3f}  "
+            f"p95 {pct(95):.3f}  p99 {pct(99):.3f}"
+        )
     print("=" * 44)
 
     if args.num_requests and len(succ) < args.num_requests:

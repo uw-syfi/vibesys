@@ -83,9 +83,7 @@ def compare_outputs(ref_text: str, custom_text: str, threshold: float):
     if normalize_text(ref_text) == normalize_text(custom_text):
         return True, f"EXACT match: {ref_text[:80]!r}"
     overlap = word_overlap_ratio(ref_text, custom_text)
-    detail = (
-        f"  Reference: {ref_text[:100]!r}\n  Custom:    {custom_text[:100]!r}"
-    )
+    detail = f"  Reference: {ref_text[:100]!r}\n  Custom:    {custom_text[:100]!r}"
     if overlap >= threshold:
         return True, f"PASS (word overlap {overlap:.1%} >= {threshold:.0%}):\n{detail}"
     return False, f"MISMATCH (word overlap {overlap:.1%} < {threshold:.0%}):\n{detail}"
@@ -120,8 +118,7 @@ def main():
     print(f"  HF model loaded in {time.perf_counter() - t0:.1f}s")
     print("Generating reference outputs ...")
     ref_outputs = [
-        reference_transcribe(ref_model, ref_proc, audio, sr)
-        for _desc, audio, sr, _ in test_samples
+        reference_transcribe(ref_model, ref_proc, audio, sr) for _desc, audio, sr, _ in test_samples
     ]
     del ref_model, ref_proc
     if torch.cuda.is_available():

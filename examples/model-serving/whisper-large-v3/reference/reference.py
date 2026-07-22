@@ -40,9 +40,9 @@ def reference_transcribe(
 ) -> str:
     device = next(model.parameters()).device
     dtype = next(model.parameters()).dtype
-    feats = processor(
-        audio, sampling_rate=sampling_rate, return_tensors="pt"
-    ).input_features.to(device=device, dtype=dtype)
+    feats = processor(audio, sampling_rate=sampling_rate, return_tensors="pt").input_features.to(
+        device=device, dtype=dtype
+    )
     ids = model.generate(
         feats,
         language="en",
