@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+from collections.abc import Iterable, Iterator
 from importlib.metadata import version
 from pathlib import Path
 
@@ -14,6 +15,17 @@ from vibesys.loops.evolve.search_policy import (
     OpenEvolveSearchConfig,
     OpenEvolveSearchPolicy,
 )
+
+
+class _IterationOrderSet(set[str]):
+    """Set whose iteration order can model a differently reconstructed process."""
+
+    def __init__(self, values: Iterable[str], iteration_order: Iterable[str]) -> None:
+        super().__init__(values)
+        self._iteration_order = tuple(iteration_order)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._iteration_order)
 
 
 def _individual(
@@ -335,6 +347,14 @@ def test_resume_continues_upstream_random_stream_without_touching_global_rng(tmp
     }
     policy.select(population, **selection_args)
     resumed = OpenEvolveSearchPolicy(state_dir=tmp_path, seed=19, config=None)
+    program_ids = sorted(policy._database.programs)
+    policy._database.config.exploration_ratio = 1.0
+    resumed._database.config.exploration_ratio = 1.0
+    policy._database.islands[0] = _IterationOrderSet(program_ids, program_ids)
+    resumed._database.islands[0] = _IterationOrderSet(
+        program_ids,
+        program_ids[1:] + program_ids[:1],
+    )
     uninterrupted_next = policy.select(population, **selection_args)
     resumed_next = resumed.select(population, **selection_args)
 
