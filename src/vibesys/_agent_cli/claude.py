@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -98,26 +97,21 @@ class ClaudeCodeCodingAgent(CLICodingAgent[ClaudeGenerationSession]):
         )
 
     def install_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:
-        """Write ``<workspace>/.mcp.json`` so Claude Code auto-discovers
-        the MCP servers from cwd."""
-        config: dict[str, Any] = {
-            "mcpServers": {
-                s.name: {
-                    "command": s.command,
-                    "args": list(s.args),
-                    **({"env": dict(s.env)} if s.env else {}),
-                }
-                for s in servers
+        """Merge servers into ``<workspace>/.mcp.json`` for auto-discovery."""
+        server_config: dict[str, dict[str, Any]] = {
+            s.name: {
+                "command": s.command,
+                "args": list(s.args),
+                **({"env": dict(s.env)} if s.env else {}),
             }
+            for s in servers
         }
-        (workspace / ".mcp.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+        self._install_mcp_config_file(
+            workspace / ".mcp.json",
+            server_key="mcpServers",
+            server_config=server_config,
+        )
 
     def uninstall_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:
-        """Remove ``<workspace>/.mcp.json``. Idempotent and tolerant of
-        files written from inside Docker (root-owned)."""
-        target = workspace / ".mcp.json"
-        if target.exists():
-            try:
-                target.unlink()
-            except OSError:
-                pass
+        """Restore the workspace's original ``.mcp.json``. Idempotent."""
+        self._restore_mcp_config_file(workspace / ".mcp.json")

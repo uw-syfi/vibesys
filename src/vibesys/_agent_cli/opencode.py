@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -77,30 +76,28 @@ class OpencodeCodingAgent(CLICodingAgent[OpencodeGenerationSession]):
         )
 
     def install_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:
-        """Write ``<workspace>/opencode.json`` so opencode auto-discovers
-        the MCP servers from cwd. opencode uses the ``mcp`` key (not
+        """Merge servers into ``<workspace>/opencode.json``.
+
+        Opencode discovers the MCP servers from cwd and uses the ``mcp`` key (not
         ``mcpServers``) and a single combined ``command`` array. Non-
         interactive ``opencode run`` already auto-approves all permissions,
         so no extra ``permission`` block is needed."""
-        config: dict[str, Any] = {
-            "$schema": "https://opencode.ai/config.json",
-            "mcp": {
-                s.name: {
-                    "type": "local",
-                    "command": [s.command, *s.args],
-                    "enabled": True,
-                    **({"environment": dict(s.env)} if s.env else {}),
-                }
-                for s in servers
-            },
+        server_config: dict[str, dict[str, Any]] = {
+            s.name: {
+                "type": "local",
+                "command": [s.command, *s.args],
+                "enabled": True,
+                **({"environment": dict(s.env)} if s.env else {}),
+            }
+            for s in servers
         }
-        (workspace / "opencode.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+        self._install_mcp_config_file(
+            workspace / "opencode.json",
+            server_key="mcp",
+            server_config=server_config,
+            defaults={"$schema": "https://opencode.ai/config.json"},
+        )
 
     def uninstall_mcp_servers(self, workspace: Path, servers: list[MCPServerSpec]) -> None:
-        """Remove ``<workspace>/opencode.json``. Idempotent."""
-        target = workspace / "opencode.json"
-        if target.exists():
-            try:
-                target.unlink()
-            except OSError:
-                pass
+        """Restore the workspace's original ``opencode.json``. Idempotent."""
+        self._restore_mcp_config_file(workspace / "opencode.json")

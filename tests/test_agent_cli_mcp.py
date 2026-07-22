@@ -88,6 +88,24 @@ class TestClaudeMCP:
         server = config["mcpServers"]["vibesys-issues"]
         assert server["env"] == {"MY_VAR": "my_value", "OTHER": "x"}
 
+    def test_install_merges_and_uninstall_restores_existing_config(self, tmp_path: Path):
+        target = tmp_path / ".mcp.json"
+        original = (
+            b'{"permissions":{"allow":["Bash(*)"]},"mcpServers":{"existing":{"command":"user"}}}\n'
+        )
+        target.write_bytes(original)
+        agent = self._agent()
+
+        agent.install_mcp_servers(tmp_path, [_spec()])
+
+        config = json.loads(target.read_text())
+        assert config["permissions"] == {"allow": ["Bash(*)"]}
+        assert config["mcpServers"]["existing"] == {"command": "user"}
+        assert "vibesys-issues" in config["mcpServers"]
+
+        agent.uninstall_mcp_servers(tmp_path, [_spec()])
+        assert target.read_bytes() == original
+
     def test_uninstall_removes_file(self, tmp_path: Path):
         agent = self._agent()
         agent.install_mcp_servers(tmp_path, [_spec()])
@@ -160,6 +178,23 @@ class TestGeminiMCP:
         server = config["mcpServers"]["vibesys-issues"]
         assert server["env"] == {"MY_VAR": "my_value", "OTHER": "x"}
 
+    def test_install_merges_and_uninstall_restores_existing_config(self, tmp_path: Path):
+        target = tmp_path / ".gemini" / "settings.json"
+        target.parent.mkdir()
+        original = b'{"theme":"dark","mcpServers":{"existing":{"command":"user"}}}\n'
+        target.write_bytes(original)
+        agent = self._agent()
+
+        agent.install_mcp_servers(tmp_path, [_spec()])
+
+        config = json.loads(target.read_text())
+        assert config["theme"] == "dark"
+        assert config["mcpServers"]["existing"] == {"command": "user"}
+        assert "vibesys-issues" in config["mcpServers"]
+
+        agent.uninstall_mcp_servers(tmp_path, [_spec()])
+        assert target.read_bytes() == original
+
 
 # ---------------------------------------------------------------------------
 # Opencode → workspace/opencode.json
@@ -196,6 +231,22 @@ class TestOpencodeMCP:
         # opencode's key is 'environment', not 'env'.
         assert server["environment"] == {"MY_VAR": "my_value", "OTHER": "x"}
         assert "env" not in server
+
+    def test_install_merges_and_uninstall_restores_existing_config(self, tmp_path: Path):
+        target = tmp_path / "opencode.json"
+        original = b'{"theme":"dark","mcp":{"existing":{"type":"local","command":["user"]}}}\n'
+        target.write_bytes(original)
+        agent = self._agent()
+
+        agent.install_mcp_servers(tmp_path, [_spec()])
+
+        config = json.loads(target.read_text())
+        assert config["theme"] == "dark"
+        assert config["mcp"]["existing"] == {"type": "local", "command": ["user"]}
+        assert "vibesys-issues" in config["mcp"]
+
+        agent.uninstall_mcp_servers(tmp_path, [_spec()])
+        assert target.read_bytes() == original
 
     def test_uninstall_removes_file(self, tmp_path: Path):
         agent = self._agent()
