@@ -5,7 +5,7 @@ import (
 	"vibesys/microservice-evaluator/telemetry"
 )
 
-const ResultSchemaVersion = 3
+const ResultSchemaVersion = 4
 
 type Distribution struct {
 	Count int      `json:"count"`
