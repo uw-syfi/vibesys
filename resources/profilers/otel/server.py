@@ -2,24 +2,25 @@
 
 import json
 import math
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, model_validator
 
 
 class LatencyRow(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str
-    count: int = Field(gt=0)
-    error_count: int = Field(ge=0)
-    mean_ms: float = Field(ge=0)
-    p50_ms: float = Field(ge=0)
-    p95_ms: float = Field(ge=0)
-    p99_ms: float = Field(ge=0)
-    max_ms: float = Field(ge=0)
+    name: str = Field(min_length=1)
+    count: StrictInt = Field(gt=0)
+    error_count: StrictInt = Field(ge=0)
+    mean_ms: StrictFloat = Field(ge=0)
+    p50_ms: StrictFloat = Field(ge=0)
+    p95_ms: StrictFloat = Field(ge=0)
+    p99_ms: StrictFloat = Field(ge=0)
+    max_ms: StrictFloat = Field(ge=0)
 
     @model_validator(mode="after")
     def validate_distribution(self) -> "LatencyRow":
@@ -39,28 +40,47 @@ class MeasurementWindow(BaseModel):
     start: str
     end: str
 
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "MeasurementWindow":
+        start = _parse_timestamp(self.start, "start")
+        end = _parse_timestamp(self.end, "end")
+        if end < start:
+            raise ValueError("measurement window end must not precede start")
+        return self
+
 
 class TelemetryReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal[1]
-    source: str
+    source: str = Field(min_length=1)
     collected_at: str
-    workload_name: str
-    workload_hash: str
+    workload_name: str = Field(min_length=1)
+    workload_hash: str = Field(min_length=1)
     measurement_windows: list[MeasurementWindow]
-    span_count: int = Field(gt=0)
-    error_count: int = Field(ge=0)
+    span_count: StrictInt = Field(gt=0)
+    error_count: StrictInt = Field(ge=0)
     services_by_p95: list[LatencyRow]
     spans_by_p95: list[LatencyRow]
     datastores_by_p95: list[LatencyRow] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_report(self) -> "TelemetryReport":
+        _parse_timestamp(self.collected_at, "collected_at")
         if not self.measurement_windows:
             raise ValueError("measurement_windows must not be empty")
         if self.error_count > self.span_count:
             raise ValueError("error_count must not exceed span_count")
+        for label, rows in (
+            ("services_by_p95", self.services_by_p95),
+            ("spans_by_p95", self.spans_by_p95),
+            ("datastores_by_p95", self.datastores_by_p95),
+        ):
+            names = [row.name for row in rows]
+            if len(names) != len(set(names)):
+                raise ValueError(f"{label} contains duplicate names")
+        if not self.services_by_p95 or not self.spans_by_p95:
+            raise ValueError("services_by_p95 and spans_by_p95 must not be empty")
         return self
 
 
@@ -69,6 +89,7 @@ def load_report(path: str) -> TelemetryReport:
 
 
 def summarize_report(path: str, *, top: int = 10) -> dict:
+    _validate_top(top)
     report = load_report(path)
     return {
         "source": report.source,
@@ -87,10 +108,9 @@ def summarize_report(path: str, *, top: int = 10) -> dict:
 def compare_reports(before_path: str, after_path: str, *, top: int = 10) -> dict:
     before = load_report(before_path)
     after = load_report(after_path)
-    if top <= 0:
-        raise ValueError("top must be positive")
+    _validate_top(top)
     if _report_identity(before) != _report_identity(after):
-        raise ValueError("reports must have matching workload identity and measurement windows")
+        raise ValueError("reports must have matching workload identity and window count")
     return {
         "before_span_count": before.span_count,
         "after_span_count": after.span_count,
@@ -106,8 +126,25 @@ def _report_identity(report: TelemetryReport) -> tuple:
     return (
         report.workload_name,
         report.workload_hash,
-        tuple((window.start, window.end) for window in report.measurement_windows),
+        len(report.measurement_windows),
     )
+
+
+def _parse_timestamp(value: str, label: str) -> datetime:
+    if not value:
+        raise ValueError(f"measurement window {label} must not be empty")
+    try:
+        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"measurement window {label} must be an RFC3339 timestamp") from exc
+    if timestamp.tzinfo is None:
+        raise ValueError(f"measurement window {label} must include a timezone")
+    return timestamp
+
+
+def _validate_top(top: int) -> None:
+    if top <= 0:
+        raise ValueError("top must be positive")
 
 
 def _compare_rows(
@@ -142,8 +179,11 @@ def find_reports(root: str = ".") -> list[str]:
         except (OSError, json.JSONDecodeError):
             continue
         if isinstance(payload, dict) and payload.get("schema_version") == 1:
-            if "services_by_p95" in payload and "spans_by_p95" in payload:
-                reports.append(path.as_posix())
+            try:
+                TelemetryReport.model_validate(payload)
+            except ValueError:
+                continue
+            reports.append(path.as_posix())
     return sorted(reports)
 
 

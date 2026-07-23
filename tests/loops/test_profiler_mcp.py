@@ -202,9 +202,7 @@ class TestOtelMcpServer:
             before.as_posix(),
         ]
 
-    @pytest.mark.parametrize(
-        "identity_field", ["workload_name", "workload_hash", "measurement_windows"]
-    )
+    @pytest.mark.parametrize("identity_field", ["workload_name", "workload_hash"])
     def test_compare_rejects_incompatible_reports(self, otel_server_mod, tmp_path, identity_field):
         before = tmp_path / "before.json"
         after = tmp_path / "after.json"
@@ -212,16 +210,26 @@ class TestOtelMcpServer:
         after_report = _otel_report(12.0)
         if identity_field == "workload_name":
             after_report[identity_field] = "different"
-        elif identity_field == "workload_hash":
-            after_report[identity_field] = "different"
         else:
-            after_report[identity_field] = [
-                {"start": "2026-07-22T12:01:00Z", "end": "2026-07-22T12:01:01Z"}
-            ]
+            after_report[identity_field] = "different"
         after.write_text(json.dumps(after_report))
 
         with pytest.raises(ValueError, match="matching workload identity"):
             otel_server_mod.compare_reports(str(before), str(after))
+
+    def test_compare_allows_run_specific_measurement_timestamps(self, otel_server_mod, tmp_path):
+        before = tmp_path / "before.json"
+        after = tmp_path / "after.json"
+        before.write_text(json.dumps(_otel_report(20.0)))
+        after_report = _otel_report(12.0)
+        after_report["measurement_windows"] = [
+            {"start": "2026-07-23T12:00:00Z", "end": "2026-07-23T12:00:01Z"}
+        ]
+        after.write_text(json.dumps(after_report))
+
+        comparison = otel_server_mod.compare_reports(str(before), str(after))
+
+        assert comparison["service_p95_changes"][0]["delta_p95_ms"] == -8.0
 
     def test_load_report_rejects_invalid_aggregate_error_count(self, otel_server_mod, tmp_path):
         report = _otel_report(20.0)
@@ -232,6 +240,34 @@ class TestOtelMcpServer:
 
         with pytest.raises(ValueError, match="error_count"):
             otel_server_mod.load_report(str(path))
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            lambda report: report.update({"workload_name": ""}),
+            lambda report: report.update({"services_by_p95": []}),
+            lambda report: report["spans_by_p95"].append(report["spans_by_p95"][0]),
+            lambda report: report["measurement_windows"].__setitem__(
+                0, {"start": "not-a-timestamp", "end": "2026-07-22T12:00:01Z"}
+            ),
+        ],
+        ids=["empty-identity", "empty-services", "duplicate-spans", "invalid-window"],
+    )
+    def test_load_report_rejects_malformed_contract(self, otel_server_mod, tmp_path, mutate):
+        report = _otel_report(20.0)
+        mutate(report)
+        path = tmp_path / "invalid.json"
+        path.write_text(json.dumps(report))
+
+        with pytest.raises(ValueError):
+            otel_server_mod.load_report(str(path))
+
+    def test_summary_rejects_non_positive_top(self, otel_server_mod, tmp_path):
+        path = tmp_path / "report.json"
+        path.write_text(json.dumps(_otel_report(20.0)))
+
+        with pytest.raises(ValueError, match="top must be positive"):
+            otel_server_mod.summarize_report(str(path), top=0)
 
 
 def _otel_report(p95: float) -> dict:
