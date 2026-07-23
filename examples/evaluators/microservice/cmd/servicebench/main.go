@@ -30,6 +30,7 @@ import (
 	"vibesys/microservice-evaluator/config"
 	"vibesys/microservice-evaluator/drivers/httpdriver"
 	"vibesys/microservice-evaluator/engine"
+	"vibesys/microservice-evaluator/fsutil"
 	"vibesys/microservice-evaluator/lifecycle"
 	"vibesys/microservice-evaluator/registry"
 	"vibesys/microservice-evaluator/telemetry"
@@ -373,7 +374,7 @@ func run() (resultErr error) {
 		return fmt.Errorf("encode result: %w", err)
 	}
 	if outputJSON != "" {
-		if err := writeAtomic(outputJSON, append(encoded, '\n')); err != nil {
+		if err := fsutil.WriteFileAtomic(outputJSON, append(encoded, '\n'), 0o600); err != nil {
 			return err
 		}
 	}
@@ -578,7 +579,7 @@ func runAccuracy(
 		return fmt.Errorf("encode accuracy result: %w", err)
 	}
 	if outputJSON != "" {
-		if err := writeAtomic(outputJSON, append(encoded, '\n')); err != nil {
+		if err := fsutil.WriteFileAtomic(outputJSON, append(encoded, '\n'), 0o600); err != nil {
 			return err
 		}
 	}
@@ -639,27 +640,6 @@ func writeNDJSON(path string, observations []api.Observation) error {
 	}
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close raw output %s: %w", path, err)
-	}
-	return nil
-}
-
-func writeAtomic(path string, data []byte) error {
-	directory := filepath.Dir(path)
-	temporary, err := os.CreateTemp(directory, ".servicebench-result-*")
-	if err != nil {
-		return fmt.Errorf("create temporary result in %s: %w", directory, err)
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if _, err := temporary.Write(data); err != nil {
-		temporary.Close()
-		return fmt.Errorf("write temporary result: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close temporary result: %w", err)
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return fmt.Errorf("replace result %s: %w", path, err)
 	}
 	return nil
 }

@@ -6,8 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"vibesys/microservice-evaluator/fsutil"
 	"vibesys/microservice-evaluator/telemetry"
 )
 
@@ -59,29 +59,8 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("encode report: %w", err)
 	}
-	if err := writeAtomic(outputPath, append(encoded, '\n')); err != nil {
+	if err := fsutil.WriteFileAtomic(outputPath, append(encoded, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write report: %w", err)
 	}
 	return nil
-}
-
-func writeAtomic(path string, data []byte) error {
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".otel-report-*.json")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if _, err := temporary.Write(data); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Chmod(0o644); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporaryPath, path)
 }
