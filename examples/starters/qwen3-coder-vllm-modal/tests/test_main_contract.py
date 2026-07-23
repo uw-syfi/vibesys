@@ -1,3 +1,4 @@
+import asyncio
 import json
 import subprocess
 import sys
@@ -95,6 +96,100 @@ def test_completion_sse_chunk_shape():
     assert line.startswith("data: ")
     assert line.endswith("\n\n")
     assert json.loads(line[len("data: ") :])["choices"][0]["text"] == "Paris"
+
+
+def test_completion_stream_records_token_prompt_prefix_at_admission(monkeypatch):
+    class FakeSamplingParams:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeTokenizer:
+        def encode(self, text, add_special_tokens=False):
+            assert add_special_tokens is False
+            return [99] if text == "x" else []
+
+    class FakeChoice:
+        text = "x"
+        finish_reason = None
+
+    class FakeOutput:
+        outputs = [FakeChoice()]
+
+    class FakeEngine:
+        def __init__(self):
+            self.prompts = []
+
+        async def generate(self, prompt, sampling_params, request_id):
+            self.prompts.append(prompt)
+            yield FakeOutput()
+
+    class FakeServer:
+        tokenizer = FakeTokenizer()
+        engine = FakeEngine()
+        cache_block_size = 16
+        _completed_prompt_prefixes = set()
+        _prompt_arg = main.Server._prompt_arg.__wrapped__
+        _sampling_params = main.Server._sampling_params.__wrapped__
+        _prompt_cache_hit_tokens = main.Server._prompt_cache_hit_tokens.__wrapped__
+        _record_prompt_cache_prefixes = main.Server._record_prompt_cache_prefixes.__wrapped__
+
+    monkeypatch.setitem(
+        sys.modules,
+        "vllm",
+        type("FakeVllm", (), {"SamplingParams": FakeSamplingParams}),
+    )
+
+    server = FakeServer()
+
+    async def close_after_first_data_chunk(prompt_ids):
+        stream = main.Server._completion_stream(
+            server,
+            {
+                "prompt": prompt_ids,
+                "max_tokens": 1,
+                "stream": True,
+                "return_token_ids": True,
+                "stream_options": {"include_usage": True},
+            },
+        )
+        try:
+            async for line in stream:
+                payload = json.loads(line[len("data: ") :])
+                assert "usage" not in payload
+                return
+        finally:
+            await stream.aclose()
+        raise AssertionError("stream did not emit a data chunk")
+
+    async def final_usage_for(prompt_ids):
+        stream = main.Server._completion_stream(
+            server,
+            {
+                "prompt": prompt_ids,
+                "max_tokens": 1,
+                "stream": True,
+                "return_token_ids": True,
+                "stream_options": {"include_usage": True},
+            },
+        )
+        try:
+            async for line in stream:
+                payload = json.loads(line[len("data: ") :])
+                if "usage" in payload:
+                    return payload["usage"]
+        finally:
+            await stream.aclose()
+        raise AssertionError("stream did not emit final usage")
+
+    prompt_ids = list(range(512))
+    asyncio.run(close_after_first_data_chunk(prompt_ids))
+    second = asyncio.run(final_usage_for(prompt_ids))
+
+    assert second["prompt_tokens_details"]["cached_tokens"] == 496
+    assert server.engine.prompts == [
+        {"prompt_token_ids": prompt_ids},
+        {"prompt_token_ids": prompt_ids},
+    ]
 
 
 def test_starter_overlays_local_vllm_source_onto_compiled_wheel():

@@ -28,6 +28,7 @@ VLLM_MAX_NUM_SEQS = 128
 VLLM_MAX_NUM_BATCHED_TOKENS = 32768
 VLLM_MAX_MODEL_LEN = 262144
 VLLM_MAX_COMPLETION_TOKENS = 4096
+VLLM_GPU_MEMORY_UTILIZATION = 0.95
 MODAL_FUNCTION_TIMEOUT = 3600
 MODAL_STARTUP_TIMEOUT = 1800
 _VLLM_SOURCE_OVERLAY_COMMAND = (
@@ -82,6 +83,7 @@ image = (
             "VLLM_USE_DEEP_GEMM": "0",
             "VLLM_MOE_USE_DEEP_GEMM": "0",
             "VLLM_DEEP_GEMM_WARMUP": "skip",
+            "ENABLE_PROMPT_TOKENS_DETAILS": "1",
             "HF_HUB_OFFLINE": "1",
             "TRANSFORMERS_OFFLINE": "1",
         }
@@ -108,6 +110,10 @@ def _normalize_stop(stop: Any) -> str | list[str] | None:
     if isinstance(stop, list) and all(isinstance(item, str) for item in stop):
         return stop
     return None
+
+
+def _is_integer_token_prompt(prompt: Any) -> bool:
+    return isinstance(prompt, list) and all(isinstance(tok, int) for tok in prompt)
 
 
 def _usage(
@@ -232,7 +238,7 @@ def _vllm_engine_kwargs(attention_backend: Any | None = None) -> dict[str, Any]:
         "max_model_len": VLLM_MAX_MODEL_LEN,
         "enable_prefix_caching": True,
         "prefix_caching_hash_algo": "sha256",
-        "gpu_memory_utilization": 0.92,
+        "gpu_memory_utilization": VLLM_GPU_MEMORY_UTILIZATION,
         "max_num_seqs": VLLM_MAX_NUM_SEQS,
         "max_num_batched_tokens": VLLM_MAX_NUM_BATCHED_TOKENS,
         "enable_chunked_prefill": True,
@@ -550,9 +556,13 @@ class Server:
         }
 
     async def _completion_stream(self, body: dict[str, Any]) -> AsyncIterator[str]:
-        prompt, prompt_token_ids = self._prompt_arg(body.get("prompt"))
+        raw_prompt = body.get("prompt")
+        is_token_id_prompt = _is_integer_token_prompt(raw_prompt)
+        prompt, prompt_token_ids = self._prompt_arg(raw_prompt)
         prompt_tokens = len(prompt_token_ids)
         fallback_cached_tokens = self._prompt_cache_hit_tokens(prompt_token_ids)
+        if is_token_id_prompt:
+            self._record_prompt_cache_prefixes(prompt_token_ids)
         sampling_params = self._sampling_params(body)
         request_id = _request_id("cmpl")
         created = _now()

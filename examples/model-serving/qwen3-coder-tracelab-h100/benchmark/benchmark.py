@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--url", default=os.environ.get("VIBESYS_SERVICE_URL"))
     parser.add_argument("--model", default="Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8")
     parser.add_argument("--output-json", default=None)
-    parser.add_argument("--max-sessions", type=int, default=16)
+    parser.add_argument("--max-sessions", type=int, default=8)
     parser.add_argument("--max-active-sessions", type=int, default=8)
     parser.add_argument("--arrival-rate", type=float, default=2.0)
     parser.add_argument("--provider", choices=["claude", "codex", "all"], default="all")
