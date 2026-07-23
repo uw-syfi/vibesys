@@ -1,11 +1,12 @@
 """MCP tools for normalized servicebench OpenTelemetry reports."""
 
 import json
+import math
 from pathlib import Path
 from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class LatencyRow(BaseModel):
@@ -19,6 +20,17 @@ class LatencyRow(BaseModel):
     p95_ms: float = Field(ge=0)
     p99_ms: float = Field(ge=0)
     max_ms: float = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_distribution(self) -> "LatencyRow":
+        if self.error_count > self.count:
+            raise ValueError("error_count must not exceed count")
+        values = (self.mean_ms, self.p50_ms, self.p95_ms, self.p99_ms, self.max_ms)
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("latency values must be finite")
+        if not (self.p50_ms <= self.p95_ms <= self.p99_ms <= self.max_ms):
+            raise ValueError("latency percentiles must be ordered")
+        return self
 
 
 class MeasurementWindow(BaseModel):
@@ -42,6 +54,14 @@ class TelemetryReport(BaseModel):
     services_by_p95: list[LatencyRow]
     spans_by_p95: list[LatencyRow]
     datastores_by_p95: list[LatencyRow] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_report(self) -> "TelemetryReport":
+        if not self.measurement_windows:
+            raise ValueError("measurement_windows must not be empty")
+        if self.error_count > self.span_count:
+            raise ValueError("error_count must not exceed span_count")
+        return self
 
 
 def load_report(path: str) -> TelemetryReport:
@@ -67,31 +87,50 @@ def summarize_report(path: str, *, top: int = 10) -> dict:
 def compare_reports(before_path: str, after_path: str, *, top: int = 10) -> dict:
     before = load_report(before_path)
     after = load_report(after_path)
-    before_rows = {row.name: row for row in before.services_by_p95}
+    if top <= 0:
+        raise ValueError("top must be positive")
+    if _report_identity(before) != _report_identity(after):
+        raise ValueError("reports must have matching workload identity and measurement windows")
+    return {
+        "before_span_count": before.span_count,
+        "after_span_count": after.span_count,
+        "service_p95_changes": _compare_rows(before.services_by_p95, after.services_by_p95, top),
+        "span_p95_changes": _compare_rows(before.spans_by_p95, after.spans_by_p95, top),
+        "datastore_p95_changes": _compare_rows(
+            before.datastores_by_p95, after.datastores_by_p95, top
+        ),
+    }
+
+
+def _report_identity(report: TelemetryReport) -> tuple:
+    return (
+        report.workload_name,
+        report.workload_hash,
+        tuple((window.start, window.end) for window in report.measurement_windows),
+    )
+
+
+def _compare_rows(
+    before_rows: list[LatencyRow], after_rows: list[LatencyRow], top: int
+) -> list[dict]:
+    before_by_name = {row.name: row for row in before_rows}
     changes = []
-    for row in after.services_by_p95:
-        previous = before_rows.get(row.name)
+    for row in after_rows:
+        previous = before_by_name.get(row.name)
         if previous is None:
             continue
+        delta = row.p95_ms - previous.p95_ms
         changes.append(
             {
                 "name": row.name,
                 "before_p95_ms": previous.p95_ms,
                 "after_p95_ms": row.p95_ms,
-                "delta_p95_ms": row.p95_ms - previous.p95_ms,
-                "delta_percent": (
-                    (row.p95_ms - previous.p95_ms) / previous.p95_ms * 100
-                    if previous.p95_ms > 0
-                    else None
-                ),
+                "delta_p95_ms": delta,
+                "delta_percent": delta / previous.p95_ms * 100 if previous.p95_ms > 0 else None,
             }
         )
     changes.sort(key=lambda item: abs(item["delta_p95_ms"]), reverse=True)
-    return {
-        "before_span_count": before.span_count,
-        "after_span_count": after.span_count,
-        "service_p95_changes": changes[:top],
-    }
+    return changes[:top]
 
 
 def find_reports(root: str = ".") -> list[str]:
@@ -123,7 +162,7 @@ def build_server() -> FastMCP:
 
     @mcp.tool()
     def compare(before_path: str, after_path: str, top: int = 10) -> dict:
-        """Compare service p95 latency between two normalized OTel reports."""
+        """Compare p95 latency for services, spans, and datastores."""
         return compare_reports(before_path, after_path, top=top)
 
     return mcp

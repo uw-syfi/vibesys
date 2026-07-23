@@ -193,10 +193,45 @@ class TestOtelMcpServer:
             "delta_p95_ms": -8.0,
             "delta_percent": -40.0,
         }
+        assert comparison["span_p95_changes"][0]["name"] == "frontend:GET /hotels"
+        assert comparison["span_p95_changes"][0]["delta_p95_ms"] == -8.0
+        assert comparison["datastore_p95_changes"][0]["name"] == "frontend:db"
+        assert comparison["datastore_p95_changes"][0]["delta_p95_ms"] == -8.0
         assert otel_server_mod.find_reports(str(tmp_path)) == [
             after.as_posix(),
             before.as_posix(),
         ]
+
+    @pytest.mark.parametrize(
+        "identity_field", ["workload_name", "workload_hash", "measurement_windows"]
+    )
+    def test_compare_rejects_incompatible_reports(self, otel_server_mod, tmp_path, identity_field):
+        before = tmp_path / "before.json"
+        after = tmp_path / "after.json"
+        before.write_text(json.dumps(_otel_report(20.0)))
+        after_report = _otel_report(12.0)
+        if identity_field == "workload_name":
+            after_report[identity_field] = "different"
+        elif identity_field == "workload_hash":
+            after_report[identity_field] = "different"
+        else:
+            after_report[identity_field] = [
+                {"start": "2026-07-22T12:01:00Z", "end": "2026-07-22T12:01:01Z"}
+            ]
+        after.write_text(json.dumps(after_report))
+
+        with pytest.raises(ValueError, match="matching workload identity"):
+            otel_server_mod.compare_reports(str(before), str(after))
+
+    def test_load_report_rejects_invalid_aggregate_error_count(self, otel_server_mod, tmp_path):
+        report = _otel_report(20.0)
+        report["span_count"] = 1
+        report["error_count"] = 2
+        path = tmp_path / "invalid.json"
+        path.write_text(json.dumps(report))
+
+        with pytest.raises(ValueError, match="error_count"):
+            otel_server_mod.load_report(str(path))
 
 
 def _otel_report(p95: float) -> dict:
@@ -211,6 +246,7 @@ def _otel_report(p95: float) -> dict:
         "max_ms": p95 + 2,
     }
     span = {**row, "name": "frontend:GET /hotels"}
+    datastore = {**row, "name": "frontend:db"}
     return {
         "schema_version": 1,
         "source": "otlp-json",
@@ -222,6 +258,7 @@ def _otel_report(p95: float) -> dict:
         "error_count": 0,
         "services_by_p95": [row],
         "spans_by_p95": [span],
+        "datastores_by_p95": [datastore],
     }
 
 
