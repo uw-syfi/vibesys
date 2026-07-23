@@ -120,6 +120,83 @@ func TestSummarizeOTLPReadsAllNDJSONDocuments(t *testing.T) {
 	}
 }
 
+func TestSummarizeOTLPReadsBOMPrefixedDocument(t *testing.T) {
+	start := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	request := CollectionRequest{
+		SchemaVersion: RequestSchemaVersion,
+		WorkloadName:  "hotel",
+		WorkloadHash:  "abc123",
+		Windows: []MeasurementWindow{{
+			Start: start,
+			End:   start.Add(time.Second),
+		}},
+	}
+	document, err := json.Marshal(map[string]any{
+		"resourceSpans": []any{resourceSpans("frontend", []map[string]any{
+			span("GET /hotels", start.Add(100*time.Millisecond), 20*time.Millisecond, false, false),
+		})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "spans.json")
+	// A leading UTF-8 BOM must not prevent the document from being read.
+	if err := os.WriteFile(path, append([]byte("\xef\xbb\xbf"), document...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := SummarizeOTLP(request, []string{path}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.SpanCount != 1 || report.Spans[0].Name != "frontend:GET /hotels" {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestSummarizeOTLPReadsLargeNDJSONLines(t *testing.T) {
+	start := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	request := CollectionRequest{
+		SchemaVersion: RequestSchemaVersion,
+		WorkloadName:  "hotel",
+		WorkloadHash:  "abc123",
+		Windows: []MeasurementWindow{{
+			Start: start,
+			End:   start.Add(time.Second),
+		}},
+	}
+	// A single ExportTraceServiceRequest can exceed the previous 16MB NDJSON
+	// line cap. Pad the document with a large ignored attribute so the encoded
+	// line is well over that limit, then confirm the in-window span still reads.
+	padding := strings.Repeat("x", 20*1024*1024)
+	measured := span("GET /hotels", start.Add(100*time.Millisecond), 20*time.Millisecond, false, false)
+	measured["attributes"] = []any{map[string]any{
+		"key":   "padding",
+		"value": map[string]any{"stringValue": padding},
+	}}
+	document, err := json.Marshal(map[string]any{
+		"resourceSpans": []any{resourceSpans("frontend", []map[string]any{measured})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document) <= 16*1024*1024 {
+		t.Fatalf("test document is only %d bytes; expected > 16MB", len(document))
+	}
+	path := filepath.Join(t.TempDir(), "spans.ndjson")
+	if err := os.WriteFile(path, append(document, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := SummarizeOTLP(request, []string{path}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.SpanCount != 1 || report.Spans[0].Name != "frontend:GET /hotels" {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
 func resourceSpans(service string, spans []map[string]any) map[string]any {
 	rawSpans := make([]any, 0, len(spans))
 	for _, item := range spans {

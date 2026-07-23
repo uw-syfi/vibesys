@@ -1,9 +1,9 @@
 package telemetry
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -97,47 +97,31 @@ func readJSONDocuments(path string) ([]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read OTLP JSON %s: %w", path, err)
 	}
-	var document any
-	if err := decodeJSON(data, &document); err == nil {
-		return []any{document}, nil
-	}
+	// Some exporters and editors prefix a UTF-8 byte-order mark; encoding/json
+	// does not skip it, so strip a single leading BOM before decoding.
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+	// A single streaming decoder reads OTLP JSON in every layout the contract
+	// accepts: one document, whitespace- or newline-delimited documents, and
+	// concatenated documents. It imposes no per-line size limit, so a single
+	// large ExportTraceServiceRequest is read the same whether or not it is
+	// wrapped in NDJSON.
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
 	var documents []any
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buffer := make([]byte, 64*1024)
-	scanner.Buffer(buffer, 16*1024*1024)
-	for line := 1; scanner.Scan(); line++ {
-		if len(bytes.TrimSpace(scanner.Bytes())) == 0 {
-			continue
+	for {
+		var document any
+		if err := decoder.Decode(&document); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("parse OTLP JSON %s: %w", path, err)
 		}
-		var item any
-		if err := decodeJSON(scanner.Bytes(), &item); err != nil {
-			return nil, fmt.Errorf("parse OTLP JSON %s line %d: %w", path, line, err)
-		}
-		documents = append(documents, item)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan OTLP JSON %s: %w", path, err)
+		documents = append(documents, document)
 	}
 	if len(documents) == 0 {
 		return nil, fmt.Errorf("OTLP JSON %s contains no documents", path)
 	}
 	return documents, nil
-}
-
-func decodeJSON(data []byte, target any) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("multiple JSON documents")
-		}
-		return err
-	}
-	return nil
 }
 
 func visitResourceSpans(value any, visit func(string, map[string]any)) {
