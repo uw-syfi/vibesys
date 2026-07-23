@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"math"
 	"strconv"
 	"testing"
 	"time"
@@ -15,6 +16,43 @@ func TestValidateReportRejectsInvalidAggregateErrorCount(t *testing.T) {
 				t.Fatalf("accepted aggregate error_count=%d", errorCount)
 			}
 		})
+	}
+}
+
+func TestValidateReportRejectsNonFiniteOrUnorderedLatency(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*LatencyRow)
+	}{
+		{"unordered p50 above p95", func(row *LatencyRow) { *row.P50MS = *row.P95MS + 1 }},
+		{"unordered p99 above max", func(row *LatencyRow) { *row.P99MS = *row.MaxMS + 1 }},
+		{"negative mean", func(row *LatencyRow) { *row.MeanMS = -1 }},
+		{"nan p95", func(row *LatencyRow) { *row.P95MS = math.NaN() }},
+		{"inf max", func(row *LatencyRow) { *row.MaxMS = math.Inf(1) }},
+		{"missing p50", func(row *LatencyRow) { row.P50MS = nil }},
+		{"invalid row count", func(row *LatencyRow) { row.Count = 0 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			report := validReport()
+			row := report.Services[0]
+			mean, p50, p95, p99, maximum := *row.MeanMS, *row.P50MS, *row.P95MS, *row.P99MS, *row.MaxMS
+			row.MeanMS, row.P50MS, row.P95MS = &mean, &p50, &p95
+			row.P99MS, row.MaxMS = &p99, &maximum
+			test.mutate(&row)
+			report.Services = []LatencyRow{row}
+			if err := ValidateReport(report); err == nil {
+				t.Fatalf("accepted latency row: %s", test.name)
+			}
+		})
+	}
+}
+
+func TestValidateReportRejectsDuplicateRowNames(t *testing.T) {
+	report := validReport()
+	report.Services = append(report.Services, report.Services[0])
+	if err := ValidateReport(report); err == nil {
+		t.Fatal("accepted duplicate service row names")
 	}
 }
 

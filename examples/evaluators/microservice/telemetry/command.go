@@ -66,6 +66,11 @@ func (collector CommandCollector) Collect(
 	arguments := append([]string(nil), collector.Command[1:]...)
 	arguments = append(arguments, "--request-json", requestPath, "--output-json", outputPath)
 	command := exec.CommandContext(commandContext, collector.Command[0], arguments...)
+	// CombinedOutput waits for the collector's output pipe to close, which a
+	// killed collector's surviving child processes can otherwise hold open long
+	// past the timeout. WaitDelay bounds that cleanup so a configured timeout
+	// actually caps wall-clock time.
+	command.WaitDelay = 10 * time.Second
 	output, err := command.CombinedOutput()
 	if err != nil {
 		if commandContext.Err() != nil {
@@ -75,6 +80,10 @@ func (collector CommandCollector) Collect(
 	}
 	data, err := os.ReadFile(outputPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return Report{}, fmt.Errorf(
+				"telemetry collector did not write a telemetry report to %s", outputPath)
+		}
 		return Report{}, fmt.Errorf("read telemetry report: %w", err)
 	}
 	var report Report

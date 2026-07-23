@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -118,6 +119,95 @@ func TestCommandCollectorDoesNotReuseStaleReport(t *testing.T) {
 	if err == nil {
 		t.Fatal("collector reused a stale telemetry report")
 	}
+}
+
+func TestCommandCollectorFailsClosedOnCommandError(t *testing.T) {
+	directory := t.TempDir()
+	script := filepath.Join(directory, "collector.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho boom >&2\nexit 3\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := collectWithScript(t, directory, script, time.Second)
+	if err == nil {
+		t.Fatal("accepted a failed telemetry collector")
+	}
+	if !strings.Contains(err.Error(), "collector failed") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCommandCollectorFailsClosedOnTimeout(t *testing.T) {
+	directory := t.TempDir()
+	script := filepath.Join(directory, "collector.sh")
+	// exec replaces the shell so the timeout kill reaches sleep directly and the
+	// output pipe closes promptly, keeping the test fast.
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := collectWithScript(t, directory, script, 100*time.Millisecond)
+	if err == nil {
+		t.Fatal("accepted a telemetry collector that exceeded its timeout")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCommandCollectorFailsClosedOnMalformedReport(t *testing.T) {
+	directory := t.TempDir()
+	script := filepath.Join(directory, "collector.sh")
+	scriptBody := `#!/bin/sh
+set -eu
+output=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --request-json) shift 2 ;;
+    --output-json) output="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf 'not json' >"$output"
+`
+	if err := os.WriteFile(script, []byte(scriptBody), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := collectWithScript(t, directory, script, time.Second)
+	if err == nil {
+		t.Fatal("accepted a malformed telemetry report")
+	}
+	if !strings.Contains(err.Error(), "decode telemetry report") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCommandCollectorReportsMissingReport(t *testing.T) {
+	directory := t.TempDir()
+	script := filepath.Join(directory, "collector.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := collectWithScript(t, directory, script, time.Second)
+	if err == nil {
+		t.Fatal("accepted a collector that wrote no report")
+	}
+	if !strings.Contains(err.Error(), "did not write a telemetry report") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func collectWithScript(t *testing.T, directory, script string, timeout time.Duration) (Report, error) {
+	t.Helper()
+	start := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	return (CommandCollector{
+		Command:    []string{script},
+		OutputPath: filepath.Join(directory, "report.json"),
+		Timeout:    timeout,
+	}).Collect(context.Background(), CollectionRequest{
+		SchemaVersion: RequestSchemaVersion,
+		WorkloadName:  "test",
+		WorkloadHash:  "abc",
+		Windows:       []MeasurementWindow{{Start: start, End: start.Add(time.Second)}},
+	})
 }
 
 func TestValidateReportRequestRejectsDifferentRun(t *testing.T) {
