@@ -184,19 +184,19 @@ class TestOtelMcpServer:
         summary = otel_server_mod.summarize_report(str(after))
         comparison = otel_server_mod.compare_reports(str(before), str(after))
 
-        assert summary["span_count"] == 4
-        assert summary["services_by_p95"][0]["name"] == "frontend"
-        assert comparison["service_p95_changes"][0] == {
+        assert summary.span_count == 4
+        assert summary.services_by_p95[0].name == "frontend"
+        assert comparison.service_p95_changes[0].model_dump() == {
             "name": "frontend",
             "before_p95_ms": 20.0,
             "after_p95_ms": 12.0,
             "delta_p95_ms": -8.0,
             "delta_percent": -40.0,
         }
-        assert comparison["span_p95_changes"][0]["name"] == "frontend:GET /hotels"
-        assert comparison["span_p95_changes"][0]["delta_p95_ms"] == -8.0
-        assert comparison["datastore_p95_changes"][0]["name"] == "frontend:db"
-        assert comparison["datastore_p95_changes"][0]["delta_p95_ms"] == -8.0
+        assert comparison.span_p95_changes[0].name == "frontend:GET /hotels"
+        assert comparison.span_p95_changes[0].delta_p95_ms == -8.0
+        assert comparison.datastore_p95_changes[0].name == "frontend:db"
+        assert comparison.datastore_p95_changes[0].delta_p95_ms == -8.0
         assert otel_server_mod.find_reports(str(tmp_path)) == [
             after.as_posix(),
             before.as_posix(),
@@ -226,7 +226,7 @@ class TestOtelMcpServer:
 
         comparison = otel_server_mod.compare_reports(str(before), str(after))
 
-        assert comparison["service_p95_changes"][0]["delta_p95_ms"] == -8.0
+        assert comparison.service_p95_changes[0].delta_p95_ms == -8.0
 
     def test_load_report_rejects_invalid_aggregate_error_count(self, otel_server_mod, tmp_path):
         report = _otel_report(20.0)
@@ -323,21 +323,21 @@ class TestOtelMcpServer:
         before.write_text(json.dumps(before_report))
         after.write_text(json.dumps(after_report))
 
-        changes = otel_server_mod.compare_reports(str(before), str(after))["service_p95_changes"]
-        by_name = {change["name"]: change for change in changes}
+        changes = otel_server_mod.compare_reports(str(before), str(after)).service_p95_changes
+        by_name = {change.name: change for change in changes}
 
         assert set(by_name) == {"frontend", "checkout", "newsvc"}
         # A row new to the after report is surfaced with no baseline...
-        assert by_name["newsvc"]["before_p95_ms"] is None
-        assert by_name["newsvc"]["after_p95_ms"] == 500.0
-        assert by_name["newsvc"]["delta_p95_ms"] is None
-        assert by_name["newsvc"]["delta_percent"] is None
+        assert by_name["newsvc"].before_p95_ms is None
+        assert by_name["newsvc"].after_p95_ms == 500.0
+        assert by_name["newsvc"].delta_p95_ms is None
+        assert by_name["newsvc"].delta_percent is None
         # ...and a row absent from the after ranking is surfaced too.
-        assert by_name["checkout"]["before_p95_ms"] == 8.0
-        assert by_name["checkout"]["after_p95_ms"] is None
+        assert by_name["checkout"].before_p95_ms == 8.0
+        assert by_name["checkout"].after_p95_ms is None
         # The largest-magnitude row ranks first even without a delta.
-        assert changes[0]["name"] == "newsvc"
-        assert by_name["frontend"]["delta_p95_ms"] == 0.0
+        assert changes[0].name == "newsvc"
+        assert by_name["frontend"].delta_p95_ms == 0.0
 
 
 def _otel_report(p95: float) -> dict:
