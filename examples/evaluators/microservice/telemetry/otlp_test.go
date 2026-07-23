@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -75,6 +76,47 @@ func TestSummarizeOTLPRejectsMissingMeasurementSpans(t *testing.T) {
 
 	if _, err := SummarizeOTLP(request, []string{path}, 10); err == nil {
 		t.Fatal("accepted telemetry without measurement-window spans")
+	}
+}
+
+func TestSummarizeOTLPReadsAllNDJSONDocuments(t *testing.T) {
+	start := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	request := CollectionRequest{
+		SchemaVersion: RequestSchemaVersion,
+		WorkloadName:  "hotel",
+		WorkloadHash:  "abc123",
+		Windows: []MeasurementWindow{{
+			Start: start,
+			End:   start.Add(time.Second),
+		}},
+	}
+	first, err := json.Marshal(map[string]any{
+		"resourceSpans": []any{resourceSpans("frontend", []map[string]any{
+			span("warmup", start.Add(-time.Second), time.Millisecond, false, false),
+		})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := json.Marshal(map[string]any{
+		"resourceSpans": []any{resourceSpans("frontend", []map[string]any{
+			span("GET /hotels", start.Add(100*time.Millisecond), 20*time.Millisecond, false, false),
+		})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "spans.ndjson")
+	if err := os.WriteFile(path, []byte(strings.Join([]string{string(first), string(second)}, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := SummarizeOTLP(request, []string{path}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.SpanCount != 1 || report.Spans[0].Name != "frontend:GET /hotels" {
+		t.Fatalf("report = %+v", report)
 	}
 }
 
