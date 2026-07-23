@@ -1,0 +1,10 @@
+{
+  "model_id": "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8",
+  "hardware": "modal-h100",
+  "serving_engine": "vllm",
+  "notes": [
+    "Use an OpenAI-compatible /v1/completions endpoint.",
+    "Enable prefix caching and prompt-token cache detail reporting.",
+    "The benchmark sends token-id prompts shaped like TraceLab coding-agent sessions."
+  ]
+}

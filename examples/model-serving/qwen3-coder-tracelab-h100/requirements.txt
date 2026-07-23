@@ -1,0 +1,5 @@
+httpx
+transformers
+huggingface_hub
+duckdb
+numpy

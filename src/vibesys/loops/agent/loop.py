@@ -339,6 +339,7 @@ def _domain_render_context(
         "reference_path": ctx.ref_name,
         "benchmark_command": ctx.judge_benchmark_command,
         "accuracy_command": ctx.judge_accuracy_command,
+        "hidden_evaluator_configured": bool(getattr(ctx, "hidden_evaluator_path", None)),
         "runtime_notes": ctx.run_environment_view.prompt_notes,
     }
 
@@ -632,11 +633,12 @@ def _run_framework_accuracy_gate(
         return None
 
     ctx.lprint(f"[framework-accuracy] running: {command}")
+    backend = getattr(ctx, "framework_judge_backend", ctx.judge_backend)
     try:
         if timeout_seconds is None:
-            result = ctx.judge_backend.execute(command)
+            result = backend.execute(command)
         else:
-            result = ctx.judge_backend.execute(command, timeout=timeout_seconds)
+            result = backend.execute(command, timeout=timeout_seconds)
         output = result.output.strip()
         passed = result.exit_code == 0
         _publish_subprocess_output(
@@ -725,10 +727,11 @@ def _run_framework_benchmark(
         passed = False
     else:
         try:
+            backend = getattr(ctx, "framework_judge_backend", ctx.judge_backend)
             if timeout_seconds is None:
-                result = ctx.judge_backend.execute(command)
+                result = backend.execute(command)
             else:
-                result = ctx.judge_backend.execute(command, timeout=timeout_seconds)
+                result = backend.execute(command, timeout=timeout_seconds)
             output = result.output.strip()
             passed = result.exit_code == 0
             _publish_subprocess_output(
@@ -858,6 +861,7 @@ def run_agent_loop(
     *,
     workspace_seed: Path | None = None,
     evaluator_path: Path | None = None,
+    hidden_evaluator_path: Path | None = None,
     benchmark_result: BenchmarkResult | None = None,
     accuracy_timeout_seconds: int | None = None,
     benchmark_timeout_seconds: int | None = None,
@@ -931,6 +935,7 @@ def run_agent_loop(
         benchmark_command=benchmark_command,
         workspace_seed=workspace_seed,
         evaluator_path=evaluator_path,
+        hidden_evaluator_path=hidden_evaluator_path,
         existing=existing,
         trusted_input_baseline=trusted_input_baseline,
         debug=debug,
