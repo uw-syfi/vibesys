@@ -166,25 +166,36 @@ func TestSummarizeOTLPReadsLargeNDJSONLines(t *testing.T) {
 		}},
 	}
 	// A single ExportTraceServiceRequest can exceed the previous 16MB NDJSON
-	// line cap. Pad the document with a large ignored attribute so the encoded
-	// line is well over that limit, then confirm the in-window span still reads.
+	// line cap. Use two documents so a whole-file decode cannot apply and the
+	// reader must handle each line, and pad the first with a large ignored
+	// attribute so its line is well over that limit. A line-capped scanner would
+	// reject the big line; confirm both in-window spans still read.
 	padding := strings.Repeat("x", 20*1024*1024)
-	measured := span("GET /hotels", start.Add(100*time.Millisecond), 20*time.Millisecond, false, false)
-	measured["attributes"] = []any{map[string]any{
+	big := span("GET /hotels", start.Add(100*time.Millisecond), 20*time.Millisecond, false, false)
+	big["attributes"] = []any{map[string]any{
 		"key":   "padding",
 		"value": map[string]any{"stringValue": padding},
 	}}
-	document, err := json.Marshal(map[string]any{
-		"resourceSpans": []any{resourceSpans("frontend", []map[string]any{measured})},
+	first, err := json.Marshal(map[string]any{
+		"resourceSpans": []any{resourceSpans("frontend", []map[string]any{big})},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(document) <= 16*1024*1024 {
-		t.Fatalf("test document is only %d bytes; expected > 16MB", len(document))
+	if len(first) <= 16*1024*1024 {
+		t.Fatalf("test document is only %d bytes; expected > 16MB", len(first))
+	}
+	second, err := json.Marshal(map[string]any{
+		"resourceSpans": []any{resourceSpans("rate", []map[string]any{
+			span("GET /rates", start.Add(200*time.Millisecond), 10*time.Millisecond, false, false),
+		})},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "spans.ndjson")
-	if err := os.WriteFile(path, append(document, '\n'), 0o644); err != nil {
+	contents := append(append(first, '\n'), append(second, '\n')...)
+	if err := os.WriteFile(path, contents, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -192,8 +203,42 @@ func TestSummarizeOTLPReadsLargeNDJSONLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.SpanCount != 1 || report.Spans[0].Name != "frontend:GET /hotels" {
-		t.Fatalf("report = %+v", report)
+	if report.SpanCount != 2 {
+		t.Fatalf("span count = %d, want 2 (report = %+v)", report.SpanCount, report)
+	}
+}
+
+func TestSummarizeOTLPAcceptsEqualDurationSpans(t *testing.T) {
+	start := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	request := CollectionRequest{
+		SchemaVersion: RequestSchemaVersion,
+		WorkloadName:  "hotel",
+		WorkloadHash:  "abc123",
+		Windows:       []MeasurementWindow{{Start: start, End: start.Add(time.Hour)}},
+	}
+	// Every in-window span has an identical duration. The percentile invariant
+	// p50<=p95<=p99<=max must still hold, so the report must not be rejected by
+	// floating-point drift in the percentile interpolation.
+	spans := make([]map[string]any, 0, 7)
+	for index := 0; index < 7; index++ {
+		spans = append(spans, span(
+			"GET /x",
+			start.Add(time.Duration(index)*time.Second),
+			123456*time.Microsecond,
+			false,
+			false,
+		))
+	}
+	path := filepath.Join(t.TempDir(), "spans.json")
+	writeJSON(t, path, map[string]any{"resourceSpans": []any{resourceSpans("svc", spans)}})
+
+	report, err := SummarizeOTLP(request, []string{path}, 10)
+	if err != nil {
+		t.Fatalf("rejected equal-duration telemetry: %v", err)
+	}
+	row := report.Services[0]
+	if *row.P50MS != *row.P95MS || *row.P95MS != *row.P99MS || *row.P99MS != *row.MaxMS {
+		t.Fatalf("equal durations produced unequal percentiles: %+v", row)
 	}
 }
 

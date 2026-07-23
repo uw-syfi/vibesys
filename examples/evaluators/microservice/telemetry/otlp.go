@@ -286,6 +286,14 @@ func percentile(sorted []float64, percent float64) float64 {
 	if upper >= len(sorted) {
 		return sorted[lower]
 	}
+	// Equal neighbors must return that exact value. The convex combination below
+	// is mathematically the identity for equal endpoints but rounds to slightly
+	// different results at different percentile positions, which can make p50
+	// exceed p95 by a rounding step and fail the p50<=p95<=p99<=max invariant on
+	// otherwise-valid all-equal or plateau distributions.
+	if sorted[lower] == sorted[upper] {
+		return sorted[lower]
+	}
 	fraction := position - float64(lower)
 	return sorted[lower]*(1-fraction) + sorted[upper]*fraction
 }
