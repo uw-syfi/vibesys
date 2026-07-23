@@ -32,6 +32,7 @@ import (
 	"vibesys/microservice-evaluator/engine"
 	"vibesys/microservice-evaluator/lifecycle"
 	"vibesys/microservice-evaluator/registry"
+	"vibesys/microservice-evaluator/telemetry"
 )
 
 var version = "dev"
@@ -50,6 +51,9 @@ type modeFlagConfig struct {
 	cleanupCommandJSON string
 	stateDir           string
 	stateEnv           string
+	telemetryCommand   string
+	telemetryOutput    string
+	telemetryTimeout   float64
 }
 
 func (o *targetOverrides) String() string {
@@ -98,6 +102,9 @@ func run() (resultErr error) {
 	var candidateDir string
 	var stateDir string
 	var stateEnv string
+	var telemetryCommandJSON string
+	var telemetryOutput string
+	var telemetryTimeout float64
 
 	flag.StringVar(&mode, "mode", "benchmark", "execution mode: benchmark or accuracy")
 	flag.StringVar(&workloadPath, "workload", "", "path to the workload TOML file")
@@ -124,6 +131,9 @@ func run() (resultErr error) {
 	flag.StringVar(&candidateDir, "candidate-dir", ".", "managed candidate working directory")
 	flag.StringVar(&stateDir, "state-dir", "", "managed candidate persistent state directory in accuracy mode")
 	flag.StringVar(&stateEnv, "state-env", "VIBESYS_STATE_DIR", "environment variable receiving --state-dir in accuracy mode")
+	flag.StringVar(&telemetryCommandJSON, "telemetry-command-json", "", "trusted telemetry collector command as a JSON string array")
+	flag.StringVar(&telemetryOutput, "telemetry-output", "", "normalized telemetry report path")
+	flag.Float64Var(&telemetryTimeout, "telemetry-timeout", 30, "telemetry collector timeout in seconds")
 	flag.Parse()
 	explicitFlags := make(map[string]bool)
 	flag.Visit(func(used *flag.Flag) { explicitFlags[used.Name] = true })
@@ -133,6 +143,8 @@ func run() (resultErr error) {
 		runCommandJSON: runCommandJSON, stopCommandJSON: stopCommandJSON,
 		cleanupCommandJSON: cleanupCommandJSON,
 		stateDir:           stateDir, stateEnv: stateEnv,
+		telemetryCommand: telemetryCommandJSON, telemetryOutput: telemetryOutput,
+		telemetryTimeout: telemetryTimeout,
 	}); err != nil {
 		return err
 	}
@@ -323,6 +335,34 @@ func run() (resultErr error) {
 	if err != nil {
 		return err
 	}
+	if telemetryCommandJSON != "" {
+		command, parseErr := parseCommandJSON(
+			telemetryCommandJSON,
+			"--telemetry-command-json",
+		)
+		if parseErr != nil {
+			return parseErr
+		}
+		windows := make([]telemetry.MeasurementWindow, 0, len(runResult.Summary.Trials))
+		for _, trial := range runResult.Summary.Trials {
+			windows = append(windows, trial.MeasurementWindow)
+		}
+		collector := telemetry.CommandCollector{
+			Command:    command,
+			OutputPath: telemetryOutput,
+			Timeout:    time.Duration(telemetryTimeout * float64(time.Second)),
+		}
+		report, collectErr := collector.Collect(ctx, telemetry.CollectionRequest{
+			SchemaVersion: telemetry.RequestSchemaVersion,
+			WorkloadName:  workload.Name,
+			WorkloadHash:  hex.EncodeToString(hash[:]),
+			Windows:       windows,
+		})
+		if collectErr != nil {
+			return fmt.Errorf("collect benchmark telemetry: %w", collectErr)
+		}
+		runResult.Summary.Telemetry = &report
+	}
 	if outputRaw != "" {
 		if err := writeNDJSON(outputRaw, runResult.Observations); err != nil {
 			return err
@@ -354,6 +394,7 @@ func validateModeFlags(config modeFlagConfig) error {
 	accuracyOnly := []string{"cases-min", "cases-max", "state-dir", "state-env"}
 	benchmarkOnly := []string{
 		"output-raw", "skip-prepare", "fixture-seed", "rate", "duration", "warmup", "concurrency", "repetitions",
+		"telemetry-command-json", "telemetry-output", "telemetry-timeout",
 	}
 	if config.mode == "benchmark" {
 		for _, name := range accuracyOnly {
@@ -376,6 +417,26 @@ func validateModeFlags(config modeFlagConfig) error {
 				config.casesMin,
 				config.casesMax,
 			)
+		}
+	}
+	if (config.explicit["telemetry-timeout"] ||
+		config.telemetryCommand != "" ||
+		config.telemetryOutput != "") &&
+		config.telemetryTimeout <= 0 {
+		return fmt.Errorf("--telemetry-timeout must be positive")
+	}
+	if config.telemetryCommand == "" && config.telemetryOutput != "" {
+		return errors.New("--telemetry-output requires --telemetry-command-json")
+	}
+	if config.telemetryCommand != "" {
+		if config.telemetryOutput == "" {
+			return errors.New("--telemetry-command-json requires --telemetry-output")
+		}
+		if _, err := parseCommandJSON(
+			config.telemetryCommand,
+			"--telemetry-command-json",
+		); err != nil {
+			return err
 		}
 	}
 	if config.runCommandJSON != "" {

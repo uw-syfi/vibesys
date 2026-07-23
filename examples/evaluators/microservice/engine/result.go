@@ -1,6 +1,9 @@
 package engine
 
-import "vibesys/microservice-evaluator/api"
+import (
+	"vibesys/microservice-evaluator/api"
+	"vibesys/microservice-evaluator/telemetry"
+)
 
 const ResultSchemaVersion = 3
 
@@ -37,24 +40,25 @@ type GeneratorReport struct {
 }
 
 type TrialResult struct {
-	Index                int                        `json:"index"`
-	Valid                bool                       `json:"valid"`
-	InvalidReasons       []string                   `json:"invalid_reasons,omitempty"`
-	PrimaryValue         *float64                   `json:"primary_value,omitempty"`
-	ElapsedSeconds       float64                    `json:"elapsed_seconds"`
-	TotalOperations      int                        `json:"total_operations"`
-	SuccessfulOperations int                        `json:"successful_operations"`
-	FailedOperations     int                        `json:"failed_operations"`
-	HTTPInvocations      int                        `json:"http_invocations"`
-	SuccessRate          float64                    `json:"success_rate"`
-	ErrorRate            float64                    `json:"error_rate"`
-	LatencyMS            Distribution               `json:"latency_ms"`
-	QueueWaitMS          Distribution               `json:"queue_wait_ms"`
-	ProtocolTimeMS       Distribution               `json:"protocol_time_ms"`
-	CustomTimingsMS      map[string]Distribution    `json:"custom_timings_ms,omitempty"`
-	ByOperation          map[string]OperationResult `json:"by_operation"`
-	ErrorsByCategory     map[string]int             `json:"errors_by_category,omitempty"`
-	Generator            GeneratorReport            `json:"load_generator"`
+	Index                int                         `json:"index"`
+	Valid                bool                        `json:"valid"`
+	InvalidReasons       []string                    `json:"invalid_reasons,omitempty"`
+	PrimaryValue         *float64                    `json:"primary_value,omitempty"`
+	ElapsedSeconds       float64                     `json:"elapsed_seconds"`
+	TotalOperations      int                         `json:"total_operations"`
+	SuccessfulOperations int                         `json:"successful_operations"`
+	FailedOperations     int                         `json:"failed_operations"`
+	HTTPInvocations      int                         `json:"http_invocations"`
+	SuccessRate          float64                     `json:"success_rate"`
+	ErrorRate            float64                     `json:"error_rate"`
+	LatencyMS            Distribution                `json:"latency_ms"`
+	QueueWaitMS          Distribution                `json:"queue_wait_ms"`
+	ProtocolTimeMS       Distribution                `json:"protocol_time_ms"`
+	CustomTimingsMS      map[string]Distribution     `json:"custom_timings_ms,omitempty"`
+	ByOperation          map[string]OperationResult  `json:"by_operation"`
+	ErrorsByCategory     map[string]int              `json:"errors_by_category,omitempty"`
+	Generator            GeneratorReport             `json:"load_generator"`
+	MeasurementWindow    telemetry.MeasurementWindow `json:"measurement_window"`
 }
 
 type Aggregate struct {
@@ -74,18 +78,19 @@ type ConstraintResult struct {
 }
 
 type Summary struct {
-	SchemaVersion int              `json:"schema_version"`
-	EngineVersion string           `json:"engine_version"`
-	WorkloadName  string           `json:"workload_name"`
-	WorkloadHash  string           `json:"workload_hash"`
-	Seed          string           `json:"seed"`
-	FixtureSeed   string           `json:"fixture_seed"`
-	PrimaryValue  *float64         `json:"primary_value,omitempty"`
-	PrimaryMetric api.Objective    `json:"primary_metric"`
-	Valid         bool             `json:"valid"`
-	Trials        []TrialResult    `json:"trials"`
-	Aggregate     Aggregate        `json:"aggregate"`
-	Constraints   ConstraintResult `json:"constraints"`
+	SchemaVersion int               `json:"schema_version"`
+	EngineVersion string            `json:"engine_version"`
+	WorkloadName  string            `json:"workload_name"`
+	WorkloadHash  string            `json:"workload_hash"`
+	Seed          string            `json:"seed"`
+	FixtureSeed   string            `json:"fixture_seed"`
+	PrimaryValue  *float64          `json:"primary_value,omitempty"`
+	PrimaryMetric api.Objective     `json:"primary_metric"`
+	Valid         bool              `json:"valid"`
+	Trials        []TrialResult     `json:"trials"`
+	Aggregate     Aggregate         `json:"aggregate"`
+	Constraints   ConstraintResult  `json:"constraints"`
+	Telemetry     *telemetry.Report `json:"telemetry,omitempty"`
 }
 
 type RunResult struct {

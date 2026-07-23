@@ -218,6 +218,7 @@ def _write_ref(tmp_path):
 def _write_support_dirs(project_root):
     dirs = {
         ProfilerKind.NSYS: "nsys_profiler",
+        ProfilerKind.OTEL: "otel_profiler",
         ProfilerKind.TORCH: "torch_profiler",
         ProfilerKind.NEURON: "neuron_profiler",
         ProfilerKind.MACOS_CPU: "macos_cpu_profiler",
@@ -231,13 +232,16 @@ def _write_support_dirs(project_root):
 
 
 @pytest.mark.parametrize(
-    ("profiler_kind", "workspace_name"),
+    ("profiler_kind", "workspace_name", "profiler_domain"),
     [
-        (ProfilerKind.TORCH, "torch_profiler"),
-        (ProfilerKind.NEURON, "neuron_profiler"),
+        (ProfilerKind.TORCH, "torch_profiler", DomainName.LLM_SERVING),
+        (ProfilerKind.NEURON, "neuron_profiler", DomainName.LLM_SERVING),
+        (ProfilerKind.OTEL, "otel_profiler", DomainName.MICROSERVICES),
     ],
 )
-def test_run_context_defaults_profiler_support_paths(tmp_path, profiler_kind, workspace_name):
+def test_run_context_defaults_profiler_support_paths(
+    tmp_path, profiler_kind, workspace_name, profiler_domain
+):
     project_root = tmp_path / "project"
     source_dir = project_root / "resources" / "profilers" / profiler_kind.value
     source_dir.mkdir(parents=True)
@@ -257,6 +261,7 @@ def test_run_context_defaults_profiler_support_paths(tmp_path, profiler_kind, wo
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             profiler_kind=profiler_kind,
+            profiler_domain=profiler_domain,
             skills_dirs=[],
             run_environment=RunEnvironmentSpec("local"),
         ) as ctx,
@@ -274,11 +279,12 @@ def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
     _write_support_dirs(project_root)
     ref = _write_ref(tmp_path)
 
-    domain = (
-        DomainName.GENERIC
-        if selected in {ProfilerKind.MACOS_CPU, ProfilerKind.LINUX_CPU}
-        else DomainName.LLM_SERVING
-    )
+    if selected in {ProfilerKind.MACOS_CPU, ProfilerKind.LINUX_CPU}:
+        domain = DomainName.GENERIC
+    elif selected is ProfilerKind.OTEL:
+        domain = DomainName.MICROSERVICES
+    else:
+        domain = DomainName.LLM_SERVING
     with (
         patch("vibesys.context.PROJECT_ROOT", project_root),
         patch("vibesys.context.build_model", return_value="mock-model"),
@@ -298,6 +304,7 @@ def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
     ):
         expected = {
             ProfilerKind.NSYS: selected is ProfilerKind.NSYS,
+            ProfilerKind.OTEL: selected is ProfilerKind.OTEL,
             ProfilerKind.TORCH: selected is ProfilerKind.TORCH,
             ProfilerKind.NEURON: selected is ProfilerKind.NEURON,
             ProfilerKind.MACOS_CPU: selected is ProfilerKind.MACOS_CPU,
@@ -305,6 +312,7 @@ def test_run_context_copies_only_selected_profiler_support(tmp_path, selected):
         }
         assert ctx.profiler_kind is selected
         assert (ctx.workspace / "nsys_profiler").exists() is expected[ProfilerKind.NSYS]
+        assert (ctx.workspace / "otel_profiler").exists() is expected[ProfilerKind.OTEL]
         assert (ctx.workspace / "torch_profiler").exists() is expected[ProfilerKind.TORCH]
         assert (ctx.workspace / "neuron_profiler").exists() is expected[ProfilerKind.NEURON]
         assert (ctx.workspace / "macos_cpu_profiler").exists() is expected[ProfilerKind.MACOS_CPU]

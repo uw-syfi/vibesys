@@ -164,6 +164,21 @@ The scheduler reports actual offered rate, scheduler lag, and maximum client
 queue depth. A trial is invalid when the client cannot offer the configured
 minimum fraction of target rate.
 
+Each trial also records a telemetry measurement window from its first request
+send through its last protocol completion. When telemetry is configured,
+`servicebench` passes all trial windows and the canonical workload identity to
+a trusted external collector while the candidate is still running. The
+collector returns a strict, versioned summary of service, span, and datastore
+latency distributions. Spans outside the measured windows, including warmup,
+are excluded.
+
+Telemetry is explanatory evidence, not a second scoring path. End-to-end
+latency and throughput from the load engine remain authoritative, and a run
+cannot claim an improvement from internal spans alone. Configured telemetry
+fails closed on command errors, malformed reports, or zero in-window spans.
+Applications own their instrumentation and export pipeline; the evaluator owns
+measurement correlation, normalization, validation, and artifact attachment.
+
 Closed-loop workloads use the same engine, drivers, observations, and semantic
 validation, but each worker schedules its next logical operation after the
 previous one completes. They are appropriate for saturation-throughput

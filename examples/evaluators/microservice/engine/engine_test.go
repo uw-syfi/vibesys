@@ -223,11 +223,15 @@ func TestTrialRequiresConfiguredOperationCoverage(t *testing.T) {
 	configured.Constraints.MinOperationsPerType = 1
 	now := time.Now()
 	observation := api.Observation{
-		Operation: "read", ScheduledAt: now, CompletedAt: now.Add(time.Millisecond),
+		Operation: "read", ScheduledAt: now, SentAt: now, CompletedAt: now.Add(time.Millisecond),
 		ValidatedAt: now.Add(time.Millisecond), ApplicationSuccess: true,
 	}
 	observation.PopulateDurations()
 	trial := summarizeTrial(0, []api.Observation{observation}, GeneratorReport{Sustained: true}, configured)
+	if !trial.MeasurementWindow.Start.Equal(observation.SentAt) ||
+		!trial.MeasurementWindow.End.Equal(observation.CompletedAt) {
+		t.Fatalf("measurement window = %+v", trial.MeasurementWindow)
+	}
 	if trial.Valid || trial.PrimaryValue != nil {
 		t.Fatalf("missing operation coverage unexpectedly passed: %+v", trial)
 	}

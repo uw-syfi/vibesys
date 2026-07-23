@@ -1,4 +1,4 @@
-"""Tests for the profiler MCP servers (nsys + torch).
+"""Tests for the profiler MCP servers.
 
 We verify tool registration via ``FastMCP.list_tools`` and exercise a few
 tools end-to-end through ``FastMCP.call_tool``. The stdio JSON-RPC framing
@@ -57,6 +57,10 @@ def test_profiler_mcp_spec_maps_known_kinds_exactly():
     assert neuron.name == "vibesys-neuron-profiler"
     assert neuron.args == ["neuron_profiler/server.py"]
 
+    otel = mcp_spec(ProfilerKind.OTEL)
+    assert otel.name == "vibesys-otel-profiler"
+    assert otel.args == ["otel_profiler/server.py"]
+
     macos = mcp_spec(ProfilerKind.MACOS_CPU)
     assert macos.name == "vibesys-macos-cpu-profiler"
     assert macos.args == ["macos_cpu_profiler/server.py"]
@@ -80,6 +84,14 @@ def torch_server_mod():
     return _load_module(
         "_torch_server",
         _REPO / "resources" / "profilers" / "torch" / "server.py",
+    )
+
+
+@pytest.fixture(scope="module")
+def otel_server_mod():
+    return _load_module(
+        "_otel_server",
+        _REPO / "resources" / "profilers" / "otel" / "server.py",
     )
 
 
@@ -150,6 +162,67 @@ class TestNsysMcpServer:
         assert "x\ty" in out
         assert "1\ta" in out
         assert "2\tb" in out
+
+
+# ---------------------------------------------------------------------------
+# OpenTelemetry MCP server
+# ---------------------------------------------------------------------------
+
+
+class TestOtelMcpServer:
+    def test_registers_expected_tools(self, otel_server_mod):
+        server = otel_server_mod.build_server()
+        names = asyncio.run(_list_tool_names(server))
+        assert names == {"reports", "summary", "compare"}
+
+    def test_summary_and_compare_use_normalized_service_rows(self, otel_server_mod, tmp_path):
+        before = tmp_path / "before.json"
+        after = tmp_path / "after.json"
+        before.write_text(json.dumps(_otel_report(20.0)))
+        after.write_text(json.dumps(_otel_report(12.0)))
+
+        summary = otel_server_mod.summarize_report(str(after))
+        comparison = otel_server_mod.compare_reports(str(before), str(after))
+
+        assert summary["span_count"] == 4
+        assert summary["services_by_p95"][0]["name"] == "frontend"
+        assert comparison["service_p95_changes"][0] == {
+            "name": "frontend",
+            "before_p95_ms": 20.0,
+            "after_p95_ms": 12.0,
+            "delta_p95_ms": -8.0,
+            "delta_percent": -40.0,
+        }
+        assert otel_server_mod.find_reports(str(tmp_path)) == [
+            after.as_posix(),
+            before.as_posix(),
+        ]
+
+
+def _otel_report(p95: float) -> dict:
+    row = {
+        "name": "frontend",
+        "count": 4,
+        "error_count": 0,
+        "mean_ms": p95 - 3,
+        "p50_ms": p95 - 5,
+        "p95_ms": p95,
+        "p99_ms": p95 + 1,
+        "max_ms": p95 + 2,
+    }
+    span = {**row, "name": "frontend:GET /hotels"}
+    return {
+        "schema_version": 1,
+        "source": "otlp-json",
+        "collected_at": "2026-07-22T12:00:00Z",
+        "workload_name": "hotel",
+        "workload_hash": "abc123",
+        "measurement_windows": [{"start": "2026-07-22T12:00:00Z", "end": "2026-07-22T12:00:01Z"}],
+        "span_count": 4,
+        "error_count": 0,
+        "services_by_p95": [row],
+        "spans_by_p95": [span],
+    }
 
 
 # ---------------------------------------------------------------------------

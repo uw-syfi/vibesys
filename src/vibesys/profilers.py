@@ -15,6 +15,7 @@ class ProfilerKind(StrEnum):
     AUTO = "auto"
     NONE = "none"
     NSYS = "nsys"
+    OTEL = "otel"
     TORCH = "torch"
     NEURON = "neuron"
     MACOS_CPU = "macos_cpu"
@@ -74,6 +75,7 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
     definition.kind: definition
     for definition in (
         ProfilerDefinition(ProfilerKind.NSYS, frozenset({DomainName.LLM_SERVING})),
+        ProfilerDefinition(ProfilerKind.OTEL, frozenset({DomainName.MICROSERVICES})),
         ProfilerDefinition(
             ProfilerKind.TORCH,
             frozenset({DomainName.LLM_SERVING}),
@@ -175,6 +177,11 @@ def resolve_profiler_kind(
             return ProfilerKind.MACOS_CPU
         if system == "Linux":
             return ProfilerKind.LINUX_CPU
+        return ProfilerKind.NONE
+
+    # OTel requires an input bundle that provisions instrumentation and a
+    # collector. Keep microservice defaults unchanged; users opt in explicitly.
+    if domain_name is DomainName.MICROSERVICES:
         return ProfilerKind.NONE
 
     if allowed == frozenset({ProfilerKind.NONE}):

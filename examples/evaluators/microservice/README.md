@@ -29,6 +29,8 @@ flowchart LR
     E <--> D["Protocol driver"]
     D <--> T["Running application"]
     E --> R["Validated results"]
+    T --> OT["OTel collector"]
+    OT --> R
 ```
 
 The dependency direction is deliberate:
@@ -185,6 +187,7 @@ retains one observation per measured logical operation for diagnosis.
 | [`probing/`](probing/) | Shared readiness and protocol-preflight execution |
 | [`registry/`](registry/) | Driver and application registration |
 | [`sampling/`](sampling/) | Shared deterministic case-volume sampling |
+| [`telemetry/`](telemetry/) | Measurement-window and normalized internal-latency contracts |
 | [`transport/`](transport/) | Shared target runtime used by benchmark and accuracy modes |
 | [`wire/httpjson/`](wire/httpjson/) | Canonical JSON-over-HTTP request construction |
 
@@ -245,6 +248,33 @@ the candidate directory whenever the contained process is stopped, including
 accuracy restarts. The cleanup command runs once when the managed lifecycle
 closes, allowing an external supervisor such as Docker Compose to remove the
 remaining project resources after restart-sensitive checks are complete.
+
+### OpenTelemetry diagnostics
+
+Benchmark mode can attach normalized service, span, and datastore latency
+evidence to the result. Telemetry is diagnostic: the workload's
+`primary_metric` remains the optimization score, while spans help explain where
+that end-to-end result was spent.
+
+`servicebench` invokes a trusted collector after all measured trials and before
+stopping a managed candidate. Configure it with a JSON command prefix and an
+output path:
+
+```bash
+go -C examples/evaluators/microservice run ./cmd/servicebench \
+  --workload "$PWD/examples/microservices/hotel-reservation/benchmark/workload.toml" \
+  --telemetry-command-json '["go","run","./cmd/otelcapture","--input-json","/tmp/otel-spans.json"]' \
+  --telemetry-output /tmp/otel-report.json \
+  --output-json /tmp/result.json
+```
+
+The evaluator appends `--request-json <path> --output-json <path>` to the
+configured command. The request contains the exact measured windows and
+workload identity. The collector must write the normalized, versioned report;
+configured telemetry fails the run when the command fails or produces no
+in-window spans. `otelcapture` accepts standard OTLP JSON or NDJSON exported by
+already-instrumented applications. See [`telemetry/README.md`](telemetry/README.md)
+for the contract and instrumentation boundary.
 
 ## Testing
 

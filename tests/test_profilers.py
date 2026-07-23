@@ -66,6 +66,8 @@ def _expected_resolved(
         if system == "Linux":
             return ProfilerKind.LINUX_CPU
         return ProfilerKind.NONE
+    if domain is DomainName.MICROSERVICES:
+        return ProfilerKind.NONE
     if allowed == frozenset({ProfilerKind.NONE}):
         return ProfilerKind.NONE
     if environment_default_profiler_kind is ProfilerKind.TORCH:
