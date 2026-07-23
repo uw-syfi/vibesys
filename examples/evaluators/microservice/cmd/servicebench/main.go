@@ -335,7 +335,7 @@ func run() (resultErr error) {
 	if err != nil {
 		return err
 	}
-	if telemetryCommandJSON != "" {
+	if shouldCollectTelemetry(telemetryCommandJSON, runResult.Summary.Valid) {
 		command, parseErr := parseCommandJSON(
 			telemetryCommandJSON,
 			"--telemetry-command-json",
@@ -384,6 +384,16 @@ func run() (resultErr error) {
 	return nil
 }
 
+// shouldCollectTelemetry reports whether servicebench invokes the telemetry
+// collector after a benchmark run. Telemetry is diagnostic evidence for a valid
+// measured workload, so an invalid benchmark skips collection: the run already
+// fails on its trial invalid_reasons, and invoking the collector would waste an
+// invocation and let a collector fault replace those reasons with a telemetry
+// error.
+func shouldCollectTelemetry(command string, valid bool) bool {
+	return command != "" && valid
+}
+
 func validateModeFlags(config modeFlagConfig) error {
 	if config.mode != "benchmark" && config.mode != "accuracy" {
 		return fmt.Errorf("--mode must be benchmark or accuracy, got %q", config.mode)
@@ -425,8 +435,13 @@ func validateModeFlags(config modeFlagConfig) error {
 		config.telemetryTimeout <= 0 {
 		return fmt.Errorf("--telemetry-timeout must be positive")
 	}
-	if config.telemetryCommand == "" && config.telemetryOutput != "" {
-		return errors.New("--telemetry-output requires --telemetry-command-json")
+	if config.telemetryCommand == "" {
+		if config.telemetryOutput != "" {
+			return errors.New("--telemetry-output requires --telemetry-command-json")
+		}
+		if config.explicit["telemetry-timeout"] {
+			return errors.New("--telemetry-timeout requires --telemetry-command-json")
+		}
 	}
 	if config.telemetryCommand != "" {
 		if config.telemetryOutput == "" {

@@ -160,6 +160,14 @@ func TestValidateModeFlagsRejectsIgnoredOrMalformedCombinations(t *testing.T) {
 				telemetryCommand: `["./collector"]`, telemetryOutput: "telemetry.json", telemetryTimeout: 30,
 			},
 		},
+		{
+			name: "telemetry timeout without command",
+			config: modeFlagConfig{
+				mode: "benchmark", startupTimeout: 15,
+				explicit:         map[string]bool{"telemetry-timeout": true},
+				telemetryTimeout: 30,
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -179,5 +187,27 @@ func TestValidateModeFlagsRejectsIgnoredOrMalformedCombinations(t *testing.T) {
 	validBenchmark.telemetryTimeout = 30
 	if err := validateModeFlags(validBenchmark); err != nil {
 		t.Fatalf("valid benchmark telemetry flags: %v", err)
+	}
+}
+
+func TestShouldCollectTelemetry(t *testing.T) {
+	cases := []struct {
+		name    string
+		command string
+		valid   bool
+		want    bool
+	}{
+		{"no command", "", true, false},
+		{"invalid run skips collection", `["./collector"]`, false, false},
+		{"valid run with command collects", `["./collector"]`, true, true},
+		{"no command invalid run", "", false, false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := shouldCollectTelemetry(test.command, test.valid); got != test.want {
+				t.Fatalf("shouldCollectTelemetry(%q, %v) = %v, want %v",
+					test.command, test.valid, got, test.want)
+			}
+		})
 	}
 }
