@@ -208,10 +208,7 @@ class TestOtelMcpServer:
         after = tmp_path / "after.json"
         before.write_text(json.dumps(_otel_report(20.0)))
         after_report = _otel_report(12.0)
-        if identity_field == "workload_name":
-            after_report[identity_field] = "different"
-        else:
-            after_report[identity_field] = "different"
+        after_report[identity_field] = "different"
         after.write_text(json.dumps(after_report))
 
         with pytest.raises(ValueError, match="matching workload identity"):
