@@ -56,7 +56,7 @@ Q from sequence A, K/V from sequence B (fixed once B is produced):
 - **mllama (Llama-3.2 Vision)**: Q from text; K/V from image features. Cross-attention layers are interleaved with self-attention in the decoder stack.
 - **Flamingo-style**: same pattern.
 
-Cross-attention **should cache K/V once per encoder pass** — computing them every decode step is a common silent perf disaster.
+Cross-attention **should cache K/V once per encoder pass** — computing them every decode step is a common silent perf disaster. For the compute-once context-pool implementation (non-causal paged prefill, plan-once reuse, RoPE skip), see [`cross-attention-kv-cache.md`](cross-attention-kv-cache.md).
 
 ### Sparse attention (token / block sparsity on long contexts)
 

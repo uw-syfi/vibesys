@@ -70,6 +70,8 @@ Each entry below is one file under [`references/`](references/). The bracketed p
 
 - [`references/algorithms/continuous-batching.md`](references/algorithms/continuous-batching.md) — Implement continuous batching for an LLM inference server.
 
+- [`references/algorithms/cross-attention-kv-cache.md`](references/algorithms/cross-attention-kv-cache.md) — Cross-attention KV cache for encoder-decoder decode (Whisper, encoder-decoder ASR/translation, mllama) — compute the encoder-context K/V once at prefill into a separate paged pool, read every step via non-causal FlashInfer prefill (`causal=False`, no re-write, no RoPE); pool-per-source, plan-once reuse, CUDA-graph-compatible.
+
 - [`references/algorithms/disaggregated-serving.md`](references/algorithms/disaggregated-serving.md) — Disaggregated prefill / decode (P/D) serving — separate worker pools for prefill and decode stages, with KV cache transferred between them.
 
 - [`references/algorithms/heterogeneous-kv-cache.md`](references/algorithms/heterogeneous-kv-cache.md) — Memory management and prefix caching for hybrid models (full-attn + sliding-window, attention + SSM/Mamba, attention + linear).
