@@ -34,6 +34,7 @@ from vibesys.domains.environment import (
     NoopEnvironmentHooks,
 )
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.input_manifest import WorkspaceSource
 from vibesys.llm_client import build_model
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
@@ -169,6 +170,7 @@ def create_run_context(
     accuracy_command: str,
     benchmark_command: str,
     workspace_seed: Path | None = None,
+    workspace_sources: tuple[WorkspaceSource, ...] = (),
     evaluator_path: Path | None = None,
     existing: bool = False,
     trusted_input_baseline: str | None = None,
@@ -432,6 +434,7 @@ def _assemble_run_context(
         input_project_dir=input_project_dir,
         profiler_support_path=profiler_support_path,
         profiler_support_name=profiler_support_name,
+        workspace_sources=workspace_sources,
         extra_input_excludes=environment_patch.copy_excludes,
     )
     workspace_files.setup(plan, existing=existing)

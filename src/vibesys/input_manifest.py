@@ -6,8 +6,9 @@ import shlex
 import tomllib
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from vibesys.constants import PROJECT_ROOT
 from vibesys.domains.base import DomainName
@@ -41,15 +42,70 @@ class WorkspaceInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    seed: str
+    seed: str | None = None
+    sources: tuple[WorkspaceSource, ...] = ()
 
     @field_validator("seed")
     @classmethod
-    def _relative_seed(cls, value: str) -> str:
+    def _relative_seed(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         if not value.strip():
             raise ValueError("seed must be a non-empty path")
         if Path(value).is_absolute():
             raise ValueError("seed must be relative to the input bundle")
+        return value
+
+
+class WorkspaceSource(BaseModel):
+    """Pinned git source materialized into the mutable candidate workspace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    repo: str
+    commit: str
+    dest: str
+    strip_git: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def _valid_name(cls, value: str) -> str:
+        if not value:
+            raise ValueError("name must be non-empty")
+        if any(character.isspace() for character in value):
+            raise ValueError("name must not contain whitespace")
+        return value
+
+    @field_validator("repo")
+    @classmethod
+    def _valid_repo(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("repo must be non-empty")
+        parsed = urlparse(value)
+        if parsed.scheme and parsed.scheme not in {"file", "http", "https", "ssh", "git"}:
+            raise ValueError(f"unsupported repo URL scheme: {parsed.scheme}")
+        return value
+
+    @field_validator("commit")
+    @classmethod
+    def _valid_commit(cls, value: str) -> str:
+        if not value:
+            raise ValueError("commit must be non-empty")
+        if not (7 <= len(value) <= 64) or any(c not in "0123456789abcdefABCDEF" for c in value):
+            raise ValueError("commit must be a 7-64 character hexadecimal hash")
+        return value.lower()
+
+    @field_validator("dest")
+    @classmethod
+    def _relative_dest(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("dest must be a non-empty path")
+        path = Path(value)
+        if path.is_absolute():
+            raise ValueError("dest must be relative to the workspace")
+        if any(part in {"", ".", ".."} for part in path.parts):
+            raise ValueError("dest must not contain empty, current, or parent path components")
         return value
 
 
@@ -119,6 +175,21 @@ class InputManifest(BaseModel):
     workspace: WorkspaceInput | None = None
     evaluator: EvaluatorInput | None = None
 
+    @model_validator(mode="after")
+    def _unique_workspace_source_destinations(self) -> InputManifest:
+        if self.workspace is None:
+            return self
+        seen_names: set[str] = set()
+        seen_dests: set[str] = set()
+        for source in self.workspace.sources:
+            if source.name in seen_names:
+                raise ValueError(f"duplicate workspace source name: {source.name}")
+            if source.dest in seen_dests:
+                raise ValueError(f"duplicate workspace source destination: {source.dest}")
+            seen_names.add(source.name)
+            seen_dests.add(source.dest)
+        return self
+
 
 class InputBundle(BaseModel):
     """Resolved input bundle with manifest commands and conventional files."""
@@ -160,6 +231,12 @@ class InputBundle(BaseModel):
     @property
     def benchmark_result(self) -> BenchmarkResult | None:
         return self.manifest.benchmark.result
+
+    @property
+    def workspace_sources(self) -> tuple[WorkspaceSource, ...]:
+        if self.manifest.workspace is None:
+            return ()
+        return self.manifest.workspace.sources
 
 
 def load_input_bundle(
@@ -223,7 +300,11 @@ def load_input_bundle(
         reference_path = None
 
     workspace_seed_path = None
-    if manifest.workspace is not None and not allow_materialized_sources:
+    if (
+        manifest.workspace is not None
+        and manifest.workspace.seed is not None
+        and not allow_materialized_sources
+    ):
         starters_root = (project_root / "examples" / "starters").resolve()
         workspace_seed_path = (root / manifest.workspace.seed).resolve()
         try:

@@ -9,6 +9,7 @@ declarative :class:`CopySpec` / :class:`InputProjectSpec` records first
 on the plan without materializing anything.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -17,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from vibesys.input_manifest import WorkspaceSource
 from vibesys.input_project import materialize_input_project
 
 if TYPE_CHECKING:
@@ -84,7 +86,14 @@ class InputProjectSpec:
     project_dir: Path
 
 
-WorkspaceStep = CopySpec | InputProjectSpec
+@dataclass(frozen=True)
+class GitSourceSpec:
+    """Materialize a pinned git source into the candidate workspace."""
+
+    source: WorkspaceSource
+
+
+WorkspaceStep = CopySpec | InputProjectSpec | GitSourceSpec
 
 
 class Workspace:
@@ -135,6 +144,7 @@ class Workspace:
         input_project_dir: Path | None,
         profiler_support_path: str | None,
         profiler_support_name: str | None,
+        workspace_sources: tuple[WorkspaceSource, ...] = (),
         extra_input_excludes: frozenset[str] = frozenset(),
     ) -> tuple[WorkspaceStep, ...]:
         """Build the ordered copy plan for ``setup``.
@@ -165,6 +175,9 @@ class Workspace:
         if not existing:
             if seed is not None:
                 steps.append(CopySpec(src=seed, dest=self.root, respect_gitignore=True))
+            for source in workspace_sources:
+                steps.append(GitSourceSpec(source=source))
+            if seed is not None:
                 steps.append(
                     CopySpec(
                         src=input_dir,
@@ -232,6 +245,9 @@ class Workspace:
                     log=self._log,
                 )
                 continue
+            if isinstance(step, GitSourceSpec):
+                self.materialize_git_source(step.source)
+                continue
             if step.require_absent is not None and (
                 step.require_absent.exists() or step.require_absent.is_symlink()
             ):
@@ -243,6 +259,64 @@ class Workspace:
                 respect_source_gitignore=step.respect_gitignore,
                 reject_collisions=step.reject_collisions,
             )
+
+    def materialize_git_source(self, source: WorkspaceSource) -> None:
+        """Clone a pinned git source into the workspace and optionally strip ``.git``."""
+
+        dest = self.root / source.dest
+        try:
+            dest.resolve().relative_to(self.root.resolve())
+        except ValueError as exc:
+            raise ValueError(
+                f"workspace source {source.name!r} escapes workspace: {source.dest}"
+            ) from exc
+        if dest.exists() or dest.is_symlink():
+            raise ValueError(
+                f"workspace source destination already exists for {source.name!r}: {source.dest}"
+            )
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        self._run_git(["clone", "--no-checkout", source.repo, str(dest)], cwd=self.root)
+        self._run_git(["checkout", "--detach", source.commit], cwd=dest)
+        actual = self._run_git(["rev-parse", "HEAD"], cwd=dest).strip().lower()
+        expected = source.commit.lower()
+        if actual != expected and not actual.startswith(expected):
+            raise RuntimeError(
+                f"workspace source {source.name!r} checked out {actual}, expected {expected}"
+            )
+
+        metadata_path = self.root / "_vibesys_sources.json"
+        metadata = []
+        if metadata_path.is_file():
+            metadata = json.loads(metadata_path.read_text())
+        metadata.append(
+            {
+                "name": source.name,
+                "repo": source.repo,
+                "commit": actual,
+                "requested_commit": source.commit,
+                "dest": source.dest,
+                "strip_git": source.strip_git,
+            }
+        )
+        metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
+
+        if source.strip_git:
+            shutil.rmtree(dest / ".git")
+
+    @staticmethod
+    def _run_git(args: list[str], *, cwd: Path) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip()
+            raise RuntimeError(f"git {' '.join(args)} failed: {detail}")
+        return result.stdout
 
     # -- copy machinery -------------------------------------------------------
 

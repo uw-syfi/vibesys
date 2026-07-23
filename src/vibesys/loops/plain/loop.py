@@ -34,6 +34,7 @@ from vibesys.config import Config, as_config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibesys.context import create_run_context
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
+from vibesys.input_manifest import WorkspaceSource
 from vibesys.loops.plain.render import render_all
 from vibesys.loops.plain.runner_ext import PlainLoopAgentRunner
 from vibesys.profilers import ProfilerKind
@@ -348,6 +349,7 @@ def run_plain_loop(
     benchmark_command: str,
     *,
     workspace_seed: Path | None = None,
+    workspace_sources: tuple[WorkspaceSource, ...] = (),
     evaluator_path: Path | None = None,
     max_rounds: int = 5,
     max_attempts_per_issue: int = 3,
@@ -384,6 +386,7 @@ def run_plain_loop(
         accuracy_command=accuracy_command,
         benchmark_command=benchmark_command,
         workspace_seed=workspace_seed,
+        workspace_sources=workspace_sources,
         evaluator_path=evaluator_path,
         existing=existing,
         debug=debug,

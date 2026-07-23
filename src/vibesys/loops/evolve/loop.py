@@ -45,6 +45,7 @@ from vibesys.context import create_candidate_context, create_run_context
 from vibesys.domains.base import DomainDefinition, DomainName, DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
+from vibesys.input_manifest import WorkspaceSource
 from vibesys.loops.evolve.population import (
     Individual,
     Objective,
@@ -1182,6 +1183,7 @@ def run_evolve_loop(
     objective: str,
     *,
     workspace_seed: Path | None = None,
+    workspace_sources: tuple[WorkspaceSource, ...] = (),
     evaluator_path: Path | None = None,
     max_generations: int = 8,
     children_per_generation: int = 2,
@@ -1240,6 +1242,7 @@ def run_evolve_loop(
         accuracy_command=accuracy_command,
         benchmark_command=benchmark_command,
         workspace_seed=workspace_seed,
+        workspace_sources=workspace_sources,
         evaluator_path=evaluator_path,
         existing=existing,
         debug=debug,

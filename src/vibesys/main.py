@@ -726,6 +726,8 @@ def _run_validate(argv: list[str]) -> None:
     print(f"  benchmark command: {bundle.benchmark_command_display}")
     if bundle.workspace_seed_path is not None:
         print(f"  workspace seed: {bundle.workspace_seed_path}")
+    for source in bundle.workspace_sources:
+        print(f"  workspace source: {source.name} -> {source.dest} @ {source.commit}")
     if bundle.evaluator_path is not None:
         print(f"  evaluator source: {bundle.evaluator_path}")
     if bundle.benchmark_result is not None:
@@ -903,6 +905,7 @@ def _run_agent(args: argparse.Namespace) -> None:
         accuracy_command=bundle.accuracy_command_display,
         benchmark_command=bundle.benchmark_command_display,
         workspace_seed=bundle.workspace_seed_path,
+        workspace_sources=bundle.workspace_sources,
         evaluator_path=bundle.evaluator_path,
         benchmark_result=bundle.benchmark_result,
         accuracy_timeout_seconds=bundle.manifest.accuracy.timeout_seconds,
@@ -1217,6 +1220,7 @@ def _run_evolve(args: argparse.Namespace) -> None:
         accuracy_command=bundle.accuracy_command_display,
         benchmark_command=bundle.benchmark_command_display,
         workspace_seed=bundle.workspace_seed_path,
+        workspace_sources=bundle.workspace_sources,
         evaluator_path=bundle.evaluator_path,
         objective=objective,
         max_generations=args.max_generations,
@@ -1337,6 +1341,7 @@ def _run_plain(args: argparse.Namespace) -> None:
         accuracy_command=bundle.accuracy_command_display,
         benchmark_command=bundle.benchmark_command_display,
         workspace_seed=bundle.workspace_seed_path,
+        workspace_sources=bundle.workspace_sources,
         evaluator_path=bundle.evaluator_path,
         max_rounds=args.max_rounds,
         max_attempts_per_issue=args.max_attempts_per_issue,
