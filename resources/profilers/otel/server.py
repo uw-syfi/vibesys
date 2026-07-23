@@ -106,9 +106,9 @@ def summarize_report(path: str, *, top: int = 10) -> dict:
 
 
 def compare_reports(before_path: str, after_path: str, *, top: int = 10) -> dict:
+    _validate_top(top)
     before = load_report(before_path)
     after = load_report(after_path)
-    _validate_top(top)
     if _report_identity(before) != _report_identity(after):
         raise ValueError("reports must have matching workload identity and window count")
     return {
@@ -151,23 +151,48 @@ def _compare_rows(
     before_rows: list[LatencyRow], after_rows: list[LatencyRow], top: int
 ) -> list[dict]:
     before_by_name = {row.name: row for row in before_rows}
+    after_by_name = {row.name: row for row in after_rows}
+    # Report rows present in only one side too. Both reports carry only the
+    # producer's top-N rows, so a row that entered or left the ranking is
+    # exactly a large change; matching on the name intersection alone would
+    # silently drop the biggest regressions and improvements.
+    names = [row.name for row in after_rows]
+    names += [row.name for row in before_rows if row.name not in after_by_name]
     changes = []
-    for row in after_rows:
-        previous = before_by_name.get(row.name)
-        if previous is None:
-            continue
-        delta = row.p95_ms - previous.p95_ms
+    for name in names:
+        previous = before_by_name.get(name)
+        current = after_by_name.get(name)
+        before_p95 = previous.p95_ms if previous is not None else None
+        after_p95 = current.p95_ms if current is not None else None
+        delta = None
+        delta_percent = None
+        if before_p95 is not None and after_p95 is not None:
+            delta = after_p95 - before_p95
+            delta_percent = delta / before_p95 * 100 if before_p95 > 0 else None
         changes.append(
             {
-                "name": row.name,
-                "before_p95_ms": previous.p95_ms,
-                "after_p95_ms": row.p95_ms,
+                "name": name,
+                "before_p95_ms": before_p95,
+                "after_p95_ms": after_p95,
                 "delta_p95_ms": delta,
-                "delta_percent": delta / previous.p95_ms * 100 if previous.p95_ms > 0 else None,
+                "delta_percent": delta_percent,
             }
         )
-    changes.sort(key=lambda item: abs(item["delta_p95_ms"]), reverse=True)
+    changes.sort(key=_change_magnitude, reverse=True)
     return changes[:top]
+
+
+def _change_magnitude(change: dict) -> float:
+    # Rank matched rows by absolute p95 change; rank a row present in only one
+    # report by its known p95 so a newly hot or newly absent span still surfaces.
+    delta = change["delta_p95_ms"]
+    if delta is not None:
+        return abs(delta)
+    for key in ("after_p95_ms", "before_p95_ms"):
+        value = change[key]
+        if value is not None:
+            return value
+    return 0.0
 
 
 def find_reports(root: str = ".") -> list[str]:
@@ -176,7 +201,11 @@ def find_reports(root: str = ".") -> list[str]:
     for path in base.rglob("*.json"):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            # Skip unreadable, non-UTF-8, or non-JSON files. UnicodeDecodeError
+            # subclasses ValueError rather than OSError/JSONDecodeError, so it
+            # must be named explicitly or a single binary ``*.json`` under the
+            # workspace would abort the whole scan.
             continue
         if isinstance(payload, dict) and payload.get("schema_version") == 1:
             try:

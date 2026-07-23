@@ -250,8 +250,19 @@ class TestOtelMcpServer:
             lambda report: report["measurement_windows"].__setitem__(
                 0, {"start": "not-a-timestamp", "end": "2026-07-22T12:00:01Z"}
             ),
+            lambda report: report["services_by_p95"][0].update({"p50_ms": 999.0}),
+            lambda report: report["services_by_p95"][0].update({"mean_ms": -1.0}),
+            lambda report: report["services_by_p95"][0].update({"p99_ms": float("inf")}),
         ],
-        ids=["empty-identity", "empty-services", "duplicate-spans", "invalid-window"],
+        ids=[
+            "empty-identity",
+            "empty-services",
+            "duplicate-spans",
+            "invalid-window",
+            "unordered-percentiles",
+            "negative-latency",
+            "non-finite-latency",
+        ],
     )
     def test_load_report_rejects_malformed_contract(self, otel_server_mod, tmp_path, mutate):
         report = _otel_report(20.0)
@@ -268,6 +279,64 @@ class TestOtelMcpServer:
 
         with pytest.raises(ValueError, match="top must be positive"):
             otel_server_mod.summarize_report(str(path), top=0)
+
+    def test_compare_rejects_non_positive_top_before_reading_files(self, otel_server_mod):
+        # top is validated before any file I/O, so unreadable paths do not matter.
+        with pytest.raises(ValueError, match="top must be positive"):
+            otel_server_mod.compare_reports("missing-before.json", "missing-after.json", top=0)
+
+    def test_find_reports_skips_non_utf8_json(self, otel_server_mod, tmp_path):
+        valid = tmp_path / "valid.json"
+        valid.write_text(json.dumps(_otel_report(20.0)))
+        binary = tmp_path / "binary.json"
+        binary.write_bytes(b"\xff\xfe\x00\x01 not valid utf-8")
+
+        assert otel_server_mod.find_reports(str(tmp_path)) == [valid.as_posix()]
+
+    def test_compare_surfaces_rows_present_in_one_report(self, otel_server_mod, tmp_path):
+        def service_row(name: str, p95: float) -> dict:
+            return {
+                "name": name,
+                "count": 4,
+                "error_count": 0,
+                "mean_ms": p95 - 3,
+                "p50_ms": p95 - 5,
+                "p95_ms": p95,
+                "p99_ms": p95 + 1,
+                "max_ms": p95 + 2,
+            }
+
+        before_report = _otel_report(20.0)
+        before_report["services_by_p95"] = [
+            service_row("frontend", 10.0),
+            service_row("checkout", 8.0),
+        ]
+        after_report = _otel_report(20.0)
+        after_report["services_by_p95"] = [
+            service_row("frontend", 10.0),
+            service_row("newsvc", 500.0),
+        ]
+
+        before = tmp_path / "before.json"
+        after = tmp_path / "after.json"
+        before.write_text(json.dumps(before_report))
+        after.write_text(json.dumps(after_report))
+
+        changes = otel_server_mod.compare_reports(str(before), str(after))["service_p95_changes"]
+        by_name = {change["name"]: change for change in changes}
+
+        assert set(by_name) == {"frontend", "checkout", "newsvc"}
+        # A row new to the after report is surfaced with no baseline...
+        assert by_name["newsvc"]["before_p95_ms"] is None
+        assert by_name["newsvc"]["after_p95_ms"] == 500.0
+        assert by_name["newsvc"]["delta_p95_ms"] is None
+        assert by_name["newsvc"]["delta_percent"] is None
+        # ...and a row absent from the after ranking is surfaced too.
+        assert by_name["checkout"]["before_p95_ms"] == 8.0
+        assert by_name["checkout"]["after_p95_ms"] is None
+        # The largest-magnitude row ranks first even without a delta.
+        assert changes[0]["name"] == "newsvc"
+        assert by_name["frontend"]["delta_p95_ms"] == 0.0
 
 
 def _otel_report(p95: float) -> dict:
