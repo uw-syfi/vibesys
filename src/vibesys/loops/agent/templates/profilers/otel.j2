@@ -24,7 +24,7 @@ trusted benchmark metric.
 ## Workspace
 
 Your working directory contains the candidate and a `{{ profiler_support_name }}/`
-directory with OpenTelemetry analysis tools.
+directory with the OpenTelemetry profiler MCP server (`{{ profiler_mcp_name }}`).
 
 Benchmark command: {{ benchmark_command }}
 
@@ -38,7 +38,8 @@ Benchmark command: {{ benchmark_command }}
 1. Run the trusted benchmark command as configured by the input bundle. It must
    include servicebench telemetry collection flags and produce a normalized
    telemetry JSON report.
-2. Call `reports()` to locate normalized reports, then `summary(path=...)`.
+2. Call the `{{ profiler_mcp_name }}` MCP tools to read the evidence: `reports()`
+   to locate normalized reports, then `summary(path=...)`.
 3. Rank bottlenecks using concrete service, span, and datastore p50/p95/p99
    values and error counts.
 4. Use `compare()` when both baseline and candidate reports exist. Treat large
