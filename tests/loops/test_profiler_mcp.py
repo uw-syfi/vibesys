@@ -285,11 +285,15 @@ class TestOtelMcpServer:
         with pytest.raises(ValueError, match="top must be positive"):
             otel_server_mod.compare_reports("missing-before.json", "missing-after.json", top=0)
 
-    def test_find_reports_skips_non_utf8_json(self, otel_server_mod, tmp_path):
+    def test_find_reports_skips_hostile_json(self, otel_server_mod, tmp_path):
         valid = tmp_path / "valid.json"
         valid.write_text(json.dumps(_otel_report(20.0)))
-        binary = tmp_path / "binary.json"
-        binary.write_bytes(b"\xff\xfe\x00\x01 not valid utf-8")
+        # A candidate under evaluation controls workspace files; none of these
+        # may abort discovery of the valid report.
+        (tmp_path / "binary.json").write_bytes(b"\xff\xfe\x00\x01 not valid utf-8")
+        (tmp_path / "nested.json").write_text("[" * 3000 + "]" * 3000)
+        (tmp_path / "bigint.json").write_text('{"schema_version": ' + "9" * 5000 + "}")
+        (tmp_path / "truncated.json").write_text('{"schema_version": 1')
 
         assert otel_server_mod.find_reports(str(tmp_path)) == [valid.as_posix()]
 

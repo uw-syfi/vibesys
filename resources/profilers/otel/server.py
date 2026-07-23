@@ -201,11 +201,13 @@ def find_reports(root: str = ".") -> list[str]:
     for path in base.rglob("*.json"):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            # Skip unreadable, non-UTF-8, or non-JSON files. UnicodeDecodeError
-            # subclasses ValueError rather than OSError/JSONDecodeError, so it
-            # must be named explicitly or a single binary ``*.json`` under the
-            # workspace would abort the whole scan.
+        except (OSError, RecursionError, ValueError):
+            # Skip any file we cannot read or parse so one bad ``*.json`` under
+            # the workspace cannot abort the whole scan. ValueError covers
+            # non-JSON (JSONDecodeError), non-UTF-8 bytes (UnicodeDecodeError),
+            # and oversized integer literals; RecursionError covers deeply
+            # nested JSON. A candidate under evaluation controls workspace files,
+            # so report discovery must tolerate hostile input.
             continue
         if isinstance(payload, dict) and payload.get("schema_version") == 1:
             try:
