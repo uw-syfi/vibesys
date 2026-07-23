@@ -283,6 +283,27 @@ func TestCommandCollectorLabelsCancellationNotTimeout(t *testing.T) {
 	}
 }
 
+func TestCommandCollectorFailsClosedOnMissingExecutable(t *testing.T) {
+	directory := t.TempDir()
+	start := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	_, err := (CommandCollector{
+		Command:    []string{filepath.Join(directory, "does-not-exist")},
+		OutputPath: filepath.Join(directory, "report.json"),
+		Timeout:    time.Second,
+	}).Collect(context.Background(), CollectionRequest{
+		SchemaVersion: RequestSchemaVersion,
+		WorkloadName:  "test",
+		WorkloadHash:  "abc",
+		Windows:       []MeasurementWindow{{Start: start, End: start.Add(time.Second)}},
+	})
+	if err == nil {
+		t.Fatal("accepted an unresolvable telemetry collector executable")
+	}
+	if !strings.Contains(err.Error(), "collector failed") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func collectWithScript(t *testing.T, directory, script string, timeout time.Duration) (Report, error) {
 	t.Helper()
 	start := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)

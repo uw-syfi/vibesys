@@ -242,6 +242,50 @@ func TestSummarizeOTLPAcceptsEqualDurationSpans(t *testing.T) {
 	}
 }
 
+func TestSummarizeOTLPRejectsInvalidArguments(t *testing.T) {
+	start := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	request := CollectionRequest{
+		SchemaVersion: RequestSchemaVersion,
+		WorkloadName:  "hotel",
+		WorkloadHash:  "abc123",
+		Windows:       []MeasurementWindow{{Start: start, End: start.Add(time.Second)}},
+	}
+	valid := filepath.Join(t.TempDir(), "spans.json")
+	writeJSON(t, valid, map[string]any{
+		"resourceSpans": []any{resourceSpans("frontend", []map[string]any{
+			span("GET /hotels", start.Add(100*time.Millisecond), 20*time.Millisecond, false, false),
+		})},
+	})
+
+	if _, err := SummarizeOTLP(request, nil, 10); err == nil {
+		t.Fatal("accepted a request with no OTLP inputs")
+	}
+	if _, err := SummarizeOTLP(request, []string{valid}, 0); err == nil {
+		t.Fatal("accepted a non-positive top")
+	}
+}
+
+func TestSummarizeOTLPRejectsMalformedJSON(t *testing.T) {
+	start := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	request := CollectionRequest{
+		SchemaVersion: RequestSchemaVersion,
+		WorkloadName:  "hotel",
+		WorkloadHash:  "abc123",
+		Windows:       []MeasurementWindow{{Start: start, End: start.Add(time.Second)}},
+	}
+	path := filepath.Join(t.TempDir(), "spans.json")
+	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := SummarizeOTLP(request, []string{path}, 10)
+	if err == nil {
+		t.Fatal("accepted malformed OTLP JSON")
+	}
+	if !strings.Contains(err.Error(), "parse OTLP JSON") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func resourceSpans(service string, spans []map[string]any) map[string]any {
 	rawSpans := make([]any, 0, len(spans))
 	for _, item := range spans {
