@@ -195,6 +195,94 @@ func TestCommandCollectorReportsMissingReport(t *testing.T) {
 	}
 }
 
+func TestCommandCollectorSucceedsDespiteLingeringChild(t *testing.T) {
+	directory := t.TempDir()
+	script := filepath.Join(directory, "collector.sh")
+	// The collector writes a valid report, exits 0, but backgrounds a child that
+	// inherits and holds the output pipe open. WaitDelay bounds the wait; the
+	// report on disk, not the lingering pipe, must decide success.
+	scriptBody := `#!/bin/sh
+set -eu
+output=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --request-json) shift 2 ;;
+    --output-json) output="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cat >"$output" <<'EOF'
+{
+  "schema_version": 1,
+  "source": "test",
+  "collected_at": "2026-07-22T12:00:00Z",
+  "workload_name": "test",
+  "workload_hash": "abc",
+  "measurement_windows": [{"start":"2026-07-22T12:00:00Z","end":"2026-07-22T12:00:01Z"}],
+  "span_count": 1,
+  "error_count": 0,
+  "services_by_p95": [{"name":"frontend","count":1,"error_count":0,"mean_ms":2,"p50_ms":2,"p95_ms":2,"p99_ms":2,"max_ms":2}],
+  "spans_by_p95": [{"name":"frontend:GET /","count":1,"error_count":0,"mean_ms":2,"p50_ms":2,"p95_ms":2,"p99_ms":2,"max_ms":2}]
+}
+EOF
+sleep 5 &
+exit 0
+`
+	if err := os.WriteFile(script, []byte(scriptBody), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	report, err := (CommandCollector{
+		Command:    []string{script},
+		OutputPath: filepath.Join(directory, "report.json"),
+		Timeout:    5 * time.Second,
+		WaitDelay:  200 * time.Millisecond,
+	}).Collect(context.Background(), CollectionRequest{
+		SchemaVersion: RequestSchemaVersion,
+		WorkloadName:  "test",
+		WorkloadHash:  "abc",
+		Windows:       []MeasurementWindow{{Start: start, End: start.Add(time.Second)}},
+	})
+	if err != nil {
+		t.Fatalf("discarded a valid report because a child held the pipe: %v", err)
+	}
+	if report.SpanCount != 1 || report.Services[0].Name != "frontend" {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestCommandCollectorLabelsCancellationNotTimeout(t *testing.T) {
+	directory := t.TempDir()
+	script := filepath.Join(directory, "collector.sh")
+	// exec so the cancellation kill reaches the blocking sleep directly.
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	start := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	_, err := (CommandCollector{
+		Command:    []string{script},
+		OutputPath: filepath.Join(directory, "report.json"),
+		Timeout:    0, // no deadline: the collector context is the caller's context
+		WaitDelay:  200 * time.Millisecond,
+	}).Collect(ctx, CollectionRequest{
+		SchemaVersion: RequestSchemaVersion,
+		WorkloadName:  "test",
+		WorkloadHash:  "abc",
+		Windows:       []MeasurementWindow{{Start: start, End: start.Add(time.Second)}},
+	})
+	if err == nil {
+		t.Fatal("accepted a cancelled collection")
+	}
+	if !strings.Contains(err.Error(), "cancelled") || strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("cancellation mislabeled: %v", err)
+	}
+}
+
 func collectWithScript(t *testing.T, directory, script string, timeout time.Duration) (Report, error) {
 	t.Helper()
 	start := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)

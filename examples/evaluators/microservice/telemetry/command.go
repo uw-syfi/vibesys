@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,11 +11,18 @@ import (
 	"time"
 )
 
+// defaultWaitDelay bounds how long Collect waits for a killed collector's
+// surviving child processes to release the output pipe.
+const defaultWaitDelay = 10 * time.Second
+
 // CommandCollector invokes a trusted collector command using the normalized contract.
 type CommandCollector struct {
 	Command    []string
 	OutputPath string
 	Timeout    time.Duration
+	// WaitDelay bounds the wait for the collector's output pipe to close after
+	// the process exits or is killed. Zero uses defaultWaitDelay.
+	WaitDelay time.Duration
 }
 
 // Collect writes a request, invokes the collector, and validates its report.
@@ -70,13 +78,27 @@ func (collector CommandCollector) Collect(
 	// killed collector's surviving child processes can otherwise hold open long
 	// past the timeout. WaitDelay bounds that cleanup so a configured timeout
 	// actually caps wall-clock time.
-	command.WaitDelay = 10 * time.Second
+	waitDelay := collector.WaitDelay
+	if waitDelay <= 0 {
+		waitDelay = defaultWaitDelay
+	}
+	command.WaitDelay = waitDelay
 	output, err := command.CombinedOutput()
 	if err != nil {
-		if commandContext.Err() != nil {
-			return Report{}, fmt.Errorf("telemetry collector timed out: %w", commandContext.Err())
+		switch {
+		case commandContext.Err() != nil:
+			if errors.Is(commandContext.Err(), context.DeadlineExceeded) {
+				return Report{}, fmt.Errorf("telemetry collector timed out: %w", commandContext.Err())
+			}
+			return Report{}, fmt.Errorf("telemetry collection cancelled: %w", commandContext.Err())
+		case errors.Is(err, exec.ErrWaitDelay):
+			// The collector exited successfully but a surviving child kept the
+			// output pipe open past WaitDelay. The report file, not the pipe
+			// output, is the contract deliverable, so fall through and let the
+			// on-disk report determine success or failure.
+		default:
+			return Report{}, fmt.Errorf("telemetry collector failed: %w: %s", err, string(output))
 		}
-		return Report{}, fmt.Errorf("telemetry collector failed: %w: %s", err, string(output))
 	}
 	data, err := os.ReadFile(outputPath)
 	if err != nil {
