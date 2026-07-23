@@ -81,6 +81,9 @@ func ValidateReport(report Report) error {
 	if report.SpanCount <= 0 {
 		return fmt.Errorf("telemetry report contains no spans in the measurement windows")
 	}
+	if report.ErrorCount < 0 || report.ErrorCount > report.SpanCount {
+		return fmt.Errorf("telemetry report has invalid error_count")
+	}
 	if len(report.Services) == 0 || len(report.Spans) == 0 {
 		return fmt.Errorf("telemetry report requires service and span latency rows")
 	}
