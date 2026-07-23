@@ -3,8 +3,10 @@ package engine
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"vibesys/microservice-evaluator/api"
+	"vibesys/microservice-evaluator/telemetry"
 )
 
 func summarizeTrial(
@@ -28,6 +30,7 @@ func summarizeTrial(
 	customTimings := make(map[string][]float64)
 	byOperation := make(map[string][]api.Observation)
 	var earliest, latest int64
+	var measurementStart, measurementEnd time.Time
 	for observationIndex, observation := range observations {
 		result.HTTPInvocations += observation.InvocationCount
 		if observationIndex == 0 || observation.ScheduledAt.UnixNano() < earliest {
@@ -39,6 +42,12 @@ func summarizeTrial(
 		}
 		if finishedAt.UnixNano() > latest {
 			latest = finishedAt.UnixNano()
+		}
+		if measurementStart.IsZero() || observation.SentAt.Before(measurementStart) {
+			measurementStart = observation.SentAt
+		}
+		if measurementEnd.IsZero() || observation.CompletedAt.After(measurementEnd) {
+			measurementEnd = observation.CompletedAt
 		}
 		byOperation[observation.Operation] = append(byOperation[observation.Operation], observation)
 		queueWaits = append(queueWaits, observation.QueueWaitMS)
@@ -63,6 +72,10 @@ func summarizeTrial(
 	}
 	if earliest != 0 && latest >= earliest {
 		result.ElapsedSeconds = float64(latest-earliest) / 1e9
+	}
+	result.MeasurementWindow = telemetry.MeasurementWindow{
+		Start: measurementStart,
+		End:   measurementEnd,
 	}
 	if len(observations) > 0 {
 		result.SuccessRate = float64(result.SuccessfulOperations) / float64(len(observations))

@@ -30,8 +30,10 @@ import (
 	"vibesys/microservice-evaluator/config"
 	"vibesys/microservice-evaluator/drivers/httpdriver"
 	"vibesys/microservice-evaluator/engine"
+	"vibesys/microservice-evaluator/fsutil"
 	"vibesys/microservice-evaluator/lifecycle"
 	"vibesys/microservice-evaluator/registry"
+	"vibesys/microservice-evaluator/telemetry"
 )
 
 var version = "dev"
@@ -50,6 +52,9 @@ type modeFlagConfig struct {
 	cleanupCommandJSON string
 	stateDir           string
 	stateEnv           string
+	telemetryCommand   string
+	telemetryOutput    string
+	telemetryTimeout   float64
 }
 
 func (o *targetOverrides) String() string {
@@ -98,6 +103,9 @@ func run() (resultErr error) {
 	var candidateDir string
 	var stateDir string
 	var stateEnv string
+	var telemetryCommandJSON string
+	var telemetryOutput string
+	var telemetryTimeout float64
 
 	flag.StringVar(&mode, "mode", "benchmark", "execution mode: benchmark or accuracy")
 	flag.StringVar(&workloadPath, "workload", "", "path to the workload TOML file")
@@ -124,6 +132,9 @@ func run() (resultErr error) {
 	flag.StringVar(&candidateDir, "candidate-dir", ".", "managed candidate working directory")
 	flag.StringVar(&stateDir, "state-dir", "", "managed candidate persistent state directory in accuracy mode")
 	flag.StringVar(&stateEnv, "state-env", "VIBESYS_STATE_DIR", "environment variable receiving --state-dir in accuracy mode")
+	flag.StringVar(&telemetryCommandJSON, "telemetry-command-json", "", "trusted telemetry collector command as a JSON string array")
+	flag.StringVar(&telemetryOutput, "telemetry-output", "", "normalized telemetry report path")
+	flag.Float64Var(&telemetryTimeout, "telemetry-timeout", 30, "telemetry collector timeout in seconds")
 	flag.Parse()
 	explicitFlags := make(map[string]bool)
 	flag.Visit(func(used *flag.Flag) { explicitFlags[used.Name] = true })
@@ -133,6 +144,8 @@ func run() (resultErr error) {
 		runCommandJSON: runCommandJSON, stopCommandJSON: stopCommandJSON,
 		cleanupCommandJSON: cleanupCommandJSON,
 		stateDir:           stateDir, stateEnv: stateEnv,
+		telemetryCommand: telemetryCommandJSON, telemetryOutput: telemetryOutput,
+		telemetryTimeout: telemetryTimeout,
 	}); err != nil {
 		return err
 	}
@@ -323,6 +336,34 @@ func run() (resultErr error) {
 	if err != nil {
 		return err
 	}
+	if shouldCollectTelemetry(telemetryCommandJSON, runResult.Summary.Valid) {
+		command, parseErr := parseCommandJSON(
+			telemetryCommandJSON,
+			"--telemetry-command-json",
+		)
+		if parseErr != nil {
+			return parseErr
+		}
+		windows := make([]telemetry.MeasurementWindow, 0, len(runResult.Summary.Trials))
+		for _, trial := range runResult.Summary.Trials {
+			windows = append(windows, trial.MeasurementWindow)
+		}
+		collector := telemetry.CommandCollector{
+			Command:    command,
+			OutputPath: telemetryOutput,
+			Timeout:    time.Duration(telemetryTimeout * float64(time.Second)),
+		}
+		report, collectErr := collector.Collect(ctx, telemetry.CollectionRequest{
+			SchemaVersion: telemetry.RequestSchemaVersion,
+			WorkloadName:  workload.Name,
+			WorkloadHash:  hex.EncodeToString(hash[:]),
+			Windows:       windows,
+		})
+		if collectErr != nil {
+			return fmt.Errorf("collect benchmark telemetry: %w", collectErr)
+		}
+		runResult.Summary.Telemetry = &report
+	}
 	if outputRaw != "" {
 		if err := writeNDJSON(outputRaw, runResult.Observations); err != nil {
 			return err
@@ -333,7 +374,7 @@ func run() (resultErr error) {
 		return fmt.Errorf("encode result: %w", err)
 	}
 	if outputJSON != "" {
-		if err := writeAtomic(outputJSON, append(encoded, '\n')); err != nil {
+		if err := fsutil.WriteFileAtomic(outputJSON, append(encoded, '\n'), 0o600); err != nil {
 			return err
 		}
 	}
@@ -342,6 +383,16 @@ func run() (resultErr error) {
 		return errors.New("benchmark result is invalid; inspect constraints and trial invalid_reasons")
 	}
 	return nil
+}
+
+// shouldCollectTelemetry reports whether servicebench invokes the telemetry
+// collector after a benchmark run. Telemetry is diagnostic evidence for a valid
+// measured workload, so an invalid benchmark skips collection: the run already
+// fails on its trial invalid_reasons, and invoking the collector would waste an
+// invocation and let a collector fault replace those reasons with a telemetry
+// error.
+func shouldCollectTelemetry(command string, valid bool) bool {
+	return command != "" && valid
 }
 
 func validateModeFlags(config modeFlagConfig) error {
@@ -354,6 +405,7 @@ func validateModeFlags(config modeFlagConfig) error {
 	accuracyOnly := []string{"cases-min", "cases-max", "state-dir", "state-env"}
 	benchmarkOnly := []string{
 		"output-raw", "skip-prepare", "fixture-seed", "rate", "duration", "warmup", "concurrency", "repetitions",
+		"telemetry-command-json", "telemetry-output", "telemetry-timeout",
 	}
 	if config.mode == "benchmark" {
 		for _, name := range accuracyOnly {
@@ -376,6 +428,31 @@ func validateModeFlags(config modeFlagConfig) error {
 				config.casesMin,
 				config.casesMax,
 			)
+		}
+	}
+	if (config.explicit["telemetry-timeout"] ||
+		config.telemetryCommand != "" ||
+		config.telemetryOutput != "") &&
+		config.telemetryTimeout <= 0 {
+		return fmt.Errorf("--telemetry-timeout must be positive")
+	}
+	if config.telemetryCommand == "" {
+		if config.telemetryOutput != "" {
+			return errors.New("--telemetry-output requires --telemetry-command-json")
+		}
+		if config.explicit["telemetry-timeout"] {
+			return errors.New("--telemetry-timeout requires --telemetry-command-json")
+		}
+	}
+	if config.telemetryCommand != "" {
+		if config.telemetryOutput == "" {
+			return errors.New("--telemetry-command-json requires --telemetry-output")
+		}
+		if _, err := parseCommandJSON(
+			config.telemetryCommand,
+			"--telemetry-command-json",
+		); err != nil {
+			return err
 		}
 	}
 	if config.runCommandJSON != "" {
@@ -502,7 +579,7 @@ func runAccuracy(
 		return fmt.Errorf("encode accuracy result: %w", err)
 	}
 	if outputJSON != "" {
-		if err := writeAtomic(outputJSON, append(encoded, '\n')); err != nil {
+		if err := fsutil.WriteFileAtomic(outputJSON, append(encoded, '\n'), 0o600); err != nil {
 			return err
 		}
 	}
@@ -563,27 +640,6 @@ func writeNDJSON(path string, observations []api.Observation) error {
 	}
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close raw output %s: %w", path, err)
-	}
-	return nil
-}
-
-func writeAtomic(path string, data []byte) error {
-	directory := filepath.Dir(path)
-	temporary, err := os.CreateTemp(directory, ".servicebench-result-*")
-	if err != nil {
-		return fmt.Errorf("create temporary result in %s: %w", directory, err)
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if _, err := temporary.Write(data); err != nil {
-		temporary.Close()
-		return fmt.Errorf("write temporary result: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close temporary result: %w", err)
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return fmt.Errorf("replace result %s: %w", path, err)
 	}
 	return nil
 }

@@ -14,7 +14,7 @@ Several flags look independent, but they combine into one execution contract:
 | Evaluation interface | `--interface` | Agent loop only. Whether evaluator-owned code invokes the candidate directly or communicates with a service. |
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, or `cpu`. |
 | Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, Docker container, or Modal-backed workflow. |
-| Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, `macos_cpu`, `linux_cpu`, or `auto`. |
+| Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, `otel`, `macos_cpu`, `linux_cpu`, or `auto`. |
 | Domain | `[agent].domain` in `vibesys.input.toml` | Problem-space package used by the agent and evolve loops, such as `llm-serving` or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--no-skills` | Candidate skill roots and the ablation switch that disables skill loading. |
@@ -183,6 +183,7 @@ Modal is active.
 | `nsys` | NVIDIA Nsight Systems. Requires a CUDA/NVIDIA profiling environment. |
 | `torch` | PyTorch profiler. Used for in-process Python profiling and Modal GPU dispatch. |
 | `neuron` | AWS Neuron profiler for Trainium. |
+| `otel` | OpenTelemetry service, span, and datastore latency for microservice benchmarks. Opt-in only (`auto` never selects it) and needs an input bundle that provisions instrumentation and a collector. |
 | `macos_cpu` | Instruments Time Profiler with a supported `/usr/bin/sample` fallback. |
 | `linux_cpu` | Linux `perf` profiler for native and mixed-language CPU workloads. |
 
