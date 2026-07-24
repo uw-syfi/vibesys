@@ -1,0 +1,41 @@
+{
+  "workspace": "/mnt/storage/shli/vibesys/.codex/final-one-h100-measurement/robust-ablate-constrained-code-fi",
+  "benchmark": "/mnt/storage/shli/vibesys/.codex/final-one-h100-measurement/constrained_robust_tokens_benchmark.py",
+  "backend_url": "https://vibeserve--vibesys-robust-ablate-constrained-code-fi-70c34f-dev.modal.run",
+  "health": {
+    "ok": true,
+    "engine": "constrained-specialized-vllm",
+    "gpu": "H100",
+    "cuda_device_name": "NVIDIA H100 80GB HBM3",
+    "cuda_total_memory_bytes": 85017624576,
+    "cuda_total_memory_gib": 79.1788330078125,
+    "gpu_memory_utilization": 0.9,
+    "max_model_len": 8192,
+    "max_containers": 1,
+    "tensor_parallel_size": 1,
+    "run_instance_id": "518a82ea788d4ac4a6e8f1762007c96e",
+    "hostname": "modal",
+    "pid": 2,
+    "cuda_visible_devices": null,
+    "vllm_worker_multiproc_method": "spawn",
+    "vllm_use_flashinfer_sampler": "1",
+    "vibesys_reuse_grammar_bitmask": "1",
+    "nvidia_smi_name": "NVIDIA H100 80GB HBM3",
+    "nvidia_smi_uuid": "GPU-cc3a359f-751d-0a8c-4eaf-1b69b4a1eadd",
+    "nvidia_smi_pci_bus_id": "[Unknown Error]",
+    "nvidia_smi_driver_version": "580.95.05",
+    "nvidia_smi_memory_total_mib": 81559
+  },
+  "benchmark_status": {
+    "started": true,
+    "returncode": 0,
+    "completed": true
+  },
+  "elapsed_seconds": 463.71486496925354,
+  "resource_control": {
+    "modal_gpu": "H100",
+    "max_containers": 1,
+    "buffer_containers": 0,
+    "tensor_parallel_size": 1
+  }
+}

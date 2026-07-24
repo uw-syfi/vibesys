@@ -394,3 +394,30 @@ Raw ablation result files:
 - `.codex/final-one-h100-measurement/results/constrained-robust-ablate-code-only.json`
 - `.codex/final-one-h100-measurement/results/constrained-robust-ablate-code-fi.json`
 - `.codex/final-one-h100-measurement/results/constrained-robust-ablate-code-params-no-fi.json`
+
+## Adversarial Benchmark Audit
+
+I asked three independent subagents to challenge the benchmark methodology, reward-hacking surface, and attribution/reproducibility of these results. Their findings materially narrow how these numbers should be interpreted.
+
+Highest-priority issues:
+
+- The public example benchmark scripts under `examples/model-serving/llama-3-8b-h100-*` still count non-empty streaming SSE chunks as "tokens". A candidate can inflate `aggregate_throughput` by changing chunking cadence without generating more model tokens. The robust reruns above were created specifically to avoid this by using non-streaming responses and `usage.completion_tokens`, but the example bundle benchmarks should be replaced before using them as authoritative scoring workloads.
+- The public example prompts, schemas, and accuracy checkers are deterministic and candidate-visible. A candidate could specialize to those exact prompts, return canned completions, echo sentinels, or synthesize valid JSON without actually improving vLLM. These bundles are useful examples, but not hardened hidden evaluators.
+- The high-concurrency robust result is provisional. The specialized trials drift upward inside one run and have much higher variance than stock, so the 1.11x number could still reflect runtime warm-state or Modal scheduling noise.
+- The constrained stock robust baseline had one transient `502 Bad Gateway`; the JSON validity flag is false even though completed outputs were schema-valid and throughput excludes the failed request. The constrained speedups should be treated as supported but still needing a clean stock rerun denominator.
+- All stock/specialized comparisons used the same H100 80GB resource class, not the same physical GPU UUID. This removes the H100-vs-H100-NVL confound but does not eliminate per-card or noisy-neighbor variance.
+- The long-prompt workload is intentionally contrived with an almost fully shared 3000-word prefix. It is a prefix-cache stress test, not evidence for diverse long-document serving.
+
+Hardening recommendations before treating these as production-quality benchmark claims:
+
+- Replace streaming chunk-count throughput in the example bundles with tokenizer- or server-reported completion-token counts, and reject suspicious chunk/token ratios.
+- Use hidden or per-run randomized prompt corpora, canaries, and schemas; validate prompt-conditioned content, not only non-empty text or generic schema shape.
+- Archive exact raw JSON, metadata, benchmark harnesses, vLLM source hashes, package versions, CUDA/torch/xgrammar/FlashInfer versions, and environment variables for every headline number.
+- Rerun high-concurrency and constrained A/B comparisons with randomized/interleaved order, repeated independent runs, confidence intervals, and ideally same-card placement or enough cards per variant to average card-level variance.
+- Add realistic long-prompt variants with low and partial prefix overlap, such as diverse RAG documents, codebase QA, multi-turn sessions, and long constrained extraction.
+
+Current trust level after the audit:
+
+- Long prompts: the robust data supports "no material speedup" for a contrived prefix-cache stress test.
+- High concurrency: the robust data supports "maybe a small serving-path gain", but not a clean vLLM-internals specialization claim.
+- Constrained JSON: still the most credible vLLM-internals win because the ablation isolates guided-decoding code changes, but it should be rerun with a clean stock baseline and hardened prompt/content validation.
