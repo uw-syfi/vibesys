@@ -27,6 +27,8 @@ Notes:
 
 Hypothesis: long prompts with short completions should benefit most from vLLM prefix caching, chunked prefill, stable CUDA graph capture sizes, and readiness warmup that exercises the actual prompt pool.
 
+Workload caveat: this scenario is intentionally contrived. The prompt pool uses a near-identical long prefix across requests, so it is best read as a prefix-cache stress test rather than a realistic diverse long-document or RAG workload.
+
 Expected: improve TTFT and request throughput by avoiding cold compile/cache effects and by keeping batch-size 16 graph coverage available.
 
 Changes that helped:
@@ -242,6 +244,8 @@ I reran the long-prompts/short-outputs workload after fixing the same benchmark 
 - Added per-trial health checks, per-response `X-Benchmark-Instance`, and invalidated runs with instance changes, token-count mismatches, failed requests, or the wrong H100 memory class.
 - Fixed the prompt generator. The first robust attempt used artificial strings like `p000w000`; Llama tokenized those into about 14,001 tokens, exceeding `max_model_len=8192`. The accepted benchmark now uses a shared natural-word 3000-word prefix plus a small per-request suffix.
 - Fixed the long-specialized FlashInfer path by installing `flashinfer-python==0.2.6.post1+cu128torch2.7` into the Modal image and setting `VLLM_WORKER_MULTIPROC_METHOD=spawn` so CUDA is not initialized through forked worker processes.
+
+Representativeness caveat: this accepted benchmark is still deliberately artificial. It uses 64 prompts with the same 3000-word prefix and only a tiny per-request suffix, which makes it a best-case prefix-cache workload. It should not be generalized to long prompts with mostly unique documents, retrieval chunks, code files, or chat histories without a separate benchmark that varies prefix sharing.
 
 Workload implementation:
 
