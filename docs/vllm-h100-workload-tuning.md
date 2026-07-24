@@ -10,17 +10,18 @@ The per-round logs remain in each experiment's `workspace/progress.md`; this fil
 
 ## Workload Results
 
-| Workload | Baseline used | Best accepted framework throughput | Speedup |
+| Workload | Baseline used | Best robust throughput | Speedup |
 | --- | ---: | ---: | ---: |
-| Long prompts, short outputs | 26.09 tok/s initial profiled benchmark | 302.54 tok/s | 11.60x |
-| High concurrency, many short outputs | 100.64 tok/s first accepted framework benchmark | 695.26 tok/s | 6.91x |
-| Constrained JSON decoding | 310.05 tok/s first accepted framework benchmark | 427.20 tok/s | 1.38x |
+| Long prompts, short outputs | 508.53 tok/s robust stock rerun | 512.53 tok/s robust long-specialized rerun | 1.01x |
+| High concurrency, many short outputs | 1,035.73 tok/s robust stock rerun | 1,147.47 tok/s robust high-specialized rerun | 1.11x |
+| Constrained JSON decoding | 934.33 tok/s robust stock rerun | 1,353.18 tok/s robust code+FlashInfer ablation | 1.45x |
 
 Notes:
 
 - The long-prompt loop also had an early framework number of 6.94 tok/s from a cold/service-path artifact. I do not use that as the meaningful baseline.
 - The long-prompt final Round 10 implementation had a self-benchmark at 301.05 tok/s but the judge loop exhausted due stale/failed judge evaluation; the best accepted framework result remains 302.54 tok/s from Round 3.
 - The constrained JSON loop's judge benchmark reached 450.44 tok/s; the official framework benchmark accepted 427.20 tok/s.
+- The robust reruns below supersede the original headline throughput claims. The earlier numbers were useful for search direction, but the corrected measurements count true completion tokens, use fixed-duration multi-trial windows, and gate on a single Modal H100 80GB container per run.
 
 ## Long Prompts
 
@@ -41,7 +42,9 @@ What did not hold up:
 - Shared/proxy streaming client experiments were unstable.
 - A 16-request streaming warmup caused severe p99/throughput variance; reducing to four looked better in self-benchmark but was not accepted by the final judge loop.
 
-Actual best accepted result: 302.54 tok/s.
+Actual best accepted framework-loop result: 302.54 tok/s.
+
+The robust one-H100 rerun below supersedes this historical loop number for final performance claims.
 
 Why it improved: this workload has extreme prompt-prefix reuse. Real warmup and prefix caching moved repeated 3000-word prompts onto the hot path, while chunked prefill and graph capture kept long-prefill/decode scheduling stable at concurrency 16.
 
@@ -112,6 +115,8 @@ I reran the final comparison with resource routing fixed to one Modal H100 per m
 The high-concurrency specialization remains the largest fair target-pair gain: 675.39 tok/s versus 276.31 tok/s, or 2.44x over stock vLLM without FlashInfer. If the FlashInfer-enabled stock baseline is the comparison point for high concurrency, the gain is 1.82x.
 
 The constrained-specialized version reached 729.12 valid tok/s. That is 1.64x faster than the stock no-FlashInfer constrained baseline and 2.90x faster than the stock FlashInfer-sampler constrained baseline. Because FlashInfer hurt stock constrained serving in this measurement, I treat both comparisons as useful: no-FlashInfer is the fairer stock baseline, while FlashInfer-sampler shows the failure mode that the constrained-specialized path avoided.
+
+The table above is retained as the first fixed-resource measurement pass, but the long-prompt, high-concurrency, and constrained sections below supersede it. The later harnesses fixed benchmark bugs around streaming chunk counts, token accounting, prompt tokenization, failure handling, and resource-class gating.
 
 ## FlashInfer Sampler Profiling
 
@@ -224,6 +229,50 @@ Revised attribution:
 - FlashInfer still appears helpful for this unconstrained short-output workload in the original table, but I have not yet rerun FlashInfer under the corrected character-count audit.
 
 The practical conclusion is now narrower: the high-concurrency specialization should not be credited with a proven large vLLM performance improvement. The previous numbers show that the serving path is sensitive to runtime settings and Modal/vLLM scheduling state, but the benchmark is not engineered well enough to attribute a clean optimization win. The next proper benchmark should count true generated tokens, run multiple repetitions per config, and use either non-streaming responses with `usage.completion_tokens` or a streaming wrapper that reports token counts from vLLM output token ids.
+
+## Long Prompts Robust Remeasurement
+
+I reran the long-prompts/short-outputs workload after fixing the same benchmark issues as the high-concurrency and constrained reruns:
+
+- Switched to non-streaming `/v1/completions` and counted `usage.completion_tokens` from vLLM output token ids.
+- Requested fixed-length completions with `min_tokens=max_tokens=16`, `ignore_eos=True`, and `temperature=0`.
+- Used concurrency 16, a prompt pool of 64 prompts, a 20 s warmup, and five 60 s fixed measurement windows.
+- Scored throughput over the fixed trial duration and reported tail completions separately.
+- Added explicit HTTP connection limits equal to concurrency.
+- Added per-trial health checks, per-response `X-Benchmark-Instance`, and invalidated runs with instance changes, token-count mismatches, failed requests, or the wrong H100 memory class.
+- Fixed the prompt generator. The first robust attempt used artificial strings like `p000w000`; Llama tokenized those into about 14,001 tokens, exceeding `max_model_len=8192`. The accepted benchmark now uses a shared natural-word 3000-word prefix plus a small per-request suffix.
+- Fixed the long-specialized FlashInfer path by installing `flashinfer-python==0.2.6.post1+cu128torch2.7` into the Modal image and setting `VLLM_WORKER_MULTIPROC_METHOD=spawn` so CUDA is not initialized through forked worker processes.
+
+Workload implementation:
+
+- Benchmark: `.codex/final-one-h100-measurement/long_robust_tokens_benchmark.py`
+- Stock wrapper: `.codex/final-one-h100-measurement/robust-high-baseline90`
+- Specialized wrapper: `.codex/final-one-h100-measurement/worktrees/long-specialized/workspace`
+
+Resource note: both accepted runs used one Modal `H100` app container, tensor parallel size 1, `NVIDIA H100 80GB HBM3`, and 79.18 GiB visible CUDA memory. They did not use the same physical GPU UUID. Stock used `GPU-7cec38f4-5f2e-c2da-71bf-78acca9d70fb`; specialized used `GPU-d3323cea-2720-7856-5906-22a0f5342697`.
+
+Rejected attempts:
+
+- Artificial-token prompt run: invalid because prompts tokenized longer than `max_model_len=8192`.
+- First stock natural-prompt run: diagnostic only; median 640.80 tok/s but one trial had 11 HTTP 408s, so it failed the robust validity gate.
+- First FlashInfer-fixed specialized attempt: rejected by resource guard because it landed on `NVIDIA H100 NVL`, not H100 80GB.
+- First FlashInfer-enabled specialized startup: failed with CUDA fork reinitialization; fixed by forcing `spawn`.
+
+| Version | FlashInfer sampler | Median tok/s | Mean tok/s | Stddev | Min | Max | Median req/s | Validity |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Stock vLLM 0.10.0 | no | 508.53 | 511.15 | 4.20 | 508.00 | 517.07 | 31.78 | valid |
+| Long-specialized | yes | 512.53 | 509.49 | 6.62 | 499.47 | 515.20 | 32.03 | valid |
+
+Robust speedup: `512.53 / 508.53 = 1.01x` by median true completion tokens/sec.
+
+Interpretation: this is a tie, not a meaningful long-prompt specialization win. Fixing FlashInfer was the correct engineering move because the specialized wrapper intended to benchmark with `VLLM_USE_FLASHINFER_SAMPLER=1`, and the accepted run confirmed that path was active. But this workload emits only 16 output tokens after long repeated prompts, so the measured path is dominated by prefill, prefix-cache behavior, scheduler cadence, and request admission. FlashInfer affects sampling during decode, which is a small fraction of this workload. The long-specialized engine params, including `max_num_batched_tokens=4096` and small CUDA graph capture sizes, did not produce a stable gain over stock in the corrected harness.
+
+Raw result files:
+
+- `.codex/final-one-h100-measurement/results/long-robust-baseline90-rerun.json`
+- `.codex/final-one-h100-measurement/results/long-robust-baseline90-rerun.meta.json`
+- `.codex/final-one-h100-measurement/results/long-robust-specialized.json`
+- `.codex/final-one-h100-measurement/results/long-robust-specialized.meta.json`
 
 ## High Concurrency Robust Remeasurement
 
