@@ -67,7 +67,6 @@ def build_agent_runner(
     model_name: str,
     run_log_file: TextIO | None,
     use_docker: bool,
-    use_modal: bool = False,
     log_dir: Path | None = None,
     host_resources: Iterable[HostResource] = (),
 ) -> AgentRunner:
@@ -135,23 +134,18 @@ def build_agent_runner(
     if backend == "cli":
         provider = cli_provider or agent_cfg.cli_provider or "codex"
         docker_sandboxes = None
-        modal_sandboxes = None
-        if use_docker or use_modal:
-            # Both container backends reuse the DOCKER_PROVIDER_ENV registry
-            # since the per-provider install + env requirements are
-            # identical (we need node/npm, codex binary, PYTHONPATH, etc).
+        if use_docker:
+            # The Docker CLI path reuses the DOCKER_PROVIDER_ENV registry for
+            # per-provider install + env requirements (node/npm, codex binary,
+            # PYTHONPATH, etc).
             from .cli_docker import DOCKER_PROVIDER_ENV
 
             if provider not in DOCKER_PROVIDER_ENV:
-                flag = "--modal" if use_modal else "--docker"
                 raise SystemExit(
-                    f"--cli-provider {provider!r} is not yet supported with {flag}; "
+                    f"--cli-provider {provider!r} is not yet supported with --docker; "
                     f"supported: {sorted(DOCKER_PROVIDER_ENV)}"
                 )
-            if use_modal:
-                modal_sandboxes = backends
-            else:
-                docker_sandboxes = backends
+            docker_sandboxes = backends
         timeout = agent_cfg.cli_timeout
         # The CLI tool runs [model].name, same as the deepagents backend —
         # it's the single source of truth for the model. model.name is a
@@ -167,7 +161,6 @@ def build_agent_runner(
             timeout=timeout,
             run_log_file=run_log_file,
             docker_sandboxes=docker_sandboxes,
-            modal_sandboxes=modal_sandboxes,
             host_resources=host_resources,
             log_dir=log_dir,
         )

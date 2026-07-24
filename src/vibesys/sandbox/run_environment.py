@@ -74,11 +74,6 @@ class RunEnvironmentView:
     prompt_notes: str = ""
     isolated: bool = False
     cli_sandboxed: bool = False
-    # When True, ``cli_sandboxed`` refers to a Modal sandbox (rather than a
-    # local Docker container).  ``build_agent_runner`` treats Modal CLI
-    # sandboxes specially (different executor, no per-invocation
-    # workspace_arg).
-    cli_modal_sandboxed: bool = False
     host_device_reselect: bool = True
     # Coarse environment label for prompt-template branching:
     # ``"local"`` | ``"docker"`` | ``"modal"``.
@@ -406,7 +401,6 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                 prompt_notes=_modal_runtime_notes(self.config.gpu, app_name),
                 isolated=True,
                 cli_sandboxed=True,
-                cli_modal_sandboxed=False,  # codex no longer runs inside Modal
                 host_device_reselect=False,
                 env_kind="modal",
                 modal_app_name=app_name,

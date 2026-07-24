@@ -160,13 +160,13 @@ the file goes away; `retain` means VibeSys owns it under either decision.
 | `src/vibesys/_agent_cli/opencode.py` | 103 | retain for now | No `0.6.0` harness; delegating loses the provider |
 | `src/vibesys/agents/cli_runner.py` | 548 | retain, rewrite | Roughly 63 lines of executor wiring are replaced; the rest is provider-neutral |
 | `src/vibesys/agents/docker_executor.py` | 182 | delegate | Replaced by the `DockerSandboxLauncher`; the exec path moves under Omnigent |
-| `src/vibesys/agents/modal_executor.py` | 181 | delete | Already unreachable; `cli_modal_sandboxed` is only ever assigned `False` (`src/vibesys/sandbox/run_environment.py:409`) |
+| `src/vibesys/agents/modal_executor.py` | 181 | deleted in this PR | Unreachable agent-Modal executor; `cli_modal_sandboxed` was only ever `False` |
 | `src/vibesys/agents/cli_docker.py` | 234 | retain | Provider install scripts and auth paths |
 | `src/vibesys/agents/host_resource_declarations.py` | 177 | retain, re-express | Would become sandbox spec fields; mapping unverified |
 | `src/vibesys/agents/callbacks.py` | 497 | retain | No agentshim import; its four hooks are the adapter target |
 | `libs/vs-sandbox/src/vs_sandbox/docker_sandbox.py` | 698 | retain | Container lifecycle behind the launcher; still VibeSys-owned |
 | `libs/vs-sandbox/src/vs_sandbox/host_sandbox.py` | 415 | retain, re-express | No embedder wrap seam under Omnigent |
-| `libs/vs-sandbox/src/vs_sandbox/modal_sandbox.py` | 899 | delete | Unreachable from `src/`; exercised by tests only |
+| `libs/vs-sandbox/src/vs_sandbox/modal_sandbox.py` | 899 | retain (model-serving) | Alive: `src/vibesys/backends/cuda/__init__.py:118` instantiates `ModalSandbox` for the out-of-scope model-serving path |
 
 Totals. `src/vibesys/_agent_cli/` is 884 lines and `src/vibesys/agents/` is
 2,546. Full replacement removes on the order of 1,000-1,250 in-repo lines,
@@ -308,20 +308,26 @@ for GPU-Docker and for Gemini and OpenCode until their gaps close.
 
 ## Follow-up work
 
-Proposed, not yet filed. The first two are independent of this decision and are
-the cheapest wins the experiment produced.
+Done in this PR, as the cheapest wins the experiment produced and independent of
+the Omnigent decision:
 
-- Drop the `agentshim` git pin and consume the published release — the pinned
-  commit is byte-identical to `agentshim==0.5.0` and the branch is behind
-  upstream `main`.
-- Delete the unreachable Modal CLI-agent path —
-  `src/vibesys/agents/modal_executor.py` and
-  `libs/vs-sandbox/src/vs_sandbox/modal_sandbox.py`, plus their tests.
+- Dropped the `agentshim` git-source override; the dependency now resolves from
+  PyPI `agentshim==0.5.0` (byte-identical to the pinned commit, which sat on a
+  branch already merged upstream).
+- Deleted the unreachable agent-Modal executor path
+  (`src/vibesys/agents/modal_executor.py` and its wiring in `cli_runner.py`,
+  `build_agent_runner`, `context.py`, and `RunEnvironmentView`), plus its tests.
+  `libs/vs-sandbox/.../modal_sandbox.py` is deliberately kept — it is alive on
+  the out-of-scope model-serving path (`src/vibesys/backends/cuda/__init__.py`).
+
+Still proposed, not yet filed:
+
 - Promote the launcher spike to a full-turn spike behind a feature-flagged
   `OmnigentAgentRunner`, on the experiment branch, gated on the triggers above.
-- Vendor the executed subset of `agentshim` into `src/vibesys/_agent_cli/` and
-  retire the external repository; check its licensing first, as no `LICENSE`
-  file exists there.
+- Vendor the executed subset of `agentshim` (~1,875 lines, almost all the four
+  provider stream parsers) into `src/vibesys/_agent_cli/` and retire the
+  external repository, bringing its per-provider parser tests across; add a
+  `LICENSE` to `vic-lsh/agentshim` first, as none exists there.
 - Replace the Codex rollout-eviction substring match at
   `src/vibesys/agents/cli_runner.py:77` with a typed error.
 - Widen or document the `"cli"` backend-string comparisons at

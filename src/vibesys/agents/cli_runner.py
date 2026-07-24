@@ -186,18 +186,12 @@ class CliAgentRunner:
         timeout: int | None = None,
         run_log_file: TextIO | None = None,
         docker_sandboxes: dict[str, Any] | None = None,
-        modal_sandboxes: dict[str, Any] | None = None,
         host_resources: Iterable[HostResource] = (),
         log_dir: Path | None = None,
     ):
         if provider not in _PROVIDER_CLASSES:
             raise SystemExit(
                 f"unknown cli provider {provider!r}; expected one of: {sorted(_PROVIDER_CLASSES)}"
-            )
-        if docker_sandboxes is not None and modal_sandboxes is not None:
-            raise SystemExit(
-                "internal error: cli runner got both docker_sandboxes and "
-                "modal_sandboxes — exactly one should be set"
             )
         self._provider = provider
         self._provider_cls = _PROVIDER_CLASSES[provider]
@@ -207,7 +201,6 @@ class CliAgentRunner:
         self._timeout = timeout
         self._run_log_file = run_log_file
         self._docker_sandboxes = docker_sandboxes
-        self._modal_sandboxes = modal_sandboxes
         # Additional resource intent is provider-independent. The declaration
         # policy combines it with provider defaults only on the local CLI path.
         self._host_resources = tuple(host_resources)
@@ -350,17 +343,13 @@ class CliAgentRunner:
             # Update the event handler for this invocation's logger.
             agent.event_handler = logger
             # Sandbox may have been restarted with a new container (e.g.
-            # reselect_gpu rebuilt it for a different --gpus device, or the
-            # Modal sandbox was recreated after a fallback restart); refresh
+            # reselect_gpu rebuilt it for a different --gpus device); refresh
             # the runner so the next exec targets the live container.
             if self._docker_sandboxes is not None:
                 # Dynamic poke: only the docker path constructs agents with a
                 # DockerCommandExecutor, which carries container_id.
                 executor = getattr(agent, "executor", None)
                 executor.container_id = self._docker_sandboxes[kind]._container_id  # pyright: ignore[reportOptionalMemberAccess]
-            # ModalCommandExecutor reads ``_modal_sandbox._sandbox`` on every
-            # ``run()``, so a fallback-triggered sandbox restart is picked up
-            # automatically — no per-invocation refresh needed here.
         elif self._docker_sandboxes is not None:
             from vibesys.agents.docker_executor import DockerCommandExecutor
 
@@ -371,29 +360,6 @@ class CliAgentRunner:
                 event_handler=logger,
                 executor=executor,
             )
-            if reuse_agent:
-                self._agents[kind] = agent
-        elif self._modal_sandboxes is not None:
-            from vibesys.agents.modal_executor import ModalCommandExecutor
-
-            sandbox = self._modal_sandboxes[kind]
-            executor = ModalCommandExecutor(sandbox)
-            agent = self._provider_cls(
-                model=self._model,
-                event_handler=logger,
-                executor=executor,
-            )
-            if self._provider == "codex" and hasattr(agent, "base_config_args"):
-                # Codex-only attribute, guarded by the hasattr check above.
-                codex_agent = cast(CodexCodingAgent, agent)
-                codex_agent.base_config_args.extend(
-                    [
-                        "--config",
-                        'cli_auth_credentials_store="file"',
-                        "--config",
-                        'forced_login_method="chatgpt"',
-                    ]
-                )
             if reuse_agent:
                 self._agents[kind] = agent
         else:
@@ -420,7 +386,7 @@ class CliAgentRunner:
         # Layer GPU env vars on top of the captured interactive env so the
         # spawned subprocess inherits CUDA_VISIBLE_DEVICES. Containerised
         # modes bake env vars into the container at start(), so skip here.
-        _in_container = bool(self._docker_sandboxes or self._modal_sandboxes)
+        _in_container = bool(self._docker_sandboxes)
         if env and not _in_container:
             agent.env = {**agent.env, **env}
         workspace_arg = None if _in_container else str(workspace)
