@@ -186,8 +186,6 @@ def test_modal_environment_uses_local_docker_for_editing(tmp_path):
     # The sandbox is local Docker, not a Modal Sandbox.
     assert backend.calls[0][0] is SandboxKind.DOCKER
     assert session.view.cli_sandboxed is True
-    # codex is NOT inside a Modal sandbox anymore — flag must be False.
-    assert session.view.cli_modal_sandboxed is False
     backend.sandbox.start.assert_called_once()
 
 
@@ -302,10 +300,9 @@ def test_modal_environment_with_deepagents_uses_docker_too(tmp_path):
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    session = env.open(_request(tmp_path, backend, agent_backend="deepagents"))
+    env.open(_request(tmp_path, backend, agent_backend="deepagents"))
 
     assert backend.calls[0][0] is SandboxKind.DOCKER
-    assert session.view.cli_modal_sandboxed is False
 
 
 def test_unknown_environment_name_raises():

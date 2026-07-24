@@ -103,7 +103,6 @@ exclude = ["exp_env/**"]
 members = ["libs/*"]
 
 [tool.uv.sources]
-agentshim = { git = "https://github.com/vic-lsh/agentshim.git", rev = "codex/executor-injection" }
 vs-feature-flags = { workspace = true }
 vs-github = { workspace = true }
 vs-issue-board = { workspace = true }

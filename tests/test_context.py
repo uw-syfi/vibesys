@@ -533,7 +533,6 @@ def test_candidate_context_cleans_up_when_agent_runner_construction_fails(tmp_pa
             profiler_support=None,
         ),
         cli_sandboxed=False,
-        cli_modal_sandboxed=False,
     )
     session.sandbox = MagicMock()
     parent.run_environment.open.return_value = session

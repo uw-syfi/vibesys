@@ -28,10 +28,14 @@ members = [
 [[package]]
 name = "agentshim"
 version = "0.5.0"
-source = { git = "https://github.com/vic-lsh/agentshim.git?rev=codex%2Fexecutor-injection#4ac0f2853c4c1ba8c236265cc42aa59c520e94c0" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "litellm" },
     { name = "loguru" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/35/1f/97290a8120021a388edcab7a27bc9aa1db0ffb67b1efcffde5e24ee4a3fb/agentshim-0.5.0.tar.gz", hash = "sha256:be24e08129532c097fef446aa087c521c40b8278884a36198d33cb20c2beb0fd", size = 220223, upload-time = "2026-04-26T00:38:48.152Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/57/3f/326d3e4830d26c93006d14a76170952d83855f01bf79749c9fa6ab2925ec/agentshim-0.5.0-py3-none-any.whl", hash = "sha256:74bbe6806b23807d5a1c42c013051c5785d38ac09ccc7416ae9fa39e7b1a8bdc", size = 49376, upload-time = "2026-04-26T00:38:46.552Z" },
 ]
 
 [[package]]
@@ -4736,7 +4740,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", git = "https://github.com/vic-lsh/agentshim.git?rev=codex%2Fexecutor-injection" },
+    { name = "agentshim", specifier = ">=0.5.0" },
     { name = "datasets", specifier = ">=4.8.4" },
     { name = "deepagents" },
     { name = "huggingface-hub" },

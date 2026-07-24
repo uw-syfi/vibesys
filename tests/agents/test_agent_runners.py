@@ -1327,48 +1327,6 @@ class TestBuildAgentRunner:
         assert isinstance(runner, CliAgentRunner)
         assert runner._docker_sandboxes is mock_backends
 
-    def test_build_agent_runner_cli_modal_returns_cli_runner(self):
-        """cli backend + --modal should wire modal_sandboxes."""
-        from unittest.mock import MagicMock
-
-        mock_backends = {
-            "implementer": MagicMock(),
-            "judge": MagicMock(),
-            "perf_eval": MagicMock(),
-        }
-        runner = build_agent_runner(
-            _agent_config(),
-            agent_backend="cli",
-            cli_provider="codex",
-            backends=mock_backends,
-            skills=[],
-            skill_source_dirs=[],
-            model=None,
-            model_name="m",
-            run_log_file=None,
-            use_docker=False,
-            use_modal=True,
-        )
-        assert isinstance(runner, CliAgentRunner)
-        assert runner._modal_sandboxes is mock_backends
-        assert runner._docker_sandboxes is None
-
-    def test_build_agent_runner_rejects_unsupported_modal_provider(self):
-        with pytest.raises(SystemExit, match="not yet supported with --modal"):
-            build_agent_runner(
-                _agent_config(),
-                agent_backend="cli",
-                cli_provider="nonexistent",
-                backends={},
-                skills=[],
-                skill_source_dirs=[],
-                model=None,
-                model_name="m",
-                run_log_file=None,
-                use_docker=False,
-                use_modal=True,
-            )
-
     def test_build_agent_runner_rejects_unsupported_docker_provider(self):
         with pytest.raises(SystemExit, match="not yet supported with --docker"):
             build_agent_runner(

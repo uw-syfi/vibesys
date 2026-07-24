@@ -511,8 +511,7 @@ def _assemble_run_context(
         model=model,
         model_name=model_name,
         run_log_file=logger.writer,
-        use_docker=(session.view.cli_sandboxed and not session.view.cli_modal_sandboxed),
-        use_modal=session.view.cli_modal_sandboxed,
+        use_docker=session.view.cli_sandboxed,
         log_dir=log_dir,
     )
 
@@ -687,8 +686,7 @@ def _assemble_candidate_context(
         model=parent.model,
         model_name=parent.model_name,
         run_log_file=logger.writer,
-        use_docker=(session.view.cli_sandboxed and not session.view.cli_modal_sandboxed),
-        use_modal=session.view.cli_modal_sandboxed,
+        use_docker=session.view.cli_sandboxed,
         log_dir=log_dir,
     )
 
