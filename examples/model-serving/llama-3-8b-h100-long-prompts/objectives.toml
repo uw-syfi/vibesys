@@ -1,0 +1,7 @@
+[[objective]]
+name = "aggregate_throughput"
+direction = "max"
+
+[[objective]]
+name = "p99_latency_ms"
+direction = "min"
