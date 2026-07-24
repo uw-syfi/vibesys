@@ -13,7 +13,6 @@ from typing import Any
 
 import httpx
 
-
 PROFILE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
