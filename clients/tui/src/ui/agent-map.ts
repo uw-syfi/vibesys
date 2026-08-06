@@ -1,5 +1,6 @@
 import {BoxRenderable, type CliRenderer, TextRenderable} from '@opentui/core';
 import type {AgentPhase} from '../run-map.js';
+import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
 import {visiblePhases, visibleRoundNumber} from '../session-model.js';
 
@@ -21,7 +22,10 @@ export class AgentMapView {
   readonly output: BoxRenderable;
   #renderedState: SessionState | null = null;
 
-  constructor(private readonly renderer: CliRenderer) {
+  constructor(
+    private readonly renderer: CliRenderer,
+    private readonly controller: SessionController,
+  ) {
     this.output = new BoxRenderable(renderer, {
       id: 'agent-map',
       width: 30,
@@ -93,6 +97,7 @@ export class AgentMapView {
       borderStyle: 'rounded',
       borderColor: selected ? '#22d3ee' : '#475569',
       ...(selected ? {backgroundColor: '#0f172a'} : {}),
+        onMouseUp: () => this.controller.selectAgent(phase.kind),
     });
     const statusColor = STATUS_COLOR[phase.status];
     row.add(

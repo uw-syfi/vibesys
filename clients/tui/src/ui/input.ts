@@ -33,8 +33,10 @@ export function createInputPanel(
   });
   const syntaxStyle = SyntaxStyle.fromStyles({
     'slash-command': {fg: '#22d3ee', bold: true},
+    'plain-text': {fg: '#f8fafc'},
   });
   const commandStyleId = syntaxStyle.getStyleId('slash-command');
+  const plainTextStyleId = syntaxStyle.getStyleId('plain-text');
   const input = new InputRenderable(renderer, {
     id: 'input',
     width: '100%',
@@ -76,6 +78,8 @@ export function createInputPanel(
     const range = slashCommandRange(value);
     if (range !== null && commandStyleId !== null) {
       input.addHighlightByCharRange({...range, styleId: commandStyleId});
+    } else if (value.length > 0 && plainTextStyleId !== null) {
+      input.addHighlightByCharRange({start: 0, end: value.length, styleId: plainTextStyleId});
     }
 
     matches = suggestSlashCommands(value);
