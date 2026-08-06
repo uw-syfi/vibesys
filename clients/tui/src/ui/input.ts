@@ -21,7 +21,7 @@ export interface InputPanel {
 }
 
 function commandSyntaxStyle(theme: Theme): SyntaxStyle {
-  return SyntaxStyle.fromStyles({'slash-command': {fg: theme.accent, bold: true}});
+  return SyntaxStyle.fromStyles({'slash-command': {fg: theme.accent, bold: true}, 'plain-text': {fg: theme.textPrimary}});
 }
 
 export function createInputPanel(
@@ -40,8 +40,9 @@ export function createInputPanel(
     paddingLeft: 1,
     paddingRight: 1,
   });
-  let syntaxStyle = commandSyntaxStyle(theme);
+let syntaxStyle = commandSyntaxStyle(theme);
   let commandStyleId = syntaxStyle.getStyleId('slash-command');
+  let plainTextStyleId = syntaxStyle.getStyleId('plain-text');
   const input = new InputRenderable(renderer, {
     id: 'input',
     width: '100%',
@@ -83,6 +84,8 @@ export function createInputPanel(
     const range = slashCommandRange(value);
     if (range !== null && commandStyleId !== null) {
       input.addHighlightByCharRange({...range, styleId: commandStyleId});
+    } else if (value.length > 0 && plainTextStyleId !== null) {
+      input.addHighlightByCharRange({start: 0, end: value.length, styleId: plainTextStyleId});
     }
 
     matches = suggestSlashCommands(value);
