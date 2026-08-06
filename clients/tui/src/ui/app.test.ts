@@ -861,6 +861,11 @@ class FakeController implements SessionController {
   selectPreviousAgent(): void {
     this.selectNextAgent();
   }
+
+  selectAgent(kind: string): void {
+    this.state = {...this.state, selectedAgentKind: kind, overlay: null};
+    for (const listener of this.#listeners) listener(this.state);
+  }
   selectNextRound(): void {
     const index = this.state.rounds.findIndex(round => round.number === this.state.selectedRound);
     const next =
