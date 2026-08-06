@@ -18,6 +18,7 @@ import {
   moveThemeSelection,
   openThemePicker,
   type SessionState,
+  selectAgent,
   selectNextAgent,
   selectNextRound,
   selectPreviousAgent,
@@ -41,6 +42,7 @@ export interface SessionController {
   live(): void;
   selectNextAgent(): void;
   selectPreviousAgent(): void;
+  selectAgent(kind: string): void;
   selectNextRound(): void;
   selectPreviousRound(): void;
   selectRound(roundNumber: number): void;
@@ -116,6 +118,10 @@ export class SocketSessionController implements SessionController {
 
   selectPreviousAgent(): void {
     this.#setState(selectPreviousAgent(this.#state));
+  }
+
+  selectAgent(kind: string): void {
+    this.#setState(selectAgent(this.#state, kind));
   }
 
   selectNextRound(): void {

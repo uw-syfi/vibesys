@@ -297,6 +297,10 @@ export function selectRound(state: SessionState, roundNumber: number): SessionSt
   return {...state, selectedRound: roundNumber, selectedAgentKind: null, overlay: null};
 }
 
+export function selectAgent(state: SessionState, kind: string): SessionState {
+  return {...state, selectedAgentKind: kind, overlay: null};
+}
+
 export function clearAgentSelection(state: SessionState): SessionState {
   return {...state, selectedAgentKind: null, overlay: null};
 }
