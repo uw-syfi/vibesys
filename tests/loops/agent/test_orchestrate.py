@@ -23,9 +23,7 @@ from vibesys.loops.agent.loop import (
     _pareto_archive_summary,
     _pareto_frontier_records,
     _provisional_candidates_since_official,
-    _resolve_rollback_commit,
     _review_due,
-    _RoundRecord,
     _run_framework_validation_gate,
     _terminal_workspace_notice,
     run_agent_loop,
@@ -47,6 +45,7 @@ from vibesys.schemas import (
     ValidationRecipeArtifact,
     Verdict,
 )
+from vs_loop_state.agent import RoundRecord
 
 # ---------------------------------------------------------------------------
 # Fixtures & helpers
@@ -75,7 +74,7 @@ def test_legacy_active_hypothesis_backfills_framework_revert_commit():  # noqa: 
         revert_applied=True,
     )
     records = [
-        _RoundRecord(
+        RoundRecord(
             round_number=28,
             commit="a" * 40,
             perf_metric=None,
@@ -89,85 +88,11 @@ def test_legacy_active_hypothesis_backfills_framework_revert_commit():  # noqa: 
     assert _backfill_revert_commit(state, records) is False
 
 
-def test_failed_child_rollback_preserves_its_exact_parent_commit():  # noqa: ANN201  # tracked: #288
-    historical_parent = _RoundRecord(
-        round_number=20,
-        commit="a" * 40,
-        perf_metric=1400.0,
-        perf_unit="tok/s",
-        passed=True,
-    )
-    failed_child = _RoundRecord(
-        round_number=21,
-        commit="c" * 40,
-        perf_metric=None,
-        perf_unit=None,
-        passed=True,
-        hypothesis_outcome="disproven",
-        hypothesis_parent_round=20,
-        hypothesis_parent_commit="b" * 40,
-    )
-
-    commit, child_round = _resolve_rollback_commit(
-        historical_parent, [historical_parent, failed_child]
-    )
-
-    assert commit == "b" * 40
-    assert child_round == 21
-
-
-def test_implementation_failed_child_rollback_preserves_its_exact_parent_commit():  # noqa: ANN201  # tracked: #288
-    historical_parent = _RoundRecord(
-        round_number=20,
-        commit="a" * 40,
-        perf_metric=1400.0,
-        perf_unit="tok/s",
-        passed=True,
-    )
-    failed_child = _RoundRecord(
-        round_number=21,
-        commit="c" * 40,
-        perf_metric=None,
-        perf_unit=None,
-        passed=True,
-        hypothesis_outcome=HypothesisOutcome.IMPLEMENTATION_FAILED.value,
-        hypothesis_parent_round=20,
-        hypothesis_parent_commit="b" * 40,
-    )
-
-    commit, child_round = _resolve_rollback_commit(
-        historical_parent, [historical_parent, failed_child]
-    )
-
-    assert commit == "b" * 40
-    assert child_round == 21
-
-
-def test_distant_rollback_uses_requested_historical_commit():  # noqa: ANN201  # tracked: #288
-    historical_parent = _RoundRecord(
-        round_number=5,
-        commit="a" * 40,
-        perf_metric=None,
-        perf_unit=None,
-        passed=True,
-    )
-    failed_child = _RoundRecord(
-        round_number=21,
-        commit="c" * 40,
-        perf_metric=None,
-        perf_unit=None,
-        passed=True,
-        hypothesis_outcome="disproven",
-        hypothesis_parent_round=20,
-        hypothesis_parent_commit="b" * 40,
-    )
-
-    commit, child_round = _resolve_rollback_commit(
-        historical_parent, [historical_parent, failed_child]
-    )
-
-    assert commit == "a" * 40
-    assert child_round is None
+# RoundRecord's persistence and rollback resolution (RoundHistory) now live
+# in libs/vs-loop-state; see its own tests
+# (libs/vs-loop-state/tests/test_vs_loop_state_agent.py) for that coverage,
+# including the failed-child, implementation-failed, and distant-rollback
+# cases previously duplicated here.
 
 
 @pytest.fixture
@@ -546,10 +471,10 @@ def test_orchestrator_plan_revert_round_optional():  # noqa: ANN201  # tracked: 
 
 def test_official_evaluation_cadence_counts_candidate_checkpoints_not_rounds():  # noqa: ANN201  # tracked: #288
     records = [
-        _RoundRecord(1, "a", None, None, False, reviewed=False, hypothesis_outcome="continue"),  # noqa: FBT003  # tracked: #288
-        _RoundRecord(2, "b", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
-        _RoundRecord(3, "c", None, None, False, reviewed=True, hypothesis_outcome="rejected"),  # noqa: FBT003  # tracked: #288
-        _RoundRecord(4, "d", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
+        RoundRecord(1, "a", None, None, False, reviewed=False, hypothesis_outcome="continue"),  # noqa: FBT003  # tracked: #288
+        RoundRecord(2, "b", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
+        RoundRecord(3, "c", None, None, False, reviewed=True, hypothesis_outcome="rejected"),  # noqa: FBT003  # tracked: #288
+        RoundRecord(4, "d", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
     ]
 
     assert _provisional_candidates_since_official(records) == 2
@@ -588,7 +513,7 @@ def test_measured_candidate_forces_review_even_when_disposition_is_downgraded():
 
 def test_reused_candidate_evidence_does_not_bypass_sparse_review():  # noqa: ANN201  # tracked: #288
     metrics = {"throughput": 6205.0, "latency": 10660.0}
-    record = _RoundRecord(
+    record = RoundRecord(
         round_number=75,
         commit="a" * 40,
         perf_metric=None,
@@ -620,7 +545,7 @@ def test_reused_candidate_evidence_does_not_bypass_sparse_review():  # noqa: ANN
 
 
 def test_changed_candidate_row_is_fresh_even_when_artifact_name_is_reused():  # noqa: ANN201  # tracked: #288
-    record = _RoundRecord(
+    record = RoundRecord(
         round_number=4,
         commit="a" * 40,
         perf_metric=None,
@@ -643,7 +568,7 @@ def test_changed_candidate_row_is_fresh_even_when_artifact_name_is_reused():  # 
 
 def test_official_evaluation_cadence_counts_reviewed_frontier_tradeoff():  # noqa: ANN201  # tracked: #288
     records = [
-        _RoundRecord(
+        RoundRecord(
             2,
             "b",
             None,
@@ -679,8 +604,8 @@ def test_noise_aware_dominance_preserves_sub_noise_alternatives():  # noqa: ANN2
 def test_pareto_frontier_keeps_throughput_latency_tradeoff_and_drops_dominated_point():  # noqa: ANN201  # tracked: #288
     objectives = [Objective("throughput", "max"), Objective("latency", "min")]
 
-    def candidate(round_number: int, throughput: float, latency: float) -> _RoundRecord:
-        return _RoundRecord(
+    def candidate(round_number: int, throughput: float, latency: float) -> RoundRecord:
+        return RoundRecord(
             round_number,
             str(round_number) * 40,
             None,
@@ -706,7 +631,7 @@ def test_live_archive_rejects_stale_frontier_claim_for_dominated_candidate():  #
     from vibesys.loops.agent.loop import _pareto_archive_conflict  # noqa: PLC0415  # tracked: #288
 
     objectives = [Objective("throughput", "max"), Objective("latency", "min")]
-    trusted = _RoundRecord(
+    trusted = RoundRecord(
         61,
         "a" * 40,
         None,
@@ -733,7 +658,7 @@ def test_live_archive_preserves_real_throughput_latency_tradeoff():  # noqa: ANN
     from vibesys.loops.agent.loop import _pareto_archive_conflict  # noqa: PLC0415  # tracked: #288
 
     objectives = [Objective("throughput", "max"), Objective("latency", "min")]
-    trusted = _RoundRecord(
+    trusted = RoundRecord(
         6,
         "a" * 40,
         None,
@@ -757,7 +682,7 @@ def test_live_archive_preserves_real_throughput_latency_tradeoff():  # noqa: ANN
 
 def test_pareto_archive_distinguishes_trusted_and_pending_candidates():  # noqa: ANN201  # tracked: #288
     objectives = [Objective("throughput", "max"), Objective("latency", "min")]
-    trusted = _RoundRecord(
+    trusted = RoundRecord(
         49,
         "a" * 40,
         None,
@@ -769,7 +694,7 @@ def test_pareto_archive_distinguishes_trusted_and_pending_candidates():  # noqa:
         candidate_evaluation_artifact="h31.json",
         candidate_operating_point="concurrency=128",
     )
-    pending = _RoundRecord(
+    pending = RoundRecord(
         51,
         "b" * 40,
         None,
@@ -793,7 +718,7 @@ def test_pareto_archive_distinguishes_trusted_and_pending_candidates():  # noqa:
 
 def test_official_evaluation_cadence_resets_at_verified_checkpoint():  # noqa: ANN201  # tracked: #288
     records = [
-        _RoundRecord(
+        RoundRecord(
             1,
             "a",
             10.0,
@@ -804,7 +729,7 @@ def test_official_evaluation_cadence_resets_at_verified_checkpoint():  # noqa: A
             official_evaluation=True,
             official_evaluation_reason="orchestrator_request",
         ),
-        _RoundRecord(2, "b", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
+        RoundRecord(2, "b", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
     ]
 
     assert _provisional_candidates_since_official(records) == 1
@@ -823,8 +748,8 @@ def test_official_evaluation_cadence_resets_at_verified_checkpoint():  # noqa: A
 
 def test_terminal_workspace_notice_points_designer_to_hypothesis_parent():  # noqa: ANN201  # tracked: #288
     records = [
-        _RoundRecord(28, "a" * 40, None, None, False),  # noqa: FBT003  # tracked: #288
-        _RoundRecord(
+        RoundRecord(28, "a" * 40, None, None, False),  # noqa: FBT003  # tracked: #288
+        RoundRecord(
             29,
             "b" * 40,
             None,
@@ -834,7 +759,7 @@ def test_terminal_workspace_notice_points_designer_to_hypothesis_parent():  # no
             hypothesis_id="bad-scheduler",
             hypothesis_outcome="rejected",
         ),
-        _RoundRecord(
+        RoundRecord(
             30,
             "c" * 40,
             None,
@@ -856,7 +781,7 @@ def test_terminal_workspace_notice_points_designer_to_hypothesis_parent():  # no
 
 
 def test_terminal_workspace_notice_preserves_pareto_tradeoff_commit():  # noqa: ANN201  # tracked: #288
-    record = _RoundRecord(
+    record = RoundRecord(
         51,
         "b" * 40,
         None,
@@ -879,8 +804,8 @@ def test_terminal_workspace_notice_preserves_pareto_tradeoff_commit():  # noqa: 
 
 def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint():  # noqa: ANN201  # tracked: #288
     records = [
-        _RoundRecord(28, "a" * 40, None, None, False),  # noqa: FBT003  # tracked: #288
-        _RoundRecord(
+        RoundRecord(28, "a" * 40, None, None, False),  # noqa: FBT003  # tracked: #288
+        RoundRecord(
             34,
             "b" * 40,
             None,
@@ -891,7 +816,7 @@ def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint():
             hypothesis_outcome="continue",
             hypothesis_parent_round=28,
         ),
-        _RoundRecord(
+        RoundRecord(
             35,
             "c" * 40,
             None,
@@ -902,7 +827,7 @@ def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint():
             hypothesis_outcome="continue",
             hypothesis_parent_round=28,
         ),
-        _RoundRecord(
+        RoundRecord(
             36,
             "d" * 40,
             None,
@@ -926,8 +851,8 @@ def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint():
 
 def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposal():  # noqa: ANN201  # tracked: #288
     records = [
-        _RoundRecord(60, "a" * 40, None, None, True),  # noqa: FBT003  # tracked: #288
-        _RoundRecord(
+        RoundRecord(60, "a" * 40, None, None, True),  # noqa: FBT003  # tracked: #288
+        RoundRecord(
             61,
             "b" * 40,
             None,
@@ -938,7 +863,7 @@ def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposa
             hypothesis_outcome="implementation_failed",
             hypothesis_parent_round=60,
         ),
-        _RoundRecord(
+        RoundRecord(
             62,
             "c" * 40,
             None,
@@ -949,7 +874,7 @@ def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposa
             hypothesis_outcome="blocked",
             hypothesis_parent_round=60,
         ),
-        _RoundRecord(
+        RoundRecord(
             63,
             "d" * 40,
             None,
@@ -3100,10 +3025,8 @@ def test_pareto_archive_is_materialized_beside_progress(tmp_path, progress_name,
 
 
 def _record(round_number: int, perf: float | None, unit: str = "tok/s"):  # noqa: ANN202  # tracked: #288
-    """Build a _RoundRecord shorthand for plateau tests."""
-    from vibesys.loops.agent.loop import _RoundRecord  # noqa: PLC0415  # tracked: #288
-
-    return _RoundRecord(
+    """Build a RoundRecord shorthand for plateau tests."""
+    return RoundRecord(
         round_number=round_number,
         commit=f"sha{round_number:03d}",
         perf_metric=perf,

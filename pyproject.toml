@@ -22,6 +22,7 @@ dependencies = [
     "vs-feature-flags",
     "vs-github",
     "vs-issue-board",
+    "vs-loop-state",
     "vs-sandbox",
     "openevolve==0.3.1",
 ]
@@ -68,7 +69,7 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "libs/vs-feature-flags/tests", "libs/vs-github/tests", "libs/vs-issue-board/tests", "libs/vs-sandbox/tests"]
+testpaths = ["tests", "libs/vs-feature-flags/tests", "libs/vs-github/tests", "libs/vs-issue-board/tests", "libs/vs-loop-state/tests", "libs/vs-sandbox/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
 # below, so `uv run pytest` reports coverage locally without needing the full
 # flag string CI uses. CI layers on `--cov-report=xml`, `--cov-report=json`,
@@ -79,7 +80,7 @@ pythonpath = ["."]
 
 [tool.coverage.run]
 branch = true
-source = ["vibesys", "vs_feature_flags", "vs_github", "vs_issue_board", "vs_sandbox"]
+source = ["vibesys", "vs_feature_flags", "vs_github", "vs_issue_board", "vs_loop_state", "vs_sandbox"]
 relative_files = true
 omit = [
     # `python -m vibesys` launcher stub: one import and a guarded call into
@@ -123,7 +124,7 @@ allowlist = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests"]
+src = ["src", "tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests", "libs/vs-loop-state/src", "libs/vs-loop-state/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests"]
 # resources/skills/ vendors reference code (submodule checkouts and copied
 # reference material) that VibeSys does not own and does not hold to repo
 # lint standards; see the UP040/UP046/UP047 note below.
@@ -195,7 +196,7 @@ reportUnknownArgumentType = "none"
 # `libs/*/src` too, not just the test paths whose baseline relies on it.
 reportUnnecessaryTypeIgnoreComment = "error"
 pythonVersion = "3.12"
-include = ["src", "tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests"]
+include = ["src", "tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests", "libs/vs-loop-state/src", "libs/vs-loop-state/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests"]
 # `tests` and `libs/*/tests` are included above so the strict checker actually
 # sees them (previously they were unchecked entirely). Running them at full
 # strict produced thousands of errors, almost all from patterns strict mode was
@@ -234,12 +235,14 @@ executionEnvironments = [
     { root = "libs/vs-feature-flags/src" },
     { root = "libs/vs-github/src" },
     { root = "libs/vs-issue-board/src" },
+    { root = "libs/vs-loop-state/src" },
     { root = "libs/vs-sandbox/src" },
     { root = "src" },
     { root = "tests", reportMissingParameterType = "none", reportUnknownParameterType = "none", reportUnknownLambdaType = "none", reportMissingTypeArgument = "none", reportPrivateUsage = "none", reportPrivateImportUsage = "none", reportAttributeAccessIssue = "none", reportFunctionMemberAccess = "none" },
     { root = "libs/vs-feature-flags/tests", reportMissingParameterType = "none", reportUnknownParameterType = "none", reportUnknownLambdaType = "none", reportMissingTypeArgument = "none", reportPrivateUsage = "none", reportPrivateImportUsage = "none", reportAttributeAccessIssue = "none", reportFunctionMemberAccess = "none" },
     { root = "libs/vs-github/tests", reportMissingParameterType = "none", reportUnknownParameterType = "none", reportUnknownLambdaType = "none", reportMissingTypeArgument = "none", reportPrivateUsage = "none", reportPrivateImportUsage = "none", reportAttributeAccessIssue = "none", reportFunctionMemberAccess = "none" },
     { root = "libs/vs-issue-board/tests", reportMissingParameterType = "none", reportUnknownParameterType = "none", reportUnknownLambdaType = "none", reportMissingTypeArgument = "none", reportPrivateUsage = "none", reportPrivateImportUsage = "none", reportAttributeAccessIssue = "none", reportFunctionMemberAccess = "none" },
+    { root = "libs/vs-loop-state/tests", reportMissingParameterType = "none", reportUnknownParameterType = "none", reportUnknownLambdaType = "none", reportMissingTypeArgument = "none", reportPrivateUsage = "none", reportPrivateImportUsage = "none", reportAttributeAccessIssue = "none", reportFunctionMemberAccess = "none" },
     { root = "libs/vs-sandbox/tests", reportMissingParameterType = "none", reportUnknownParameterType = "none", reportUnknownLambdaType = "none", reportMissingTypeArgument = "none", reportPrivateUsage = "none", reportPrivateImportUsage = "none", reportAttributeAccessIssue = "none", reportFunctionMemberAccess = "none" },
 ]
 
@@ -254,4 +257,5 @@ members = ["libs/*"]
 vs-feature-flags = { workspace = true }
 vs-github = { workspace = true }
 vs-issue-board = { workspace = true }
+vs-loop-state = { workspace = true }
 vs-sandbox = { workspace = true }

@@ -19,6 +19,7 @@ members = [
     "vs-feature-flags",
     "vs-github",
     "vs-issue-board",
+    "vs-loop-state",
     "vs-sandbox",
 ]
 
@@ -4434,6 +4435,7 @@ dependencies = [
     { name = "vs-feature-flags" },
     { name = "vs-github" },
     { name = "vs-issue-board" },
+    { name = "vs-loop-state" },
     { name = "vs-sandbox" },
 ]
 
@@ -4477,6 +4479,7 @@ requires-dist = [
     { name = "vs-feature-flags", editable = "libs/vs-feature-flags" },
     { name = "vs-github", editable = "libs/vs-github" },
     { name = "vs-issue-board", editable = "libs/vs-issue-board" },
+    { name = "vs-loop-state", editable = "libs/vs-loop-state" },
     { name = "vs-sandbox", editable = "libs/vs-sandbox" },
 ]
 provides-extras = ["omnigent"]
@@ -4523,6 +4526,17 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.0" },
     { name = "pydantic", specifier = ">=2" },
 ]
+
+[[package]]
+name = "vs-loop-state"
+version = "0.1.0"
+source = { editable = "libs/vs-loop-state" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
 
 [[package]]
 name = "vs-sandbox"

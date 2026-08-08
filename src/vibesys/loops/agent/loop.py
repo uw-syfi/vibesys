@@ -66,6 +66,7 @@ from vibesys.skills import (
     build_skill_catalog,
     resolve_skill_selections,
 )
+from vs_loop_state.agent import RoundHistory, RoundRecord
 
 # Candidate process boundaries selected by ``--interface``. Language, tooling,
 # and artifact requirements belong to the selected domain and input bundle.
@@ -78,109 +79,14 @@ _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
 
 
 # ---------------------------------------------------------------------------
-# Rounds state (persisted to log_dir/rounds.json)
+# Active hypothesis state (persisted to log_dir/active_hypothesis.json)
+#
+# ``RoundRecord`` (persisted to log_dir/rounds.json) and its load/save/
+# rollback-resolution helpers live in the vs-loop-state library
+# (vs_loop_state.agent) — see its module docstring. ``_ActiveHypothesis``
+# stays here: it embeds ``OrchestratorPlan`` from ``vibesys.schemas``, which
+# that dependency-free library cannot import.
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class _RoundRecord:
-    round_number: int
-    commit: str | None
-    perf_metric: float | None
-    perf_unit: str | None
-    passed: bool
-    # True when the orchestrator chose to skip profiling this round; the
-    # perf_metric (if any) was reused / inherited from a prior measurement
-    # rather than freshly measured this round.  Plateau detection ignores
-    # these so a chain of skipped-profile rounds doesn't masquerade as a
-    # real plateau.
-    profile_skipped: bool = False
-    # False means the implementer was still investigating and sparse-review
-    # policy intentionally deferred both the independent judge and official
-    # framework gates. Such a round is provisional, not a failed attempt.
-    reviewed: bool = True
-    hypothesis_id: str | None = None
-    hypothesis_outcome: str | None = None
-    hypothesis_parent_round: int | None = None
-    # Exact tree from which this hypothesis started. This can be newer than
-    # the historical end-of-round checkpoint when an operator or framework
-    # repair lands between rounds.
-    hypothesis_parent_commit: str | None = None
-    metrics: dict[str, float] = field(default_factory=dict)
-    evaluation_artifact: str | None = None
-    # Only framework-owned gates can set this. A judge-approved hypothesis may
-    # be a useful provisional working checkpoint without becoming the latest
-    # officially verified checkpoint.
-    official_evaluation: bool = False
-    official_evaluation_reason: str | None = None
-    # Candidate evidence is deliberately separate from official tracking.
-    # It may describe one directly comparable representative point rather
-    # than a full canonical evaluation and therefore never updates
-    # ``perf_metric`` or plateau detection by itself.
-    candidate_disposition: str = CandidateDisposition.UNASSESSED.value
-    candidate_metrics: dict[str, float] = field(default_factory=dict)
-    candidate_evaluation_artifact: str | None = None
-    candidate_operating_point: str = ""
-    candidate_retention_reason: str = ""
-
-    def to_json(self) -> dict[str, Any]:
-        return {
-            "round": self.round_number,
-            "commit": self.commit,
-            "perf_metric": self.perf_metric,
-            "perf_unit": self.perf_unit,
-            "passed": self.passed,
-            "profile_skipped": self.profile_skipped,
-            "reviewed": self.reviewed,
-            "hypothesis_id": self.hypothesis_id,
-            "hypothesis_outcome": self.hypothesis_outcome,
-            "hypothesis_parent_round": self.hypothesis_parent_round,
-            "hypothesis_parent_commit": self.hypothesis_parent_commit,
-            "metrics": self.metrics,
-            "evaluation_artifact": self.evaluation_artifact,
-            "official_evaluation": self.official_evaluation,
-            "official_evaluation_reason": self.official_evaluation_reason,
-            "candidate_disposition": self.candidate_disposition,
-            "candidate_metrics": self.candidate_metrics,
-            "candidate_evaluation_artifact": self.candidate_evaluation_artifact,
-            "candidate_operating_point": self.candidate_operating_point,
-            "candidate_retention_reason": self.candidate_retention_reason,
-        }
-
-    @classmethod
-    def from_json(cls, data: dict[str, Any]) -> _RoundRecord:
-        return cls(
-            round_number=int(data["round"]),
-            commit=data.get("commit"),
-            perf_metric=data.get("perf_metric"),
-            perf_unit=data.get("perf_unit"),
-            passed=bool(data.get("passed", False)),
-            profile_skipped=bool(data.get("profile_skipped", False)),
-            reviewed=bool(data.get("reviewed", True)),
-            hypothesis_id=data.get("hypothesis_id"),
-            hypothesis_outcome=data.get("hypothesis_outcome"),
-            hypothesis_parent_round=data.get("hypothesis_parent_round"),
-            hypothesis_parent_commit=data.get("hypothesis_parent_commit"),
-            metrics=data.get("metrics", {}),
-            evaluation_artifact=data.get("evaluation_artifact"),
-            # Runs written before sparse official evaluation executed global
-            # gates for every proven candidate. Preserve that history when
-            # resuming rather than relabeling old checkpoints provisional.
-            official_evaluation=bool(
-                data.get(
-                    "official_evaluation",
-                    data.get("passed", False) and data.get("hypothesis_outcome") == "proven",
-                )
-            ),
-            official_evaluation_reason=data.get("official_evaluation_reason"),
-            candidate_disposition=data.get(
-                "candidate_disposition", CandidateDisposition.UNASSESSED.value
-            ),
-            candidate_metrics=data.get("candidate_metrics", {}),
-            candidate_evaluation_artifact=data.get("candidate_evaluation_artifact"),
-            candidate_operating_point=data.get("candidate_operating_point", ""),
-            candidate_retention_reason=data.get("candidate_retention_reason", ""),
-        )
 
 
 @dataclass
@@ -299,18 +205,6 @@ class _ActiveHypothesis:
         )
 
 
-def _load_rounds_state(path: Path) -> list[_RoundRecord]:
-    if not path.exists():
-        return []
-    data = json.loads(path.read_text())
-    return [_RoundRecord.from_json(d) for d in data]
-
-
-def _save_rounds_state(path: Path, records: list[_RoundRecord]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps([r.to_json() for r in records], indent=2))
-
-
 def _load_active_hypothesis(path: Path) -> _ActiveHypothesis | None:
     if not path.exists():
         return None
@@ -328,7 +222,7 @@ def _save_active_hypothesis(path: Path, state: _ActiveHypothesis | None) -> None
 
 def _backfill_revert_commit(
     state: _ActiveHypothesis | None,
-    records: list[_RoundRecord],
+    records: list[RoundRecord],
 ) -> bool:
     """Recover rollback provenance for state written before it was persisted.
 
@@ -411,36 +305,8 @@ def _implementation_keeps_hypothesis_active(
     )
 
 
-def _resolve_rollback_commit(
-    target: _RoundRecord,
-    records: list[_RoundRecord],
-) -> tuple[str | None, int | None]:
-    """Resolve a requested parent round to the actual failed-child base tree.
-
-    A round record names the historical tree at the end of that round. An
-    immediately following hypothesis can start from a newer tree after a
-    validated operator or framework repair. If that child later fails, restore
-    its recorded pre-hypothesis tree instead of erasing those independent
-    repairs along with the failed implementation.
-
-    The second return value identifies the failed child whose base was chosen;
-    ``None`` means the historical target commit is used unchanged.
-    """
-    if not records:
-        return target.commit, None
-    latest = records[-1]
-    if (
-        latest.round_number > target.round_number
-        and latest.hypothesis_parent_round == target.round_number
-        and latest.hypothesis_parent_commit is not None
-        and latest.hypothesis_outcome in _FAILED_HYPOTHESIS_OUTCOMES
-    ):
-        return latest.hypothesis_parent_commit, latest.round_number
-    return target.commit, None
-
-
-def _best_round(records: list[_RoundRecord]) -> _RoundRecord | None:
-    best: _RoundRecord | None = None
+def _best_round(records: list[RoundRecord]) -> RoundRecord | None:
+    best: RoundRecord | None = None
     best_metric = float("-inf")
     for r in records:
         if not r.official_evaluation:
@@ -462,7 +328,7 @@ def _best_round(records: list[_RoundRecord]) -> _RoundRecord | None:
 _DEFAULT_PARETO_RELATIVE_NOISE = 0.0
 
 
-def _record_candidate_metrics(record: _RoundRecord) -> dict[str, float]:
+def _record_candidate_metrics(record: RoundRecord) -> dict[str, float]:
     """Return the comparable objective row associated with *record*.
 
     Official metrics remain authoritative when present. Candidate metrics are
@@ -511,13 +377,13 @@ def _noise_aware_dominates(
 
 
 def _trusted_candidate_records(
-    records: list[_RoundRecord], objectives: list[Objective]
-) -> list[_RoundRecord]:
+    records: list[RoundRecord], objectives: list[Objective]
+) -> list[RoundRecord]:
     """Return reviewed checkpoints with complete comparable objective rows."""
     objective_names = {objective.name for objective in objectives}
     if not objective_names:
         return []
-    trusted: list[_RoundRecord] = []
+    trusted: list[RoundRecord] = []
     for record in records:
         metrics = _record_candidate_metrics(record)
         if not objective_names.issubset(metrics):
@@ -534,11 +400,11 @@ def _trusted_candidate_records(
 
 
 def _pareto_frontier_records(
-    records: list[_RoundRecord],
+    records: list[RoundRecord],
     objectives: list[Objective],
     *,
     relative_noise: float = _DEFAULT_PARETO_RELATIVE_NOISE,
-) -> list[_RoundRecord]:
+) -> list[RoundRecord]:
     """Compute the noise-aware frontier over independently reviewed points."""
     candidates = _trusted_candidate_records(records, objectives)
     return [
@@ -559,11 +425,11 @@ def _pareto_frontier_records(
 
 def _pareto_archive_dominators(
     candidate_metrics: dict[str, float],
-    records: list[_RoundRecord],
+    records: list[RoundRecord],
     objectives: list[Objective],
     *,
     relative_noise: float = _DEFAULT_PARETO_RELATIVE_NOISE,
-) -> list[_RoundRecord]:
+) -> list[RoundRecord]:
     """Return trusted archive points that dominate a proposed candidate row."""
     objective_names = {objective.name for objective in objectives}
     if not objective_names or not objective_names.issubset(candidate_metrics):
@@ -589,7 +455,7 @@ def _format_metric_row(metrics: dict[str, float], objectives: list[Objective]) -
 
 
 def _pareto_archive_summary(
-    records: list[_RoundRecord],
+    records: list[RoundRecord],
     objectives: list[Objective],
     *,
     relative_noise: float = _DEFAULT_PARETO_RELATIVE_NOISE,
@@ -658,7 +524,7 @@ def _pareto_archive_conflict(
     *,
     candidate_disposition: CandidateDisposition,
     candidate_metrics: dict[str, float],
-    records: list[_RoundRecord],
+    records: list[RoundRecord],
     objectives: list[Objective],
 ) -> str | None:
     """Explain why a claimed frontier row is dominated by the live archive."""
@@ -691,7 +557,7 @@ _PLATEAU_MIN_STREAK = 3
 
 
 def _detect_plateau(
-    records: list[_RoundRecord],
+    records: list[RoundRecord],
     *,
     threshold_pct: float = _PLATEAU_THRESHOLD_PCT,
     min_streak: int = _PLATEAU_MIN_STREAK,
@@ -785,7 +651,7 @@ def _review_due(
 
 def _candidate_evidence_is_fresh(
     implementation: ImplementerResponse,
-    records: list[_RoundRecord],
+    records: list[RoundRecord],
 ) -> bool:
     """Return whether an implementer reported a previously unseen objective row."""
     if not implementation.candidate_metrics:
@@ -802,7 +668,7 @@ def _candidate_evidence_is_fresh(
     )
 
 
-def _provisional_candidates_since_official(records: list[_RoundRecord]) -> int:
+def _provisional_candidates_since_official(records: list[RoundRecord]) -> int:
     """Count accepted candidate checkpoints after the latest official one."""
     count = 0
     for record in reversed(records):
@@ -822,7 +688,7 @@ def _provisional_candidates_since_official(records: list[_RoundRecord]) -> int:
 
 def _official_evaluation_reason(  # noqa: PLR0913  # tracked: #288
     *,
-    records: list[_RoundRecord],
+    records: list[RoundRecord],
     round_number: int,
     max_rounds: int,
     official_eval_every: int,
@@ -848,7 +714,7 @@ def _official_evaluation_reason(  # noqa: PLR0913  # tracked: #288
     return None
 
 
-def _terminal_workspace_notice(records: list[_RoundRecord]) -> str | None:
+def _terminal_workspace_notice(records: list[RoundRecord]) -> str | None:
     """Describe a terminal hypothesis whose edits remain in the workspace."""
     if not records:
         return None
@@ -1001,7 +867,7 @@ def _invoke_read_only_role(
             )
 
 
-def _is_fresh_cold_start(round_number: int, records: list[_RoundRecord]) -> bool:
+def _is_fresh_cold_start(round_number: int, records: list[RoundRecord]) -> bool:
     """True for round 1 of a fresh run (no prior rounds recorded)."""
     return round_number == 1 and not records
 
@@ -1618,7 +1484,7 @@ def _run_single_agent_round(  # noqa: PLR0913  # tracked: #288
     official_evaluation_due: bool = False,
     official_evaluation_reason: str | None = None,
     framework_benchmark_enabled: bool = False,
-    pareto_records: list[_RoundRecord] | None = None,
+    pareto_records: list[RoundRecord] | None = None,
     objectives: list[Objective] | None = None,
 ) -> SingleAgentRoundResponse:
     """Invoke one agent that plays implementer + judge + profiler.
@@ -2381,7 +2247,8 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     pareto_archive_location = issue_board.display_path(pareto_archive_path, ctx.workspace)
 
     rounds_state_path = ctx.log_dir / "rounds.json"
-    records = _load_rounds_state(rounds_state_path)
+    round_history = RoundHistory.load(rounds_state_path)
+    records = round_history.records
     active_hypothesis_path = ctx.log_dir / "active_hypothesis.json"
     active_hypothesis = _load_active_hypothesis(active_hypothesis_path)
     if _backfill_revert_commit(active_hypothesis, records):
@@ -2520,8 +2387,8 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         None,
                     )
                     if target and target.commit:
-                        rollback_commit, failed_child_round = _resolve_rollback_commit(
-                            target, records
+                        rollback_commit, failed_child_round = round_history.resolve_rollback_commit(
+                            target, _FAILED_HYPOTHESIS_OUTCOMES
                         )
                         assert rollback_commit is not None  # noqa: S101  # tracked: #288
                         # Restore the tree without moving HEAD so subsequent
@@ -3097,7 +2964,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         active_hypothesis.gate_approved_candidate_retention_reason
                     )
                 records.append(
-                    _RoundRecord(
+                    RoundRecord(
                         round_number=round_number,
                         commit=commit,
                         perf_metric=perf_metric,
@@ -3132,7 +2999,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         candidate_retention_reason=candidate_retention_reason,
                     )
                 )
-                _save_rounds_state(rounds_state_path, records)
+                round_history.save()
                 if ctx.supervisor is not None:
                     ctx.supervisor.record(
                         EventType.ROUND_FINISHED,

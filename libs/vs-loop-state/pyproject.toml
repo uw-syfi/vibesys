@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vs-loop-state"
+version = "0.1.0"
+description = "Typed, atomic on-disk round state for VibeSys loop drivers"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["vs_loop_state*"]
+
+[tool.setuptools.package-data]
+vs_loop_state = ["py.typed"]
