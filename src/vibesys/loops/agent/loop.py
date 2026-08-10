@@ -622,6 +622,30 @@ class _CarryOver:
     exhaustion_info: str | None = None
 
 
+@dataclass
+class _RoundOutcome:
+    """Resolved per-round metrics, outcome labels, and candidate evidence.
+
+    Computed once after the retry loop exits so that ``run_agent_loop``
+    can hand a single typed value to round-record persistence rather than
+    unpacking a dozen local variables inline.
+    """
+
+    perf_metric: float | None
+    perf_unit: str | None
+    profile_skipped: bool
+    accepted_metrics: dict[str, float]
+    accepted_evaluation_artifact: str | None
+    hypothesis_outcome: str | None
+    reviewed: bool
+    candidate_disposition: str
+    candidate_metrics: dict[str, float]
+    candidate_evaluation_artifact: str | None
+    candidate_operating_point: str
+    candidate_retention_reason: str
+    last_single_agent_response: SingleAgentRoundResponse | None
+
+
 def _review_due(
     *,
     round_number: int,
@@ -870,6 +894,181 @@ def _invoke_read_only_role(
 def _is_fresh_cold_start(round_number: int, records: list[RoundRecord]) -> bool:
     """True for round 1 of a fresh run (no prior rounds recorded)."""
     return round_number == 1 and not records
+
+
+def _resolve_round_outcome(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
+    *,
+    inner_loop: str,
+    passed: bool,
+    final_attempt_reviewed: bool,
+    completed_official_evaluation_reason: str | None,
+    framework_perf_metric: float | None,
+    benchmark_result: BenchmarkResult | None,
+    implementation: ImplementerResponse | None,
+    single_agent_response: SingleAgentRoundResponse | None,
+    active_hypothesis: _ActiveHypothesis,
+) -> _RoundOutcome:
+    """Resolve per-round metrics, outcome labels, and candidate evidence.
+
+    Called once after the retry loop exits.  All reads of
+    ``active_hypothesis`` are read-only here; the caller owns any
+    subsequent mutations.
+    """
+    reviewed = final_attempt_reviewed if inner_loop == "multi-agent" else True
+
+    # --- perf metric and profile-skipped flag ---
+    last_single_agent_response: SingleAgentRoundResponse | None = None
+    if inner_loop == "single-agent":
+        if (
+            single_agent_response is not None
+            and framework_perf_metric is not None
+            and completed_official_evaluation_reason is not None
+        ):
+            single_agent_response.perf_metric = framework_perf_metric
+            single_agent_response.perf_unit = benchmark_result.metric if benchmark_result else None
+        profile_skipped = single_agent_response is None or (
+            single_agent_response.perf_metric is None
+        )
+        perf_metric = (
+            single_agent_response.perf_metric
+            if (
+                single_agent_response
+                and passed
+                and completed_official_evaluation_reason is not None
+            )
+            else None
+        )
+        perf_unit = (
+            single_agent_response.perf_unit
+            if (
+                single_agent_response
+                and passed
+                and completed_official_evaluation_reason is not None
+            )
+            else None
+        )
+        accepted_metrics: dict[str, float] = {}
+        accepted_evaluation_artifact: str | None = None
+        if single_agent_response is not None:
+            last_single_agent_response = single_agent_response
+    else:
+        implementation_metric = (
+            implementation.perf_metric
+            if (
+                implementation is not None
+                and passed
+                and completed_official_evaluation_reason is not None
+            )
+            else None
+        )
+        if (
+            implementation_metric is None
+            and passed
+            and implementation is not None
+            and implementation.hypothesis_outcome
+            in {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED}
+            and active_hypothesis.gate_revalidation_pending
+            and completed_official_evaluation_reason is not None
+        ):
+            implementation_metric = active_hypothesis.gate_approved_perf_metric
+        profile_skipped = framework_perf_metric is None and implementation_metric is None
+        if (
+            framework_perf_metric is not None
+            and passed
+            and completed_official_evaluation_reason is not None
+        ):
+            perf_metric = framework_perf_metric
+            perf_unit = benchmark_result.metric if benchmark_result else None
+            accepted_metrics = {}
+            accepted_evaluation_artifact = None
+        elif implementation_metric is not None:
+            perf_metric = implementation_metric
+            if implementation is not None and implementation.perf_metric is not None:
+                perf_unit = implementation.perf_unit
+                accepted_metrics = dict(implementation.metrics)
+                accepted_evaluation_artifact = implementation.evaluation_artifact
+            else:
+                perf_unit = active_hypothesis.gate_approved_perf_unit
+                accepted_metrics = dict(active_hypothesis.gate_approved_metrics)
+                accepted_evaluation_artifact = active_hypothesis.gate_approved_evaluation_artifact
+        else:
+            # Profiles and directional probes inform the designer,
+            # but only an official checkpoint may update the
+            # verified headline trajectory in rounds.json.
+            perf_metric = None
+            perf_unit = None
+            accepted_metrics = {}
+            accepted_evaluation_artifact = None
+
+    # --- hypothesis outcome label ---
+    if passed and inner_loop == "multi-agent" and implementation is not None:
+        hypothesis_outcome: str | None = (
+            "proven"
+            if implementation.hypothesis_outcome
+            in {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED}
+            else implementation.hypothesis_outcome.value
+        )
+    elif passed:
+        hypothesis_outcome = "proven"
+    elif reviewed:
+        hypothesis_outcome = "rejected"
+    elif implementation is not None:
+        hypothesis_outcome = implementation.hypothesis_outcome.value
+    else:
+        hypothesis_outcome = None
+
+    # --- candidate evidence ---
+    if implementation is not None:
+        candidate_disposition = implementation.candidate_disposition.value
+        candidate_metrics = dict(implementation.candidate_metrics)
+        candidate_evaluation_artifact = implementation.candidate_evaluation_artifact
+        candidate_operating_point = implementation.candidate_operating_point
+        candidate_retention_reason = implementation.candidate_retention_reason
+    elif single_agent_response is not None:
+        candidate_disposition = single_agent_response.candidate_disposition.value
+        candidate_metrics = dict(single_agent_response.candidate_metrics)
+        candidate_evaluation_artifact = single_agent_response.candidate_evaluation_artifact
+        candidate_operating_point = single_agent_response.candidate_operating_point
+        candidate_retention_reason = single_agent_response.candidate_retention_reason
+    else:
+        candidate_disposition = CandidateDisposition.UNASSESSED.value
+        candidate_metrics = {}
+        candidate_evaluation_artifact = None
+        candidate_operating_point = ""
+        candidate_retention_reason = ""
+
+    # A framework-gate retry may correctly return no fresh candidate
+    # row. Preserve the judge-approved provisional evidence for the
+    # unchanged checkpoint just as canonical evidence is preserved.
+    if (
+        candidate_disposition == CandidateDisposition.UNASSESSED.value
+        and active_hypothesis.gate_revalidation_pending
+        and active_hypothesis.gate_approved_candidate_disposition
+        == CandidateDisposition.PARETO_FRONTIER.value
+    ):
+        candidate_disposition = active_hypothesis.gate_approved_candidate_disposition
+        candidate_metrics = dict(active_hypothesis.gate_approved_candidate_metrics)
+        candidate_evaluation_artifact = (
+            active_hypothesis.gate_approved_candidate_evaluation_artifact
+        )
+        candidate_operating_point = active_hypothesis.gate_approved_candidate_operating_point
+        candidate_retention_reason = active_hypothesis.gate_approved_candidate_retention_reason
+
+    return _RoundOutcome(
+        perf_metric=perf_metric,
+        perf_unit=perf_unit,
+        profile_skipped=profile_skipped,
+        accepted_metrics=accepted_metrics,
+        accepted_evaluation_artifact=accepted_evaluation_artifact,
+        hypothesis_outcome=hypothesis_outcome,
+        reviewed=reviewed,
+        candidate_disposition=candidate_disposition,
+        candidate_metrics=candidate_metrics,
+        candidate_evaluation_artifact=candidate_evaluation_artifact,
+        candidate_operating_point=candidate_operating_point,
+        candidate_retention_reason=candidate_retention_reason,
+        last_single_agent_response=last_single_agent_response,
+    )
 
 
 def _run_pre_round_decision(  # noqa: PLR0913  # tracked: #288
@@ -2809,160 +3008,32 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
 
                 # --- Record round result & update carry-over ---
                 commit = ctx.git.current_sha() if ctx.git_tracking else None
-                # `profile_skipped` is True when no fresh profile ran this round
-                # (cold-start or the orchestrator/framework decided to skip).
-                # The plateau detector ignores skipped-profile rounds so cached
-                # / inherited perf numbers don't masquerade as fresh measurements.
-                #
-                # For single-agent inner loop, `profiler_summary` carries the
-                # PREVIOUS round's profile (fed forward to the orchestrator),
-                # so this round's perf comes from `single_agent_response` instead.
-                if inner_loop == "single-agent":
-                    if (
-                        single_agent_response is not None
-                        and framework_perf_metric is not None
-                        and completed_official_evaluation_reason is not None
-                    ):
-                        single_agent_response.perf_metric = framework_perf_metric
-                        single_agent_response.perf_unit = (
-                            benchmark_result.metric if benchmark_result else None
-                        )
-                    profile_skipped = single_agent_response is None or (
-                        single_agent_response.perf_metric is None
-                    )
-                    perf_metric = (
-                        single_agent_response.perf_metric
-                        if (
-                            single_agent_response
-                            and passed
-                            and completed_official_evaluation_reason is not None
-                        )
-                        else None
-                    )
-                    perf_unit = (
-                        single_agent_response.perf_unit
-                        if (
-                            single_agent_response
-                            and passed
-                            and completed_official_evaluation_reason is not None
-                        )
-                        else None
-                    )
-                    # Remember the latest profile for the orchestrator's next plan
-                    # and carry forward the implicit profile focus.
-                    if single_agent_response is not None:
-                        last_single_agent_response = single_agent_response
-                else:
-                    implementation_metric = (
-                        implementation.perf_metric
-                        if (
-                            implementation is not None
-                            and passed
-                            and completed_official_evaluation_reason is not None
-                        )
-                        else None
-                    )
-                    if (
-                        implementation_metric is None
-                        and passed
-                        and implementation is not None
-                        and implementation.hypothesis_outcome
-                        in {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED}
-                        and active_hypothesis.gate_revalidation_pending
-                        and completed_official_evaluation_reason is not None
-                    ):
-                        implementation_metric = active_hypothesis.gate_approved_perf_metric
-                    profile_skipped = (
-                        framework_perf_metric is None and implementation_metric is None
-                    )
-                    if (
-                        framework_perf_metric is not None
-                        and passed
-                        and completed_official_evaluation_reason is not None
-                    ):
-                        perf_metric = framework_perf_metric
-                        perf_unit = benchmark_result.metric if benchmark_result else None
-                    elif implementation_metric is not None:
-                        perf_metric = implementation_metric
-                        if implementation is not None and implementation.perf_metric is not None:
-                            perf_unit = implementation.perf_unit
-                            accepted_metrics = dict(implementation.metrics)
-                            accepted_evaluation_artifact = implementation.evaluation_artifact
-                        else:
-                            perf_unit = active_hypothesis.gate_approved_perf_unit
-                            accepted_metrics = dict(active_hypothesis.gate_approved_metrics)
-                            accepted_evaluation_artifact = (
-                                active_hypothesis.gate_approved_evaluation_artifact
-                            )
-                    else:
-                        # Profiles and directional probes inform the designer,
-                        # but only an official checkpoint may update the
-                        # verified headline trajectory in rounds.json.
-                        perf_metric = None
-                        perf_unit = None
-                # A prior retry may have been reviewed before the implementer
-                # returned a different terminal result.  Record and transition
-                # from the final attempt, not from any earlier audit in the
-                # round; otherwise an unreviewed ``disproven`` retry is
-                # mislabeled rejected and the dead hypothesis stays active.
-                reviewed = final_attempt_reviewed if inner_loop == "multi-agent" else True
-                if passed and inner_loop == "multi-agent" and implementation is not None:
-                    hypothesis_outcome = (
-                        "proven"
-                        if implementation.hypothesis_outcome
-                        in {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED}
-                        else implementation.hypothesis_outcome.value
-                    )
-                elif passed:
-                    hypothesis_outcome = "proven"
-                elif reviewed:
-                    hypothesis_outcome = "rejected"
-                elif implementation is not None:
-                    hypothesis_outcome = implementation.hypothesis_outcome.value
-                else:
-                    hypothesis_outcome = None
+                outcome = _resolve_round_outcome(
+                    inner_loop=inner_loop,
+                    passed=passed,
+                    final_attempt_reviewed=final_attempt_reviewed,
+                    completed_official_evaluation_reason=completed_official_evaluation_reason,
+                    framework_perf_metric=framework_perf_metric,
+                    benchmark_result=benchmark_result,
+                    implementation=implementation,
+                    single_agent_response=single_agent_response,
+                    active_hypothesis=active_hypothesis,
+                )
+                perf_metric = outcome.perf_metric
+                perf_unit = outcome.perf_unit
+                profile_skipped = outcome.profile_skipped
+                accepted_metrics = outcome.accepted_metrics
+                accepted_evaluation_artifact = outcome.accepted_evaluation_artifact
+                hypothesis_outcome = outcome.hypothesis_outcome
+                reviewed = outcome.reviewed
+                candidate_disposition = outcome.candidate_disposition
+                candidate_metrics = outcome.candidate_metrics
+                candidate_evaluation_artifact = outcome.candidate_evaluation_artifact
+                candidate_operating_point = outcome.candidate_operating_point
+                candidate_retention_reason = outcome.candidate_retention_reason
+                if outcome.last_single_agent_response is not None:
+                    last_single_agent_response = outcome.last_single_agent_response
 
-                if implementation is not None:
-                    candidate_disposition = implementation.candidate_disposition.value
-                    candidate_metrics = dict(implementation.candidate_metrics)
-                    candidate_evaluation_artifact = implementation.candidate_evaluation_artifact
-                    candidate_operating_point = implementation.candidate_operating_point
-                    candidate_retention_reason = implementation.candidate_retention_reason
-                elif single_agent_response is not None:
-                    candidate_disposition = single_agent_response.candidate_disposition.value
-                    candidate_metrics = dict(single_agent_response.candidate_metrics)
-                    candidate_evaluation_artifact = (
-                        single_agent_response.candidate_evaluation_artifact
-                    )
-                    candidate_operating_point = single_agent_response.candidate_operating_point
-                    candidate_retention_reason = single_agent_response.candidate_retention_reason
-                else:
-                    candidate_disposition = CandidateDisposition.UNASSESSED.value
-                    candidate_metrics = {}
-                    candidate_evaluation_artifact = None
-                    candidate_operating_point = ""
-                    candidate_retention_reason = ""
-
-                # A framework-gate retry may correctly return no fresh candidate
-                # row. Preserve the judge-approved provisional evidence for the
-                # unchanged checkpoint just as canonical evidence is preserved.
-                if (
-                    candidate_disposition == CandidateDisposition.UNASSESSED.value
-                    and active_hypothesis.gate_revalidation_pending
-                    and active_hypothesis.gate_approved_candidate_disposition
-                    == CandidateDisposition.PARETO_FRONTIER.value
-                ):
-                    candidate_disposition = active_hypothesis.gate_approved_candidate_disposition
-                    candidate_metrics = dict(active_hypothesis.gate_approved_candidate_metrics)
-                    candidate_evaluation_artifact = (
-                        active_hypothesis.gate_approved_candidate_evaluation_artifact
-                    )
-                    candidate_operating_point = (
-                        active_hypothesis.gate_approved_candidate_operating_point
-                    )
-                    candidate_retention_reason = (
-                        active_hypothesis.gate_approved_candidate_retention_reason
-                    )
                 records.append(
                     RoundRecord(
                         round_number=round_number,
