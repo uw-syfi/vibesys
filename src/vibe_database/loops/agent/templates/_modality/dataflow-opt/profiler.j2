@@ -1,0 +1,16 @@
+## Server Type: dataflow-opt (compiled differential-dataflow `bfs` binary, benchmark-driven, CPU-scored)
+
+There is **no long-running server** to curl and **no input file** to hand it. The engine is the compiled `bfs` example, launched as `engine/target/release/examples/bfs <workload args>`; it self-generates its graph from a fixed RNG seed and runs the fixed incremental-BFS workload to completion. Performance is measured by the example's benchmark harness (`{{ bench_path }}/benchmark.py`), which runs the binary on the fixed `reference/workload.py::METRIC_WORKLOAD` and samples CPU. The workload args are fixed and identical for every round (and for round 0), so total CPU-seconds is a fair, wall-independent parity metric.
+
+Key performance axis: **CPU** — total user+sys **CPU-seconds** the engine burns to run the workload (lower is better), taken as the child process's exact `getrusage(RUSAGE_CHILDREN)` user+sys time (all worker threads included) via `os.wait4`, reported as the **median of several timed runs after warmups** (robust to the occasional scheduler tail; validated meta-CoV ~0.1%). The **headline** is `cpu_reduction_ratio = baseline_cpu_seconds / candidate_cpu_seconds` (higher is better; `> 1` ⇒ you shaved real cycles off the vanilla engine), where `baseline_cpu_seconds` is **round 0 itself** — the vanilla vendored source captured once on this box in `{{ bench_path }}/baseline.json`. This is a **same-code, same-output** CPU win by construction: round 0 measures ≈ 1.0, and the honest expectation for later rounds is a **modest percentage, not a multiple**.
+
+## Profiling Commands
+
+**Build + measure** — point the harness at your compiled binary (the harness appends the fixed workload args; there is no `{query}`/`{events}` to substitute):
+```
+python3 {{ bench_path }}/benchmark.py \
+  --engine-cmd 'engine/target/release/examples/bfs' --output-json /tmp/perf.json
+```
+Read the headline from the `Primary metric: cpu_reduction_ratio = ...` stdout line (equivalently the `cpu_reduction_ratio` field of `--output-json`). This is the number to report as `perf_metric`; the unit is `x_vs_round0_cpu` and must not change between rounds. If `baseline.json` is somehow absent, the harness prints `Primary metric: cpu_seconds = ...` instead — report `cpu_seconds` (lower is better) until the baseline lands. The JSON also carries raw `cpu_seconds`, the per-run `samples`, and `baseline_cpu_seconds` for later Pareto analysis.
+
+Profiler-guided kernel analysis is not wired up for this modality — there is no torch/nsys profile to capture. Reason from where CPU goes instead: the `iterate` fixpoint re-running `join_map`/`reduce` each round, arrangement/trace merges, `consolidate`, and per-tuple allocation inside the differential operators. Then classify the primary bottleneck into exactly one of: `cpu_launch_bound`, `python_overhead_bound`, `input_pipeline_bound`, `sync_bound`, `memcpy_bound`, `comm_bound`, `kernel_bound`, `mixed_or_unclear`. For incremental BFS the usual suspects are per-tuple allocation in the join/reduce hot path, redundant clones in the arrangement merge, and consolidation cost — the graph generation and the fixed-point iteration control are comparatively cheap, so a growing or poorly-laid-out arrangement (rather than the algorithm itself) is the most common self-inflicted cost.

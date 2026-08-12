@@ -37,9 +37,10 @@ class CpuBackend:
 
     name = ComputeBackend.CPU
     # No GPU profiler for a compiled CPU engine; perf comes from the benchmark
-    # harness. ``torch`` keeps protocol parity with the other backends and picks
-    # the profiler-free workflow fragment (see _backend/cpu/profiling_workflow.j2).
-    profiler_kind = "torch"
+    # harness. ``native`` selects the profiler-free ``profiler_prompt_native.j2``
+    # prompt (run the benchmark, read ``events_per_sec``) instead of the GPU
+    # torch/nsys prompts.
+    profiler_kind = "native"
 
     def __init__(
         self,

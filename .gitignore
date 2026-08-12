@@ -254,7 +254,9 @@ CLAUDE.md
 baseline_eval_*/
 sandbox-*/
 
-# streaming-ivm-bench: native infra (Kafka/RisingWave downloads ~1GB + running procs)
-# and the seed-42 event stream (regenerate with `python3 reference/core/generate.py`)
-examples/streaming-ivm-bench/.native/
-examples/streaming-ivm-bench/reference/core/events.csv
+# Native baseline infra (Kafka/RisingWave binaries, ~1-2GB) — materialized locally, never committed
+examples/.native/
+
+# Local-only backups and cleanup holding area (never committed)
+.backups/
+.cleanup-trash/

@@ -3,7 +3,8 @@
 Covers the resolver (built-in name / path / error), the section renderer
 (present, empty, missing, ``single_agent`` derivation, context branching), and
 end-to-end injection into the base prompts for both built-in domains
-(``streaming-ivm`` carries IVM prose; ``generic`` injects nothing of its own).
+(``differential-dataflow`` carries the in-place superoptimization prose;
+``generic`` injects nothing of its own).
 """
 
 from __future__ import annotations
@@ -25,23 +26,29 @@ _TEMPLATE_DIR = (
     Path(__file__).resolve().parents[3] / "src" / "vibe_database" / "loops" / "agent" / "templates"
 )
 
+_DOMAIN = "differential-dataflow"
+_MODALITY = "dataflow-opt"
+
 
 # --------------------------------------------------------------------------- #
 # resolver
 # --------------------------------------------------------------------------- #
 def test_builtins_present():
     names = builtin_domains()
-    assert "streaming-ivm" in names
+    assert "differential-dataflow" in names
     assert "generic" in names
+    assert "nexmark" not in names  # nexmark synthesis targets were removed
+    assert "nexmark-q7" not in names
     assert "llm-serving" not in names  # LLM-serving domain was removed in the fork
+    assert "streaming-ivm" not in names  # streaming-ivm target was removed
     assert "README" not in names  # the authoring guide is not a domain
-    assert DEFAULT_DOMAIN == "streaming-ivm"
+    assert DEFAULT_DOMAIN == "differential-dataflow"
 
 
 def test_resolve_builtin_name():
-    d = resolve_domain("streaming-ivm")
+    d = resolve_domain(_DOMAIN)
     assert d.is_file()
-    assert d.name == "streaming-ivm.md"
+    assert d.name == "differential-dataflow.md"
 
 
 def test_resolve_path(tmp_path: Path):
@@ -55,7 +62,7 @@ def test_resolve_unknown_raises():
     with pytest.raises(ValueError) as exc:
         resolve_domain("does-not-exist-xyz")
     # error lists the built-ins to guide the user
-    assert "streaming-ivm" in str(exc.value)
+    assert "differential-dataflow" in str(exc.value)
 
 
 # --------------------------------------------------------------------------- #
@@ -75,16 +82,15 @@ def test_render_empty_role_is_empty():
         assert render_domain_section(d, role) == ""
 
 
-def test_render_streaming_ivm_has_content():
-    d = resolve_domain("streaming-ivm")
-    impl = render_domain_section(
-        d, "implementer", modality="stream-snapshot", reference_path="/ref"
-    )
+def test_render_differential_dataflow_has_content():
+    d = resolve_domain(_DOMAIN)
+    impl = render_domain_section(d, "implementer", modality=_MODALITY, reference_path="/ref")
     assert impl  # non-empty
     # leading/trailing blank lines are stripped — base template owns spacing
     assert impl == impl.strip("\n")
-    # the body keeps its IVM prose (non-monotonic retraction is the crux)
-    assert "non-monotonic" in impl.lower()
+    # the body keeps its superoptimization prose
+    assert "micro-optimiz" in impl.lower()
+    assert "byte-identical" in impl.lower()
 
 
 def test_deeper_markdown_heading_does_not_delimit_role(tmp_path: Path):
@@ -116,8 +122,8 @@ def test_render_role_branches_on_context(tmp_path: Path):
     f.write_text(
         "# D\n\n## judge\n{% if bench_path %}Benchmark lives at {{ bench_path }}.{% endif %}\n"
     )
-    with_bench = render_domain_section(f, "judge", modality="stream-snapshot", bench_path="/BENCHX")
-    without_bench = render_domain_section(f, "judge", modality="stream-snapshot", bench_path=None)
+    with_bench = render_domain_section(f, "judge", modality=_MODALITY, bench_path="/BENCHX")
+    without_bench = render_domain_section(f, "judge", modality=_MODALITY, bench_path=None)
     assert "/BENCHX" in with_bench
     assert "/BENCHX" not in without_bench
 
@@ -131,14 +137,14 @@ def test_single_agent_derives_from_implementer_and_judge(tmp_path: Path):
     assert "JUDGE-BODY" in sa
 
 
-def test_streaming_ivm_single_agent_derives_from_impl_and_judge():
-    # streaming-ivm.md ships no ## single_agent section, so it is derived
+def test_differential_dataflow_single_agent_derives_from_impl_and_judge():
+    # differential-dataflow.md ships no ## single_agent section, so it is derived
     # from the implementer + judge bodies.
-    d = resolve_domain("streaming-ivm")
-    sa = render_domain_section(d, "single_agent", modality="stream-snapshot", reference_path="/ref")
+    d = resolve_domain(_DOMAIN)
+    sa = render_domain_section(d, "single_agent", modality=_MODALITY, reference_path="/ref")
     assert sa
-    assert "non-monotonic" in sa.lower()
-    assert "oracle" in sa.lower()  # judge-body correctness-parity language
+    assert "micro-optimiz" in sa.lower()  # implementer-body optimization language
+    assert "output-equivalence" in sa.lower()  # judge-body correctness-gate language
 
 
 # --------------------------------------------------------------------------- #
@@ -146,13 +152,11 @@ def test_streaming_ivm_single_agent_derives_from_impl_and_judge():
 # --------------------------------------------------------------------------- #
 def _render_implementer(domain: str) -> str:
     d = resolve_domain(domain)
-    section = render_domain_section(
-        d, "implementer", modality="stream-snapshot", reference_path="/ref"
-    )
+    section = render_domain_section(d, "implementer", modality=_MODALITY, reference_path="/ref")
     return render_template(
         "implementer_prompt.j2",
         template_dir=_TEMPLATE_DIR,
-        modality="stream-snapshot",
+        modality=_MODALITY,
         domain_implementer=section,
         task="TASK",
         pass_criteria="PC",
@@ -162,19 +166,19 @@ def _render_implementer(domain: str) -> str:
     )
 
 
-def test_streaming_ivm_injects_into_implementer():
-    out = _render_implementer("streaming-ivm")
-    # IVM-specific prose from the domain pack is present
-    assert "retract" in out.lower()
+def test_differential_dataflow_injects_into_implementer():
+    out = _render_implementer(_DOMAIN)
+    # domain-pack prose is present
+    assert "micro-optimization" in out.lower()
     assert "## Progress tracking" in out  # base skeleton intact
 
 
 def test_generic_injects_nothing_extra():
     generic = _render_implementer("generic")
-    # the generic render must be strictly shorter than streaming-ivm's, which
-    # carries the injected domain section.
-    streaming = _render_implementer("streaming-ivm")
-    assert len(generic) < len(streaming)
+    # the generic render must be strictly shorter than differential-dataflow's,
+    # which carries the injected domain section.
+    dataflow = _render_implementer(_DOMAIN)
+    assert len(generic) < len(dataflow)
     assert "## Progress tracking" in generic  # base skeleton intact
 
 
@@ -196,9 +200,7 @@ def test_orchestrator_is_a_domain_role():
 
 
 def _render_orchestrator(domain: str) -> str:
-    section = render_domain_section(
-        resolve_domain(domain), "orchestrator", modality="stream-snapshot"
-    )
+    section = render_domain_section(resolve_domain(domain), "orchestrator", modality=_MODALITY)
     return render_template(
         "orchestrator_plan_prompt.j2",
         template_dir=_TEMPLATE_DIR,
@@ -214,17 +216,15 @@ def _render_orchestrator(domain: str) -> str:
     )
 
 
-def test_streaming_ivm_provides_orchestrator_sequencing():
-    section = render_domain_section(
-        resolve_domain("streaming-ivm"), "orchestrator", modality="stream-snapshot"
-    )
-    assert "correctness leads and throughput follows" in section
-    assert "anti-join" in section.lower()
+def test_differential_dataflow_provides_orchestrator_sequencing():
+    section = render_domain_section(resolve_domain(_DOMAIN), "orchestrator", modality=_MODALITY)
+    assert "output stays byte-identical and CPU follows" in section
+    assert "micro-optimization" in section.lower()
 
 
-def test_streaming_ivm_orchestrator_section_injected_into_plan():
-    out = _render_orchestrator("streaming-ivm")
-    assert "correctness leads and throughput follows" in out
+def test_differential_dataflow_orchestrator_section_injected_into_plan():
+    out = _render_orchestrator(_DOMAIN)
+    assert "output stays byte-identical and CPU follows" in out
     # the back-reference resolves when a domain orchestrator section is provided
     assert "the optimization-floor section below" in out
 
@@ -232,6 +232,6 @@ def test_streaming_ivm_orchestrator_section_injected_into_plan():
 def test_generic_orchestrator_has_no_domain_section():
     out = _render_orchestrator("generic")
     # the domain section is gone, and its back-reference collapses
-    assert "correctness leads and throughput follows" not in out
+    assert "output stays byte-identical and CPU follows" not in out
     assert "the optimization-floor section below" not in out
     assert "## Task granularity" in out  # base skeleton intact

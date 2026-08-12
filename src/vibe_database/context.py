@@ -160,6 +160,12 @@ class _RunContext:
             "_opt_vibe_database",
             "_mounts",
             ".cache",
+            # Pristine copy of a human-authored seed engine kept for the Judge's
+            # diff-against-seed gate; framework-managed, never the agent's to edit.
+            "_seed_engine",
+            # Pristine copy of a vendored real upstream engine (--reference-engine),
+            # diffed against every round; framework-managed, never the agent's to edit.
+            "_ref_engine",
         }
         self.debug = debug
         self.git_tracking = git_tracking
@@ -308,6 +314,17 @@ class _RunContext:
                 src = Path(self.bench_path)
                 self._copy_excluding_extras(src, self.workspace / "bench")
 
+            # Mount the target's sibling design docs (OBJECTIVE.md, CONTRACT.md,
+            # DESIGN.md live next to the reference dir) at the workspace root so
+            # the orchestrator/implementer/domain prompts can cite them by name
+            # (e.g. "the query's binding in CONTRACT.md"). Reference material,
+            # not editable artifacts.
+            if ref_dir is not None:
+                self._copy_reference_docs(ref_dir.parent)
+                # Seed a human-authored engine into the writable workspace (in-place-editing
+                # targets); no-op when the target ships no seed_engine/.
+                self._seed_engine_into_workspace(ref_dir.parent)
+
             if self.nsys_profiler_path:
                 src = Path(self.nsys_profiler_path)
                 self._copy_excluding_extras(src, self.workspace / "nsys_profiler")
@@ -332,6 +349,14 @@ class _RunContext:
             src = Path(self.neuron_profiler_path)
             if not (self.workspace / "neuron_profiler").exists():
                 self._copy_excluding_extras(src, self.workspace / "neuron_profiler")
+
+        # Ensure the sibling design docs are present even when resuming a run
+        # started before they were mounted.
+        if existing and ref_dir is not None:
+            self._copy_reference_docs(ref_dir.parent, only_if_missing=True)
+            # Restore the pristine seed snapshot if a pre-seed resume lost it; never clobber the
+            # implementer's in-progress engine/ (only_if_missing skips an existing engine/).
+            self._seed_engine_into_workspace(ref_dir.parent, only_if_missing=True)
 
         if git_tracking:
             self._init_git_tracking(existing)
@@ -499,6 +524,82 @@ class _RunContext:
                     path.unlink()
                     marker.write_text(str(target))
 
+    #: Design docs mounted at the workspace root from the reference dir's parent
+    #: (the ``examples/<target>/`` root). Prompts cite these by bare name.
+    REFERENCE_DOC_NAMES = ("OBJECTIVE.md", "CONTRACT.md", "DESIGN.md")
+
+    def _vendor_engine_into_workspace(
+        self,
+        example_root: Path,
+        *,
+        source_name: str,
+        pristine_name: str,
+        only_if_missing: bool = False,
+    ) -> None:
+        """Copy a provided starting engine into the WRITABLE workspace.
+
+        When a target ships ``<source_name>/`` beside its ``reference/``, the agent does NOT
+        synthesize an engine from scratch — it micro-optimizes this provided engine in place. Two
+        copies are made:
+
+          * ``workspace/engine/`` — the editable engine the implementer modifies and the harness
+            builds (the same ``engine/`` path the acceptance/equivalence gate and prompts use).
+          * ``workspace/<pristine_name>/`` — a pristine, framework-managed snapshot the Judge diffs
+            every round against, so any drift from the round-0 architecture shows up as a diff.
+
+        Build output (``target/``), durable-state dirs (``.q7_state/``), caches, and VCS metadata are
+        skipped. No-op when the target ships no ``<source_name>/`` dir.
+        """
+        src = example_root / source_name
+        if not src.is_dir():
+            return
+        ignore = shutil.ignore_patterns("target", ".q7_state", "__pycache__", ".git", "*.tmp")
+        for dst in (self.workspace / "engine", self.workspace / pristine_name):
+            if only_if_missing and dst.exists():
+                continue
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst, symlinks=True, ignore=ignore)
+        self.lprint(
+            f"[seed] provided engine ({source_name}) copied to workspace/engine "
+            "(in-place editing target)"
+        )
+
+    def _seed_engine_into_workspace(
+        self, example_root: Path, only_if_missing: bool = False
+    ) -> None:
+        """Vendor the round-0 starting engine into the workspace, if the target ships one.
+
+        Prefers a real vendored upstream tree ``ref_engine/`` (the ``--reference-engine``
+        superoptimization model → pristine ``_ref_engine/``); falls back to the legacy
+        human-authored ``seed_engine/`` (→ pristine ``_seed_engine/``). No-op for from-scratch
+        synthesis targets that ship neither.
+        """
+        if (example_root / "ref_engine").is_dir():
+            self._vendor_engine_into_workspace(
+                example_root,
+                source_name="ref_engine",
+                pristine_name="_ref_engine",
+                only_if_missing=only_if_missing,
+            )
+        else:
+            self._vendor_engine_into_workspace(
+                example_root,
+                source_name="seed_engine",
+                pristine_name="_seed_engine",
+                only_if_missing=only_if_missing,
+            )
+
+    def _copy_reference_docs(self, example_root: Path, only_if_missing: bool = False) -> None:
+        for doc in self.REFERENCE_DOC_NAMES:
+            src = example_root / doc
+            if not src.is_file():
+                continue
+            dst = self.workspace / doc
+            if only_if_missing and dst.exists():
+                continue
+            shutil.copy2(src, dst)
+
     def _copy_excluding_extras(self, src: Path, dst: Path) -> None:
         skip = self.EXCLUDED_WORKSPACE_DIRS | {"_mounts"}
 
@@ -639,6 +740,11 @@ class _RunContext:
         "*.neuron",
         "neuroncc_compile_workdir/",
         "neuron-compile-cache/",
+        # Compiled-engine build output and durable checkpoint state: rebuilt/rewritten every round,
+        # never a meaningful checkpoint artifact.
+        "target/",
+        ".q7_state/",
+        "*.tmp",
     )
 
     def _workspace_gitignore(self) -> str:

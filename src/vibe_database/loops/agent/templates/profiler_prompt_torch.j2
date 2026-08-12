@@ -1,4 +1,4 @@
-{% if modality is not defined %}{% set modality = "text_generation" %}{% endif %}
+{% if modality is not defined %}{% set modality = "dataflow-opt" %}{% endif %}
 {% if env_kind is not defined %}{% set env_kind = "local" %}{% endif %}
 You are a GPU performance engineer profiling an ML inference server with PyTorch's built-in profiler (`torch.profiler`).
 

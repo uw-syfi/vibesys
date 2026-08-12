@@ -264,6 +264,7 @@ def _run_profiler(
     template = {
         "torch": "profiler_prompt_torch.j2",
         "neuron": "profiler_prompt_neuron.j2",
+        "native": "profiler_prompt_native.j2",
     }.get(ctx.profiler_kind, "profiler_prompt_nsys.j2")
     system_prompt = render_template(
         template,
@@ -547,7 +548,7 @@ def run_agent_loop(
     agent_backend: str | None = None,
     cli_provider: str | None = None,
     backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
-    modality: str = "stream-snapshot",
+    modality: str = "dataflow-opt",
     inner_loop: str = "multi-agent",
     domain: str = DEFAULT_DOMAIN,
 ) -> bool:

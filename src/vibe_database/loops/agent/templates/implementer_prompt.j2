@@ -1,4 +1,4 @@
-{% if modality is not defined %}{% set modality = "text_generation" %}{% endif %}
+{% if modality is not defined %}{% set modality = "dataflow-opt" %}{% endif %}
 {% include "_modality/" ~ modality ~ "/implementer.j2" %}
 
 {% if runtime_notes %}

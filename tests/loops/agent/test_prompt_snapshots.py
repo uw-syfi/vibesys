@@ -3,6 +3,10 @@
 These fixtures are intentionally plain text files. When prompt wording changes
 on purpose, the fixture diff is the review artifact: it shows reviewers exactly
 what an agent will see after all template includes and domain interpolation.
+
+The domain under test is ``differential-dataflow`` (the in-place
+superoptimization target); ``generic`` is the negative control that injects no
+domain content of its own.
 """
 
 from __future__ import annotations
@@ -19,15 +23,16 @@ _ROOT = Path(__file__).resolve().parents[3]
 _TEMPLATE_DIR = _ROOT / "src" / "vibe_database" / "loops" / "agent" / "templates"
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "prompt_snapshots"
 
+_DOMAIN = "differential-dataflow"
 _ROLES = ("implementer", "judge", "single_agent", "orchestrator")
 
 _BASE_CONTEXT = {
-    "modality": "stream-snapshot",
-    "reference_path": "/workspace/reference/main.py",
-    "task": "TASK: incrementally maintain the windowed SUM + HAVING query (Q1).",
-    "pass_criteria": "PASS: pytest passes and per-snapshot output matches the oracle at 1.0.",
-    "objective": "OBJECTIVE: maximize events_per_sec at correctness parity.",
-    "roadmap_text": "- major-1: todo - reach exact-match 1.0 on Q1 threshold retraction.",
+    "modality": "dataflow-opt",
+    "reference_path": "/workspace/reference",
+    "task": "TASK: micro-optimize the differential-dataflow bfs engine in place.",
+    "pass_criteria": "PASS: output-equivalence with pristine round 0 and cpu_reduction_ratio > 1.0.",
+    "objective": "OBJECTIVE: maximize cpu_reduction_ratio at byte-identical output.",
+    "roadmap_text": "- major-1: todo - shave CPU on the bfs merge path at output parity.",
     "env_kind": "local",
 }
 
@@ -101,7 +106,7 @@ def _render_prompt(domain: str, role: str, context: dict[str, object]) -> str:
             retry=1,
             feedback=None,
             reference_path=context["reference_path"],
-            profiler_kind="torch",
+            profiler_kind="native",
             profile_focus="",
             domain_single_agent=_domain_section(domain, "single_agent", context),
         )
@@ -146,43 +151,44 @@ def _assert_matches_snapshot(domain: str, case_name: str, role: str, rendered: s
 
 @pytest.mark.parametrize("case_name,context", _CONTEXTS.items())
 @pytest.mark.parametrize("role", _ROLES)
-def test_streaming_ivm_prompt_snapshot(case_name: str, context: dict[str, object], role: str):
-    rendered = _render_prompt("streaming-ivm", role, context)
-    _assert_matches_snapshot("streaming-ivm", case_name, role, rendered)
+def test_differential_dataflow_prompt_snapshot(
+    case_name: str, context: dict[str, object], role: str
+):
+    rendered = _render_prompt(_DOMAIN, role, context)
+    _assert_matches_snapshot(_DOMAIN, case_name, role, rendered)
 
 
-def test_streaming_ivm_rendered_prompts_keep_required_domain_content():
+def test_rendered_prompts_keep_required_domain_content():
     context = _CONTEXTS["full"]
-    prompts = {role: _render_prompt("streaming-ivm", role, context) for role in _ROLES}
+    prompts = {role: _render_prompt(_DOMAIN, role, context) for role in _ROLES}
 
-    assert "incremental-view-maintenance" in prompts["implementer"]
-    assert "non-monotonic" in prompts["implementer"].lower()
-    assert "Sliding window" in prompts["implementer"]
-    assert "correctness parity with the oracle" in prompts["judge"]
-    assert "Retraction correctness is the crux" in prompts["judge"]
+    assert "differential-dataflow" in prompts["implementer"]
+    assert "micro-optimization" in prompts["implementer"].lower()
+    assert "byte-identical" in prompts["implementer"]
+    assert "output-equivalence" in prompts["judge"].lower()
     assert "No reward hacking" in prompts["judge"]
-    assert "non-monotonic" in prompts["single_agent"].lower()
-    assert "correctness leads and throughput follows" in prompts["orchestrator"]
-    assert "anti-join" in prompts["orchestrator"].lower()
+    assert "micro-optimization" in prompts["single_agent"].lower()
+    assert "output stays byte-identical and CPU follows" in prompts["orchestrator"]
 
 
-def test_minimal_streaming_ivm_prompt_omits_optional_checker_paths():
+def test_minimal_prompt_omits_optional_checker_paths():
     context = _CONTEXTS["minimal"]
-    judge = _render_prompt("streaming-ivm", "judge", context)
-    single_agent = _render_prompt("streaming-ivm", "single_agent", context)
+    judge = _render_prompt(_DOMAIN, "judge", context)
+    single_agent = _render_prompt(_DOMAIN, "single_agent", context)
 
     assert "/workspace/bench/benchmark.py" not in judge
-    assert "/workspace/acc_checker/checker.py" not in judge
+    assert "/workspace/acc_checker/equivalence_gate.py" not in judge
     assert "/workspace/bench/benchmark.py" not in single_agent
-    assert "/workspace/acc_checker/checker.py" not in single_agent
+    assert "/workspace/acc_checker/equivalence_gate.py" not in single_agent
 
 
-def test_generic_prompts_do_not_receive_streaming_ivm_domain_content():
+def test_generic_prompts_do_not_receive_domain_content():
     context = _CONTEXTS["full"]
     prompts = {role: _render_prompt("generic", role, context) for role in _ROLES}
 
-    assert "incremental-view-maintenance" not in prompts["implementer"]
-    assert "Sliding window, snapshot-sampled" not in prompts["implementer"]
-    assert "correctness parity with the oracle" not in prompts["judge"]
-    assert "Retraction correctness is the crux" not in prompts["judge"]
-    assert "correctness leads and throughput follows" not in prompts["orchestrator"]
+    # Anchors chosen to be unique to the domain role sections — NOT the shared
+    # dataflow-opt modality fragment, which mentions differential-dataflow
+    # regardless of --domain.
+    assert "You earn the win" not in prompts["implementer"]
+    assert "truth to regenerate here" not in prompts["judge"]
+    assert "output stays byte-identical and CPU follows" not in prompts["orchestrator"]

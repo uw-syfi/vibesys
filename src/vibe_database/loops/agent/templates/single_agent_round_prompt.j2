@@ -1,4 +1,4 @@
-{% if modality is not defined %}{% set modality = "text_generation" %}{% endif %}
+{% if modality is not defined %}{% set modality = "dataflow-opt" %}{% endif %}
 {% if env_kind is not defined %}{% set env_kind = "local" %}{% endif %}
 You are a senior engineer running ONE complete inner-loop round end-to-end. In this ablation a single agent owns three roles that are normally split across three specialists:
 
@@ -42,23 +42,13 @@ Address every item above before declaring PASS this attempt.
 
 ## Workspace
 
-The shared experiment workspace is your working directory. Reference implementation: `{{ reference_path }}`. Use `uv` for Python packaging — `uv init` if needed, `uv add` for deps, `uv run` for execution.
+The shared experiment workspace is your working directory. Reference implementation: `{{ reference_path }}`. Use the target's own toolchain to build and run the candidate — e.g. `cargo build --release` for a compiled Rust engine, or `uv` (`uv init` / `uv add` / `uv run`) for a Python one.
 
 ## Profiling step
 
-After (and only after) the implementation passes your self-judge gates, capture a profile so the orchestrator has a bottleneck signal for the next round.
+After (and only after) the implementation passes your self-judge gates, measure the candidate so the orchestrator has a bottleneck signal for the next round.
 
-{% if profiler_kind == "torch" %}
-Use `torch.profiler` via `torch_profiler/analyze_torch_profile.py` (or the `vibe-database-torch-profiler` MCP tools when attached). Start with `tables`, then `kernels` / `operators` / `cpu_overhead` / `memory` / `summary` as relevant.
-
-{% if env_kind == "modal" %}
-**Modal mode**: the editor container has no GPU. Dispatch profiling via `modal run main.py::modal_profile -- --output /workspace/prof.json --num-iters 20 --max-tokens 32 --prompt "The capital of France is"`. Do NOT fall back to synthetic-weight in-process profiling.
-{% else %}
-Capture in-process: `python torch_profiler/analyze_torch_profile.py capture --model-dir /workspace --weights-dir /model --output /tmp/prof.json --warmup 3 --num-iters 20 --max-tokens 32 --prompt "The capital of France is"`.
-{% endif %}
-{% else %}
-Use `nsys` via `nsys_profiler/analyze_nsys.py` (or the `vibe-database-nsys-profiler` MCP tools when attached). The capture script starts the server, runs the benchmark under `nsys profile`, and writes a report you can analyze with the MCP tools. Focus: kernel breakdown, CPU launch overhead, GPU idle gaps.
-{% endif %}
+There is no GPU kernel profiler for this target — the engine is a compiled **streaming** binary (reads events on stdin, emits per-snapshot records on stdout; CONTRACT.md §0) and performance comes from the benchmark harness. Run the benchmark, pointing it at your streaming binary (`python3 benchmark/benchmark.py --query <q> --engine-cmd '<your-binary> --query {query}' --output-json /tmp/bench.json`; discover the exact flags with `--help`) to get `events_per_sec`. ⛔ The harness prints `BATCH ENGINE DETECTED` and produces no metric if the engine only emits at EOF — a batch engine gets no throughput number. Then reason about the cost breakdown from the engine's structure (stream/CSV parse, window maintenance and retraction, per-snapshot emission) and name the dominant stage. Optionally, if available locally, a sampling profiler (`perf`) or a flamegraph on the binary can localize a hot function — never fabricate profiler output you did not capture.
 
 Profiler focus this round: {{ profile_focus or "general bottleneck analysis on the steady-state benchmark path" }}.
 
@@ -68,7 +58,7 @@ The plateau detector compares this raw float across rounds, so the **unit must n
 
 1. The OBJECTIVE block above names the headline field — look for `Headline metric: <field_name>`.
 2. Run the benchmark with `--output-json /tmp/bench.json` (discover the exact flag with `--help`).
-3. Read **that exact field**. Set `perf_metric` to its numeric value and `perf_unit` to that field's name (e.g. `"median_tok_per_sec"`). Do not substitute a different field, do not invert it, do not convert units.
+3. Read **that exact field**. Set `perf_metric` to its numeric value and `perf_unit` to that field's name (e.g. `"events_per_sec"`). Do not substitute a different field, do not invert it, do not convert units.
 
 If you could not run the benchmark this round, set `perf_metric: null` rather than fabricating a value.
 

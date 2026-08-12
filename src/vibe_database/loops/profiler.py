@@ -37,9 +37,8 @@ def mcp_spec(profiler_kind: str):
             command="python",
             args=["torch_profiler/server.py"],
         )
-    # No profiler MCP for other kinds (the cpu / stream-snapshot path is
-    # profiler-free — perf comes from the benchmark harness). Callers treat
-    # None as "skip MCP".
+    # No profiler MCP for other kinds (the cpu path is profiler-free — perf
+    # comes from the benchmark harness). Callers treat None as "skip MCP".
     return None
 
 

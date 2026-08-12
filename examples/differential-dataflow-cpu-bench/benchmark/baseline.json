@@ -1,0 +1,26 @@
+{
+  "baseline_cpu_seconds": 0.933124,
+  "workload": [
+    "200000",
+    "2000000",
+    "200",
+    "10",
+    "inspect",
+    "-w",
+    "1"
+  ],
+  "samples": [
+    1.172288,
+    0.935331,
+    1.017061,
+    0.933124,
+    0.932247,
+    0.930021,
+    0.928902
+  ],
+  "reps": 7,
+  "warmups": 2,
+  "engine": "differential-dataflow (vanilla ref_engine, round 0)",
+  "host": "kisnis",
+  "cpu": "x86_64"
+}

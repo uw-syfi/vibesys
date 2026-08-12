@@ -40,9 +40,10 @@ your next prompt — it does not parse it, so format it however you find
 useful, but follow these conventions so the structure stays legible:
 
 - **Major** items: structural changes expected to move the headline
-  performance metric meaningfully (e.g. "Implement EAGLE3 speculative
-  decoding", "Add CUDA graphs to verifier decode", "Replace manual
-  attention with FlashAttention"). Usually 1-3 rounds each.
+  performance metric meaningfully (e.g. "Replace the O(n) per-snapshot
+  recompute in the Q4 anti-join with an incremental in-window index",
+  "Add two-pointer O(1)-amortized window expiry", "Switch to delta-only
+  changelog emission"). Usually 1-3 rounds each.
 - **Minor** items: bug fixes, polish, gates (correctness recoveries,
   tiny kernel swaps, accuracy bumps). Usually 1 round each.
 - Use one of these four statuses, and note rounds spent on each
@@ -52,9 +53,9 @@ useful, but follow these conventions so the structure stays legible:
   - `done` — implemented, profiler-verified, hitting (close to) predicted impact.
   - `parked` — implementation is buggy or incomplete, but you believe the
     *direction* is sound. Returnable to `in_progress` later. Use this when
-    the metric isn't moving for an *implementation* reason (zero acceptance
-    on EAGLE3, capture failures on CUDA graphs, …) rather than a workload
-    reason.
+    the metric isn't moving for an *implementation* reason (a retraction
+    that never fires, an incremental path that always falls back to full
+    recompute, …) rather than a workload reason.
   - `abandoned` — the *direction* itself doesn't fit this workload. Strict
     requirement (see below) before flipping to this state.
 - For each item include a one-line *why* (predicted impact, what
@@ -73,32 +74,32 @@ treat them as one bucket:
 - **`parked`** is the right call when (a) you predicted the technique
   would help, (b) the implementation passes the judge / pytest / accuracy
   gate, but (c) the headline metric didn't move *because the implementation
-  appears to have a bug or is incomplete*. Symptoms: zero acceptance on a
-  speculative decoder, all-fallback paths on what should be the fast path,
-  a CUDA graph capturing but never replaying, etc. The direction itself is
+  appears to have a bug or is incomplete*. Symptoms: accuracy stuck at zero
+  on one query, all-fallback paths on what should be the incremental fast
+  path, an expiry that never emits its retraction, etc. The direction itself is
   still believable; you just couldn't make the implementation good enough
   in the rounds you spent. Mark `parked` and move to a different Major;
   return to it when (i) you have a hypothesis for the bug, or (ii) other
   levers are exhausted.
 
 - **`abandoned`** is the right call only when the *direction itself* is
-  the wrong fit for this workload. Examples: continuous batching on a
-  workload contractually limited to single-batch, MTP on a model that
-  doesn't ship MTP heads, paged attention when the engine's fixed-shape
-  KV path is already optimal at this batch size. Each requires a
+  the wrong fit for this workload. Examples: a monotonic-only aggregation
+  on a query that is a windowed anti-join by contract, a hash-index on a
+  query whose key cardinality is 1, a delta-emission path when the
+  per-snapshot recompute is already O(1) at this window size. Each requires a
   *mechanism-level* autopsy explaining why the technique cannot help
   *here* (not "it didn't pay off in 3 rounds"). If you can't write that
   mechanism, the right status is `parked`, not `abandoned`.
 
 **Hard rule for `abandoned` autopsies:** you must name a code-level or
 hardware-level mechanism — not a behavioral observation. A perf number
-("+0% TPOT") is not a mechanism; "the workload is single-batch by
-contract so continuous batching cannot raise arithmetic intensity" is.
-If acceptance on a speculative decoder is zero, that is *not* a reason
+("+0% events_per_sec") is not a mechanism; "the query is a windowed
+anti-join by contract, so a monotonic-only aggregation cannot express the
+retraction and can never reach exact-match here" is.
+If accuracy is stuck at zero on one query, that is *not* a reason
 to abandon — it's a debugging task, and the right status is `parked`
-with a hypothesis. Spec decode acceptance debugging has a checklist in
-`references/algorithms/speculative-decoding.md` ("Debugging 0
-acceptance"); read it before parking or abandoning.
+with a hypothesis. Re-read the query's I/O binding in `CONTRACT.md` and
+the relevant window/retraction semantics before parking or abandoning.
 
 ## Major
 

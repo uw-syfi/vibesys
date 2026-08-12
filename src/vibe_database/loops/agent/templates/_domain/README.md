@@ -9,18 +9,18 @@ what does 'good' mean here?"* — kept separate from the neutral prompt skeleton
 Pick one with `--domain` (agent loop):
 
 ```bash
-vibe-database --outer-loop agent --domain streaming-ivm ...   # default
-vibe-database --outer-loop agent --domain generic ...         # no domain context
-vibe-database --outer-loop agent --domain ./my-domain.md ...  # your own (a path)
+vibe-database --outer-loop agent --domain differential-dataflow ...  # default (dd bfs)
+vibe-database --outer-loop agent --domain generic ...                # no domain context
+vibe-database --outer-loop agent --domain ./my-domain.md ...         # your own (a path)
 ```
 
 `--domain` accepts either a **built-in name** (a `<name>.md` next to this file)
 or a **path** to your own `.md` file anywhere on disk. Built-ins:
 
-| Domain          | What it does |
-|-----------------|--------------|
-| `streaming-ivm` | The default. Non-monotonic, time-windowed incremental view maintenance: the retraction-correctness implementer context, the oracle-parity + reward-hack judge gates, and the correctness-leads-throughput orchestrator sequencing. |
-| `generic`       | Empty — no domain prose injected. The neutral baseline; copy it to start your own. |
+| Domain                  | What it does |
+|-------------------------|--------------|
+| `differential-dataflow` | The default. In-place **micro-optimization of a real engine's own source** — the vanilla differential-dataflow `bfs` example — graded on output-equivalence with the pristine round-0 build and CPU-seconds on a fixed workload: the superoptimization implementer context, the output-equivalence + diff-discipline + reward-hack judge gates, and the "round 0 is the frozen architecture" orchestrator sequencing. |
+| `generic`               | Empty — no domain prose injected. The neutral baseline; copy it to start your own. |
 
 ## Anatomy of a domain file
 
@@ -59,8 +59,9 @@ Rules:
   framing.
 - **`## orchestrator` is optional.** Omit it to inject nothing into the planner
   prompt (its neutral skeleton still applies). Add it to give the planner
-  domain-specific strategy — `streaming-ivm` uses it to sequence rounds so
-  correctness leads and throughput follows, one non-monotonic pattern at a time.
+  domain-specific strategy — `differential-dataflow` uses it to freeze the
+  round-0 architecture and restrict every round to output-equivalent
+  micro-optimizations that only shave CPU.
 - Write normal Markdown prose. The base template owns the surrounding structure
   (task, pass criteria, workspace, output contract); your section owns the
   domain content.
@@ -74,7 +75,7 @@ use any of these in any section without tracking which role you're in:
 
 | Variable | Meaning |
 |----------|---------|
-| `modality` | The `--modality` value (e.g. `stream-snapshot`). |
+| `modality` | The `--modality` value (e.g. `dataflow-opt`). |
 | `reference_path` | Path to the reference implementation. |
 | `bench_path` | Benchmark harness dir, or falsy if no benchmark is attached. |
 | `accuracy_checker_path` | Accuracy checker dir, or falsy if not attached. |

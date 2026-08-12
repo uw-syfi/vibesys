@@ -29,13 +29,22 @@ from vibe_database.constants import (
     ComputeBackend,
 )
 from vibe_database.loops.agent.domain import DEFAULT_DOMAIN, builtin_domains
+from vibe_database.reference_engines import REFERENCE_ENGINES
 from vibe_database.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
 )
 
 _OUTER_LOOPS = ("agent", "plain", "evolve", "openevolve")
-_MODALITIES = ("stream-snapshot",)
+_MODALITIES = ("dataflow-opt",)
+
+# Sentinel defaults for the target-locating args, so ``--reference-engine`` can
+# fill them only when the user left them untouched (see _resolve_reference_engine).
+# They point at the differential-dataflow target so a bare invocation works too.
+_DEFAULT_REF = "examples/differential-dataflow-cpu-bench/reference"
+_DEFAULT_ACC_CHECKER = "examples/differential-dataflow-cpu-bench/accuracy_checker"
+_DEFAULT_BENCH = "examples/differential-dataflow-cpu-bench/benchmark"
+_DEFAULT_MODALITY = "dataflow-opt"
 
 
 # ---------------------------------------------------------------------------
@@ -106,8 +115,11 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     """Add CLI arguments shared across every outer-loop parser."""
     parser.add_argument(
         "--ref",
-        default="examples/Llama-3-8B/reference",
-        help="Path to reference implementation file, or directory containing at least one reference.py (default: examples/Llama-3-8B/reference)",
+        default=_DEFAULT_REF,
+        help=(
+            "Path to reference implementation file, or directory containing at "
+            f"least one reference.py (default: {_DEFAULT_REF})"
+        ),
     )
     parser.add_argument(
         "--exp-name",
@@ -124,14 +136,19 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--acc-checker",
         type=Path,
-        default=Path("examples/Llama-3-8B/accuracy_checker"),
-        help="Path to a directory containing accuracy checker code/documents (default: examples/Llama-3-8B/accuracy_checker).",
+        default=Path(_DEFAULT_ACC_CHECKER),
+        help=(
+            "Path to a directory containing accuracy checker code/documents "
+            f"(default: {_DEFAULT_ACC_CHECKER})."
+        ),
     )
     parser.add_argument(
         "--bench",
         type=Path,
-        default=Path("examples/Llama-3-8B/benchmark"),
-        help="Path to a directory containing benchmark code/documents (default: examples/Llama-3-8B/benchmark).",
+        default=Path(_DEFAULT_BENCH),
+        help=(
+            f"Path to a directory containing benchmark code/documents (default: {_DEFAULT_BENCH})."
+        ),
     )
     parser.add_argument(
         "--nsys-profiler",
@@ -402,16 +419,28 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-rounds", type=int, default=24)
     parser.add_argument("--max-retries-per-round", type=int, default=3)
     parser.add_argument("--start-round", type=int, default=None, metavar="N")
-    parser.add_argument("--modality", default="stream-snapshot", choices=_MODALITIES)
+    parser.add_argument("--modality", default=None, choices=_MODALITIES)
     parser.add_argument(
         "--domain",
-        default=DEFAULT_DOMAIN,
+        default=None,
         metavar="NAME_OR_PATH",
         help=(
             "Domain pack supplying the implementer/judge context for your "
             f"problem space. A built-in name ({', '.join(builtin_domains())}) "
             "or a path to your own domain directory. Default: "
-            f"{DEFAULT_DOMAIN}. See loops/agent/templates/_domain/README.md."
+            f"{DEFAULT_DOMAIN} (or the --reference-engine preset's domain). "
+            "See loops/agent/templates/_domain/README.md."
+        ),
+    )
+    parser.add_argument(
+        "--reference-engine",
+        default=None,
+        choices=sorted(REFERENCE_ENGINES),
+        help=(
+            "Vendor a real engine's OWN source as round 0 and micro-optimize it "
+            "in place (superoptimization). Supplies defaults for "
+            "--ref/--acc-checker/--bench/--domain/--modality; any of those you "
+            "pass explicitly still win."
         ),
     )
     parser.add_argument(
@@ -433,7 +462,32 @@ def _validate_agent(args: argparse.Namespace) -> None:
         sys.exit(2)
 
 
+def _resolve_reference_engine(args: argparse.Namespace) -> None:
+    """Expand ``--reference-engine`` into the five existing target args.
+
+    The preset only fills a target-locating arg that still holds its built-in
+    default, so an explicit ``--ref``/``--acc-checker``/``--bench``/``--domain``/
+    ``--modality`` always wins. ``--domain``/``--modality`` default to ``None``
+    (see ``_build_agent_parser``) and are filled here — from the preset when one
+    is named, else from the framework defaults.
+    """
+    preset = REFERENCE_ENGINES.get(args.reference_engine) if args.reference_engine else None
+    if preset is not None:
+        root = PROJECT_ROOT / preset.example_dir
+        if args.ref == _DEFAULT_REF:
+            args.ref = str(root / "reference")
+        if str(args.acc_checker) == _DEFAULT_ACC_CHECKER:
+            args.acc_checker = root / "accuracy_checker"
+        if str(args.bench) == _DEFAULT_BENCH:
+            args.bench = root / "benchmark"
+    if args.domain is None:
+        args.domain = preset.default_domain if preset is not None else DEFAULT_DOMAIN
+    if args.modality is None:
+        args.modality = preset.default_modality if preset is not None else _DEFAULT_MODALITY
+
+
 def _run_agent(args: argparse.Namespace) -> None:
+    _resolve_reference_engine(args)
     config, skills, backend = load_config_and_skills(args)
     from vibe_database.loops.agent.loop import run_agent_loop
 
@@ -560,7 +614,7 @@ def _build_evolve_parser() -> argparse.ArgumentParser:
         metavar="NAME:DIRECTION",
     )
     parser.add_argument("--frontier-bias", type=float, default=0.7)
-    parser.add_argument("--modality", default="stream-snapshot", choices=_MODALITIES)
+    parser.add_argument("--modality", default=_DEFAULT_MODALITY, choices=_MODALITIES)
     return parser
 
 
@@ -654,7 +708,7 @@ def _build_openevolve_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-iterations", type=int, default=16)
     parser.add_argument("--k-inspirations", type=int, default=3)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--modality", default="stream-snapshot", choices=_MODALITIES)
+    parser.add_argument("--modality", default=_DEFAULT_MODALITY, choices=_MODALITIES)
     return parser
 
 

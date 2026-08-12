@@ -1,0 +1,21 @@
+## Modality: dataflow-opt (micro-optimize a **real vendored engine's** own source, in place)
+
+The candidate is the **vanilla differential-dataflow source** (`engine/`, vendored verbatim as round 0 from the pristine `_ref_engine/`) that the Implementer may only **micro-optimize in place**. It runs the shipped `bfs` example — incremental breadth-first distance over a graph the binary self-generates from a fixed RNG seed — and its correctness is judged as **output-equivalence with the pristine round-0 engine**: there is no external Python truth, because "correct" here means "computes exactly what vanilla differential-dataflow computes."
+
+**⛔ IN-PLACE-EDIT / NO-REARCHITECTURE — HARD GATE, check this FIRST (every round, including round 1):** the architecture is frozen by round 0, not by round 1. Diff the candidate against the pristine snapshot:
+```
+diff -ru _ref_engine engine    # (ignoring target/)
+```
+Every hunk must be an identifiable **micro-optimization** — allocation removal, buffer reuse, `SmallVec`/`Vec` sizing, inlining, branchless/SWAR, a tightened merge/sort/consolidation loop, layout of existing structures, or `[profile.release]` codegen flags. **Automatic FAIL — even if faster and still byte-identical — for any architectural change:** a module deleted and rewritten, an operator reimplemented, the algorithm or its complexity class changed, the dataflow/execution or worker/concurrency model changed, or a heavyweight crate/runtime pulled in. Name the ✅ micro-optimization behind each hunk; if a hunk isn't one, reject the round. A round that only tweaks hot-path layout/allocation/codegen and stays equivalent is fine to accept even with a small or zero win; a round that changes the model is not.
+
+**⛔ OUTPUT-EQUIVALENCE — HARD GATE:** run the equivalence gate with `--rebuild-cmd` so it grades the freshly-built candidate against the pristine engine run **live** on every fixed workload:
+```
+{{ accuracy_checker_path }}/equivalence_gate.py \
+    --engine-cmd 'engine/target/release/examples/bfs' \
+    --rebuild-cmd 'cargo build --release --example bfs -p differential-dataflow --offline --manifest-path engine/Cargo.toml'
+```
+Require **exit 0 / PASS**. The gate rebuilds the candidate, runs the pristine `_ref_engine/` LIVE on the canonical **and** perturbation workloads in `reference/workload.py`, normalizes both outputs (data tuples only, sorted), and requires a **byte-for-byte match on all of them**. Running the pristine engine live on ≥2 distinct workloads is the anti-memorization mechanism — there is no stored golden file to hardcode, and an engine that special-cases one input still has to reproduce the real BFS result on the other. Treat any diverging tuple on any workload as a real defect: exit 1 is a correctness FAIL, exit 2 is a build/setup error (also not acceptable as a passing round).
+
+**No reward hacking.** The engine must compute BFS in differential-dataflow's own code — the `iterate`/`join_map`/`reduce`/`consolidate` dataflow. Reading a stored answer, short-circuiting the computation for the known workload, embedding or shelling out to another engine, or hardcoding the expected tuples is a FAIL even at exact match. The failure modes to watch: a hunk that changes what a `bfs.rs` operator computes (wrong distances), a "layout" change that is really a model change (a different arrangement/trace strategy or a different aggregation), an added heavyweight dependency, and any edit that is faster only because it stopped doing part of the work.
+
+**CPU is scored only after both gates pass.** The metric is `cpu_reduction_ratio` from `{{ bench_path }}/benchmark.py` (higher is better; round 0 ≈ 1.0). It is meaningful **only** as a same-code, same-output number won purely by micro-optimization against the pristine `_ref_engine/`. A round that is faster because it changed the model or the output is a FAIL, not a win — the honest expectation is a modest percentage, never a multiple.

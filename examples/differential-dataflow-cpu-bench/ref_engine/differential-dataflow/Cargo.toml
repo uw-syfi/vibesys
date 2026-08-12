@@ -1,0 +1,45 @@
+[package]
+
+name = "differential-dataflow"
+version = "0.25.1"
+authors = ["Frank McSherry <fmcsherry@me.com>"]
+
+description = "An incremental data-parallel dataflow platform"
+
+# These URLs point to more information about the repository
+documentation = "https://docs.rs/differential-dataflow"
+homepage = "https://github.com/TimelyDataflow/differential-dataflow"
+repository = "https://github.com/TimelyDataflow/differential-dataflow.git"
+keywords = ["differential", "dataflow"]
+license = "MIT"
+readme = "../README.md"
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+rand="0.4"
+itertools="^0.13"
+graph_map = "0.1"
+bytemuck = "1.18.0"
+mimalloc = "0.1.48"
+tempfile = "3"
+lz4_flex = "0.11"
+
+[dependencies]
+columnar = { workspace = true }
+columnation = "0.1.1"
+fnv="1.0.2"
+paste = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+smallvec = "1.15.1"
+timely = {workspace = true}
+
+[features]
+default = ["timely/getopts"]
+
+[[bench]]
+name = "chunk_bench"
+harness = false

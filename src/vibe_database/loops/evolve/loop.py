@@ -222,9 +222,11 @@ def _run_profiler(
     objective: str,
     objectives: list[Objective] | None = None,
 ) -> ProfilerSummary | None:
-    template = (
-        "profiler_prompt_torch.j2" if ctx.profiler_kind == "torch" else "profiler_prompt_nsys.j2"
-    )
+    template = {
+        "torch": "profiler_prompt_torch.j2",
+        "neuron": "profiler_prompt_neuron.j2",
+        "native": "profiler_prompt_native.j2",
+    }.get(ctx.profiler_kind, "profiler_prompt_nsys.j2")
     base_prompt = _render(
         template,
         bench_path=ctx.profiler_bench_path,
@@ -283,7 +285,7 @@ def run_evolve_loop(
     agent_backend: str | None = None,
     cli_provider: str | None = None,
     backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
-    modality: str = "stream-snapshot",
+    modality: str = "dataflow-opt",
     objectives: list[Objective] | None = None,
     frontier_bias: float = 0.7,
 ) -> bool:
