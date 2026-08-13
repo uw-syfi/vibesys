@@ -138,6 +138,7 @@ jobs:
           cache-dependency-path: |
             examples/evaluators/queue/go.sum
             examples/evaluators/microservice/go.sum
+            examples/evaluators/priority-queue/go.sum
 
       - name: Install managed-candidate containment dependency
         run: |
@@ -176,6 +177,34 @@ jobs:
 
       - name: Test queue evaluator
         working-directory: examples/evaluators/queue
+        run: go test -race ./...
+
+      - name: Check priority-queue native runner formatting
+        working-directory: examples/evaluators/priority-queue/native_runner
+        run: cargo fmt -- --check
+
+      - name: Lint priority-queue native runner
+        working-directory: examples/evaluators/priority-queue/native_runner
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test priority-queue native runner
+        working-directory: examples/evaluators/priority-queue/native_runner
+        run: cargo test --locked
+
+      - name: Check priority-queue starter formatting
+        working-directory: examples/starters/priority-queue-rs
+        run: cargo fmt -- --check
+
+      - name: Lint priority-queue starter
+        working-directory: examples/starters/priority-queue-rs
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test priority-queue starter
+        working-directory: examples/starters/priority-queue-rs
+        run: cargo test --locked
+
+      - name: Test priority-queue evaluator
+        working-directory: examples/evaluators/priority-queue
         run: go test -race ./...
 
       - name: Test microservice evaluator
