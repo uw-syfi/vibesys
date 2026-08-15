@@ -4,11 +4,14 @@ import {type RoundSummary, roundAgentElapsedMs} from '../run-map.js';
 import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
 import {visibleRoundNumber} from '../session-model.js';
-import type {Theme} from './theme.js';
+
+const ACTIVE_ROUND_COLOR = '#22c55e';
+const DEFAULT_ROUND_COLOR = '#cbd5e1';
+const OVERFLOW_COLOR = '#64748b';
+const WINDOW_SIZE = 8;
 
 export class RoundStripView {
   readonly output: BoxRenderable;
-  #theme: Theme;
   #renderedState: SessionState | null = null;
   #elapsedTimer: ReturnType<typeof setInterval> | null = null;
   #runningRound: {
@@ -20,26 +23,18 @@ export class RoundStripView {
   constructor(
     private readonly renderer: CliRenderer,
     private readonly controller: SessionController,
-    theme: Theme,
   ) {
-    this.#theme = theme;
     this.output = new BoxRenderable(renderer, {
       id: 'round-strip',
       width: '100%',
       height: 3,
       border: true,
       borderStyle: 'rounded',
-      borderColor: theme.borderStrong,
+      borderColor: '#334155',
       paddingLeft: 1,
       paddingRight: 1,
       title: ' Rounds ',
     });
-  }
-
-  applyTheme(theme: Theme): void {
-    this.#theme = theme;
-    this.output.borderColor = theme.borderStrong;
-    this.#renderedState = null;
   }
 
   render(state: SessionState): void {
@@ -50,7 +45,7 @@ export class RoundStripView {
       this.output.add(
         new TextRenderable(this.renderer, {
           content: 'Waiting for rounds...',
-          fg: this.#theme.textSubtle,
+          fg: '#64748b',
           width: '100%',
         }),
       );
@@ -63,8 +58,16 @@ export class RoundStripView {
     });
     const selected = visibleRoundNumber(state);
     const runningRound = latestActiveRoundNumber(state.rounds);
-    for (const round of state.rounds.slice(-8)) {
+    const {slice, hasEarlier, hasLater} = visibleRoundSlice(state.rounds, selected);
+
+    if (hasEarlier) {
+      row.add(new TextRenderable(this.renderer, {content: ' ◀ ', fg: OVERFLOW_COLOR}));
+    }
+    for (const round of slice) {
       row.add(this.#renderRound(round, {selected, runningRound}));
+    }
+    if (hasLater) {
+      row.add(new TextRenderable(this.renderer, {content: ' ▶ ', fg: OVERFLOW_COLOR}));
     }
     this.output.add(row);
     this.#syncElapsedTimer();
@@ -92,8 +95,8 @@ export class RoundStripView {
     const isRunning = round.number === runningRound;
     const text = new TextRenderable(this.renderer, {
       content: this.#roundLabel(round, selected),
-      fg: isRunning ? this.#theme.success : this.#theme.textPrimary,
-      ...(isSelected ? {bg: this.#theme.selectedSurface} : {}),
+      fg: isRunning ? ACTIVE_ROUND_COLOR : DEFAULT_ROUND_COLOR,
+      ...(isSelected ? {bg: '#0f172a'} : {}),
       onMouseUp: () => this.controller.selectRound(round.number),
     });
     if (isRunning && hasActiveAgentTiming(round)) this.#runningRound = {round, selected, text};
@@ -121,6 +124,32 @@ export class RoundStripView {
     clearInterval(this.#elapsedTimer);
     this.#elapsedTimer = null;
   }
+}
+
+function visibleRoundSlice(
+  rounds: RoundSummary[],
+  selected: number | null,
+): {slice: RoundSummary[]; hasEarlier: boolean; hasLater: boolean} {
+  if (rounds.length <= WINDOW_SIZE) {
+    return {slice: rounds, hasEarlier: false, hasLater: false};
+  }
+  const selectedIndex =
+    selected === null
+      ? rounds.length - 1
+      : rounds.findIndex(r => r.number === selected);
+  const anchorIndex = selectedIndex === -1 ? rounds.length - 1 : selectedIndex;
+  const half = Math.floor(WINDOW_SIZE / 2);
+  let start = Math.max(0, anchorIndex - half);
+  let end = start + WINDOW_SIZE;
+  if (end > rounds.length) {
+    end = rounds.length;
+    start = Math.max(0, end - WINDOW_SIZE);
+  }
+  return {
+    slice: rounds.slice(start, end),
+    hasEarlier: start > 0,
+    hasLater: end < rounds.length,
+  };
 }
 
 function latestActiveRoundNumber(rounds: RoundSummary[]): number | null {
