@@ -33,6 +33,13 @@ export interface SessionState {
   experimentLog: ExperimentLogState | null;
   hypothesisScope: HypothesisScope | null;
   layout: LayoutState;
+  /**
+   * Whether the terminal is wide enough to carry the docked chat beside the
+   * log. Measured by the renderer and reported in, because where a question's
+   * answer is displayed has to agree with what is actually on screen: too
+   * narrow to dock and the chat is the modal it has always been.
+   */
+  chatDockFits: boolean;
   /** Non-null while the theme list is open as a keyboard selection. */
   themePicker: ThemePicker | null;
   /**
@@ -97,10 +104,17 @@ export interface RightPane {
   error: string | null;
 }
 
+/**
+ * Which column the pane keys act on. ``left`` is whatever holds the middle of
+ * the row, the experiment log or the transcript; ``chat`` and ``right`` are the
+ * panes beside it.
+ */
+export type PaneFocus = 'chat' | 'left' | 'right';
+
 export interface LayoutState {
-  /** null means single-pane: the transcript has the full width. */
+  /** null means no visualization pane: the left side has the rest of the row. */
   right: RightPane | null;
-  focus: 'left' | 'right';
+  focus: PaneFocus;
 }
 
 export interface ThemePicker {
@@ -172,6 +186,9 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     experimentLog: {entries: [], selectedId: null, pending: true, error: null},
     hypothesisScope: null,
     layout: {right: null, focus: 'left'},
+    // Docked until the renderer measures otherwise, so the landing view carries
+    // the chat from the first frame rather than after a resize.
+    chatDockFits: true,
     themePicker: null,
     typedToolEvents: false,
   };
@@ -188,9 +205,57 @@ export function entryKey(entry: HypothesisEntry, index: number): string {
     : entry.hypothesis_id || `#${index}`;
 }
 
-/** True when the table itself is on screen rather than a hypothesis trajectory. */
+/**
+ * True when the table itself is on screen rather than a hypothesis trajectory.
+ * The chat does not enter into it: docked it is part of this view, and as a
+ * modal it floats over it, so asking a question never swaps the table for the
+ * per-round transcript underneath.
+ */
 export function experimentLogVisible(state: SessionState): boolean {
-  return state.experimentLog !== null && state.hypothesisScope === null && !state.chatOpen;
+  return state.experimentLog !== null && state.hypothesisScope === null;
+}
+
+/**
+ * The chat is docked on the landing view: it is part of that view rather than a
+ * dialog over it, so a question never hides the table it is about. Inside a
+ * hypothesis, and in a terminal too narrow for two columns, it stays the modal
+ * it was.
+ */
+export function chatDocked(state: SessionState): boolean {
+  return state.chatDockFits && state.experimentLog !== null && state.hypothesisScope === null;
+}
+
+/** True when the docked chat is the thing on screen rather than the modal. */
+export function chatPaneVisible(state: SessionState): boolean {
+  return chatDocked(state) && !state.chatOpen;
+}
+
+export function chatPaneFocused(state: SessionState): boolean {
+  return chatPaneVisible(state) && state.layout.focus === 'chat';
+}
+
+export function rightPaneFocused(state: SessionState): boolean {
+  return state.layout.right !== null && state.layout.focus === 'right';
+}
+
+export function setChatDockFits(state: SessionState, fits: boolean): SessionState {
+  if (state.chatDockFits === fits) return state;
+  const layout =
+    fits || state.layout.focus !== 'chat'
+      ? state.layout
+      : {...state.layout, focus: 'left' as const};
+  return {...state, chatDockFits: fits, layout};
+}
+
+/**
+ * What ``/chat`` does. Docked, the chat is already on screen, so opening it
+ * means putting the pane keys on it rather than covering the table.
+ */
+export function openChat(state: SessionState): SessionState {
+  if (chatDocked(state)) {
+    return {...state, overlay: null, layout: {...state.layout, focus: 'chat'}};
+  }
+  return {...state, overlay: null, chatOpen: true};
 }
 
 export function openExperimentLog(state: SessionState): SessionState {
@@ -373,12 +438,30 @@ export function closePane(state: SessionState): SessionState {
   return {...state, layout: {right: null, focus: 'left'}};
 }
 
-export function togglePaneFocus(state: SessionState): SessionState {
-  if (state.layout.right === null) return state;
-  return {
-    ...state,
-    layout: {...state.layout, focus: state.layout.focus === 'left' ? 'right' : 'left'},
-  };
+/**
+ * Moves the pane keys one column to the right, wrapping. Only the columns
+ * actually on screen take part, so the operator never lands on a pane they
+ * cannot see.
+ */
+export function cyclePaneFocus(state: SessionState): SessionState {
+  const order = visiblePaneOrder(state);
+  if (order.length < 2) return state;
+  const next = order[(order.indexOf(state.layout.focus) + 1) % order.length] ?? 'left';
+  return {...state, layout: {...state.layout, focus: next}};
+}
+
+export function focusPane(state: SessionState, focus: PaneFocus): SessionState {
+  if (state.layout.focus === focus) return state;
+  if (!visiblePaneOrder(state).includes(focus)) return state;
+  return {...state, layout: {...state.layout, focus}};
+}
+
+function visiblePaneOrder(state: SessionState): PaneFocus[] {
+  return [
+    ...(chatPaneVisible(state) ? (['chat'] as const) : []),
+    'left' as const,
+    ...(state.layout.right !== null ? (['right'] as const) : []),
+  ];
 }
 
 export function setTheme(state: SessionState, themeName: ThemeName): SessionState {

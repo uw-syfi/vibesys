@@ -1,6 +1,6 @@
 import type {CliRenderer, KeyEvent, ScrollBoxRenderable} from '@opentui/core';
 import type {SessionController} from '../session-controller.js';
-import {experimentLogVisible} from '../session-model.js';
+import {chatPaneFocused, chatPaneVisible, experimentLogVisible} from '../session-model.js';
 
 export interface KeybindingActions {
   completeInput(): boolean;
@@ -13,6 +13,7 @@ export interface KeybindingActions {
   selectPreviousRound(): void;
   toggleTodos(): void;
   scrollRightPane(delta: number): void;
+  scrollChatPane(delta: number): void;
 }
 
 export function bindKeybindings(
@@ -27,11 +28,15 @@ export function bindKeybindings(
       renderer.destroy();
       return;
     }
-    // Pane switching works from anywhere the split is open, including with the
-    // chat focused, so the operator never has to close the chat to look at the
-    // visualization beside it.
-    if (key.ctrl && key.name === 'w' && controller.state.layout.right !== null) {
-      controller.togglePaneFocus();
+    // Pane switching works from anywhere a second column is on screen, which
+    // on the landing view includes the docked chat, so the operator never has
+    // to leave the table to scroll back through an answer.
+    if (
+      key.ctrl &&
+      key.name === 'w' &&
+      (controller.state.layout.right !== null || chatPaneVisible(controller.state))
+    ) {
+      controller.cyclePaneFocus();
       key.preventDefault();
       return;
     }
@@ -44,6 +49,19 @@ export function bindKeybindings(
     ) {
       if (key.name === 'escape') controller.closePane();
       else actions.scrollRightPane(key.name === 'pageup' ? -1 : 1);
+      key.preventDefault();
+      return;
+    }
+    // The docked chat takes the scroll keys while it holds focus, so Page Up
+    // reads the conversation back instead of moving the table's selection.
+    // Escape hands the keys back to the table rather than closing anything:
+    // the pane is part of the view, not a dialog over it.
+    if (
+      chatPaneFocused(controller.state) &&
+      (key.name === 'pageup' || key.name === 'pagedown' || key.name === 'escape')
+    ) {
+      if (key.name === 'escape') controller.focusPane('left');
+      else actions.scrollChatPane(key.name === 'pageup' ? -1 : 1);
       key.preventDefault();
       return;
     }

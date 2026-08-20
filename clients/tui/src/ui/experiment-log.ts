@@ -23,6 +23,15 @@ const CLAIM_MIN_WIDTH = 90;
 const MEASURED_MIN_WIDTH = 62;
 const KEPT_MIN_WIDTH = 104;
 
+/**
+ * Panel width at which the table still shows the claim, which is the row's
+ * identity in words. Anything that takes columns from the table reads this
+ * rather than restating the threshold.
+ */
+export const LOG_CLAIM_PANEL_WIDTH = CLAIM_MIN_WIDTH + PANEL_CHROME_COLUMNS;
+/** Panel width that still carries the measured and verdict columns. */
+export const LOG_COMPACT_PANEL_WIDTH = MEASURED_MIN_WIDTH + PANEL_CHROME_COLUMNS;
+
 interface Columns {
   claim: boolean;
   measured: boolean;

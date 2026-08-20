@@ -6,20 +6,23 @@ import type {SessionController} from '../session-controller.js';
 import {
   closePane,
   closeThemePicker,
+  cyclePaneFocus,
   enterExperimentDrilldown,
   enterExperimentRound,
+  focusPane,
   initialSessionState,
   leaveExperimentDrilldown,
   moveExperimentSelection,
   moveThemeSelection,
   openExperimentLog,
   openPane,
+  type PaneFocus,
   type PaneView,
   type SessionState,
+  setChatDockFits,
   setExperiments,
   setPaneContent,
   setTheme,
-  togglePaneFocus,
 } from '../session-model.js';
 import {createOpenTuiApp, type OpenTuiApp} from './app.js';
 import {resolveTheme, type ThemeName} from './theme.js';
@@ -1053,6 +1056,224 @@ describe('theming', () => {
     expect(controller.state.experimentLog?.selectedId).toBe('H-001');
   });
 
+  it('lands with the chat docked beside the hypothesis table', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+
+    const landing = await frameAfter(testRenderer);
+
+    // Both columns at once, and the table keeps the claim it came to show.
+    expect(landing).toContain('Experiment chat');
+    expect(landing).toContain('Experiments');
+    expect(landing).toContain('Implementation Details');
+    expect(landing).toContain('Batch the prefill step');
+
+    // Each column has its own input, under the surface it writes to, and the
+    // command box starts where the chat column ends rather than running under
+    // it.
+    // The cursor starts in the command box, and the chat says how to reach it.
+    expect(landing).toContain('Ctrl+W to type here');
+    const lines = landing.split('\n');
+    const paneTop = lines.find(line => line.includes('╭─ Experiment chat')) ?? '';
+    const inputTop = lines.find(line => line.includes('╭─ Chat ')) ?? '';
+    expect(inputTop).toContain('╭─ Ask or command');
+    expect(inputTop.indexOf('╭─ Ask or command')).toBe(paneTop.indexOf('╭─ Experiments'));
+  });
+
+  it('routes typing to whichever input Ctrl+W points at', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('w', {ctrl: true});
+    await frameAfter(testRenderer);
+    await testRenderer.mockInput.typeText('why is r41 slow?');
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.chatSubmissions.length === 1);
+
+    // The chat's own box took it, not the command input.
+    expect(controller.chatSubmissions).toEqual(['why is r41 slow?']);
+    expect(controller.submissions).toEqual([]);
+
+    testRenderer.mockInput.pressKey('w', {ctrl: true});
+    await frameAfter(testRenderer);
+    await testRenderer.mockInput.typeText('/perf');
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.submissions.length === 1);
+
+    expect(controller.submissions).toEqual(['/perf']);
+    expect(controller.chatSubmissions).toHaveLength(1);
+  });
+
+  it('raises the command list out of the command input, clear of the chat', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    await frameAfter(testRenderer);
+
+    await testRenderer.mockInput.typeText('/pe');
+    const frame = await testRenderer.waitForFrame(value => value.includes('[Tab]'));
+
+    const lines = frame.split('\n');
+    const suggestion = lines.find(line => line.includes('/perf')) ?? '';
+    const commandInput = lines.find(line => line.includes('╭─ Ask or command')) ?? '';
+    // The list belongs to the box it completes, so it starts where that box
+    // starts rather than running back across the chat column.
+    expect(suggestion.indexOf('│')).toBe(commandInput.indexOf('╭─ Ask or command'));
+  });
+
+  it('drops /chat from the command surface while the chat is already docked', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    await frameAfter(testRenderer);
+
+    await testRenderer.mockInput.typeText('/c');
+    const frame = await frameAfter(testRenderer);
+
+    // Nothing to open: the chat is the column beside the table.
+    expect(frame).not.toContain('/chat');
+  });
+
+  it('says when the docked chat is waiting on the agent', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+
+    controller.publish({...controller.state, chatPending: true});
+
+    expect(await frameAfter(testRenderer)).toContain('Awaiting the agent');
+  });
+
+  it('answers in the docked chat without covering the table', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+
+    await testRenderer.mockInput.typeText('why is r41 slow?');
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.submissions.length === 1);
+    controller.publish({
+      ...controller.state,
+      chatConversation: [
+        {id: 'q', kind: 'user', label: 'You', content: 'why is r41 slow?'},
+        {id: 'a', kind: 'assistant', label: 'Answer', content: 'Prefill dominates.'},
+      ],
+    });
+
+    const answered = await frameAfter(testRenderer);
+
+    expect(answered).toContain('Prefill dominates.');
+    expect(answered).toContain('H-07');
+    expect(answered).toContain('Implementation Details');
+  });
+
+  it('keeps the chat, the table, and the visualization on screen together', async () => {
+    const testRenderer = await createTestRenderer({width: 200, height: 20});
+    const controller = logController();
+    controller.paneContent = 'Performance · tok_s\n    1135 ┤   ●\nbest r7 1135 tok_s';
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    controller.publish({
+      ...controller.state,
+      chatConversation: [{id: 'a', kind: 'assistant', label: 'Answer', content: 'Prefill.'}],
+    });
+
+    await controller.openPane('perf');
+    const frame = await frameAfter(testRenderer);
+
+    // Three columns: chat, table, visualization. None replaced another.
+    expect(frame).toContain('Experiment chat');
+    expect(frame).toContain('H-07');
+    expect(frame).toContain('best r7 1135 tok_s');
+    expect(frame).toContain('Ctrl+W: switch pane');
+  });
+
+  it('gives the row to the table alone when the chat cannot fit beside it', async () => {
+    const testRenderer = await createTestRenderer({width: 84, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+
+    const landing = await frameAfter(testRenderer);
+
+    // Two columns would both be unreadable here, so the table keeps the row.
+    expect(landing).not.toContain('Experiment chat');
+    expect(landing).toContain('H-07');
+    expect(controller.state.chatDockFits).toBe(false);
+  });
+
+  it('keeps the table behind the chat modal instead of the round transcript', async () => {
+    const testRenderer = await createTestRenderer({width: 84, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    // What a question does where the chat cannot dock.
+    controller.publish({...controller.state, chatOpen: true});
+
+    const frame = await frameAfter(testRenderer);
+
+    expect(frame).toContain('Experiment chat');
+    expect(frame).toContain('H-07');
+    // The per-round chrome belongs to a hypothesis the operator never opened.
+    expect(frame).not.toContain('─ Rounds ─');
+    expect(frame).not.toContain('─ Agents ─');
+  });
+
+  it('moves the pane keys onto the docked chat and back with Ctrl+W', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('w', {ctrl: true});
+    const focused = await frameAfter(testRenderer);
+    expect(focused).toContain('▸ Experiment chat');
+    expect(focused).toContain('Ask about this run');
+    expect(controller.state.layout.focus).toBe('chat');
+
+    testRenderer.mockInput.pressKey('w', {ctrl: true});
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.focus).toBe('left');
+  });
+
+  it('leaves the table its own keys while the chat is docked', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 20});
+    const controller = logController();
+    controller.experiments = [
+      logEntry('H-07', 41, 41, {claim: 'batch the prefill step', resolved_outcome: 'proven'}),
+      logEntry('H-08', 42, 42, {claim: 'bigger KV cache block', resolved_outcome: 'disproven'}),
+    ];
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    await frameAfter(testRenderer);
+
+    // Arrows still belong to the table, docked chat or not.
+    testRenderer.mockInput.pressKey('ARROW_DOWN');
+    await frameAfter(testRenderer);
+    expect(controller.state.experimentLog?.selectedId).toBe('H-08');
+  });
+
   it('renders the transcript and the visualization side by side', async () => {
     const testRenderer = await createTestRenderer({width: 140, height: 20});
     const controller = splitController();
@@ -1163,7 +1384,7 @@ describe('theming', () => {
     expect(spanColors(testRenderer, 'Performance · focused')?.fg).toBe(theme.borderFocus);
     expect(spanColors(testRenderer, 'best r7 1135 tok_s')?.fg).toBe(theme.textPrimary);
 
-    controller.togglePaneFocus();
+    controller.cyclePaneFocus();
     await frameAfter(testRenderer);
 
     // Focus moved to the transcript, so the pane border drops back to the
@@ -1234,6 +1455,25 @@ async function frameAfter(testRenderer: TestRendererSetup): Promise<string> {
 async function frameAfterEscape(testRenderer: TestRendererSetup): Promise<string> {
   await new Promise(resolve => setTimeout(resolve, 40));
   return frameAfter(testRenderer);
+}
+
+/** A client on the landing view, with one hypothesis to show. */
+function logController(): FakeController {
+  const controller = new FakeController({
+    ...initialSessionState(),
+    status: 'running',
+    rounds: [{number: 41, status: 'completed'}],
+  });
+  controller.publish({...controller.state, experimentLog: initialSessionState().experimentLog});
+  controller.experiments = [
+    logEntry('H-07', 41, 41, {
+      claim: 'batch the prefill step',
+      resolved_outcome: 'proven',
+      judge_verdict: 'pass',
+      rounds: [{round: 41, passed: true, reviewed: true}],
+    }),
+  ];
+  return controller;
 }
 
 function splitController(): FakeController {
@@ -1451,8 +1691,14 @@ class FakeController implements SessionController {
   closePane(): void {
     this.publish(closePane(this.state));
   }
-  togglePaneFocus(): void {
-    this.publish(togglePaneFocus(this.state));
+  cyclePaneFocus(): void {
+    this.publish(cyclePaneFocus(this.state));
+  }
+  focusPane(focus: PaneFocus): void {
+    this.publish(focusPane(this.state, focus));
+  }
+  setChatDockFits(fits: boolean): void {
+    this.publish(setChatDockFits(this.state, fits));
   }
 
   /** Content the fake server returns for whichever visualization is opened. */

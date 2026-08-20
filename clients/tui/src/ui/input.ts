@@ -6,12 +6,19 @@ import {
   SyntaxStyle,
   TextRenderable,
 } from '@opentui/core';
-import {type SlashCommand, slashCommandRange, suggestSlashCommands} from '../commands.js';
+import {
+  type CommandContext,
+  type SlashCommand,
+  slashCommandRange,
+  suggestSlashCommands,
+} from '../commands.js';
 import type {Theme} from './theme.js';
 
 export interface InputPanel {
   box: BoxRenderable;
   suggestions: BoxRenderable;
+  /** Narrows the completions to the commands the current view offers. */
+  setCommandContext(context: CommandContext): void;
   completeSuggestion(): boolean;
   /** True when nothing is typed, so Enter belongs to whatever pane is behind. */
   isEmpty(): boolean;
@@ -22,6 +29,75 @@ export interface InputPanel {
 
 function commandSyntaxStyle(theme: Theme): SyntaxStyle {
   return SyntaxStyle.fromStyles({'slash-command': {fg: theme.accent, bold: true}});
+}
+
+/**
+ * The docked chat's own input. It carries no command suggestions: the command
+ * list belongs to the client's input, and this box is for questions about the
+ * experiment on screen. A slash command typed here still runs, through the same
+ * path as anywhere else.
+ */
+export interface ChatInputPanel {
+  box: BoxRenderable;
+  isEmpty(): boolean;
+  focus(): void;
+  setFocused(focused: boolean): void;
+  applyTheme(theme: Theme): void;
+  destroy(): void;
+}
+
+export function createChatInputPanel(
+  renderer: CliRenderer,
+  onSubmit: (value: string) => void,
+  theme: Theme,
+): ChatInputPanel {
+  const box = new BoxRenderable(renderer, {
+    // The modal chat owns 'chat-input-box'; this is the docked one.
+    id: 'chat-dock-input-box',
+    height: 3,
+    width: '100%',
+    border: true,
+    borderStyle: 'rounded',
+    borderColor: theme.border,
+    title: ' Chat ',
+    paddingLeft: 1,
+    paddingRight: 1,
+  });
+  const input = new InputRenderable(renderer, {
+    id: 'chat-dock-input',
+    width: '100%',
+    placeholder: 'Type a question',
+    textColor: theme.textStrong,
+    focusedTextColor: theme.textStrong,
+  });
+  const submit = (value: string): void => {
+    input.value = '';
+    onSubmit(value);
+  };
+  input.on(InputRenderableEvents.ENTER, submit);
+  box.add(input);
+  let focused = false;
+  let current = theme;
+  return {
+    box,
+    isEmpty: () => input.value.trim() === '',
+    focus: () => input.focus(),
+    // Which box the keystrokes land in is the one thing two inputs must never
+    // leave ambiguous, so the focused one carries the focus border.
+    setFocused(next: boolean): void {
+      focused = next;
+      box.borderColor = next ? current.borderFocus : current.border;
+    },
+    applyTheme(next: Theme): void {
+      current = next;
+      box.borderColor = focused ? next.borderFocus : next.border;
+      input.textColor = next.textStrong;
+      input.focusedTextColor = next.textStrong;
+    },
+    destroy(): void {
+      input.off(InputRenderableEvents.ENTER, submit);
+    },
+  };
 }
 
 export function createInputPanel(
@@ -77,6 +153,7 @@ export function createInputPanel(
   });
   suggestions.add(suggestionList);
   let matches: readonly SlashCommand[] = [];
+  let context: CommandContext = {};
 
   const updateDecorations = (value: string): void => {
     input.clearAllHighlights();
@@ -85,7 +162,7 @@ export function createInputPanel(
       input.addHighlightByCharRange({...range, styleId: commandStyleId});
     }
 
-    matches = suggestSlashCommands(value);
+    matches = suggestSlashCommands(value, context);
     const visible = matches.length > 0;
     suggestions.visible = visible;
     suggestions.height = matches.length + 2;
@@ -109,6 +186,11 @@ export function createInputPanel(
   return {
     box,
     suggestions,
+    setCommandContext(next: CommandContext): void {
+      if (next.chatDocked === context.chatDocked) return;
+      context = next;
+      updateDecorations(input.value);
+    },
     completeSuggestion(): boolean {
       const suggestion = matches[0];
       if (suggestion === undefined || suggestion.name === input.value) return false;

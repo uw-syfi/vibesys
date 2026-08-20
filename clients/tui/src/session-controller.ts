@@ -1,24 +1,30 @@
 import type {EventSubscription} from './client.js';
-import {HELP_TEXT, parseInput} from './commands.js';
+import {helpText, parseInput} from './commands.js';
 import {renderPerformanceCurve} from './performance-chart.js';
 import type {ProtocolResponse, RequestInput, RunEvent, ServerMessage} from './protocol.js';
 import {
   applyEvent,
   applySnapshot,
   type ConversationEntry,
+  chatDocked,
+  chatPaneVisible,
   closePane,
   closeThemePicker,
+  cyclePaneFocus,
   enterExperimentDrilldown,
   enterExperimentRound,
   failExperiments,
   failPane,
+  focusPane,
   initialSessionState,
   leaveExperimentDrilldown,
   moveExperimentSelection,
   moveThemeSelection,
+  openChat,
   openExperimentLog,
   openPane,
   openThemePicker,
+  type PaneFocus,
   type PaneView,
   type SessionState,
   selectNextAgent,
@@ -26,12 +32,12 @@ import {
   selectPreviousAgent,
   selectPreviousRound,
   selectRound,
+  setChatDockFits,
   setExperiments,
   setPaneContent,
   setTheme,
   showDetail,
   showLive,
-  togglePaneFocus,
   toggleTodos,
 } from './session-model.js';
 import {DEFAULT_THEME_NAME, type ThemeName} from './ui/theme.js';
@@ -56,7 +62,9 @@ export interface SessionController {
   openRound(roundNumber?: number): void;
   openPane(view: PaneView): Promise<void>;
   closePane(): void;
-  togglePaneFocus(): void;
+  cyclePaneFocus(): void;
+  focusPane(focus: PaneFocus): void;
+  setChatDockFits(fits: boolean): void;
   moveExperimentSelection(delta: number): void;
   enterExperimentDrilldown(): void;
   leaveExperimentDrilldown(): void;
@@ -219,8 +227,21 @@ export class SocketSessionController implements SessionController {
     this.#setState(closePane(this.#state));
   }
 
-  togglePaneFocus(): void {
-    this.#setState(togglePaneFocus(this.#state));
+  cyclePaneFocus(): void {
+    this.#setState(cyclePaneFocus(this.#state));
+  }
+
+  focusPane(focus: PaneFocus): void {
+    this.#setState(focusPane(this.#state, focus));
+  }
+
+  /**
+   * Reported by the renderer, which is the only part that knows how many
+   * columns there are. It decides whether a question opens the modal or lands
+   * in the pane beside the log.
+   */
+  setChatDockFits(fits: boolean): void {
+    this.#setState(setChatDockFits(this.#state, fits));
   }
 
   /**
@@ -311,7 +332,9 @@ export class SocketSessionController implements SessionController {
     this.#chatQueue.push({id, text});
     this.#setState({
       ...this.#state,
-      chatOpen: true,
+      // Docked, the answer lands in the pane the operator is already looking
+      // at, so nothing has to open over the log to show it.
+      ...(chatDocked(this.#state) ? {} : {chatOpen: true}),
       chatConversation: appendChatEntry(this.#state.chatConversation, {
         id,
         kind: 'user',
@@ -383,10 +406,12 @@ export class SocketSessionController implements SessionController {
     const parsed = parseInput(value.trim());
     if (parsed.error) return this.#setState(showDetail(this.#state, parsed.error, 'error'));
     if (parsed.localView === 'help') {
-      return this.#setState(showDetail(this.#state, HELP_TEXT, 'help'));
+      return this.#setState(
+        showDetail(this.#state, helpText({chatDocked: chatPaneVisible(this.#state)}), 'help'),
+      );
     }
     if (parsed.localView === 'chat') {
-      this.#setState({...this.#state, overlay: null, chatOpen: true});
+      this.#setState(openChat(this.#state));
       if (parsed.chatMessage) await this.sendChat(parsed.chatMessage);
       return;
     }

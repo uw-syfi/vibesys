@@ -24,7 +24,7 @@ available slash commands are:
 | Command | Behavior |
 | --- | --- |
 | `/help` | Show commands and planned controls. |
-| `/chat` | Open a read-only chat about the run; `/chat <question>` asks immediately. |
+| `/chat` | Put the pane keys on the docked chat, or open it as a modal where it cannot dock; `/chat <question>` asks immediately. |
 | | Slash commands work inside the chat too, and do the same thing as in the main input. |
 | `/pause` | Pause after the current agent call finishes. |
 | `/resume` | Resume a paused run. |
@@ -80,18 +80,57 @@ reshuffle. Records written before hypothesis tracking render as
 `(Unidentified)` rather than being dropped. Columns drop widest first as the
 terminal narrows; hypothesis, rounds, and outcome always survive.
 
+The chat is docked beside the table as a permanent column of this view, so a
+question about the run never covers what the run has done. It has its own input
+at the foot of its column, under the instruction `Ask about this run`,
+and the client's command input sits beside it, starting at the boundary between
+the two columns so each box is under the surface it writes to. The command
+list rises out of the command input rather than across the chat.
+
+The cursor starts in the command input, and `Ctrl+W` moves both it and the pane
+keys to the chat and back; the chat's instruction line says so (`Ctrl+W to type
+here`) until it holds them, and the focused input carries the focus border, so
+where a keystroke lands is never a guess. A question typed into either box
+reaches the same agent and is answered in the same column. Page Up and Page Down scroll the focused pane, and
+Escape hands the keys back to the table. Arrows, Enter, and the rest of the
+table's keys are unaffected by the dock. A slash command typed into the chat
+input runs through the same path as anywhere else, and ordinary text typed into
+the command input is still a question for the agent: the two boxes are a
+division of attention, not of capability.
+
+`/chat` leaves the command surface on this view, since the chat is already
+beside the table: it is absent from `/help` and from the completions, though it
+is still accepted and still focuses the pane. Inside a hypothesis, where the
+chat is a dialog again, the command comes back and opens it over the
+trajectory. It is one conversation throughout, so a question asked from the
+pop-up is in the column when the operator steps back out.
+
+The chat asks for the columns left over once the table has enough for its
+claim, so a wide terminal loses no table column to it; where there is no such
+surplus it still takes its readable minimum and the table drops columns as it
+does on any narrow terminal. Below about 92 columns two columns would both be
+unreadable, so the table keeps the row alone and the chat opens over it as a
+modal. Opening a visualization narrows the chat before it narrows the table,
+and where all three will not fit the chat is the one that steps aside.
+
+Whichever way the chat is on screen, it never replaces the view it was asked
+from: the modal floats over the table rather than swapping in the per-round
+transcript behind it.
+
 ### Split panes
 
 Visualization commands render beside the current view rather than over it.
 `/perf` puts its output in a right pane and leaves the transcript, the chat,
-or the experiment log in the left one, both live at the same time. A second
-visualization command replaces the pane's contents rather than stacking
-another surface on top.
+or the experiment log in the left one, both live at the same time. On the
+experiment log that makes three columns, chat, table, and visualization, each
+live. A second visualization command replaces the pane's contents rather than
+stacking another surface on top.
 
-`Ctrl+W` moves focus between the panes; the focused one carries the theme's
-focus border and says so in its title. Page Up and Page Down scroll whichever
-pane has focus, and Escape on the right pane closes it and restores the
-full-width view. Chat and transcript state survive the pane closing.
+`Ctrl+W` moves focus one column to the right and wraps, through whichever
+columns are actually on screen; the focused one carries the theme's focus
+border and says so in its title. Page Up and Page Down scroll whichever pane
+has focus, and Escape on the right pane closes it and restores the full-width
+view. Chat and transcript state survive the pane closing.
 
 Pane widths are computed from the terminal, so a wide terminal gives the
 visualization real room while the left pane keeps a readable floor. Below 100
@@ -115,6 +154,12 @@ Text typed in the chat that starts with `/` is parsed as a slash command
 through the same path as the main input, so `/perf` there does exactly what
 `/perf` does anywhere else. Anything else is a question for the agent, and a
 question containing a slash mid-sentence is still a question.
+
+Where the chat is docked it answers in its column, under its own input; where
+it is not, inside a hypothesis or in a terminal too narrow to dock, it opens
+over the view as before, carrying the same input at the foot of the modal. It
+is one conversation either way: the transcript survives docking, undocking, and
+the pane closing.
 
 Inside a hypothesis the footer shows keyboard navigation. `[` and `]` select rounds, Tab and
 Shift+Tab select agents, Page Up/Page Down scroll the transcript, Ctrl+T expands

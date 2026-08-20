@@ -2,20 +2,27 @@ import {describe, expect, it} from 'bun:test';
 import type {RunEvent} from './protocol.js';
 import {
   applyEvent,
+  chatDocked,
+  chatPaneVisible,
   closePane,
   closeThemePicker,
+  cyclePaneFocus,
+  enterExperimentDrilldown,
   failPane,
+  focusPane,
   initialSessionState,
   moveThemeSelection,
+  openChat,
   openPane,
   openThemePicker,
   selectNextAgent,
   selectNextRound,
   selectRound,
+  setChatDockFits,
+  setExperiments,
   setPaneContent,
   setTheme,
   statusText,
-  togglePaneFocus,
   toggleTodos,
   visibleConversation,
   visiblePhases,
@@ -604,6 +611,56 @@ describe('session event model', () => {
   });
 });
 
+describe('docked experiment chat', () => {
+  const entry = {
+    hypothesis_id: 'H-01',
+    identified: true,
+    first_round: 1,
+    last_round: 1,
+    rounds: [{round: 1, passed: true, reviewed: true}],
+    kept: false,
+    active: false,
+  };
+
+  it('docks beside the log and nowhere else', () => {
+    const landing = setExperiments(initialSessionState(), [entry]);
+    expect(chatDocked(landing)).toBe(true);
+    expect(chatPaneVisible(landing)).toBe(true);
+
+    // Inside a hypothesis the row belongs to the transcript.
+    const scoped = enterExperimentDrilldown(landing);
+    expect(scoped.hypothesisScope).not.toBeNull();
+    expect(chatDocked(scoped)).toBe(false);
+  });
+
+  it('stops docking in a terminal too narrow for two columns', () => {
+    const narrow = setChatDockFits(initialSessionState(), false);
+
+    expect(chatDocked(narrow)).toBe(false);
+    expect(chatPaneVisible(narrow)).toBe(false);
+  });
+
+  it('gives the pane the keys instead of opening a modal over the table', () => {
+    const opened = openChat(initialSessionState());
+
+    expect(opened.chatOpen).toBe(false);
+    expect(opened.layout.focus).toBe('chat');
+  });
+
+  it('still opens the modal where the chat cannot dock', () => {
+    const narrow = setChatDockFits(initialSessionState(), false);
+
+    expect(openChat(narrow).chatOpen).toBe(true);
+  });
+
+  it('yields to the modal while one is open', () => {
+    const modal = {...initialSessionState(), chatOpen: true};
+
+    expect(chatDocked(modal)).toBe(true);
+    expect(chatPaneVisible(modal)).toBe(false);
+  });
+});
+
 describe('right pane layout', () => {
   it('starts single-pane with focus on the transcript', () => {
     const state = initialSessionState();
@@ -641,21 +698,48 @@ describe('right pane layout', () => {
     expect(failed.layout.right?.pending).toBe(false);
   });
 
-  it('moves focus between panes and returns it on close', () => {
+  it('cycles focus left to right through the columns on screen', () => {
+    // The landing view carries the docked chat, so opening a visualization
+    // makes three columns: chat, log, pane.
     const open = openPane(initialSessionState(), 'perf');
-    expect(togglePaneFocus(open).layout.focus).toBe('left');
-    expect(togglePaneFocus(togglePaneFocus(open)).layout.focus).toBe('right');
+    expect(open.layout.focus).toBe('right');
+    const first = cyclePaneFocus(open);
+    expect(first.layout.focus).toBe('chat');
+    expect(cyclePaneFocus(first).layout.focus).toBe('left');
+    expect(cyclePaneFocus(cyclePaneFocus(first)).layout.focus).toBe('right');
 
     const closed = closePane(open);
     expect(closed.layout.right).toBeNull();
     expect(closed.layout.focus).toBe('left');
   });
 
-  it('does nothing to focus while single-pane', () => {
-    const single = initialSessionState();
+  it('cycles between the chat and the log while no visualization is open', () => {
+    const docked = initialSessionState();
 
-    expect(togglePaneFocus(single)).toBe(single);
+    expect(cyclePaneFocus(docked).layout.focus).toBe('chat');
+    expect(cyclePaneFocus(cyclePaneFocus(docked)).layout.focus).toBe('left');
+  });
+
+  it('does nothing to focus when only one column is on screen', () => {
+    // Too narrow for the dock and no visualization: the log has the row.
+    const single = setChatDockFits(initialSessionState(), false);
+
+    expect(cyclePaneFocus(single)).toBe(single);
     expect(closePane(single)).toBe(single);
+  });
+
+  it('refuses focus for a column that is not on screen', () => {
+    const narrow = setChatDockFits(initialSessionState(), false);
+
+    expect(focusPane(narrow, 'chat')).toBe(narrow);
+    expect(focusPane(initialSessionState(), 'right').layout.focus).toBe('left');
+    expect(focusPane(initialSessionState(), 'chat').layout.focus).toBe('chat');
+  });
+
+  it('hands the keys back to the log when the dock stops fitting', () => {
+    const focused = focusPane(initialSessionState(), 'chat');
+
+    expect(setChatDockFits(focused, false).layout.focus).toBe('left');
   });
 
   it('leaves the chat transcript untouched when the pane closes', () => {

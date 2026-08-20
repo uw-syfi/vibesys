@@ -1,5 +1,11 @@
 import {describe, expect, it} from 'bun:test';
-import {parseInput, slashCommandRange, suggestSlashCommands} from './commands.js';
+import {
+  availableCommands,
+  helpText,
+  parseInput,
+  slashCommandRange,
+  suggestSlashCommands,
+} from './commands.js';
 
 describe('parseInput', () => {
   it('accepts the intentionally small slash-command surface', () => {
@@ -82,6 +88,28 @@ describe('parseInput', () => {
     expect(parsed.error).toContain('Unknown theme: monokai');
     expect(parsed.error).toContain('catppuccin-mocha');
     expect(parsed.localView).toBeUndefined();
+  });
+});
+
+describe('command surface by view', () => {
+  it('drops /chat where the chat is already a pane of the view', () => {
+    const docked = availableCommands({chatDocked: true}).map(command => command.name);
+
+    expect(docked).not.toContain('/chat');
+    expect(docked).toContain('/perf');
+    expect(helpText({chatDocked: true})).not.toContain('/chat');
+    expect(suggestSlashCommands('/c', {chatDocked: true})).toEqual([]);
+  });
+
+  it('offers /chat everywhere the chat is not already on screen', () => {
+    expect(availableCommands().map(command => command.name)).toContain('/chat');
+    expect(helpText()).toContain('/chat');
+    expect(suggestSlashCommands('/c').map(command => command.name)).toEqual(['/chat']);
+  });
+
+  it('still accepts /chat when it is not offered, since the chat is the point', () => {
+    // Hidden from the list, not removed from the client.
+    expect(parseInput('/chat')).toEqual({localView: 'chat'});
   });
 });
 

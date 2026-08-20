@@ -38,18 +38,40 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   {name: '/theme', description: 'List themes, or switch with /theme <name>'},
 ];
 
-export const HELP_TEXT = [
-  'Available',
-  ...SLASH_COMMANDS.map(command => `  ${command.name.padEnd(18)} ${command.description}`),
-  '',
-  'Planned',
-  '  /round <number>    Inspect a completed round',
-  '  /invocation <id>   Inspect an agent invocation',
-].join('\n');
+/**
+ * Where the chat is a pane of the current view there is nothing for `/chat` to
+ * open, so it leaves the command surface rather than sitting in it as a command
+ * that does nothing new. It is still accepted, and still opens the chat
+ * anywhere the chat is not already on screen.
+ */
+export interface CommandContext {
+  chatDocked?: boolean;
+}
 
-export function suggestSlashCommands(text: string): readonly SlashCommand[] {
+export function availableCommands(context: CommandContext = {}): readonly SlashCommand[] {
+  if (!context.chatDocked) return SLASH_COMMANDS;
+  return SLASH_COMMANDS.filter(command => command.name !== '/chat');
+}
+
+export function helpText(context: CommandContext = {}): string {
+  return [
+    'Available',
+    ...availableCommands(context).map(
+      command => `  ${command.name.padEnd(18)} ${command.description}`,
+    ),
+    '',
+    'Planned',
+    '  /round <number>    Inspect a completed round',
+    '  /invocation <id>   Inspect an agent invocation',
+  ].join('\n');
+}
+
+export function suggestSlashCommands(
+  text: string,
+  context: CommandContext = {},
+): readonly SlashCommand[] {
   if (!text.startsWith('/') || /\s/.test(text)) return [];
-  return SLASH_COMMANDS.filter(command => command.name.startsWith(text));
+  return availableCommands(context).filter(command => command.name.startsWith(text));
 }
 
 export function slashCommandRange(text: string): {start: number; end: number} | null {

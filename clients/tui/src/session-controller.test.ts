@@ -2,6 +2,7 @@ import {describe, expect, it} from 'bun:test';
 import type {EventSubscription} from './client.js';
 import type {ProtocolResponse, RequestInput, RunEvent, ServerMessage} from './protocol.js';
 import {SocketSessionController, type SupervisionTransport} from './session-controller.js';
+import {chatPaneVisible, experimentLogVisible} from './session-model.js';
 
 describe('session controller', () => {
   it('shows local help without sending a backend command', async () => {
@@ -16,14 +17,17 @@ describe('session controller', () => {
     expect(transport.requests).toEqual([]);
   });
 
-  it('sends ordinary text to the multi-turn chat panel', async () => {
+  it('sends ordinary text to the chat docked beside the log', async () => {
     const transport = new FakeTransport();
     const controller = new SocketSessionController(transport);
 
     await controller.submit('what is happening?');
 
     expect(transport.requests).toEqual([{type: 'query.chat', text: 'what is happening?'}]);
-    expect(controller.state.chatOpen).toBe(true);
+    // The pane is part of the landing view, so nothing opens over the table.
+    expect(controller.state.chatOpen).toBe(false);
+    expect(chatPaneVisible(controller.state)).toBe(true);
+    expect(experimentLogVisible(controller.state)).toBe(true);
     expect(controller.state.chatConversation).toMatchObject([
       {kind: 'user', label: 'You', content: 'what is happening?'},
       {kind: 'assistant', label: 'Answer', content: 'The implementer is running.'},
@@ -119,7 +123,10 @@ describe('session controller', () => {
 
     await controller.submit('/chat');
 
-    expect(controller.state.chatOpen).toBe(true);
+    // Already on screen: /chat puts the pane keys on it instead of opening a
+    // modal over the log.
+    expect(controller.state.chatOpen).toBe(false);
+    expect(controller.state.layout.focus).toBe('chat');
     expect(transport.requests).toEqual([]);
 
     await controller.sendChat('what changed?');
@@ -138,6 +145,99 @@ describe('session controller', () => {
     expect(controller.state.chatConversation).toHaveLength(4);
   });
 
+  it('opens the chat as a modal where it cannot dock', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+    // A terminal too narrow for two columns, reported by the renderer.
+    controller.setChatDockFits(false);
+
+    await controller.submit('what is happening?');
+
+    expect(controller.state.chatOpen).toBe(true);
+    expect(chatPaneVisible(controller.state)).toBe(false);
+    expect(controller.state.chatConversation.at(-1)?.content).toBe('The implementer is running.');
+  });
+
+  it('keeps the log as the view when the chat opens over it', async () => {
+    const transport = new FakeTransport();
+    transport.experiments = [entry('H-01', 1, 1, {resolved_outcome: 'proven'})];
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    // Too narrow to dock, so the question opens the modal.
+    controller.setChatDockFits(false);
+
+    await controller.sendChat('what is happening?');
+
+    expect(controller.state.chatOpen).toBe(true);
+    // The modal floats over the table. It must not put the operator into the
+    // per-round transcript they never asked for.
+    expect(experimentLogVisible(controller.state)).toBe(true);
+    expect(controller.state.hypothesisScope).toBeNull();
+    expect(controller.state.experimentLog?.entries).toHaveLength(1);
+  });
+
+  it('offers /chat in help only where the chat is not already on screen', async () => {
+    const transport = new FakeTransport();
+    transport.experiments = [
+      entry('H-01', 1, 1, {rounds: [{round: 1, passed: true, reviewed: true}]}),
+    ];
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    await controller.submit('/help');
+    expect(controller.state.overlay?.content).not.toContain('/chat');
+
+    // Inside a hypothesis the chat is a dialog again, so the command returns.
+    controller.enterExperimentDrilldown();
+    await controller.submit('/help');
+    expect(controller.state.overlay?.content).toContain('/chat');
+  });
+
+  it('carries the modal conversation back into the docked pane', async () => {
+    const transport = new FakeTransport();
+    transport.experiments = [
+      entry('H-01', 1, 1, {rounds: [{round: 1, passed: true, reviewed: true}]}),
+    ];
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    controller.enterExperimentDrilldown();
+
+    // Asked from the trajectory view, where the chat is a pop-up.
+    await controller.submit('/chat why did r1 fail?');
+    expect(controller.state.chatOpen).toBe(true);
+
+    controller.live();
+
+    // Back on the landing view the same conversation is in the column, both
+    // the question and what came back.
+    expect(chatPaneVisible(controller.state)).toBe(true);
+    expect(controller.state.chatConversation.map(entry => entry.content)).toEqual([
+      'why did r1 fail?',
+      'The implementer is running.',
+    ]);
+  });
+
+  it('opens the chat as a modal inside a hypothesis', async () => {
+    const transport = new FakeTransport();
+    transport.experiments = [
+      entry('H-01', 1, 1, {rounds: [{round: 1, passed: true, reviewed: true}]}),
+    ];
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    controller.enterExperimentDrilldown();
+
+    await controller.sendChat('why did r1 fail?');
+
+    // The row belongs to the transcript here, so the chat is the dialog it was.
+    expect(controller.state.chatOpen).toBe(true);
+
+    // Back on the landing view it docks again, transcript intact.
+    controller.live();
+    expect(controller.state.chatOpen).toBe(false);
+    expect(chatPaneVisible(controller.state)).toBe(true);
+    expect(controller.state.chatConversation.at(0)?.content).toBe('why did r1 fail?');
+  });
+
   it('opens chat and sends an initial message from the command line', async () => {
     const transport = new FakeTransport([], [], {
       question: 'why?',
@@ -148,7 +248,8 @@ describe('session controller', () => {
 
     await controller.submit('/chat why?');
 
-    expect(controller.state.chatOpen).toBe(true);
+    expect(controller.state.chatOpen).toBe(false);
+    expect(controller.state.layout.focus).toBe('chat');
     expect(transport.requests).toEqual([{type: 'query.chat', text: 'why?'}]);
   });
 
@@ -591,11 +692,29 @@ describe('session controller', () => {
     controller.closePane();
 
     expect(controller.state.layout.right).toBeNull();
-    expect(controller.state.chatOpen).toBe(true);
+    expect(chatPaneVisible(controller.state)).toBe(true);
     expect(controller.state.chatConversation.map(entry => entry.content)).toEqual([
       'why?',
       'Round 2 regressed.',
     ]);
+  });
+
+  it('keeps the docked chat beside the log while a visualization is open', async () => {
+    const transport = new FakeTransport(
+      [],
+      [{round: 1, perf_metric: 1200, perf_unit: 'ops', passed: true, profile_skipped: false}],
+    );
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    await controller.submit('/perf');
+    await controller.sendChat('what changed in r1?');
+
+    // Three columns: chat, log, pane. None of them replaced another.
+    expect(controller.state.layout.right?.view).toBe('perf');
+    expect(chatPaneVisible(controller.state)).toBe(true);
+    expect(experimentLogVisible(controller.state)).toBe(true);
+    expect(controller.state.chatConversation.at(0)?.content).toBe('what changed in r1?');
   });
 
   it('sends chat messages while the pane stays put', async () => {
