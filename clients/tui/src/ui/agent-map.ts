@@ -2,6 +2,7 @@ import {BoxRenderable, type CliRenderer, TextRenderable} from '@opentui/core';
 import {hasActiveAgentTiming} from '../round-timing.js';
 import type {AgentPhase, RoundSummary} from '../run-map.js';
 import {roundAgentElapsedMs} from '../run-map.js';
+import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
 import {scopedRounds, visiblePhases, visibleRoundNumber} from '../session-model.js';
 import {elapsedLabel} from './previews.js';
@@ -9,8 +10,8 @@ import type {Theme} from './theme.js';
 
 const STATUS_MARKER: Record<AgentPhase['status'], string> = {
   pending: '○',
-  active: '●',
-  completed: '✓',
+  active: '◉',
+  completed: '✔',
   failed: '×',
 };
 
@@ -30,6 +31,7 @@ export class AgentMapView {
 
   constructor(
     private readonly renderer: CliRenderer,
+    private readonly controller: SessionController,
     theme: Theme,
   ) {
     this.#theme = theme;
@@ -80,8 +82,6 @@ export class AgentMapView {
       width: '100%',
     });
     this.output.add(heading);
-    // Elapsed time only advances while an agent is running, so the heading
-    // ticks for exactly as long as one is.
     if (round !== null && hasActiveAgentTiming(round)) this.#runningRound = {round, text: heading};
     for (const [index, phase] of phases.entries()) {
       this.output.add(this.#renderPhase(phase, state.selectedAgentKind === phase.kind));
@@ -138,6 +138,7 @@ export class AgentMapView {
       borderStyle: 'rounded',
       borderColor: selected ? this.#theme.borderFocus : this.#theme.border,
       ...(selected ? {backgroundColor: this.#theme.selectedSurface} : {}),
+      onMouseUp: () => this.controller.selectAgent(phase.kind),
     });
     const color = statusColor(this.#theme, phase.status);
     row.add(
@@ -167,11 +168,6 @@ export class AgentMapView {
   }
 }
 
-/**
- * The agent-active elapsed time of the round on screen: wall clock minus the
- * gaps where no agent was running, which is what the rounds strip reports for
- * the running round.
- */
 function headingLabel(roundNumber: number | null, round: RoundSummary | null): string {
   if (roundNumber === null) return 'Run flow';
   const elapsedMs = round === null ? 0 : roundAgentElapsedMs(round);

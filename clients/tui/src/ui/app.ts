@@ -71,7 +71,7 @@ export function createOpenTuiApp(renderer: CliRenderer, controller: SessionContr
   let markdownStyle = createMarkdownStyle(theme);
   const roundStrip = new RoundStripView(renderer, controller, theme);
   const todoStrip = new TodoStripView(renderer, controller, theme);
-  const agentMap = new AgentMapView(renderer, theme);
+  const agentMap = new AgentMapView(renderer, controller, theme);
   const overlay = new OverlayView(renderer, theme);
   const experimentLog = new ExperimentLogView(renderer, controller, theme);
   const rightPane = new RightPaneView(renderer, theme);
