@@ -40,8 +40,13 @@ export function createInputPanel(
     paddingLeft: 1,
     paddingRight: 1,
   });
-  let syntaxStyle = commandSyntaxStyle(theme);
-  let commandStyleId = syntaxStyle.getStyleId('slash-command');
+  const syntaxStyle = SyntaxStyle.fromStyles({
+    'slash-command': {fg: '#22d3ee', bold: true},
+    'plain-text': {fg: '#f8fafc'},
+  });
+  const commandStyleId = syntaxStyle.getStyleId('slash-command');
+  const plainTextStyleId = syntaxStyle.getStyleId('plain-text');
+  
   const input = new InputRenderable(renderer, {
     id: 'input',
     width: '100%',
@@ -83,6 +88,8 @@ export function createInputPanel(
     const range = slashCommandRange(value);
     if (range !== null && commandStyleId !== null) {
       input.addHighlightByCharRange({...range, styleId: commandStyleId});
+    } else if (value.length > 0 && plainTextStyleId !== null) {
+      input.addHighlightByCharRange({start: 0, end: value.length, styleId: plainTextStyleId});
     }
 
     matches = suggestSlashCommands(value);
@@ -99,13 +106,16 @@ export function createInputPanel(
       )
       .join('\n');
   };
+
   const submit = (value: string): void => {
     input.value = '';
     onSubmit(value);
   };
+
   input.on(InputRenderableEvents.INPUT, updateDecorations);
   input.on(InputRenderableEvents.ENTER, submit);
   box.add(input);
+
   return {
     box,
     suggestions,
