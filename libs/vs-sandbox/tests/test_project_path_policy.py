@@ -248,6 +248,9 @@ class TestBubblewrapProjectPaths:
             "which",
             lambda *_args, **_kwargs: "/usr/bin/bwrap",
         )
+        # The builder probes that bwrap can actually unshare a user namespace;
+        # this test supplies a path rather than a working binary.
+        monkeypatch.setattr(host_sandbox, "_bwrap_confines", lambda _path: True)
 
         sandbox = host_sandbox.build(
             workspace,

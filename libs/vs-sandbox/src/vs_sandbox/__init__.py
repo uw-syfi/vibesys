@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     )
     from vs_sandbox.host_sandbox import (
         HostSandbox,
+        LandlockSandbox,
+        LinuxBackend,
         SandboxUnavailableError,
         SeatbeltSandbox,
         WorkspaceSandbox,
@@ -39,6 +41,8 @@ __all__ = [
     "HostResourceContext",
     "HostResourceDeclarer",
     "HostSandbox",
+    "LandlockSandbox",
+    "LinuxBackend",
     "ModalSandbox",
     "ProjectPathPolicy",
     "ProjectPathPolicyError",
@@ -68,6 +72,8 @@ def __getattr__(name: str) -> Any:  # noqa: ANN401  # tracked: #288
         return getattr(host_resources, name)
     if name in {
         "HostSandbox",
+        "LandlockSandbox",
+        "LinuxBackend",
         "SandboxUnavailableError",
         "SeatbeltSandbox",
         "WorkspaceSandbox",

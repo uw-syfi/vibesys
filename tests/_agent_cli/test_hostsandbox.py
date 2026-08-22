@@ -65,6 +65,17 @@ def _bwrap_works() -> bool:
     return proc.returncode == 0
 
 
+def _stub_working_bwrap(monkeypatch, path: str = "/usr/bin/bwrap") -> None:  # noqa: ANN001  # tracked: #288
+    """Present a usable ``bwrap`` to the builder without needing one installed.
+
+    ``build()`` both locates ``bwrap`` and probes that it can actually unshare a
+    user namespace. Tests below exercise the builder's path policy, not the
+    probe, so they stub each half.
+    """
+    monkeypatch.setattr(hostsandbox.shutil, "which", lambda *a, **k: path)  # noqa: ARG005  # tracked: #288
+    monkeypatch.setattr(hostsandbox, "_bwrap_confines", lambda _path: True)
+
+
 # CI sets ``VIBESYS_REQUIRE_SANDBOX_TESTS=1`` so the real-confinement tests must
 # run instead of silently skipping. If the backend is then unavailable the tests
 # fail (build() returns None → assertions trip), which is the whole point: a
@@ -113,7 +124,7 @@ class TestBuild:
 
     def test_allow_ancestor_of_workspace_is_rejected(self, tmp_path, monkeypatch):  # noqa: ANN001, ANN202  # tracked: #288
         monkeypatch.setattr(hostsandbox.sys, "platform", "linux")
-        monkeypatch.setattr(hostsandbox.shutil, "which", lambda *a, **k: "/usr/bin/bwrap")  # noqa: ARG005  # tracked: #288
+        _stub_working_bwrap(monkeypatch)
         workspace = tmp_path / "exp_env" / "run" / "workspace"
         workspace.mkdir(parents=True)
         logs: list[str] = []
@@ -130,7 +141,7 @@ class TestBuild:
 
     def test_allow_extra_path_is_bound(self, tmp_path, monkeypatch):  # noqa: ANN001, ANN202  # tracked: #288
         monkeypatch.setattr(hostsandbox.sys, "platform", "linux")
-        monkeypatch.setattr(hostsandbox.shutil, "which", lambda *a, **k: "/usr/bin/bwrap")  # noqa: ARG005  # tracked: #288
+        _stub_working_bwrap(monkeypatch)
         workspace = tmp_path / "ws"
         workspace.mkdir()
         weights = tmp_path.parent / f"{tmp_path.name}-weights"
@@ -149,7 +160,7 @@ class TestBuild:
 
     def test_programmatic_resources_are_imported_by_access(self, tmp_path, monkeypatch):  # noqa: ANN001, ANN202  # tracked: #288
         monkeypatch.setattr(hostsandbox.sys, "platform", "linux")
-        monkeypatch.setattr(hostsandbox.shutil, "which", lambda *a, **k: "/usr/bin/bwrap")  # noqa: ARG005  # tracked: #288
+        _stub_working_bwrap(monkeypatch)
         workspace = tmp_path / "workspace"
         readonly = tmp_path / "compiler"
         writable = tmp_path / "agent-state"
@@ -175,7 +186,7 @@ class TestBuild:
 
     def test_codex_auth_file_survives_nested_codex_worktree_filter(self, tmp_path, monkeypatch):  # noqa: ANN001, ANN202  # tracked: #288
         monkeypatch.setattr(hostsandbox.sys, "platform", "linux")
-        monkeypatch.setattr(hostsandbox.shutil, "which", lambda *a, **k: "/usr/bin/bwrap")  # noqa: ARG005  # tracked: #288
+        _stub_working_bwrap(monkeypatch)
         codex_home = tmp_path / ".codex"
         workspace = codex_home / "worktrees" / "run" / "workspace"
         workspace.mkdir(parents=True)

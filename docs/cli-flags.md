@@ -86,13 +86,31 @@ compatibility path.
 
 The native sandbox requires `bwrap` on Linux or `sandbox-exec` on macOS. A
 missing confinement tool or an unsupported operating system stops the run
-rather than launching the agent without isolation. Evaluator, checker, and
-benchmark paths are visible to agents but enforced read-only and protected by
-integrity checks. The agent also cannot write `.git`, `.vibesys`, legacy
-root-level task inputs, or `_evaluator/`, and cannot read
+rather than launching the agent without isolation. On Linux `bwrap` must also
+be able to create a user namespace; a present but blocked binary is treated as
+missing and reported at startup rather than failing once per round. Evaluator,
+checker, and benchmark paths are visible to agents but enforced read-only and
+protected by integrity checks. The agent also cannot write `.git`, `.vibesys`,
+legacy root-level task inputs, or `_evaluator/`, and cannot read
 `.vibesys/state/local/`, root `.env*` files, or root `agent.toml`. A run is
 rejected when a root `.env*` file or `agent.toml` is recoverable from Git refs
 or reflogs.
+
+`VIBESYS_AGENT_SANDBOX` selects the Linux mechanism. `auto` (the default) and
+`bwrap` both require bubblewrap. `landlock` opts in to a weaker backend for
+hosts that block unprivileged user namespaces, which is the common reason
+bubblewrap cannot run without root (for example Ubuntu's
+`kernel.apparmor_restrict_unprivileged_userns`). The Landlock backend keeps the
+outer boundary — the project is writable and the rest of the host is denied for
+both read and write — but Landlock rules only ever add access, so it cannot
+carve a restriction out of the writable project. Read-only and hidden project
+paths are therefore *not* enforced under it, and each unenforced tier is logged
+at startup. Evaluator-input integrity still holds, because the accuracy gate
+independently diffs those paths against a trusted baseline and fails the round.
+Landlock is never selected automatically, and a project that sits inside a tree
+the backend must grant (such as `/tmp`) is refused rather than run unconfined.
+Set the variable to `0`/`false`/`off`/`no` to disable confinement entirely; any
+other value is rejected.
 
 VibeSys initializes Git when needed and creates one `vibesys-runs/<run-id>` branch
 per run. Agent-authored source stays at its normal project paths. Portable and
@@ -290,7 +308,7 @@ starts with an actionable error.
 
 | Flags | Environment | Notes |
 | --- | --- | --- |
-| neither `--docker` nor `--modal` | Local host. | Requires bubblewrap on Linux or Seatbelt on macOS. Enforces the project path policy. |
+| neither `--docker` nor `--modal` | Local host. | Requires bubblewrap on Linux or Seatbelt on macOS. Enforces the project path policy. `VIBESYS_AGENT_SANDBOX=landlock` trades the nested read-only and hidden tiers for a backend that runs without user namespaces. |
 | `--docker` | Docker container. | Mounts the project with the same hidden and read-only overlays. Backend controls GPU/device passthrough. |
 | `--modal` | Modal workflow. | Mutually exclusive with `--docker`. Intended for remote GPU dispatch. |
 

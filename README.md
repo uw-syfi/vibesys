@@ -68,7 +68,11 @@ accuracy and performance results.
 ## Quickstart
 
 Install Python 3.12+, Git, and [uv](https://docs.astral.sh/uv/). Linux also
-requires `bubblewrap`; macOS includes the required `sandbox-exec` command. Then
+requires `bubblewrap`, and a kernel that lets it create an unprivileged user
+namespace; macOS includes the required `sandbox-exec` command. Where user
+namespaces are blocked and installing bubblewrap needs root you do not have,
+`VIBESYS_AGENT_SANDBOX=landlock` selects a weaker but root-free backend (see
+the [CLI reference](docs/cli-flags.md) for what it stops enforcing). Then
 install VibeSys:
 
 ```bash

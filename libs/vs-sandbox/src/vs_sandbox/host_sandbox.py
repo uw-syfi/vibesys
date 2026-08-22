@@ -20,12 +20,17 @@ Everything else, including the project's *parent* and sibling projects, is
 denied, so absolute-path traversal outside the project fails. Network is left
 open so the agent can still reach its model provider.
 
-Two host backends implement the same ``wrap(argv) -> argv`` contract, selected
-by platform:
+Three host backends implement the same ``wrap(argv) -> argv`` contract,
+selected by platform and, on Linux, by operator choice:
 
-* **Linux** — :class:`HostSandbox`, a `bubblewrap <https://github.com/
+* **Linux, default** — :class:`HostSandbox`, a `bubblewrap <https://github.com/
   containers/bubblewrap>`_ (``bwrap``) mount namespace. Denied paths are simply
-  absent from the namespace, so traversal fails with ``ENOENT``.
+  absent from the namespace, so traversal fails with ``ENOENT``. This is the
+  only backend that enforces the full :class:`ProjectPathPolicy`.
+* **Linux, opt-in** — :class:`LandlockSandbox`, for hosts where bubblewrap
+  cannot run because unprivileged user namespaces are blocked. It enforces the
+  outer project boundary but not the nested read-only and hidden tiers, so it
+  is never selected automatically.
 * **macOS** — :class:`SeatbeltSandbox`, a Seatbelt (``sandbox-exec``) profile
   with ``(deny default)`` and an explicit read/write allowlist.
 
@@ -38,7 +43,10 @@ Operator controls (read from the agent's environment):
 ``VIBESYS_AGENT_SANDBOX``
     Set to ``0``/``false``/``off``/``no`` to disable host confinement (e.g. for
     debugging, or on a host whose toolchain layout the default allowlist does
-    not cover). Disabling is logged loudly.
+    not cover). Disabling is logged loudly. On Linux it also selects the
+    mechanism: ``auto`` (default) and ``bwrap`` require bubblewrap, while
+    ``landlock`` opts in to the weaker :class:`LandlockSandbox`. An
+    unrecognized value is rejected rather than treated as the default.
 
 Resource discovery and policy are deliberately outside this module. The caller
 passes declarations through the public resource SDK; this consumer only
@@ -47,13 +55,16 @@ validates them and implements their requested access.
 
 from __future__ import annotations
 
+import enum
 import shutil
+import subprocess
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from vs_sandbox import landlock
 from vs_sandbox.host_resource_importer import prepare_host_resource_imports
 from vs_sandbox.host_resources import HostResource  # noqa: TC001  # tracked: #288
 from vs_sandbox.project_paths import ProjectPathPolicy
@@ -61,6 +72,23 @@ from vs_sandbox.project_paths import ProjectPathPolicy
 DISABLE_ENV = "VIBESYS_AGENT_SANDBOX"
 
 _DISABLED_VALUES = frozenset({"0", "false", "off", "no"})
+
+
+class LinuxBackend(enum.StrEnum):
+    """Which Linux confinement mechanism ``VIBESYS_AGENT_SANDBOX`` selects.
+
+    The same variable that disables confinement also chooses the mechanism, so
+    operators have one knob rather than two that can disagree.
+    """
+
+    #: Default. Bubblewrap only; fail closed if it is missing or unusable.
+    AUTO = "auto"
+    #: Bubblewrap, stated explicitly. Identical to :attr:`AUTO` today, but says
+    #: so, and keeps saying so if the default ever changes.
+    BWRAP = "bwrap"
+    #: Landlock. Opt-in because it cannot enforce the nested project policy;
+    #: see :class:`LandlockSandbox` for exactly what it drops.
+    LANDLOCK = "landlock"
 
 
 class SandboxUnavailableError(RuntimeError):
@@ -93,6 +121,19 @@ _SYSTEM_READ_ROOTS: tuple[str, ...] = (
     "/run/systemd/resolve",  # DNS via systemd-resolved
 )
 
+# Writable scratch and device roots for the Landlock backend. Bubblewrap gets
+# these for free from ``--dev``/``--tmpfs``; Landlock cannot mount, so they are
+# granted in place and the host's ``/tmp`` is shared rather than private.
+# Discretionary permissions still apply on top, so granting ``/proc`` and
+# ``/dev`` does not hand the agent anything its uid could not already reach.
+_LINUX_SCRATCH_WRITE_ROOTS: tuple[str, ...] = (
+    "/dev",
+    "/proc",
+    "/tmp",  # noqa: S108  # tracked: #288
+    "/var/tmp",  # noqa: S108  # tracked: #288
+)
+
+
 # Read-only system roots the macOS dynamic linker and command-line tools need to
 # launch anything at all. Kept deliberately broad on the *system* side (dyld,
 # frameworks, config) while the project's parent and siblings stay denied
@@ -123,12 +164,17 @@ def _is_disabled(env: dict[str, str]) -> bool:
 class WorkspaceSandbox(ABC):
     """A host confinement policy for a single canonical project.
 
-    Both OS backends are built by :func:`build` from the same inputs: the
-    project plus the read/write allowlists computed from resource declarations.
-    They expose the same ``wrap(argv) -> argv`` contract consumed at the process
-    launch chokepoint. Subclasses differ only
-    in the OS mechanism they emit: :class:`HostSandbox` a bubblewrap namespace,
-    :class:`SeatbeltSandbox` a ``sandbox-exec`` profile.
+    Every backend is built by :func:`build` from the same inputs: the project
+    plus the read/write allowlists computed from resource declarations. They
+    expose the same ``wrap(argv) -> argv`` contract consumed at the process
+    launch chokepoint, and differ in the OS mechanism they emit:
+    :class:`HostSandbox` a bubblewrap namespace, :class:`SeatbeltSandbox` a
+    ``sandbox-exec`` profile, :class:`LandlockSandbox` a Landlock ruleset.
+
+    The mechanisms are not equally strong. Only :class:`HostSandbox` enforces
+    every tier of :attr:`project_path_policy`; the others document what they
+    cannot express, so callers must not assume the contract is fully enforced
+    just because a sandbox was returned.
     """
 
     workspace: Path
@@ -220,6 +266,117 @@ def _gpu_device_nodes() -> list[Path]:
     if dri.exists():
         nodes.append(dri)
     return nodes
+
+
+@dataclass(frozen=True)
+class LandlockSandbox(WorkspaceSandbox):
+    """A Linux Landlock policy for a canonical project, for hosts without bwrap.
+
+    Landlock needs neither root nor an unprivileged user namespace, so it is
+    the only host confinement left when ``CLONE_NEWUSER`` is denied (Ubuntu's
+    ``kernel.apparmor_restrict_unprivileged_userns``, most commonly). It is
+    strictly weaker than :class:`HostSandbox` and is never selected
+    automatically; the operator opts in with ``VIBESYS_AGENT_SANDBOX=landlock``.
+
+    **Enforced.** The outer boundary, which is the escape from issue #149: the
+    project is read-write, declared host resources get their declared access,
+    system roots are read-only, and every other host path is denied for both
+    read and write. The project's parent and siblings are unreachable.
+
+    **Not enforced**, because Landlock rules only ever add rights and so cannot
+    carve a restriction out of a granted tree (see :mod:`vs_sandbox.landlock`):
+
+    * ``ProjectPathPolicy.read_only_paths`` — the agent may modify ``.git``,
+      ``.vibesys``, and task inputs. VibeSys's accuracy gate independently
+      diffs those paths against a trusted baseline and fails the round, so this
+      is downgraded from prevention to detection rather than lost outright.
+    * ``ProjectPathPolicy.hidden_paths`` — the agent may read ``agent.toml``,
+      root ``.env*``, and ``.vibesys/state/local``. Keep provider credentials
+      out of the project directory on such a host.
+
+    Residual channels, all verified by probing a live ruleset:
+
+    * ``/tmp`` and ``/var/tmp`` are the host's rather than a private tmpfs, so
+      scratch files are visible to other users of a shared machine.
+    * No PID namespace is unshared, so ``/proc/<pid>/cmdline`` of other
+      processes owned by the same user stays readable. Their ``environ``,
+      ``cwd``, and ``fd`` targets do not: those need ptrace-level access, and
+      reads through the ``/proc`` magic links resolve to the real path and are
+      denied by the rules.
+    * Network is open, as it is under bubblewrap, so anything readable is also
+      exfiltratable and cloud instance-metadata endpoints are reachable.
+
+    On ABI 6 and later, signals and abstract unix sockets are scoped, which
+    closes two routes to making an unconfined process act on the agent's
+    behalf. Bubblewrap blocks the first with ``--unshare-pid`` and leaves the
+    second open, so scoping puts this backend slightly ahead there.
+    """
+
+    system_read_roots: tuple[str, ...] = _SYSTEM_READ_ROOTS
+    scratch_write_roots: tuple[str, ...] = _LINUX_SCRATCH_WRITE_ROOTS
+
+    def unenforced_policy(self) -> tuple[str, ...]:
+        """Return human-readable policy tiers this backend cannot enforce."""
+        policy = self.project_path_policy
+        unenforced: list[str] = []
+        if policy.read_only_paths:
+            unenforced.append(
+                "read-only paths remain writable: "
+                + ", ".join(str(path) for path in policy.read_only_paths)
+            )
+        if policy.hidden_paths:
+            unenforced.append(
+                "hidden paths remain readable: "
+                + ", ".join(str(path) for path in policy.hidden_paths)
+            )
+        return tuple(unenforced)
+
+    def policy(self) -> landlock.LandlockPolicy:
+        """Return the Landlock ruleset this policy compiles to.
+
+        Raises:
+            SandboxUnavailableError: If a tree that must be granted write
+                access contains the project. Because rules only add rights,
+                such a grant reaches the project too and there is no way to
+                take it back, so the run must not proceed believing itself
+                confined.
+        """
+        workspace = self.workspace.resolve()
+        write_roots = (
+            *(Path(root) for root in self.scratch_write_roots),
+            *self.write_paths,
+        )
+        for root in write_roots:
+            resolved = root.resolve()
+            if resolved == workspace or resolved in workspace.parents:
+                raise SandboxUnavailableError(  # noqa: TRY003  # tracked: #288
+                    f"project {workspace} sits inside {resolved}, which the Landlock "
+                    "backend must grant write access to. Landlock rules cannot subtract, "
+                    "so the project would be effectively unconfined. Move the project "
+                    "outside that tree, or use bubblewrap or --docker."
+                )
+        return landlock.policy_for(
+            read_paths=(
+                *(Path(root) for root in self.system_read_roots),
+                *self.read_paths,
+            ),
+            # The project is granted last for readability only; Landlock unions
+            # overlapping grants, so order carries no meaning.
+            write_paths=(*write_roots, workspace),
+            chdir=workspace,
+        )
+
+    def wrap(self, argv: list[str]) -> list[str]:
+        """Return *argv* wrapped so it runs under this Landlock ruleset."""
+        return [
+            sys.executable,
+            "-m",
+            landlock.__name__,
+            "--policy",
+            self.policy().model_dump_json(),
+            "--",
+            *argv,
+        ]
 
 
 def _sbpl_string(value: str) -> str:
@@ -432,15 +589,74 @@ def _unavailable(
         raise SandboxUnavailableError(message)
 
 
+def _requested_linux_backend(env: dict[str, str]) -> LinuxBackend:
+    """Return the operator's ``VIBESYS_AGENT_SANDBOX`` backend choice."""
+    raw = env.get(DISABLE_ENV, "").strip().lower()
+    if not raw:
+        return LinuxBackend.AUTO
+    try:
+        return LinuxBackend(raw)
+    except ValueError:
+        # ``_is_disabled`` already consumed the off switches, so anything left
+        # over is a typo. Naming it beats silently confining with the default.
+        raise SandboxUnavailableError(
+            f"unknown {DISABLE_ENV} value {raw!r}; expected one of "
+            + ", ".join(sorted(member.value for member in LinuxBackend))
+            + ", or an off switch ("
+            + ", ".join(sorted(_DISABLED_VALUES))
+            + ")"
+        ) from None
+
+
+def _bwrap_confines(bwrap: str) -> bool:
+    """Return whether *bwrap* can actually create a namespace on this host.
+
+    A present-but-blocked ``bwrap`` is a real configuration: Ubuntu's
+    ``kernel.apparmor_restrict_unprivileged_userns`` denies the uid-map write
+    unless the binary is the distro's own ``/usr/bin/bwrap``, so a copy
+    unpacked elsewhere exits non-zero at launch. Probing here turns that into
+    one clear startup error instead of an agent that dies every round.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603  # tracked: #288
+            [bwrap, "--ro-bind", "/", "/", "--unshare-user", "--", "/bin/true"],
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 def _build_linux(
     workspace: Path,
     options: _BuildOptions,
-) -> HostSandbox | None:
-    bwrap = shutil.which("bwrap", path=options.env.get("PATH")) or shutil.which("bwrap")
-    if not bwrap:
+) -> WorkspaceSandbox | None:
+    requested = _requested_linux_backend(options.env)
+    read_paths, write_paths = _resource_paths(workspace, options.log, options.resources)
+
+    if requested is not LinuxBackend.LANDLOCK:
+        bwrap = shutil.which("bwrap", path=options.env.get("PATH")) or shutil.which("bwrap")
+        if bwrap and _bwrap_confines(bwrap):
+            return HostSandbox(
+                bwrap_path=bwrap,
+                workspace=workspace,
+                read_paths=tuple(read_paths),
+                write_paths=tuple(write_paths),
+                project_path_policy=options.project_path_policy,
+                gpu_device_nodes=tuple(_gpu_device_nodes()),
+            )
+        reason = (
+            f"'bwrap' at {bwrap} cannot create a user namespace"
+            if bwrap
+            else "'bwrap' not found on PATH"
+        )
         message = (
-            "[hostsandbox] 'bwrap' not found on PATH; agent runs unconfined. "
-            "Install bubblewrap or use --docker for an externally sandboxed run."
+            f"[hostsandbox] {reason}; agent runs unconfined. Install bubblewrap, "
+            f"use --docker for an externally sandboxed run, or set "
+            f"{DISABLE_ENV}={LinuxBackend.LANDLOCK} to accept the weaker "
+            f"Landlock backend (it cannot enforce read-only or hidden project paths)."
         )
         return _unavailable(
             message,
@@ -448,15 +664,34 @@ def _build_linux(
             log=options.log,
         )
 
-    read_paths, write_paths = _resource_paths(workspace, options.log, options.resources)
-    return HostSandbox(
-        bwrap_path=bwrap,
+    if landlock.abi_version() is None:
+        message = (
+            f"[hostsandbox] {DISABLE_ENV}={LinuxBackend.LANDLOCK} requested but this "
+            "kernel does not support Landlock; agent runs unconfined."
+        )
+        return _unavailable(
+            message,
+            require_enforcement=options.require_enforcement,
+            log=options.log,
+        )
+
+    sandbox = LandlockSandbox(
         workspace=workspace,
         read_paths=tuple(read_paths),
         write_paths=tuple(write_paths),
         project_path_policy=options.project_path_policy,
-        gpu_device_nodes=tuple(_gpu_device_nodes()),
+        scratch_write_roots=_LINUX_SCRATCH_WRITE_ROOTS,
     )
+    # Compile eagerly so an unconfinable project layout is one clear error at
+    # startup rather than a surprise on the first agent turn.
+    sandbox.policy()
+    options.log(
+        f"[hostsandbox] Landlock backend (ABI {landlock.abi_version()}); the project "
+        "is writable and the rest of the host is denied."
+    )
+    for gap in sandbox.unenforced_policy():
+        options.log(f"[hostsandbox] NOT ENFORCED by Landlock: {gap}")
+    return sandbox
 
 
 def _build_macos(
