@@ -91,6 +91,11 @@ _SYSTEM_READ_ROOTS: tuple[str, ...] = (
     "/etc",
     "/opt",
     "/run/systemd/resolve",  # DNS via systemd-resolved
+    # Accelerator runtimes discover devices through sysfs before they ever
+    # touch the device node: without it the AWS Neuron runtime aborts in
+    # ``nrt_init`` and ``neuron-ls`` exits fatal, and CUDA's device query
+    # fails the same way. Read-only, so it exposes topology, not control.
+    "/sys",
 )
 
 # Read-only system roots the macOS dynamic linker and command-line tools need to
@@ -208,12 +213,18 @@ class HostSandbox(WorkspaceSandbox):
 
 
 def _gpu_device_nodes() -> list[Path]:
-    """NVIDIA character devices to pass through (``--dev`` hides them otherwise)."""
+    """Accelerator character devices to pass through.
+
+    ``--dev`` mounts a minimal devtmpfs that omits every accelerator node, so
+    anything the agent must reach to exercise its own code has to be bound back
+    explicitly. That covers NVIDIA GPUs, DRI render nodes, and AWS Neuron
+    devices for the Trainium backend's local (non-Docker) path.
+    """
     dev = Path("/dev")
     if not dev.exists():
         return []
     nodes: list[Path] = []
-    for pattern in ("nvidia*", "nvidia-uvm*", "nvidia-caps"):
+    for pattern in ("nvidia*", "nvidia-uvm*", "nvidia-caps", "neuron*"):
         nodes.extend(sorted(dev.glob(pattern)))
     # ``/dev/dri`` (render nodes) for non-NVIDIA / integrated GPUs.
     dri = dev / "dri"

@@ -135,11 +135,26 @@ class TrainiumBackend:
         env = self._build_env(extra_env)
 
         if kind is SandboxKind.LOCAL:
+            # ``_build_env`` names the *container* cache and temp paths, which
+            # only exist because the Docker branch bind-mounts them. A local run
+            # has no such mounts: /opt is root-owned and read-only inside the
+            # agent sandbox, so neuronx-cc would fail to write either one.
+            # Redirect both under the run's log directory, which is writable.
+            host_cache = self.log_dir / "neuron-compile-cache"
+            host_tmp = self.log_dir / "neuron-tmp"
+            host_cache.mkdir(parents=True, exist_ok=True)
+            host_tmp.mkdir(parents=True, exist_ok=True)
+            local_env = {
+                **env,
+                "NEURON_COMPILE_CACHE_URL": str(host_cache),
+                "TMPDIR": str(host_tmp),
+            }
+            local_env.update(extra_env)
             return LocalShellBackend(
                 root_dir=host_workspace,
                 virtual_mode=True,
                 inherit_env=True,
-                env=env,
+                env=local_env,
             )
 
         if kind is SandboxKind.DOCKER:
