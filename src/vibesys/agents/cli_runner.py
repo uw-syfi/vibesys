@@ -70,6 +70,10 @@ class _ProviderFactory(Protocol):
     ) -> CodingAgent: ...
 
 
+# Providers whose CLI accepts a reasoning-effort level. Others silently
+# ignore the setting rather than failing, so the gate is explicit.
+_REASONING_EFFORT_PROVIDERS = frozenset({"codex", "claude"})
+
 _PROVIDER_CLASSES: dict[str, _ProviderFactory] = {
     "claude": ClaudeCodeCodingAgent,
     "gemini": GeminiCodingAgent,
@@ -344,7 +348,7 @@ class CliAgentRunner:
             kind, self._default_reasoning_effort
         )
         selected_reasoning_effort = (
-            configured_reasoning_effort if self._provider == "codex" else None
+            configured_reasoning_effort if self._provider in _REASONING_EFFORT_PROVIDERS else None
         )
         materialize_skills(
             workspace,
@@ -572,9 +576,17 @@ class CliAgentRunner:
         return text
 
     def _configure_reasoning_effort(self, agent: CodingAgent, reasoning_effort: str | None) -> None:
-        """Apply provider-specific reasoning controls to a newly built CLI agent."""
-        if self._provider == "codex" and reasoning_effort is not None:
-            cast("CodexCodingAgent", agent).set_reasoning_effort(reasoning_effort)
+        """Apply provider-specific reasoning controls to a newly built CLI agent.
+
+        Codex takes the level as a ``--config`` override and Claude Code as a
+        ``--effort`` session flag, but both expose the same
+        ``set_reasoning_effort`` hook, so the caller does not branch on which.
+        """
+        if reasoning_effort is None or self._provider not in _REASONING_EFFORT_PROVIDERS:
+            return
+        cast("CodexCodingAgent | ClaudeCodeCodingAgent", agent).set_reasoning_effort(
+            reasoning_effort
+        )
 
     def _write_usage_record(
         self,

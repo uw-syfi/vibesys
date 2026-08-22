@@ -144,6 +144,20 @@ class ClaudeCodeCodingAgent(CLICodingAgent[ClaudeGenerationSession]):
         if self.output_schema_json is not None:
             cmd.extend(["--json-schema", self.output_schema_json])
 
+    def set_reasoning_effort(self, effort: str) -> None:
+        """Apply a per-agent effort level to fresh and resumed turns.
+
+        Claude Code takes this as a session flag rather than a config override,
+        which is why it is stored and re-emitted per command instead of being
+        appended to a persistent argument list the way Codex does it.
+        """
+        self.reasoning_effort = effort
+
+    def _append_reasoning_effort(self, cmd: list[str]) -> None:
+        effort = getattr(self, "reasoning_effort", None)
+        if effort:
+            cmd.extend(["--effort", effort])
+
     def _get_command(self, prompt: str) -> list[str]:  # noqa: ARG002  # tracked: #288
         cmd = [
             self.binary_path,
@@ -155,6 +169,7 @@ class ClaudeCodeCodingAgent(CLICodingAgent[ClaudeGenerationSession]):
         ]
         if self.model:
             cmd.extend(["--model", self.model])
+        self._append_reasoning_effort(cmd)
         self._append_output_schema(cmd)
         return cmd
 
@@ -171,6 +186,7 @@ class ClaudeCodeCodingAgent(CLICodingAgent[ClaudeGenerationSession]):
         ]
         if self.model:
             cmd.extend(["--model", self.model])
+        self._append_reasoning_effort(cmd)
         self._append_output_schema(cmd)
         return cmd
 
