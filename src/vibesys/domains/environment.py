@@ -11,6 +11,13 @@ from typing import Protocol
 class RunEnvironmentCapabilities(Protocol):  # noqa: D101  # tracked: #288
     isolated: bool
     materialize_local_model_weights: bool
+    # True when the environment's own remote execution surface already has
+    # access to model weights (e.g. persistent cluster storage) independent
+    # of anything the framework stages or downloads locally. Domain hooks
+    # must not require local weights, or a meta.json to derive them, when
+    # this is set: the candidate transfer deliberately excludes weights for
+    # these environments, so a local materialization would be unused.
+    provides_remote_model_weights: bool
 
 
 @dataclass(frozen=True)

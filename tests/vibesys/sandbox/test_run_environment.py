@@ -384,6 +384,32 @@ def test_skypilot_selection_requires_profile_and_resources() -> None:
         )
 
 
+def test_only_skypilot_declares_remote_model_weights() -> None:
+    """Only the remote environment exempts domain hooks from local weights.
+
+    ``provides_remote_model_weights`` is the declaration
+    ``LLMServingEnvironmentHooks`` consults to skip requiring host-local model
+    weights (see ``src/vibesys/domains/llm_serving/hooks.py``). Local, Docker,
+    and Modal all still expect the framework to resolve weights itself
+    (locally, or via a Modal Volume derived from a local source), so only
+    SkyPilot sets it.
+    """
+    resources = RunResourceRequest(accelerators_per_node=1, accelerator_backend="rocm")
+    local = build_run_environment(make_run_environment_spec())
+    docker = build_run_environment(make_run_environment_spec(use_docker=True))
+    modal = build_run_environment(make_run_environment_spec(use_modal=True))
+    skypilot = build_run_environment(
+        make_run_environment_spec(
+            use_skypilot=True, cluster_profile="gpu", resources=resources
+        )
+    )
+
+    assert local.provides_remote_model_weights is False
+    assert docker.provides_remote_model_weights is False
+    assert modal.provides_remote_model_weights is False
+    assert skypilot.provides_remote_model_weights is True
+
+
 def test_run_environment_record_captures_operator_selected_options():  # noqa: ANN201  # tracked: #288
     assert run_environment_record(make_run_environment_spec()) == RunEnvironmentRecord(name="local")
     assert run_environment_record(

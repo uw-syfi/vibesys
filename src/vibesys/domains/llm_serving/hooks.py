@@ -66,7 +66,9 @@ class LLMServingEnvironmentHooks:  # noqa: D101  # tracked: #288
 
         model_path = ref_path / "model"
         meta_path = ref_path / "meta.json"
-        if ctx.run_environment.materialize_local_model_weights or not meta_path.exists():
+        if not ctx.run_environment.provides_remote_model_weights and (
+            ctx.run_environment.materialize_local_model_weights or not meta_path.exists()
+        ):
             model_path = _ensure_model_weights(
                 ref_path,
                 cache_dir=ctx.model_cache_dir,
