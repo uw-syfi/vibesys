@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from vibesys.skypilot.config import ResolvedSkyPilotResources
 
 _CLUSTER_COMPONENT = re.compile(r"[^a-z0-9-]+")
+_ANSI_ESCAPE_SEQUENCE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _MAX_CLUSTER_NAME = 28
 _JOB_DISCOVERY_TIMEOUT_SECONDS = 60.0
 _POLL_INTERVAL_SECONDS = 2.0
@@ -272,6 +273,36 @@ def build_task_document(
     return document
 
 
+def _decode_json_stdout(stdout: str, *, error_message: str) -> object:
+    """Extract and decode the trailing ``--output json`` payload from sky CLI stdout.
+
+    The sky CLI (0.13.0) logs informational lines to stdout ahead of JSON output
+    even when ``--output json`` is requested: e.g. a "Cluster(s) not found: ..."
+    notice for ``status`` on an absent cluster, or a "Fetching job queue for:
+    ..." notice for ``queue``. These lines may also carry ANSI styling. The JSON
+    payload itself is always written last, as one ``json.dumps`` block starting
+    at the first character of a line with ``[`` or ``{`` and running to the end
+    of stdout, so this locates that block and decodes it while ignoring any
+    banner lines before it.
+    """
+    lines = stdout.splitlines()
+    payload_start = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if _ANSI_ESCAPE_SEQUENCE.sub("", line).lstrip()[:1] in ("[", "{")
+        ),
+        None,
+    )
+    if payload_start is None:
+        raise SkyPilotOutputError(error_message)
+    payload_text = "\n".join(_ANSI_ESCAPE_SEQUENCE.sub("", line) for line in lines[payload_start:])
+    try:
+        return json.loads(payload_text)
+    except json.JSONDecodeError as exc:
+        raise SkyPilotOutputError(error_message) from exc
+
+
 class SkyPilotJobRunner:
     """Inspect, launch, use, cancel, and release named SkyPilot clusters."""
 
@@ -296,12 +327,9 @@ class SkyPilotJobRunner:
     def inspect_cluster(self, name: str, *, timeout: float = 60) -> ClusterInfo | None:
         """Return the named cluster's state, or ``None`` when it is absent."""
         result = self._control(["status", "--refresh", "--output", "json", name], timeout=timeout)
-        try:
-            payload = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise SkyPilotOutputError(  # noqa: TRY003
-                "SkyPilot status returned invalid JSON"
-            ) from exc
+        payload = _decode_json_stdout(
+            result.stdout, error_message="SkyPilot status returned invalid JSON"
+        )
         entries = (
             payload
             if isinstance(payload, list)
@@ -493,10 +521,7 @@ class SkyPilotJobRunner:
 
     @staticmethod
     def _queue_records(stdout: str, cluster_name: str) -> list[dict[str, object]]:
-        try:
-            payload = json.loads(stdout)
-        except json.JSONDecodeError as exc:
-            raise SkyPilotOutputError("SkyPilot queue returned invalid JSON") from exc  # noqa: TRY003
+        payload = _decode_json_stdout(stdout, error_message="SkyPilot queue returned invalid JSON")
         records = payload.get(cluster_name) if isinstance(payload, dict) else None
         if not isinstance(records, list) or not all(isinstance(record, dict) for record in records):
             raise SkyPilotOutputError(  # noqa: TRY003

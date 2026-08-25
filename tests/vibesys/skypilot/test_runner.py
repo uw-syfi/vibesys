@@ -176,6 +176,58 @@ def test_inspect_cluster_parses_json_and_unknown_states() -> None:
     )
 
 
+def test_inspect_cluster_skips_cluster_not_found_banner_before_json() -> None:
+    # Observed real sky 0.13.0 behavior: `sky status --refresh --output json <name>`
+    # for an absent cluster logs an ANSI-styled "Cluster(s) not found" notice to
+    # stdout ahead of the pretty-printed JSON array, even under --output json.
+    banner = "Cluster(s) not found: \x1b[1mlease\x1b[0m."
+    fake = FakeCommandRunner([_result(stdout=f"{banner}\n[]\n")])
+
+    assert SkyPilotJobRunner(fake).inspect_cluster("lease") is None
+
+
+def test_inspect_cluster_skips_cold_start_banner_lines_before_json() -> None:
+    # Observed real sky 0.13.0 behavior on a cold API server: informational
+    # lines about starting the local server precede the JSON payload on stdout.
+    stdout = (
+        "\x1b[2mFailed to connect to SkyPilot API server at "
+        "http://127.0.0.1:46580. Starting a local server.\x1b[0m\n"
+        "\x1b[0m\x1b[32m\U0001f389 SkyPilot API server started. \x1b[0m\x1b[0m\n"
+        + json.dumps([{"name": "lease", "status": "UP"}], indent=2)
+        + "\n"
+    )
+    fake = FakeCommandRunner([_result(stdout=stdout)])
+
+    cluster = SkyPilotJobRunner(fake).inspect_cluster("lease")
+
+    assert cluster is not None
+    assert cluster.status is ClusterStatus.UP
+
+
+def test_inspect_cluster_parses_pretty_printed_json() -> None:
+    # sky's --output json uses json.dumps(..., indent=2), not compact JSON.
+    stdout = json.dumps([{"name": "lease", "status": "UP"}], indent=2) + "\n"
+    fake = FakeCommandRunner([_result(stdout=stdout)])
+
+    cluster = SkyPilotJobRunner(fake).inspect_cluster("lease")
+
+    assert cluster is not None
+    assert cluster.status is ClusterStatus.UP
+
+
+def test_query_job_skips_fetching_banner_before_json() -> None:
+    # Observed real sky 0.13.0 behavior: `sky queue --output json <cluster>`
+    # logs a "Fetching job queue for: ..." notice to stdout before the JSON.
+    banner = "Fetching job queue for: lease"
+    payload = json.dumps({"lease": [{"job_name": "job-token", "job_id": 7}]}, indent=2)
+    fake = FakeCommandRunner([_result(stdout=f"{banner}\n{payload}\n")])
+
+    job = SkyPilotJobRunner(fake).query_job("lease", job_name="job-token")
+
+    assert job is not None
+    assert job.job_id == 7
+
+
 def test_ensure_reuses_active_cluster_without_launch() -> None:
     fake = FakeCommandRunner([_result(stdout=json.dumps([{"name": "lease", "status": "UP"}]))])
 
