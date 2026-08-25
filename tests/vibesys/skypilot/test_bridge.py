@@ -704,6 +704,144 @@ def test_bridge_rejects_workspace_symlink_escape(tmp_path: Path) -> None:
         bridge.close()
 
 
+def _bridge_for_staging(
+    tmp_path: Path, workspace: Path, *, hidden_paths: Sequence[Path] = ()
+) -> SkyPilotBridge:
+    return SkyPilotBridge(
+        runner=FakeRunner(),
+        cluster_name="lease",
+        resources=_resources(),
+        workspace=workspace,
+        evaluator_package_root=None,
+        hidden_paths=hidden_paths,
+        commands={"accuracy": ("true",)},
+        benchmark_output_argument=None,
+        state_namespace=_namespace(tmp_path),
+        log=lambda _: None,
+    )
+
+
+def _staged_relative_paths(staging: Path) -> set[str]:
+    return {path.relative_to(staging).as_posix() for path in staging.rglob("*") if path.is_file()}
+
+
+def _init_git_repo(root: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)  # noqa: S607
+
+
+def test_stage_workspace_excludes_gitignored_directory_in_a_git_repo(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _init_git_repo(workspace)
+    (workspace / ".gitignore").write_text("rust/target/\n")
+    (workspace / "keep.py").write_text("candidate")
+    (workspace / "rust").mkdir()
+    (workspace / "rust" / "target").mkdir()
+    (workspace / "rust" / "target" / "big.rlib").write_text("x" * 1000)
+
+    bridge = _bridge_for_staging(tmp_path, workspace)
+    staging = tmp_path / "staged"
+    bridge._stage_workspace(staging)  # noqa: SLF001
+
+    assert _staged_relative_paths(staging) == {"keep.py", ".gitignore"}
+
+
+def test_stage_workspace_keeps_force_added_tracked_files_matching_gitignore(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _init_git_repo(workspace)
+    (workspace / ".gitignore").write_text("*.log\n")
+    (workspace / "keep.log").write_text("tracked despite matching *.log")
+    subprocess.run(["git", "add", "-f", "keep.log"], cwd=workspace, check=True)  # noqa: S607
+
+    bridge = _bridge_for_staging(tmp_path, workspace)
+    staging = tmp_path / "staged"
+    bridge._stage_workspace(staging)  # noqa: SLF001
+
+    assert "keep.log" in _staged_relative_paths(staging)
+
+
+def test_stage_workspace_excluding_gitignored_bytes_stays_under_the_size_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A build cache large enough to overflow the cap on its own must not
+    # count against the cap once it is Git-ignored: this is the regression
+    # covered here (e.g. a 761 MB `rust/target/` cache that previously
+    # overflowed `_MAX_STAGED_BYTES` even though it carries no candidate
+    # signal).
+    monkeypatch.setattr(bridge_module, "_MAX_STAGED_BYTES", 10_000)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _init_git_repo(workspace)
+    (workspace / ".gitignore").write_text("cache/\n")
+    (workspace / "keep.py").write_text("candidate")
+    (workspace / "cache").mkdir()
+    (workspace / "cache" / "big.bin").write_bytes(b"x" * 50_000)
+
+    bridge = _bridge_for_staging(tmp_path, workspace)
+    staging = tmp_path / "staged"
+    bridge._stage_workspace(staging)  # noqa: SLF001
+
+    assert _staged_relative_paths(staging) == {"keep.py", ".gitignore"}
+
+
+def test_stage_workspace_still_enforces_cap_for_tracked_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bridge_module, "_MAX_STAGED_BYTES", 10)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _init_git_repo(workspace)
+    (workspace / "keep.py").write_text("this tracked file is well over the patched cap")
+
+    bridge = _bridge_for_staging(tmp_path, workspace)
+
+    with pytest.raises(ValueError, match="excluding Git-ignored paths"):
+        bridge._stage_workspace(tmp_path / "staged")  # noqa: SLF001
+
+
+def test_stage_workspace_falls_back_unchanged_for_a_non_git_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "keep.py").write_text("candidate")
+    (workspace / "build").mkdir()  # excluded by name, not by gitignore
+    (workspace / "build" / "artifact.txt").write_text("built")
+    (workspace / "not_a_cache").mkdir()
+    (workspace / "not_a_cache" / "data.txt").write_text("kept even without git")
+
+    bridge = _bridge_for_staging(tmp_path, workspace)
+    staging = tmp_path / "staged"
+    bridge._stage_workspace(staging)  # noqa: SLF001
+
+    assert _staged_relative_paths(staging) == {"keep.py", "not_a_cache/data.txt"}
+
+
+def test_stage_workspace_queries_git_ignores_exactly_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _init_git_repo(workspace)
+    for index in range(5):
+        (workspace / f"file{index}.py").write_text("candidate")
+
+    calls: list[Sequence[str]] = []
+    real_run = subprocess.run
+
+    def spy_run(argv: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        if argv[0] == "git":
+            calls.append(argv)
+        return real_run(argv, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(bridge_module.subprocess, "run", spy_run)
+    bridge = _bridge_for_staging(tmp_path, workspace)
+    bridge._stage_workspace(tmp_path / "staged")  # noqa: SLF001
+
+    assert len(calls) == 1
+
+
 def _bridge_for(
     tmp_path: Path, state_root: Path | None = None, **kwargs: object
 ) -> SkyPilotBridge:

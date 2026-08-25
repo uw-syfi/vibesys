@@ -13,6 +13,7 @@ import shlex
 import shutil
 import socket
 import socketserver
+import subprocess
 import tempfile
 import threading
 from pathlib import Path
@@ -879,6 +880,7 @@ class SkyPilotBridge:
 
     def _stage_workspace(self, staging: Path) -> None:
         hidden = frozenset(self._hidden_paths)
+        ignored = self._gitignored_paths(self._workspace)
         file_count = 0
         total_bytes = 0
         for current_text, directory_names, file_names in os.walk(
@@ -889,11 +891,11 @@ class SkyPilotBridge:
             directory_names[:] = [
                 name
                 for name in directory_names
-                if not self._excluded(relative_parent / name, hidden)
+                if not self._excluded(relative_parent / name, hidden, ignored)
             ]
             for name in (*directory_names, *file_names):
                 relative = relative_parent / name
-                if self._excluded(relative, hidden):
+                if self._excluded(relative, hidden, ignored):
                     continue
                 path = current / name
                 if path.is_symlink():
@@ -905,11 +907,15 @@ class SkyPilotBridge:
                 file_count += 1
                 total_bytes += path.stat().st_size
                 if file_count > _MAX_STAGED_FILES or total_bytes > _MAX_STAGED_BYTES:
-                    raise ValueError("workspace exceeds remote staging limits")  # noqa: TRY003
+                    raise ValueError(  # noqa: TRY003
+                        "workspace exceeds remote staging limits even after excluding "
+                        "Git-ignored paths (e.g. build caches); remove large tracked "
+                        "files or untrack them instead"
+                    )
 
         def ignore(current_text: str, names: list[str]) -> set[str]:
             parent = Path(current_text).relative_to(self._workspace)
-            return {name for name in names if self._excluded(parent / name, hidden)}
+            return {name for name in names if self._excluded(parent / name, hidden, ignored)}
 
         shutil.copytree(
             self._workspace,
@@ -920,15 +926,58 @@ class SkyPilotBridge:
         )
 
     @staticmethod
-    def _excluded(relative: Path, hidden: frozenset[Path]) -> bool:
+    def _gitignored_paths(workspace: Path) -> frozenset[tuple[str, ...]]:
+        """Return workspace-relative paths Git ignores, via one `ls-files` call.
+
+        Untracked, Git-ignored paths (build caches, dependency directories,
+        ...) are excluded from remote staging so they cannot overflow
+        `_MAX_STAGED_BYTES`; a Git-tracked file is never returned here (only
+        `--others` paths are considered), so tracked files are always staged.
+        Falls back to no additional exclusions (empty result) when `git` is
+        unavailable or `workspace` is not a Git repository, so staging still
+        works for non-Git workspaces.
+        """
+        try:
+            result = subprocess.run(  # noqa: S603
+                [  # noqa: S607
+                    "git",
+                    "-C",
+                    str(workspace),
+                    "ls-files",
+                    "--others",
+                    "--ignored",
+                    "--exclude-standard",
+                    "--directory",
+                    "-z",
+                ],
+                capture_output=True,
+                check=False,
+            )
+        except FileNotFoundError:
+            return frozenset()
+        if result.returncode != 0:
+            return frozenset()
+        return frozenset(
+            Path(os.fsdecode(raw).rstrip("/")).parts for raw in result.stdout.split(b"\0") if raw
+        )
+
+    @staticmethod
+    def _excluded(
+        relative: Path,
+        hidden: frozenset[Path],
+        ignored: frozenset[tuple[str, ...]] = frozenset(),
+    ) -> bool:
         local_state_or_logs = relative.parts[:2] in {
             (".vibesys", "logs"),
             (".vibesys", "state"),
         }
+        parts = relative.parts
+        gitignored = any(parts[:index] in ignored for index in range(1, len(parts) + 1))
         return (
             relative.name in _STAGING_EXCLUDED_NAMES
             or relative.name.startswith(".env")
             or local_state_or_logs
+            or gitignored
             or any(relative == path or relative.is_relative_to(path) for path in hidden)
         )
 
