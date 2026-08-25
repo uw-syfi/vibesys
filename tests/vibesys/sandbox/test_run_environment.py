@@ -1741,7 +1741,7 @@ remote_artifact_root = "/remote/vibesys"
     class FakeBridge:
         def __init__(self, **kwargs):  # noqa: ANN003, ANN204
             captures.update(kwargs)
-            self.socket_path = kwargs["socket_path"]
+            self.socket_path = tmp_path / "fake-bridge.sock"
             self.closed = 0
 
         def start(self) -> None:
@@ -1828,7 +1828,7 @@ remote_artifact_root = "/remote/vibesys"
     class FakeBridge:
         def __init__(self, **kwargs):  # noqa: ANN003, ANN204
             captures.update(kwargs)
-            self.socket_path = kwargs["socket_path"]
+            self.socket_path = tmp_path / "fake-bridge.sock"
 
         def start(self) -> None:
             self.socket_path.write_text("socket")
@@ -2083,7 +2083,7 @@ remote_artifact_root = "/remote/vibesys"
 
     class _FakeBridge:
         def __init__(self, **kwargs: Any) -> None:  # noqa: ANN401  # tracked: #288
-            self.socket_path = kwargs["socket_path"]
+            self.socket_path = tmp_path / "fake-bridge.sock"
 
         def start(self) -> None:
             self.socket_path.write_text("socket")
