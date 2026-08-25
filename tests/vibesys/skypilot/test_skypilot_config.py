@@ -129,6 +129,22 @@ def test_resolves_portable_request_without_persisting_profile_policy() -> None:
     assert resolved.infra == "slurm/example/gpu"
 
 
+def test_resolves_operator_memory_per_node_not_from_request() -> None:
+    document = ClusterProfilesFile(profiles={"test": _profile(memory_gb_per_node=480)})
+
+    resolved = resolve_profile(document, "test", _request())
+
+    assert resolved.memory_gb_per_node == 480
+
+
+def test_resolves_absent_memory_per_node_when_profile_omits_it() -> None:
+    document = ClusterProfilesFile(profiles={"test": _profile()})
+
+    resolved = resolve_profile(document, "test", _request())
+
+    assert resolved.memory_gb_per_node is None
+
+
 def test_resolution_freezes_operator_command_prefix() -> None:
     document = ClusterProfilesFile(
         profiles={"test": _profile(command_prefix=["srun", "--overlap"])}

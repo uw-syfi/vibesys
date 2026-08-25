@@ -37,6 +37,12 @@ class SkyPilotProfile(_StrictModel):
     accelerator_type: Annotated[str, Field(min_length=1)]
     accelerators_per_node: Annotated[int, Field(gt=0)]
     cpus_per_node: Annotated[int, Field(gt=0)] | None = None
+    # SkyPilot's Slurm backend defaults GPU-task memory to 4 GB per requested
+    # CPU when this is unset. That default can exceed a partition's actual
+    # per-node RAM (e.g. many CPUs, comparatively little memory), which fails
+    # resource resolution outright. Set this whenever cpus_per_node times 4
+    # would overshoot the partition's real per-node memory.
+    memory_gb_per_node: Annotated[int, Field(gt=0)] | None = None
     max_nodes: Annotated[int, Field(gt=0)] = 1
     exclusive: bool = True
     remote_runtime_image: str | None = None
@@ -113,6 +119,7 @@ class ResolvedSkyPilotResources(_StrictModel):
     accelerator_type: str
     accelerators_per_node: Annotated[int, Field(gt=0)]
     cpus_per_node: Annotated[int, Field(gt=0)] | None = None
+    memory_gb_per_node: Annotated[int, Field(gt=0)] | None = None
     exclusive: bool
     remote_runtime_image: str | None = None
     command_prefix: tuple[Annotated[str, Field(min_length=1)], ...] = ()
@@ -178,6 +185,7 @@ def resolve_profile(
         accelerator_type=profile.accelerator_type,
         accelerators_per_node=request.accelerators_per_node,
         cpus_per_node=request.cpus_per_node or profile.cpus_per_node,
+        memory_gb_per_node=profile.memory_gb_per_node,
         exclusive=profile.exclusive,
         remote_runtime_image=profile.remote_runtime_image,
         command_prefix=tuple(profile.command_prefix or ()),

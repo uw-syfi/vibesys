@@ -231,6 +231,21 @@ def stable_cluster_name(run_id: str, resources: ResolvedSkyPilotResources) -> st
     return f"vibesys-{component}-{suffix}"
 
 
+def _resource_document(resources: ResolvedSkyPilotResources) -> dict[str, object]:
+    """Build the ``resources:`` block of one SkyPilot task document."""
+    resource_document: dict[str, object] = {
+        "infra": resources.infra,
+        "accelerators": f"{resources.accelerator_type}:{resources.accelerators_per_node}",
+    }
+    if resources.cpus_per_node is not None:
+        resource_document["cpus"] = resources.cpus_per_node
+    if resources.memory_gb_per_node is not None:
+        resource_document["memory"] = resources.memory_gb_per_node
+    if resources.remote_runtime_image is not None:
+        resource_document["image_id"] = resources.remote_runtime_image
+    return resource_document
+
+
 def build_task_document(
     resources: ResolvedSkyPilotResources,
     *,
@@ -242,14 +257,7 @@ def build_task_document(
     """Build the provider-neutral subset of one SkyPilot task document."""
     if not command:
         raise ValueError("SkyPilot task command must not be empty")  # noqa: TRY003
-    resource_document: dict[str, object] = {
-        "infra": resources.infra,
-        "accelerators": f"{resources.accelerator_type}:{resources.accelerators_per_node}",
-    }
-    if resources.cpus_per_node is not None:
-        resource_document["cpus"] = resources.cpus_per_node
-    if resources.remote_runtime_image is not None:
-        resource_document["image_id"] = resources.remote_runtime_image
+    resource_document = _resource_document(resources)
     effective_command = (
         (*resources.command_prefix, *command) if use_command_prefix else tuple(command)
     )

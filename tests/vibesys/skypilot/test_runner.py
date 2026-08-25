@@ -138,6 +138,26 @@ def test_task_document_quotes_argv_once() -> None:
     }
 
 
+def test_task_document_includes_memory_when_profile_sets_it() -> None:
+    document = build_task_document(
+        _resources(memory_gb_per_node=480),
+        command=("true",),
+        use_command_prefix=False,
+    )
+
+    assert document["resources"]["memory"] == 480
+
+
+def test_task_document_omits_memory_when_profile_leaves_it_unset() -> None:
+    document = build_task_document(
+        _resources(memory_gb_per_node=None),
+        command=("true",),
+        use_command_prefix=False,
+    )
+
+    assert "memory" not in document["resources"]
+
+
 def test_task_document_prepends_operator_command_prefix_once() -> None:
     document = build_task_document(
         _resources(command_prefix=("srun", "--overlap", "--environment=/path/runtime.toml")),
