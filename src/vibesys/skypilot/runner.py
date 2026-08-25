@@ -28,6 +28,13 @@ _ANSI_ESCAPE_SEQUENCE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _MAX_CLUSTER_NAME = 28
 _JOB_DISCOVERY_TIMEOUT_SECONDS = 60.0
 _POLL_INTERVAL_SECONDS = 2.0
+# Bounded retry policy for read-only, idempotent control-plane calls (cluster
+# status, queue polling). The sky CLI's local API server cold-starts on first
+# invocation; combined with a slow site-side refresh (e.g. Slurm over an SSH
+# jump host), one attempt can exceed its timeout even though the underlying
+# query is safe to repeat. See ``SkyPilotJobRunner._control``.
+_CONTROL_RETRY_ATTEMPTS = 3
+_CONTROL_RETRY_TIMEOUT_MULTIPLIER = 1.5
 _SKY_JOB_FAILED = 100
 _SKY_JOB_NOT_FINISHED = 101
 _SKY_JOB_NOT_FOUND = 102
@@ -358,7 +365,11 @@ class SkyPilotJobRunner:
 
     def inspect_cluster(self, name: str, *, timeout: float = 60) -> ClusterInfo | None:
         """Return the named cluster's state, or ``None`` when it is absent."""
-        result = self._control(["status", "--refresh", "--output", "json", name], timeout=timeout)
+        result = self._control(
+            ["status", "--refresh", "--output", "json", name],
+            timeout=timeout,
+            retry_on_timeout=True,
+        )
         payload = _decode_json_stdout(
             result.stdout, error_message="SkyPilot status returned invalid JSON"
         )
@@ -501,7 +512,11 @@ class SkyPilotJobRunner:
         timeout: float = 60,
     ) -> RemoteJobInfo | None:
         """Find exactly one job by caller-owned name and optional persisted ID."""
-        result = self._control(["queue", cluster_name, "--output", "json"], timeout=timeout)
+        result = self._control(
+            ["queue", cluster_name, "--output", "json"],
+            timeout=timeout,
+            retry_on_timeout=True,
+        )
         records = self._queue_records(result.stdout, cluster_name)
         matches = [record for record in records if record.get("job_name") == job_name]
         if not matches:
@@ -592,7 +607,51 @@ class SkyPilotJobRunner:
         """Tear down a named cluster."""
         self._control(["down", "-y", cluster_name], timeout=timeout)
 
-    def _control(self, arguments: Sequence[str], *, timeout: float | None) -> ProcessResult:
+    def _control(
+        self,
+        arguments: Sequence[str],
+        *,
+        timeout: float | None,
+        retry_on_timeout: bool = False,
+    ) -> ProcessResult:
+        """Run one control-plane command, translating a nonzero exit to a domain error.
+
+        Set ``retry_on_timeout`` only for read-only, idempotent operations
+        (cluster status, queue polling): the sky CLI's local API server
+        cold-starts on first invocation, and combined with a slow site-side
+        refresh (e.g. Slurm over an SSH jump host) can push one attempt past
+        its timeout even though repeating the query is safe. On a timeout this
+        retries up to ``_CONTROL_RETRY_ATTEMPTS`` times with an escalating
+        per-attempt timeout, and raises :class:`SkyPilotTimeoutError` naming
+        every attempted timeout if all attempts time out.
+
+        Mutating operations (``launch``, ``exec``, ``cancel``, ``down``) must
+        leave this at its default. SkyPilot 0.13 gives no idempotency token
+        for submission, so a timed-out mutating attempt may already have taken
+        effect remotely; blindly retrying it risks a duplicate. Recovering
+        from a mutating timeout is a separate, documented reconciliation
+        concern (see docs/remote-slurm-execution.md), not an automatic retry.
+        """
+        if not retry_on_timeout or timeout is None:
+            return self._invoke_control(arguments, timeout=timeout)
+        attempted_timeouts: list[float] = []
+        last_error: SkyPilotTimeoutError | None = None
+        attempt_timeout = timeout
+        for _ in range(_CONTROL_RETRY_ATTEMPTS):
+            attempted_timeouts.append(attempt_timeout)
+            try:
+                return self._invoke_control(arguments, timeout=attempt_timeout)
+            except SkyPilotTimeoutError as exc:
+                last_error = exc
+                attempt_timeout *= _CONTROL_RETRY_TIMEOUT_MULTIPLIER
+        operation = arguments[0] if arguments else "command"
+        total = sum(attempted_timeouts)
+        raise SkyPilotTimeoutError(  # noqa: TRY003
+            f"SkyPilot {operation} timed out after {_CONTROL_RETRY_ATTEMPTS} attempts "
+            f"(per-attempt timeouts {attempted_timeouts!r} seconds, {total:.1f}s total)"
+        ) from last_error
+
+    def _invoke_control(self, arguments: Sequence[str], *, timeout: float | None) -> ProcessResult:
         result = self._invoke([self._executable, *arguments], timeout=timeout)
         if result.returncode != 0:
             operation = arguments[0] if arguments else "command"

@@ -469,17 +469,88 @@ def test_control_failure_does_not_expose_process_output() -> None:
     assert "secret-value" not in str(caught.value)
 
 
+def test_missing_executable_is_typed_and_not_retried() -> None:
+    # A missing executable is not a timeout, so it must not trigger the
+    # read-only retry policy even on a retryable operation like inspect_cluster.
+    fake = FakeCommandRunner([FileNotFoundError("sky")])
+    runner = SkyPilotJobRunner(fake)
+
+    with pytest.raises(SkyPilotCLIError):
+        runner.inspect_cluster("lease", timeout=1)
+
+    assert len(fake.calls) == 1
+
+
+def test_inspect_cluster_retries_a_timed_out_status_call_and_then_succeeds() -> None:
+    # Regression test: a bridge start() with no wrapping deadline used to die
+    # outright on one 60s status timeout during a cold local API server
+    # start. inspect_cluster is read-only, so a single timeout must not be
+    # fatal as long as a later attempt succeeds within the retry budget.
+    fake = FakeCommandRunner(
+        [
+            subprocess.TimeoutExpired(("sky", "status"), 1),
+            _result(stdout=json.dumps([{"name": "lease", "status": "UP"}])),
+        ]
+    )
+    runner = SkyPilotJobRunner(fake)
+
+    cluster = runner.inspect_cluster("lease", timeout=1)
+
+    assert cluster is not None
+    assert cluster.status is ClusterStatus.UP
+    assert len(fake.calls) == 2
+
+
+def test_inspect_cluster_raises_timeout_naming_attempts_when_all_retries_time_out() -> None:
+    fake = FakeCommandRunner(
+        [
+            subprocess.TimeoutExpired(("sky", "status"), 1),
+            subprocess.TimeoutExpired(("sky", "status"), 1),
+            subprocess.TimeoutExpired(("sky", "status"), 1),
+        ]
+    )
+    runner = SkyPilotJobRunner(fake)
+
+    with pytest.raises(SkyPilotTimeoutError, match="3 attempts"):
+        runner.inspect_cluster("lease", timeout=1)
+
+    assert len(fake.calls) == 3
+
+
+def test_query_job_retries_a_timed_out_queue_call_and_then_succeeds() -> None:
+    fake = FakeCommandRunner(
+        [
+            subprocess.TimeoutExpired(("sky", "queue"), 1),
+            _result(stdout=json.dumps({"lease": [{"job_name": "job-token", "job_id": 7}]})),
+        ]
+    )
+    runner = SkyPilotJobRunner(fake)
+
+    job = runner.query_job("lease", job_name="job-token", timeout=1)
+
+    assert job is not None
+    assert job.job_id == 7
+    assert len(fake.calls) == 2
+
+
 @pytest.mark.parametrize(
-    ("failure", "error"),
+    ("mutate", "expected_call_prefix"),
     [
-        (FileNotFoundError("sky"), SkyPilotCLIError),
-        (subprocess.TimeoutExpired(("sky", "status"), 1), SkyPilotTimeoutError),
+        (lambda runner: runner.launch("lease", _resources()), ("sky", "launch")),
+        (lambda runner: runner.cancel("lease", 7), ("sky", "cancel")),
+        (lambda runner: runner.release("lease"), ("sky", "down")),
     ],
 )
-def test_process_boundary_failures_are_typed(
-    failure: BaseException, error: type[SkyPilotCLIError]
+def test_mutating_control_calls_are_not_retried_on_timeout(
+    mutate: Callable[[SkyPilotJobRunner], object], expected_call_prefix: tuple[str, ...]
 ) -> None:
-    runner = SkyPilotJobRunner(FakeCommandRunner([failure]))
+    fake = FakeCommandRunner([subprocess.TimeoutExpired(("sky",), 1)])
+    runner = SkyPilotJobRunner(fake)
 
-    with pytest.raises(error):
-        runner.inspect_cluster("lease", timeout=1)
+    with pytest.raises(SkyPilotTimeoutError):
+        mutate(runner)
+
+    # Exactly one attempt: a mutating op's timeout is ambiguous about whether
+    # the remote side already accepted it, so it must never be auto-retried.
+    assert len(fake.calls) == 1
+    assert fake.calls[0][:2] == expected_call_prefix
