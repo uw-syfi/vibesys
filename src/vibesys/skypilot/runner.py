@@ -32,6 +32,9 @@ _SKY_JOB_FAILED = 100
 _SKY_JOB_NOT_FINISHED = 101
 _SKY_JOB_NOT_FOUND = 102
 _SKY_JOB_CANCELLED = 103
+# Name of the remote environment variable that carries the host shell's
+# working directory across an operator ``command_prefix`` (see `_run_script`).
+_REMOTE_WORKDIR_VARIABLE = "VIBESYS_REMOTE_WORKDIR"
 
 
 class SkyPilotCLIError(RuntimeError):
@@ -246,6 +249,27 @@ def _resource_document(resources: ResolvedSkyPilotResources) -> dict[str, object
     return resource_document
 
 
+def _run_script(resources: ResolvedSkyPilotResources, command: Sequence[str]) -> str:
+    """Compose the remote run script, restoring cwd across an operator command prefix.
+
+    ``resources.command_prefix`` (e.g. Slurm ``srun --environment=<EDF>``
+    invoking a pyxis/enroot container) can run the wrapped command with a
+    working directory the container image controls, independent of the host
+    shell's cwd that SkyPilot establishes from the task's ``workdir`` before
+    running this script. Capture that host cwd before the prefix and
+    re-enter it inside the prefixed shell, so ``command`` always executes
+    from the synced workspace regardless of what the operator's command
+    prefix does to cwd. This assumes the synced workspace stays reachable at
+    the same path across the prefix (e.g. via a bind mount); it restores cwd
+    only, it does not change path visibility.
+    """
+    if not resources.command_prefix:
+        return shlex.join(command)
+    inner = f'cd "${_REMOTE_WORKDIR_VARIABLE}" && exec {shlex.join(command)}'
+    prefixed = (*resources.command_prefix, "bash", "-c", inner)
+    return f'export {_REMOTE_WORKDIR_VARIABLE}="$(pwd)" && {shlex.join(prefixed)}'
+
+
 def build_task_document(
     resources: ResolvedSkyPilotResources,
     *,
@@ -258,13 +282,13 @@ def build_task_document(
     if not command:
         raise ValueError("SkyPilot task command must not be empty")  # noqa: TRY003
     resource_document = _resource_document(resources)
-    effective_command = (
-        (*resources.command_prefix, *command) if use_command_prefix else tuple(command)
+    run_script = (
+        _run_script(resources, tuple(command)) if use_command_prefix else shlex.join(command)
     )
     document: dict[str, object] = {
         "num_nodes": resources.nodes,
         "resources": resource_document,
-        "run": shlex.join(effective_command),
+        "run": run_script,
     }
     if name is not None:
         document["name"] = name

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -164,9 +165,57 @@ def test_task_document_prepends_operator_command_prefix_once() -> None:
         command=("python", "benchmark.py", "argument with spaces"),
     )
 
-    assert document["run"] == (
-        "srun --overlap --environment=/path/runtime.toml python benchmark.py 'argument with spaces'"
+    run = document["run"]
+    assert isinstance(run, str)
+    prefix = 'export VIBESYS_REMOTE_WORKDIR="$(pwd)" && '
+    assert run.startswith(prefix)
+    # The wrapped argv (parsed back with shlex) contains the operator prefix
+    # exactly once, followed by a `bash -c <inner script>` re-entering the
+    # captured host cwd before exec'ing the original command.
+    wrapped_argv = shlex.split(run.removeprefix(prefix))
+    assert wrapped_argv[:5] == [
+        "srun",
+        "--overlap",
+        "--environment=/path/runtime.toml",
+        "bash",
+        "-c",
+    ]
+    assert len(wrapped_argv) == len(wrapped_argv[:5]) + 1
+    inner_script = wrapped_argv[5]
+    assert inner_script == (
+        "cd \"$VIBESYS_REMOTE_WORKDIR\" && exec python benchmark.py 'argument with spaces'"
     )
+
+
+def test_task_document_reuses_plain_command_without_operator_command_prefix() -> None:
+    # No `command_prefix` configured on the profile: the run script is the
+    # plain quoted command, with no cwd-capture wrapping needed.
+    document = build_task_document(
+        _resources(command_prefix=()),
+        command=("python", "benchmark.py"),
+    )
+
+    assert document["run"] == "python benchmark.py"
+
+
+def test_task_document_command_prefix_wrapping_preserves_argv_quoting() -> None:
+    # Arguments containing shell metacharacters and embedded quotes must
+    # survive the extra `bash -c` wrapping layer intact.
+    command = ("python", "check.py", "path with spaces/and'quote", "$(not-shell)")
+    document = build_task_document(
+        _resources(command_prefix=("srun", "--environment=/path/runtime.toml")),
+        command=command,
+    )
+
+    run = document["run"]
+    assert isinstance(run, str)
+    prefix = 'export VIBESYS_REMOTE_WORKDIR="$(pwd)" && '
+    wrapped_argv = shlex.split(run.removeprefix(prefix))
+    inner_script = wrapped_argv[-1]
+    assert inner_script == ('cd "$VIBESYS_REMOTE_WORKDIR" && exec ' + shlex.join(command))
+    # The inner script, once handed to a real shell, must expand back to the
+    # exact original argv it wraps (modulo the leading `cd ... && exec`).
+    assert shlex.split(inner_script)[4:] == list(command)
 
 
 def test_inspect_cluster_parses_json_and_unknown_states() -> None:
