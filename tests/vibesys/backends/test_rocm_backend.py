@@ -104,6 +104,27 @@ class TestRocmSandbox:
         assert isinstance(sb, DockerSandbox)
         assert sb._group_add == ["video", "render"]  # noqa: SLF001  # tracked: #288
 
+    def test_docker_skip_accelerator_also_skips_device_groups(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        """Remote run environments (SkyPilot, Modal) request a CPU-only editor
+        container via ``attach_accelerator=False``. The video/render groups
+        exist only to unlock the device nodes requested alongside them; with
+        no devices requested there is nothing for them to unlock, and the
+        editor host may not even have those groups (e.g. a CPU-only host
+        launching a SkyPilot-dispatched remote run) — a stray --group-add
+        there previously made `docker run` fail with "Unable to find group
+        render"."""
+        impl = _make_backend(tmp_path)
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        sb = impl.make_sandbox(
+            SandboxKind.DOCKER,
+            host_workspace=str(workspace),
+            log_path=None,
+            attach_accelerator=False,
+        )
+        assert sb._group_add == []  # noqa: SLF001  # tracked: #288
+        assert sb._devices == []  # noqa: SLF001  # tracked: #288
+
     def test_torch_wheel_index_targets_rocm(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
         """Without this, `uv add torch` in the agent's fresh venv resolves the
         default PyPI (CUDA) wheel and the run silently falls back to CPU."""

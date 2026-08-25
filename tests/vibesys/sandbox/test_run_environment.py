@@ -1774,6 +1774,11 @@ remote_artifact_root = "/remote/vibesys"
 
     kind, kwargs = backend.calls[0]
     assert kind is SandboxKind.DOCKER
+    # Evaluation runs on the remote SkyPilot cluster; this editor container
+    # gets no local GPU devices *or* their unlock groups (e.g. rocm's
+    # video/render) — see RocmBackend.make_sandbox and
+    # test_docker_skip_accelerator_also_skips_device_groups in
+    # tests/backends/test_rocm_backend.py for the composed-args proof.
     assert kwargs["attach_accelerator"] is False
     # The local editor container starts from the same kind of pushed agent
     # image the plain Docker path builds, and installs nothing at start; this

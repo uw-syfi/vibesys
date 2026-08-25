@@ -190,7 +190,13 @@ class RocmBackend:
                 image=container_image or self.image,
                 gpus=None,  # ROCm uses --device, not --gpus
                 devices=self._devices if attach_accelerator else [],
-                group_add=list(_DEVICE_GROUPS),
+                # The video/render groups exist only to unlock the device
+                # nodes just requested above; without a device request there
+                # is nothing on the host they need to unlock, and the host
+                # may not even have them (e.g. a CPU-only editor host for a
+                # remote run environment) — see docker_sandbox.py's group_add
+                # docstring for why these groups are device-contingent.
+                group_add=list(_DEVICE_GROUPS) if attach_accelerator else [],
                 shm_size=_DEFAULT_SHM_SIZE,
                 bind_mounts=bind_mounts,
                 resources=resources,
