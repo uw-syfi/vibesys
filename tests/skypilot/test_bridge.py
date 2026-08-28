@@ -469,6 +469,7 @@ def test_bridge_rejects_special_workspace_file(tmp_path: Path) -> None:
             frame = decode_response(client.makefile("rb").readline())
         assert isinstance(frame, ErrorFrame)
         assert frame.error == "ValueError"
+        assert frame.message == "workspace contains a special file"
         assert runner.commands == []
     finally:
         bridge.close()
@@ -509,9 +510,45 @@ def test_bridge_rejects_workspace_symlink_escape(tmp_path: Path) -> None:
             frame = decode_response(client.makefile("rb").readline())
         assert isinstance(frame, ErrorFrame)
         assert frame.error == "ValueError"
+        assert frame.message == "workspace symlink escapes the project"
         assert runner.commands == []
     finally:
         bridge.close()
+
+
+def test_bridge_logs_full_traceback_on_handler_failure(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    os.mkfifo(workspace / "pipe")
+    runner = FakeRunner()
+    logs: list[str] = []
+    bridge = SkyPilotBridge(
+        runner=runner,  # pyright: ignore[reportArgumentType]
+        cluster_name="lease",
+        resources=_resources(),
+        workspace=workspace,
+        evaluator_package_root=None,
+        hidden_paths=(),
+        commands={"accuracy": ("true",)},
+        benchmark_output_argument=None,
+        state_namespace=_Namespace(tmp_path / "state"),  # pyright: ignore[reportArgumentType]
+        log=logs.append,
+    )
+    bridge.start()
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.connect(str(bridge.socket_path))
+            client.sendall(
+                encode_message(EvaluationRequest(kind="accuracy", invocation_id="4" * 32))
+            )
+            frame = decode_response(client.makefile("rb").readline())
+        assert isinstance(frame, ErrorFrame)
+    finally:
+        bridge.close()
+
+    traceback_logs = [entry for entry in logs if "Traceback" in entry]
+    assert len(traceback_logs) == 1
+    assert "workspace contains a special file" in traceback_logs[0]
 
 
 def _bridge_for_staging(

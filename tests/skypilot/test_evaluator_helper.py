@@ -79,12 +79,26 @@ def test_helper_relays_streams_and_maps_terminal_status(
 
 def test_helper_reports_bridge_error_as_transport_failure(tmp_path: Path) -> None:
     path = tmp_path / "bridge.sock"
-    thread = _serve_frames(path, [ErrorFrame(error="SkyPilotTimeoutError")])
+    thread = _serve_frames(
+        path,
+        [ErrorFrame(error="SkyPilotTimeoutError", message="control-plane call timed out")],
+    )
     stderr = io.StringIO()
 
     assert run_evaluator("benchmark", path, stdout=io.StringIO(), stderr=stderr) == 2
     thread.join()
     assert "SkyPilotTimeoutError" in stderr.getvalue()
+    assert "control-plane call timed out" in stderr.getvalue()
+
+
+def test_helper_reports_bridge_error_without_message(tmp_path: Path) -> None:
+    path = tmp_path / "bridge.sock"
+    thread = _serve_frames(path, [ErrorFrame(error="ValueError")])
+    stderr = io.StringIO()
+
+    assert run_evaluator("benchmark", path, stdout=io.StringIO(), stderr=stderr) == 2
+    thread.join()
+    assert stderr.getvalue().strip() == "SkyPilot bridge error: ValueError"
 
 
 def test_helper_rejects_incomplete_terminal_result(tmp_path: Path) -> None:

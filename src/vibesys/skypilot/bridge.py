@@ -16,6 +16,7 @@ import socketserver
 import subprocess
 import tempfile
 import threading
+import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -387,7 +388,8 @@ class SkyPilotBridge:
                     raise ValueError("SkyPilot bridge is closing")  # noqa: TRY003, TRY301
                 self._handle_request(reader, writer, connection)
         except Exception as exc:  # noqa: BLE001
-            self._write(writer, ErrorFrame(error=type(exc).__name__))
+            self._log(f"[error] SkyPilot bridge handler failed:\n{traceback.format_exc()}")
+            self._write(writer, ErrorFrame(error=type(exc).__name__, message=str(exc)))
         finally:
             with self._handler_condition:
                 self._active_handlers -= 1
