@@ -67,6 +67,18 @@ _SOCKET_FILE_NAME = "bridge.sock"
 # room for it so socket.bind never raises "AF_UNIX path too long".
 _MAX_SOCKET_PATH_BYTES = 107
 _FRAMEWORK_ARTIFACT = re.compile(r"^/tmp/vibesys-framework-benchmark-[a-zA-Z0-9._-]+\.json$")
+# Non-terminal SkyPilot queue states: a job in one of these is still capable of
+# producing fresh output, so its replay state must not be discarded out from
+# under it. Every other status (terminal, or absent from the queue entirely)
+# is safe evidence that a prior attempt is dead.
+_ACTIVE_REMOTE_JOB_STATUSES = frozenset(
+    {
+        RemoteJobStatus.INIT,
+        RemoteJobStatus.PENDING,
+        RemoteJobStatus.SETTING_UP,
+        RemoteJobStatus.RUNNING,
+    }
+)
 _STAGING_EXCLUDED_NAMES = frozenset(
     {
         ".cache",
@@ -171,6 +183,16 @@ class _ArtifactStream:
         return data
 
 
+class _ReplayInconsistentError(ValueError):
+    """The durable log replay state for one invocation cannot be trusted.
+
+    Raised only by :class:`_DecodedLogSpool`. Retrying the same replay can
+    never succeed once the persisted spool and journal offsets disagree, so
+    the caller treats this as evidence the prior dispatch is unrecoverable
+    (see ``_run``'s handling below) rather than a transient failure.
+    """
+
+
 class _DecodedLogSpool:
     """Persist decoded remote stdout and suppress replayed Sky log prefixes."""
 
@@ -194,7 +216,9 @@ class _DecodedLogSpool:
             self._persisted = ""
         record = self._record()
         if len(self._persisted) < record.remote_read_offset:
-            raise ValueError("SkyPilot log spool is shorter than its journal offset")  # noqa: TRY003
+            raise _ReplayInconsistentError(  # noqa: TRY003
+                "SkyPilot log spool is shorter than its journal offset"
+            )
         if len(self._persisted) > record.remote_read_offset:
             record = self._journal.offsets(
                 record,
@@ -213,7 +237,7 @@ class _DecodedLogSpool:
         """Accept Sky's from-origin log stream and deliver only its new suffix."""
         overlap = min(len(data), max(0, len(self._persisted) - self._seen))
         if data[:overlap] != self._persisted[self._seen : self._seen + overlap]:
-            raise ValueError("SkyPilot replayed log prefix changed")  # noqa: TRY003
+            raise _ReplayInconsistentError("SkyPilot replayed log prefix changed")  # noqa: TRY003
         suffix = data[overlap:]
         self._seen += len(data)
         if not suffix:
@@ -238,12 +262,12 @@ class _DecodedLogSpool:
     def finish(self) -> None:
         """Require a terminal from-origin stream to cover the durable prefix."""
         if self._seen < len(self._persisted):
-            raise ValueError("SkyPilot terminal log replay was truncated")  # noqa: TRY003
+            raise _ReplayInconsistentError("SkyPilot terminal log replay was truncated")  # noqa: TRY003
 
     def _record(self) -> InvocationRecord:
         record = self._journal.load(self._invocation_id)
         if record is None:
-            raise ValueError("SkyPilot invocation journal disappeared")  # noqa: TRY003
+            raise _ReplayInconsistentError("SkyPilot invocation journal disappeared")  # noqa: TRY003
         return record
 
 
@@ -440,7 +464,7 @@ class SkyPilotBridge:
             return
         self._run(request, effective_command, record, staging, reader, writer, connection)
 
-    def _run(  # noqa: C901, PLR0913, PLR0915
+    def _run(  # noqa: C901, PLR0912, PLR0913, PLR0915
         self,
         request: EvaluationRequest,
         command: tuple[str, ...],
@@ -483,28 +507,30 @@ class SkyPilotBridge:
                     ).hexdigest()[:32]
                     begin_marker = f"__VIBESYS_SKYPILOT_ARTIFACT_BEGIN_{nonce}__"
                     end_marker = f"__VIBESYS_SKYPILOT_ARTIFACT_END_{nonce}__"
-                    log_spool = _DecodedLogSpool(
-                        path=self._state_namespace.external_directory(
-                            f"logs/{request.invocation_id}/{active_record.job_name}"
-                        )
-                        / "stdout",
-                        journal=self._journal,
-                        invocation_id=request.invocation_id,
-                        sink=lambda data: self._write_output(writer, "stdout", data, write_lock),
-                    )
-                    artifact_stream = _ArtifactStream(
-                        log_spool.feed,
-                        expected=bool(request.artifacts),
-                        begin_marker=begin_marker,
-                        end_marker=end_marker,
-                    )
-                    effective_command = self._with_artifact_transport(
-                        command,
-                        request.artifacts,
-                        begin_marker=begin_marker,
-                        end_marker=end_marker,
-                    )
                     try:
+                        log_spool = _DecodedLogSpool(
+                            path=self._state_namespace.external_directory(
+                                f"logs/{request.invocation_id}/{active_record.job_name}"
+                            )
+                            / "stdout",
+                            journal=self._journal,
+                            invocation_id=request.invocation_id,
+                            sink=lambda data: self._write_output(
+                                writer, "stdout", data, write_lock
+                            ),
+                        )
+                        artifact_stream = _ArtifactStream(
+                            log_spool.feed,
+                            expected=bool(request.artifacts),
+                            begin_marker=begin_marker,
+                            end_marker=end_marker,
+                        )
+                        effective_command = self._with_artifact_transport(
+                            command,
+                            request.artifacts,
+                            begin_marker=begin_marker,
+                            end_marker=end_marker,
+                        )
                         found = self._reconcile(active_record)
                         self._require_open_for_remote_action()
                         if found is not None and found.status is RemoteJobStatus.FAILED_DRIVER:
@@ -572,6 +598,18 @@ class SkyPilotBridge:
                             ClusterStatus.STOPPED,
                         }
                         if not allocation_expired:
+                            raise
+                        self._require_open_for_remote_action()
+                        active_record = self._recover_after_allocation_loss(latest)
+                        self._ensure_current_cluster_for_work()
+                    except _ReplayInconsistentError:
+                        latest = self._journal.load(request.invocation_id) or active_record
+                        found = self._reconcile(latest)
+                        if found is not None and found.status in _ACTIVE_REMOTE_JOB_STATUSES:
+                            # The prior attempt is still producing output; the
+                            # local replay state is corrupt for an unrelated
+                            # reason, so surface the error instead of
+                            # discarding a job that could still complete.
                             raise
                         self._require_open_for_remote_action()
                         active_record = self._recover_after_allocation_loss(latest)

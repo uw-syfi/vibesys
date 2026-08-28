@@ -30,7 +30,14 @@ from vibesys.skypilot.recovery import (
     InvocationProvenance,
     InvocationResultRecord,
 )
-from vibesys.skypilot.runner import ClusterInfo, ClusterStatus, JobResult, JobStatus
+from vibesys.skypilot.runner import (
+    ClusterInfo,
+    ClusterStatus,
+    JobResult,
+    JobStatus,
+    RemoteJobInfo,
+    RemoteJobStatus,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -111,7 +118,7 @@ class FakeRunner:
         stderr_sink("err\n")
         return JobResult(JobStatus.COMPLETED, 0, 9, "out\n", "err\n", cluster_name)
 
-    def query_job(self, *args: object, **kwargs: object) -> None:  # noqa: ARG002
+    def query_job(self, *args: object, **kwargs: object) -> RemoteJobInfo | None:  # noqa: ARG002
         return None
 
     def cancel(self, cluster_name: str, job_id: int) -> None:
@@ -314,6 +321,154 @@ def test_terminal_replay_tracks_persisted_cluster_for_release(tmp_path: Path) ->
     bridge.close()
 
     assert set(runner.release_names) == {"new-lease", "old-lease"}
+
+
+def _prepared_torn_invocation(
+    bridge: SkyPilotBridge, namespace: _Namespace, invocation_id: str
+) -> tuple[EvaluationRequest, InvocationJournal, object]:
+    """Persist an invocation whose journal offset outruns its (missing) spool.
+
+    Mirrors a client dying mid-dispatch after the bridge advanced
+    `remote_read_offset` in the journal but before anything reached the
+    on-disk spool: `_DecodedLogSpool.__init__` then raises
+    `_ReplayInconsistentError` deterministically on every reattach attempt.
+    """
+    request = EvaluationRequest(kind="accuracy", invocation_id=invocation_id)
+    staging = bridge._snapshot(request.invocation_id)  # noqa: SLF001
+    snapshot_digest = bridge._snapshot_digest(staging)  # noqa: SLF001
+    request_digest = hashlib.sha256(
+        json.dumps(
+            {
+                "request": request.model_dump(mode="json", exclude={"invocation_id"}),
+                "command": ("true",),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    journal = InvocationJournal(namespace)  # pyright: ignore[reportArgumentType]
+    record = journal.prepare(request.invocation_id, request_digest, snapshot_digest)
+    record = journal.submitting(record, "lease", _attempt_resources())
+    record = journal.submitted(record, 9, "lease")
+    journal.offsets(record, remote_read=100, client_delivered=0)
+    return request, journal, record
+
+
+def test_bridge_resets_replay_inconsistent_state_for_a_dead_invocation(tmp_path: Path) -> None:
+    """A torn replay state with no live remote job gets a fresh dispatch.
+
+    Regression test for a client that reuses its caller-token invocation_id
+    across restarts (intended sequential-caller semantics): once the local
+    replay state diverged from the journal, `_DecodedLogSpool` used to raise
+    a bare `ValueError` on every reattach, forever, even though the prior
+    job was already gone. The bridge must treat that combination as evidence
+    the prior dispatch is dead and dispatch fresh instead of failing forever.
+    """
+    namespace = _Namespace(tmp_path / "state")
+    runner = FakeRunner()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "candidate.py").write_text("candidate")
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "checker.py").write_text("checker")
+    bridge = SkyPilotBridge(
+        runner=runner,  # pyright: ignore[reportArgumentType]
+        cluster_name="lease",
+        resources=_resources(),
+        workspace=workspace,
+        evaluator_package_root=package,
+        hidden_paths=(),
+        commands={"accuracy": ("true",)},
+        benchmark_output_argument=None,
+        state_namespace=namespace,  # pyright: ignore[reportArgumentType]
+        log=lambda _: None,
+    )
+    request, journal, record = _prepared_torn_invocation(bridge, namespace, "7" * 32)
+    reader = io.BytesIO(
+        encode_message(request) + encode_message(AckRequest(invocation_id=request.invocation_id))
+    )
+    writer = io.BytesIO()
+    connection, peer = socket.socketpair()
+    try:
+        bridge._handle_request(reader, writer, connection)  # noqa: SLF001
+    finally:
+        connection.close()
+        peer.close()
+        bridge.close()
+
+    writer.seek(0)
+    frames = []
+    while line := writer.readline():
+        frames.append(decode_response(line))
+    assert [frame.type for frame in frames] == ["stdout", "stderr", "result", "acked"]
+    assert runner.commands == [("true",)]
+    recovered = journal.load(request.invocation_id)
+    assert recovered is not None
+    assert recovered.attempt == 2
+    assert recovered.job_name != record.job_name
+
+
+def test_bridge_preserves_a_genuinely_live_invocation_on_replay_inconsistency(
+    tmp_path: Path,
+) -> None:
+    """A live remote job's replay state is never silently discarded.
+
+    If the persisted spool/journal state is torn while the underlying
+    SkyPilot job is still queued or running, resetting would abandon a job
+    that could still complete on its own; the bridge must surface the
+    replay error instead of resubmitting over it.
+    """
+
+    class LiveRunner(FakeRunner):
+        def query_job(self, *args: object, **kwargs: object) -> RemoteJobInfo:  # noqa: ARG002
+            job_name = kwargs["job_name"]
+            assert isinstance(job_name, str)
+            return RemoteJobInfo(9, job_name, RemoteJobStatus.RUNNING)
+
+    namespace = _Namespace(tmp_path / "state")
+    runner = LiveRunner()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "candidate.py").write_text("candidate")
+    bridge = SkyPilotBridge(
+        runner=runner,  # pyright: ignore[reportArgumentType]
+        cluster_name="lease",
+        resources=_resources(),
+        workspace=workspace,
+        evaluator_package_root=None,
+        hidden_paths=(),
+        commands={"accuracy": ("true",)},
+        benchmark_output_argument=None,
+        state_namespace=namespace,  # pyright: ignore[reportArgumentType]
+        log=lambda _: None,
+    )
+    request, journal, record = _prepared_torn_invocation(bridge, namespace, "8" * 32)
+    reader = io.BytesIO(
+        encode_message(request) + encode_message(AckRequest(invocation_id=request.invocation_id))
+    )
+    writer = io.BytesIO()
+    connection, peer = socket.socketpair()
+    try:
+        # Go through `_handle` (not `_handle_request`) so the top-level
+        # exception handler converts the re-raised replay error into the
+        # same ErrorFrame a real client would receive.
+        bridge._handle(reader, writer, connection)  # noqa: SLF001
+    finally:
+        connection.close()
+        peer.close()
+        bridge.close()
+
+    writer.seek(0)
+    frame = decode_response(writer.readline())
+    assert isinstance(frame, ErrorFrame)
+    assert frame.error == "_ReplayInconsistentError"
+    assert "shorter than its journal offset" in frame.message
+    assert runner.commands == []
+    unchanged = journal.load(request.invocation_id)
+    assert unchanged is not None
+    assert unchanged.attempt == record.attempt
+    assert unchanged.job_name == record.job_name
 
 
 def test_job_discovered_during_close_is_cancelled_and_released(tmp_path: Path) -> None:
