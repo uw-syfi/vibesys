@@ -150,10 +150,16 @@ def run_evaluator(  # noqa: C901, PLR0911, PLR0912, PLR0915
                 artifact_received = True
             elif frame_type == "error":
                 error = frame.get("error")
-                if set(frame) != {"version", "type", "error"} or not isinstance(error, str):
+                message = frame.get("message")
+                if (
+                    set(frame) != {"version", "type", "error", "message"}
+                    or not isinstance(error, str)
+                    or not isinstance(message, str)
+                ):
                     print("SkyPilot bridge returned an invalid frame", file=stderr)
                     return 2
-                print(f"SkyPilot bridge error: {error}", file=stderr)
+                detail = f"{error}: {message}" if message else error
+                print(f"SkyPilot bridge error: {detail}", file=stderr)
                 return 2
             else:
                 print("SkyPilot bridge returned an invalid frame", file=stderr)

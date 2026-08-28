@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 PROTOCOL_VERSION = 2
+_MAX_ERROR_MESSAGE_CHARACTERS = 500
 
 
 class _Message(BaseModel):
@@ -70,6 +71,14 @@ class ErrorFrame(_Message):
 
     type: Literal["error"] = "error"
     error: str
+    message: str = ""
+
+    @field_validator("message")
+    @classmethod
+    def _bounded_single_line(cls, value: str) -> str:
+        """Collapse newlines and cap length so the frame stays one JSON line."""
+        collapsed = value.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+        return collapsed[:_MAX_ERROR_MESSAGE_CHARACTERS]
 
 
 ResponseFrame = Annotated[

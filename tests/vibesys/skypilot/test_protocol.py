@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from vibesys.skypilot.protocol import (
+    ErrorFrame,
     EvaluationRequest,
     OutputFrame,
     decode_request,
@@ -15,6 +16,15 @@ def test_protocol_round_trips_strict_versioned_messages() -> None:
     frame = OutputFrame(type="stdout", data="measurement\n")
 
     assert decode_request(encode_message(request)) == request
+    assert decode_response(encode_message(frame)) == frame
+
+
+def test_error_frame_collapses_newlines_and_bounds_message_length() -> None:
+    frame = ErrorFrame(error="ValueError", message="line one\r\nline two\n" + "x" * 600)
+
+    assert "\n" not in frame.message
+    assert "\r" not in frame.message
+    assert len(frame.message) == 500
     assert decode_response(encode_message(frame)) == frame
 
 
