@@ -177,6 +177,51 @@ allowlist = [
     "src/vibesys/_model_config/",
 ]
 
+[tool.vibesys.file_length]
+# God-file ceiling for first-party Python, in physical lines (`wc -l`).
+# Enforced by `scripts/check_file_length.py`. Ruff's C901/PL rules bound
+# individual functions but say nothing about how many of them one module may
+# accumulate, and `biome.json` has the TypeScript counterpart
+# (`style/noExcessiveLinesPerFile`) at the same 800-line ceiling.
+max_lines = 800
+
+# Directories scanned for `*.py`. Any path with a `tests` or `__pycache__`
+# component is skipped: long test modules are normal, and `biome.json`
+# exempts `*.test.ts` from its file-length rule for the same reason.
+roots = ["src", "libs", "scripts", "sdk"]
+
+# Files already over the ceiling, recorded at their length on 2026-08-27. This
+# is a shrink-only ratchet: exceeding a recorded count fails, and an entry that
+# drops back to 800 or below is reported as stale and must be deleted. Splitting
+# any of these is a separate refactor, not a prerequisite for turning the check
+# on.
+[tool.vibesys.file_length.allowlist]
+# The agent loop: round orchestration, agent invocation, and result handling in
+# one module. The largest single refactor target in the repo.
+"src/vibesys/loops/agent/loop.py" = 3618
+# CLI entry point; every subcommand's argument wiring lives here.
+"src/vibesys/main.py" = 2610
+# Generated-state accessors for the whole `.vibesys` layout.
+"libs/vs-project/src/vs_project/_state.py" = 2141
+# Prompt/context assembly for every loop.
+"src/vibesys/context.py" = 1981
+# Evolutionary search loop, parallel in structure to the agent loop above.
+"src/vibesys/loops/evolve/loop.py" = 1592
+# Sandbox run environment: setup, execution, and teardown across strategies.
+"src/vibesys/sandbox/run_environment.py" = 1552
+# Backend supervisor: process lifecycle plus the event fan-out to clients.
+"src/vibesys/server/supervisor.py" = 1387
+# Omnigent agent driver, including its full CLI protocol translation.
+"src/vibesys/agents/drivers/omnigent.py" = 1012
+# Git snapshot/restore plumbing for candidate repositories.
+"src/vibesys/run/git_tracker.py" = 988
+# Modal sandbox strategy: image build, volume wiring, and remote execution.
+"libs/vs-sandbox/src/vs_sandbox/modal_sandbox.py" = 900
+# SkyPilot bridge: cluster provisioning and job streaming.
+"src/vibesys/skypilot/bridge.py" = 875
+# Pydantic models for the persisted state and config contracts.
+"src/vibesys/schemas.py" = 809
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

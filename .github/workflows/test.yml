@@ -147,6 +147,13 @@ jobs:
       - name: Check Python lint
         run: ./scripts/check_lint.sh
 
+      # Ruff bounds individual functions (C901, PL) but not module size, so a
+      # file can grow without bound while every function in it stays legal.
+      # Ratchets against the allowlist in [tool.vibesys.file_length]; the
+      # TypeScript counterpart rides `pnpm check:ts` in the `tui` job.
+      - name: Check Python file length
+        run: uv run python scripts/check_file_length.py
+
       - name: Check Python package boundaries
         run: uv run lint-imports
 
