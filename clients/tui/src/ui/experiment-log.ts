@@ -1,3 +1,4 @@
+// biome-ignore lint/style/noExcessiveLinesPerFile: pre-existing; tracked: #288
 import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} from '@opentui/core';
 import type {HypothesisEntry, HypothesisRound} from '@vibesys/backend-client';
 import type {SessionController} from '../session-controller.js';
@@ -172,6 +173,7 @@ export class ExperimentLogView {
     this.#stopElapsedTimer();
   }
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
   render(state: SessionState): void {
     const log = experimentLogVisible(state) ? state.experimentLog : null;
     if (log === null) {
@@ -264,6 +266,7 @@ export class ExperimentLogView {
         : '↑↓: select activity or recorded round · Enter: open';
   }
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
   #renderTable(state: SessionState): void {
     const log = state.experimentLog;
     if (log === null) return;
@@ -913,7 +916,9 @@ export function hypothesisMetadata(entry: HypothesisEntry): string {
  * direction as words, then the absolute value, its baseline, and the causal
  * delta the table compresses into one cell.
  */
-function measurementMetadata(entry: HypothesisEntry): string[] {
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+function  measurementMetadata(entry: HypothesisEntry): string[] {
   const parts: string[] = [];
   const name = entry.perf_metric_name ?? null;
   const direction =

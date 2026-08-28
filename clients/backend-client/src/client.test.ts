@@ -33,6 +33,7 @@ describe('ServerClient', () => {
     await withServer(
       socket => {
         const requests: Array<Record<string, unknown>> = [];
+        // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
         respondToLines(socket, request => {
           requests.push(request);
           if (requests.length !== 2) return;

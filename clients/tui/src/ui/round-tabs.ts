@@ -125,7 +125,9 @@ interface TabWindow {
  * later side on a tie. An overflow marker is reserved at its real width and
  * only for a side that is still hidden.
  */
-export function tabWindow(
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+export  function tabWindow(
   widths: readonly number[],
   selected: number,
   live: number | null,

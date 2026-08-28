@@ -80,6 +80,7 @@ export function renderPerformanceCurve(
   return lines.join('\n');
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 function performancePoints(
   performance: ProtocolResponse['performance'] | undefined,
   events: RunEvent[] | undefined,

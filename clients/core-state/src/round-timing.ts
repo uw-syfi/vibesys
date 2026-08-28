@@ -177,6 +177,7 @@ export function closeActiveAgentTimings<T extends RoundTimingState>(
 }
 
 /** Merges timing facts from an older prefix under a newer suffix. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 export function mergeAgentTimingPrefix(
   older: RoundTimingState,
   newer: RoundTimingState,

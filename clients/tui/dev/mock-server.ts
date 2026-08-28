@@ -221,7 +221,9 @@ function isRunTerminal(type: string | undefined): boolean {
  * and a terminal run event closes all of them the way the real server's
  * tracker interrupts what is still running.
  */
-function activeExecutionsFrom(delivered: RunEventRecord[]): ActiveExecutionCheckpoint {
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+function  activeExecutionsFrom(delivered: RunEventRecord[]): ActiveExecutionCheckpoint {
   const active = new Map<string, ExecutionCheckpoint>();
   for (const event of delivered) {
     if (isRunTerminal(event.type)) active.clear();
@@ -493,6 +495,7 @@ function ok(requestId: unknown, body: Record<string, unknown> = {}): Record<stri
   };
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
 function main(): void {
   const options = parseOptions(process.argv.slice(2));
   options.fixture = resolveFixture(options.fixture);
@@ -508,8 +511,11 @@ function main(): void {
       `${options.startPaused ? ' (paused; /resume in the TUI to start)' : ''}\n`,
   );
 
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
   const server = createServer(socket => {
-    readLines(socket, request => {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+    // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
+        readLines(socket, request => {
       const id = request['request_id'];
       const type = request['type'];
       switch (type) {

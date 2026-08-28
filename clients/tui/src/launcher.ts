@@ -191,6 +191,7 @@ async function watchBackendStartup(socketPath: string, backend: ChildProcess): P
   return false;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 async function monitor(
   frontend: ChildProcess,
   backend: ChildProcess,

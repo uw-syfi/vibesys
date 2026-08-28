@@ -73,7 +73,9 @@ const PLAIN_PERF = /^perf_eval\s+iter\s+(.+)$/;
  * covers (an orchestrator plans in `round-N-plan` and prepares in
  * `round-N-pre`), which the kind alone cannot.
  */
-export function describePhase(
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+export  function describePhase(
   roundLabel: string | null,
   agentKind: string | null,
 ): PhaseDescription | null {

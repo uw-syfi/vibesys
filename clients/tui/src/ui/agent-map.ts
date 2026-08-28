@@ -163,7 +163,9 @@ export class AgentMapView {
    * pane; callers that manage their own height (tests driving the view
    * directly) can omit it and get the unclamped graph.
    */
-  render(state: SessionState, widthOverride?: number, rows = Number.POSITIVE_INFINITY): void {
+  
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+render(state: SessionState, widthOverride?: number, rows = Number.POSITIVE_INFINITY): void {
     const phases = visiblePhases(state);
     // The pane's width follows the terminal, so a resize has to redraw even
     // when the state is unchanged. A zoom hands the pane the whole terminal,

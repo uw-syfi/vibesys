@@ -53,6 +53,7 @@ function commandSyntaxStyle(theme: Theme): SyntaxStyle {
   return SyntaxStyle.fromStyles({'slash-command': {fg: theme.accent, bold: true}});
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
 export function createCommandInputPanel(
   renderer: CliRenderer,
   onSubmit: (value: string) => void,
