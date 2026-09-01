@@ -919,7 +919,7 @@ const CHANNELS = ['assistant', 'assistant', 'assistant', 'analysis', 'prompt'] a
  */
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
-function  generateRunEvents(seed: number, options: {typedTools: boolean}, rounds = 5): RunEvent[] {
+function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds = 5): RunEvent[] {
   const rng = new Rng(seed);
   const events: RunEvent[] = [];
   const threadIds = ['thread-a', 'thread-b', 'thread-c'];

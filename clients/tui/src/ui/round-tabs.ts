@@ -127,7 +127,7 @@ interface TabWindow {
  */
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
-export  function tabWindow(
+export function tabWindow(
   widths: readonly number[],
   selected: number,
   live: number | null,

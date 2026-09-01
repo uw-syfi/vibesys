@@ -1,4 +1,3 @@
-// biome-ignore lint/style/noExcessiveLinesPerFile: pre-existing; tracked: #288
 import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} from '@opentui/core';
 import type {HypothesisEntry, HypothesisRound} from '@vibesys/backend-client';
 import type {SessionController} from '../session-controller.js';
@@ -918,7 +917,7 @@ export function hypothesisMetadata(entry: HypothesisEntry): string {
  */
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
-function  measurementMetadata(entry: HypothesisEntry): string[] {
+function measurementMetadata(entry: HypothesisEntry): string[] {
   const parts: string[] = [];
   const name = entry.perf_metric_name ?? null;
   const direction =

@@ -223,7 +223,7 @@ function isRunTerminal(type: string | undefined): boolean {
  */
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
-function  activeExecutionsFrom(delivered: RunEventRecord[]): ActiveExecutionCheckpoint {
+function activeExecutionsFrom(delivered: RunEventRecord[]): ActiveExecutionCheckpoint {
   const active = new Map<string, ExecutionCheckpoint>();
   for (const event of delivered) {
     if (isRunTerminal(event.type)) active.clear();
@@ -515,7 +515,7 @@ function main(): void {
   const server = createServer(socket => {
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
     // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
-        readLines(socket, request => {
+    readLines(socket, request => {
       const id = request['request_id'];
       const type = request['type'];
       switch (type) {

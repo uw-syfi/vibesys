@@ -532,7 +532,7 @@ export function reduceEventPrefix(
  */
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
-function  mergeTranscriptPrefix(
+function mergeTranscriptPrefix(
   older: readonly TranscriptEntry[],
   newer: readonly TranscriptEntry[],
 ): TranscriptEntry[] {

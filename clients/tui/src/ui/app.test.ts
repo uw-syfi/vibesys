@@ -6357,7 +6357,7 @@ describe('modal scrim', () => {
 
   it.each(
     THEME_NAMES.map(name => [name] as const),
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
   )('%s dims every cell around the modal and leaves the modal at full contrast', async (themeName: ThemeName) => {
     const theme = resolveTheme(themeName);
     const {color, strength} = scrim(theme);

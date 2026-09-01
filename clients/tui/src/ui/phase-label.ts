@@ -75,7 +75,7 @@ const PLAIN_PERF = /^perf_eval\s+iter\s+(.+)$/;
  */
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
-export  function describePhase(
+export function describePhase(
   roundLabel: string | null,
   agentKind: string | null,
 ): PhaseDescription | null {

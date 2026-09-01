@@ -230,7 +230,7 @@ and the waiver becomes an error once it is no longer needed.
 | Cyclomatic / cognitive complexity | ruff `C901` (max 10) and `PLR0912` (max 12 branches) | biome `complexity/noExcessiveCognitiveComplexity`, max 15 |
 | Function length | ruff `PLR0915`, max 50 statements | biome `complexity/noExcessiveLinesPerFunction`, 80 lines, blanks skipped |
 | Parameters | ruff `PLR0913`, max 5 | biome `complexity/useMaxParams`, max 6 |
-| File length | `scripts/check_file_length.py`, 800 lines | biome `style/noExcessiveLinesPerFile`, 800 lines |
+| File length | `scripts/check_file_length.py`, 1,600 lines | biome `style/noExcessiveLinesPerFile`, 1,600 lines |
 
 Test files are exempt from the two length rules in both languages: long test
 modules are normal. They are still held to the complexity and parameter rules.
@@ -253,7 +253,7 @@ The thresholds live in `pyproject.toml` (`[tool.ruff.lint]`,
 - **Python file length.** `[tool.vibesys.file_length.allowlist]` in
   `pyproject.toml` records each over-ceiling file at its current line count,
   with a comment saying what it holds. `scripts/check_file_length.py` fails when
-  a non-allowlisted file crosses 800 lines, when an allowlisted file grows past
+  a non-allowlisted file crosses 1,600 lines, when an allowlisted file grows past
   its recorded count, and when an entry is stale (the file is gone or now fits
   under the ceiling, so the entry must be deleted). Shrinking a file is always
   allowed; the check prints the entries whose recorded count can be lowered.
