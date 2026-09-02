@@ -1,4 +1,6 @@
 import {
+  type BorderCharacters,
+  type BorderSides,
   BoxRenderable,
   type CliRenderer,
   MarkdownRenderable,
@@ -54,6 +56,42 @@ const CONVERSATION_WINDOW_THRESHOLD = 2_000;
 
 /** How many entries a windowed paint materializes, and grows by on demand. */
 const CONVERSATION_WINDOW = 200;
+
+/** The one side of the card body the stripe is drawn on. */
+const STRIPE_SIDE: BorderSides = 'left';
+
+/**
+ * A border set whose only reachable member is `vertical`: corners need two
+ * adjacent sides and the stripe has one, so the rest are spaces because
+ * `BorderCharacters` is a closed shape.
+ */
+function stripeChars(glyph: string): BorderCharacters {
+  return {
+    vertical: glyph,
+    horizontal: ' ',
+    topLeft: ' ',
+    topRight: ' ',
+    bottomLeft: ' ',
+    bottomRight: ' ',
+    topT: ' ',
+    bottomT: ' ',
+    leftT: ' ',
+    rightT: ' ',
+    cross: ' ',
+  };
+}
+
+/**
+ * A half block carries the role's hue at a glance while staying visibly not a
+ * border: the card's rounded frame already owns the box-drawing vocabulary, so
+ * a `│` inside it reads as a double frame. A full block would be the fill this
+ * replaces, only narrower, and would compete with the frame for the eye; the
+ * frame has to stay the loudest mark on the card because it carries the cursor.
+ */
+const ROLE_STRIPE = stripeChars('▌');
+
+/** The same column, unpainted, for a card that carries no conversation role. */
+const RESERVED_STRIPE = stripeChars(' ');
 
 export class ConversationView {
   readonly output: BoxRenderable;
@@ -326,19 +364,24 @@ export class ConversationView {
   #renderEntry(entry: ConversationEntry): BoxRenderable {
     const palette = entryPalette(entry, this.#theme);
     const selected = this.#selectedId === entry.id;
+    // A status line reports on the run rather than speaking in it, so it has no
+    // conversation role to stripe. It still reserves the column, and so still
+    // lines up with the cards around it.
+    const striped = entry.kind !== 'status';
     const card = new BoxRenderable(this.renderer, {
       id: `event-${entry.id}`,
       width: '100%',
       flexDirection: 'column',
       marginTop: 1,
-      paddingLeft: entry.kind === 'status' ? 0 : 1,
       paddingRight: 1,
       border: entry.kind !== 'status',
       borderStyle: 'rounded',
-      // The cursor is the card's border, not a fill: a filled card reads as
-      // selected text, and the transcript already uses fills for roles.
+      // The cursor is the card's border, and the role is the body's left edge
+      // stripe. Painting the role as a fill instead put it across every cell
+      // of the card, which reads as "this pane is highlighted" rather than
+      // "this card is role X", and it outweighed the cursor sitting on top of
+      // it. No fill at all: the card sits on the canvas.
       borderColor: selected ? this.#theme.borderFocus : palette.border,
-      backgroundColor: palette.background,
       ...(this.#showsSelection
         ? {
             onMouseUp: () => {
@@ -360,6 +403,29 @@ export class ConversationView {
             }
           : {}),
     });
+    // Everything the card holds hangs off the body, and the stripe is the
+    // body's left border. A border, rather than a stripe renderable or a glyph
+    // prefixed to each line, because it reserves its column: the column is the
+    // one the card's `paddingLeft` used to hold, so no text moves, and it costs
+    // the same cell whether or not a glyph is painted in it, so a card with a
+    // stripe and a card without still start their text in the same place. It
+    // also runs the body's full height, which a card holding a markdown block
+    // does not know in advance.
+    const body = new BoxRenderable(this.renderer, {
+      id: `event-${entry.id}-body`,
+      width: '100%',
+      flexDirection: 'column',
+      border: [STRIPE_SIDE],
+      customBorderChars: striped ? ROLE_STRIPE : RESERVED_STRIPE,
+      // The role's label colour, not its raw accent. The theme derives the
+      // label to clear its own contrast floor, so the stripe is legible in all
+      // eight themes, including the two high-contrast ones where several raw
+      // accents sit under 3:1 against the canvas. It is also the colour the
+      // card's own heading uses, so the stripe repeats the role rather than
+      // introducing a second colour for it.
+      borderColor: palette.label,
+    });
+    card.add(body);
     const heading = new BoxRenderable(this.renderer, {
       id: `event-${entry.id}-heading`,
       width: '100%',
@@ -374,15 +440,15 @@ export class ConversationView {
         height: 1,
       }),
     );
-    card.add(heading);
+    body.add(heading);
     if (this.#markdownKinds.has(entry.kind)) {
-      this.#renderMarkdownEntry(card, entry);
+      this.#renderMarkdownEntry(body, entry);
     } else if (
       entry.kind === 'tool' &&
       (entry.toolCall !== undefined ||
         (entry.toolName !== undefined && entry.toolArguments !== undefined))
     ) {
-      this.#renderToolTurn(card, entry);
+      this.#renderToolTurn(body, entry);
     } else {
       const prompt =
         entry.kind === 'prompt'
@@ -394,13 +460,13 @@ export class ConversationView {
           ? toolResultPreview(entry.content, entry.toolResult?.payload)
           : null;
       const content = prompt ? prompt.content : (output?.content ?? entry.content);
-      card.add(new TextRenderable(this.renderer, {content, fg: palette.content, width: '100%'}));
+      body.add(new TextRenderable(this.renderer, {content, fg: palette.content, width: '100%'}));
       if (output?.collapsible) {
         const hidden =
           output.hiddenLines > 0
             ? `${output.hiddenLines} more line${output.hiddenLines === 1 ? '' : 's'}`
             : `${output.hiddenCharacters} more characters`;
-        card.add(
+        body.add(
           new TextRenderable(this.renderer, {
             content: `… ${hidden} hidden`,
             fg: this.#theme.info,
@@ -409,7 +475,7 @@ export class ConversationView {
         );
       }
       if (prompt && (prompt.hiddenLines > 0 || this.#expandedPrompts.has(entry.id))) {
-        card.add(
+        body.add(
           new TextRenderable(this.renderer, {
             content: this.#expandedPrompts.has(entry.id)
               ? '▴ click to collapse'
@@ -423,13 +489,13 @@ export class ConversationView {
     return card;
   }
 
-  #renderMarkdownEntry(card: BoxRenderable, entry: ConversationEntry): void {
+  #renderMarkdownEntry(body: BoxRenderable, entry: ConversationEntry): void {
     const expanded = this.#expandedPrompts.has(entry.id);
     const preview =
       entry.kind === 'prompt'
         ? promptPreview(entry.content, expanded)
         : {content: entry.content, hiddenLines: 0};
-    card.add(
+    body.add(
       new MarkdownRenderable(this.renderer, {
         ...this.#markdownBlockOptions,
         content: preview.content,
@@ -437,7 +503,7 @@ export class ConversationView {
       }),
     );
     if (entry.kind === 'prompt' && (preview.hiddenLines > 0 || expanded)) {
-      card.add(
+      body.add(
         new TextRenderable(this.renderer, {
           content: expanded
             ? '▴ click or Ctrl+P to collapse'
@@ -449,13 +515,13 @@ export class ConversationView {
     }
   }
 
-  #renderToolTurn(card: BoxRenderable, entry: ConversationEntry): void {
+  #renderToolTurn(body: BoxRenderable, entry: ConversationEntry): void {
     const toolCall =
       entry.toolName !== undefined && entry.toolArguments !== undefined
         ? toolCallPreview(entry.toolName, entry.toolArguments)
         : (entry.toolCall ?? '');
     const toolResponse = entry.toolResult?.content ?? entry.toolResponse;
-    card.add(
+    body.add(
       new TextRenderable(this.renderer, {
         content: toolCall.trimEnd(),
         fg: this.#theme.toolCall.foreground,
@@ -466,7 +532,7 @@ export class ConversationView {
     if (toolResponse) {
       const expanded = this.#expandedTools.has(entry.id);
       const response = toolResultPreview(toolResponse, entry.toolResult?.payload, expanded);
-      card.add(
+      body.add(
         new TextRenderable(this.renderer, {
           content: `← ${response.content}`,
           fg: this.#theme.toolResult.foreground,
@@ -479,7 +545,7 @@ export class ConversationView {
           response.hiddenLines > 0
             ? `${response.hiddenLines} more line${response.hiddenLines === 1 ? '' : 's'}`
             : `${response.hiddenCharacters} more characters`;
-        card.add(
+        body.add(
           new TextRenderable(this.renderer, {
             content: expanded
               ? '▴ click or Enter to collapse response'

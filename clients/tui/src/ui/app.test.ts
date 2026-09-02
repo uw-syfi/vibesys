@@ -2478,7 +2478,9 @@ describe('theming', () => {
     expect(spanColors(testRenderer, 'VibeSys')?.fg).toBe(light.accent);
     const body = spanColors(testRenderer, 'themed body text');
     expect(body?.fg).toBe(light.conversation.assistant.content);
-    expect(body?.bg).toBe(light.conversation.assistant.background);
+    // A card carries its role on a left edge stripe rather than a fill, so its
+    // body sits on the theme's canvas.
+    expect(body?.bg).toBe(light.canvas);
     expect(spanColors(testRenderer, 'implementer')?.fg).toBe(light.conversation.assistant.label);
   });
 
@@ -2499,8 +2501,8 @@ describe('theming', () => {
     expect(spanColors(testRenderer, 'VibeSys')?.fg).toBe('#22d3ee');
     const body = spanColors(testRenderer, 'themed body text');
     expect(body?.fg).toBe('#e2e8f0');
-    // Assistant cards derive their fill from the canvas and the role accent.
-    expect(body?.bg).toBe('#0e283d');
+    // No card fill: the role is a stripe, so a card body is the canvas.
+    expect(body?.bg).toBe('#0f172a');
     expect(spanColors(testRenderer, 'implementer')?.fg).toBe('#5cb6cc');
   });
 
@@ -2526,7 +2528,7 @@ describe('theming', () => {
     expect(spanColors(testRenderer, 'VibeSys')?.fg).toBe(solarized.accent);
     const body = spanColors(testRenderer, 'themed body text');
     expect(body?.fg).toBe(solarized.conversation.assistant.content);
-    expect(body?.bg).toBe(solarized.conversation.assistant.background);
+    expect(body?.bg).toBe(solarized.canvas);
   });
 
   it('navigates the theme list with the keyboard and applies on Enter', async () => {
