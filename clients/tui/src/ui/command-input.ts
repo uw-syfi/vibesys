@@ -116,6 +116,9 @@ export function createCommandInputPanel(
   };
   const submit = (value: string): void => {
     input.value = '';
+    // Enter on an empty (or whitespace-only) box belongs to whatever pane is
+    // behind it, not to command parsing; see isEmpty() above.
+    if (value.trim() === '') return;
     onSubmit(value);
   };
   input.on(InputRenderableEvents.INPUT, updateDecorations);
