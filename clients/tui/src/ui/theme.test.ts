@@ -9,6 +9,7 @@ import {
   mix,
   relativeLuminance,
   resolveTheme,
+  scrim,
   THEME_NAMES,
   type Theme,
 } from './theme.js';
@@ -212,6 +213,46 @@ describe('semantic roles', () => {
       expect(dark.conversation.assistant.background).not.toBe(
         light.conversation.assistant.background,
       );
+    }
+  });
+});
+
+describe('modal scrim', () => {
+  const themes = listThemes();
+
+  it.each(
+    themes.map(theme => [theme.name, theme] as const),
+  )('%s recedes behind a modal without erasing what is behind it', (name: string, theme: Theme) => {
+    const {color, strength} = scrim(theme);
+    // The theme's own canvas, so the background fades into the surface it
+    // already sits on rather than toward a tone the palette never uses.
+    expect(color).toBe(theme.canvas);
+    expect(strength).toBeGreaterThan(0);
+    expect(strength).toBeLessThan(1);
+
+    const floor = name.startsWith('high-contrast') ? 7 : 4.5;
+    const recessed = contrastRatio(mix(theme.textPrimary, color, strength), color);
+    expect(contrastRatio(theme.textPrimary, theme.canvas)).toBeGreaterThanOrEqual(floor);
+    // Body text lands on WCAG's large-text floor whichever theme it started
+    // from: still recognizable, and well under the comfortable-reading floor
+    // the theme guarantees, which now belongs to the modal alone.
+    expect(recessed).toBeLessThanOrEqual(3);
+    expect(recessed).toBeGreaterThanOrEqual(2.5);
+    expect(recessed).toBeLessThan(floor);
+  });
+
+  it('solves a different strength per theme rather than reusing one blend', () => {
+    const strengths = themes.map(theme => scrim(theme).strength);
+    // Solarized Dark starts at 5.6:1 body text and High Contrast Dark at 21:1,
+    // so one blend cannot recede both. The spread is the point, not a defect.
+    expect(new Set(strengths).size).toBe(themes.length);
+    expect(Math.max(...strengths) - Math.min(...strengths)).toBeGreaterThan(0.2);
+  });
+
+  it('never leaves a modal fully transparent or the background erased', () => {
+    for (const theme of themes) {
+      expect(scrim(theme).strength).toBeGreaterThan(0.3);
+      expect(scrim(theme).strength).toBeLessThan(0.85);
     }
   });
 });

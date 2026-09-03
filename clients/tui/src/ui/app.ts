@@ -36,6 +36,7 @@ import {bindKeybindings} from './keybindings.js';
 import {OverlayView} from './overlay.js';
 import {RightPaneView, rightPaneWidth, splitFits} from './right-pane.js';
 import {RoundRailView, roundRailVisible, roundRailWidth} from './round-rail.js';
+import {ScrimView} from './scrim.js';
 import {createMarkdownStyle} from './styles.js';
 import {resolveTheme, type ThemeName} from './theme.js';
 import {ThemePickerView} from './theme-picker.js';
@@ -228,6 +229,7 @@ export function createOpenTuiApp(
   const errorBanner = new ErrorBannerView(renderer, theme, () => controller.dismissErrorBanner());
   const agentMap = new AgentMapView(renderer, controller, theme);
   const conversationActivityBar = new ActivityBarView(renderer, theme, 'conversation-activity-bar');
+  const scrim = new ScrimView(renderer, theme);
   const overlay = new OverlayView(renderer, theme);
   const experimentLog = new ExperimentLogView(renderer, controller, theme);
   const rightPane = new RightPaneView(renderer, theme, () => controller.focusPane('right'));
@@ -324,6 +326,7 @@ export function createOpenTuiApp(
   workspace.add(bottom);
   body.add(workspace);
   root.add(body);
+  root.add(scrim.output);
   root.add(overlay.output);
   root.add(themePicker.output);
   root.add(chat.output);
@@ -345,6 +348,7 @@ export function createOpenTuiApp(
     errorBanner.applyTheme(theme);
     agentMap.applyTheme(theme);
     conversationActivityBar.applyTheme(theme);
+    scrim.applyTheme(theme);
     overlay.applyTheme(theme);
     experimentLog.applyTheme(theme);
     rightPane.applyTheme(theme);
@@ -402,6 +406,11 @@ export function createOpenTuiApp(
         : chatPaneWidth(renderer.terminalWidth, rightWidth)
       : 0;
     const showExperimentLog = showLog && (zoomedPane === null || zoomedPane === 'experiments');
+    // The three real modals only. The narrow-terminal pane fallback is
+    // deliberately excluded: raising the scrim there erases the pane frames
+    // behind it rather than dimming them, so the fallback needs its own
+    // treatment before it can join this predicate.
+    const modalOpen = state.chatOpen || state.overlay !== null || state.themePicker !== null;
     paintHeader(renderHeader(state, showLog, renderer.terminalWidth - HEADER_CHROME));
     errorBanner.render(state);
     // The log carries its own key hints in its footer, so when it shares the
@@ -509,6 +518,9 @@ export function createOpenTuiApp(
     experimentLog.render(state);
     experimentLog.output.visible = showExperimentLog;
     rightPane.render(state, showRightPane, rightWidth);
+    // Painted after every pane and before every modal, so the whole background
+    // recedes and the modals above it keep their own colours.
+    scrim.render(modalOpen);
     overlay.render(state, paneFallback);
     themePicker.render(state);
     chat.render(state);

@@ -170,7 +170,11 @@ modal they used before panes existed. That modal is the same surface as the
 pane, so it keeps the pane's title and its focus marker rather than reading as a
 generic dialog. The layout re-flows on resize in either direction.
 
-`/help`, `/theme`, and errors stay modal.
+`/help`, `/theme`, and errors stay modal. While any of them is open, a scrim
+dims the entire screen behind it, so the modal is the only surface left at full
+contrast and the operator can tell where a keystroke will land. The scrim is a
+translucent paint applied over the finished frame rather than a layout node: the
+background keeps every character where it was, and closing restores it exactly.
 
 ### Experiment chat
 
@@ -270,6 +274,11 @@ the Markdown palette are derived from that core, and each derived foreground is
 pushed toward the nearest extreme until it clears the theme's `minContrast`
 against the surface it actually sits on. The `dark` theme additionally pins its
 derived values to the original literals so the baseline is byte-identical.
+The modal scrim is derived the same way: it pulls the background toward the
+theme's own `canvas`, and its strength is solved per theme so body text lands on
+WCAG's large-text floor whatever it started from. One fixed blend cannot do
+that, because a blend deep enough to recede Solarized Dark's 5.6:1 body text
+leaves High Contrast Dark's 21:1 fully readable.
 Status meaning never depends on color: agent phases carry a marker glyph and
 the spelled-out status, todos carry a per-status marker, and only the running
 round shows elapsed time.

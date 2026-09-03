@@ -177,6 +177,54 @@ export function ensureContrast(foreground: string, background: string, minRatio:
   return candidate;
 }
 
+/**
+ * The dim a modal paints over everything behind it, as a colour and how far
+ * each background cell is pulled toward it. Applied by the renderer as an
+ * alpha blend over the finished frame, so it changes colour without moving a
+ * single cell.
+ */
+export interface Scrim {
+  /** Colour every background cell is pulled toward. */
+  color: string;
+  /** How far it is pulled: 0 leaves the frame alone, 1 replaces it. */
+  strength: number;
+}
+
+/**
+ * Contrast the scrim leaves between background text and what it sits on. WCAG's
+ * large-text floor: the run behind the modal stays recognizable, and the
+ * comfortable-reading floor each theme guarantees (4.5, or 7 on the
+ * high-contrast pair) is left to the modal, the one surface the scrim does not
+ * paint over.
+ */
+const SCRIM_RESIDUAL_CONTRAST = 3;
+
+/** A scrim that erases the background is a screen, not a dim. */
+const MAX_SCRIM_STRENGTH = 0.85;
+
+const SCRIM_STEPS = 100;
+
+/**
+ * Pulls the background toward the theme's own canvas, so it fades into the
+ * surface it already sits on instead of toward a blend the palette never uses.
+ * That darkens a dark theme and washes out a light one without an appearance
+ * branch, and it never invents a mid-tone a high-contrast palette excludes.
+ *
+ * The strength is solved per theme rather than fixed, because the themes do not
+ * start from the same contrast: one blend deep enough to recede Solarized
+ * Dark's 5.6:1 body text leaves High Contrast Dark's 21:1 fully readable.
+ * Solving for a residual lands every theme at the same recessed legibility.
+ */
+export function scrim(theme: Theme): Scrim {
+  const color = theme.canvas;
+  for (let step = 1; step <= SCRIM_STEPS; step += 1) {
+    const strength = (step / SCRIM_STEPS) * MAX_SCRIM_STRENGTH;
+    const faded = mix(theme.textPrimary, color, strength);
+    if (contrastRatio(faded, color) <= SCRIM_RESIDUAL_CONTRAST) return {color, strength};
+  }
+  return {color, strength: MAX_SCRIM_STRENGTH};
+}
+
 interface ThemeSpec {
   name: ThemeName;
   label: string;
