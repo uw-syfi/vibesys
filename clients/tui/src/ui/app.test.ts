@@ -1502,6 +1502,33 @@ describe('OpenTUI presentation', () => {
     expect(controller.submissions).toEqual(['/help']);
   });
 
+  it('does nothing when Enter is pressed on an empty command box', async () => {
+    // Reproduces #564: a round with no selected expandable tool result, so no
+    // pane action consumes Enter, and the box has never been typed into.
+    const testRenderer = await createTestRenderer({width: 80, height: 16});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    testRenderer.mockInput.pressEnter();
+    await frameAfter(testRenderer);
+    expect(controller.submissions).toEqual([]);
+    expect(controller.state.errorBanner).toBeNull();
+  });
+
+  it('does nothing when Enter is pressed with only whitespace typed', async () => {
+    const testRenderer = await createTestRenderer({width: 80, height: 16});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    await testRenderer.mockInput.typeText('   ');
+    testRenderer.mockInput.pressEnter();
+    await frameAfter(testRenderer);
+    expect(controller.submissions).toEqual([]);
+    expect(controller.state.errorBanner).toBeNull();
+  });
+
   it('rejects ordinary text from the command input without sending chat', async () => {
     const testRenderer = await createTestRenderer({width: 80, height: 16});
     const controller = new FakeController(initialSessionState());
