@@ -77,8 +77,10 @@ import {
   contrastRatio,
   ensureContrast,
   listThemes,
+  mix,
   resolveTheme,
   SUBTLE_TEXT_MIN_CONTRAST,
+  scrim,
   THEME_NAMES,
   type ThemeName,
 } from './theme.js';
@@ -5532,6 +5534,199 @@ function clipboardReturning(
       return result;
     },
   };
+}
+
+describe('modal scrim', () => {
+  const helpOverlay = {kind: 'help' as const, content: 'Available commands'};
+
+  function behindTheModal(themeName: ThemeName): SessionState {
+    const initial = initialSessionState(themeName);
+    return {
+      ...initial,
+      core: {
+        ...initial.core,
+        status: 'running',
+        transcript: [
+          {id: 'behind', kind: 'assistant', label: 'implementer', content: 'transcript behind it'},
+        ],
+      },
+    };
+  }
+
+  it.each(
+    THEME_NAMES.map(name => [name] as const),
+  )('%s dims every cell around the modal and leaves the modal at full contrast', async (themeName: ThemeName) => {
+    const theme = resolveTheme(themeName);
+    const {color, strength} = scrim(theme);
+    const testRenderer = await createTestRenderer({width: 100, height: 24});
+    const controller = new FakeController(behindTheModal(themeName));
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('transcript behind it'));
+    await testRenderer.waitForVisualIdle();
+    const closed = frameCells(testRenderer);
+    const headerBefore = requireSpanColors(testRenderer, 'VibeSys');
+
+    controller.publish({...controller.state, overlay: helpOverlay});
+    await testRenderer.waitForFrame(value => value.includes('Available commands'));
+    await testRenderer.waitForVisualIdle();
+    const open = frameCells(testRenderer);
+
+    const box = boxOf(testRenderer, 'overlay');
+    // Every band around the modal, so a scrim confined to the box region
+    // fails here rather than passing on the rows it happens to cover.
+    const dimmed = {above: 0, below: 0, left: 0, right: 0};
+    const moved: number[] = [];
+    for (const [row, column, before, after] of cellsOutside(closed, open, box)) {
+      if (before.char !== after.char) {
+        moved.push(row);
+        continue;
+      }
+      // A blank cell has no visible foreground, and the scrim claims it.
+      if (before.char !== ' ') {
+        expect(channelDistance(after.fg, mix(before.fg, color, strength))).toBeLessThanOrEqual(1);
+      }
+      expect(channelDistance(after.bg, mix(before.bg, color, strength))).toBeLessThanOrEqual(1);
+      if (after.fg === before.fg && after.bg === before.bg) continue;
+      if (row < box.y) dimmed.above += 1;
+      else if (row >= box.y + box.height) dimmed.below += 1;
+      else if (column < box.x) dimmed.left += 1;
+      else dimmed.right += 1;
+    }
+    expect(dimmed.above).toBeGreaterThan(0);
+    expect(dimmed.below).toBeGreaterThan(0);
+    expect(dimmed.left).toBeGreaterThan(0);
+    expect(dimmed.right).toBeGreaterThan(0);
+    // The header gains its Escape hint, so its own rows are allowed to change
+    // characters. Nothing else outside the box moves: the scrim repaints cells,
+    // it does not lay anything out. The header sits in its own housing since
+    // #571, so its rows are read off the frame rather than assumed to be row 0.
+    const headerFrame = boxOf(testRenderer, 'header-frame');
+    const headerRows = new Set(
+      Array.from({length: headerFrame.height}, (_, offset) => headerFrame.y + offset),
+    );
+    expect(moved.filter(row => !headerRows.has(row))).toEqual([]);
+
+    const floor = themeName.startsWith('high-contrast') ? 7 : 4.5;
+    const modalBody = requireSpanColors(testRenderer, 'Available commands');
+    expect(modalBody).toEqual({fg: theme.textPrimary, bg: theme.elevatedSurface});
+    expect(contrastRatio(modalBody.fg, modalBody.bg)).toBeGreaterThanOrEqual(floor);
+    // Background text recedes below the floor the theme guarantees, and stays
+    // above the point where the run behind the modal would be erased.
+    const headerAfter = requireSpanColors(testRenderer, 'VibeSys');
+    expect(contrastRatio(headerBefore.fg, headerBefore.bg)).toBeGreaterThanOrEqual(floor);
+    const recessed = contrastRatio(headerAfter.fg, headerAfter.bg);
+    expect(recessed).toBeLessThan(floor);
+    expect(recessed).toBeGreaterThanOrEqual(1.9);
+  });
+
+  it('restores the frame exactly when the modal closes', async () => {
+    const testRenderer = await createTestRenderer({width: 100, height: 24});
+    const controller = new FakeController(behindTheModal('dark'));
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('transcript behind it'));
+    await testRenderer.waitForVisualIdle();
+    const before = frameCells(testRenderer);
+
+    controller.publish({...controller.state, overlay: helpOverlay});
+    await testRenderer.waitForFrame(value => value.includes('Available commands'));
+    await testRenderer.waitForVisualIdle();
+    controller.publish({...controller.state, overlay: null});
+    await testRenderer.waitForFrame(value => !value.includes('Available commands'));
+    await testRenderer.waitForVisualIdle();
+
+    expect(frameCells(testRenderer)).toEqual(before);
+  });
+
+  it('raises one scrim under whichever modals are open, and never over them', async () => {
+    const testRenderer = await createTestRenderer({width: 100, height: 24});
+    const controller = new FakeController(behindTheModal('dark'));
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('transcript behind it'));
+    const scrimBox = boxOf(testRenderer, 'scrim');
+    // One scrim under every modal: two of them stacked must not dim each other,
+    // and a command ack over the chat still needs the background held down.
+    expect(scrimBox.zIndex).toBeLessThan(boxOf(testRenderer, 'chat-overlay').zIndex);
+    expect(scrimBox.zIndex).toBeLessThan(boxOf(testRenderer, 'overlay').zIndex);
+    expect(scrimBox.zIndex).toBeLessThan(boxOf(testRenderer, 'theme-picker').zIndex);
+    expect(scrimBox.visible).toBe(false);
+
+    for (const modal of [
+      {chatOpen: true},
+      {overlay: helpOverlay},
+      {themePicker: {selected: 'dark' as const}},
+    ]) {
+      controller.publish({...behindTheModal('dark'), ...modal});
+      await testRenderer.flush();
+      expect(scrimBox.visible).toBe(true);
+      // The whole terminal, so the dim never stops at the pane the modal is in.
+      expect([scrimBox.x, scrimBox.y, scrimBox.width, scrimBox.height]).toEqual([0, 0, 100, 24]);
+      controller.publish(behindTheModal('dark'));
+      await testRenderer.flush();
+      expect(scrimBox.visible).toBe(false);
+    }
+  });
+});
+
+/** The renderable behind a screen region, for asserting what a scrim covers. */
+function boxOf(testRenderer: TestRendererSetup, id: string): Renderable {
+  const found = testRenderer.renderer.root.findDescendantById(id);
+  if (found === undefined) throw new Error(`no renderable with id ${id}`);
+  return found;
+}
+
+/** The colors of the span carrying `needle`, which the caller expects on screen. */
+function requireSpanColors(
+  testRenderer: TestRendererSetup,
+  needle: string,
+): {fg: string; bg: string} {
+  const colors = spanColors(testRenderer, needle);
+  if (colors === undefined) throw new Error(`no rendered span contains ${needle}`);
+  return colors;
+}
+
+/** The captured frame as a grid of cells, for asserting what a scrim repaints. */
+function frameCells(
+  testRenderer: TestRendererSetup,
+): Array<Array<{char: string; fg: string; bg: string}>> {
+  return testRenderer.captureSpans().lines.map(line => {
+    const row: Array<{char: string; fg: string; bg: string}> = [];
+    for (const span of line.spans) {
+      const fg = rgbToHex(span.fg).toLowerCase();
+      const bg = rgbToHex(span.bg).toLowerCase();
+      for (const char of span.text) row.push({char, fg, bg});
+    }
+    return row;
+  });
+}
+
+type Cell = {char: string; fg: string; bg: string};
+
+/** Every screen cell the modal does not cover, paired across the two frames. */
+function* cellsOutside(
+  closed: Cell[][],
+  open: Cell[][],
+  box: Renderable,
+): Generator<[number, number, Cell, Cell]> {
+  for (const [row, cells] of closed.entries()) {
+    for (const [column, before] of cells.entries()) {
+      const covered =
+        row >= box.y && row < box.y + box.height && column >= box.x && column < box.x + box.width;
+      const after = open[row]?.[column];
+      if (covered || after === undefined) continue;
+      yield [row, column, before, after];
+    }
+  }
+}
+
+/** The largest per-channel gap between two hex colors. */
+function channelDistance(left: string, right: string): number {
+  const channels = (hex: string): number[] =>
+    [1, 3, 5].map(at => Number.parseInt(hex.slice(at, at + 2), 16));
+  const [first, second] = [channels(left), channels(right)];
+  return Math.max(...first.map((value, index) => Math.abs(value - (second[index] ?? 0))));
 }
 
 class FakeController implements SessionController {
