@@ -1,7 +1,7 @@
 import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} from '@opentui/core';
 import {focusedPane, type RightPane, type SessionState} from '../session-model.js';
 import {applyPaneFocus} from './focus.js';
-import type {Theme} from './theme.js';
+import {scrim, type Theme} from './theme.js';
 
 type OverlayKind = NonNullable<SessionState['overlay']>['kind'];
 
@@ -64,8 +64,12 @@ export class OverlayView {
       position: 'absolute',
       width: '100%',
       height: '100%',
-      backgroundColor: theme.canvas,
-      opacity: 0.7,
+      // The dim is solved per theme rather than fixed: the themes do not start
+      // from the same contrast, so one blend deep enough to recede Solarized
+      // Dark's body text leaves High Contrast Dark's fully readable. `scrim`
+      // in theme.ts is the single place that derivation lives (#566).
+      backgroundColor: scrim(theme).color,
+      opacity: scrim(theme).strength,
       zIndex: 19,
       visible: false,
     });
@@ -122,7 +126,8 @@ export class OverlayView {
   applyTheme(theme: Theme): void {
     this.#theme = theme;
     this.output.backgroundColor = theme.elevatedSurface;
-    this.scrim.backgroundColor = theme.canvas;
+    this.scrim.backgroundColor = scrim(theme).color;
+    this.scrim.opacity = scrim(theme).strength;
     this.output.borderColor = borderFor(theme, this.#renderedKind ?? 'detail');
     this.#hint.fg = theme.textSubtle;
     this.#renderedKind = null;
