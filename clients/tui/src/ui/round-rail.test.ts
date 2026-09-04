@@ -1,4 +1,4 @@
-import {describe, expect, test} from 'bun:test';
+import {afterEach, describe, expect, jest, test} from 'bun:test';
 import {rgbToHex, type TextRenderable} from '@opentui/core';
 import {createTestRenderer} from '@opentui/core/testing';
 import type {HypothesisRound} from '@vibesys/backend-client';
@@ -406,5 +406,54 @@ describe('RoundRailView judge verdict', () => {
     // RAIL_FULL_WIDTH (28) minus the border (2) and the 1-column padding on
     // each side (2) leaves 24 usable columns.
     expect(row?.text.length).toBeLessThanOrEqual(RAIL_FULL_WIDTH - 4);
+  });
+});
+
+describe('RoundRailView elapsed refresh', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  /** A run whose one round is still active, so the elapsed timer starts. */
+  function runningRailState(): SessionState {
+    const running: RoundSummary = {
+      number: 1,
+      status: 'active',
+      activeAgentStarts: {'agent:1': new Date().toISOString()},
+    };
+    const base = initialSessionState();
+    return {...base, experimentLog: null, core: {...base.core, rounds: [running]}};
+  }
+
+  function labelFor(view: RoundRailView, roundNumber: number): string | undefined {
+    return view.output
+      .getChildren()
+      .map(child => {
+        const content = (child as {content?: {chunks?: {text?: string}[]}}).content;
+        return (content?.chunks ?? []).map(chunk => chunk.text ?? '').join('');
+      })
+      .find(line => line.includes(`r${roundNumber}`));
+  }
+
+  test('redraws the running round in compact form after the 1s elapsed refresh', async () => {
+    const {renderer} = await createTestRenderer({width: 120, height: 40});
+    const view = new RoundRailView(
+      renderer,
+      {} as unknown as SessionController,
+      resolveTheme(null),
+    );
+
+    jest.useFakeTimers();
+    view.render(runningRailState(), RAIL_COMPACT_WIDTH, 10);
+    const before = labelFor(view, 1);
+    jest.advanceTimersByTime(1000);
+    const after = labelFor(view, 1);
+    view.destroy();
+
+    // Compact form is "<marker>r<number><glyph>", no spaces. The full form the
+    // timer used to hardcode joins marker, glyph, status word, and metric with
+    // spaces, so a space anywhere in `after` is the regression signal.
+    expect(before).toMatch(/^[ ▸]r1⟳$/);
+    expect(after).toMatch(/^[ ▸]r1⟳$/);
   });
 });

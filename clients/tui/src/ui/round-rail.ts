@@ -329,7 +329,7 @@ export class RoundRailView {
         round,
         state,
         round.number === visibleRoundNumber(state),
-        false,
+        this.#renderedWidth <= RAIL_COMPACT_WIDTH,
       );
     }, 1000);
   }
