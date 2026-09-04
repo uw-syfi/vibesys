@@ -975,6 +975,40 @@ def test_pareto_archive_distinguishes_trusted_and_pending_candidates():  # noqa:
     assert "round 51" in summary
 
 
+def test_pareto_archive_discloses_pending_claims_omitted_past_the_display_limit():  # noqa: ANN201  # tracked: #288
+    """Regression for #547: the pending list caps at 8 rows, but must say so.
+
+    Ten unreviewed claims accumulate across rounds 101-110. Only the eight
+    most recent are rendered; the two oldest are dropped from the listing but
+    must not vanish silently, since this warning exists to flag untrusted
+    commits to the operator.
+    """
+    pending_rounds = [
+        RoundRecord(
+            round_number,
+            f"{round_number:040d}",
+            None,
+            None,
+            False,  # noqa: FBT003  # tracked: #288
+            reviewed=False,
+            candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
+            candidate_metrics={"throughput": 1000.0 + round_number, "latency": 500.0},
+        )
+        for round_number in range(101, 111)
+    ]
+
+    summary = _pareto_archive_summary(pending_rounds, _THROUGHPUT_LATENCY)
+
+    # The two oldest claims are dropped from the rendered rows...
+    assert "round 101" not in summary
+    assert "round 102" not in summary
+    # ...but the operator can tell they were omitted, not lost.
+    assert "2 older, still-unreviewed claims not shown (rounds 101-102)" in summary
+    # The eight most recent claims still render in full.
+    for round_number in range(103, 111):
+        assert f"round {round_number}" in summary
+
+
 def _accuracy_row(
     round_number: int,
     accuracy: float,

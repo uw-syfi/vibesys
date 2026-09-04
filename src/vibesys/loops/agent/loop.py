@@ -341,6 +341,13 @@ def _format_metric_row(metrics: dict[str, float], objectives: Sequence[Objective
     )
 
 
+# How many pending frontier claims to render in full. The list can grow
+# unbounded over a long run, so it is still capped, but an omission is always
+# disclosed (see _pareto_archive_summary) instead of silently dropping the
+# oldest, still-unreviewed rows.
+_PENDING_CLAIM_DISPLAY_LIMIT = 8
+
+
 def _pareto_archive_summary(records: list[RoundRecord], space: MetricSpace) -> str:
     """Render trusted frontier parents and any measured points awaiting review."""
     objectives = space.objectives
@@ -391,7 +398,19 @@ def _pareto_archive_summary(records: list[RoundRecord], space: MetricSpace) -> s
             "have not passed independent review, or because its numbers are the "
             "implementer's own report rather than a framework measurement:"
         )
-        for record in pending[-8:]:
+        omitted = pending[:-_PENDING_CLAIM_DISPLAY_LIMIT]
+        if omitted:
+            claim = "claim" if len(omitted) == 1 else "claims"
+            rounds = (
+                f"round {omitted[0].round_number}"
+                if len(omitted) == 1
+                else f"rounds {omitted[0].round_number}-{omitted[-1].round_number}"
+            )
+            lines.append(
+                f"- {len(omitted)} older, still-unreviewed {claim} not shown ({rounds}); "
+                "do not treat them as trusted parents just because they scrolled off."
+            )
+        for record in pending[-_PENDING_CLAIM_DISPLAY_LIMIT:]:
             assert record.commit is not None  # noqa: S101  # tracked: #288
             lines.append(
                 f"- round {record.round_number}, commit {record.commit[:12]}: "
