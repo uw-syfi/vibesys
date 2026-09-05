@@ -4,17 +4,74 @@ The ledger (``vibesys.loops.agent.bottleneck_ledger``) is the deterministic walk
 cursor for the ``dataflow_opt`` modality: it merges a ranked attribution into a
 durable structure, selects the round's active component (honoring a bounded soft
 override), and advances / exhausts a component on a measured plateau. These tests
-cover the pure state machine; the valgrind and subprocess paths are not exercised
-here.
+cover the pure state machine plus the framework-owned attribution subprocess,
+which is driven through a fake ``LoopContext`` backend rather than real valgrind.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
 from vibesys.loops.agent import bottleneck_ledger as bl
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from vibesys.run.protocol import LoopContext
 
 
 def _attr(*components: tuple[str, float]) -> dict:
     return {"components": [{"component": name, "pct": pct} for name, pct in components]}
+
+
+class _FakeResult:
+    """Stand-in for the judge backend's execute result."""
+
+    def __init__(self, exit_code: int, output: str) -> None:
+        self.exit_code = exit_code
+        self.output = output
+
+
+class _FakeBackend:
+    """Records executed commands; returns a canned main result, then a benign
+    cleanup result. Optionally raises on the first (main) execute call."""
+
+    def __init__(self, main: _FakeResult | None = None, *, raise_on_main: bool = False) -> None:
+        self._main = main
+        self._raise_on_main = raise_on_main
+        self.commands: list[str] = []
+
+    def execute(self, command: str, timeout: int | None = None) -> _FakeResult:  # noqa: ARG002  # tracked: #288
+        self.commands.append(command)
+        if len(self.commands) == 1:
+            if self._raise_on_main:
+                raise RuntimeError("backend unavailable")  # noqa: TRY003  # tracked: #288
+            assert self._main is not None
+            return self._main
+        return _FakeResult(0, "")  # cleanup call in the finally block
+
+
+class _FakeCtx:
+    """Minimal LoopContext surface used by ``run_attribution``."""
+
+    def __init__(self, workspace: Path, backend: _FakeBackend) -> None:
+        self.workspace = workspace
+        self.judge_backend = backend
+        self.logs: list[str] = []
+
+    def lprint(self, message: str) -> None:
+        self.logs.append(message)
+
+
+def _framed(payload: str) -> str:
+    """Wrap ``payload`` in the marker transport ``run_attribution`` parses."""
+    return f"noise before\n{bl._ATTRIBUTION_MARKER}\n{payload}\n{bl._ATTRIBUTION_END_MARKER}\n"  # noqa: SLF001  # tracked: #288
+
+
+def _make_script(tmp_path: Path) -> None:
+    script = tmp_path / bl.ATTRIBUTION_SCRIPT_REL
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("# attribution stub\n")
 
 
 def test_new_and_roundtrip_persistence(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
@@ -166,3 +223,91 @@ def test_format_for_prompt_renders_table():  # noqa: ANN201  # tracked: #288
     assert "component | status" in text
     assert "a | active" in text
     assert "12.50%" in text
+
+
+# --------------------------------------------------------------------------- #
+# Persistence + projection edge cases
+# --------------------------------------------------------------------------- #
+
+
+def test_load_ledger_backfills_missing_top_level_keys(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    # An older/hand-edited ledger with no version/active_component/components
+    # keys must load into a complete structure rather than KeyError later.
+    path = tmp_path / "bottlenecks.json"
+    path.write_text("{}")
+    ledger = bl.load_ledger(path)
+    assert ledger == {"components": [], "active_component": None, "version": 1}
+
+
+def test_repopulate_skips_unnamed_components():  # noqa: ANN201  # tracked: #288
+    ledger = bl.new_ledger()
+    attribution = {"components": [{"component": "", "pct": 9.0}, {"component": "a", "pct": 1.0}]}
+    bl.repopulate_from_attribution(ledger, attribution, round_number=1)
+    assert [c["name"] for c in ledger["components"]] == ["a"]
+
+
+def test_advance_noops_when_active_component_unknown():  # noqa: ANN201  # tracked: #288
+    ledger = bl.new_ledger()
+    bl.repopulate_from_attribution(ledger, _attr(("a", 90.0)), round_number=1)
+    # Naming a component absent from the ledger is a safe no-op.
+    bl.advance_after_round(ledger, "ghost", round_number=1, passed=True, walk_metric=1.5)
+    a = next(c for c in ledger["components"] if c["name"] == "a")
+    assert a["rounds_spent"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# Attribution subprocess (driven through a fake backend)
+# --------------------------------------------------------------------------- #
+
+
+def test_run_attribution_returns_none_when_script_absent(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    backend = _FakeBackend()
+    ctx = _FakeCtx(tmp_path, backend)
+    assert bl.run_attribution(cast("LoopContext", ctx), round_number=1) is None
+    # The backend is never invoked when the bundle ships no attribution script.
+    assert backend.commands == []
+    assert any("not present" in m for m in ctx.logs)
+
+
+def test_run_attribution_parses_marker_framed_json(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    _make_script(tmp_path)
+    payload = '{"components": [{"component": "trace/implementations", "pct": 53.6}]}'
+    backend = _FakeBackend(_FakeResult(0, _framed(payload)))
+    ctx = _FakeCtx(tmp_path, backend)
+    result = bl.run_attribution(cast("LoopContext", ctx), round_number=2)
+    assert result == {"components": [{"component": "trace/implementations", "pct": 53.6}]}
+    # Main command + cleanup in the finally block.
+    assert len(backend.commands) == 2
+    assert bl.ATTRIBUTION_SCRIPT_REL in backend.commands[0]
+
+
+def test_run_attribution_returns_none_on_nonzero_exit(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    _make_script(tmp_path)
+    backend = _FakeBackend(_FakeResult(2, _framed("{}")))
+    ctx = _FakeCtx(tmp_path, backend)
+    assert bl.run_attribution(cast("LoopContext", ctx), round_number=1) is None
+    assert any("exited 2" in m for m in ctx.logs)
+
+
+def test_run_attribution_returns_none_when_marker_missing(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    _make_script(tmp_path)
+    backend = _FakeBackend(_FakeResult(0, "just some noise, no markers here"))
+    ctx = _FakeCtx(tmp_path, backend)
+    assert bl.run_attribution(cast("LoopContext", ctx), round_number=1) is None
+    assert any("did not include its result JSON" in m for m in ctx.logs)
+
+
+def test_run_attribution_returns_none_on_malformed_json(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    _make_script(tmp_path)
+    backend = _FakeBackend(_FakeResult(0, _framed("{not valid json")))
+    ctx = _FakeCtx(tmp_path, backend)
+    assert bl.run_attribution(cast("LoopContext", ctx), round_number=1) is None
+    assert any("malformed" in m for m in ctx.logs)
+
+
+def test_run_attribution_returns_none_when_execute_raises(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    _make_script(tmp_path)
+    backend = _FakeBackend(raise_on_main=True)
+    ctx = _FakeCtx(tmp_path, backend)
+    assert bl.run_attribution(cast("LoopContext", ctx), round_number=1) is None
+    assert any("could not be executed" in m for m in ctx.logs)
