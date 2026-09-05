@@ -190,7 +190,7 @@ def repopulate_from_attribution(
         if not name:
             continue
         pct = float(entry.get("pct", 0.0) or 0.0)
-        comp = existing.get(name)
+        comp: dict[str, Any] | None = existing.get(name)
         if comp is None:
             comp = {
                 "name": name,
