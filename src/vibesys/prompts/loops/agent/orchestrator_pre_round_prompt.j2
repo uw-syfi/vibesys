@@ -65,4 +65,13 @@ The latest progress entry records exhausted-review feedback; read it before
 deciding whether profiling can unblock that concrete failure.
 {% endif %}
 
+{% if bottleneck_walk_active is defined and bottleneck_walk_active %}
+`active_component` is a **soft override** of the framework's bottleneck walk.
+Leave it empty in the normal case — the framework profiles and selects the
+hottest non-exhausted component itself. Only set it (to a component name from the
+ledger in `{{ progress_location|default('progress.md') }}`) when you have a
+specific reason to revisit or reorder; the framework ignores an unknown or
+already-exhausted name.
+{% endif %}
+
 Return only the schema-valid JSON object.

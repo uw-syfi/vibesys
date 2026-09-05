@@ -1,0 +1,30 @@
+version = 1
+
+[agent]
+domain = "database"
+
+[accuracy]
+command = ["uv", "run", "python", "accuracy_checker/checker.py"]
+timeout_seconds = 3600
+
+[benchmark]
+command = ["uv", "run", "python", "benchmark/benchmark.py"]
+timeout_seconds = 1800
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "cpu_seconds"
+
+[[workspace.sources]]
+name = "engine"
+repo = "https://github.com/HQingXuan/differential-dataflow-pinned"
+commit = "4f05cbb61775a45844a0905de9dacfee1e91dd80"
+dest = "engine"
+strip_git = true
+
+[[workspace.sources]]
+name = "ref_engine"
+repo = "https://github.com/HQingXuan/differential-dataflow-pinned"
+commit = "4f05cbb61775a45844a0905de9dacfee1e91dd80"
+dest = "_ref_engine"
+strip_git = true
