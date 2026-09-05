@@ -465,8 +465,8 @@ class RankedBottleneck(BaseModel):
 
     Emitted by a modality's attribution capability (e.g. the ``dataflow_opt``
     bundle's ``profiler/attribute_cpu.py``) and read by the loop's bottleneck
-    ledger to steer the round's ``active_component``. All fields default so an
-    older summary without a ranking still parses.
+    ledger to steer the round's ``active_component``. Every field is optional so
+    an older summary without a ranking still parses.
     """
 
     component: str = Field(
