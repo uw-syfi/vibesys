@@ -43,6 +43,7 @@ from vibesys.constants import DEFAULT_AGENT_BACKEND, PROJECT_ROOT
 from vibesys.domains.environment import EnvironmentBindMount  # noqa: TC001  # tracked: #288
 from vibesys.evaluators import (
     PROJECT_ROOT_TOKEN,
+    PYTHON_TOKEN,
     CargoGitToolSpec,
     EvaluatorToolError,
     EvaluatorToolLifecycleHooks,
@@ -1174,7 +1175,10 @@ def _environment_command(
     except ValueError as exc:
         raise ValueError(f"invalid evaluator command: {exc}") from exc  # noqa: TRY003
     project_root = "/workspace" if isolated else str(request.workspace)
-    replacements = [(PROJECT_ROOT_TOKEN, project_root)]
+    replacements = [
+        (PROJECT_ROOT_TOKEN, project_root),
+        (PYTHON_TOKEN, "python3" if isolated else sys.executable),
+    ]
     if request.evaluator_package_root is not None:
         replacements.append(
             (

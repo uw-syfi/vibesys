@@ -48,11 +48,11 @@ implements `api.Driver` and `api.Client`; a new application implements
 `api.Application`. The command registers concrete implementations at startup,
 and the workload selects them by name.
 
-When an application implements `api.PreflightApplication`, benchmark and
-accuracy execution use the same readiness and protocol-probe plans before
-mode-specific work. Accuracy applications also declare an unskippable minimum
-case volume and randomized extra range, so low CLI bounds or one fixed fixture
-count cannot silently weaken capacity coverage.
+When an application implements `api.PreflightApplication`, benchmark execution
+uses its readiness and protocol-probe plans before measured work. Accuracy
+applications declare their own readiness probes, unskippable minimum case
+volume, and randomized extra range, so low CLI bounds or one fixed fixture count
+cannot silently weaken capacity coverage.
 
 ### Trial lifecycle
 
@@ -174,6 +174,7 @@ retains one observation per measured logical operation for diagnosis.
 | [`api/`](api/) | Shared workload, extension, and observation contracts |
 | [`accuracy/`](accuracy/) | Accuracy orchestration and fail-closed validation primitives |
 | [`accuracyapps/`](accuracyapps/) | Independent application-specific accuracy oracles |
+| [`hotelcorrectness/`](hotelcorrectness/) | Python Hotel Reservation correctness gate and workload |
 | [`appsupport/`](appsupport/) | Mode-neutral topology, preflight, input, and authentication grammars |
 | [`apps/`](apps/) | Application-adapter extension layer |
 | [`apps/declarative/`](apps/declarative/) | Declarative HTTP request and response adapter |
@@ -219,6 +220,10 @@ See the checked-in workloads for complete examples:
 - `examples/microservices/train-ticket/benchmark/workload.toml`
 - `examples/microservices/repositories/deathstarbench/.vibesys/tasks/social-network-read-timeline/benchmark/workload.toml`
 - `examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml`
+
+Hotel Reservation correctness uses the packaged `hotel-correctness` Python
+entrypoint. The Go accuracy mode remains available for registered applications
+such as Train Ticket; it does not provide a Hotel accuracy adapter.
 
 ## Running the evaluator
 

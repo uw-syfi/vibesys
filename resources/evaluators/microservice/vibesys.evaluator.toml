@@ -6,5 +6,6 @@ toolchains = ["go"]
 
 [entrypoints]
 servicebench = ["go", "-C", "${PACKAGE_ROOT}", "run", "./cmd/servicebench"]
+hotel-correctness = ["${PYTHON}", "${PACKAGE_ROOT}/hotelcorrectness/check.py"]
 otelinject = ["go", "-C", "${PACKAGE_ROOT}", "run", "./cmd/otelinject"]
 otelcapture = ["go", "-C", "${PACKAGE_ROOT}", "run", "./cmd/otelcapture"]
