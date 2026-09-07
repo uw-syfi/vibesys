@@ -10,6 +10,7 @@ include third_party/bun/LICENSE
 # Include the Python package roots owned by the root distribution.
 graft src
 graft libs/vs-evaluator-protocol/src
+graft libs/vs-correctness/src
 graft libs/vs-feature-flags/src
 graft libs/vs-github/src
 graft libs/vs-issue-board/src
