@@ -68,6 +68,26 @@ def test_load_package_validates_metadata_and_expands_entrypoint(tmp_path: Path) 
     )[-2:] == ("--project", str(tmp_path))
 
 
+def test_python_token_is_preserved_for_environment_resolution(tmp_path: Path) -> None:
+    root = _write_package(
+        tmp_path / "package", entrypoint_command='"${PYTHON}", "${PACKAGE_ROOT}/runner.py"'
+    )
+
+    package = load_evaluator_package(root)
+
+    assert package.command("test-check") == ("${PYTHON}", f"{root}/runner.py")
+
+
+def test_package_rejects_embedded_python_token(tmp_path: Path) -> None:
+    root = _write_package(
+        tmp_path / "package",
+        entrypoint_command='"prefix-${PYTHON}", "${PACKAGE_ROOT}/runner.py"',
+    )
+
+    with pytest.raises(EvaluatorPackageError, match=r"Python token.*complete argv element"):
+        load_evaluator_package(root)
+
+
 def test_digest_covers_paths_contents_and_executable_mode(tmp_path: Path) -> None:
     root = _write_package(tmp_path / "package")
     original = load_evaluator_package(root).digest
@@ -285,7 +305,7 @@ def test_framework_resolver_finds_bundled_queue_package() -> None:
         ("vibesys-evaluator-queue", {"vibesys-queue"}),
         (
             "vibesys-evaluator-microservice",
-            {"servicebench", "otelinject", "otelcapture"},
+            {"servicebench", "hotel-correctness", "otelinject", "otelcapture"},
         ),
         (
             "vibesys-evaluator-request-factory",

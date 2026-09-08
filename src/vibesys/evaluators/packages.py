@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 EVALUATOR_PACKAGE_METADATA_NAME = "vibesys.evaluator.toml"
 PACKAGE_ROOT_TOKEN = "${PACKAGE_ROOT}"  # noqa: S105
 PROJECT_ROOT_TOKEN = "${PROJECT_ROOT}"  # noqa: S105
+PYTHON_TOKEN = "${PYTHON}"  # noqa: S105
 TOOL_TOKEN_PREFIX = "${TOOL:"  # noqa: S105
 
 _IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
@@ -170,6 +171,11 @@ class EvaluatorPackageMetadata(EvaluatorPackageRequirement):
             if any(not part for part in command):
                 raise ValueError(  # noqa: TRY003
                     f"entrypoint {name!r} contains an empty argv element"
+                )
+            if any(PYTHON_TOKEN in part and part != PYTHON_TOKEN for part in command):
+                raise ValueError(  # noqa: TRY003
+                    f"entrypoint {name!r} contains a malformed Python token; "
+                    "${PYTHON} must occupy one complete argv element"
                 )
         return value
 

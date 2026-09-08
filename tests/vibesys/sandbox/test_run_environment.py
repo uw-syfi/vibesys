@@ -5,6 +5,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
@@ -705,6 +706,49 @@ def test_environment_quotes_project_root_after_token_expansion(tmp_path: Path) -
         "--workspace",
         str(request.workspace),
     ]
+
+
+def test_local_environment_resolves_python_token_to_running_interpreter(tmp_path: Path) -> None:
+    backend = FakeBackend()
+    env = build_run_environment(RunEnvironmentSpec("local"))
+
+    session = env.open(
+        _request(
+            tmp_path,
+            backend,
+            accuracy_command="'${PYTHON}' checker.py",
+            benchmark_command="true",
+        )
+    )
+
+    assert shlex.split(session.view.paths.accuracy_command or "") == [sys.executable, "checker.py"]
+
+
+@pytest.mark.parametrize("environment_name", ["docker", "modal"])
+def test_isolated_environment_resolves_python_token_without_host_path(
+    tmp_path: Path, environment_name: str
+) -> None:
+    backend = FakeBackend()
+    env = build_run_environment(RunEnvironmentSpec(environment_name))
+
+    session = env.open(
+        _request(
+            tmp_path,
+            backend,
+            accuracy_command="'${PYTHON}' checker.py",
+            benchmark_command="true",
+        )
+    )
+
+    command = session.view.paths.accuracy_command or ""
+    arguments = shlex.split(command)
+    if environment_name == "docker":
+        assert arguments == ["python3", "checker.py"]
+    else:
+        assert "python3" in arguments
+        assert "checker.py" in arguments
+    assert "${PYTHON}" not in command
+    assert sys.executable not in command
 
 
 def test_environment_quotes_nested_shell_paths(tmp_path: Path) -> None:

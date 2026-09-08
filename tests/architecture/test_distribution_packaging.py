@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 INTERNAL_DISTRIBUTIONS = {
+    "vs-correctness",
     "vs-evaluator-protocol",
     "vs-feature-flags",
     "vs-github",
@@ -32,6 +33,7 @@ INTERNAL_DISTRIBUTIONS = {
     "vs-sandbox",
 }
 INTERNAL_IMPORT_PACKAGES = {
+    "vs_correctness",
     "vs_evaluator_protocol",
     "vs_feature_flags",
     "vs_github",
@@ -172,6 +174,7 @@ def test_root_distribution_discovers_internal_packages_from_their_source_roots()
     assert package_dirs["entrypoints"] == "src/entrypoints"
     assert package_dirs["server"] == "src/server"
     assert package_dirs["vs_feature_flags"] == ("libs/vs-feature-flags/src/vs_feature_flags")
+    assert package_dirs["vs_correctness"] == "libs/vs-correctness/src/vs_correctness"
     assert package_dirs["vs_prompts"] == "libs/vs-prompts/src/vs_prompts"
     assert package_dirs["vs_sandbox"] == "libs/vs-sandbox/src/vs_sandbox"
 

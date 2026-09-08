@@ -571,6 +571,10 @@ Direct `command = [...]` arrays may point at Python, shell, Go, Rust, C++, or
 any other task-owned program. Package entry points decouple task manifests
 from the package's install location. `${PROJECT_ROOT}` in package arguments
 expands to the absolute candidate repository root.
+An evaluator package entry point may use `${PYTHON}` as one complete argv
+element. Local runs use the interpreter running VibeSys without a `PATH` lookup;
+isolated environments use their `python3`. The evaluator package and
+environment remain responsible for compatible Python and runtime dependencies.
 
 The optional `benchmark.result` block opts a single-metric benchmark into
 trusted framework scoring: VibeSys appends `json_argument`, reads the resulting

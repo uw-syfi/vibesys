@@ -22,7 +22,6 @@ import (
 	"github.com/uw-syfi/vibesys/sdk/vs-evaluator/vseval"
 
 	"vibesys/microservice-evaluator/accuracy"
-	accuracyhotel "vibesys/microservice-evaluator/accuracyapps/hotel"
 	accuracytrainticket "vibesys/microservice-evaluator/accuracyapps/trainticket"
 	"vibesys/microservice-evaluator/api"
 	"vibesys/microservice-evaluator/apps/declarative"
@@ -272,9 +271,6 @@ func run() (resultErr error) {
 		return err
 	}
 	if err := registry.RegisterAccuracyApplication("train-ticket", accuracytrainticket.New); err != nil {
-		return err
-	}
-	if err := registry.RegisterAccuracyApplication("hotel", accuracyhotel.New); err != nil {
 		return err
 	}
 	if mode == "benchmark" {

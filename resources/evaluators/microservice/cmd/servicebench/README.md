@@ -18,8 +18,9 @@ The command is responsible for:
 - returning a nonzero status for invalid benchmark results.
 
 `--mode benchmark` is the default. `--mode accuracy` uses the same resolved
-targets, transport sessions, random seed handling, and atomic JSON output but
-runs the application's independent exhaustive accuracy adapter. Managed
+targets, transport sessions, random seed handling, and atomic JSON output for
+applications with a registered Go accuracy adapter. Hotel Reservation uses the
+evaluator package's `hotel-correctness` Python entrypoint instead. Managed
 candidate mode additionally proves that every readiness endpoint stops before
 restarting after an OS-contained crash. Managed candidates require Bubblewrap;
 the command fails closed when a dedicated PID namespace cannot be created.

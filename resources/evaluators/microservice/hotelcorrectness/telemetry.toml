@@ -1,0 +1,19 @@
+# Telemetry description consumed by the evaluator's cmd/otelinject at run
+# time. Every hotelReservation application service has built-in Jaeger
+# tracing pointed at the `jaeger` compose service, so the collector
+# impersonates that name and only the sampling ratio needs tuning.
+version = 1
+collector_service_name = "jaeger"
+sample_ratio = 0.1
+
+[services]
+frontend = "jaeger-native"
+geo = "jaeger-native"
+profile = "jaeger-native"
+rate = "jaeger-native"
+recommendation = "jaeger-native"
+reservation = "jaeger-native"
+search = "jaeger-native"
+user = "jaeger-native"
+review = "jaeger-native"
+attractions = "jaeger-native"
