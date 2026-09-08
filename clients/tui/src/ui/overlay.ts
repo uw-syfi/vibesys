@@ -32,6 +32,7 @@ function borderFor(theme: Theme, kind: OverlayKind): string {
 
 export class OverlayView {
   readonly output: BoxRenderable;
+  readonly scrim: BoxRenderable;
   readonly #scroll: ScrollBoxRenderable;
   readonly #hint: TextRenderable;
   #theme: Theme;
@@ -44,6 +45,16 @@ export class OverlayView {
     theme: Theme,
   ) {
     this.#theme = theme;
+    this.scrim = new BoxRenderable(renderer, {
+      id: 'overlay-scrim',
+      position: 'absolute',
+      width: '100%',
+      height: '100%',
+      backgroundColor: theme.canvas,
+      opacity: 0.7,
+      zIndex: 19,
+      visible: false,
+    });
     this.output = new BoxRenderable(renderer, {
       id: 'overlay',
       position: 'absolute',
@@ -87,9 +98,14 @@ export class OverlayView {
     this.#scroll.scrollBy(delta, 'viewport');
   }
 
+  renderScrim(visible: boolean): void {
+    this.scrim.visible = visible;
+  }
+
   applyTheme(theme: Theme): void {
     this.#theme = theme;
     this.output.backgroundColor = theme.elevatedSurface;
+    this.scrim.backgroundColor = theme.canvas;
     this.output.borderColor = borderFor(theme, this.#renderedKind ?? 'detail');
     this.#hint.fg = theme.textSubtle;
     this.#renderedKind = null;
@@ -183,3 +199,5 @@ export class OverlayView {
     }
   }
 }
+
+
