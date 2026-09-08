@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import random
+import random as random_module
 import string
-import uuid
+import uuid as uuid_module
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from itertools import islice
@@ -33,15 +33,15 @@ class GenerationContext:
 
     seed: int
     cases: int
-    _random: random.Random = field(init=False, repr=False)
+    _random: random_module.Random = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Initialize the deterministic, non-cryptographic generator."""
-        self._random = random.Random(self.seed)  # noqa: S311
+        self._random = random_module.Random(self.seed)  # noqa: S311
 
-    def random(self) -> random.Random:
+    def random(self) -> random_module.Random:
         """Return a fresh PRNG at this context's initial state."""
-        return random.Random(self.seed)  # noqa: S311
+        return random_module.Random(self.seed)  # noqa: S311
 
     def integer(self, minimum: int, maximum: int) -> int:
         """Generate an inclusive bounded integer."""
@@ -63,12 +63,12 @@ class GenerationContext:
         alphabet = string.ascii_letters + string.digits + "_-"
         return "".join(self._rng.choice(alphabet) for _ in range(length))
 
-    def uuid(self) -> uuid.UUID:
+    def uuid(self) -> uuid_module.UUID:
         """Generate a deterministic RFC 4122 UUID."""
-        return uuid.UUID(int=self._rng.getrandbits(128), version=4)
+        return uuid_module.UUID(int=self._rng.getrandbits(128), version=4)
 
     @property
-    def _rng(self) -> random.Random:
+    def _rng(self) -> random_module.Random:
         return self._random
 
 

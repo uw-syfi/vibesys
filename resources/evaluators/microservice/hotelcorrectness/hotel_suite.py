@@ -201,7 +201,9 @@ class HotelGenerator:
             ("/reservation", invalid_date),
             *malformed_reservations,
         )
-        actions.extend(HTTPAction(method="GET", path=path, query=query) for path, query in malformed)
+        actions.extend(
+            HTTPAction(method="GET", path=path, query=query) for path, query in malformed
+        )
         return self._case(f"hotel-protocol-{seed}", actions)
 
     def _reservation_case(self, seed: int, day: dt.date) -> TestCase:
@@ -381,7 +383,9 @@ class HotelOracle:
                     )
                 if isinstance(action, CustomAction):
                     if action.name not in {"persistent-http", "restart-services"}:
-                        raise ValueError(f"action {index} has unknown custom action {action.name!r}")
+                        raise ValueError(
+                            f"action {index} has unknown custom action {action.name!r}"
+                        )
                     self._status(result, 204, index)
                     continue
                 model_action = self._classify_http(action)

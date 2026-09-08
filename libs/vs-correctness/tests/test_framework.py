@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.request
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -158,7 +159,8 @@ def test_case_rejects_oracle_expectations_in_generator_output() -> None:
 )
 def test_misaligned_executor_observation_is_inconclusive(mutation: str) -> None:
     class MisalignedExecutor:
-        def execute(self, _test_case: TestCase, environment: Environment) -> Observation:
+        def execute(self, test_case: TestCase, environment: Environment) -> Observation:
+            del test_case
             results = (
                 ActionResult(phase="actions", index=0, status=200),
                 ActionResult(phase="actions", index=1, status=200),
@@ -235,7 +237,9 @@ def test_infrastructure_failure_during_shrink_is_not_retained() -> None:
     report = Verifier(RecordingExecutor(fail_on_length=2), max_shrink_attempts=10).verify(
         Suite(FixedGenerator([make_case(4)]), AlwaysFailOracle()), candidate=CANDIDATE, cases=1
     )
-    assert len(report.results[0].minimized_case.actions) == 3
+    minimized = report.results[0].minimized_case
+    assert minimized is not None
+    assert len(minimized.actions) == 3
 
 
 def test_shrinking_recomputes_outcome_from_reduced_executable_inputs() -> None:
@@ -243,7 +247,11 @@ def test_shrinking_recomputes_outcome_from_reduced_executable_inputs() -> None:
 
     class InputDerivedOracle:
         def check(self, context: OracleContext) -> Decision:
-            paths = tuple(action.path for action in context.test_case.actions)
+            paths = tuple(
+                action.path
+                for action in context.test_case.actions
+                if isinstance(action, HTTPAction)
+            )
             seen.append(paths)
             return Decision(
                 verdict=Verdict.FAIL if "/bad" in paths else Verdict.PASS,
@@ -262,7 +270,9 @@ def test_shrinking_recomputes_outcome_from_reduced_executable_inputs() -> None:
 
     minimized = report.results[0].minimized_case
     assert minimized is not None
-    assert tuple(action.path for action in minimized.actions) == ("/bad",)
+    assert tuple(action.path for action in minimized.actions if isinstance(action, HTTPAction)) == (
+        "/bad",
+    )
     assert seen[0] == ("/good", "/bad", "/also-good")
     assert seen[-1] == ("/bad",)
 
@@ -314,7 +324,8 @@ def test_references_resolve_independently_in_each_environment() -> None:
             self.token = token
 
         def open(self, request: object, timeout: float | None = None) -> Response:  # noqa: ARG002
-            url = request.full_url  # type: ignore[attr-defined]
+            assert isinstance(request, urllib.request.Request)
+            url = request.full_url
             if url.endswith("/token"):
                 return Response({"token": self.token})
             return Response({"matched": url.endswith(f"?token={self.token}")})

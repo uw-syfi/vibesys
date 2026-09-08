@@ -4,11 +4,13 @@ import os
 import subprocess
 import sys
 import tomllib
+from collections.abc import Callable
 from itertools import pairwise
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from pydantic import JsonValue
 
 from vibesys.evaluators import PROJECT_ROOT_TOKEN
 from vibesys.input_manifest import InputBundle, load_input_bundle, load_project_task
@@ -272,8 +274,13 @@ def test_hotel_accuracy_waits_for_every_dependency_before_verification(
     )
 
     class Verifier:
-        def __init__(self, *_args: object, **kwargs: object) -> None:
-            self.reset = kwargs["reset"]
+        def __init__(
+            self,
+            *_args: object,
+            reset: Callable[[Environment], None],
+            **_kwargs: object,
+        ) -> None:
+            self.reset = reset
 
         def verify(self, *_args: object, **_kwargs: object) -> object:
             self.reset(Environment(name="candidate", base_url="http://candidate"))
@@ -332,7 +339,7 @@ def test_hotel_readiness_timeout_names_each_failed_probe(
 )
 def test_hotel_oracle_checks_observed_compose_topology(
     monkeypatch: pytest.MonkeyPatch,
-    artifacts: dict[str, list[str]],
+    artifacts: dict[str, JsonValue],
     expected: Verdict,
 ) -> None:
     checker = _load_hotel_checker(monkeypatch)
@@ -658,8 +665,13 @@ def test_hotel_accuracy_cleans_up_when_readiness_fails(
     )
 
     class Verifier:
-        def __init__(self, *_args: object, **kwargs: object) -> None:
-            self.reset = kwargs["reset"]
+        def __init__(
+            self,
+            *_args: object,
+            reset: Callable[[Environment], None],
+            **_kwargs: object,
+        ) -> None:
+            self.reset = reset
 
         def verify(self, *_args: object, **_kwargs: object) -> object:
             self.reset(Environment(name="candidate", base_url="http://candidate"))

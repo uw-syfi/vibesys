@@ -254,6 +254,7 @@ root = [
     ".",
     "src",
     "tests",
+    "libs/vs-correctness/src",
     "libs/vs-evaluator-protocol/src",
     "libs/vs-feature-flags/src",
     "libs/vs-github/src",
@@ -272,6 +273,8 @@ root = [
 include = [
     "src",
     "tests",
+    "libs/vs-correctness/src",
+    "libs/vs-correctness/tests",
     "libs/vs-evaluator-protocol/src",
     "libs/vs-evaluator-protocol/tests",
     "libs/vs-feature-flags/src",

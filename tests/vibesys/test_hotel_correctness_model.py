@@ -3,6 +3,7 @@
 import copy
 import json
 import struct
+from typing import TypedDict
 
 import pytest
 from resources.evaluators.microservice.hotelcorrectness.catalog import (
@@ -25,7 +26,24 @@ from resources.evaluators.microservice.hotelcorrectness.schema import (
 )
 
 
-def _feature(hotel_id: str) -> dict[str, object]:
+class _Geometry(TypedDict):
+    type: str
+    coordinates: list[object]
+
+
+class _Feature(TypedDict):
+    type: str
+    id: str
+    properties: dict[str, object]
+    geometry: _Geometry
+
+
+class _FeatureCollection(TypedDict):
+    type: str
+    features: list[_Feature]
+
+
+def _feature(hotel_id: str) -> _Feature:
     profile = seed_profiles()[hotel_id]
 
     def wire_value(value: float) -> float:
@@ -106,14 +124,13 @@ def test_catalog_matches_pinned_fixture_boundaries() -> None:
 
 
 def test_strict_schema_and_catalog_reject_mutants() -> None:
-    root = {"type": "FeatureCollection", "features": [_feature("1")]}
+    root = _FeatureCollection(type="FeatureCollection", features=[_feature("1")])
     features = decode_feature_collection(root)
     validate_profiles(features, seed_profiles())
     exact_ids(features, {"1"})
 
     mutants = []
-    extra = copy.deepcopy(root)
-    extra["extra"] = True
+    extra = {**copy.deepcopy(root), "extra": True}
     mutants.append(extra)
     wrong_coordinate = copy.deepcopy(root)
     wrong_coordinate["features"][0]["geometry"]["coordinates"][0] = "-122"
@@ -149,7 +166,10 @@ def test_profile_coordinates_normalize_at_float32_storage_boundary(
     serialized = _feature(hotel_id)
     serialized["geometry"]["coordinates"] = [lon, lat]
 
-    validate_profiles(decode_feature_collection({"type": "FeatureCollection", "features": [serialized]}), seed_profiles())
+    validate_profiles(
+        decode_feature_collection({"type": "FeatureCollection", "features": [serialized]}),
+        seed_profiles(),
+    )
 
     # This nearby decimal rounds to the same float32, but Go's old rational
     # JSON comparison still rejected it because it was not the canonical wire value.

@@ -8,12 +8,30 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from vs_correctness.models import Action, ActionResult, HTTPAction, Observation, Reference
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from vs_correctness.models import Environment, TestCase
+
+type ActionPhase = Literal["setup", "actions", "cleanup"]
+
+
+class _ResponseHeaders(Protocol):
+    def __iter__(self) -> Iterator[str]: ...
+
+    def get_all(self, key: str) -> list[str] | None: ...
+
+
+class _HTTPResponse(Protocol):
+    status: int
+    code: int
+    headers: _ResponseHeaders
+
+    def read(self) -> bytes: ...
 
 
 class HTTPExecutor:
@@ -51,7 +69,7 @@ class HTTPExecutor:
         opener: urllib.request.OpenerDirector,
         environment: Environment,
         action: Action,
-        phase: str,
+        phase: ActionPhase,
         index: int,
         prior: list[ActionResult],
     ) -> ActionResult:
@@ -69,9 +87,10 @@ class HTTPExecutor:
                 else self._resolve(value, prior)
                 for key, value in action.query.items()
             }
-            resolved_headers = {
-                key: self._resolve(value, prior) for key, value in action.headers.items()
-            }
+            resolved_headers = cast(
+                "dict[str, str]",
+                {key: self._resolve(value, prior) for key, value in action.headers.items()},
+            )
             resolved_body = self._resolve(action.body, prior)
         except Exception as error:  # noqa: BLE001
             return ActionResult(
@@ -111,7 +130,8 @@ class HTTPExecutor:
             )
 
     @staticmethod
-    def _response(response: object, phase: str, index: int, started: float) -> ActionResult:
+    def _response(response: object, phase: ActionPhase, index: int, started: float) -> ActionResult:
+        response = cast("_HTTPResponse", response)
         status = int(getattr(response, "status", getattr(response, "code", 0)))
         headers = {
             key.lower(): response.headers.get_all(key) or []  # type: ignore[attr-defined]
@@ -149,9 +169,9 @@ class HTTPExecutor:
             return values[0]
         current: object = result.json_body()
         for part in value.json_path:
-            if (isinstance(part, int) and isinstance(current, list)) or (
-                isinstance(part, str) and isinstance(current, dict)
-            ):
+            if isinstance(part, int) and isinstance(current, list):  # noqa: SIM114
+                current = current[part]
+            elif isinstance(part, str) and isinstance(current, dict):
                 current = current[part]
             else:
                 message = f"reference part {part!r} is invalid for {type(current).__name__}"
