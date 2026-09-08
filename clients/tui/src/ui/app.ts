@@ -596,4 +596,3 @@ export function createOpenTuiApp(
     },
   };
 }
-
