@@ -48,12 +48,12 @@ export interface OpenTuiApp {
 /** Which of the client's editors currently holds the cursor. */
 type FocusTarget = 'command' | 'chat' | 'modal';
 
-const KEY_HELP = `←→: rounds/agents/transcript · ↑↓: within · [/]: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
-const SCOPED_KEY_HELP = `←→: rounds/agents/transcript · ↑↓: within · [/]: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
-const LOG_KEY_HELP = `↑↓ or scroll: select · Enter/click: open hypothesis · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
-const LOG_CHAT_KEY_HELP = `↑↓: select · Enter/click: hypothesis · Ctrl+W: chat · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
+const KEY_HELP = `â†â†’: rounds/agents/transcript Â· â†‘â†“: within Â· [/]: round Â· F4: zoom Â· ${COMMAND_NAMES.todos} Â· ${COMMAND_NAMES.prompt} Â· Ctrl+L: live`;
+const SCOPED_KEY_HELP = `â†â†’: rounds/agents/transcript Â· â†‘â†“: within Â· [/]: round Â· F4: zoom Â· ${COMMAND_NAMES.todos} Â· ${COMMAND_NAMES.prompt} Â· Esc: back`;
+const LOG_KEY_HELP = `â†‘â†“ or scroll: select Â· Enter/click: open hypothesis Â· F4: zoom Â· ${COMMAND_NAMES['open-round']} --N`;
+const LOG_CHAT_KEY_HELP = `â†‘â†“: select Â· Enter/click: hypothesis Â· Ctrl+W: chat Â· F4: zoom Â· ${COMMAND_NAMES['open-round']} --N`;
 const HYPOTHESIS_KEY_HELP =
-  '↑↓: select round · Enter/click: trajectory · PgUp/PgDn: scroll · Esc: hypotheses';
+  'â†‘â†“: select round Â· Enter/click: trajectory Â· PgUp/PgDn: scroll Â· Esc: hypotheses';
 /** Bezel, one content row, bezel. See the header frame below. */
 const HEADER_FRAME_HEIGHT = 3;
 
@@ -61,7 +61,7 @@ const HEADER_FRAME_HEIGHT = 3;
 const HEADER_CHROME = 4;
 
 const SPLIT_KEY_HELP =
-  'Ctrl+W: switch pane · F4: zoom focused pane · PgUp/PgDn: scroll · Esc: close pane';
+  'Ctrl+W: switch pane Â· F4: zoom focused pane Â· PgUp/PgDn: scroll Â· Esc: close pane';
 
 const TRANSCRIPT_TITLE = 'Transcript';
 
@@ -71,10 +71,10 @@ const TRANSCRIPT_TITLE = 'Transcript';
  */
 function emptyTranscriptMessage(state: SessionState): string {
   const roundNumber = visibleRoundNumber(state);
-  if (roundNumber === null) return 'Waiting for run events…';
+  if (roundNumber === null) return 'Waiting for run eventsâ€¦';
   const round = stripRounds(state).find(item => item.number === roundNumber);
   if (round?.status === 'planned') return `Round ${roundNumber} has not run yet.`;
-  return 'Waiting for run events…';
+  return 'Waiting for run eventsâ€¦';
 }
 
 export function createOpenTuiApp(
@@ -127,7 +127,7 @@ export function createOpenTuiApp(
   // `flexShrink: 0` because `renderHeader` has already budgeted the line to this
   // width, so a row that still overruns is a bug rather than something to
   // absorb. Shrinking spans put an ellipsis through every one of them at once
-  // (`V...ys·r...ng`) instead of leaving the single cut the budget decided on.
+  // (`V...ysÂ·r...ng`) instead of leaving the single cut the budget decided on.
   const headerLine = new BoxRenderable(renderer, {
     id: 'header',
     width: '100%',
@@ -573,8 +573,8 @@ export function createOpenTuiApp(
     showClipboardStatus: result => {
       transientStatus =
         result === 'copied'
-          ? 'Copied selected text · Ctrl+C exits when no text is selected'
-          : 'Copy unavailable (OSC52) · selection kept · use your terminal copy command';
+          ? 'Copied selected text Â· Ctrl+C exits when no text is selected'
+          : 'Copy unavailable (OSC52) Â· selection kept Â· use your terminal copy command';
       help.content = transientStatus;
     },
   });
@@ -601,5 +601,3 @@ export function createOpenTuiApp(
     },
   };
 }
-
-
