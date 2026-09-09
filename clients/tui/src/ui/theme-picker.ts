@@ -31,7 +31,10 @@ export class ThemePickerView {
       paddingLeft: 1,
       paddingRight: 1,
       border: true,
-      borderStyle: 'rounded',
+      // Square with an outer fill, the overlay exception (tui-conventions.md):
+      // the fill is what makes this modal opaque over whatever it covers, ring
+      // included, and a fill that reaches the ring needs a square corner.
+      borderStyle: 'single',
       borderColor: theme.info,
       backgroundColor: theme.elevatedSurface,
       title: ' Themes ',

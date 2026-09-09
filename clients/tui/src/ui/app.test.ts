@@ -1,7 +1,10 @@
 import {afterEach, describe, expect, it} from 'bun:test';
 import {
+  BoxRenderable,
   CliRenderEvents,
+  getBorderSides,
   InputRenderable,
+  type Renderable,
   rgbToHex,
   ScrollBoxRenderable,
   TextareaRenderable,
@@ -5182,6 +5185,203 @@ describe('header hierarchy', () => {
     expect(frame).not.toContain('V...');
   });
 });
+/**
+ * A fill lives on an inner box, so a border ring shows what is behind the box.
+ *
+ * `docs/contributing/tui-conventions.md` states the rule and the reason.
+ * `BoxRenderable` hands `OptimizedBuffer.drawBox` one `backgroundColor` for the
+ * whole rectangle and the buffer is write-only, so a fill set on a bordered box
+ * paints the ring as well: the painted rectangle ends up one cell larger than
+ * the drawn line on all four sides, the line sits in a solid block, and under a
+ * rounded arc the fill paints the outside of the curve and squares the corner
+ * back off. That is #642.
+ *
+ * Asserted by walking the constructed tree rather than by reading a frame, so
+ * it covers every box the app builds, including the modals that stay
+ * `visible: false` until they are opened, and so a call site added later fails
+ * this without anyone remembering to extend a list.
+ */
+describe('box fills', () => {
+  /**
+   * The boxes that keep an outer fill, which is the one exception.
+   *
+   * Each of them floats over other content, so the fill has to reach the border
+   * ring or what is behind shows through it. A list rather than a structural
+   * test because floating is not a property a box carries: the agent map's
+   * cards are absolutely positioned too, and they are laid out on a canvas
+   * rather than over anything, so `position` would exempt them as well. Every
+   * entry here is an exception someone reviewed, which is the point of holding
+   * them in one place.
+   */
+  const OVERLAY_IDS = new Set([
+    'overlay',
+    'theme-picker',
+    'chat-overlay',
+    'command-input-suggestions',
+  ]);
+
+  /** One per composer, and a composer is built per surface, so match the suffix. */
+  function isOverlay(id: string): boolean {
+    return OVERLAY_IDS.has(id) || id.endsWith('-composer-menu');
+  }
+
+  /** Every box under `renderable`, itself included. */
+  function* boxesIn(renderable: Renderable): Generator<BoxRenderable> {
+    if (renderable instanceof BoxRenderable) yield renderable;
+    for (const child of renderable.getChildren()) yield* boxesIn(child);
+  }
+
+  /** The id of every box that breaks the rule, so a failure names the site. */
+  function offenders(renderable: Renderable): string[] {
+    const found: string[] = [];
+    for (const box of boxesIn(renderable)) {
+      const sides = getBorderSides(box.border);
+      if (!sides.top && !sides.right && !sides.bottom && !sides.left) continue;
+      // `transparent` is the default and is what "no fill of its own" means
+      // here: `drawBox` leaves the rectangle alone, so the ring keeps whatever
+      // was already under it.
+      if (box.backgroundColor.a === 0) continue;
+      // An overlay may keep the outer fill, but only square. The fill reaches
+      // the ring either way, and a ring of fill under a rounded arc is #642.
+      if (isOverlay(box.id) && box.borderStyle !== 'rounded') continue;
+      found.push(box.id);
+    }
+    return found;
+  }
+
+  function boxIds(renderable: Renderable): string[] {
+    return [...boxesIn(renderable)].map(box => box.id);
+  }
+
+  /** A box that is there and is actually painting something. */
+  function isPainted(root: Renderable, id: string): boolean {
+    const box = root.findDescendantById(id);
+    return box instanceof BoxRenderable && box.backgroundColor.a > 0;
+  }
+
+  /** Enough state to build the boxes that are made per entry, not at startup. */
+  function shapeController(): FakeController {
+    return new FakeController({
+      ...initialSessionState(),
+      selectedAgentKind: 'implementer',
+      selectedEntryId: 'card',
+      core: {
+        ...initialSessionState().core,
+        status: 'running',
+        agentKind: 'implementer',
+        rounds: [{number: 1, status: 'active'}],
+        phases: [
+          {kind: 'optimizer', status: 'completed', roundNumber: 1, roundLabel: 'round 1'},
+          {kind: 'implementer', status: 'active', roundNumber: 1, roundLabel: 'round 1'},
+        ],
+        // Stamped with the agent and the round, because `visibleConversation`
+        // filters on both and an unstamped entry would be dropped before a
+        // card was ever built for it.
+        transcript: [
+          {
+            id: 'card',
+            kind: 'assistant',
+            agentKind: 'implementer',
+            roundNumber: 1,
+            label: 'implementer · round 1',
+            content: 'a bordered card',
+          },
+          {
+            id: 'status',
+            kind: 'status',
+            agentKind: 'implementer',
+            roundNumber: 1,
+            content: 'a status line',
+          },
+        ],
+      },
+    });
+  }
+
+  it('keeps a fill off every bordered box that is not an overlay', async () => {
+    const testRenderer = await createTestRenderer({width: 120, height: 30});
+    const app = createOpenTuiApp(testRenderer.renderer, shapeController());
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('a bordered card'));
+    const root = testRenderer.renderer.root;
+
+    // Coverage first, because a walk that reached nothing passes vacuously.
+    // One box from each side of the rule, plus the two that are built per
+    // entry rather than once at startup.
+    const ids = boxIds(root);
+    expect(ids).toContain('header-frame'); // bordered, fill moved inwards
+    expect(ids).toContain('experiment-log'); // a pane, the same way
+    expect(ids).toContain('theme-picker'); // an overlay, built here, never opened
+    expect(ids).toContain('event-card'); // a bordered transcript card
+    expect(ids).toContain('event-status'); // borderless, so it keeps its own fill
+    expect(ids.some(id => id.startsWith('agent-implementer-'))).toBe(true);
+
+    expect(offenders(root)).toEqual([]);
+  });
+
+  it('moves a fill inwards rather than dropping it', async () => {
+    // The other half of the rule, and the one a walk for offenders cannot see:
+    // deleting a fill satisfies that walk too, and it was how this branch first
+    // tried to answer #642. Every site that used to fill its own rectangle has
+    // to still be painting one, on a layer inside the border.
+    const testRenderer = await createTestRenderer({width: 120, height: 30});
+    const app = createOpenTuiApp(testRenderer.renderer, shapeController());
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('a bordered card'));
+    const root = testRenderer.renderer.root;
+
+    for (const id of ['header-fill', 'experiment-log-fill', 'event-card-fill']) {
+      expect([id, isPainted(root, id)]).toEqual([id, true]);
+    }
+  });
+
+  it('keeps the rule in the stacked agent layout', async () => {
+    // Two things only a narrow terminal builds. The agent pane falls back to
+    // stacked rows when there is no width to lay the graph out, and a
+    // visualization below `MIN_SPLIT_WIDTH` is drawn through the overlay,
+    // which then wears the pane treatment. That second one is the case a
+    // construction-time rule cannot cover on its own: `applyPaneFocus` sets
+    // the frame at render time, so the rounded overlay it could reintroduce
+    // only exists after a frame.
+    const testRenderer = await createTestRenderer({width: 60, height: 30});
+    const controller = shapeController();
+    controller.paneContent = 'Performance · tok_s\nbest r1 1135 tok_s';
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('implementer'));
+    await controller.openPane('perf');
+    await testRenderer.waitForFrame(value => value.includes('1135 tok_s'));
+    const root = testRenderer.renderer.root;
+
+    expect(boxIds(root)).toContain('agent-implementer');
+    expect(offenders(root)).toEqual([]);
+  });
+
+  it('flags a bordered box that fills its own rectangle', async () => {
+    // The walks above are only evidence while they can fail. These are the
+    // controls: a box built the way #642 reported, and the overlay exception
+    // used to take a rounded frame back, which is the same bug again.
+    const {renderer} = await createTestRenderer({width: 20, height: 6});
+    cleanup.push(() => renderer.destroy());
+    for (const [id, borderStyle] of [
+      ['bordered-and-filled', 'rounded'],
+      ['overlay', 'rounded'],
+    ] as const) {
+      const box = new BoxRenderable(renderer, {
+        id,
+        width: 6,
+        height: 3,
+        border: true,
+        borderStyle,
+        backgroundColor: '#ffffff',
+      });
+      renderer.root.add(box);
+      cleanup.push(() => box.destroyRecursively());
+    }
+
+    expect(offenders(renderer.root)).toEqual(['bordered-and-filled', 'overlay']);
+  });
+});
 
 /**
  * The experiment log settles synchronously, so there is no later frame to wait
@@ -5355,8 +5555,12 @@ function paneBorders(testRenderer: TestRendererSetup): Record<string, string> {
   const borders: Record<string, string> = {};
   for (const line of testRenderer.captureSpans().lines) {
     for (const span of line.spans) {
-      // Either frame style, since a focused pane draws the heavy one.
-      for (const match of span.text.matchAll(/[╭┏][─━]([^─━╮┓]+)[─━]/g)) {
+      // All three corner glyphs a titled box can open with: rounded, the
+      // heavy one a focused pane would draw, and square. Square is in the set
+      // because an overlay keeps an outer fill and so draws a square frame
+      // (tui-conventions.md), and the narrow-terminal visualization is drawn
+      // through the overlay while it is also the performance pane.
+      for (const match of span.text.matchAll(/[╭┏┌][─━]([^─━╮┓┐]+)[─━]/g)) {
         borders[(match[1] ?? '').trim()] = rgbToHex(span.fg).toLowerCase();
       }
     }

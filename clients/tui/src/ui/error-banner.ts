@@ -1,5 +1,6 @@
 import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} from '@opentui/core';
 import type {ErrorBannerState, SessionState} from '../session-model.js';
+import {fillLayer} from './box-fill.js';
 import type {Theme} from './theme.js';
 
 /** Enough rows to read a useful diagnostic without pushing the run off screen. */
@@ -18,6 +19,7 @@ function context(banner: ErrorBannerState): string {
  */
 export class ErrorBannerView {
   readonly output: BoxRenderable;
+  readonly #fill: BoxRenderable;
   readonly #scroll: ScrollBoxRenderable;
   #theme: Theme;
   #rendered: ErrorBannerState | null = null;
@@ -39,9 +41,11 @@ export class ErrorBannerView {
       borderColor: theme.error,
       paddingLeft: 1,
       paddingRight: 1,
-      backgroundColor: theme.elevatedSurface,
       visible: false,
     });
+    // The surface the diagnostic reads on, on its own layer so the banner keeps
+    // its rounded frame (tui-conventions.md).
+    this.#fill = fillLayer(this.output, 'error-banner-fill', theme.elevatedSurface);
     this.#scroll = new ScrollBoxRenderable(renderer, {
       id: 'error-banner-scroll',
       width: '100%',
@@ -54,7 +58,9 @@ export class ErrorBannerView {
 
   applyTheme(theme: Theme): void {
     this.#theme = theme;
-    this.output.backgroundColor = theme.elevatedSurface;
+    this.#fill.backgroundColor = theme.elevatedSurface;
+    // `#rendered = null` makes the next `render` repaint the border from the
+    // new theme.
     this.#rendered = null;
   }
 

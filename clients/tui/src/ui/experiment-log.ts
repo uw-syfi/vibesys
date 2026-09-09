@@ -15,6 +15,7 @@ import {
   selectedExperimentIndexItem,
   unownedExperimentRounds,
 } from '../session-model.js';
+import {fillLayer} from './box-fill.js';
 import {formatFileChange} from './design-log.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {elapsedLabel} from './previews.js';
@@ -58,6 +59,7 @@ interface Columns {
 
 export class ExperimentLogView {
   readonly output: BoxRenderable;
+  readonly #fill: BoxRenderable;
   readonly #header: TextRenderable;
   readonly #rows: ScrollBoxRenderable;
   readonly #footerLine: TextRenderable;
@@ -84,11 +86,13 @@ export class ExperimentLogView {
       border: true,
       borderStyle: paneBorderStyle(false),
       borderColor: paneBorderColor(theme, false),
-      backgroundColor: theme.elevatedSurface,
       visible: false,
       title: paneTitle(EXPERIMENTS_TITLE, false),
       onMouseUp: () => this.controller.focusPane('left'),
     });
+    // The pane surface, on its own layer so the rounded frame stays rounded
+    // (tui-conventions.md). Same call as `chat-pane`.
+    this.#fill = fillLayer(this.output, 'experiment-log-fill', theme.elevatedSurface);
     this.#header = new TextRenderable(renderer, {
       content: '',
       fg: theme.textSubtle,
@@ -138,7 +142,7 @@ export class ExperimentLogView {
   applyTheme(theme: Theme): void {
     this.#theme = theme;
     this.output.borderColor = theme.border;
-    this.output.backgroundColor = theme.elevatedSurface;
+    this.#fill.backgroundColor = theme.elevatedSurface;
     this.#header.fg = theme.textSubtle;
     this.#footerLine.fg = theme.textSubtle;
     this.#renderedState = null;

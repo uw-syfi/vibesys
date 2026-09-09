@@ -78,7 +78,11 @@ export function createCommandInputPanel(
     visible: false,
     zIndex: 5,
     border: true,
-    borderStyle: 'rounded',
+    // Square with an outer fill, the overlay exception (tui-conventions.md):
+    // this popup floats over the panes above the command column, so its fill
+    // has to reach the border ring to stop them showing through, and that is
+    // only honest under a square corner.
+    borderStyle: 'single',
     borderColor: theme.border,
     backgroundColor: theme.selectedSurface,
     paddingLeft: 1,
