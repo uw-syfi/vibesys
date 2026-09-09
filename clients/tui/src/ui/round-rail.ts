@@ -42,12 +42,21 @@ const STATUS_WORD: Record<RoundState['status'], string> = {
 };
 
 /**
- * A completed round where no fresh profile ran trades the solid check for a
- * hollow ring, so it never reads as a freshly measured one. A failed round
- * keeps its cross: how the round ended outranks how it measured.
+ * A completed round's own status says it ran to the end, not what the judge
+ * decided about it, so a round the judge failed would otherwise wear the same
+ * solid check as one it passed. It trades the check for a cross instead, on
+ * the same reasoning the profile-skipped ring already follows: how the round
+ * was judged outranks how it measured, which outranks that it finished. The
+ * cross is also the only part of the label compact width keeps, so a narrow
+ * rail still carries the verdict. `pass` matches what the check already
+ * implies, and `deferred` or an unjudged round has no claim to contradict it,
+ * so only `fail` takes the cross.
  */
-function statusGlyph(round: RoundState): string {
-  if (round.status === 'completed' && round.profileSkipped === true) return '○';
+function statusGlyph(round: RoundState, state: SessionState): string {
+  if (round.status === 'completed') {
+    if (hypothesisRoundFor(state, round.number)?.judge_verdict === 'fail') return '✗';
+    if (round.profileSkipped === true) return '○';
+  }
   return STATUS_GLYPH[round.status];
 }
 
@@ -303,7 +312,7 @@ export class RoundRailView {
     compact: boolean,
   ): string {
     const marker = isSelected ? '▸' : ' ';
-    const glyph = statusGlyph(round);
+    const glyph = statusGlyph(round, state);
     if (compact) return `${marker}r${round.number}${glyph}`;
     const metric = roundMetric(round, state, new Date());
     const parts = [`${marker}r${round.number}`, glyph, STATUS_WORD[round.status]];
