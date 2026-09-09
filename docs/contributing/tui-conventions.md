@@ -72,7 +72,10 @@ were shipped wrong once:
 - A box nested inside a pane does not repeat the treatment. The chat's `Message`
   composer sits inside the chat pane, so the pane frame carries the marker and
   the composer keeps the resting frame. Which box holds the cursor is said by
-  the cursor and by the hint line under it.
+  the cursor and by the hint line under it. The `Command` box is the same case:
+  it is drawn inside the pane whose keys it takes, which is the log on the
+  landing view, the transcript inside a round, and whichever single pane a zoom
+  has left on screen.
 - A surface that takes the keys is a pane, whatever its shape. The expanded todo
   list is a strip rather than a column, but `keybindings.ts` routes the arrow
   keys to it, so it is a `PaneId` and the pane it opened over goes back to rest.
@@ -100,8 +103,12 @@ than the row saved.
 ### Bindings are visible
 
 The active bindings are shown on the key-help line at the bottom of the screen,
-just above the command input, and that line changes with whichever surface is in
-front. A binding a person has to already know is a binding they do not have.
+under every pane, and that line changes with whichever surface is in front. A
+binding a person has to already know is a binding they do not have.
+
+The line keeps the full width of the screen rather than moving inside a pane
+with the command input. A pane is narrower than the terminal, and a row of
+bindings truncated to fit one is a row whose last bindings nobody has.
 
 ### A box has a rounded border or a background fill, never both
 

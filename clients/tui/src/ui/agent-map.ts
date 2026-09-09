@@ -79,6 +79,13 @@ const AGENTS_TITLE = 'Agents';
 
 export class AgentMapView {
   readonly output: BoxRenderable;
+  /**
+   * Everything this view draws, in a box that outlives what it draws. `#clear`
+   * destroys the graph on every repaint, and while this pane is zoomed the
+   * command column is a child of `output` too: without the separation the first
+   * repaint after a zoom destroyed the command input along with the graph.
+   */
+  readonly #content: BoxRenderable;
   #theme: Theme;
   #renderedState: SessionState | null = null;
   #renderedWidth = 0;
@@ -106,6 +113,15 @@ export class AgentMapView {
       title: paneTitle(AGENTS_TITLE, false),
       onMouseUp: () => this.controller.focusRound('agents'),
     });
+    this.#content = new BoxRenderable(renderer, {
+      id: 'agent-map-content',
+      width: '100%',
+      flexGrow: 1,
+      flexShrink: 1,
+      flexDirection: 'column',
+      onMouseUp: () => this.controller.focusRound('agents'),
+    });
+    this.output.add(this.#content);
   }
 
   applyTheme(theme: Theme): void {
@@ -161,7 +177,7 @@ export class AgentMapView {
         roundNumber === null
           ? null
           : (stripRounds(state).find(item => item.number === roundNumber) ?? null);
-      this.output.add(
+      this.#content.add(
         new TextRenderable(this.renderer, {
           content:
             round?.status === 'planned'
@@ -204,7 +220,7 @@ export class AgentMapView {
         }),
       );
     }
-    this.output.add(headingRow);
+    this.#content.add(headingRow);
     // Elapsed time only advances while an agent is running, so the heading
     // ticks for exactly as long as one is.
     if (round !== null && hasActiveAgentTiming(round)) this.#runningRound = {round, text: heading};
@@ -243,7 +259,7 @@ export class AgentMapView {
       flexShrink: 0,
       onMouseUp: () => this.controller.focusRound('agents'),
     });
-    this.output.add(area);
+    this.#content.add(area);
     area.add(canvas);
     for (const run of edgeRuns(graph)) {
       canvas.add(
@@ -326,9 +342,9 @@ export class AgentMapView {
   /** The pane before the graph: used when the terminal is too narrow for it. */
   #renderStacked(phases: AgentPhase[], selectedKind: string | null): void {
     for (const [index, phase] of phases.entries()) {
-      this.output.add(this.#renderStackedPhase(phase, selectedKind === phase.kind));
+      this.#content.add(this.#renderStackedPhase(phase, selectedKind === phase.kind));
       if (index < phases.length - 1) {
-        this.output.add(
+        this.#content.add(
           new TextRenderable(this.renderer, {
             content: '        ↓',
             fg: this.#theme.textSubtle,
@@ -417,8 +433,8 @@ export class AgentMapView {
   #clear(): void {
     this.#runningRound = null;
     this.#stopElapsedTimer();
-    for (const child of [...this.output.getChildren()]) {
-      this.output.remove(child);
+    for (const child of [...this.#content.getChildren()]) {
+      this.#content.remove(child);
       child.destroyRecursively();
     }
   }

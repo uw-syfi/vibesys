@@ -16,12 +16,12 @@ import type {Theme} from './theme.js';
  * is that authority, and each pane compares its own `PaneId` against it. A
  * surface that is not a pane never wears the treatment, and neither does a box
  * inside a pane that already does: two lit frames, one nested in the other, are
- * as ambiguous as two lit panes side by side. The chat's `Message` composer is
- * that case, and the command box is the other worth naming, since it sits under
- * the pane column and is shared by every pane in it rather than being one of
- * them. Both take the resting title, frame and colour and no focused variant,
- * and call in only to keep their labels at the same column as the panes around
- * them. Lighting the command box made the marked pane ambiguous, which is #433.
+ * as ambiguous as two lit panes side by side. Both boxes that take typed text
+ * are that case: the chat's `Message` composer sits inside the chat pane, and
+ * the command box sits inside the pane whose keys it takes. Both take the
+ * resting title, frame and colour and no focused variant, and call in only to
+ * keep their labels at the same column as the pane they are drawn in. Lighting
+ * the command box made the marked pane ambiguous, which is #433.
  */
 
 /** Marks the title of the pane that currently takes keys. */

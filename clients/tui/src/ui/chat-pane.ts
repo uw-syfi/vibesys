@@ -41,38 +41,6 @@ export function chatDockFits(terminalWidth: number, rightPaneWidth = 0): boolean
 }
 
 /**
- * The row the command column gives up so its box shares a bottom edge with the
- * docked Message box. The pane is bordered and the column is not, so the pane
- * spends the terminal's last row on its own bottom border and the column has to
- * skip the same row to end level with it.
- */
-const DOCK_ALIGNMENT_ROWS = 1;
-
-/**
- * Rows the landing table keeps for itself before presentation may spend one.
- * Nine is the kickoff panel: two borders around the round's title, the phase
- * list, and the lines saying what the round produces.
- */
-const MIN_LANDING_ROWS = 9;
-
-/**
- * Rows the command column insets itself by so the Command and Message boxes
- * line up beneath a docked chat.
- *
- * The row is not free: it comes out of the table above it. A terminal short
- * enough that the table would lose a line keeps the row instead and lets the
- * two boxes sit one row apart. Alignment is presentation and the table is the
- * view, so a short terminal degrades in the direction the operator can see and
- * undo (resize) rather than silently clipping the content.
- *
- * `landingRows` is what the table has before this inset is taken.
- */
-export function commandColumnInset(chatDocked: boolean, landingRows: number): number {
-  if (!chatDocked) return 0;
-  return landingRows - DOCK_ALIGNMENT_ROWS >= MIN_LANDING_ROWS ? DOCK_ALIGNMENT_ROWS : 0;
-}
-
-/**
  * Width in columns for the docked chat. It asks for the columns left over once
  * the table has enough for its claim, so a wide terminal loses no table column
  * to the chat; where there is no such surplus it still takes its readable
