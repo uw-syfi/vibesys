@@ -24,6 +24,20 @@ const LEFT_SHARE = 0.15;
 const HEIGHT_SHARE = 0.6;
 const TOP_SHARE = 0.18;
 
+/**
+ * Rows at the foot of the screen the box never reaches: the command input, the
+ * bottom border of the pane holding it, and the key-help line under that pane.
+ *
+ * Floating over pane content is what an overlay is for. The command input is
+ * the exception, because it keeps taking keystrokes while the box is open, so
+ * covering it would hide the surface the operator is still typing into. The
+ * share above only reaches these rows on a short terminal.
+ */
+const COMMAND_SURFACE_ROWS = 5;
+
+/** Two borders, the hint row, and one line of content worth opening for. */
+const MIN_ROWS = 4;
+
 function borderFor(theme: Theme, kind: OverlayKind): string {
   if (kind === 'help') return theme.success;
   if (kind === 'error') return theme.error;
@@ -197,8 +211,12 @@ export class OverlayView {
     const rows = this.renderer.terminalHeight;
     this.output.width = Math.round(columns * WIDTH_SHARE);
     this.output.left = Math.round(columns * LEFT_SHARE);
-    this.output.height = Math.round(rows * HEIGHT_SHARE);
-    this.output.top = Math.round(rows * TOP_SHARE);
+    const top = Math.round(rows * TOP_SHARE);
+    this.output.top = top;
+    this.output.height = Math.max(
+      MIN_ROWS,
+      Math.min(Math.round(rows * HEIGHT_SHARE), rows - COMMAND_SURFACE_ROWS - top),
+    );
   }
 
   #clear(): void {

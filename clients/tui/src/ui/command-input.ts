@@ -43,13 +43,13 @@ export function createCommandInputPanel(
     height: 3,
     width: '100%',
     border: true,
-    // The focus treatment names the one pane the navigation keys are on. The
-    // command box is shared by every pane in the column rather than being one of
-    // them, so it never wears that treatment: resting frame, resting colour, and
-    // the gutter cell where a pane would put its marker. A second lit border
-    // made the marked pane ambiguous, which is the whole complaint behind #433.
-    // It still takes the title from `focus.ts` so its label sits at the same
-    // column as the panes it shares the column with.
+    // The focus treatment names the one pane the navigation keys are on. This
+    // box is drawn inside that pane rather than being one, so it never wears
+    // the treatment: resting frame, resting colour, and the gutter cell where a
+    // pane would put its marker. A second lit border made the marked pane
+    // ambiguous, which is the whole complaint behind #433. It still takes the
+    // title from `focus.ts` so its label sits at the same column as the pane
+    // holding it, and as the chat's `Message` box across the landing view.
     borderStyle: paneBorderStyle(false),
     borderColor: paneBorderColor(theme, false),
     title: paneTitle(COMMAND_TITLE, false),
