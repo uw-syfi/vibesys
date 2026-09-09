@@ -108,7 +108,12 @@ export function createOpenTuiApp(
     paddingLeft: 1,
     paddingRight: 1,
     border: true,
-    borderStyle: 'rounded',
+    // Square, because this frame keeps its fill and a box may have one or the
+    // other, never both (tui-conventions.md). The fill is not decoration here:
+    // `headerSpanStyle` derives every header tone's contrast against
+    // `headerBackground`, so dropping it would make the header's text
+    // contrast-checked against a surface it does not paint.
+    borderStyle: 'single',
     borderColor: theme.border,
     // The same surface every other pane sits on. Without this the frame falls
     // through to the root's `canvas`, which is a different shade, so the header

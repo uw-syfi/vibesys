@@ -39,7 +39,12 @@ export class ErrorBannerView {
       borderColor: theme.error,
       paddingLeft: 1,
       paddingRight: 1,
-      backgroundColor: theme.elevatedSurface,
+      // No fill: the frame is rounded, and a box may have one or the other,
+      // never both (tui-conventions.md). The banner is a flex child of `root`
+      // holding its own rows, so nothing shows through where the fill was, and
+      // what says "error" is the border colour `render` picks from the
+      // severity plus the title, not a tint a high-contrast theme flattens
+      // into the canvas anyway.
       visible: false,
     });
     this.#scroll = new ScrollBoxRenderable(renderer, {
@@ -54,7 +59,8 @@ export class ErrorBannerView {
 
   applyTheme(theme: Theme): void {
     this.#theme = theme;
-    this.output.backgroundColor = theme.elevatedSurface;
+    // `#rendered = null` makes the next `render` repaint the border from the
+    // new theme, which is the only colour this box owns.
     this.#rendered = null;
   }
 

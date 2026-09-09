@@ -31,7 +31,10 @@ export class ThemePickerView {
       paddingLeft: 1,
       paddingRight: 1,
       border: true,
-      borderStyle: 'rounded',
+      // Square, because this modal keeps its fill and a box may have one or
+      // the other, never both (tui-conventions.md). The fill is what makes it
+      // opaque over whatever it covers.
+      borderStyle: 'single',
       borderColor: theme.info,
       backgroundColor: theme.elevatedSurface,
       title: ' Themes ',

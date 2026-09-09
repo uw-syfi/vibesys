@@ -103,6 +103,40 @@ The active bindings are shown on the key-help line at the bottom of the screen,
 just above the command input, and that line changes with whichever surface is in
 front. A binding a person has to already know is a binding they do not have.
 
+### A box has a rounded border or a background fill, never both
+
+`OptimizedBuffer.drawBox` takes one background for the whole rectangle and the
+buffer is write-only, so every cell of a box gets that fill and a corner cell
+cannot know what it sat on. Under a square corner glyph that is truthful: the
+box really is square there, and the whole cell is inside it. Under a rounded arc
+it is not. The arc is a thin curve with outside-the-box on one side of it, and
+filling the cell paints that outside too, which squares the corner back off and
+leaves the drawn shape disagreeing with the painted one. That is #642.
+
+Blending the corner cell between the fill and what is behind it was tried and
+rejected: it is still one flat colour standing in for two regions, and it reads
+as a smudge rather than as a curve.
+
+So pick a side per box, on what the fill is doing:
+
+| The fill | Do this |
+| --- | --- |
+| Carries state, or makes a floating surface opaque | Keep it, and draw a **square** border (`borderStyle: 'single'`) |
+| Is a surface tint | **Drop it**, and keep the rounded border |
+
+A pane is normally the second case, because `PANE_BORDER` keeps the rounded
+frame for its own reasons. The overlay is the exception: it is absolutely
+positioned over the round view in both of its roles, so its fill is what makes
+it opaque rather than a tint it could give up, and it stays square while still
+wearing the pane title and border colour. It loses nothing by that, since frame
+weight was never one of the focus channels.
+
+`app.test.ts` holds this over the whole constructed tree rather than over a list
+of call sites, so a box added later fails it without anyone remembering to
+extend a list. One trap it exists to catch: OpenTUI turns a border back on if
+`borderStyle` or `borderColor` is passed beside `border: false`, so a box that
+means to draw no border has to omit both.
+
 ## Proposed: movement and naming
 
 Nothing in this section is implemented. It is where the movement and naming

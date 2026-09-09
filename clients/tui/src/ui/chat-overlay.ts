@@ -71,7 +71,10 @@ export class ChatOverlayView {
       paddingLeft: 1,
       paddingRight: 1,
       border: true,
-      borderStyle: 'rounded',
+      // Square, because this modal keeps its fill and a box may have one or
+      // the other, never both (tui-conventions.md). The fill is what makes the
+      // modal opaque over the run behind it, so it is not the side to drop.
+      borderStyle: 'single',
       borderColor: theme.conversation.analysis.label,
       backgroundColor: theme.elevatedSurface,
       title: ' Experiment chat ',

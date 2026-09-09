@@ -165,7 +165,11 @@ export class ChatComposerView {
       visible: false,
       zIndex: 5,
       border: true,
-      borderStyle: 'rounded',
+      // Square, because this menu keeps its fill and a box may have one or the
+      // other, never both (tui-conventions.md). The fill is what makes an
+      // absolutely positioned popup opaque: without it the composer text under
+      // it shows through between the rows.
+      borderStyle: 'single',
       borderColor: theme.border,
       backgroundColor: theme.elevatedSurface,
       paddingLeft: 1,

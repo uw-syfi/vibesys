@@ -51,7 +51,10 @@ export class OverlayView {
       paddingLeft: 1,
       paddingRight: 1,
       border: true,
-      borderStyle: 'rounded',
+      // Square, because this modal keeps its fill and a box may have one or
+      // the other, never both (tui-conventions.md). The fill is what makes it
+      // opaque over whatever it covers.
+      borderStyle: 'single',
       borderColor: theme.info,
       backgroundColor: theme.elevatedSurface,
       // Above the chat modal (20), below the theme picker (30): a command ack
@@ -139,6 +142,14 @@ export class OverlayView {
     this.#applyGeometry();
     // Outside the cache below: focus moves without the content changing.
     applyPaneFocus(this.output, this.#theme, pane.title, focusedPane(state) === 'performance');
+    // `applyPaneFocus` also stamps the pane frame, which is rounded, and this
+    // box keeps its fill in both of its roles: it is absolutely positioned over
+    // the round view either way, so the fill is what makes it opaque rather
+    // than a tint it could give up. A box may have a rounded border or a fill,
+    // never both (tui-conventions.md), so the shape stays square and only the
+    // title and the border colour come from the pane treatment. Frame weight
+    // was never one of the focus channels anyway; `PANE_BORDER` says why.
+    this.output.borderStyle = 'single';
     if (pane === this.#renderedPane) return;
     this.#renderedPane = pane;
     // The next ordinary overlay repaints its own title and border rather than

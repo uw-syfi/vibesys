@@ -84,7 +84,10 @@ export class ExperimentLogView {
       border: true,
       borderStyle: paneBorderStyle(false),
       borderColor: paneBorderColor(theme, false),
-      backgroundColor: theme.elevatedSurface,
+      // No fill: `paneBorderStyle` is rounded, and a box may have one or the
+      // other, never both (tui-conventions.md). Same call as `chat-pane`: the
+      // pane keeps its frame, and the tint it drops was decoration over a
+      // region of `main` that nothing else paints.
       visible: false,
       title: paneTitle(EXPERIMENTS_TITLE, false),
       onMouseUp: () => this.controller.focusPane('left'),
@@ -138,7 +141,6 @@ export class ExperimentLogView {
   applyTheme(theme: Theme): void {
     this.#theme = theme;
     this.output.borderColor = theme.border;
-    this.output.backgroundColor = theme.elevatedSurface;
     this.#header.fg = theme.textSubtle;
     this.#footerLine.fg = theme.textSubtle;
     this.#renderedState = null;

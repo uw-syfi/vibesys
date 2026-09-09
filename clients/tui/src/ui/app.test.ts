@@ -1,7 +1,10 @@
 import {afterEach, describe, expect, it} from 'bun:test';
 import {
+  BoxRenderable,
   CliRenderEvents,
+  getBorderSides,
   InputRenderable,
+  type Renderable,
   rgbToHex,
   ScrollBoxRenderable,
   TextareaRenderable,
@@ -1703,10 +1706,14 @@ describe('OpenTUI presentation', () => {
     const frame = await testRenderer.waitForFrame(value => value.includes('2 passed'));
     expect(frame).toContain('→ Bash(command="pytest")');
     expect(frame).toContain('← 2 passed');
-    // Header housing, agents pane, transcript frame, and the card's call and
-    // result regions: the rail is absent because this fixture has no rounds.
-    // A focused pane draws a heavy corner, so the count is over both styles.
-    expect(frame.match(/[╭┏]/g)).toHaveLength(5);
+    // Agents pane, transcript frame, and the card's call and result regions:
+    // the rail is absent because this fixture has no rounds. A focused pane
+    // draws a heavy corner, so the count is over both styles. The header
+    // housing is no longer among them: it keeps its fill, so it draws a square
+    // frame (tui-conventions.md), and it is counted separately so its shape
+    // stays asserted rather than dropping out of the test.
+    expect(frame.match(/[╭┏]/g)).toHaveLength(4);
+    expect(frame.match(/┌/g)).toHaveLength(1);
   });
 
   it('renders a typed command payload with labeled stderr and exit code', async () => {
@@ -2425,6 +2432,18 @@ describe('overlay scrolling', () => {
 });
 
 describe('theming', () => {
+  /**
+   * The role colour a transcript card carries.
+   *
+   * The border, because that is where the role lives: a bordered card has no
+   * fill (tui-conventions.md), so the body text reports the canvas and the
+   * role would otherwise go unasserted here.
+   */
+  function cardBorder(testRenderer: TestRendererSetup, id: string): string | undefined {
+    const card = testRenderer.renderer.root.findDescendantById(id);
+    return card instanceof BoxRenderable ? rgbToHex(card.borderColor).toLowerCase() : undefined;
+  }
+
   const assistantEntry = {
     id: 'themed',
     kind: 'assistant' as const,
@@ -2451,7 +2470,10 @@ describe('theming', () => {
     expect(spanColors(testRenderer, 'VibeSys')?.fg).toBe(light.accent);
     const body = spanColors(testRenderer, 'themed body text');
     expect(body?.fg).toBe(light.conversation.assistant.content);
-    expect(body?.bg).toBe(light.conversation.assistant.background);
+    // The canvas, not a role fill: a bordered card carries the role in its
+    // border and draws no background of its own.
+    expect(body?.bg).toBe(light.canvas);
+    expect(cardBorder(testRenderer, 'event-themed')).toBe(light.conversation.assistant.border);
     expect(spanColors(testRenderer, 'implementer')?.fg).toBe(light.conversation.assistant.label);
   });
 
@@ -2472,8 +2494,10 @@ describe('theming', () => {
     expect(spanColors(testRenderer, 'VibeSys')?.fg).toBe('#22d3ee');
     const body = spanColors(testRenderer, 'themed body text');
     expect(body?.fg).toBe('#e2e8f0');
-    // Assistant cards derive their fill from the canvas and the role accent.
-    expect(body?.bg).toBe('#0e283d');
+    // The canvas: an assistant card draws no fill of its own, and carries its
+    // role accent in the border instead.
+    expect(body?.bg).toBe('#0f172a');
+    expect(cardBorder(testRenderer, 'event-themed')).toBe('#0891b2');
     expect(spanColors(testRenderer, 'implementer')?.fg).toBe('#5cb6cc');
   });
 
@@ -2499,7 +2523,10 @@ describe('theming', () => {
     expect(spanColors(testRenderer, 'VibeSys')?.fg).toBe(solarized.accent);
     const body = spanColors(testRenderer, 'themed body text');
     expect(body?.fg).toBe(solarized.conversation.assistant.content);
-    expect(body?.bg).toBe(solarized.conversation.assistant.background);
+    // Both channels have to follow the swap: the canvas the card sits on, and
+    // the border it carries its role in.
+    expect(body?.bg).toBe(solarized.canvas);
+    expect(cardBorder(testRenderer, 'event-themed')).toBe(solarized.conversation.assistant.border);
   });
 
   it('navigates the theme list with the keyboard and applies on Enter', async () => {
@@ -4934,6 +4961,151 @@ describe('header hierarchy', () => {
     expect(frame).not.toContain('V...');
   });
 });
+/**
+ * A box may have a rounded border or a background fill, never both.
+ *
+ * `docs/contributing/tui-conventions.md` states the rule and the reason.
+ * `BoxRenderable.renderSelf` hands `OptimizedBuffer.drawBox` a single
+ * `backgroundColor` for the whole rectangle, and the buffer is write-only, so
+ * every cell of the box takes that fill and a corner cell has no way to know
+ * what it sat on. Under a square glyph that is truthful: the box really is
+ * square there and the whole cell is inside it. Under a rounded arc it is not.
+ * The arc is a thin curve with outside-the-box on one side of it, and filling
+ * the cell paints that outside too, which squares the corner back off. That is
+ * #642.
+ *
+ * Asserted by walking the constructed tree rather than by reading a frame, so
+ * it covers every box the app builds, including modals that stay
+ * `visible: false` until they are opened, and so a call site added later fails
+ * this without anyone remembering to extend a list.
+ */
+describe('box shape and fill', () => {
+  /** Every box under `renderable`, itself included. */
+  function* boxesIn(renderable: Renderable): Generator<BoxRenderable> {
+    if (renderable instanceof BoxRenderable) yield renderable;
+    for (const child of renderable.getChildren()) yield* boxesIn(child);
+  }
+
+  /** The id of every box that breaks the rule, so a failure names the site. */
+  function offenders(renderable: Renderable): string[] {
+    const found: string[] = [];
+    for (const box of boxesIn(renderable)) {
+      if (box.borderStyle !== 'rounded') continue;
+      const sides = getBorderSides(box.border);
+      if (!sides.top && !sides.right && !sides.bottom && !sides.left) continue;
+      // `transparent` is the default and is what "no fill" means here:
+      // `drawBox` leaves the rectangle alone, so a corner cell keeps whatever
+      // was already under it and the arc reads as an arc.
+      if (box.backgroundColor.a > 0) found.push(box.id);
+    }
+    return found;
+  }
+
+  function boxIds(renderable: Renderable): string[] {
+    return [...boxesIn(renderable)].map(box => box.id);
+  }
+
+  /** Enough state to build the boxes that are made per entry, not at startup. */
+  function shapeController(): FakeController {
+    return new FakeController({
+      ...initialSessionState(),
+      selectedAgentKind: 'implementer',
+      selectedEntryId: 'card',
+      core: {
+        ...initialSessionState().core,
+        status: 'running',
+        agentKind: 'implementer',
+        rounds: [{number: 1, status: 'active'}],
+        phases: [
+          {kind: 'optimizer', status: 'completed', roundNumber: 1, roundLabel: 'round 1'},
+          {kind: 'implementer', status: 'active', roundNumber: 1, roundLabel: 'round 1'},
+        ],
+        // Stamped with the agent and the round, because `visibleConversation`
+        // filters on both and an unstamped entry would be dropped before a
+        // card was ever built for it.
+        transcript: [
+          {
+            id: 'card',
+            kind: 'assistant',
+            agentKind: 'implementer',
+            roundNumber: 1,
+            label: 'implementer · round 1',
+            content: 'a bordered card',
+          },
+          {
+            id: 'status',
+            kind: 'status',
+            agentKind: 'implementer',
+            roundNumber: 1,
+            content: 'a status line',
+          },
+        ],
+      },
+    });
+  }
+
+  it('never pairs a rounded border with a fill, anywhere in the tree', async () => {
+    const testRenderer = await createTestRenderer({width: 120, height: 30});
+    const app = createOpenTuiApp(testRenderer.renderer, shapeController());
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('a bordered card'));
+    const root = testRenderer.renderer.root;
+
+    // Coverage first, because a walk that reached nothing passes vacuously.
+    // One box from each side of the rule, plus the two that are built per
+    // entry rather than once at startup.
+    const ids = boxIds(root);
+    expect(ids).toContain('header-frame'); // square, keeps its fill
+    expect(ids).toContain('experiment-log'); // rounded, dropped its fill
+    expect(ids).toContain('theme-picker'); // built here, never opened
+    expect(ids).toContain('event-card'); // a bordered transcript card
+    expect(ids).toContain('event-status'); // borderless, so it keeps its fill
+    expect(ids.some(id => id.startsWith('agent-implementer-'))).toBe(true);
+
+    expect(offenders(root)).toEqual([]);
+  });
+
+  it('keeps the rule in the stacked agent layout', async () => {
+    // Two things only a narrow terminal builds. The agent pane falls back to
+    // stacked rows when there is no width to lay the graph out, and a
+    // visualization below `MIN_SPLIT_WIDTH` is drawn through the overlay,
+    // which then wears the pane treatment. That second one is the case a
+    // construction-time rule cannot cover on its own: `applyPaneFocus` sets
+    // the frame at render time, so the pairing it could reintroduce only
+    // exists after a frame.
+    const testRenderer = await createTestRenderer({width: 60, height: 30});
+    const controller = shapeController();
+    controller.paneContent = 'Performance · tok_s\nbest r1 1135 tok_s';
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('implementer'));
+    await controller.openPane('perf');
+    await testRenderer.waitForFrame(value => value.includes('1135 tok_s'));
+    const root = testRenderer.renderer.root;
+
+    expect(boxIds(root)).toContain('agent-implementer');
+    expect(offenders(root)).toEqual([]);
+  });
+
+  it('flags a box that pairs them', async () => {
+    // The two walks above are only evidence while they can fail. This is the
+    // control: a box built the way #642 reported has to be caught.
+    const {renderer} = await createTestRenderer({width: 20, height: 6});
+    cleanup.push(() => renderer.destroy());
+    const box = new BoxRenderable(renderer, {
+      id: 'rounded-and-filled',
+      width: 6,
+      height: 3,
+      border: true,
+      borderStyle: 'rounded',
+      backgroundColor: '#ffffff',
+    });
+    renderer.root.add(box);
+    cleanup.push(() => box.destroyRecursively());
+
+    expect(offenders(renderer.root)).toEqual(['rounded-and-filled']);
+  });
+});
 
 /**
  * The experiment log settles synchronously, so there is no later frame to wait
@@ -5107,8 +5279,12 @@ function paneBorders(testRenderer: TestRendererSetup): Record<string, string> {
   const borders: Record<string, string> = {};
   for (const line of testRenderer.captureSpans().lines) {
     for (const span of line.spans) {
-      // Either frame style, since a focused pane draws the heavy one.
-      for (const match of span.text.matchAll(/[╭┏][─━]([^─━╮┓]+)[─━]/g)) {
+      // All three corner glyphs a titled box can open with: rounded, the
+      // heavy one a focused pane would draw, and square. Square is in the set
+      // because a box that keeps a fill draws a square frame
+      // (tui-conventions.md), and the narrow-terminal visualization is such a
+      // box while it is also the performance pane.
+      for (const match of span.text.matchAll(/[╭┏┌][─━]([^─━╮┓┐]+)[─━]/g)) {
         borders[(match[1] ?? '').trim()] = rgbToHex(span.fg).toLowerCase();
       }
     }

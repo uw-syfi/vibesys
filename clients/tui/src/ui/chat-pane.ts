@@ -116,10 +116,13 @@ export class ChatPaneView {
       border: true,
       borderStyle: paneBorderStyle(false),
       borderColor: paneBorderColor(theme, false),
-      // The surface every other pane sits on. Without it this box falls
-      // through to the root's canvas, a lighter shade, so the chat read as a
-      // pale band beside panes that did not match it.
-      backgroundColor: theme.elevatedSurface,
+      // No fill: `paneBorderStyle` is rounded, and a box may have one or the
+      // other, never both (tui-conventions.md). A pane keeps the rounded frame
+      // that `PANE_BORDER` argues for, so the fill is the side that goes. It
+      // was only a surface tint: this box sits in its own reserved column of
+      // `body`, so nothing shows through where it used to paint, and every
+      // theme token is already held to `minContrast` against the canvas it now
+      // falls through to rather than against the elevated surface.
       title: paneTitle(CHAT_PANE_TITLE, false),
       visible: false,
       // Clicking into the chat gives it the keys, the same thing Ctrl+W does.
@@ -171,7 +174,6 @@ export class ChatPaneView {
     this.#theme = theme;
     // Resting colour: `render` repaints from the live focus on the next frame.
     this.output.borderColor = paneBorderColor(theme, false);
-    this.output.backgroundColor = theme.elevatedSurface;
     this.#conversation.applyTheme(theme, markdownStyle);
     this.#composer.applyTheme(theme);
     this.#renderedConversation = null;

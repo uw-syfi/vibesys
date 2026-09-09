@@ -278,7 +278,14 @@ export class AgentMapView {
       // No horizontal padding: two columns of it is the difference between
       // "implementer" and "implement…" at the widths a four-stage round leaves.
       border: true,
-      borderStyle: 'rounded',
+      // Square, because this card carries selection as a fill and a box may
+      // have one or the other, never both (tui-conventions.md). A square
+      // corner cell is honestly square, so filling it is truthful; a rounded
+      // one is not. Unconditional rather than square-only-when-selected:
+      // swapping the shape on selection reads as the node becoming a
+      // different kind of object, which is why `PANE_BORDER` rejected the same
+      // swap for focus.
+      borderStyle: 'single',
       borderColor: selected
         ? this.#theme.borderFocus
         : phase.status === 'pending'
@@ -342,10 +349,13 @@ export class AgentMapView {
       paddingRight: 1,
       // Passing borderStyle without border draws a frame that the layout does
       // not reserve rows for, and the phase's lines then overlap it.
+      //
+      // Square for the same reason as `#renderNode`: this is that card in the
+      // stacked layout, and it only draws a frame in the state that fills it.
       ...(selected
         ? {
             border: true,
-            borderStyle: 'rounded' as const,
+            borderStyle: 'single' as const,
             borderColor: this.#theme.borderFocus,
           }
         : {}),

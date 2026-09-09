@@ -78,7 +78,11 @@ export function createCommandInputPanel(
     visible: false,
     zIndex: 5,
     border: true,
-    borderStyle: 'rounded',
+    // Square, because this popup keeps its fill and a box may have one or the
+    // other, never both (tui-conventions.md). It is absolutely positioned over
+    // the panes above the command column, and the fill is what stops them
+    // showing through it.
+    borderStyle: 'single',
     borderColor: theme.border,
     backgroundColor: theme.selectedSurface,
     paddingLeft: 1,

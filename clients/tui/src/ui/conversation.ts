@@ -326,19 +326,38 @@ export class ConversationView {
   #renderEntry(entry: ConversationEntry): BoxRenderable {
     const palette = entryPalette(entry, this.#theme);
     const selected = this.#selectedId === entry.id;
+    const bordered = entry.kind !== 'status';
     const card = new BoxRenderable(this.renderer, {
       id: `event-${entry.id}`,
       width: '100%',
       flexDirection: 'column',
       marginTop: 1,
-      paddingLeft: entry.kind === 'status' ? 0 : 1,
+      paddingLeft: bordered ? 1 : 0,
       paddingRight: 1,
-      border: entry.kind !== 'status',
-      borderStyle: 'rounded',
-      // The cursor is the card's border, not a fill: a filled card reads as
-      // selected text, and the transcript already uses fills for roles.
-      borderColor: selected ? this.#theme.borderFocus : palette.border,
-      backgroundColor: palette.background,
+      // The two branches are the two sides of one rule: a box may have a
+      // rounded border or a background fill, never both (tui-conventions.md).
+      //
+      // A bordered card keeps the frame and drops the role tint. The role
+      // survives that: the border colour and the heading in `palette.label`
+      // both carry it, which is what 1.4.1 needs anyway, and the tint was only
+      // the accent at 8-16% over the canvas.
+      //
+      // A status entry keeps the fill, which is the only thing marking it as a
+      // region of its own. `borderStyle` and `borderColor` move inside the
+      // bordered branch rather than sitting beside `border: false`, because
+      // OpenTUI reads either of them as a request for a frame and turns the
+      // border back on. That is how a status card came to draw the rounded
+      // frame over a fill that this rule forbids, while reading as if it drew
+      // no border at all.
+      ...(bordered
+        ? {
+            border: true,
+            borderStyle: 'rounded' as const,
+            // The cursor is the card's border, not a fill: a filled card reads
+            // as selected text.
+            borderColor: selected ? this.#theme.borderFocus : palette.border,
+          }
+        : {backgroundColor: palette.background}),
       ...(this.#showsSelection
         ? {
             onMouseUp: () => {
