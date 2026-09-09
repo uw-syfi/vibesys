@@ -405,13 +405,28 @@ export class ConversationView {
       flexDirection: 'row',
       justifyContent: 'space-between',
     });
+    // The heading box is already `space-between`, and an entry that names both
+    // an agent and a round carries them as separate fields, so the role can sit
+    // at the left edge where it lines up down the column and the run id can go
+    // to the right rather than pushing the eye a variable distance across. Any
+    // other entry keeps its single label on the left, unchanged.
+    const splitHeading = entry.agentKind !== undefined && entry.roundLabel !== undefined;
     heading.add(
       new TextRenderable(this.renderer, {
-        content: `${selected ? '▸ ' : ''}${entry.label ?? entry.kind}`,
+        content: `${selected ? '▸ ' : ''}${splitHeading ? entry.agentKind : (entry.label ?? entry.kind)}`,
         fg: selected ? this.#theme.textStrong : palette.label,
         height: 1,
       }),
     );
+    if (splitHeading) {
+      heading.add(
+        new TextRenderable(this.renderer, {
+          content: entry.roundLabel as string,
+          fg: this.#theme.textSubtle,
+          height: 1,
+        }),
+      );
+    }
     card.add(heading);
     if (this.#markdownKinds.has(entry.kind)) {
       this.#renderMarkdownEntry(card, entry);
