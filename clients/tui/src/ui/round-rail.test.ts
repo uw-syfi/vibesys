@@ -1,6 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {rgbToHex, type TextRenderable} from '@opentui/core';
 import {createTestRenderer} from '@opentui/core/testing';
+import type {HypothesisRound} from '@vibesys/backend-client';
 import type {RoundSummary} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
@@ -341,5 +342,127 @@ describe('RoundRailView profile-skipped rounds', () => {
     const failed = rows.find(row => row.text.includes('r2'));
     expect(failed?.text).toContain('✗');
     expect(failed?.text).not.toContain('○');
+  });
+});
+
+describe('RoundRailView judge verdict', () => {
+  /** A single completed round whose experiment-log record carries `verdict`. */
+  function verdictState(verdict: 'pass' | 'fail' | 'deferred' | null | undefined): SessionState {
+    const base = railState(1);
+    const record: HypothesisRound = {
+      round: 1,
+      passed: verdict === 'pass',
+      reviewed: true,
+      // Omitted rather than set to `undefined`: a round the judge has not
+      // reached yet has no `judge_verdict` key at all, same as the backend
+      // sends it (exactOptionalPropertyTypes forbids the key set to
+      // `undefined` explicitly).
+      ...(verdict !== undefined ? {judge_verdict: verdict} : {}),
+    };
+    return {
+      ...base,
+      selectedRound: 1,
+      experimentLog: {
+        entries: [{hypothesis_id: 'H-01', first_round: 1, last_round: 1, rounds: [record]}],
+        selectedId: null,
+        pending: false,
+        error: null,
+      },
+    };
+  }
+
+  /** The row for round 1 as its plain text, or undefined once `view.render` ran. */
+  function rowText(view: RoundRailView): string | undefined {
+    return view.output
+      .getChildren()
+      .map(child => {
+        const content = (child as {content?: {chunks?: {text?: string}[]}}).content;
+        return (content?.chunks ?? []).map(chunk => chunk.text ?? '').join('');
+      })
+      .find(line => line.includes('r1'));
+  }
+
+  test('marks a completed round the judge failed, without losing the round-status check', async () => {
+    const rows = await renderedRows(verdictState('fail'), 10);
+    const row = rows.find(r => r.text.includes('r1'));
+    // The verdict replaces the status glyph rather than sitting beside it: a
+    // row carrying both a check and a cross reads as two contradictory claims,
+    // and the status word ('done') already says the round finished.
+    expect(row?.text).toContain('✗');
+    expect(row?.text).not.toContain('✓');
+    expect(row?.text).toContain('done');
+  });
+
+  test('adds no mark for a pass verdict, a deferred one, or a round not yet judged', async () => {
+    // One renderer reused across every verdict, so the run's assertions read as
+    // one behaviour (fail is the only mark-worthy case) rather than four
+    // independent renders.
+    const {renderer} = await createTestRenderer({width: 120, height: 40});
+    const view = new RoundRailView(
+      renderer,
+      {} as unknown as SessionController,
+      resolveTheme(null),
+    );
+    for (const verdict of ['pass', 'deferred', null, undefined] as const) {
+      view.render(verdictState(verdict), RAIL_FULL_WIDTH, 10);
+      expect(rowText(view)).not.toContain('✗');
+    }
+    view.destroy();
+  });
+
+  test('carries the verdict into the compact row, which keeps only the glyph', async () => {
+    const {renderer} = await createTestRenderer({width: 120, height: 40});
+    const view = new RoundRailView(
+      renderer,
+      {} as unknown as SessionController,
+      resolveTheme(null),
+    );
+    view.render(verdictState('fail'), RAIL_COMPACT_WIDTH, 10);
+    const content = (
+      view.output.getChildren()[0] as unknown as {
+        content?: {chunks?: {text?: string}[]};
+      }
+    ).content;
+    const text = (content?.chunks ?? []).map(chunk => chunk.text ?? '').join('');
+    view.destroy();
+    // Compact keeps nothing past the glyph, which is exactly why the verdict
+    // lives in the glyph: a narrow rail is where an operator can least afford
+    // to lose the one fact that a finished round was still judged a failure.
+    expect(text).toBe('▸r1✗');
+  });
+
+  test('keeps a fail verdict inside the usable width even at a high round count', async () => {
+    const base = railState(1);
+    const state: SessionState = {
+      ...base,
+      selectedRound: 999,
+      core: {...base.core, rounds: [{number: 999, status: 'completed'}]},
+      experimentLog: {
+        entries: [
+          {
+            hypothesis_id: 'H-01',
+            first_round: 999,
+            last_round: 999,
+            rounds: [
+              {
+                round: 999,
+                passed: false,
+                reviewed: true,
+                judge_verdict: 'fail',
+                perf_delta_pct: -100,
+              },
+            ],
+          },
+        ],
+        selectedId: null,
+        pending: false,
+        error: null,
+      },
+    };
+    const rows = await renderedRows(state, 10);
+    const row = rows.find(r => r.text.includes('r999'));
+    // RAIL_FULL_WIDTH (28) minus the border (2) and the 1-column padding on
+    // each side (2) leaves 24 usable columns.
+    expect(row?.text.length).toBeLessThanOrEqual(RAIL_FULL_WIDTH - 4);
   });
 });
