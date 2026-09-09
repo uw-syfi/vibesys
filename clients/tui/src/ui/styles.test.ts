@@ -278,14 +278,17 @@ describe('markdown code blocks', () => {
     expect(code.streaming).toBe(true);
   });
 
-  it('draws more than one colour for a fence whose grammar ships', async () => {
+  it.each([
+    ['ts', 'typescript'],
+    ['tsx', 'typescriptreact'],
+  ])('draws more than one colour for a %s fence whose grammar ships', async (info, filetype) => {
     const theme = resolveTheme('dark');
     const content = 'const x = 1;';
-    const fixture = await renderMarkdown(`\`\`\`ts\n${content}\n\`\`\`\n`, theme);
+    const fixture = await renderMarkdown(`\`\`\`${info}\n${content}\n\`\`\`\n`, theme);
     await fixture.layout();
 
     const code = fencedBlock(fixture.markdown, content);
-    expect(code.filetype).toBe('typescript');
+    expect(code.filetype).toBe(filetype);
     // The mock client never runs a real parser; feeding it a highlight result
     // stands in for a grammar resolving, which is the case this override must
     // let through undisturbed instead of overwriting with a flat color.
