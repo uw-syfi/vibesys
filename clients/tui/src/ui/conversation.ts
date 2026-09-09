@@ -11,7 +11,6 @@ import {hasRunEnded} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import type {ConversationEntry, SessionState} from '../session-model.js';
 import {visibleConversation} from '../session-model.js';
-import {fillLayer} from './box-fill.js';
 import {promptPreview, toolCallPreview, toolResultPreview} from './previews.js';
 import {
   conversationRole,
@@ -19,7 +18,7 @@ import {
   entryPalette,
   type MarkdownBlockOptions,
 } from './styles.js';
-import type {Theme} from './theme.js';
+import {ensureContrast, SUBTLE_TEXT_MIN_CONTRAST, type Theme} from './theme.js';
 
 export interface ConversationViewOptions {
   selectConversation?: (state: SessionState) => ConversationEntry[];
@@ -102,8 +101,11 @@ export class ConversationView {
     this.#showsSelection = options.showsSelection ?? false;
     this.#onFocusRequest = options.onFocusRequest;
     const onRevealOlder = options.onRevealOlder;
-    // The bordered surface owns horizontal inset so transcript siblings, such
-    // as a fixed footer, share the same content origin as these turn cards.
+    // Horizontal inset belongs to the pane (or the chat surface's own frame)
+    // that contains this view, not to the cards below: see #565. A card that
+    // padded itself again on top of that sat one layer deeper than a
+    // non-card sibling in the same pane, such as the empty-transcript
+    // message added directly below.
     this.output = new BoxRenderable(renderer, {
       id: 'output',
       width: '100%',
@@ -337,26 +339,43 @@ export class ConversationView {
       id: `event-${entry.id}`,
       width: '100%',
       flexDirection: 'column',
-      marginTop: bare && entry.kind !== 'status' ? 0 : 1,
-      paddingLeft: bare ? 0 : 1,
-      paddingRight: 1,
-      // `border: false` is not enough on its own: OpenTUI turns the border
-      // back on whenever any border styling option is present, so a borderless
-      // entry has to omit `borderStyle` and `borderColor` as well. That is how
-      // a bare card came to draw a rounded frame while reading as if it drew
-      // none.
+      // A carded entry gets a rule on its top edge instead of a four-sided
+      // border (#565): it separates one entry from the next at a fraction of
+      // the row cost, with no bottom border and no blank margin row to hold
+      // the gap open. No side padding either: the pane this view sits in
+      // already insets its content by one column (or the chat surface's own
+      // frame does), and a card padding on top of that was a second,
+      // inconsistent inset.
       //
-      // A bare card draws no frame, so its role tint goes straight on the card.
-      // A bordered card takes its tint on an inner layer instead, below.
+      // A bare entry keeps its own grammar rather than joining that one.
+      // #620 demoted lifecycle chatter to bare lines deliberately, so giving
+      // it a rule would undo that demotion; only entries that were cards
+      // trade a border for a divider here. A bare entry draws no frame, so
+      // its role tint goes straight on the card. `border: false` is not
+      // enough on its own: OpenTUI turns the border back on whenever any
+      // border styling option is present, so a borderless entry has to omit
+      // `borderStyle` and `borderColor` as well.
+      marginTop: bare && entry.kind === 'status' ? 1 : 0,
       ...(bare
         ? {border: false, backgroundColor: palette.background}
         : {
-            border: true,
-            borderStyle: 'rounded' as const,
-            // The cursor is the card's border, not a fill: a filled card reads
-            // as selected text, and the transcript already uses fills for
-            // roles.
-            borderColor: selected ? this.#theme.borderFocus : palette.border,
+            border: ['top'] as const,
+            borderStyle: 'single' as const,
+            // The cursor is the rule's colour. Selection is never carried by
+            // that alone: the heading below adds a "▸ " marker and switches
+            // to `textStrong`, neither of which this change touches, so losing
+            // three of the four border sides does not weaken the WCAG 1.4.1
+            // channel.
+            //
+            // The resting colour is held to the same 3:1 floor `textSubtle`
+            // uses for punctuation and rules: `roleAccents` in theme.ts is not
+            // run through `ensureContrast` the way the label and content
+            // derived from it are, and five of the 64 role/theme combinations
+            // sit under 3:1. A four-sided border could lean on its own area to
+            // stay noticeable at a marginal contrast; a one-row rule cannot.
+            borderColor: selected
+              ? this.#theme.borderFocus
+              : ensureContrast(palette.border, this.#theme.canvas, SUBTLE_TEXT_MIN_CONTRAST),
           }),
       ...(this.#showsSelection
         ? {
@@ -379,9 +398,6 @@ export class ConversationView {
             }
           : {}),
     });
-    // Inside the frame rather than under it, so the arc keeps the canvas in its
-    // corner cells (tui-conventions.md).
-    if (!bare) fillLayer(card, `event-${entry.id}-fill`, palette.background);
     const heading = new BoxRenderable(this.renderer, {
       id: `event-${entry.id}-heading`,
       width: '100%',
