@@ -71,6 +71,23 @@ And the shell that verifies it:
 cargo build --release
 ./bin/tests && ./bin/bench --scale 1.0 --json /tmp/out.json
 ```
+
+And the equivalent in the TypeScript harness the dashboard runs against:
+
+```typescript
+const CAPACITY = 1024;
+
+function push<T>(ring: Ring<T>, value: T): boolean {
+  const next = (ring.head + 1) & ring.mask;
+  if (next === ring.tail) {
+    console.warn("ring buffer full"); // never grows past CAPACITY
+    return false;
+  }
+  ring.slots[ring.head] = value;
+  ring.head = next;
+  return true;
+}
+```
 """
 
 MIXED = """\

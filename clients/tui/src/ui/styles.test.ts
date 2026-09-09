@@ -278,6 +278,39 @@ describe('markdown code blocks', () => {
     expect(code.streaming).toBe(true);
   });
 
+  it('draws more than one colour for a fence whose grammar ships', async () => {
+    const theme = resolveTheme('dark');
+    const content = 'const x = 1;';
+    const fixture = await renderMarkdown(`\`\`\`ts\n${content}\n\`\`\`\n`, theme);
+    await fixture.layout();
+
+    const code = fencedBlock(fixture.markdown, content);
+    expect(code.filetype).toBe('typescript');
+    // The mock client never runs a real parser; feeding it a highlight result
+    // stands in for a grammar resolving, which is the case this override must
+    // let through undisturbed instead of overwriting with a flat color.
+    expect(code.baseHighlight).toBe('markup.raw.block');
+    expect(code.drawUnstyledText).toBe(false);
+
+    fixture.treeSitterClient.setMockResult({
+      highlights: [
+        [0, 5, 'keyword'],
+        [10, 11, 'number'],
+      ],
+    });
+    fixture.treeSitterClient.resolveAllHighlightOnce();
+    await code.highlightingDone;
+    await fixture.layout();
+
+    expect(rgbToHex(code.bg)).toBe(theme.markdown.codeBackground);
+    expect(drawnSurface(fixture, 'const').fg).toBe(theme.markdown.keyword);
+    expect(drawnSurface(fixture, '1').fg).toBe(theme.markdown.number);
+    // Uncaptured text ("x", "=") still reads as code rather than the markdown
+    // default: `baseHighlight` carries the code surface's fg into every span
+    // the two captures above do not own.
+    expect(drawnSurface(fixture, ' x = ').fg).toBe(theme.markdown.code);
+  });
+
   it('leaves prose coalesced instead of one renderable per paragraph', async () => {
     const theme = resolveTheme('dark');
     const content = Array.from({length: 100}, (_, index) => `Paragraph ${index + 1}.`).join('\n\n');

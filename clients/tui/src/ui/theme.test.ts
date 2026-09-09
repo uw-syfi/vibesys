@@ -134,6 +134,22 @@ describe('semantic roles', () => {
 
   it.each(
     themes.map(theme => [theme.name, theme] as const),
+  )('%s keeps highlighted code tokens readable on the code surface', (_name, theme: Theme) => {
+    const minimum = theme.name.startsWith('high-contrast') ? 7 : 4.5;
+    // These paint on a fenced block, not the canvas prose sits on, so they are
+    // checked against codeBackground rather than canvas.
+    for (const token of [
+      theme.markdown.keyword,
+      theme.markdown.string,
+      theme.markdown.comment,
+      theme.markdown.number,
+    ]) {
+      expect(contrastRatio(token, theme.markdown.codeBackground)).toBeGreaterThanOrEqual(minimum);
+    }
+  });
+
+  it.each(
+    themes.map(theme => [theme.name, theme] as const),
   )('%s keeps every conversation card label and body readable on its own fill', (_name, theme: Theme) => {
     const minimum = theme.name.startsWith('high-contrast') ? 7 : 4.5;
     for (const role of CONVERSATION_ROLES) {
