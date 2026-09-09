@@ -172,9 +172,7 @@ def event(  # noqa: PLR0913
         "protocol_version": 1,
         "sequence": sequence,
         "run_id": RUN_ID,
-        "timestamp": (START + timedelta(milliseconds=offset_ms))
-        .isoformat()
-        .replace("+00:00", "Z"),
+        "timestamp": (START + timedelta(milliseconds=offset_ms)).isoformat().replace("+00:00", "Z"),
         "type": kind,
         "text": "",
         "diagnostic": None,
