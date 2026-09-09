@@ -65,23 +65,69 @@ describe('conversation entry row cost (#565)', () => {
     {id: 'c', kind: 'result', label: 'result', content: 'one line'},
   ];
 
+  it('pins the role to the left edge and the run id to the right', async () => {
+    // The role is what an operator scans down the column, so it holds the left
+    // edge; the run id is per-entry detail and would otherwise push the eye a
+    // variable distance rightward on every line. An entry with no agent/round
+    // pair keeps its single label on the left.
+    const entries: ConversationEntry[] = [
+      {
+        id: 'split',
+        kind: 'analysis',
+        label: 'judge · round-1-retry-1-judge',
+        agentKind: 'judge',
+        roundLabel: 'round-1-retry-1-judge',
+        content: 'one line',
+      },
+      {id: 'plain', kind: 'result', label: 'round-1 · PASS', content: 'one line'},
+    ];
+    const {view} = await renderEntries(entries);
+
+    const split = view.output.findDescendantById('event-split-heading');
+    if (!(split instanceof BoxRenderable)) throw new Error('split heading missing');
+    const [role, runId] = split.getChildren();
+    if (role === undefined || runId === undefined)
+      throw new Error('split heading did not render two parts');
+    expect(role.x).toBe(split.x);
+    expect(runId.x + runId.width).toBe(split.x + split.width);
+    // Not merely offset: the run id must actually sit to the right of the role.
+    expect(runId.x).toBeGreaterThan(role.x + role.width);
+
+    // An entry without the pair is untouched, one child on the left edge.
+    const plain = view.output.findDescendantById('event-plain-heading');
+    if (!(plain instanceof BoxRenderable)) throw new Error('plain heading missing');
+    expect(plain.getChildren()).toHaveLength(1);
+    expect(plain.getChildren()[0]?.x).toBe(plain.x);
+  });
+
   it('costs a divider and a heading per entry, not a margin row plus a four-sided card', async () => {
+    // Divider (1) + heading (1) + one content line (1) for an entry drawn as a
+    // card. A bordered card with its own margin row cost 5 rows for the same
+    // content.
+    //
+    // 'status' is the one kind that does not draw the divider, and that is not
+    // this change's doing: #620 demoted lifecycle chatter to bare lines, so a
+    // status entry draws no frame at all and costs a heading plus its content.
+    // Giving it the rule would undo that demotion, so the row cost is asserted
+    // per kind rather than as one number for all of them.
+    const expected: Record<string, {height: number; border: boolean | 'top'[]}> = {
+      a: {height: 2, border: false},
+      b: {height: 3, border: ['top']},
+      c: {height: 3, border: ['top']},
+    };
     const {testRenderer, view} = await renderEntries(oneLineEntries);
     for (const entry of oneLineEntries) {
       const card = view.output.findDescendantById(`event-${entry.id}`);
       if (!(card instanceof BoxRenderable))
         throw new Error(`entry ${entry.id} did not render a card`);
-      // Divider (1) + heading (1) + one content line (1). A bordered card
-      // with its own margin row cost 5 for the same content; even the
-      // pre-#565 borderless 'status' case still cost 3 rows for a margin
-      // and a heading before a single line of content ever appeared. Every
-      // kind now costs the same, and this one has no margin to add.
-      expect(card.height).toBe(3);
-      expect(card.border).toEqual(['top']);
+      const want = expected[entry.id];
+      if (want === undefined) throw new Error(`no expectation for ${entry.id}`);
+      expect([entry.id, card.height]).toEqual([entry.id, want.height]);
+      expect([entry.id, card.border]).toEqual([entry.id, want.border]);
     }
-    // No stray rows between cards either: three one-line entries cost
-    // exactly 9 rows end to end. The pre-#565 card cost 5 rows each (15
-    // total); this assertion fails at that revision and passes at this one.
+    // No stray rows between cards either: the three entries cost exactly 9 rows
+    // end to end (2 + 3 + 3, plus the single margin row the bare status entry
+    // keeps from #620). The pre-#565 card cost 5 rows each, 15 total.
     expect(view.output.height).toBe(9);
     void testRenderer;
   });

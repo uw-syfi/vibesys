@@ -72,7 +72,15 @@ import type {ClipboardCopyResult, SelectionClipboard} from './clipboard.js';
 import {renderDesignSummary} from './design-log.js';
 import {paneTitle} from './focus.js';
 import {headerBackground} from './header.js';
-import {contrastRatio, listThemes, resolveTheme, THEME_NAMES, type ThemeName} from './theme.js';
+import {
+  contrastRatio,
+  ensureContrast,
+  listThemes,
+  resolveTheme,
+  SUBTLE_TEXT_MIN_CONTRAST,
+  THEME_NAMES,
+  type ThemeName,
+} from './theme.js';
 
 const cleanup: Array<() => void> = [];
 
@@ -1798,10 +1806,14 @@ describe('OpenTUI presentation', () => {
     const frame = await testRenderer.waitForFrame(value => value.includes('2 passed'));
     expect(frame).toContain('→ Bash pytest');
     expect(frame).toContain('← 2 passed');
-    // Header housing, agents pane, transcript frame, and the card's call and
-    // result regions: the rail is absent because this fixture has no rounds.
-    // A focused pane draws a heavy corner, so the count is over both styles.
-    expect(frame.match(/[╭┏]/g)).toHaveLength(5);
+    // Header housing, agents pane, transcript frame, and the command box: the
+    // rail is absent because this fixture has no rounds. A focused pane draws a
+    // heavy corner, so the count is over both styles. The transcript card used
+    // to contribute a fifth: #565 replaced its four-sided border with a
+    // top-edge rule, which draws no corner glyph at all. The call and result
+    // regions #620 added are bands inside the card, not bordered boxes, so they
+    // never contributed one.
+    expect(frame.match(/[╭┏]/g)).toHaveLength(4);
   });
 
   it('renders a typed command payload with labeled stderr and exit code', async () => {
@@ -1975,10 +1987,12 @@ describe('OpenTUI presentation', () => {
     const frame = await testRenderer.waitForFrame(value => value.includes('[codex error]'));
     expect(frame).toContain('[codex turn started]');
     expect(frame).toContain('driver: agentshim');
-    // Header housing, agents pane, transcript frame, command bar, and the one
-    // card the error diagnostic still earns. The two quiet diagnostics draw no
-    // border at all, so they add nothing to the count.
-    expect(frame.match(/[╭┏]/g)).toHaveLength(5);
+    // Header housing, agents pane, transcript frame, and the command bar. The
+    // two quiet diagnostics draw no border at all, so they add nothing to the
+    // count, and the one card the error diagnostic still earns no longer adds
+    // one either: #565 turned that four-sided border into a top-edge rule,
+    // which has no corner glyph.
+    expect(frame.match(/[╭┏]/g)).toHaveLength(4);
   });
 
   it('renders an unanswered tool call once, with no response band', async () => {
@@ -1997,8 +2011,9 @@ describe('OpenTUI presentation', () => {
     // The response band is the only thing that draws a left arrow followed by
     // text; the footer's key hint is the glyph pair, not this.
     expect(frame).not.toContain('← ');
-    // One card: the header, the two panes, the command bar, and this turn.
-    expect(frame.match(/[╭┏]/g)).toHaveLength(5);
+    // The header, the two panes, and the command bar. This turn's card no
+    // longer adds a corner: #565 made it a top-edge rule instead of a border.
+    expect(frame.match(/[╭┏]/g)).toHaveLength(4);
   });
 
   it('collapses, prettifies, and expands long JSON tool responses', async () => {
@@ -2676,6 +2691,21 @@ describe('overlay scrolling', () => {
 });
 
 describe('theming', () => {
+  /**
+   * The role colour a transcript card carries.
+   *
+   * The top-edge rule, because that is where the role lives: a card has no
+   * fill (tui-conventions.md) and #565 replaced its four sides with that one
+   * rule, so the body text reports the canvas and the role would otherwise go
+   * unasserted here. `conversation.test.ts` pins the same colour as a
+   * computation over theme.ts across all eight themes; this asserts the
+   * rendered frame actually carries what that computation produces.
+   */
+  function cardBorder(testRenderer: TestRendererSetup, id: string): string | undefined {
+    const card = testRenderer.renderer.root.findDescendantById(id);
+    return card instanceof BoxRenderable ? rgbToHex(card.borderColor).toLowerCase() : undefined;
+  }
+
   const assistantEntry = {
     id: 'themed',
     kind: 'assistant' as const,
@@ -2705,6 +2735,13 @@ describe('theming', () => {
     // #565: the card carries its role on the divider rule, not a fill, so its
     // body sits on the theme's canvas.
     expect(body?.bg).toBe(light.canvas);
+    expect(cardBorder(testRenderer, 'event-themed')).toBe(
+      ensureContrast(
+        light.conversation.assistant.border,
+        light.canvas,
+        SUBTLE_TEXT_MIN_CONTRAST,
+      ).toLowerCase(),
+    );
     expect(spanColors(testRenderer, 'implementer')?.fg).toBe(light.conversation.assistant.label);
   });
 
@@ -5315,7 +5352,7 @@ describe('box fills', () => {
     expect(ids).toContain('header-frame'); // bordered, fill moved inwards
     expect(ids).toContain('experiment-log'); // a pane, the same way
     expect(ids).toContain('theme-picker'); // an overlay, built here, never opened
-    expect(ids).toContain('event-card'); // a bordered transcript card
+    expect(ids).toContain('event-card'); // a transcript card, now a top-edge rule
     expect(ids).toContain('event-status'); // borderless, so it keeps its own fill
     expect(ids.some(id => id.startsWith('agent-implementer-'))).toBe(true);
 
@@ -5333,7 +5370,10 @@ describe('box fills', () => {
     await testRenderer.waitForFrame(value => value.includes('a bordered card'));
     const root = testRenderer.renderer.root;
 
-    for (const id of ['header-fill', 'experiment-log-fill', 'event-card-fill']) {
+    // 'event-card-fill' is deliberately absent: #565 removed the transcript
+    // card's border and its fill together, so there is no longer a rounded
+    // corner to keep a fill out of, and nothing left to move inwards.
+    for (const id of ['header-fill', 'experiment-log-fill']) {
       expect([id, isPainted(root, id)]).toEqual([id, true]);
     }
   });
