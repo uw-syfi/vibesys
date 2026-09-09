@@ -65,6 +65,41 @@ describe('conversation entry row cost (#565)', () => {
     {id: 'c', kind: 'result', label: 'result', content: 'one line'},
   ];
 
+  it('pins the role to the left edge and the run id to the right', async () => {
+    // The role is what an operator scans down the column, so it holds the left
+    // edge; the run id is per-entry detail and would otherwise push the eye a
+    // variable distance rightward on every line. An entry with no agent/round
+    // pair keeps its single label on the left.
+    const entries: ConversationEntry[] = [
+      {
+        id: 'split',
+        kind: 'analysis',
+        label: 'judge · round-1-retry-1-judge',
+        agentKind: 'judge',
+        roundLabel: 'round-1-retry-1-judge',
+        content: 'one line',
+      },
+      {id: 'plain', kind: 'result', label: 'round-1 · PASS', content: 'one line'},
+    ];
+    const {view} = await renderEntries(entries);
+
+    const split = view.output.findDescendantById('event-split-heading');
+    if (!(split instanceof BoxRenderable)) throw new Error('split heading missing');
+    const [role, runId] = split.getChildren();
+    if (role === undefined || runId === undefined)
+      throw new Error('split heading did not render two parts');
+    expect(role.x).toBe(split.x);
+    expect(runId.x + runId.width).toBe(split.x + split.width);
+    // Not merely offset: the run id must actually sit to the right of the role.
+    expect(runId.x).toBeGreaterThan(role.x + role.width);
+
+    // An entry without the pair is untouched, one child on the left edge.
+    const plain = view.output.findDescendantById('event-plain-heading');
+    if (!(plain instanceof BoxRenderable)) throw new Error('plain heading missing');
+    expect(plain.getChildren()).toHaveLength(1);
+    expect(plain.getChildren()[0]?.x).toBe(plain.x);
+  });
+
   it('costs a divider and a heading per entry, not a margin row plus a four-sided card', async () => {
     const {testRenderer, view} = await renderEntries(oneLineEntries);
     for (const entry of oneLineEntries) {

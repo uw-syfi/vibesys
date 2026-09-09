@@ -72,7 +72,15 @@ import type {ClipboardCopyResult, SelectionClipboard} from './clipboard.js';
 import {renderDesignSummary} from './design-log.js';
 import {paneTitle} from './focus.js';
 import {headerBackground} from './header.js';
-import {contrastRatio, listThemes, resolveTheme, THEME_NAMES, type ThemeName} from './theme.js';
+import {
+  contrastRatio,
+  ensureContrast,
+  listThemes,
+  resolveTheme,
+  SUBTLE_TEXT_MIN_CONTRAST,
+  THEME_NAMES,
+  type ThemeName,
+} from './theme.js';
 
 const cleanup: Array<() => void> = [];
 
@@ -1706,13 +1714,15 @@ describe('OpenTUI presentation', () => {
     const frame = await testRenderer.waitForFrame(value => value.includes('2 passed'));
     expect(frame).toContain('→ Bash(command="pytest")');
     expect(frame).toContain('← 2 passed');
-    // Agents pane, transcript frame, and the card's call and result regions:
-    // the rail is absent because this fixture has no rounds. A focused pane
-    // draws a heavy corner, so the count is over both styles. The header
-    // housing is no longer among them: it keeps its fill, so it draws a square
-    // frame (tui-conventions.md), and it is counted separately so its shape
-    // stays asserted rather than dropping out of the test.
-    expect(frame.match(/[╭┏]/g)).toHaveLength(4);
+    // Agents pane, transcript frame and command box: the rail is absent
+    // because this fixture has no rounds. A focused pane draws a heavy corner,
+    // so the count is over both styles. Two rounded corners that used to be
+    // here are gone for separate reasons, and both are asserted rather than
+    // simply subtracted: the header housing keeps its fill so it now draws a
+    // *square* frame (tui-conventions.md), counted on its own line below, and
+    // the transcript card's four-sided border became a top-edge rule (#565),
+    // which has no corner glyph at all.
+    expect(frame.match(/[╭┏]/g)).toHaveLength(3);
     expect(frame.match(/┌/g)).toHaveLength(1);
   });
 
@@ -2435,9 +2445,12 @@ describe('theming', () => {
   /**
    * The role colour a transcript card carries.
    *
-   * The border, because that is where the role lives: a bordered card has no
-   * fill (tui-conventions.md), so the body text reports the canvas and the
-   * role would otherwise go unasserted here.
+   * The top-edge rule, because that is where the role lives: a card has no
+   * fill (tui-conventions.md) and #565 replaced its four sides with that one
+   * rule, so the body text reports the canvas and the role would otherwise go
+   * unasserted here. `conversation.test.ts` pins the same colour as a
+   * computation over theme.ts across all eight themes; this asserts the
+   * rendered frame actually carries what that computation produces.
    */
   function cardBorder(testRenderer: TestRendererSetup, id: string): string | undefined {
     const card = testRenderer.renderer.root.findDescendantById(id);
@@ -2473,6 +2486,13 @@ describe('theming', () => {
     // #565: the card carries its role on the divider rule, not a fill, so its
     // body sits on the theme's canvas.
     expect(body?.bg).toBe(light.canvas);
+    expect(cardBorder(testRenderer, 'event-themed')).toBe(
+      ensureContrast(
+        light.conversation.assistant.border,
+        light.canvas,
+        SUBTLE_TEXT_MIN_CONTRAST,
+      ).toLowerCase(),
+    );
     expect(spanColors(testRenderer, 'implementer')?.fg).toBe(light.conversation.assistant.label);
   });
 
