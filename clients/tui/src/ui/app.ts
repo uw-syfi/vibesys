@@ -19,7 +19,7 @@ import {AgentMapView} from './agent-map.js';
 import {fillLayer} from './box-fill.js';
 import {createChatDraft} from './chat-composer.js';
 import {ChatOverlayView} from './chat-overlay.js';
-import {ChatPaneView, chatDockFits, chatPaneWidth, commandColumnInset} from './chat-pane.js';
+import {ChatPaneView, chatDockFits, chatPaneWidth} from './chat-pane.js';
 import {RendererSelectionClipboard, type SelectionClipboard} from './clipboard.js';
 import {createCommandInputPanel} from './command-input.js';
 import {ConversationView} from './conversation.js';
@@ -198,17 +198,12 @@ export function createOpenTuiApp(
     verticalScrollbarOptions: {showArrows: true},
     onMouseUp: focusTranscript,
   });
+  // Every content pane is a column of this row, the chat included. Each of them
+  // owns whatever input writes to it, so two panes side by side are the same
+  // rectangle and their boxes share a bottom edge because they are siblings
+  // rather than because a row was budgeted to line them up.
   const main = new BoxRenderable(renderer, {
     id: 'main',
-    width: '100%',
-    flexGrow: 1,
-    flexDirection: 'row',
-  });
-  // The chat is a sibling of the entire workspace column, not just its
-  // transcript row. Its composer therefore remains inside the chat border and
-  // the pane spans the same height as the table plus command surface.
-  const body = new BoxRenderable(renderer, {
-    id: 'body',
     width: '100%',
     flexGrow: 1,
     flexDirection: 'row',
@@ -282,19 +277,18 @@ export function createOpenTuiApp(
     theme,
     () => controller.focusPane('left'),
   );
-  const bottom = new BoxRenderable(renderer, {
-    id: 'bottom',
-    width: '100%',
-    flexShrink: 0,
-    flexDirection: 'column',
-    alignItems: 'stretch',
-  });
-  const commandColumn = new BoxRenderable(renderer, {
-    id: 'command-column',
-    flexGrow: 1,
-    flexShrink: 0,
-    flexDirection: 'column',
-  });
+  /**
+   * Moves the command box, and the list that completes it, into one pane.
+   *
+   * Both go straight into the pane rather than into a column of their own, the
+   * way the chat pane holds its own composer and menu: the list is positioned
+   * against the bottom of whatever contains it, and a wrapper sized to its
+   * contents leaves the list no room to open upwards into.
+   */
+  const hostCommandSurface = (pane: BoxRenderable): void => {
+    pane.add(commandInput.suggestions);
+    pane.add(commandInput.box);
+  };
 
   // A slash command and a key toggle the same prompt: the controller routes the
   // request, the transcript decides which prompt it applies to.
@@ -305,6 +299,10 @@ export function createOpenTuiApp(
   // fixed activity row. Activity stays outside scrolling content, so a new
   // turn can change scroll height without moving the line.
   transcriptFrame.add(conversationActivityBar.output);
+  // The chat is the leftmost column of the same row as the table it discusses,
+  // so both panes end on the same line and each keeps its own input inside its
+  // own frame.
+  main.add(chatPane.output);
   // The rounds rail is the left edge of the round view; the agents graph and
   // transcript follow to its right, so drilling deeper reads left to right.
   main.add(roundRail.output);
@@ -314,20 +312,20 @@ export function createOpenTuiApp(
   // landing view, not a dialog.
   main.add(experimentLog.output);
   main.add(rightPane.output);
-  commandColumn.add(help);
-  // Absolute inside the command column rather than the root, so the list rises
-  // out of the input it belongs to instead of across the chat beside it.
-  commandColumn.add(commandInput.suggestions);
-  commandColumn.add(commandInput.box);
-  bottom.add(commandColumn);
+  // The pane the command box is currently inside. The first frame is drawn
+  // before any experiment log arrives, so the round view's transcript owns it
+  // until `render` says otherwise.
+  let commandHost: BoxRenderable = transcriptFrame;
+  hostCommandSurface(commandHost);
   root.add(headerFrame);
   root.add(errorBanner.output);
-  body.add(chatPane.output);
   workspace.add(main);
   workspace.add(todoStrip.output);
-  workspace.add(bottom);
-  body.add(workspace);
-  root.add(body);
+  // The key-help line stays the width of the screen and under every pane. Inside
+  // one of them it would be cut to that pane's columns, and a binding that has
+  // been truncated away is a binding nobody has.
+  workspace.add(help);
+  root.add(workspace);
   root.add(overlay.scrim);
   root.add(overlay.output);
   root.add(themePicker.output);
@@ -447,14 +445,16 @@ export function createOpenTuiApp(
       // previous frame's height and leaves them a row long or short (clipping
       // the selected late round, the overflow indicator, or a graph node) until
       // the next paint.
+      //
+      // The command box is a column inside one of those panes now rather than a
+      // band under them, so it takes no rows off this budget.
       const mainRows = Math.max(
         0,
         renderer.terminalHeight -
           headerFrame.height -
           errorHeight -
           todoStripHeight(state) -
-          help.height -
-          commandInput.box.height,
+          help.height,
       );
       agentMap.render(
         state,
@@ -489,13 +489,7 @@ export function createOpenTuiApp(
     // The rounds rail is a column inside the main row, not a strip above it, so
     // only the header and the banner take rows off the top.
     const above = headerFrame.height + rowsOn(errorBanner.output);
-    const belowRows = rowsOn(todoStrip.output) + help.height + commandInput.box.height;
-    // Taken from the same budget the main area draws from, so the decision and
-    // the consequence cannot disagree.
-    const commandInset = commandColumnInset(
-      showChatPane,
-      renderer.terminalHeight - above - belowRows,
-    );
+    const belowRows = rowsOn(todoStrip.output) + help.height;
     // Match the chat to the left pane's rectangle so it sits beside the
     // visualization instead of over it.
     if (showSplit) {
@@ -503,15 +497,41 @@ export function createOpenTuiApp(
         left: 1,
         width: leftWidth - 2,
         top: above,
-        height: renderer.terminalHeight - above - belowRows - commandInset,
+        height: renderer.terminalHeight - above - belowRows,
       });
     } else {
       chat.setPaneBounds(null);
     }
     chatPane.render(state, showChatPane, chatWidth);
     const chatInputFocused = showChatPane && state.layout.focus === 'chat';
-    commandColumn.visible = zoomedPane !== 'chat';
-    bottom.paddingBottom = commandInset;
+    // A zoomed chat already has a composer inside it, so the command box stands
+    // down rather than following the zoom into a pane that does not want it.
+    // The key-help line goes with it, the way it did when the two shared a row.
+    const showCommand = zoomedPane !== 'chat';
+    commandInput.box.visible = showCommand;
+    if (!showCommand) commandInput.suggestions.visible = false;
+    help.visible = showCommand;
+    // Which pane the command box writes to, and therefore which one it is drawn
+    // inside. Clicking it asks for `left` focus, so it belongs to the pane that
+    // focus names: the log on the landing view and the transcript inside a
+    // round. Zoom is the only thing that can take that pane off screen, and then
+    // the box follows the one pane that is left. The narrow-width fallback needs
+    // no case of its own: it draws the visualization through the overlay and
+    // leaves the pane underneath on screen, still holding the box.
+    const nextHost =
+      zoomedPane === 'performance'
+        ? rightPane.output
+        : zoomedPane === 'agents'
+          ? agentMap.output
+          : showLog
+            ? experimentLog.output
+            : transcriptFrame;
+    if (nextHost !== commandHost) {
+      commandHost.remove(commandInput.suggestions);
+      commandHost.remove(commandInput.box);
+      hostCommandSurface(nextHost);
+      commandHost = nextHost;
+    }
     // The command list completes the box it belongs to, and on this view that
     // box cannot open a chat that is already beside it.
     commandInput.setCommandContext({chatDocked: showChatPane});

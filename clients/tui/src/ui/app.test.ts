@@ -72,6 +72,7 @@ import type {ClipboardCopyResult, SelectionClipboard} from './clipboard.js';
 import {renderDesignSummary} from './design-log.js';
 import {paneTitle} from './focus.js';
 import {headerBackground} from './header.js';
+import {MIN_SPLIT_WIDTH} from './right-pane.js';
 import {
   contrastRatio,
   ensureContrast,
@@ -500,18 +501,25 @@ describe('OpenTUI presentation', () => {
     const promptLine = lines.findIndex(line => line.includes('Implement the queue'));
     const activityLineIndex = lines.findIndex(line => line.includes('Implementer · Working'));
     const helpLine = lines.findIndex(line => line.includes('[/]: round'));
+    // The command box is the foot of the transcript pane, so the pane's own
+    // bottom border is below it and the row the activity line is measured
+    // against is where that box starts.
+    const commandTop = lines.findIndex(
+      (line, index) => index > activityLineIndex && /[╭┏][─━] [▸ ] Command /.test(line),
+    );
     const viewportBottomBorder = lines.findIndex(
       (line, index) =>
-        index > activityLineIndex && index < helpLine && FRAME_BOTTOM_RIGHT.test(line.trimEnd()),
+        index > commandTop && index < helpLine && FRAME_BOTTOM_RIGHT.test(line.trimEnd()),
     );
     expect(activityLineIndex).toBeGreaterThan(promptLine);
     expect(FRAME_VERTICAL.test(activityLine?.trimEnd() ?? '')).toBe(true);
-    expect(viewportBottomBorder).toBeGreaterThan(activityLineIndex);
+    expect(commandTop).toBeGreaterThan(activityLineIndex);
+    expect(viewportBottomBorder).toBeGreaterThan(commandTop);
     expect(viewportBottomBorder).toBeLessThan(helpLine);
     const transcriptColumn = Math.max(0, (activityLine?.indexOf('Implementer') ?? 2) - 2);
     expect(
       lines
-        .slice(activityLineIndex + 1, viewportBottomBorder)
+        .slice(activityLineIndex + 1, commandTop)
         .every(line => line.slice(transcriptColumn).replaceAll(FRAME_VERTICALS, '').trim() === ''),
     ).toBe(true);
 
@@ -3380,14 +3388,17 @@ describe('theming', () => {
     expect(landing).toContain('Implementation Details');
     expect(landing).toContain('Batch the prefill step');
 
-    // Each column has its own input, under the surface it writes to, and the
-    // command box starts where the chat column ends rather than running under
-    // it.
+    // Each column has its own input, inside the pane that input writes to.
     // The cursor starts in the command box, and the chat says how to reach it.
     expect(landing).toContain('Ctrl+W to type here');
     expect(paneFrameColumn(landing, 'Experiment chat')).not.toBeNull();
     expect(paneFrameColumn(landing, 'Message')).not.toBeNull();
-    expect(paneFrameColumn(landing, 'Command')).toBe(paneFrameColumn(landing, 'Experiments'));
+    // Inset by the table's own border and padding rather than level with its
+    // frame: the command box is a child of the pane whose keys it takes, so it
+    // starts inside that pane and cannot run back under the chat beside it.
+    const table = paneFrameColumn(landing, 'Experiments');
+    expect(table).not.toBeNull();
+    expect(paneFrameColumn(landing, 'Command')).toBe((table ?? 0) + 2);
   });
 
   it('keeps the message and command boxes on the same rows while the chat is docked', async () => {
@@ -3438,12 +3449,119 @@ describe('theming', () => {
     expect(rows.message).toBe(rows.command);
   });
 
-  it('gives the short terminal its landing rows back instead of the box alignment', async () => {
-    // The row that puts the Command box on the Message box's row comes out of
-    // the table above it. On a terminal with no row to spare the table keeps
-    // it and the two boxes sit one row apart: the operator can see that and
-    // undo it by resizing, whereas a clipped last line of the kickoff copy
-    // just looks like the copy ends there.
+  it('keeps the command box inside the pane whose keys it takes, in every view', async () => {
+    // The box used to sit in a row of its own beneath every pane, which is why
+    // it could take keys while another pane wore the marker. It is a child of
+    // the pane it writes to now, and which pane that is differs by view, so
+    // what has to hold is that it lands in the right one through a view change,
+    // a split, each zoom that takes the left pane off screen, and the width
+    // that replaces the split with a floating pane.
+    const testRenderer = await createTestRenderer({width: 140, height: 24});
+    const controller = splitController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+
+    /** The command box is the foot of `paneId`, inside that pane's frame. */
+    const expectCommandInside = (paneId: string): void => {
+      const pane = testRenderer.renderer.root.findDescendantById(paneId);
+      const command = testRenderer.renderer.root.findDescendantById('command-input-box');
+      if (pane === undefined || command === undefined)
+        throw new Error(`${paneId} geometry was missing`);
+      expect({pane: paneId, onScreen: pane.visible && command.visible}).toEqual({
+        pane: paneId,
+        onScreen: true,
+      });
+      expect({pane: paneId, insideLeft: command.x > pane.x}).toEqual({
+        pane: paneId,
+        insideLeft: true,
+      });
+      expect({
+        pane: paneId,
+        insideRight: command.x + command.width < pane.x + pane.width,
+      }).toEqual({pane: paneId, insideRight: true});
+      // The pane's own bottom border is the row under the box, so the box ends
+      // one row short of the pane. That is also why the two columns of the
+      // landing view line up without a row being spent on it.
+      expect({pane: paneId, foot: command.y + command.height}).toEqual({
+        pane: paneId,
+        foot: pane.y + pane.height - 1,
+      });
+    };
+
+    // A round: the transcript.
+    await frameAfter(testRenderer);
+    expectCommandInside('viewport');
+
+    // A split: still the left pane, not the one the split opened on the right.
+    await controller.openPane('perf');
+    await frameAfter(testRenderer);
+    const rightPane = testRenderer.renderer.root.findDescendantById('right-pane');
+    const command = testRenderer.renderer.root.findDescendantById('command-input-box');
+    if (rightPane === undefined || command === undefined)
+      throw new Error('split geometry was missing');
+    expect(rightPane.visible).toBe(true);
+    expect(command.x).toBeLessThan(rightPane.x);
+    expectCommandInside('viewport');
+
+    // Zoomed onto the visualization, which is now the only pane on screen.
+    controller.focusPane('right');
+    testRenderer.mockInput.pressKey('F4');
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.zoomedPane).toBe('performance');
+    expectCommandInside('right-pane');
+
+    // Zoomed onto the agents pane, whose contents are rebuilt on every repaint:
+    // the box has to survive the repaint, not only the first frame after it.
+    testRenderer.mockInput.pressKey('F4');
+    controller.closePane();
+    controller.focusRound('agents');
+    testRenderer.mockInput.pressKey('F4');
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.zoomedPane).toBe('agents');
+    expectCommandInside('agent-map');
+    controller.publish({
+      ...controller.state,
+      core: {...controller.state.core, status: 'completed'},
+    });
+    await frameAfter(testRenderer);
+    expectCommandInside('agent-map');
+
+    // Too narrow to split: the visualization becomes a floating pane over the
+    // round, the transcript keeps the box, and the floating pane keeps clear of
+    // it rather than covering the surface still taking the keystrokes.
+    testRenderer.mockInput.pressKey('F4');
+    await controller.openPane('perf');
+    testRenderer.renderer.resize(MIN_SPLIT_WIDTH - 1, 20);
+    const narrow = await frameAfter(testRenderer);
+    expect(narrow).toContain('best r7 1135 tok_s');
+    expectCommandInside('viewport');
+    const floating = testRenderer.renderer.root.findDescendantById('overlay');
+    const narrowCommand = testRenderer.renderer.root.findDescendantById('command-input-box');
+    if (floating === undefined || narrowCommand === undefined)
+      throw new Error('fallback geometry was missing');
+    expect(floating.visible).toBe(true);
+    expect(floating.y + floating.height).toBeLessThanOrEqual(narrowCommand.y);
+
+    // The landing view: the table, at a width that carries the chat beside it.
+    testRenderer.renderer.resize(140, 24);
+    controller.closePane();
+    await controller.openExperimentLog();
+    await frameAfter(testRenderer);
+    expectCommandInside('experiment-log');
+
+    // Through all of it, the box never claimed a focus of its own: it takes no
+    // marker, and exactly one pane wears one.
+    expect(markedPanes(paneBorders(testRenderer))).toHaveLength(1);
+    expect(markedPanes(paneBorders(testRenderer))).not.toContain('▸ Command');
+  });
+
+  it('keeps the short terminal both its landing rows and the box alignment', async () => {
+    // Alignment used to cost the table a row, so a terminal with none to spare
+    // gave the row back and let the two boxes sit one row apart. Each box now
+    // sits inside its own pane and the two panes are the same rectangle, so
+    // the boxes share a row because they are siblings rather than because a
+    // row was budgeted for it. That budget is what #556 measured, and it is
+    // gone: nothing is bought, so a short terminal has nothing to give up.
     const testRenderer = await createTestRenderer({width: 100, height: 16});
     const controller = kickoffController();
     const app = createOpenTuiApp(testRenderer.renderer, controller);
@@ -3466,10 +3584,10 @@ describe('theming', () => {
     expect(short).toContain('This activity becomes');
     expect(short).toMatch(/[╭┏][─━]\s*▸?\s*Command/);
     expect(short).toContain('Type /help for commands');
-    // The cost, stated: the boxes are one row apart rather than level.
-    expect(bottomRows().command).toBe(bottomRows().message + 1);
+    // Level at the height that used to have to choose.
+    expect(bottomRows().command).toBe(bottomRows().message);
 
-    // One more row and the alignment is affordable again, copy still whole.
+    // And at the height that could afford it before, copy still whole.
     testRenderer.renderer.resize(100, 17);
     const taller = await frameAfter(testRenderer);
     expect(taller).toContain('This activity becomes');
@@ -3506,7 +3624,14 @@ describe('theming', () => {
     controller.focusPane('left');
     await frameAfter(testRenderer);
     await testRenderer.mockInput.typeText('/');
-    await testRenderer.waitForFrame(value => value.includes('/pause'));
+    // Not `waitForFrame(text.includes('/pause'))`: the chat's own list is still
+    // open beside this one and offers the same commands, so the text can match
+    // on a frame the command list has not been laid out in yet. Wait for the
+    // list itself to have taken a row per match.
+    await testRenderer.waitForFrame(() => {
+      const list = testRenderer.renderer.root.findDescendantById('command-input-suggestions');
+      return list?.visible === true && list.height > 2;
+    });
     const command = boxTopUnder('command-input-suggestions', 'command-input-box');
     expect(command.menu).toBe(command.box);
   });
@@ -3705,7 +3830,7 @@ describe('theming', () => {
     expect(controller.chatSubmissions).toEqual(['draft survives the layout change']);
   });
 
-  it('lets the docked chat span the table and command surface', async () => {
+  it('gives the docked chat and the table the same rectangle, each holding its own input', async () => {
     const testRenderer = await createTestRenderer({width: 140, height: 20});
     const controller = logController();
     const app = createOpenTuiApp(testRenderer.renderer, controller);
@@ -3714,14 +3839,25 @@ describe('theming', () => {
     await frameAfter(testRenderer);
 
     const chatPane = testRenderer.renderer.root.findDescendantById('chat-pane');
-    const workspace = testRenderer.renderer.root.findDescendantById('workspace');
+    const table = testRenderer.renderer.root.findDescendantById('experiment-log');
     const composer = testRenderer.renderer.root.findDescendantById('chat-dock-composer-box');
-    if (chatPane === undefined || workspace === undefined || composer === undefined)
+    const command = testRenderer.renderer.root.findDescendantById('command-input-box');
+    if (
+      chatPane === undefined ||
+      table === undefined ||
+      composer === undefined ||
+      command === undefined
+    )
       throw new Error('landing layout was missing');
-    expect(chatPane.y).toBe(workspace.y);
-    expect(chatPane.y + chatPane.height).toBe(workspace.y + workspace.height);
+    // Two columns of one row, so they start and end on the same lines. This is
+    // what makes the boxes below line up without a row being budgeted for it.
+    expect(chatPane.y).toBe(table.y);
+    expect(chatPane.y + chatPane.height).toBe(table.y + table.height);
+    // Each input sits within the frame of the pane it writes to.
     expect(composer.x).toBeGreaterThan(chatPane.x);
     expect(composer.x + composer.width).toBeLessThan(chatPane.x + chatPane.width);
+    expect(command.x).toBeGreaterThan(table.x);
+    expect(command.x + command.width).toBeLessThan(table.x + table.width);
   });
 
   it('raises the command list out of the command input, clear of the chat', async () => {
