@@ -134,7 +134,9 @@ function asCodeBlockOnly(renderNode: MarkdownRenderNode): MarkdownRenderNode {
  */
 const GRAMMAR_FILETYPES = new Set([
   'javascript',
+  'javascriptreact',
   'typescript',
+  'typescriptreact',
   'zig',
   'markdown',
   'markdown_inline',
