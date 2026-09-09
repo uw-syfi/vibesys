@@ -61,6 +61,15 @@ export function createMarkdownStyle(theme: Theme): SyntaxStyle {
     'markup.link.url': {fg: markdown.link, underline: true},
     'markup.link.label': {fg: markdown.link},
     'markup.quote': {fg: markdown.blockquote, italic: true},
+    // The rest are a fenced block's own captures (js/ts/zig all emit these),
+    // not markdown's markup.* ones. Anything else a grammar captures
+    // (variables, punctuation, types, ...) is intentionally left unmapped: it
+    // falls back to `markup.raw.block` via `drawOnCodeSurface`'s
+    // `baseHighlight`, which keeps it reading as code instead of prose.
+    keyword: {fg: markdown.keyword},
+    string: {fg: markdown.string},
+    comment: {fg: markdown.comment},
+    number: {fg: markdown.number},
   });
 }
 
@@ -115,10 +124,36 @@ function asCodeBlockOnly(renderNode: MarkdownRenderNode): MarkdownRenderNode {
   return Object.assign(renderNode, marker);
 }
 
+/**
+ * Filetypes `@opentui/core` ships a tree-sitter grammar for, mirroring
+ * `node_modules/@opentui/core/assets/`. `infoStringToFiletype` (which the
+ * renderer already applies before a block reaches `drawOnCodeSurface`, so
+ * `block.filetype` is read here rather than re-parsed) happily resolves a
+ * name for languages that have no grammar bundled, such as "rust" or "bash",
+ * so the filetype alone does not say whether highlighting can run.
+ */
+const GRAMMAR_FILETYPES = new Set([
+  'javascript',
+  'typescript',
+  'zig',
+  'markdown',
+  'markdown_inline',
+]);
+
 /** Puts one block the renderer already built on the code surface. */
 function drawOnCodeSurface(block: CodeRenderable, {fg, bg}: CodeSurface): void {
-  block.fg = fg;
   block.bg = bg;
+  if (block.filetype !== undefined && GRAMMAR_FILETYPES.has(block.filetype)) {
+    // A shipped grammar highlights this block on its own: forcing a flat fg
+    // or drawUnstyledText would suppress the per-token colors it produces.
+    // `markup.raw.block` is the code style already registered for a plain
+    // block, so captures this syntax style does not name (most identifiers,
+    // punctuation, types) still read as code rather than falling back to the
+    // prose default.
+    block.baseHighlight = 'markup.raw.block';
+    return;
+  }
+  block.fg = fg;
   // The default suppresses the plain-text draw while streaming and waits for
   // highlighting to supply styled chunks instead. With no grammar available
   // that wait resolves to plain text anyway, so the block would just be blank
@@ -150,12 +185,13 @@ function* fencedBlocks(renderable: Renderable): Generator<CodeRenderable> {
  * Inline code picks up `markup.raw` from the syntax style, but a fenced block
  * is rendered by `CodeRenderable`, which colors text from tree-sitter captures
  * for the block's own language. The package ships grammars for markdown,
- * JavaScript, TypeScript and Zig, so the info string of a transcript fence
- * usually names one it has no grammar for and none is cached locally.
- * Highlighting then falls back to plain text and the block arrives with no
- * foreground and no background: visually identical to the prose around it.
- * Restyling the default block gives it a code surface whether or not a grammar
- * is ever available, and highlighting still applies on top when one is.
+ * JavaScript, TypeScript and Zig; the info string of a transcript fence
+ * otherwise usually names a language it has no grammar for. Restyling the
+ * default block gives it a code surface either way. When a grammar is
+ * available, per-token highlighting draws on top of that surface. When it is
+ * not, the wait for highlighting would resolve to plain text anyway, so the
+ * block is drawn flat and unstyled immediately instead of sitting blank until
+ * it does.
  *
  * The default block is restyled rather than replaced. A replacement would
  * discard the margins, streaming mode, concealment, tree-sitter client, and

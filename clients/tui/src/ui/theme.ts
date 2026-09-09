@@ -57,6 +57,14 @@ export interface MarkdownColors {
   codeBackground: string;
   link: string;
   blockquote: string;
+  /** Tree-sitter `keyword` captures inside a fence with a shipped grammar. */
+  keyword: string;
+  /** Tree-sitter `string` captures inside a fence with a shipped grammar. */
+  string: string;
+  /** Tree-sitter `comment` captures inside a fence with a shipped grammar. */
+  comment: string;
+  /** Tree-sitter `number` captures inside a fence with a shipped grammar. */
+  number: string;
 }
 
 export interface Theme {
@@ -331,6 +339,12 @@ function buildMarkdown(spec: ThemeSpec): MarkdownColors {
     codeBackground,
     link: ensureContrast(spec.info, spec.canvas, spec.minContrast),
     blockquote: ensureContrast(spec.textMuted, spec.canvas, spec.minContrast),
+    // Checked against codeBackground, not canvas: these paint on a fenced
+    // block's surface, not the canvas prose sits on.
+    keyword: ensureContrast(spec.info, codeBackground, spec.minContrast),
+    string: ensureContrast(spec.success, codeBackground, spec.minContrast),
+    number: ensureContrast(spec.warning, codeBackground, spec.minContrast),
+    comment: ensureContrast(spec.textMuted, codeBackground, spec.minContrast),
   };
   return {...derived, ...spec.overrides?.markdown};
 }
