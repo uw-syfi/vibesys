@@ -11,6 +11,7 @@ import {hasRunEnded} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import type {ConversationEntry, SessionState} from '../session-model.js';
 import {visibleConversation} from '../session-model.js';
+import {fillLayer} from './box-fill.js';
 import {promptPreview, toolCallPreview, toolResultPreview} from './previews.js';
 import {
   conversationRole,
@@ -339,17 +340,22 @@ export class ConversationView {
       marginTop: bare && entry.kind !== 'status' ? 0 : 1,
       paddingLeft: bare ? 0 : 1,
       paddingRight: 1,
-      backgroundColor: palette.background,
       // `border: false` is not enough on its own: OpenTUI turns the border
       // back on whenever any border styling option is present, so a borderless
-      // entry has to omit `borderStyle` and `borderColor` as well.
+      // entry has to omit `borderStyle` and `borderColor` as well. That is how
+      // a bare card came to draw a rounded frame while reading as if it drew
+      // none.
+      //
+      // A bare card draws no frame, so its role tint goes straight on the card.
+      // A bordered card takes its tint on an inner layer instead, below.
       ...(bare
-        ? {border: false}
+        ? {border: false, backgroundColor: palette.background}
         : {
             border: true,
             borderStyle: 'rounded' as const,
             // The cursor is the card's border, not a fill: a filled card reads
-            // as selected text, and the transcript already uses fills for roles.
+            // as selected text, and the transcript already uses fills for
+            // roles.
             borderColor: selected ? this.#theme.borderFocus : palette.border,
           }),
       ...(this.#showsSelection
@@ -373,6 +379,9 @@ export class ConversationView {
             }
           : {}),
     });
+    // Inside the frame rather than under it, so the arc keeps the canvas in its
+    // corner cells (tui-conventions.md).
+    if (!bare) fillLayer(card, `event-${entry.id}-fill`, palette.background);
     const heading = new BoxRenderable(this.renderer, {
       id: `event-${entry.id}-heading`,
       width: '100%',

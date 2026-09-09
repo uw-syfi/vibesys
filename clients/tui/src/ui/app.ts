@@ -16,6 +16,7 @@ import {
 } from '../session-model.js';
 import {ActivityBarView} from './activity-bar.js';
 import {AgentMapView} from './agent-map.js';
+import {fillLayer} from './box-fill.js';
 import {createChatDraft} from './chat-composer.js';
 import {ChatOverlayView} from './chat-overlay.js';
 import {ChatPaneView, chatDockFits, chatPaneWidth, commandColumnInset} from './chat-pane.js';
@@ -108,16 +109,19 @@ export function createOpenTuiApp(
     paddingLeft: 1,
     paddingRight: 1,
     border: true,
+    // Rounded, like the panes below it. The fill is on an inner layer, so
+    // there is nothing in the corner cell to bleed past the arc
+    // (tui-conventions.md).
     borderStyle: 'rounded',
     borderColor: theme.border,
-    // The same surface every other pane sits on. Without this the frame falls
-    // through to the root's `canvas`, which is a different shade, so the header
-    // read as a band laid over the UI rather than a pane within it. That is
-    // the exact quality the housing exists to remove. Through
-    // `headerBackground` because `headerSpanStyle` derives the text tones
-    // against the same call: the fill and the contrast basis are one fact.
-    backgroundColor: headerBackground(theme),
   });
+  // The same surface every other pane sits on. Without this the frame falls
+  // through to the root's `canvas`, which is a different shade, so the header
+  // read as a band laid over the UI rather than a pane within it. That is the
+  // exact quality the housing exists to remove. Through `headerBackground`
+  // because `headerSpanStyle` derives every header tone's contrast against the
+  // same call: the fill and the contrast basis are one fact.
+  const headerFill = fillLayer(headerFrame, 'header-fill', headerBackground(theme));
   // One renderable per span, because a terminal cell carries one foreground
   // colour and the header's roles do not share one. The row is allocated once
   // at its maximum and repainted in place: the spans change on every frame, and
@@ -338,7 +342,7 @@ export function createOpenTuiApp(
     markdownStyle = createMarkdownStyle(theme);
     root.backgroundColor = theme.canvas;
     headerFrame.borderColor = theme.border;
-    headerFrame.backgroundColor = headerBackground(theme);
+    headerFill.backgroundColor = headerBackground(theme);
     transcriptFrame.borderColor = theme.border;
     help.fg = theme.textSubtle;
     roundRail.applyTheme(theme);

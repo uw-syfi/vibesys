@@ -11,6 +11,7 @@ import {
   chatThreadHeading,
   type SessionState,
 } from '../session-model.js';
+import {fillLayer} from './box-fill.js';
 import {ChatComposerView, type ChatDraft} from './chat-composer.js';
 import {ConversationView} from './conversation.js';
 import {LOG_CLAIM_PANEL_WIDTH, LOG_COMPACT_PANEL_WIDTH} from './experiment-log.js';
@@ -92,6 +93,7 @@ export function chatPaneWidth(terminalWidth: number, rightPaneWidth = 0): number
  */
 export class ChatPaneView {
   readonly output: BoxRenderable;
+  readonly #fill: BoxRenderable;
   readonly #scroll: ScrollBoxRenderable;
   readonly #conversation: ConversationView;
   readonly #composer: ChatComposerView;
@@ -116,10 +118,6 @@ export class ChatPaneView {
       border: true,
       borderStyle: paneBorderStyle(false),
       borderColor: paneBorderColor(theme, false),
-      // The surface every other pane sits on. Without it this box falls
-      // through to the root's canvas, a lighter shade, so the chat read as a
-      // pale band beside panes that did not match it.
-      backgroundColor: theme.elevatedSurface,
       title: paneTitle(CHAT_PANE_TITLE, false),
       visible: false,
       // Clicking into the chat gives it the keys, the same thing Ctrl+W does.
@@ -127,6 +125,11 @@ export class ChatPaneView {
       // table, so the operator could not tell where their keys were going.
       onMouseUp: () => controller.focusPane('chat'),
     });
+    // The surface every other pane sits on. Without it this box falls through
+    // to the root's canvas, a lighter shade, so the chat read as a pale band
+    // beside panes that did not match it. On its own layer, so the pane keeps
+    // the rounded frame `PANE_BORDER` argues for (tui-conventions.md).
+    this.#fill = fillLayer(this.output, 'chat-pane-fill', theme.elevatedSurface);
     this.#scroll = new ScrollBoxRenderable(renderer, {
       id: 'chat-pane-scroll',
       width: '100%',
@@ -171,7 +174,7 @@ export class ChatPaneView {
     this.#theme = theme;
     // Resting colour: `render` repaints from the live focus on the next frame.
     this.output.borderColor = paneBorderColor(theme, false);
-    this.output.backgroundColor = theme.elevatedSurface;
+    this.#fill.backgroundColor = theme.elevatedSurface;
     this.#conversation.applyTheme(theme, markdownStyle);
     this.#composer.applyTheme(theme);
     this.#renderedConversation = null;

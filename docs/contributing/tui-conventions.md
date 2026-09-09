@@ -103,6 +103,45 @@ The active bindings are shown on the key-help line at the bottom of the screen,
 just above the command input, and that line changes with whichever surface is in
 front. A binding a person has to already know is a binding they do not have.
 
+### A fill lives on an inner box
+
+`OptimizedBuffer.drawBox` takes one background for the whole rectangle and the
+buffer is write-only, so a `backgroundColor` on a bordered box fills the border
+ring as well. The painted rectangle is then a cell larger than the drawn line on
+all four sides: the line sits in a solid block with fill on both sides of it,
+and under a rounded arc the fill paints the outside of the curve and squares the
+corner back off. That is #642.
+
+So the fill goes on an inner box that occupies the interior, and the outer box
+draws only the border. A cell then reads canvas, then line, then fill, and a
+corner cell holds no fill to bleed past the arc. `box-fill.ts` is the one way to
+do it: a layer inset to zero on all four sides, absolutely positioned so it adds
+no row, no padding and no containing block and the box's children stay where
+they were.
+
+**Exception: an overlay keeps an outer fill.** A box that floats over other
+content needs an opaque edge, or what is behind shows through its border ring.
+That fill reaches the ring by design, so an overlay draws a **square** border
+(`borderStyle: 'single'`): a ring of fill under a rounded arc is #642 again. The
+three modals and the two suggestion popups are the whole list.
+
+Two other answers were tried and rejected, so they are settled rather than open.
+Blending the corner cell between the fill and what was behind it is still one
+flat colour standing in for two regions, and reads as a smudge rather than a
+curve. Forcing every filled box square fixes the corner and leaves the fill
+overhanging the border on all four sides, which is the same disagreement between
+the drawn shape and the painted one, one cell further out.
+
+`app.test.ts` holds both halves over the whole constructed tree rather than over
+a list of call sites, so a box added later fails it without anyone remembering
+to extend a list: no non-overlay box fills its own rectangle, and a site that
+used to fill one still paints a layer inside its border. The exception is an
+explicit list there, because floating over something is not a property a box
+carries: the agent map's cards are absolutely positioned too. One trap the walk
+exists to catch: OpenTUI turns a border back on if `borderStyle` or
+`borderColor` is passed beside `border: false`, so a box that means to draw no
+border has to omit both.
+
 ## Proposed: movement and naming
 
 Nothing in this section is implemented. It is where the movement and naming

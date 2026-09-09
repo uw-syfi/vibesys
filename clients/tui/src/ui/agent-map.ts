@@ -24,6 +24,7 @@ import {
   stageKinds,
 } from './agent-graph.js';
 import {agentRuntimeLabel} from './agent-runtime-label.js';
+import {fillLayer} from './box-fill.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {elapsedLabel} from './previews.js';
 import type {Theme} from './theme.js';
@@ -336,17 +337,26 @@ export class AgentMapView {
       // No horizontal padding: two columns of it is the difference between
       // "implementer" and "implement…" at the widths a four-stage round leaves.
       border: true,
-      borderStyle: 'rounded',
+      // Square, and not because of the fill: that sits on an inner layer
+      // (tui-conventions.md), so the shape is free either way and this is a
+      // look decision. A stage reads as a slot in a pipeline rather than as a
+      // card, and the map's edges arrive at its sides. Unconditional rather
+      // than square-only-when-selected, because swapping the shape on
+      // selection reads as the node becoming a different kind of object,
+      // which is why `PANE_BORDER` rejected the same swap for focus.
+      borderStyle: 'single',
       borderColor: selected
         ? this.#theme.borderFocus
         : phase.status === 'pending'
           ? this.#theme.borderStrong
           : color,
-      ...(selected ? {backgroundColor: this.#theme.selectedSurface} : {}),
       // Clicking a node filters the transcript to it, and clicking the selected
       // one clears the filter: the same toggle Tab and Esc give the keyboard.
       onMouseUp: () => this.controller.selectAgent(phase.kind),
     });
+    // Inside the frame, so the fill stops at the border line instead of
+    // painting the ring the edges arrive at (tui-conventions.md).
+    if (selected) fillLayer(box, `agent-${phase.kind}-${node.y}-fill`, this.#theme.selectedSurface);
     const inner = node.width - 2;
     box.add(
       new TextRenderable(this.renderer, {
@@ -400,16 +410,19 @@ export class AgentMapView {
       paddingRight: 1,
       // Passing borderStyle without border draws a frame that the layout does
       // not reserve rows for, and the phase's lines then overlap it.
+      //
+      // Square for the same reason as `#renderNode`: this is that node in the
+      // stacked layout, so the two layouts read as one object.
       ...(selected
         ? {
             border: true,
-            borderStyle: 'rounded' as const,
+            borderStyle: 'single' as const,
             borderColor: this.#theme.borderFocus,
           }
         : {}),
-      ...(selected ? {backgroundColor: this.#theme.selectedSurface} : {}),
       onMouseUp: () => this.controller.selectAgent(phase.kind),
     });
+    if (selected) fillLayer(row, `agent-${phase.kind}-fill`, this.#theme.selectedSurface);
     const color = statusColor(this.#theme, phase.status);
     row.add(
       new TextRenderable(this.renderer, {
