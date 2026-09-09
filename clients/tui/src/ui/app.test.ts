@@ -2470,10 +2470,9 @@ describe('theming', () => {
     expect(spanColors(testRenderer, 'VibeSys')?.fg).toBe(light.accent);
     const body = spanColors(testRenderer, 'themed body text');
     expect(body?.fg).toBe(light.conversation.assistant.content);
-    // The canvas, not a role fill: a bordered card carries the role in its
-    // border and draws no background of its own.
+    // #565: the card carries its role on the divider rule, not a fill, so its
+    // body sits on the theme's canvas.
     expect(body?.bg).toBe(light.canvas);
-    expect(cardBorder(testRenderer, 'event-themed')).toBe(light.conversation.assistant.border);
     expect(spanColors(testRenderer, 'implementer')?.fg).toBe(light.conversation.assistant.label);
   });
 
@@ -2494,10 +2493,9 @@ describe('theming', () => {
     expect(spanColors(testRenderer, 'VibeSys')?.fg).toBe('#22d3ee');
     const body = spanColors(testRenderer, 'themed body text');
     expect(body?.fg).toBe('#e2e8f0');
-    // The canvas: an assistant card draws no fill of its own, and carries its
-    // role accent in the border instead.
+    // No card fill: the role lives on the top-edge divider rule, so a card
+    // body is the canvas.
     expect(body?.bg).toBe('#0f172a');
-    expect(cardBorder(testRenderer, 'event-themed')).toBe('#0891b2');
     expect(spanColors(testRenderer, 'implementer')?.fg).toBe('#5cb6cc');
   });
 
@@ -2523,10 +2521,7 @@ describe('theming', () => {
     expect(spanColors(testRenderer, 'VibeSys')?.fg).toBe(solarized.accent);
     const body = spanColors(testRenderer, 'themed body text');
     expect(body?.fg).toBe(solarized.conversation.assistant.content);
-    // Both channels have to follow the swap: the canvas the card sits on, and
-    // the border it carries its role in.
     expect(body?.bg).toBe(solarized.canvas);
-    expect(cardBorder(testRenderer, 'event-themed')).toBe(solarized.conversation.assistant.border);
   });
 
   it('navigates the theme list with the keyboard and applies on Enter', async () => {
