@@ -465,6 +465,7 @@ def test_declared_host_resources_reach_the_sandbox(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("sandbox_builds")
 def test_mcp_servers_are_installed_for_the_turn_and_removed_after(tmp_path: Path) -> None:
     """The config exists only while the provider process is running.
 
@@ -495,6 +496,7 @@ def test_mcp_servers_are_installed_for_the_turn_and_removed_after(tmp_path: Path
     assert not (tmp_path / ".mcp.json").exists()
 
 
+@pytest.mark.usefixtures("sandbox_builds")
 def test_a_non_python_mcp_command_is_left_alone(tmp_path: Path) -> None:
     observed: list[dict[str, Any]] = []
 
