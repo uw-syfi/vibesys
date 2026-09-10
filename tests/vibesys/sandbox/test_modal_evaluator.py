@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import io
 import json
 import os
@@ -178,6 +179,95 @@ def test_ensure_runtime_dir_rejects_symlink_shadowing_the_directory(tmp_path: Pa
 
     with pytest.raises(RuntimeError, match="expected a directory owned by uid"):
         modal_evaluator._ensure_runtime_dir(shadow / "modal-evaluator.lock")  # noqa: SLF001
+
+
+def test_ensure_runtime_dir_rejects_pre_existing_world_writable_directory(
+    tmp_path: Path,
+) -> None:
+    """A directory others could already have planted files in is rejected, not coerced."""
+    runtime_dir = tmp_path / "rt"
+    runtime_dir.mkdir()
+    runtime_dir.chmod(0o777)
+
+    with pytest.raises(RuntimeError, match="group- or world-writable"):
+        modal_evaluator._ensure_runtime_dir(runtime_dir / "modal-evaluator.lock")  # noqa: SLF001
+
+
+def test_ensure_runtime_dir_accepts_pre_existing_readable_directory(tmp_path: Path) -> None:
+    """0o755 is readable but not a planting vector, so it is tightened rather than rejected."""
+    runtime_dir = tmp_path / "rt"
+    runtime_dir.mkdir()
+    runtime_dir.chmod(0o755)
+
+    modal_evaluator._ensure_runtime_dir(runtime_dir / "modal-evaluator.lock")  # noqa: SLF001
+
+    assert stat.S_IMODE(runtime_dir.stat().st_mode) == 0o700
+
+
+def test_exclusive_evaluation_rejects_symlink_planted_at_the_lock_path(
+    tmp_path: Path,
+    monkeypatch,  # noqa: ANN001
+) -> None:
+    """A symlink at the lock path fails instead of truncating the file it points at."""
+    runtime_dir = tmp_path / "rt"
+    runtime_dir.mkdir(mode=0o700)
+    outside = tmp_path / "outside"
+    outside.write_text("untouched")
+    lock_path = runtime_dir / "modal-evaluator.lock"
+    lock_path.symlink_to(outside)
+    monkeypatch.setattr(modal_evaluator, "_LOCK_PATH", lock_path)
+
+    with (
+        pytest.raises(OSError, match=r"modal-evaluator\.lock") as raised,
+        modal_evaluator._exclusive_evaluation(),  # noqa: SLF001
+    ):
+        pass
+
+    assert raised.value.errno == errno.ELOOP
+    assert outside.read_text() == "untouched"
+
+
+def test_read_deployment_lease_rejects_symlink_planted_at_the_lease_path(
+    tmp_path: Path,
+    monkeypatch,  # noqa: ANN001
+) -> None:
+    """A symlink at the lease path yields no lease instead of trusting its target."""
+    runtime_dir = tmp_path / "rt"
+    runtime_dir.mkdir(mode=0o700)
+    outside = tmp_path / "outside.json"
+    outside.write_text(
+        json.dumps({"candidate_revision": "abc123", "base_url": "https://attacker.example"})
+    )
+    lease_path = runtime_dir / "modal-evaluator-deployment.json"
+    lease_path.symlink_to(outside)
+    monkeypatch.setattr(modal_evaluator, "_DEPLOYMENT_LEASE_PATH", lease_path)
+
+    assert modal_evaluator._read_deployment_lease() is None  # noqa: SLF001
+
+
+def test_write_deployment_lease_rejects_symlink_planted_at_the_staging_path(
+    tmp_path: Path,
+    monkeypatch,  # noqa: ANN001
+) -> None:
+    """A symlink at the lease staging path fails instead of clobbering its target."""
+    runtime_dir = tmp_path / "rt"
+    runtime_dir.mkdir(mode=0o700)
+    outside = tmp_path / "outside"
+    outside.write_text("untouched")
+    (runtime_dir / "modal-evaluator-deployment.tmp").symlink_to(outside)
+    monkeypatch.setattr(
+        modal_evaluator,
+        "_DEPLOYMENT_LEASE_PATH",
+        runtime_dir / "modal-evaluator-deployment.json",
+    )
+
+    with pytest.raises(OSError, match=r"modal-evaluator-deployment\.tmp") as raised:
+        modal_evaluator._write_deployment_lease(  # noqa: SLF001
+            "abc123", "https://example.invalid", None
+        )
+
+    assert raised.value.errno == errno.ELOOP
+    assert outside.read_text() == "untouched"
 
 
 def test_extract_modal_web_url_handles_rich_line_wrapping() -> None:
