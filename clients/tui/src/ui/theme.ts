@@ -75,9 +75,30 @@ export interface Theme {
    */
   minContrast: number;
 
+  /**
+   * The one background the UI paints. Every pane, modal, the header, the error
+   * banner, the composer and the frame behind them all fill with this, so a box
+   * is told from the page by its border and not by a shade of its own.
+   *
+   * There is deliberately no second, raised shade (#574). On a cell grid a
+   * "raised" surface is a flat fill one step off the canvas: at a step small
+   * enough to keep text readable it is not seen as depth, and at a step large
+   * enough to be seen it bleeds a rectangle around content it is not marking.
+   *
+   * Where the two used to disagree this took the pane's value rather than the
+   * frame's, because the panes cover nearly all of the screen. That made the
+   * frame the minority colour, and the strips of it left showing between and
+   * below the panes read as stray bands of light rather than as a background.
+   * The key-help line was the plainest case: it paints no background of its own
+   * and so falls through to the frame, which drew a pale rule across the bottom
+   * of every dark theme.
+   *
+   * The two remaining fills name a state rather than a depth: `selectedSurface`
+   * is what the cursor is on, and `surface` backs a code block, which has no
+   * border to delimit it.
+   */
   canvas: string;
   surface: string;
-  elevatedSurface: string;
   selectedSurface: string;
 
   textPrimary: string;
@@ -231,7 +252,6 @@ interface ThemeSpec {
   appearance: Appearance;
   canvas: string;
   surface: string;
-  elevatedSurface: string;
   selectedSurface: string;
   textPrimary: string;
   textMuted: string;
@@ -328,7 +348,6 @@ function buildTheme(spec: ThemeSpec): Theme {
     minContrast: spec.minContrast,
     canvas: spec.canvas,
     surface: spec.surface,
-    elevatedSurface: spec.elevatedSurface,
     selectedSurface: spec.selectedSurface,
     textPrimary: ensureContrast(spec.textPrimary, spec.canvas, spec.minContrast),
     textMuted: ensureContrast(spec.textMuted, spec.canvas, spec.minContrast),
@@ -353,9 +372,8 @@ const DARK: ThemeSpec = {
   name: 'dark',
   label: 'Dark',
   appearance: 'dark',
-  canvas: '#0f172a',
+  canvas: '#020617',
   surface: '#1e293b',
-  elevatedSurface: '#020617',
   // Distinct from the canvas: a selection painted in the canvas colour is not a
   // selection. Every other theme already differs here.
   selectedSurface: '#1e293b',
@@ -401,9 +419,8 @@ const LIGHT: ThemeSpec = {
   name: 'light',
   label: 'Light',
   appearance: 'light',
-  canvas: '#f8fafc',
+  canvas: '#ffffff',
   surface: '#f1f5f9',
-  elevatedSurface: '#ffffff',
   selectedSurface: '#e2e8f0',
   textPrimary: '#0f172a',
   textMuted: '#475569',
@@ -435,9 +452,8 @@ const SOLARIZED_DARK: ThemeSpec = {
   name: 'solarized-dark',
   label: 'Solarized Dark',
   appearance: 'dark',
-  canvas: '#002b36',
+  canvas: '#001f27',
   surface: '#073642',
-  elevatedSurface: '#001f27',
   selectedSurface: '#073642',
   textPrimary: '#93a1a1',
   textMuted: '#839496',
@@ -469,9 +485,8 @@ const SOLARIZED_LIGHT: ThemeSpec = {
   name: 'solarized-light',
   label: 'Solarized Light',
   appearance: 'light',
-  canvas: '#fdf6e3',
+  canvas: '#fffbf0',
   surface: '#eee8d5',
-  elevatedSurface: '#fffbf0',
   selectedSurface: '#eee8d5',
   textPrimary: '#073642',
   textMuted: '#586e75',
@@ -503,9 +518,8 @@ const CATPPUCCIN_MOCHA: ThemeSpec = {
   name: 'catppuccin-mocha',
   label: 'Catppuccin Mocha',
   appearance: 'dark',
-  canvas: '#1e1e2e',
+  canvas: '#11111b',
   surface: '#181825',
-  elevatedSurface: '#11111b',
   selectedSurface: '#313244',
   textPrimary: '#cdd6f4',
   textMuted: '#a6adc8',
@@ -537,9 +551,8 @@ const CATPPUCCIN_LATTE: ThemeSpec = {
   name: 'catppuccin-latte',
   label: 'Catppuccin Latte',
   appearance: 'light',
-  canvas: '#eff1f5',
+  canvas: '#ffffff',
   surface: '#e6e9ef',
-  elevatedSurface: '#ffffff',
   selectedSurface: '#ccd0da',
   textPrimary: '#4c4f69',
   textMuted: '#6c6f85',
@@ -573,7 +586,6 @@ const HIGH_CONTRAST_DARK: ThemeSpec = {
   appearance: 'dark',
   canvas: '#000000',
   surface: '#0a0a0a',
-  elevatedSurface: '#000000',
   selectedSurface: '#262626',
   textPrimary: '#ffffff',
   textMuted: '#e6e6e6',
@@ -607,7 +619,6 @@ const HIGH_CONTRAST_LIGHT: ThemeSpec = {
   appearance: 'light',
   canvas: '#ffffff',
   surface: '#f2f2f2',
-  elevatedSurface: '#ffffff',
   selectedSurface: '#d9d9d9',
   textPrimary: '#000000',
   textMuted: '#1a1a1a',

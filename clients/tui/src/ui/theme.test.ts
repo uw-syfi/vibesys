@@ -58,14 +58,23 @@ describe('theme selection', () => {
     expect(dark.conversation.analysis.label).toBe('#b193f8');
   });
 
-  it('keeps the dark baseline pinned to the pre-theme appearance', () => {
+  it('keeps the dark baseline pinned, background excepted', () => {
     const dark = resolveTheme('dark');
-    expect(dark.canvas).toBe('#0f172a');
+    // #574 moved the canvas, and only the canvas: this was the pre-theme
+    // `#0f172a`, and is now the value the panes already painted, so the whole
+    // screen is one shade instead of two. Everything below is unchanged from
+    // the pre-theme palette, which is the point of pinning it here: the token
+    // that was meant to move is the only one that did.
+    expect(dark.canvas).toBe('#020617');
     expect(dark.accent).toBe('#22d3ee');
     expect(dark.border).toBe('#475569');
     expect(dark.conversation.assistant).toEqual({
       border: '#0891b2',
-      background: '#0e283d',
+      // The one knock-on. A card fill is `mix(canvas, roleAccent, cardTint)`,
+      // so it follows the canvas by construction and stays the same 14% step
+      // off it that it was; pinning the old `#0e283d` here would put a lighter
+      // rectangle back on the screen, which is the thing #574 removed.
+      background: '#03192d',
       label: '#5cb6cc',
       content: '#e2e8f0',
     });
@@ -182,6 +191,39 @@ describe('semantic roles', () => {
     expect(contrastRatio(theme.borderFocus, theme.canvas)).toBeGreaterThanOrEqual(
       contrastRatio(theme.border, theme.canvas),
     );
+  });
+
+  it.each(
+    themes.map(theme => [theme.name, theme] as const),
+  )('%s keeps every semantic foreground readable where a pane draws it', (_name, theme: Theme) => {
+    // Panes reuse these tokens raw, with no re-contrast at the call site:
+    // error-banner draws its message and hint in `warning` and its fatal
+    // message in `conversation.failure.content`; overlay borders and bodies its
+    // help/error/detail kinds in `success`/`error`/`info`; experiment-log
+    // colours rows and the active-hypothesis column in
+    // `warning`/`success`/`error`; theme-picker borders itself in `info`;
+    // chat-overlay borders itself in `conversation.analysis.label`; the header
+    // draws the brand in `accent` and the run state in a verdict colour.
+    //
+    // Every one of those fills `canvas` (#574 collapsed the surface ladder
+    // instead of re-ordering it), so `buildTheme`'s guarantee is now made
+    // against the cell the text actually lands on and this asserts it there.
+    // Stricter than `status colors distinguishable` above, which asks only 3:1
+    // and only of three of them: a token retuned below the reading floor, or a
+    // second background token coming back, breaks all of these at once and
+    // without a symptom until someone reads a pane.
+    const minimum = theme.name.startsWith('high-contrast') ? 7 : 4.5;
+    for (const status of [
+      theme.accent,
+      theme.info,
+      theme.success,
+      theme.warning,
+      theme.error,
+      theme.conversation.failure.content,
+      theme.conversation.analysis.label,
+    ] as const) {
+      expect(contrastRatio(status, theme.canvas)).toBeGreaterThanOrEqual(minimum);
+    }
   });
 
   it('orients light and dark themes in opposite luminance directions', () => {

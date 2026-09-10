@@ -92,7 +92,7 @@ export class ExperimentLogView {
     });
     // The pane surface, on its own layer so the rounded frame stays rounded
     // (tui-conventions.md). Same call as `chat-pane`.
-    this.#fill = fillLayer(this.output, 'experiment-log-fill', theme.elevatedSurface);
+    this.#fill = fillLayer(this.output, 'experiment-log-fill', theme.canvas);
     this.#header = new TextRenderable(renderer, {
       content: '',
       fg: theme.textSubtle,
@@ -142,7 +142,7 @@ export class ExperimentLogView {
   applyTheme(theme: Theme): void {
     this.#theme = theme;
     this.output.borderColor = theme.border;
-    this.#fill.backgroundColor = theme.elevatedSurface;
+    this.#fill.backgroundColor = theme.canvas;
     this.#header.fg = theme.textSubtle;
     this.#footerLine.fg = theme.textSubtle;
     this.#renderedState = null;

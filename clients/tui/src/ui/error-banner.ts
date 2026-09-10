@@ -45,7 +45,7 @@ export class ErrorBannerView {
     });
     // The surface the diagnostic reads on, on its own layer so the banner keeps
     // its rounded frame (tui-conventions.md).
-    this.#fill = fillLayer(this.output, 'error-banner-fill', theme.elevatedSurface);
+    this.#fill = fillLayer(this.output, 'error-banner-fill', theme.canvas);
     this.#scroll = new ScrollBoxRenderable(renderer, {
       id: 'error-banner-scroll',
       width: '100%',
@@ -58,7 +58,7 @@ export class ErrorBannerView {
 
   applyTheme(theme: Theme): void {
     this.#theme = theme;
-    this.#fill.backgroundColor = theme.elevatedSurface;
+    this.#fill.backgroundColor = theme.canvas;
     // `#rendered = null` makes the next `render` repaint the border from the
     // new theme.
     this.#rendered = null;

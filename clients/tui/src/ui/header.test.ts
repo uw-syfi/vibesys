@@ -359,9 +359,10 @@ describe('run state', () => {
  * The floor every token but `textSubtle` is held to, restated here rather than
  * read off `theme.minContrast` so this is an independent check.
  *
- * It is measured against `headerBackground`, not the canvas: the header frame
- * paints a surface of its own, and a tone that clears the floor against a
- * background nothing draws is not a readable header.
+ * It is measured against `headerBackground` rather than `theme.canvas` because
+ * that function is what decides which cell the text lands on, and a tone that
+ * clears the floor against a background nothing draws is not a readable
+ * header. Since #574 the two are the same colour, which the test below pins.
  */
 function minContrast(theme: Theme): number {
   return theme.name.startsWith('high-contrast') ? 7 : 4.5;
@@ -541,26 +542,19 @@ describe('header contrast', () => {
     }
   });
 
-  it('derives its tones against the surface it paints, not against the canvas', () => {
-    // No built-in theme separates the two: every one of the eight puts its
-    // elevated surface further from mid grey than its canvas, so a tone that
-    // clears the floor on the canvas clears it by more on the header. The
-    // header cannot assume that. #574 is open on the surface ladder being
-    // inverted, and a header background on the other side of the canvas is
-    // exactly what a canvas-derived tone gets wrong: it returns the raw token
-    // for a cell it is unreadable on.
-    const dark = resolveTheme('dark');
-    const moved: Theme = {...dark, elevatedSurface: resolveTheme('light').canvas};
-    expect(contrastRatio(dark.accent, moved.canvas)).toBeGreaterThanOrEqual(dark.minContrast);
-    expect(contrastRatio(dark.accent, headerBackground(moved))).toBeLessThan(dark.minContrast);
-
-    for (const role of SPAN_ROLES) {
-      const {fg} = headerSpanStyle(moved, {text: 'completed', role});
-      const floor = role === 'separator' ? SUBTLE_FLOOR : minContrast(moved);
-      expect({
-        role,
-        ratio: contrastRatio(fg, headerBackground(moved)) >= floor,
-      }).toEqual({role, ratio: true});
+  it('paints the canvas, so the top line wears no colour of its own', () => {
+    // #574: the header filled `elevatedSurface` while the frame behind it
+    // filled `canvas`, so the top line agreed with the panes and disagreed with
+    // the strip of frame showing around them. The collapse kept the header's
+    // own value and moved `canvas` onto it; this pins that the two names now
+    // mean one colour. The token is gone, so no theme can reintroduce a second
+    // shade, but `headerBackground` is still the single place that chooses the
+    // fill, so the choice is pinned rather than left to the next reader.
+    for (const theme of listThemes()) {
+      expect({theme: theme.name, background: headerBackground(theme)}).toEqual({
+        theme: theme.name,
+        background: theme.canvas,
+      });
     }
   });
 

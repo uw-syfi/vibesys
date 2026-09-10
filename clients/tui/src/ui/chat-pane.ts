@@ -97,7 +97,7 @@ export class ChatPaneView {
     // to the root's canvas, a lighter shade, so the chat read as a pale band
     // beside panes that did not match it. On its own layer, so the pane keeps
     // the rounded frame `PANE_BORDER` argues for (tui-conventions.md).
-    this.#fill = fillLayer(this.output, 'chat-pane-fill', theme.elevatedSurface);
+    this.#fill = fillLayer(this.output, 'chat-pane-fill', theme.canvas);
     this.#scroll = new ScrollBoxRenderable(renderer, {
       id: 'chat-pane-scroll',
       width: '100%',
@@ -142,7 +142,7 @@ export class ChatPaneView {
     this.#theme = theme;
     // Resting colour: `render` repaints from the live focus on the next frame.
     this.output.borderColor = paneBorderColor(theme, false);
-    this.#fill.backgroundColor = theme.elevatedSurface;
+    this.#fill.backgroundColor = theme.canvas;
     this.#conversation.applyTheme(theme, markdownStyle);
     this.#composer.applyTheme(theme);
     this.#renderedConversation = null;
