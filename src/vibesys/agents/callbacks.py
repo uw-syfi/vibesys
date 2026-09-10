@@ -439,6 +439,14 @@ class AgentLogger(BaseCallbackHandler):
     # on the same private ``_emit_*`` helpers, so emitted events and log text
     # are identical regardless of which backend is in use.
 
+    def _publish_channel(self, text: str, channel: AgentOutputChannel) -> None:
+        """Publish ``text`` verbatim on ``channel`` and mirror it to the log."""
+        if not text:
+            return
+        status = self._status()
+        self._publish(text, channel, status=status)
+        self._log_line(f"{format_status_prefix(status)}{text}")
+
     def on_thinking(self, text: str) -> None:
         """Publish agent reasoning on the analysis channel.
 
@@ -446,11 +454,7 @@ class AgentLogger(BaseCallbackHandler):
         ``payload={"channel": "diagnostic"}``, which the observer routes to
         :meth:`on_diagnostic`, so nothing that reaches here is inspected.
         """
-        if not text:
-            return
-        status = self._status()
-        self._publish(text, "analysis", status=status)
-        self._log_line(f"{format_status_prefix(status)}{text}")
+        self._publish_channel(text, "analysis")
 
     def on_diagnostic(self, text: str) -> None:
         """Publish driver plumbing on the diagnostic channel.
@@ -459,11 +463,7 @@ class AgentLogger(BaseCallbackHandler):
         agent reasoning, so nothing here inspects it. The text is published
         verbatim; only the channel differs from :meth:`on_thinking`.
         """
-        if not text:
-            return
-        status = self._status()
-        self._publish(text, "diagnostic", status=status)
-        self._log_line(f"{format_status_prefix(status)}{text}")
+        self._publish_channel(text, "diagnostic")
 
     def on_tool_call(self, tool: str, args: dict[str, Any] | str | None = None) -> None:  # noqa: D102  # tracked: #288
         if isinstance(args, dict):
