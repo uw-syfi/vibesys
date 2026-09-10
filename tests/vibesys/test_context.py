@@ -1,14 +1,24 @@
 import json
 import subprocess
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import BaseModel
 
 from vibesys import boot_trace
+from vibesys.agents.client import AgentClient
+from vibesys.agents.contracts import (
+    AgentCapabilities,
+    AgentTurnRequest,
+    AgentTurnResult,
+)
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.agents.session_store import DurableSessionStore
+from vibesys.backends.cuda import CudaBackend
+from vibesys.backends.cuda.gpu_monitor import GpuInfo
 from vibesys.config import Config
 from vibesys.context import (
     _resume_configuration_update,
@@ -28,7 +38,14 @@ from vibesys.evaluators import (
 from vibesys.input_manifest import WorkspaceSource
 from vibesys.loops.agent.model import AgentRunState
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
-from vibesys.run import LocalRunIntegration, RunIntegration, RunLogger, RunPaths, RunStateNamespace
+from vibesys.run import (
+    DeviceLease,
+    LocalRunIntegration,
+    RunIntegration,
+    RunLogger,
+    RunPaths,
+    RunStateNamespace,
+)
 from vibesys.run.events import CoreEventType
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
 from vs_loop_state import PlainLoopCursor
@@ -899,3 +916,130 @@ def test_evolve_candidate_clients_get_no_provider_session_store(tmp_path):  # no
             )
             assert "session_store" not in build_runner.call_args.kwargs
             candidate.close()
+
+
+# ---------------------------------------------------------------------------
+# The device pin and the agent execution mode
+# ---------------------------------------------------------------------------
+
+
+class _PinResponse(BaseModel):
+    answer: str
+
+
+@dataclass
+class _PinSession:
+    """One turn that answers whatever the schema asked for."""
+
+    turns: list[AgentTurnRequest] = field(default_factory=list)
+
+    def run_turn(self, request, observer=None):  # noqa: ANN001, ANN202
+        del observer
+        self.turns.append(request)
+        return AgentTurnResult('{"answer":"ok"}')
+
+    def resume_provider_session(self, session_id: str) -> bool:
+        del session_id
+        return False
+
+    def cancel(self) -> None: ...
+
+    def close(self) -> None: ...
+
+
+@dataclass
+class _PinDriver:
+    """Records the session specs the client builds, and its execution mode."""
+
+    containerized: bool
+    specs: list = field(default_factory=list)
+
+    @property
+    def capabilities(self):  # noqa: ANN202
+        return AgentCapabilities(container_execution=self.containerized)
+
+    def create_session(self, spec):  # noqa: ANN001, ANN202
+        self.specs.append(spec)
+        return _PinSession()
+
+    def close(self) -> None: ...
+
+
+def _pin_context(
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+    *,
+    containerized: bool,
+    device_index: int = 3,
+) -> tuple[_RunContext, _PinDriver]:
+    """A context whose only real parts are the device lease and agent client."""
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir(exist_ok=True)
+    backend = CudaBackend(log_dir=log_dir, log=lambda _message: None)
+    backend.selected_device = GpuInfo(
+        index=device_index,
+        uuid=f"GPU-{device_index}",
+        name="test-gpu",
+        memory_used_mib=0,
+        memory_total_mib=1,
+        utilization_pct=0,
+    )
+    driver = _PinDriver(containerized=containerized)
+
+    ctx = object.__new__(_RunContext)
+    ctx.integration = LocalRunIntegration()
+    request.addfinalizer(ctx.integration.close)
+    ctx.events = ctx.integration.events
+    ctx._progress_stack = []  # noqa: SLF001
+    ctx._paths = RunPaths(  # noqa: SLF001
+        project_root=tmp_path,
+        log_dir=log_dir,
+        run_log_path=tmp_path / "run.log",
+    )
+    ctx.device = DeviceLease(backend, log_dir=log_dir)
+    ctx.agent_client = AgentClient(driver, provider="claude", model_name="m", log_dir=log_dir)
+    return ctx, driver
+
+
+def test_a_host_agent_is_pinned_to_the_selected_device(
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+) -> None:
+    ctx, driver = _pin_context(tmp_path, request, containerized=False)
+
+    assert ctx.gpu_env() == {"CUDA_VISIBLE_DEVICES": "3"}
+
+    ctx.invoke(
+        kind="judge",
+        system_prompt="system",
+        user_prompt="user",
+        response_cls=_PinResponse,
+        fallback_factory=lambda: _PinResponse(answer="fallback"),
+    )
+
+    assert driver.specs[0].environment == (("CUDA_VISIBLE_DEVICES", "3"),)
+
+
+def test_a_container_agent_carries_no_host_device_pin(
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+) -> None:
+    """``--gpus device=N`` already makes the chosen GPU device 0 inside.
+
+    A host index forwarded into the container would name a device that is not
+    there, and re-pinning it mid-run would change the session fingerprint and
+    evict the live conversation.
+    """
+    ctx, driver = _pin_context(tmp_path, request, containerized=True)
+
+    assert ctx.gpu_env() == {}
+
+    ctx.invoke(
+        kind="judge",
+        system_prompt="system",
+        user_prompt="user",
+        response_cls=_PinResponse,
+        fallback_factory=lambda: _PinResponse(answer="fallback"),
+    )
+
+    assert driver.specs[0].environment == ()

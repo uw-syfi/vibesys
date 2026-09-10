@@ -606,6 +606,35 @@ def test_a_container_turn_carries_the_session_environment_and_workdir(
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_container_turn_carries_no_host_device_pin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """The host GPU index is not a fact about the inside of the container.
+
+    An editor container is started with ``--gpus device=N``, which makes the
+    chosen GPU device 0 inside it, so the host's ``CUDA_VISIBLE_DEVICES``
+    would name a device that is not there. The run context keeps the pin out
+    of the session spec in container mode; the driver's part of that contract
+    is that it forwards only what the spec declared and never reads the
+    variable off the host environment.
+    """
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3")
+    driver, fake, _repairs = _container_driver(
+        monkeypatch, provider, scripted_turn(provider, text="ok")
+    )
+    session = driver.create_session(_container_spec(tmp_path, provider, environment=()))
+
+    session.run_turn(AgentTurnRequest(message="Do it"))
+
+    argv = list(fake.requests[-1].argv)
+    forwarded = [argv[index + 1] for index, item in enumerate(argv) if item == "-e"]
+    assert forwarded == []
+    assert not any("CUDA_VISIBLE_DEVICES" in argument for argument in argv)
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
 def test_a_container_turn_repairs_workspace_ownership_afterwards(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

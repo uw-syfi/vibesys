@@ -1428,7 +1428,18 @@ class _RunContext:
         self.device.monitor = monitor
 
     def gpu_env(self) -> dict[str, str]:
-        """Env vars for the host-running CLI agent; see :meth:`DeviceLease.gpu_env`."""
+        """Env vars for the CLI agent, empty when that agent runs in a container.
+
+        The pin names a *host* device index (see :meth:`DeviceLease.gpu_env`).
+        An editor container is started with ``--gpus device=N``, so inside it
+        the selected GPU is device 0 and the container env already says so;
+        forwarding the host index there would point the agent at a device the
+        container cannot see. Keeping the pin out of the session spec also
+        keeps a mid-run device reselect from changing the session fingerprint
+        and evicting the live conversation.
+        """
+        if self.agent_client.capabilities.container_execution:
+            return {}
         return self.device.gpu_env()
 
     @contextmanager
