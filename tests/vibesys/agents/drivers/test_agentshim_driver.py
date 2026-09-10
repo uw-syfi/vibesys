@@ -68,40 +68,12 @@ RESUME_FAILURE_STDERR = {
     "claude": "no conversation found\n",
     "codex": "thread/resume failed: no rollout found for thread id thread-1\n",
     # Gemini and opencode print nothing that separates a refused resume from
-    # any other startup failure, which is exactly why the library has to treat
-    # a failed resumed turn as a refused resume for them.
+    # any other startup failure, which is why agentshim applies the Claude
+    # rule to them: any nonzero exit of a resumed turn is a lost conversation.
     "gemini": "fatal: failed to start\n",
     "opencode": "error: failed to start\n",
 }
 """How each provider's CLI reports a resume it will not honour."""
-
-PENDING_RESUME_CLASSIFICATION = ("gemini", "opencode")
-"""Providers whose ``classify_exit`` does not yield ``SessionResumeError`` yet.
-
-Their CLIs give a refused resume no distinguishing message, so agentshim
-returns a plain ``CliExitError`` and the driver's restart-once path never
-fires: a resumed turn on a dead conversation raises instead of recovering.
-The library is changing to apply the documented Claude rule (any nonzero exit
-of a resumed turn is a resume failure) to them as well; these cases are
-written for that behaviour and marked strict-xfail so they flip to passing
-when the snapshot updates.
-"""
-
-
-def _resume_retry_case(provider: str) -> Any:  # noqa: ANN401
-    """Parametrize one provider, marking the ones the library cannot serve yet."""
-    if provider not in PENDING_RESUME_CLASSIFICATION:
-        return provider
-    return pytest.param(
-        provider,
-        marks=pytest.mark.xfail(
-            strict=True,
-            reason=(
-                "pending agentshim: gemini/opencode classify a failed resumed "
-                "turn as SessionResumeError"
-            ),
-        ),
-    )
 
 
 @dataclass
@@ -929,7 +901,7 @@ def test_a_checkpoint_is_adopted_only_while_no_conversation_is_live(
     assert "session-1" in fake.requests[1].argv
 
 
-@pytest.mark.parametrize("provider", [_resume_retry_case(name) for name in SCRIPTED_PROVIDERS])
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
 def test_a_failed_resume_retries_once_from_a_fresh_conversation(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,

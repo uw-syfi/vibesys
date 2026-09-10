@@ -108,14 +108,15 @@ A raise carries no `AgentTurnResult`, so the turn cannot report
 `RESET_REQUIRED`, and forgetting is the only way the session can refuse to
 offer a conversation again.
 
-This exists because not every CLI makes a refused resume distinguishable.
-Claude maps any nonzero exit of a resumed turn onto `SessionResumeError`;
-Codex recognizes its own missing-rollout message; Gemini and opencode report a
-refused resume exactly as they report any other startup failure. Without the
-drop, a conversation the provider will not resume would be resumed again on
-every later turn and the run would make no progress. The price is that a
-genuine agent failure on a resumed turn also costs that conversation's
-history, which is the cheaper of the two.
+This is a backstop, not the normal path. Codex recognizes its own
+missing-rollout message and raises `SessionResumeError`; Claude, Gemini and
+opencode make a refused resume indistinguishable from any other startup
+failure, so agentshim maps any nonzero exit of a resumed turn onto
+`SessionResumeError` for them. What is left over is a resumed turn that fails
+in a way no provider calls a resume failure, and resuming that conversation
+again on every later turn would make no progress. The price is that a genuine
+agent failure on a resumed turn also costs that conversation's history, which
+is the cheaper of the two.
 
 The drop is session-local. `AgentClient` evicts the live session when a turn
 raises and deliberately keeps the checkpoint, so a run whose provider cannot
