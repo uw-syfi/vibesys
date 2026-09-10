@@ -7,8 +7,9 @@ import agentshim
 import pytest
 from tests.support import provider_profiles as fake_profiles
 
+import vibesys
 from vibesys.agents import host_resource_declarations
-from vs_sandbox import HostResource, HostResourceAccess
+from vs_sandbox import HostResource, HostResourceAccess, HostResourceContext
 
 _SHIPPED = ("claude", "codex", "gemini", "opencode")
 
@@ -95,6 +96,29 @@ class TestInterpreterAliasRoots:
         monkeypatch.setattr(host_resource_declarations.sys, "executable", str(real))
 
         assert host_resource_declarations._interpreter_alias_roots() == set()  # noqa: SLF001  # tracked: #288
+
+
+class TestAgentRuntime:
+    """The running VibeSys install must be importable inside confinement.
+
+    ``import vibesys`` cannot fail here: this test module is itself reached
+    through ``vibesys.agents.host_resource_declarations``, so the package is
+    already loaded and ``vibesys/__init__.py`` is a docstring-only module with
+    no re-exports that could raise. The declaration is unconditional.
+    """
+
+    def test_declares_the_running_vibesys_package_root(self) -> None:
+        declarations = tuple(
+            host_resource_declarations._agent_runtime(  # noqa: SLF001  # tracked: #288
+                HostResourceContext(env={})
+            )
+        )
+
+        vibesys_root = Path(vibesys.__file__).resolve().parents[1]
+        matching = [resource for resource in declarations if resource.path == vibesys_root]
+        assert len(matching) == 1
+        assert matching[0].access is HostResourceAccess.READ_ONLY
+        assert matching[0].purpose == "agent and VibeSys runtime"
 
 
 def test_defaults_declare_path_rust_and_shell_resources(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288

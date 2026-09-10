@@ -150,6 +150,23 @@ class TestOnThinkingChannel:
 
         assert [chunk.channel for chunk in chunks] == ["analysis"] * 2
 
+    def test_empty_text_publishes_nothing_directly(self) -> None:
+        """``on_thinking`` and ``on_diagnostic`` share a no-op-on-empty helper."""
+        seen = []
+        unsubscribe = output_sink().subscribe(seen.append)
+        try:
+            AgentLogger().on_thinking("")
+        finally:
+            unsubscribe()
+
+        assert [event.data for event in seen if isinstance(event.data, AgentOutputChunkData)] == []
+
+    def test_writes_to_log_file(self) -> None:
+        log = io.StringIO()
+        AgentLogger(log_file=log).on_thinking("The ring buffer is the hot path.")
+
+        assert "The ring buffer is the hot path." in log.getvalue()
+
 
 class TestOnDiagnostic:
     """The explicit hook a driver-marked event routes to."""
@@ -174,6 +191,12 @@ class TestOnDiagnostic:
 
     def test_empty_text_publishes_nothing(self) -> None:
         assert self._chunks("") == []
+
+    def test_writes_to_log_file(self) -> None:
+        log = io.StringIO()
+        AgentLogger(log_file=log).on_diagnostic("agentshim: restarting the provider process")
+
+        assert "agentshim: restarting the provider process" in log.getvalue()
 
 
 class TestOnToolStart:
