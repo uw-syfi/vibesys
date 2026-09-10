@@ -85,7 +85,7 @@ export class OverlayView {
       // included, and a fill that reaches the ring needs a square corner.
       borderStyle: 'single',
       borderColor: theme.info,
-      backgroundColor: theme.elevatedSurface,
+      backgroundColor: theme.canvas,
       // Above the chat modal (20), below the theme picker (30): a command ack
       // submitted from the modal chat has to be visible over it.
       zIndex: 25,
@@ -125,7 +125,7 @@ export class OverlayView {
 
   applyTheme(theme: Theme): void {
     this.#theme = theme;
-    this.output.backgroundColor = theme.elevatedSurface;
+    this.output.backgroundColor = theme.canvas;
     this.scrim.backgroundColor = scrim(theme).color;
     this.scrim.opacity = scrim(theme).strength;
     this.output.borderColor = borderFor(theme, this.#renderedKind ?? 'detail');

@@ -76,7 +76,7 @@ export class ChatOverlayView {
       // included, and a fill that reaches the ring needs a square corner.
       borderStyle: 'single',
       borderColor: theme.conversation.analysis.label,
-      backgroundColor: theme.elevatedSurface,
+      backgroundColor: theme.canvas,
       title: ' Experiment chat ',
       zIndex: 20,
       visible: false,
@@ -182,7 +182,7 @@ export class ChatOverlayView {
 
   applyTheme(theme: Theme, markdownStyle: SyntaxStyle): void {
     this.output.borderColor = theme.conversation.analysis.label;
-    this.output.backgroundColor = theme.elevatedSurface;
+    this.output.backgroundColor = theme.canvas;
     this.#composer.applyTheme(theme);
     this.#conversation.applyTheme(theme, markdownStyle);
   }
