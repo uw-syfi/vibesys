@@ -268,11 +268,12 @@ def test_the_turn_streams_neutral_events(
     assert call.payload["args"] == {"command": "cargo test"}
     result = observer.of_kind(AgentEventKind.TOOL_RESULT)[0]
     assert result.text == "ok"
+    duration = result.payload["duration"]
     assert result.payload["result_payload"] == CommandResultPayload(
         stdout="ok",
         stderr="",
         exit_code=None,
-        duration=result.payload["duration"],
+        duration=duration if isinstance(duration, float) else None,
     )
     # The flat fields remain for consumers that predate the typed payload.
     assert result.payload["stdout"] == "ok"

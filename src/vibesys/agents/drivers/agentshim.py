@@ -87,7 +87,7 @@ def _ignore_log(_message: str) -> None:
 class ExecutorFactory(Protocol):
     """Builds the command executor a host session runs its CLI through."""
 
-    def __call__(self, sandbox: WorkspaceSandbox | None) -> agentshim.CommandExecutor:
+    def __call__(self, sandbox: WorkspaceSandbox | None, /) -> agentshim.CommandExecutor:
         """Return an executor confined by *sandbox*, or unconfined when it is ``None``."""
         ...
 
