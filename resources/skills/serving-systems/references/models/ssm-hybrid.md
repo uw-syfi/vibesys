@@ -74,6 +74,11 @@ Total memory grows only in attention layers as the sequence grows.
 - Follow-up hybrid from NVIDIA
 - Similar architectural ideas as Nemotron-H with updated training
 
+### Qwen3.5-397B-A17B (hybrid Gated DeltaNet + attention + MoE)
+
+- 45 Gated-DeltaNet (linear-attention) layers interleaved with 15 full-attention layers, plus a 512-expert MoE block
+- See [`text-moe.md`](text-moe.md) for the MoE side and [`qwen3-5.md`](qwen3-5.md) for the full structure table and serving numbers
+
 ## Kernels — what vLLM and SGLang actually use
 
 Two distinct Triton kernel families, both adapted from open-source upstreams, plus an optional CUDA conv-1d.

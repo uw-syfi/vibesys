@@ -101,6 +101,14 @@ sglang/
 | Hardware backend adapters | `python/sglang/srt/hardware_backend/` |
 | JIT Triton / CuTeDSL kernels | `python/sglang/jit_kernel/` |
 | Custom CUDA kernels (sgl-kernel) | `sgl-kernel/csrc/` |
+| ShardedStateLoader, `sharded_state` format | `python/sglang/srt/model_loader/loader.py` (`class ShardedStateLoader`) |
+| KV pool sizing from free memory after load | `python/sglang/srt/mem_cache/kv_cache_configurator.py` (`_profile_available_bytes`) |
+| aiter mem-fraction 0.85 multiplier | `python/sglang/srt/server_args.py` (applied when `attention_backend == "aiter"` and context length > 8192) |
+| Quark MXFP4 MoE scheme | `python/sglang/srt/layers/quantization/quark/schemes/quark_w4a4_mxfp4_moe.py` |
+| Health-check timeout env (`SGLANG_HEALTH_CHECK_TIMEOUT`) | `python/sglang/srt/entrypoints/http_server.py` (`HEALTH_CHECK_TIMEOUT`, default 20 s) |
+| `Engine.save_sharded_model` | `python/sglang/srt/entrypoints/engine.py` |
+
+Status: verified, paths confirmed against an sglang checkout past the pinned commit above (commit `ae6ef906d9`), 2026-09-10.
 
 ## Grep anchors
 

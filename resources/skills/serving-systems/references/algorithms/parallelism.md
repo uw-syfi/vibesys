@@ -70,6 +70,10 @@ Location: `$SERVE_REPOS/TensorRT-LLM/cpp/tensorrt_llm/kernels/helixKernels.cu`, 
 
 **DP-attention + EP-MoE** is the modern default for fine-grained MoE because attention is relatively cheap while MoE FFN is the expensive part — sharding only the experts minimizes collective volume.
 
+Whole-model TP is a validated alternative when EP has not been exercised on the target platform. TP=4 across four 128 GB devices is the validated configuration for a 212 GB resident, 512-expert MoE model: under TP each expert is sliced on its intermediate dim (not assigned whole to a rank), so a plain TP layout scales a fine-grained MoE using all-reduce instead of EP's all-to-all. Expert parallelism is candidate, untested on this platform; what would verify it is a paired comparison of EP's all-to-all dispatch against this TP layout at the same expert count and hardware.
+
+Status: verified (TP=4 configuration, validated as a working configuration, not individually ablated against other TP degrees); candidate (EP row). Scope: `rocm`, MI300A, sglang-v0.5.18-rocm700-mi30x, 2026-09-10, job 631025.
+
 ## Collective primitives
 
 | Primitive | Pattern | Where it shows up |

@@ -2,6 +2,20 @@
 
 Hardware spec reference. For the ROCm optimization floor see [`floor.md`](floor.md); for kernel-library guidance see [`aiter.md`](aiter.md).
 
+## Per-SKU reference: gfx target, memory model, FP4
+
+| SKU | gfx target | CDNA generation | Memory per device | Memory model | FP4 tensor support | Notes |
+|:--|:--|:--|:--|:--|:--|:--|
+| MI300A | gfx942 | CDNA3 | 128 GB HBM3 per socket, ~5.3 TB/s | Unified (APU): host and device share one HBM pool | No | 4-socket node shows ~501 to 513 GB total visible (observed). Page cache competes with resident weights and KV/Mamba allocation; see [`unified-memory.md`](unified-memory.md). |
+| MI300X | gfx942 | CDNA3 | 192 GB HBM3 | Discrete | No | Same ISA as MI300A; the unified-memory findings in this tree do not apply (discrete host/device memory, no page-cache contention). |
+| MI350X / MI355X | gfx950 | CDNA4 | 288 GB HBM3e (public spec) | Discrete | Yes, native MXFP4 compute | AITER's CK a4w4 2-stage GEMM and MXFP4 MoE quant+sort target this generation; gfx942 lacks this path, see [`aiter.md`](aiter.md). |
+
+Scope: SKU-level, gfx942 and gfx950. Status: verified (gfx target, CDNA generation, and MI300X/MI350X capacity are public spec; MI300A capacity-per-socket and the 5.3 TB/s figure are public spec; the ~501 to 513 GB node total is on-node observation). Stamp: public AMD spec (MI300 series, MI350 series) plus `sglang-v0.5.18-rocm700-mi30x`, 2026-08-25 to 2026-09-10 for the MI300A node-total observation.
+
+## Unified memory on MI300A
+
+MI300A is an APU: host and device memory form one HBM pool, so page cache competes with resident model weights and with KV-cache and Mamba-cache allocation at scheduler init. This does not apply to MI300X (discrete). See [`unified-memory.md`](unified-memory.md) for the checkpoint load-path recipe, the KV-pool pinning fix, and the AITER mem-fraction interaction.
+
 ## SKU matrix
 
 | SKU | Architecture | HBM | HBM bandwidth | Interconnect |
@@ -14,8 +28,8 @@ Peak BF16 dense on MI300X: ~1.3 PFLOP/s; FP8 roughly doubles that.
 
 ## Compute capability (GFX ID)
 
-- **gfx940 / gfx941 / gfx942** — CDNA3 (MI300 family)
-- **gfx950** — CDNA4 (MI350, announced)
+- **gfx940 / gfx941 / gfx942**: CDNA3 (MI300 family)
+- **gfx950**: CDNA4 (MI350, announced)
 
 ## Precision support
 
@@ -35,6 +49,6 @@ Beyond a node: Ethernet / InfiniBand with RDMA (RoCE). No NVL72-equivalent domai
 
 ## See also
 
-- [`floor.md`](floor.md) — the ROCm optimization floor
-- [`aiter.md`](aiter.md) — AITER / Composable Kernel, the fused-attention path on CDNA
-- [`profiler.md`](profiler.md) — rocprof / omniperf
+- [`floor.md`](floor.md): the ROCm optimization floor
+- [`aiter.md`](aiter.md): AITER / Composable Kernel, the fused-attention path on CDNA
+- [`profiler.md`](profiler.md): rocprof / omniperf

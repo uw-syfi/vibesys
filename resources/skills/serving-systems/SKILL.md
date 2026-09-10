@@ -83,6 +83,8 @@ One directory per compute backend, each with `floor.md`, `hardware.md`, and `pro
 
 - [`references/models/omni-multimodal.md`](references/models/omni-multimodal.md) — Omni-modal serving — multi-modality in AND out.
 
+- [`references/models/qwen3-5.md`](references/models/qwen3-5.md): Qwen3.5-397B-A17B, hybrid Gated DeltaNet + full-attention MoE, structure and serving numbers.
+
 - [`references/models/speech-generation.md`](references/models/speech-generation.md) — Speech generation serving — TTS and speech-to-speech.
 
 - [`references/models/speech-language.md`](references/models/speech-language.md) — Speech-language serving — ASR, speech translation, audio-text chat.

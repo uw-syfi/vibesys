@@ -110,6 +110,14 @@ python benchmarks/benchmark_serving.py \
 - **Fair comparison**: pin hardware, CUDA version, model checkpoint, sampling params.
 - **Report version strings**: engine git hash / version, model, precision, kernel backend.
 
+### Node-to-node noise on clusters
+
+On a multi-node job scheduler allocation, p95 TTFT for an equivalent server and workload varies about 30 percent between consecutive runs on the same node, and about 50 percent across nodes of one otherwise-homogeneous partition; some nodes are consistently slow. Example same-node paired runs for trees that later proved equivalent: 718 vs 781 ms, and 1017 vs 799 ms.
+
+Protocol that resolves this to about 10 percent residual noise: run the candidate and the baseline on the same node in the same allocation, three repetitions each against one held server process, and compare the median of p95 across repetitions rather than a single run.
+
+Status: verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05 to 2026-09-10.
+
 ## Reading a benchmark report (skeptically)
 
 Checklist before trusting someone's numbers:
@@ -133,6 +141,7 @@ If the report misses these, the numbers are suggestive, not authoritative.
 - **Running multiple benchmarks without restart.** Memory-pool state carries over; results drift.
 - **Expressing throughput in requests/sec instead of tokens/sec.** Different OSL distributions give different req/s for the same tok/s; always report both.
 - **Comparing under-saturated vs saturated.** At low concurrency, server throughput is bounded by request arrivals, not server capacity. Sweep concurrency until saturation.
+- **First request after boot.** It can trigger lazy kernel compilation and contaminates turn-1 TTFT by an order of magnitude; discard it as warmup, separate from the steady-state warmup window above. Scope: any backend with JIT/lazy kernel builds. Status: verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job 623402.
 
 ## See also
 

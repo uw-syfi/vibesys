@@ -46,6 +46,7 @@ The most operationally demanding open architecture. Every MoE + attention optimi
 - Standard SwiGLU per expert
 - Simpler than DeepSeek: no MLA, no MTP in base variants (though Qwen3-Next / Qwen3-MoE-Next add MTP)
 - Qwen3-VL-MoE and Qwen3-Omni-MoE extend to multimodal
+- Qwen3.5-397B-A17B is a hybrid variant (Gated DeltaNet + full attention, 512 experts): see [`qwen3-5.md`](qwen3-5.md)
 
 ### Llama-4 Scout / Maverick
 

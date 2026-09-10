@@ -1,12 +1,14 @@
 # ROCm (AMD Instinct) optimization floor
 
-CDNA shares the discrete-accelerator model with CUDA — separate device memory, dynamic shapes, per-kernel launch cost — so the *shape* of the floor matches NVIDIA's even though the libraries differ. Where a technique is identical apart from the library name, this file says so rather than restating it.
+Scope: backend `rocm`. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-08-25 to 2026-09-10.
 
-> **Status: experimental.** The `rocm` backend is wired but has not been exercised end to end against MI300-class hardware in this repo. Treat kernel-library specifics here as directionally correct and verify against your ROCm version before relying on them.
+CDNA shares the accelerator model with CUDA (dynamic shapes, per-kernel launch cost, and on discrete parts a separate device memory), so the *shape* of the floor matches NVIDIA's even though the libraries differ. MI300A is the exception on memory: host and device share one pool, see [`unified-memory.md`](unified-memory.md). Where a technique is identical apart from the library name, this file says so rather than restating it.
+
+**Verified on:** MI300A, `sglang-v0.5.18-rocm700-mi30x` image, 2026-08-25 to 2026-09-10, Qwen3.5-397B-A17B-MXFP4 at TP=4. The launch recipe and pitfalls index below are scoped to gfx942 (MI300A); confirm against your ROCm and library versions before extending to gfx950.
 
 ## 1. Continuous batching
 
-Identical to CUDA in both design and rationale — dynamic shapes are cheap, so eliminate padding via variable-length packing or paged KV.
+Identical to CUDA in both design and rationale: dynamic shapes are cheap, so eliminate padding via variable-length packing or paged KV.
 
 - Contract: [`algorithms/continuous-batching.md`](../../algorithms/continuous-batching.md)
 - The CUDA implementation transfers directly; substitute the attention kernel below.
@@ -32,22 +34,61 @@ Capture decode, keep prefill eager or bucketed. The shape-stability and address-
 
 ## Then
 
-1. **Paged KV** — [`algorithms/paged-attention.md`](../../algorithms/paged-attention.md); the design applies unmodified.
-2. **Prefix caching** — [`algorithms/radix-prefix-caching.md`](../../algorithms/radix-prefix-caching.md).
-3. **Chunked prefill** — [`algorithms/chunked-prefill.md`](../../algorithms/chunked-prefill.md).
-4. **Quantization** — FP8 is native from MI300 (CDNA3); FP4 from CDNA4. See [`algorithms/quantization-schemes.md`](../../algorithms/quantization-schemes.md) and the HW floor in [`hardware.md`](hardware.md).
+1. **Paged KV**: [`algorithms/paged-attention.md`](../../algorithms/paged-attention.md); the design applies unmodified.
+2. **Prefix caching**: [`algorithms/radix-prefix-caching.md`](../../algorithms/radix-prefix-caching.md).
+3. **Chunked prefill**: [`algorithms/chunked-prefill.md`](../../algorithms/chunked-prefill.md).
+4. **Quantization**: FP8 is native from MI300 (CDNA3); FP4 from CDNA4. See [`algorithms/quantization-schemes.md`](../../algorithms/quantization-schemes.md) and the HW floor in [`hardware.md`](hardware.md).
+
+## Validated launch recipe (SGLang, MI300A, MXFP4 MoE)
+
+A working configuration for Qwen3.5-397B-A17B-MXFP4 on 4x MI300A, TP=4. Verified as a working set; not individually ablated unless noted. Rationale for each line lives in the file it links to, not here.
+
+Environment:
+
+- `SGLANG_USE_AITER=1`: enable AITER attention/MoE dispatch. See [`aiter.md`](aiter.md).
+- `SGLANG_USE_AITER_UNIFIED_ATTN=1`: unified attention path (works on gfx942). See [`aiter.md`](aiter.md).
+- `AITER_FLYDSL_FORCE=1`: see [`aiter.md`](aiter.md); FlyDSL a4w4 fails to compile on gfx942, so this flag has no effect here and the Triton MXFP4 MoE fallback is what actually runs.
+- `SGLANG_MAMBA_SSM_DTYPE=bfloat16`: Mamba state cache dtype; see the mem-fraction and Mamba-cache sizing interaction in [`unified-memory.md`](unified-memory.md).
+- `ROCM_QUICK_REDUCE_QUANTIZATION=INT8`: **candidate**, not ablated against alternatives or against being unset.
+- `AITER_JIT_DIR=<persistent warm dir>`: must survive across launches. See [`aiter.md`](aiter.md) (JIT cache).
+- `SGLANG_HEALTH_CHECK_TIMEOUT=1800`: see [`aiter.md`](aiter.md) (pitfalls: lazy variant build).
+
+argv:
+
+- `--attention-backend aiter`: see [`aiter.md`](aiter.md).
+- `--page-size 16`
+- `--mem-fraction-static 0.72`: see [`unified-memory.md`](unified-memory.md) for the effective value after AITER's multiplier.
+- `--tp 4`
+- `--max-total-tokens 787936`: the KV-pool pin; see [`unified-memory.md`](unified-memory.md).
+- loader flags per load path: see [`weight-loading.md`](weight-loading.md).
+
+Flag set sourced from SGLang's `amd_gpu.mdx` docs and the Qwen3.5 deployment snippet's MI355X+MXFP4 branch. That source recipe's `--disable-radix-cache` is deliberately **not** applied here: it exists for FP4 kernels on MI355X (gfx950), and this workload is multi-turn and depends on prefix reuse, which radix caching provides.
+
+## Known pitfalls
+
+One line per known pitfall; detail lives at the link.
+
+- Server exits shortly after the first request; log shows a JIT build of a kernel variant. [`aiter.md#lazy-kernel-variant-build-kills-health-check-on-first-request`](aiter.md#lazy-kernel-variant-build-kills-health-check-on-first-request)
+- Launch hangs forever on "waiting for baton release". [`aiter.md#stale-jit-lock-after-a-killed-launch`](aiter.md#stale-jit-lock-after-a-killed-launch)
+- Scheduler-init crash with uneven per-rank free memory after dropping page cache post-load. [`unified-memory.md#scheduler-init-crash-from-drop-cache-at-higher-thread-counts`](unified-memory.md#scheduler-init-crash-from-drop-cache-at-higher-thread-counts)
+- Sharded-model save fails: "Not enough GPU memory for hybrid (mamba/linear-attention) state cache". [`unified-memory.md#sharded-artifact-save-needs-mem-fraction-085`](unified-memory.md#sharded-artifact-save-needs-mem-fraction-085)
+- KV pool auto-sizes to a different token count across otherwise-identical boots. [`unified-memory.md#kv-pool-size-drifts-across-boots`](unified-memory.md#kv-pool-size-drifts-across-boots)
+- MoE weight loading crawls at tens of MB/s with CPU and disk idle. [`weight-loading.md#stock-per-tensor-moe-materialization-is-the-pathology-not-io`](weight-loading.md#stock-per-tensor-moe-materialization-is-the-pathology-not-io)
+- Sharded checkpoint load hangs for minutes with no progress on a network filesystem. [`weight-loading.md#shardedstateloader-avoid-mmap-over-a-network-filesystem`](weight-loading.md#shardedstateloader-avoid-mmap-over-a-network-filesystem)
 
 ## Where ROCm differs from CUDA
 
 | Concern | Difference |
 |:--|:--|
-| Interconnect | Infinity Fabric, not NVLink. Lower per-pair bandwidth; no NVL72-equivalent domain. Affects TP sizing — see [`algorithms/parallelism.md`](../../algorithms/parallelism.md). |
-| Memory capacity | MI300X ships 192 GB and MI325X 256 GB — larger than contemporary NVIDIA parts. Capacity-bound designs that need offload on NVIDIA may fit resident here. |
+| Interconnect | Infinity Fabric, not NVLink. Lower per-pair bandwidth; no NVL72-equivalent domain. Affects TP sizing, see [`algorithms/parallelism.md`](../../algorithms/parallelism.md). |
+| Memory capacity | MI300X ships 192 GB and MI325X 256 GB, larger than contemporary NVIDIA parts. Capacity-bound designs that need offload on NVIDIA may fit resident here. |
 | Kernel coverage | Narrower than NVIDIA. Verify the specific attention variant and quantization scheme are implemented before designing around them. |
 | Engine support | vLLM and SGLang support ROCm; TensorRT-LLM does not. |
 
 ## See also
 
-- [`hardware.md`](hardware.md) — MI300X / MI325X / MI350X specs, GFX IDs, precision support
-- [`aiter.md`](aiter.md) — AITER / Composable Kernel
-- [`profiler.md`](profiler.md) — rocprofv3 / rocprof-compute
+- [`hardware.md`](hardware.md): MI300A / MI300X / MI350X specs, GFX IDs, precision support
+- [`aiter.md`](aiter.md): AITER / Composable Kernel, capability by gfx target, JIT cache
+- [`unified-memory.md`](unified-memory.md): MI300A load-path recipe, KV-pool pin, mem-fraction math
+- [`weight-loading.md`](weight-loading.md): MoE weight materialization, sharded-artifact fast path
+- [`profiler.md`](profiler.md): rocprofv3 / rocprof-compute
