@@ -601,6 +601,32 @@ class TestIdProperty:
         assert len(sandbox.id) > len("vibesys-")
 
 
+class TestContainerIdProperty:
+    @patch("subprocess.run")
+    def test_container_id_returns_running_container(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123def456ghi789\n", stderr=""
+        )
+        sandbox.start()
+
+        assert sandbox.container_id == "abc123def456ghi789"
+
+    def test_container_id_before_start_raises(self, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+        with pytest.raises(RuntimeError, match="no running container"):
+            _ = sandbox.container_id
+
+    @patch("subprocess.run")
+    def test_container_id_after_stop_raises(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123def456ghi789\n", stderr=""
+        )
+        sandbox.start()
+        sandbox.stop()
+
+        with pytest.raises(RuntimeError, match="no running container"):
+            _ = sandbox.container_id
+
+
 class TestUploadFiles:
     @patch("subprocess.run")
     def test_upload_files(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288

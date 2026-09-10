@@ -606,6 +606,22 @@ class DockerSandbox(BaseSandbox):
             _live_containers.pop(container_id, None)
 
     @property
+    def container_id(self) -> str:
+        """Return the Docker container id backing this sandbox.
+
+        Callers that need to run their own ``docker`` commands against the
+        container (a command executor, an exec probe) read the id here rather
+        than the private attribute. Raises ``RuntimeError`` when no container
+        is running, which is also the state after :meth:`stop`.
+        """
+        if self._container_id is None:
+            raise RuntimeError(  # noqa: TRY003  # tracked: #288
+                f"Docker sandbox for {self._host_workspace} has no running "
+                "container — call start() first"
+            )
+        return self._container_id
+
+    @property
     def id(self) -> str:
         """Return sandbox identifier."""
         if self._container_id:
