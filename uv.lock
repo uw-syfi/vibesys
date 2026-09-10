@@ -30,9 +30,10 @@ provides-extras = ["test"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "import-linter", specifier = ">=2.0" },
     { name = "pyright", specifier = ">=1.1.408" },
     { name = "pytest", specifier = ">=8.0.0" },
-    { name = "ruff", specifier = ">=0.11.0" },
+    { name = "ruff", specifier = "==0.15.12" },
 ]
 docs = [
     { name = "mkdocs", specifier = ">=1.6.1" },

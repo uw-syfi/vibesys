@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+import pytest
+
+
 from io import StringIO
 from unittest.mock import MagicMock, patch
 

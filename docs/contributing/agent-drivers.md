@@ -89,7 +89,7 @@ reset for both of its restarts:
 - retiring an over-budget Codex thread (turn count or heavy-turn usage),
   evaluated after the turn so the decision reads the usage it just produced;
 - retrying a resumed turn once from a fresh conversation after agentshim raises
-  `SessionResumeFailed`, which is how each provider reports that the
+  `SessionResumeError`, which is how each provider reports that the
   conversation the turn named is gone (a missing Codex rollout, a refused
   `claude --resume`). Only a resumed turn is retried, and only once, so a
   second failure is a real agent failure and propagates.

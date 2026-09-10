@@ -15,6 +15,7 @@ import sys
 from collections.abc import Iterable, Mapping  # noqa: TC003  # tracked: #288
 from pathlib import Path
 
+from vibesys.agents import provider_profiles
 from vs_sandbox import (
     HostResource,
     HostResourceAccess,
@@ -193,40 +194,59 @@ def _agent_runtime(ctx: HostResourceContext) -> Iterable[HostResource]:
     return _resources(paths, purpose="agent and VibeSys runtime")
 
 
-def _provider_state(ctx: HostResourceContext) -> Iterable[HostResource]:
-    home = ctx.env.get("HOME")
-    if not home:
-        return ()
-    base = Path(home)
-    paths: list[Path]
-    if ctx.provider == "codex":
-        codex_home = Path(ctx.env.get("CODEX_HOME", base / ".codex")).expanduser()
-        paths = [
-            codex_home / "auth.json",
-            codex_home / "config.toml",
-            base / ".config" / "codex",
-        ]
-    elif ctx.provider == "claude":
-        paths = [base / ".claude", base / ".claude.json", base / ".config" / "claude"]
-    elif ctx.provider == "gemini":
-        paths = [base / ".gemini", base / ".config" / "gemini"]
-    elif ctx.provider == "opencode":
-        paths = [base / ".local" / "share" / "opencode", base / ".config" / "opencode"]
-    else:
-        paths = []
+#: Codex relocates its whole state tree when ``CODEX_HOME`` is set. The profile
+#: names the default location; VibeSys knows which environment variable moves
+#: it, because ``ProviderProfile`` carries no "state root variable" field.
+_CODEX_DEFAULT_HOME = ".codex"
 
+#: State directories granted as named leaf files rather than whole.
+#:
+#: A Codex checkout may itself live under ``$CODEX_HOME/worktrees``: granting
+#: the directory would expose sibling tasks to the agent, while dropping it
+#: makes the CLI appear logged out inside confinement (#185). Bubblewrap
+#: creates the ephemeral parent directory these leaf mounts need. Every other
+#: state directory is granted whole, because a CLI writes session history and
+#: caches there and needs them back on resume.
+_NARROWED_STATE_DIRS: dict[str, tuple[str, ...]] = {
+    _CODEX_DEFAULT_HOME: ("auth.json", "config.toml"),
+}
+
+
+def _state_root(state_dir: str, *, home: Path, ctx: HostResourceContext) -> Path:
+    if state_dir == _CODEX_DEFAULT_HOME and ctx.provider == "codex":
+        return Path(ctx.env.get("CODEX_HOME", home / _CODEX_DEFAULT_HOME)).expanduser()
+    return home / state_dir
+
+
+def _provider_state(ctx: HostResourceContext) -> Iterable[HostResource]:
+    """Declare the provider's own writable state, derived from its profile."""
+    home = ctx.env.get("HOME")
+    if not home or not ctx.provider:
+        return ()
+    try:
+        profile = provider_profiles.provider_profile(ctx.provider)
+    except ValueError:
+        # An unregistered provider has no state to declare; agent construction
+        # rejects it separately, naming the providers that are registered.
+        return ()
+
+    state_dirs = list(profile.state_dirs)
     if sys.platform == "darwin":
-        support = base / "Library" / "Application Support"
-        caches = base / "Library" / "Caches"
-        if ctx.provider == "codex":
-            paths.extend((support / "codex", support / "com.openai.codex", caches / "codex"))
-        elif ctx.provider == "claude":
-            paths.extend((support / "claude", caches / "claude"))
+        state_dirs.extend(profile.darwin_state_dirs)
+
+    paths: list[Path] = []
+    for state_dir in state_dirs:
+        root = _state_root(state_dir, home=Path(home), ctx=ctx)
+        leaves = _NARROWED_STATE_DIRS.get(state_dir)
+        if leaves is None:
+            paths.append(root)
+        else:
+            paths.extend(root / leaf for leaf in leaves)
 
     return _resources(
         paths,
         access=HostResourceAccess.READ_WRITE,
-        purpose=f"{ctx.provider or 'unknown'} agent state",
+        purpose=f"{ctx.provider} agent state",
     )
 
 

@@ -301,5 +301,7 @@ exclude = ["exp_env/**", "sdk/vs-evaluator"]
 members = ["sdk/*"]
 
 [tool.uv.sources]
-agentshim = { path = "/mnt/data/shli/worktrees/agentshim-snapshot", editable = true }
 vs-bench = { workspace = true }
+# Local development override while agentshim 0.6 is unreleased; becomes a git
+# rev source, then the PyPI release, before this ships.
+agentshim = { path = "/mnt/data/shli/worktrees/agentshim-snapshot", editable = true }

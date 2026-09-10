@@ -4,9 +4,37 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from tests.support import provider_profiles as fake_profiles
 
 from vibesys.agents import host_resource_declarations
 from vs_sandbox import HostResourceAccess
+
+# The agentshim release VibeSys builds against registers `claude` only; these
+# are what VibeSys expects the four shipped profiles to declare.
+_PROVIDER_PROFILES = {
+    "claude": fake_profiles.profile(
+        "claude",
+        state_dirs=(".claude", ".claude.json", ".config/claude"),
+        darwin_state_dirs=(
+            "Library/Application Support/claude",
+            "Library/Caches/claude",
+        ),
+    ),
+    "codex": fake_profiles.profile(
+        "codex",
+        state_dirs=(".codex", ".config/codex"),
+        darwin_state_dirs=(
+            "Library/Application Support/codex",
+            "Library/Application Support/com.openai.codex",
+            "Library/Caches/codex",
+        ),
+    ),
+    "gemini": fake_profiles.profile("gemini", state_dirs=(".gemini", ".config/gemini")),
+    "opencode": fake_profiles.profile(
+        "opencode",
+        state_dirs=(".local/share/opencode", ".config/opencode"),
+    ),
+}
 
 
 class TestInstallRoot:
@@ -118,6 +146,29 @@ def test_active_rust_toolchain_declaration_is_narrow(
     assert rustup_home not in paths
 
 
+def _writable_state(
+    tmp_path: Path,
+    provider: str,
+    env: dict[str, str] | None = None,
+) -> set[str]:
+    declarations = host_resource_declarations.declare_agent_host_resources(
+        {"HOME": str(tmp_path), **(env or {})},
+        binary_path=None,
+        provider=provider,
+    )
+    return {
+        resource.path.relative_to(tmp_path).as_posix()
+        for resource in declarations
+        if resource.access is HostResourceAccess.READ_WRITE
+        and resource.path.is_relative_to(tmp_path)
+    }
+
+
+@pytest.fixture
+def _shipped_profiles(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_profiles.install(monkeypatch, _PROVIDER_PROFILES)
+
+
 @pytest.mark.parametrize(
     ("provider", "expected", "forbidden"),
     [
@@ -127,21 +178,44 @@ def test_active_rust_toolchain_declaration_is_narrow(
         ("opencode", ".config/opencode", ".codex/auth.json"),
     ],
 )
-def test_provider_state_is_scoped_to_selected_agent(tmp_path, provider, expected, forbidden):  # noqa: ANN001, ANN201  # tracked: #288
-    declarations = host_resource_declarations.declare_agent_host_resources(
-        {"HOME": str(tmp_path)},
-        binary_path=None,
-        provider=provider,
-    )
-    writable = {
-        resource.path.relative_to(tmp_path).as_posix()
-        for resource in declarations
-        if resource.access is HostResourceAccess.READ_WRITE
-        and resource.path.is_relative_to(tmp_path)
-    }
+def test_provider_state_is_scoped_to_selected_agent(  # noqa: ANN201
+    tmp_path,  # noqa: ANN001
+    provider,  # noqa: ANN001
+    expected,  # noqa: ANN001
+    forbidden,  # noqa: ANN001
+    _shipped_profiles,  # noqa: ANN001, PT019
+):
+    writable = _writable_state(tmp_path, provider)
 
     assert expected in writable
     assert forbidden not in writable
+
+
+def test_codex_state_is_declared_as_leaf_files_not_the_whole_home(  # noqa: ANN201
+    tmp_path,  # noqa: ANN001
+    _shipped_profiles,  # noqa: ANN001, PT019
+):
+    writable = _writable_state(tmp_path, "codex")
+
+    # A Codex checkout may live under $CODEX_HOME/worktrees, so the directory
+    # itself must never be granted (#185).
+    assert writable == {".codex/auth.json", ".codex/config.toml", ".config/codex"}
+
+
+def test_codex_home_relocates_the_state_leaves(tmp_path, _shipped_profiles):  # noqa: ANN001, ANN201, PT019
+    relocated = tmp_path / "relocated-codex"
+
+    writable = _writable_state(tmp_path, "codex", {"CODEX_HOME": str(relocated)})
+
+    assert "relocated-codex/auth.json" in writable
+    assert "relocated-codex/config.toml" in writable
+    assert ".codex/auth.json" not in writable
+    # $CODEX_HOME does not move the XDG config directory.
+    assert ".config/codex" in writable
+
+
+def test_a_provider_agentshim_does_not_register_declares_no_state(tmp_path):  # noqa: ANN001, ANN201
+    assert _writable_state(tmp_path, "unregistered-provider") == set()
 
 
 class TestContainerRuntimeResources:

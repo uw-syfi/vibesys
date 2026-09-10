@@ -456,7 +456,7 @@ class AgentShimSession:
         """
         try:
             return self._turn(request)
-        except agentshim.SessionResumeFailed:
+        except agentshim.SessionResumeError:
             self._log(
                 f"{self._profile.name} session is no longer available; "
                 "retrying this turn with a fresh conversation."
