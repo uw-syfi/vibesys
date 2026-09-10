@@ -13,6 +13,10 @@ Keep changes narrowly scoped to the requested behavior, preserve existing
 architecture boundaries, and run the smallest relevant checks before handing
 work back.
 
+Before touching the agent CLI integration, read "Where agentshim lives" in
+[`docs/contributing/agent-drivers.md`](docs/contributing/agent-drivers.md): it
+says which repository owns provider knowledge and which owns driver policy.
+
 # Delegation
 
 The main agent does orchestration: planning high-level effort, monitoring

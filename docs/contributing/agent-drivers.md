@@ -16,6 +16,40 @@ driver = "omnigent"
 The `omnigent` package is a base dependency (pinned exactly in
 `pyproject.toml`), so every install carries it; `uv sync` is enough.
 
+## Where agentshim lives
+
+agentshim is a separate repository, <https://github.com/vic-lsh/agentshim>,
+published to PyPI as `agentshim`. VibeSys depends on it like any other package
+and pins the version in `pyproject.toml`.
+
+To develop against a library commit that has no release yet, add a
+`[tool.uv.sources]` override:
+
+```toml
+[tool.uv.sources]
+agentshim = { git = "https://github.com/vic-lsh/agentshim", rev = "<sha>" }
+# or, for a local checkout:
+# agentshim = { path = "../agentshim", editable = true }
+```
+
+Revert to the PyPI pin before merging: a branch that keeps the override builds
+only where that checkout or commit exists.
+
+### Who owns what
+
+agentshim owns provider knowledge: argv construction, stream parsing, MCP
+config file formats, output-schema dialects, provider state directories, auth
+environment variables, skill directories, install recipes, and resume flags. A
+fact that is true because of how a CLI behaves belongs there.
+
+VibeSys owns driver policy: which provider to run, session budgets and when to
+retire a conversation, host sandbox policy, Docker lifecycle, and event
+rendering. A fact that is true because of how VibeSys chooses to run agents
+belongs here.
+
+New provider behavior therefore goes upstream, not into a VibeSys driver
+workaround.
+
 ## Provider session resume
 
 `AgentClient` keeps one live session per session key and, for keys whose scope
