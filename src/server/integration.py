@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from server.chat.factory import (
     ChatAgentBuilder,
@@ -26,8 +28,7 @@ from vibesys.run.integration import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
-    from pathlib import Path
+    from collections.abc import Generator
 
     from server.chat.manager import ChatManager
     from server.controller import ProjectRunState, RunController
@@ -35,6 +36,8 @@ if TYPE_CHECKING:
     from server.journal import EventJournal as WireEventJournal
     from vibesys.run.events import CoreEvent
     from vs_project import Project
+
+CommittedStateListener = Callable[[str, Path, str, BaseModel, tuple[str, ...] | None], None]
 
 _EVENT_DATA_ADAPTER = TypeAdapter(EventData)
 _TERMINAL_TRIGGERS: dict[EventType, RunTrigger] = {
@@ -156,6 +159,7 @@ class RunIntegrationAdapter:
         self._unsubscribe_core_events = self.events.subscribe(self._project_core_event)
         self._unsubscribe_output = output_sink().subscribe(self._route_output_event)
         self._chat_factory: ExperimentChatFactory | None = None
+        self._committed_state_listeners: tuple[CommittedStateListener, ...] = ()
         self._closed = False
 
     @property
@@ -188,6 +192,30 @@ class RunIntegrationAdapter:
         resolved_run_id = run_id or log_dir.parent.name
         self.events.attach(log_dir, resolved_run_id)
         self.controller.attach(log_dir, project=project, run_id=run_id)
+
+    def add_committed_state_listener(self, listener: CommittedStateListener) -> None:
+        """Register an application projection of freshly committed core state."""
+        self._committed_state_listeners = (*self._committed_state_listeners, listener)
+
+    def publish_committed_state(
+        self,
+        namespace: str,
+        state: BaseModel,
+        *,
+        changed_keys: tuple[str, ...] | None = None,
+    ) -> None:
+        """Synchronously project state while the committed object is stable."""
+        project_run = self.project_run
+        if project_run is None:
+            return
+        for listener in self._committed_state_listeners:
+            listener(
+                namespace,
+                project_run.project.root,
+                project_run.run_id,
+                state,
+                changed_keys,
+            )
 
     def attach_run(self, attachment: RunAttachment) -> Callable[[], None] | None:
         """Attach server-only run features and return their cleanup callback."""

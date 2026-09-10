@@ -2308,6 +2308,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     state_store.save(agent_run_state)
     state_store.cleanup_legacy_portable([record.round_number for record in legacy_records])
     ctx.state.commit("agent: migrate unified hypothesis state", state_store.namespace)
+    ctx.publish_committed_state("agent", agent_run_state)
     state_store.cleanup_legacy_local(local_agent_state)
 
     round_history = RoundHistory(records=agent_run_state.rounds)
@@ -2438,9 +2439,20 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         agent_run_state,
                         label=f"agent: start hypothesis {plan.hypothesis_id}",
                     )
+                    ctx.publish_committed_state(
+                        "agent",
+                        agent_run_state,
+                        changed_keys=(
+                            plan.hypothesis_id,
+                            *(update.hypothesis_id for update in plan.hypothesis_updates),
+                        ),
+                    )
                     ctx.events.emit(
                         CoreEventType.EXPERIMENTS_CHANGED,
-                        data=ExperimentsChangedData(reason="active_hypothesis_changed"),
+                        data=ExperimentsChangedData(
+                            reason="active_hypothesis_changed",
+                            revision=agent_run_state.experiment_revision,
+                        ),
                     )
                 else:
                     plan = active_hypothesis.plan
@@ -3458,9 +3470,18 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                 ctx.persist_completed_round()
                 agent_run_state = next_agent_run_state
                 active_hypothesis = agent_run_state.active_hypothesis
+                assert completed_record.hypothesis_id is not None  # noqa: S101
+                ctx.publish_committed_state(
+                    "agent",
+                    agent_run_state,
+                    changed_keys=(completed_record.hypothesis_id,),
+                )
                 ctx.events.emit(
                     CoreEventType.EXPERIMENTS_CHANGED,
-                    data=ExperimentsChangedData(reason="round_persisted"),
+                    data=ExperimentsChangedData(
+                        reason="round_persisted",
+                        revision=agent_run_state.experiment_revision,
+                    ),
                 )
                 ctx.events.emit(
                     CoreEventType.ROUND_FINISHED,

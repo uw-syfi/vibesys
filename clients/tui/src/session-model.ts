@@ -719,6 +719,18 @@ export function setExperiments(state: SessionState, entries: HypothesisEntry[]):
   };
 }
 
+/** Apply delta replacements and removals by the protocol's stable identity. */
+export function mergeExperimentEntries(
+  current: readonly HypothesisEntry[],
+  replacements: readonly HypothesisEntry[],
+  removedIds: readonly string[],
+): HypothesisEntry[] {
+  const entries = new Map(current.map(entry => [entry.hypothesis_id, entry]));
+  for (const entry of replacements) entries.set(entry.hypothesis_id, entry);
+  for (const hypothesisId of removedIds) entries.delete(hypothesisId);
+  return [...entries.values()];
+}
+
 export function failExperiments(state: SessionState, error: string): SessionState {
   const log = state.experimentLog;
   if (log === null) return state;

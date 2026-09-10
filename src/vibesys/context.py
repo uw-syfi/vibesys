@@ -1404,6 +1404,20 @@ class _RunContext:
         transaction.complete()
         self._pending_round_transaction = None
 
+    def publish_committed_state(
+        self,
+        namespace: str,
+        state: BaseModel,
+        *,
+        changed_keys: tuple[str, ...] | None = None,
+    ) -> None:
+        """Publish an in-memory hint only after the same state is durable."""
+        self.integration.publish_committed_state(
+            namespace,
+            state,
+            changed_keys=changed_keys,
+        )
+
     @property
     def run_log_path(self) -> Path:
         return self._paths.run_log_path

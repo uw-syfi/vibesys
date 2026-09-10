@@ -200,6 +200,7 @@ class RunStatusChangedData(EventPayload):
 class ExperimentsChangedData(EventPayload):  # noqa: D101  # tracked: #288
     kind: Literal["experiments_changed"] = "experiments_changed"
     reason: Literal["project_attached", "active_hypothesis_changed", "round_persisted"]
+    revision: int | None = Field(default=None, ge=0)
 
 
 class ConfigurationFailedData(EventPayload):  # noqa: D101  # tracked: #288

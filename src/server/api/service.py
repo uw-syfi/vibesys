@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from hashlib import sha256
+from typing import TYPE_CHECKING, cast
 
 from server.api.design import DesignLog
-from server.api.experiments import build_experiment_log
+from server.api.experiments import (
+    ExperimentProjection,
+    ExperimentQueryResult,
+    build_experiment_log,
+)
 from server.api.performance import (
     build_performance_context,
     metric_directions,
@@ -50,13 +55,16 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from pydantic import BaseModel
+
     from server.chat.manager import ChatManager
-    from server.controller import RunController
+    from server.controller import ProjectRunState, RunController
     from server.execution import ActiveAgentExecution, ExecutionTracker
     from server.integration import RunIntegrationAdapter
     from server.journal import EventJournal
     from server.settings import InteractiveSetupDefaults
     from vibesys.loops.agent.model import AgentRunState
+    from vs_project import AgentRunConfiguration, Project
 
 
 @dataclass(frozen=True)
@@ -98,6 +106,14 @@ class RunApi:
         # across requests but never outlives the run it was built for.
         self._design: tuple[tuple[Path, str], DesignLog] | None = None
         self._design_lock = threading.Lock()
+        self._experiment_projection = ExperimentProjection()
+        self._experiment_run_kind: tuple[tuple[Path, str], bool] | None = None
+        self._experiment_run_kind_lock = threading.Lock()
+        self._journal.add_listener(
+            self._observe_experiment_change,
+            replay_filter=lambda _header: False,
+        )
+        self._integration.add_committed_state_listener(self._observe_committed_state)
 
     def execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911
         """Execute one typed request and return its protocol response."""
@@ -123,10 +139,15 @@ class RunApi:
             )
         if isinstance(request, ExperimentQuery):
             self._journal.record(EventType.STATUS_QUERY, "/experiments")
-            ready = self._controller.project_run is not None
+            project_run = self._controller.project_run
+            ready = project_run is not None
+            result = (
+                self._query_experiments(project_run, request) if project_run is not None else None
+            )
             return Response(
                 request_id=request.request_id,
-                experiments=self.experiments() if ready else [],
+                experiments=result.entries if result is not None else [],
+                experiment_update=result.update if result is not None else None,
                 experiments_ready=ready,
             )
         if isinstance(request, DesignQuery):
@@ -385,12 +406,48 @@ class RunApi:
             return None
         return summarize_objective(text)
 
-    def _agent_run_state(self) -> AgentRunState | None:
-        project_run = self._controller.project_run
+    def _query_experiments(
+        self,
+        project_run: ProjectRunState,
+        request: ExperimentQuery,
+    ) -> ExperimentQueryResult | None:
+        """Answer from memory, loading once outside projection locks if needed."""
+        while self._is_agent_run(project_run.project, project_run.run_id):
+            projection_id = self._experiment_projection_id(project_run)
+            cached = self._experiment_projection.query(
+                project_run.run_id,
+                projection_id,
+                request.after,
+            )
+            if isinstance(cached, ExperimentQueryResult):
+                return cached
+            state = self._required_agent_run_state(project_run, reproject=True)
+            current = self._controller.project_run
+            if current is not None and self._same_project_run(current, project_run):
+                installed = self._experiment_projection.install_loaded(
+                    project_run.run_id,
+                    projection_id,
+                    state,
+                    cached,
+                )
+                if installed is not None:
+                    return installed
+                continue
+            if current is None:
+                return None
+            project_run = current
+        return None
+
+    def _agent_run_state(
+        self,
+        project_run: ProjectRunState | None = None,
+        *,
+        reproject: bool = True,
+    ) -> AgentRunState | None:
+        project_run = project_run or self._controller.project_run
         if project_run is None:
             return None
-        manifest = project_run.project.state.load_run(project_run.run_id)
-        if manifest.configuration.outer_loop != "agent":
+        if not self._is_agent_run(project_run.project, project_run.run_id):
             return None
         portable = project_run.project.state.portable_namespace(project_run.run_id, "agent")
         store = AgentRunStateStore(portable)
@@ -401,6 +458,8 @@ class RunApi:
             local = project_run.project.state.local_namespace(
                 project_run.run_id, RunStateNamespace.AGENT
             )
+            manifest = project_run.project.state.load_run(project_run.run_id)
+            configuration = cast("AgentRunConfiguration", manifest.configuration)
             # Unified state predating the persisted metric space: the run
             # manifest records the axes but no tolerance, so legacy rounds are
             # ordered exactly, which is what they were ordered by when written.
@@ -410,12 +469,84 @@ class RunApi:
                 legacy_space=MetricSpace(
                     objectives=tuple(
                         Objective(name=name, direction=direction)
-                        for name, direction in metric_directions(
-                            manifest.configuration.objectives
-                        ).items()
+                        for name, direction in metric_directions(configuration.objectives).items()
                     )
                 ),
             )
         # The run's own space and each round's own comparison travel with the
         # state, so the read path needs no measurement configuration of its own.
-        return reproject_run_evidence(state)
+        return reproject_run_evidence(state) if reproject else state
+
+    def _required_agent_run_state(
+        self,
+        project_run: ProjectRunState,
+        *,
+        reproject: bool,
+    ) -> AgentRunState:
+        state = self._agent_run_state(project_run, reproject=reproject)
+        if state is None:
+            raise RuntimeError(  # noqa: TRY003
+                "attached run does not have agent experiment state"
+            )
+        return state
+
+    def _is_agent_run(self, project: Project, run_id: str) -> bool:
+        key = (project.root, run_id)
+        with self._experiment_run_kind_lock:
+            cached = self._experiment_run_kind
+            if cached is not None and cached[0] == key:
+                return cached[1]
+        is_agent = project.state.load_run(run_id).configuration.outer_loop == "agent"
+        with self._experiment_run_kind_lock:
+            self._experiment_run_kind = (key, is_agent)
+        return is_agent
+
+    @staticmethod
+    def _same_project_run(left: ProjectRunState, right: ProjectRunState) -> bool:
+        return left.project.root == right.project.root and left.run_id == right.run_id
+
+    @staticmethod
+    def _experiment_projection_id(project_run: ProjectRunState) -> str:
+        identity = f"{project_run.project.root.resolve()}\0{project_run.run_id}"
+        return sha256(identity.encode()).hexdigest()[:16]
+
+    def _observe_committed_state(
+        self,
+        namespace: str,
+        project_root: Path,
+        run_id: str,
+        state: BaseModel,
+        changed_keys: tuple[str, ...] | None,
+    ) -> None:
+        """Incrementally project a state object immediately after its commit."""
+        if namespace != "agent":
+            return
+        project_run = self._controller.project_run
+        if (
+            project_run is None
+            or project_run.run_id != run_id
+            or project_run.project.root != project_root
+        ):
+            return
+        agent_state = cast("AgentRunState", state)
+        self._experiment_projection.update(
+            run_id,
+            self._experiment_projection_id(project_run),
+            agent_state,
+            changed_keys=changed_keys,
+        )
+
+    def _observe_experiment_change(self, event: RunEvent) -> None:
+        data = event.data
+        if event.type is not EventType.EXPERIMENTS_CHANGED or data is None:
+            return
+        if data.kind == "experiments_changed":
+            project_run = self._controller.project_run
+            if project_run is None or project_run.run_id != event.run_id:
+                return
+            projection_id = self._experiment_projection_id(project_run)
+            self._experiment_projection.invalidate(
+                event.run_id,
+                projection_id,
+                data.revision,
+            )

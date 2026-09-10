@@ -734,6 +734,125 @@ describe('session controller', () => {
     expect(controller.state.experimentLog?.entries[1]?.resolved_outcome).toBe('rejected');
   });
 
+  it('applies a revisioned replacement without dropping unchanged hypotheses', async () => {
+    const transport = new RevisionedExperimentsTransport([
+      entry('H-01', 1, 1, {resolved_outcome: 'proven'}),
+      entry('H-02', 2, 2, {active: true}),
+    ]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitExperimentChange(2, 2);
+    expect(transport.experimentInputs.at(-1)).toEqual({
+      type: 'query.experiments',
+      after: {run_id: 'run', projection_id: 'projection', revision: 1},
+    });
+    transport.resolveExperiment([entry('H-02', 2, 3, {resolved_outcome: 'rejected'})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      from_revision: 1,
+      through_revision: 2,
+      reset: false,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries.map(item => item.hypothesis_id)).toEqual([
+      'H-01',
+      'H-02',
+    ]);
+    expect(controller.state.experimentLog?.entries[1]?.resolved_outcome).toBe('rejected');
+  });
+
+  it('recovers from a delta whose base does not match the applied cursor', async () => {
+    const transport = new RevisionedExperimentsTransport([entry('H-old', 1, 1, {})]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitExperimentChange(2, 2);
+    transport.resolveExperiment([entry('H-wrong', 2, 2, {})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      from_revision: 0,
+      through_revision: 2,
+      reset: false,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(transport.experimentInputs.at(-1)).toEqual({type: 'query.experiments'});
+    transport.resolveExperiment([entry('H-current', 1, 2, {active: true})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      through_revision: 2,
+      reset: true,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries.map(item => item.hypothesis_id)).toEqual([
+      'H-current',
+    ]);
+  });
+
+  it('converges through a burst that advances while a delta is in flight', async () => {
+    const transport = new RevisionedExperimentsTransport([entry('H-01', 1, 1, {})]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitExperimentChange(2, 2);
+    transport.emitExperimentChange(3, 3);
+    transport.resolveExperiment([entry('H-01', 1, 2, {})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      from_revision: 1,
+      through_revision: 2,
+      reset: false,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(transport.experimentInputs.at(-1)).toEqual({
+      type: 'query.experiments',
+      after: {run_id: 'run', projection_id: 'projection', revision: 2},
+    });
+    transport.resolveExperiment([entry('H-01', 1, 3, {resolved_outcome: 'proven'})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      from_revision: 2,
+      through_revision: 3,
+      reset: false,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries[0]?.last_round).toBe(3);
+    expect(transport.experimentInputs).toHaveLength(3);
+  });
+
+  it('rejects an in-flight response when the same run id is attached from another project', async () => {
+    const transport = new RevisionedExperimentsTransport([entry('H-old', 1, 1, {})]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitExperimentChange(2, 2);
+    transport.emitProjectAttached(3);
+    transport.resolveExperiment([entry('H-stale', 1, 2, {})], {
+      run_id: 'run',
+      projection_id: 'old-project',
+      through_revision: 2,
+      reset: true,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries[0]?.hypothesis_id).toBe('H-old');
+    expect(transport.experimentInputs).toHaveLength(3);
+    transport.resolveExperiment([entry('H-new', 1, 1, {active: true})], {
+      run_id: 'run',
+      projection_id: 'new-project',
+      through_revision: 1,
+      reset: true,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries[0]?.hypothesis_id).toBe('H-new');
+  });
+
   it('does not refetch the log for events that cannot change it', async () => {
     const transport = new FakeTransport();
     const controller = new SocketSessionController(transport);
@@ -1845,12 +1964,18 @@ describe('stream reconnect', () => {
     const transport = new ReconnectTransport();
     const controller = new SocketSessionController(transport, undefined, undefined, [0]);
     await controller.start();
+    const experimentRequests = transport.requests.filter(
+      request => request.type === 'query.experiments',
+    ).length;
     // A tail bootstrap: everything at or below sequence 5 is unread history.
     transport.emitBatch([event(6, 'agent_output_chunk', 'six\n')], 5);
     expect(controller.state.core.historyAfterSequence).toBe(5);
 
     transport.sever();
     await settle();
+    expect(transport.requests.filter(request => request.type === 'query.experiments')).toHaveLength(
+      experimentRequests + 1,
+    );
     // The resumed stream declares no floor of its own; taking its 0 literally
     // would claim the unread history below 5 is already loaded.
     transport.emitBatch([event(7, 'agent_output_chunk', 'seven\n')], 0);
@@ -2036,6 +2161,101 @@ class DeferredExperimentsTransport implements ServerTransport {
 
   emit(runEvent: RunEvent): void {
     this.#message?.({type: 'event', event: runEvent});
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+class RevisionedExperimentsTransport implements ServerTransport {
+  readonly experimentInputs: RequestInput[] = [];
+  readonly #pending: Array<(response: ProtocolResponse) => void> = [];
+  #message: ((message: ServerMessage) => void) | null = null;
+
+  constructor(private readonly initial: NonNullable<ProtocolResponse['experiments']>) {}
+
+  request(input: RequestInput): Promise<ProtocolResponse> {
+    const base = {
+      protocol_version: 1 as const,
+      request_id: 'request',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: true,
+    };
+    if (input.type === 'query.snapshot') {
+      return Promise.resolve({
+        ...base,
+        snapshot: {run_id: 'run', status: 'running', sequence: 0},
+      });
+    }
+    if (input.type !== 'query.experiments') return Promise.resolve(base);
+    this.experimentInputs.push(input);
+    if (this.experimentInputs.length === 1) {
+      return Promise.resolve({
+        ...base,
+        experiments: this.initial,
+        experiments_ready: true,
+        experiment_update: {
+          run_id: 'run',
+          projection_id: 'projection',
+          through_revision: 1,
+          reset: true,
+        },
+      });
+    }
+    return new Promise(resolve => this.#pending.push(resolve));
+  }
+
+  resolveExperiment(
+    experiments: NonNullable<ProtocolResponse['experiments']>,
+    update: NonNullable<ProtocolResponse['experiment_update']>,
+  ): void {
+    const resolve = this.#pending.shift();
+    if (!resolve) throw new Error('No pending experiment request');
+    resolve({
+      protocol_version: 1,
+      request_id: 'request',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: true,
+      experiments,
+      experiments_ready: true,
+      experiment_update: update,
+    });
+  }
+
+  subscribe(
+    _afterSequence: number,
+    onMessage: (message: ServerMessage) => void,
+    _onDisconnect: (error: Error) => void,
+  ): Promise<EventSubscription> {
+    this.#message = onMessage;
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  emitExperimentChange(sequence: number, revision: number): void {
+    this.#message?.({
+      type: 'event',
+      event: {
+        sequence,
+        run_id: 'run',
+        timestamp: '2026-01-01T00:00:00Z',
+        type: 'experiments_changed',
+        data: {kind: 'experiments_changed', reason: 'round_persisted', revision},
+      },
+    });
+  }
+
+  emitProjectAttached(sequence: number): void {
+    this.#message?.({
+      type: 'event',
+      event: {
+        sequence,
+        run_id: 'run',
+        timestamp: '2026-01-01T00:00:00Z',
+        type: 'experiments_changed',
+        data: {kind: 'experiments_changed', reason: 'project_attached'},
+      },
+    });
   }
 
   close(): Promise<void> {

@@ -1271,6 +1271,32 @@
       "title": "EventsQuery",
       "type": "object"
     },
+    "ExperimentCursor": {
+      "additionalProperties": false,
+      "description": "Client's last completely applied experiment projection.",
+      "properties": {
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "projection_id": {
+          "title": "Projection Id",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "projection_id",
+        "revision"
+      ],
+      "title": "ExperimentCursor",
+      "type": "object"
+    },
     "ExperimentQuery": {
       "additionalProperties": false,
       "description": "Request the hypothesis-level experiment log for the attached run.",
@@ -1295,9 +1321,71 @@
           "default": "query.experiments",
           "title": "Type",
           "type": "string"
+        },
+        "after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExperimentCursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "ExperimentQuery",
+      "type": "object"
+    },
+    "ExperimentUpdate": {
+      "additionalProperties": false,
+      "description": "How to apply ``Response.experiments`` to a client's prior snapshot.\n\nA reset replaces the entire list. A delta replaces entries by stable\nhypothesis ID and then removes the named IDs. ``from_revision`` is None for\na reset because no prior client state is trusted.",
+      "properties": {
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "projection_id": {
+          "title": "Projection Id",
+          "type": "string"
+        },
+        "from_revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Revision"
+        },
+        "through_revision": {
+          "minimum": 0,
+          "title": "Through Revision",
+          "type": "integer"
+        },
+        "reset": {
+          "title": "Reset",
+          "type": "boolean"
+        },
+        "removed_hypothesis_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Removed Hypothesis Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "run_id",
+        "projection_id",
+        "through_revision",
+        "reset"
+      ],
+      "title": "ExperimentUpdate",
       "type": "object"
     },
     "ExperimentsChangedData": {
@@ -1316,6 +1404,19 @@
           ],
           "title": "Reason",
           "type": "string"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision"
         }
       },
       "required": [
@@ -2390,6 +2491,17 @@
           },
           "title": "Experiments",
           "type": "array"
+        },
+        "experiment_update": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExperimentUpdate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "experiments_ready": {
           "anyOf": [

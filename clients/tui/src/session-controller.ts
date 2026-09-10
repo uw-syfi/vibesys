@@ -1,5 +1,6 @@
 import {
   type EventSubscription,
+  type ExperimentCursor,
   PersistentEventStream,
   type ProtocolResponse,
   type RequestInput,
@@ -46,6 +47,7 @@ import {
   leaveHypothesisDetail,
   markEventStreamAvailable,
   markEventStreamUnavailable,
+  mergeExperimentEntries,
   moveChatMenuSelection,
   moveExperimentSelection,
   moveHypothesisRoundSelection,
@@ -196,6 +198,14 @@ export class SocketSessionController implements SessionController {
   /** Single-flight guard for semantic experiment-log invalidations. */
   #experimentFetch: Promise<void> | null = null;
   #experimentRefreshPending = false;
+  /** Last server projection applied completely to the local experiment log. */
+  #experimentCursor: ExperimentCursor | null = null;
+  /** Highest semantic invalidation observed while connected. */
+  #experimentTarget: Pick<ExperimentCursor, 'run_id' | 'revision'> | null = null;
+  #experimentForceRefresh = false;
+  /** Changes whenever an unknown invalidation makes an in-flight answer stale. */
+  #experimentRefreshGeneration = 0;
+  #streamConnected = false;
   /**
    * When the client first asked for experiments, and whether the answer has
    * been timed yet. The first request can be answered `experiments_ready:
@@ -287,11 +297,20 @@ export class SocketSessionController implements SessionController {
         onConnectionState: state => this.#onConnectionState(state),
       }),
     ]);
+    this.#streamConnected = this.#state.eventStreamAvailable;
   }
 
   #onConnectionState(state: StreamConnectionState): void {
     if (state.status === 'connected') {
+      const reconnected = this.#streamConnected;
+      this.#streamConnected = true;
       this.#setState(markEventStreamAvailable(this.#state));
+      if (reconnected && this.#state.experimentLog !== null) {
+        this.#experimentRefreshGeneration += 1;
+        this.#experimentForceRefresh = true;
+        if (this.#experimentFetch !== null) this.#experimentRefreshPending = true;
+        void this.#loadExperiments();
+      }
     } else {
       this.#setState(
         reportCaughtError(markEventStreamUnavailable(this.#state), state.error, 'transport'),
@@ -741,12 +760,65 @@ export class SocketSessionController implements SessionController {
   }
 
   async #requestExperiments(): Promise<void> {
+    const generation = this.#experimentRefreshGeneration;
     try {
-      const response = await this.client.request({type: 'query.experiments'});
+      const response = await this.client.request({
+        type: 'query.experiments',
+        ...(this.#experimentCursor === null ? {} : {after: this.#experimentCursor}),
+      });
       if (response.experiments_ready === false) return;
       const entries = response.experiments ?? [];
-      this.#setState(setExperiments(this.#state, entries));
-      this.#traceExperimentsLoaded(entries.length);
+      const update = response.experiment_update;
+      if (
+        generation !== this.#experimentRefreshGeneration ||
+        (update !== undefined &&
+          update !== null &&
+          this.#experimentTarget !== null &&
+          this.#experimentTarget.run_id !== update.run_id)
+      ) {
+        this.#experimentRefreshPending = true;
+        return;
+      }
+      if (update === undefined || update === null) {
+        this.#experimentCursor = null;
+        this.#experimentTarget = null;
+        this.#experimentForceRefresh = false;
+        this.#setState(setExperiments(this.#state, entries));
+      } else if (update.reset) {
+        this.#experimentCursor = {
+          run_id: update.run_id,
+          projection_id: update.projection_id,
+          revision: update.through_revision,
+        };
+        this.#clearSatisfiedExperimentTarget();
+        this.#setState(setExperiments(this.#state, entries));
+      } else if (
+        this.#experimentCursor === null ||
+        this.#experimentCursor.run_id !== update.run_id ||
+        this.#experimentCursor.projection_id !== update.projection_id ||
+        this.#experimentCursor.revision !== update.from_revision
+      ) {
+        // Never apply a delta to an unproven base. The queued cursor-free
+        // request deterministically recovers with a full server snapshot.
+        this.#experimentCursor = null;
+        this.#experimentForceRefresh = true;
+        this.#experimentRefreshPending = true;
+        return;
+      } else {
+        this.#experimentCursor = {
+          run_id: update.run_id,
+          projection_id: update.projection_id,
+          revision: update.through_revision,
+        };
+        this.#clearSatisfiedExperimentTarget();
+        const merged = mergeExperimentEntries(
+          this.#state.experimentLog?.entries ?? [],
+          entries,
+          update.removed_hypothesis_ids ?? [],
+        );
+        this.#setState(setExperiments(this.#state, merged));
+      }
+      this.#traceExperimentsLoaded(this.#state.experimentLog?.entries.length ?? entries.length);
     } catch (error) {
       const message = errorMessage(error);
       this.#setState(reportCaughtError(failExperiments(this.#state, message), error, 'request'));
@@ -1113,10 +1185,49 @@ export class SocketSessionController implements SessionController {
    */
   #refreshExperimentsFor(events: readonly RunEvent[]): void {
     if (this.#state.experimentLog === null) return;
-    const relevant = events.some(event => event.type === 'experiments_changed');
-    if (!relevant) return;
+    let relevant = false;
+    for (const event of events) {
+      if (event.type !== 'experiments_changed') continue;
+      relevant = true;
+      const revision = event.data?.kind === 'experiments_changed' ? event.data.revision : null;
+      const runId = event.run_id ?? this.#experimentCursor?.run_id;
+      if (revision === undefined || revision === null || runId === undefined) {
+        this.#experimentRefreshGeneration += 1;
+        this.#experimentForceRefresh = true;
+      } else if (
+        this.#experimentTarget === null ||
+        this.#experimentTarget.run_id !== runId ||
+        revision > this.#experimentTarget.revision
+      ) {
+        this.#experimentTarget = {run_id: runId, revision};
+      }
+    }
+    if (!relevant || !this.#experimentRefreshNeeded()) return;
     if (this.#experimentFetch !== null) this.#experimentRefreshPending = true;
     void this.#loadExperiments();
+  }
+
+  #experimentRefreshNeeded(): boolean {
+    if (this.#experimentForceRefresh) return true;
+    if (this.#experimentTarget === null || this.#experimentCursor === null) return true;
+    return (
+      this.#experimentTarget.run_id !== this.#experimentCursor.run_id ||
+      this.#experimentTarget.revision > this.#experimentCursor.revision
+    );
+  }
+
+  #clearSatisfiedExperimentTarget(): void {
+    const cursor = this.#experimentCursor;
+    const target = this.#experimentTarget;
+    if (
+      cursor !== null &&
+      target !== null &&
+      cursor.run_id === target.run_id &&
+      cursor.revision >= target.revision
+    ) {
+      this.#experimentTarget = null;
+    }
+    this.#experimentForceRefresh = false;
   }
 
   #setState(state: SessionState): void {
