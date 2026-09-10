@@ -8,6 +8,8 @@ from uuid import uuid4
 import pytest
 
 from vibesys.agents.callbacks import AgentLogger
+from vibesys.agents.client import _LoggerObserver
+from vibesys.agents.contracts import AgentEvent, AgentEventKind
 from vibesys.agents.progress import RoundProgress
 from vibesys.constants import DIM, GREEN, RED, RESET
 from vibesys.render.sink import output_sink
@@ -111,55 +113,42 @@ class TestOnLlmEnd:
 
 
 class TestOnThinkingChannel:
-    """Driver plumbing must not be published as the agent's chain of thought."""
+    """Agent reasoning is published as analysis; plumbing is marked by drivers."""
 
     @staticmethod
-    def _channels(*texts: str) -> list[str]:
+    def _chunks(*events: AgentEvent) -> list[AgentOutputChunkData]:
         seen = []
         unsubscribe = output_sink().subscribe(seen.append)
         try:
-            logger = AgentLogger()
-            for text in texts:
-                logger.on_thinking(text)
+            observer = _LoggerObserver(AgentLogger())
+            for event in events:
+                observer.on_event(event)
         finally:
             unsubscribe()
-        return [
-            event.data.channel for event in seen if isinstance(event.data, AgentOutputChunkData)
-        ]
+        return [event.data for event in seen if isinstance(event.data, AgentOutputChunkData)]
 
-    def test_lifecycle_markers_publish_as_diagnostics(self) -> None:
-        assert (
-            self._channels(
-                "[codex thread 01a0 started]",
-                "[codex turn started]",
-                "[codex turn complete: in=10 cached=0 out=2]",
-                "[codex stderr] warning: slow filesystem",
-                "[codex error] stream disconnected",
-                "[copilot error] rate limited",
+    def test_a_driver_marked_event_publishes_as_a_diagnostic(self) -> None:
+        """A driver that knows an event is plumbing says so in the payload."""
+        chunks = self._chunks(
+            AgentEvent(
+                kind=AgentEventKind.THINKING,
+                text="[stderr] warning: slow filesystem",
+                payload={"channel": "diagnostic"},
             )
-            == ["diagnostic"] * 6
         )
 
-    def test_reasoning_still_publishes_as_analysis(self) -> None:
-        assert (
-            self._channels(
-                "The ring buffer is the hot path.",
-                "[note] a bracketed aside is not a driver marker",
-                "[codex thread-safety] neither is a hyphenated word",
-            )
-            == ["analysis"] * 3
+        assert [chunk.channel for chunk in chunks] == ["diagnostic"]
+        # The marker text is published verbatim; only the channel changes.
+        assert [chunk.content for chunk in chunks] == ["[stderr] warning: slow filesystem"]
+
+    def test_an_unmarked_event_publishes_as_analysis(self) -> None:
+        """Nothing inspects the text: a bracketed aside is still reasoning."""
+        chunks = self._chunks(
+            AgentEvent(kind=AgentEventKind.THINKING, text="The ring buffer is the hot path."),
+            AgentEvent(kind=AgentEventKind.THINKING, text="[note] a bracketed aside"),
         )
 
-    def test_marker_text_is_published_verbatim(self) -> None:
-        seen = []
-        unsubscribe = output_sink().subscribe(seen.append)
-        try:
-            AgentLogger().on_thinking("[codex stderr] permission denied")
-        finally:
-            unsubscribe()
-
-        chunk = next(event.data for event in seen if isinstance(event.data, AgentOutputChunkData))
-        assert chunk.content == "[codex stderr] permission denied"
+        assert [chunk.channel for chunk in chunks] == ["analysis"] * 2
 
 
 class TestOnDiagnostic:

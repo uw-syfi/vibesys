@@ -1,5 +1,4 @@
 import json  # noqa: D100  # tracked: #288
-import re
 import time
 import traceback
 import uuid
@@ -15,22 +14,6 @@ from vibesys.agents.todos import todos_from_tool_call
 from vibesys.render.format import format_status_prefix
 from vibesys.render.sink import output_sink
 from vibesys.run.events import AgentOutputChannel, AgentStatusData, ToolResultPayload
-
-_DRIVER_LIFECYCLE_RE = re.compile(r"\[[^\s\]]+ (?:stderr|thread|turn|error)[\s\]]")
-"""Matches AgentShim's driver lifecycle marker at the head of a chunk.
-
-Used with ``re.match``, so it is anchored at the start of the text and runs a
-bounded character class before a literal alternation: no backtracking.
-
-AgentShim CLI drivers have no diagnostic hook, so they route their own
-plumbing through ``on_thinking`` tagged with a ``[<provider> <event>]``
-marker: ``[codex thread <id> started]``, ``[codex turn started]``,
-``[codex turn complete: ...]``, ``[codex stderr] <line>``, and
-``[codex error] <message>``. Without this classification the transcript
-presents a provider heartbeat as the agent's own chain of thought, glued
-onto whatever reasoning preceded it. The marker text is published verbatim;
-only the channel changes.
-"""
 
 ContextWindowLookup = Callable[[str | None], int | None]
 """Resolves a model name to its context window size in tokens.
@@ -448,23 +431,22 @@ class AgentLogger(BaseCallbackHandler):
     #
     # The deepagents path drives ``AgentLogger`` via the langchain
     # ``BaseCallbackHandler`` hooks (``on_llm_new_token``, ``on_tool_end``, …).
-    # External-agent drivers receive events
-    # from ``vibesys._agent_cli.AgentEventHandler`` directly on this object. Both
-    # paths converge on the same private ``_emit_*`` helpers, so emitted events
-    # and log text are identical regardless of which backend is in use.
+    # External-agent drivers publish normalized ``AgentEvent``s, which
+    # ``_LoggerObserver`` calls through to on this object. Both paths converge
+    # on the same private ``_emit_*`` helpers, so emitted events and log text
+    # are identical regardless of which backend is in use.
 
-    def on_thinking(self, text: str) -> None:  # noqa: D102  # tracked: #288
+    def on_thinking(self, text: str) -> None:
+        """Publish agent reasoning on the analysis channel.
+
+        Every driver marks its own plumbing with
+        ``payload={"channel": "diagnostic"}``, which the observer routes to
+        :meth:`on_diagnostic`, so nothing that reaches here is inspected.
+        """
         if not text:
             return
         status = self._status()
-        # Superseded by the ``payload={"channel": "diagnostic"}`` convention on
-        # ``AgentEvent``: a driver that knows an event is plumbing marks it, and
-        # the observer calls ``on_diagnostic`` instead. This text match stays
-        # only until the AgentShim driver emits the marker itself.
-        channel: AgentOutputChannel = (
-            "diagnostic" if _DRIVER_LIFECYCLE_RE.match(text) else "analysis"
-        )
-        self._publish(text, channel, status=status)
+        self._publish(text, "analysis", status=status)
         self._log_line(f"{format_status_prefix(status)}{text}")
 
     def on_diagnostic(self, text: str) -> None:
@@ -511,10 +493,10 @@ class AgentLogger(BaseCallbackHandler):
 
         Mirrors the deepagents path (:meth:`on_llm_end`): we overwrite, not
         accumulate, because the prefix reflects *current context window
-        pressure*, not cumulative spend.  Claude Code's stream-json already
-        folds ``cache_read_input_tokens`` / ``cache_creation_input_tokens``
-        back into ``input_tokens``, matching what ``langchain-anthropic``
-        does for the deepagents path.
+        pressure*, not cumulative spend.  ``input_tokens`` includes cached
+        tokens on every provider — the CLI drivers fold the cache counts in
+        before reporting, matching what ``langchain-anthropic`` does for the
+        deepagents path.
 
         A zero / missing ``input_tokens`` field is treated as "no update"
         so a stale usage block can't clobber the last real reading.
