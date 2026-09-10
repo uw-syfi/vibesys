@@ -527,7 +527,15 @@ class AgentShimSession:
             # Loops fail closed on ``subprocess.TimeoutExpired`` and read its
             # ``timeout``; the library raises its own type, so translate here
             # rather than teaching every catch site a second exception.
-            raise subprocess.TimeoutExpired(cmd=list(exc.argv), timeout=exc.timeout) from exc
+            #
+            # Only the provider name goes in ``cmd``. ``str(TimeoutExpired)``
+            # renders the whole command, and the argv the library timed out on
+            # is the transformed one: in container mode that is a
+            # ``docker exec -e KEY=VALUE ...`` line carrying every forwarded
+            # environment value, which callers log verbatim.
+            raise subprocess.TimeoutExpired(
+                cmd=[self._profile.binary], timeout=exc.timeout
+            ) from exc
 
     def _renew_codex_thread_if_needed(self, result: agentshim.TurnResult) -> bool:
         """Retire an over-budget Codex thread, reporting whether it was dropped.

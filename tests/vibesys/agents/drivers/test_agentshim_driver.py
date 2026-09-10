@@ -1063,6 +1063,44 @@ def test_a_turn_that_times_out_is_reported_as_a_subprocess_timeout(
         session.run_turn(AgentTurnRequest(message="one"))
 
     assert raised.value.timeout == 45
+    # Only the provider is named. ``str(TimeoutExpired)`` renders ``cmd``, and
+    # callers log that string.
+    assert raised.value.cmd == [agentshim.get_provider(provider).profile.binary]
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_container_timeout_reports_no_forwarded_environment_value(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """A timeout message must not carry the credentials the turn was given.
+
+    In container mode the argv agentshim times out on is the transformed
+    ``docker exec -e KEY=VALUE ...`` line, and ``AgentClient`` logs
+    ``str(exc)`` on a failed round.
+    """
+
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        # Every container command is scripted, the binary health check
+        # included; only the turn itself is the one that hangs.
+        return FakeRun() if "--help" in request.argv else FakeRun(timeout=True)
+
+    driver, _fake, _repairs = _container_driver(monkeypatch, provider, run)
+    session = driver.create_session(
+        _container_spec(
+            tmp_path,
+            provider,
+            environment=(("ANTHROPIC_AUTH_TOKEN", "secret-token"),),
+        )
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired) as raised:
+        session.run_turn(AgentTurnRequest(message="one", timeout=timedelta(seconds=5)))
+
+    assert raised.value.cmd == [agentshim.get_provider(provider).profile.binary]
+    assert "secret-token" not in str(raised.value)
+    assert "docker" not in str(raised.value)
 
 
 def test_the_codex_thread_budget_retires_a_conversation(
