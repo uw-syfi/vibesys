@@ -1540,11 +1540,11 @@ def _cli_container_setup(
     if effective_agent != "cli" or not request.cli_provider:
         return [], {}
     from vibesys.agents.cli_docker import (  # noqa: PLC0415  # tracked: #288
-        DOCKER_AUTH_ENV_VARS,
-        DOCKER_AUTH_PATHS,
         DOCKER_PROVIDER_ENV,
         auth_copy_commands,
         auth_env_passthrough,
+        auth_env_vars,
+        auth_paths,
         docker_init_commands,
     )
 
@@ -1553,10 +1553,9 @@ def _cli_container_setup(
     auth_env = auth_env_passthrough(provider)
     if not auth_commands and not auth_env:
         checked_files = (
-            ", ".join(str(spec.host_path) for spec in DOCKER_AUTH_PATHS.get(provider, []))
-            or "<none registered>"
+            ", ".join(str(spec.host_path) for spec in auth_paths(provider)) or "<none registered>"
         )
-        checked_env = ", ".join(DOCKER_AUTH_ENV_VARS.get(provider, ())) or "<none registered>"
+        checked_env = ", ".join(auth_env_vars(provider)) or "<none registered>"
         raise ValueError(  # noqa: TRY003  # tracked: #288
             f"no {provider!r} CLI authentication is available for the container: "
             f"none of the host files exist ({checked_files}) and none of the "

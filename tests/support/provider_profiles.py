@@ -1,0 +1,72 @@
+"""Provider profiles for tests, without depending on what agentshim ships.
+
+The agentshim release VibeSys builds against registers ``claude`` only;
+``codex``, ``gemini``, and ``opencode`` arrive later with the same
+``ProviderProfile`` shape. Tests that exercise VibeSys's per-provider tables
+therefore build the profiles they need here and install them through
+``vibesys.agents.provider_profiles``, so a test asserts on VibeSys's derivation
+rather than on which providers happen to be registered today.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from agentshim import McpMechanism, OutputSchemaStyle, ProviderProfile, SchemaDialect
+
+from vibesys.agents import provider_profiles
+
+if TYPE_CHECKING:
+    import pytest
+
+
+def profile(  # noqa: PLR0913
+    name: str,
+    *,
+    supports_resume: bool = True,
+    supports_reasoning_effort: bool = True,
+    mcp: McpMechanism = McpMechanism.CONFIG_FILE,
+    output_schema: OutputSchemaStyle = OutputSchemaStyle.INLINE_JSON,
+    schema_dialect: SchemaDialect | None = SchemaDialect.OPEN,
+    state_dirs: tuple[str, ...] = (),
+    darwin_state_dirs: tuple[str, ...] = (),
+    auth_env_vars: tuple[str, ...] = (),
+    skill_dirs: tuple[str, ...] = (),
+    container_install: tuple[str, ...] = (),
+) -> ProviderProfile:
+    """Build a profile for *name*, defaulting every field a test ignores.
+
+    Only the fields a test asserts on need to be passed. The defaults are
+    deliberately uninteresting: a test that depends on one of them is testing
+    this helper, not VibeSys.
+    """
+    return ProviderProfile(
+        name=name,
+        display_name=name.title(),
+        binary=name,
+        supports_resume=supports_resume,
+        supports_reasoning_effort=supports_reasoning_effort,
+        mcp=mcp,
+        output_schema=output_schema,
+        schema_dialect=schema_dialect,
+        state_dirs=state_dirs,
+        darwin_state_dirs=darwin_state_dirs,
+        auth_env_vars=auth_env_vars,
+        skill_dirs=skill_dirs,
+        container_install=container_install,
+    )
+
+
+def install(
+    monkeypatch: pytest.MonkeyPatch,
+    profiles: dict[str, ProviderProfile],
+) -> None:
+    """Make ``provider_profile`` answer from *profiles*, and nothing else."""
+
+    def lookup(provider: str) -> ProviderProfile:
+        try:
+            return profiles[provider]
+        except KeyError:
+            raise ValueError(f"unknown provider {provider!r}") from None  # noqa: TRY003
+
+    monkeypatch.setattr(provider_profiles, "provider_profile", lookup)

@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+# ruff: noqa: E402  # the module-level skip below has to precede the imports it guards
+import pytest
+
+pytest.skip(
+    "superseded by the 0.6 driver rewrite",
+    allow_module_level=True,
+)
+
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock

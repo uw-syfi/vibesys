@@ -1,11 +1,22 @@
-"""Docker configuration registries for CLI agent providers."""
+"""Docker configuration for CLI agent providers.
+
+Provider facts come from ``agentshim``'s ``ProviderProfile`` at call time:
+state directories, auth environment variables, and the CLI's own container
+install recipe. What stays here is VibeSys policy: the environment a VibeSys
+container needs, the toolchain a candidate repository needs, which leaf files
+inside a provider state directory carry credentials, and the overrides VibeSys
+applies to a library recipe.
+"""
 
 from __future__ import annotations
 
 import os
+import re
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
+
+from vibesys.agents import provider_profiles
 
 # Per-provider environment variables to set inside the container.  Used as
 # the canonical "supported with --docker" registry — providers absent from
@@ -64,25 +75,6 @@ def _apt_install(pkgs: str, check_bin: str | None = None) -> str:
     )
 
 
-# Tarball install for node/npm — apt-get against archive.ubuntu.com is
-# unreliable from inside several of our hosts (intermittent connection
-# timeouts). nodejs.org / Cloudflare-fronted endpoints reach reliably.
-_NODE_TARBALL_INSTALL = (
-    "command -v node >/dev/null || { set -e; "
-    "V=v20.18.1; A=linux-x64; "
-    "cd /tmp && "
-    "curl -fsSL --retry 5 --retry-delay 5 -o node.tgz "
-    '  "https://nodejs.org/dist/$V/node-$V-$A.tar.gz" && '
-    "mkdir -p /opt/node && "
-    "tar -xzf node.tgz -C /opt/node --strip-components=1 && "
-    "ln -sf /opt/node/bin/node /usr/local/bin/node && "
-    "ln -sf /opt/node/bin/npm /usr/local/bin/npm && "
-    "ln -sf /opt/node/bin/npx /usr/local/bin/npx && "
-    "/opt/node/bin/npm config set prefix /usr/local && "
-    "rm -f node.tgz; }"
-)
-
-
 _RUST_TOOLCHAIN_INSTALL = (
     "command -v cargo >/dev/null || { set -e; "
     "curl -fsSL --retry 5 --retry-delay 5 -o /tmp/rustup-init.sh "
@@ -103,42 +95,69 @@ _COMMON_DOCKER_TOOLING_INSTALL = [
     "PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip install --quiet 'mcp>=1.0,<2'",
 ]
 
-_DOCKER_INSTALL_COMMANDS: dict[str, list[str]] = {
-    "claude": [
-        _apt_install("curl ca-certificates", check_bin="curl"),
-        "curl -fsSL https://claude.ai/install.sh | bash",
-        # Anthropic's installer drops the binary in /root/.local/bin —
-        # symlink to /usr/local/bin so PATH doesn't need adjustment.
-        "ln -sf /root/.local/bin/claude /usr/local/bin/claude",
-        *_COMMON_DOCKER_TOOLING_INSTALL,
-    ],
-    "opencode": [
-        _apt_install("curl ca-certificates", check_bin="curl"),
-        "curl -fsSL https://opencode.ai/install | bash",
-        "ln -sf /root/.opencode/bin/opencode /usr/local/bin/opencode 2>/dev/null || "
-        "ln -sf /root/.local/bin/opencode /usr/local/bin/opencode",
-        *_COMMON_DOCKER_TOOLING_INSTALL,
-    ],
-    "gemini": [
-        _NODE_TARBALL_INSTALL,
-        "npm install -g @google/gemini-cli",
-        *_COMMON_DOCKER_TOOLING_INSTALL,
-    ],
-    "codex": [
-        _NODE_TARBALL_INSTALL,
-        # Pin the verified Luna-capable CLI rather than floating editor images.
-        # `--include=optional` because newer codex packages ship the
-        # Linux-x64 native binary as an optional dependency that
-        # `npm install -g` silently skips on some npm configurations.
-        f"npm install -g --include=optional @openai/codex@{CODEX_DOCKER_CLI_VERSION}",
-        *_COMMON_DOCKER_TOOLING_INSTALL,
-    ],
+
+# Steps a provider's own recipe may contain that VibeSys replaces before
+# running them in an editor container.
+#
+# ``apt-get update``: a library recipe bootstraps curl with a single-shot
+# ``apt-get``. Ubuntu archive mirrors reachable from our hosts return transient
+# fetch failures often enough that a single-shot update fails container start
+# outright, so the exact bootstrap step is swapped for the retrying, idempotent
+# VibeSys equivalent. An exact-string key on purpose: when the library changes
+# its recipe the override stops matching, and the test that pins this pairing
+# fails rather than silently hardening nothing.
+_PROFILE_STEP_OVERRIDES: dict[str, str] = {
+    "apt-get update && apt-get install -y --no-install-recommends curl ca-certificates": (
+        _apt_install("curl ca-certificates", check_bin="curl")
+    ),
 }
+
+# Node is the next likely entry. VibeSys previously installed it from the
+# nodejs.org tarball because apt-get against archive.ubuntu.com is unreliable
+# from several of our hosts; whichever way the codex and gemini profiles
+# bootstrap node, check it against that experience when those profiles land.
+
+# ``npm install -g [--flags] @openai/codex`` with no ``@<version>`` suffix.
+_UNPINNED_CODEX_NPM_INSTALL = re.compile(r"(npm install -g\b[^&|;]*?)@openai/codex(?!@)(\s|$)")
+
+
+def _pin_codex_cli(step: str) -> str:
+    """Pin an unpinned ``@openai/codex`` install to the verified CLI version.
+
+    VibeSys pins because the container CLI must match the host feature set the
+    prompts were validated against; a floating ``@latest`` silently changes the
+    editor mid-campaign. A recipe that already names a version is left alone:
+    the library is then the one making the call, and disagreeing silently would
+    be worse than either choice.
+
+    ``--include=optional`` is added with the pin because newer codex packages
+    ship the Linux-x64 native binary as an optional dependency that
+    ``npm install -g`` skips on some npm configurations.
+    """
+
+    def pinned(match: re.Match[str]) -> str:
+        prefix = match.group(1)
+        flag = "" if "--include=optional" in prefix else "--include=optional "
+        return f"{prefix}{flag}@openai/codex@{CODEX_DOCKER_CLI_VERSION}{match.group(2)}"
+
+    return _UNPINNED_CODEX_NPM_INSTALL.sub(pinned, step, count=1)
 
 
 def docker_init_commands(provider: str) -> list[str]:
-    """Return the list of init commands for *provider*."""
-    return list(_DOCKER_INSTALL_COMMANDS.get(provider, []))
+    """Return the container init commands for *provider*.
+
+    The provider's own install recipe comes from its agentshim profile, with
+    the VibeSys overrides above applied, and is followed by the toolchain every
+    VibeSys editor container needs regardless of provider.
+
+    Raises:
+        ValueError: if agentshim does not register *provider*.
+    """
+    recipe = [
+        _pin_codex_cli(_PROFILE_STEP_OVERRIDES.get(step, step))
+        for step in provider_profiles.provider_profile(provider).container_install
+    ]
+    return [*recipe, *_COMMON_DOCKER_TOOLING_INSTALL]
 
 
 @dataclass(frozen=True)
@@ -149,109 +168,80 @@ class DockerAuthPath:
     container_path: str
 
 
-# Authentication and user configuration are mounted read-only under
-# ``/opt/vibesys-auth`` and copied into the container's ephemeral writable
-# layer before the CLI starts. Keep this list to provider-owned leaf files:
-# provider homes also contain large caches, worktrees, session history, package
-# installations, and databases that are neither required for authentication
-# nor appropriate to duplicate for every sandbox.
-DOCKER_AUTH_PATHS: dict[str, list[DockerAuthPath]] = {
-    "claude": [
-        DockerAuthPath(
-            Path.home() / ".claude" / ".credentials.json",
-            "/root/.claude/.credentials.json",
-        ),
-        DockerAuthPath(
-            Path.home() / ".claude" / "settings.json",
-            "/root/.claude/settings.json",
-        ),
-        DockerAuthPath(
-            Path.home() / ".claude" / "settings.local.json",
-            "/root/.claude/settings.local.json",
-        ),
-        DockerAuthPath(Path.home() / ".claude.json", "/root/.claude.json"),
-    ],
-    "gemini": [
-        DockerAuthPath(
-            Path.home() / ".gemini" / "oauth_creds.json",
-            "/root/.gemini/oauth_creds.json",
-        ),
-        DockerAuthPath(
-            Path.home() / ".gemini" / "google_accounts.json",
-            "/root/.gemini/google_accounts.json",
-        ),
-        DockerAuthPath(
-            Path.home() / ".gemini" / "settings.json",
-            "/root/.gemini/settings.json",
-        ),
-        DockerAuthPath(Path.home() / ".gemini" / ".env", "/root/.gemini/.env"),
-    ],
-    "codex": [
-        DockerAuthPath(Path.home() / ".codex" / "auth.json", "/root/.codex/auth.json"),
-        DockerAuthPath(
-            Path.home() / ".codex" / "config.toml",
-            "/root/.codex/config.toml",
-        ),
-    ],
-    "opencode": [
-        DockerAuthPath(
-            Path.home() / ".local" / "share" / "opencode" / "auth.json",
-            "/root/.local/share/opencode/auth.json",
-        ),
-        DockerAuthPath(
-            Path.home() / ".config" / "opencode" / "opencode.json",
-            "/root/.config/opencode/opencode.json",
-        ),
-        DockerAuthPath(
-            Path.home() / ".config" / "opencode" / "opencode.jsonc",
-            "/root/.config/opencode/opencode.jsonc",
-        ),
-        # Older OpenCode releases used config.json/config.jsonc.
-        DockerAuthPath(
-            Path.home() / ".config" / "opencode" / "config.json",
-            "/root/.config/opencode/config.json",
-        ),
-        DockerAuthPath(
-            Path.home() / ".config" / "opencode" / "config.jsonc",
-            "/root/.config/opencode/config.jsonc",
-        ),
-        DockerAuthPath(
-            Path.home() / ".config" / "opencode" / ".env",
-            "/root/.config/opencode/.env",
-        ),
-    ],
-}
-
-
-# Host environment variables that carry provider authentication, forwarded
-# into the container alongside the staged files above.  A host may authenticate
-# a CLI entirely through the environment — an ``ANTHROPIC_AUTH_TOKEN`` plus
-# ``ANTHROPIC_BASE_URL`` pointing at a proxy or enterprise gateway is a
-# first-class Claude Code auth mechanism, and plain API keys are another — in
-# which case no provider state file exists to stage and the container CLI would
-# start unauthenticated.  Host sandboxes never hit this because they inherit
-# the host environment directly.
+# Which leaf files VibeSys stages out of each provider state directory named by
+# ``ProviderProfile.state_dirs``.
 #
-# Keep this registry to credential and endpoint variables.  Model-selection
-# variables such as ``ANTHROPIC_MODEL`` are deliberately excluded: VibeSys owns
-# per-role model selection, and forwarding a host export would let it silently
-# override the configured model inside the container.
-DOCKER_AUTH_ENV_VARS: dict[str, tuple[str, ...]] = {
-    "claude": (
-        "ANTHROPIC_AUTH_TOKEN",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_CUSTOM_HEADERS",
+# The profile names directories; those directories also hold caches,
+# worktrees, session history, package installations, and databases that are
+# neither required for authentication nor appropriate to duplicate for every
+# sandbox. ``None`` marks a state entry that is itself a single file and is
+# staged as-is. A state directory with no entry here stages nothing.
+#
+# This is the one piece of per-provider knowledge that did not move to the
+# library: ``ProviderProfile`` carries no "which files hold credentials" field.
+# An ``auth_files`` tuple per state directory would let this table go away.
+_AUTH_LEAF_FILES: dict[str, tuple[str, ...] | None] = {
+    ".claude": (".credentials.json", "settings.json", "settings.local.json"),
+    ".claude.json": None,
+    ".gemini": ("oauth_creds.json", "google_accounts.json", "settings.json", ".env"),
+    ".codex": ("auth.json", "config.toml"),
+    ".local/share/opencode": ("auth.json",),
+    ".config/opencode": (
+        "opencode.json",
+        "opencode.jsonc",
+        # Older OpenCode releases used config.json/config.jsonc.
+        "config.json",
+        "config.jsonc",
+        ".env",
     ),
-    "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-    "codex": ("OPENAI_API_KEY", "OPENAI_BASE_URL"),
-    # OpenCode resolves credentials per *model* provider from the models.dev
-    # registry, so the variable names depend on whichever provider the user
-    # configured rather than on OpenCode itself; it documents no CLI-owned auth
-    # variable to enumerate here.  Its ``auth.json`` and config files are
-    # already staged through ``DOCKER_AUTH_PATHS``.
-    "opencode": (),
 }
+
+
+def auth_paths(provider: str) -> list[DockerAuthPath]:
+    """Return the provider state files to stage into a container, in order.
+
+    Authentication and user configuration are mounted read-only under
+    ``/opt/vibesys-auth`` and copied into the container's ephemeral writable
+    layer before the CLI starts.
+
+    Raises:
+        ValueError: if agentshim does not register *provider*.
+    """
+    home = Path.home()
+    paths: list[DockerAuthPath] = []
+    for state_dir in provider_profiles.provider_profile(provider).state_dirs:
+        if state_dir not in _AUTH_LEAF_FILES:
+            continue
+        leaves = _AUTH_LEAF_FILES[state_dir]
+        if leaves is None:
+            paths.append(DockerAuthPath(home / state_dir, f"/root/{state_dir}"))
+            continue
+        paths.extend(
+            DockerAuthPath(home / state_dir / leaf, f"/root/{state_dir}/{leaf}") for leaf in leaves
+        )
+    return paths
+
+
+def auth_env_vars(provider: str) -> tuple[str, ...]:
+    """Return the host environment variables that carry *provider* credentials.
+
+    Forwarded into the container alongside the staged files above. A host may
+    authenticate a CLI entirely through the environment — an
+    ``ANTHROPIC_AUTH_TOKEN`` plus ``ANTHROPIC_BASE_URL`` pointing at a proxy or
+    enterprise gateway is a first-class Claude Code auth mechanism, and plain
+    API keys are another — in which case no provider state file exists to stage
+    and the container CLI would start unauthenticated. Host sandboxes never hit
+    this because they inherit the host environment directly.
+
+    The profile lists credential and endpoint variables only. VibeSys owns
+    per-role model selection, so a model-selection variable such as
+    ``ANTHROPIC_MODEL`` must never appear here: forwarding a host export would
+    let it silently override the configured model inside the container.
+
+    Raises:
+        ValueError: if agentshim does not register *provider*.
+    """
+    return provider_profiles.provider_profile(provider).auth_env_vars
 
 
 def auth_env_passthrough(provider: str) -> dict[str, str]:
@@ -262,7 +252,7 @@ def auth_env_passthrough(provider: str) -> dict[str, str]:
     preflight check believe the container is authenticated.
     """
     values: dict[str, str] = {}
-    for name in DOCKER_AUTH_ENV_VARS.get(provider, ()):
+    for name in auth_env_vars(provider):
         value = os.environ.get(name)
         if value and value.strip():
             values[name] = value
@@ -272,7 +262,7 @@ def auth_env_passthrough(provider: str) -> dict[str, str]:
 def auth_bind_mounts(provider: str) -> list[tuple[str, str, bool]]:
     """Return read-only staging mounts for existing provider state."""
     out: list[tuple[str, str, bool]] = []
-    for index, spec in enumerate(DOCKER_AUTH_PATHS.get(provider, [])):
+    for index, spec in enumerate(auth_paths(provider)):
         if spec.host_path.exists():
             out.append(
                 (
@@ -293,7 +283,7 @@ def auth_copy_commands(provider: str) -> list[str]:
     container layer.
     """
     commands: list[str] = []
-    for index, spec in enumerate(DOCKER_AUTH_PATHS.get(provider, [])):
+    for index, spec in enumerate(auth_paths(provider)):
         if not spec.host_path.exists():
             continue
         source = shlex.quote(f"/opt/vibesys-auth/{index}")

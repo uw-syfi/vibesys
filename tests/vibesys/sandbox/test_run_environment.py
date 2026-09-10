@@ -10,9 +10,8 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
+from tests.support import provider_profiles as fake_profiles
 
-from vibesys.agents import cli_docker
-from vibesys.agents.cli_docker import DockerAuthPath
 from vibesys.backends import SandboxKind
 from vibesys.constants import ComputeBackend
 from vibesys.domains.environment import EnvironmentBindMount
@@ -167,6 +166,30 @@ def _run_rootless_rust_setup(
     )
 
 
+#: The profiles these tests drive container setup with. agentshim registers
+#: `claude` only in the release VibeSys builds against, so `codex` is supplied
+#: here rather than depending on when the library ships it.
+_CLI_PROFILES = {
+    "claude": fake_profiles.profile(
+        "claude",
+        state_dirs=(".claude", ".claude.json", ".config/claude"),
+        auth_env_vars=(
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_CUSTOM_HEADERS",
+        ),
+        container_install=("install-claude",),
+    ),
+    "codex": fake_profiles.profile(
+        "codex",
+        state_dirs=(".codex", ".config/codex"),
+        auth_env_vars=("OPENAI_API_KEY", "OPENAI_BASE_URL"),
+        container_install=("install-codex",),
+    ),
+}
+
+
 @pytest.fixture(autouse=True)
 def _synthetic_cli_auth(monkeypatch):  # noqa: ANN001, ANN202
     """Pin a deterministic host auth source for container CLI setup.
@@ -175,8 +198,9 @@ def _synthetic_cli_auth(monkeypatch):  # noqa: ANN001, ANN202
     host file nor an auth environment variable, so these tests must not depend
     on whichever CLI the developer running them happens to be logged into.
     """
-    for names in cli_docker.DOCKER_AUTH_ENV_VARS.values():
-        for name in names:
+    fake_profiles.install(monkeypatch, _CLI_PROFILES)
+    for profile in _CLI_PROFILES.values():
+        for name in profile.auth_env_vars:
             monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "synthetic-openai-key")
 
@@ -880,14 +904,11 @@ def test_isolated_environment_enforces_project_path_policy(tmp_path, environment
 def test_docker_environment_copies_cli_auth_from_readonly_staging(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
-    auth_file = tmp_path / "synthetic-codex-home" / "auth.json"
-    auth_file.parent.mkdir()
+    home = tmp_path / "synthetic-home"
+    auth_file = home / ".codex" / "auth.json"
+    auth_file.parent.mkdir(parents=True)
     auth_file.write_text('{"synthetic": true}\n')
-    monkeypatch.setitem(
-        cli_docker.DOCKER_AUTH_PATHS,
-        "codex",
-        [DockerAuthPath(auth_file, "/root/.codex/auth.json")],
-    )
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
 
     env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
@@ -923,18 +944,16 @@ def test_docker_environment_rejects_a_cli_provider_without_any_auth_source(  # n
 ):
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
-    monkeypatch.setitem(
-        cli_docker.DOCKER_AUTH_PATHS,
-        "codex",
-        [DockerAuthPath(tmp_path / "absent-codex-home" / "auth.json", "/root/.codex/auth.json")],
-    )
+    home = tmp_path / "absent-home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     with pytest.raises(ValueError, match="no 'codex' CLI authentication") as excinfo:
         env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     message = str(excinfo.value)
-    assert str(tmp_path / "absent-codex-home" / "auth.json") in message
+    assert str(home / ".codex" / "auth.json") in message
     assert "OPENAI_API_KEY" in message
     assert "OPENAI_BASE_URL" in message
     assert backend.calls == []
