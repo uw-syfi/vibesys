@@ -22,23 +22,10 @@ members = [
 [[package]]
 name = "agentshim"
 version = "0.6.0"
-source = { editable = "../../../../worktrees/agentshim-snapshot" }
-
-[package.metadata]
-requires-dist = [{ name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" }]
-provides-extras = ["test"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "import-linter", specifier = ">=2.0" },
-    { name = "pyright", specifier = ">=1.1.408" },
-    { name = "pytest", specifier = ">=8.0.0" },
-    { name = "ruff", specifier = "==0.15.12" },
-]
-docs = [
-    { name = "mkdocs", specifier = ">=1.6.1" },
-    { name = "mkdocs-material", specifier = ">=9.6.0" },
-    { name = "mkdocstrings", extras = ["python"], specifier = ">=0.28.0" },
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fd/0a/50cda28318091c50b718f9e4a52aa76e26a4e5bc10ae7e7c68eacb3e8a1e/agentshim-0.6.0.tar.gz", hash = "sha256:d15b69eadc9c03db77635a8cc906f3a62642b9c79fc676ab47ea1bfdba0623c5", size = 71223, upload-time = "2026-09-10T09:05:38.365Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e9/6d/e48d7a8dc5e0f8ba45ce7a6bd30a93c03d8a3746c38bb1f5600b07691d1f/agentshim-0.6.0-py3-none-any.whl", hash = "sha256:721eb08c3fbdbc1d71284e95f794830a72d480dd90445cc7c68eec863c940787", size = 94746, upload-time = "2026-09-10T09:05:36.966Z" },
 ]
 
 [[package]]
@@ -4565,7 +4552,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", editable = "../../../../worktrees/agentshim-snapshot" },
+    { name = "agentshim", specifier = ">=0.6.0,<0.7" },
     { name = "cbor2", specifier = "<6" },
     { name = "cryptography", specifier = "<50" },
     { name = "deepagents" },
