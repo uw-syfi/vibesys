@@ -69,12 +69,14 @@ Two contract members carry this:
   conversation whose history is newer than the checkpoint. A `False` answer
   tells the client the checkpoint is dead, so it drops it.
 
-Cross-process resume is AgentShim-only today, and within AgentShim only for the
-providers whose CLI has a resume flag: `codex exec resume <thread>` and
-`claude --resume <session>`. Gemini and opencode declare no resume support, so
-they always refuse a checkpoint. Omnigent 0.10 owns its executor's conversation
-lifecycle internally and exposes no attach point, so `OmnigentSession` reports
-`provider_session_resume=False` and always refuses.
+Cross-process resume is AgentShim-only today. Which providers can do it is
+declared by `ProviderProfile.supports_resume`, not by the driver: every CLI
+VibeSys ships has a resume flag (`claude --resume <session>`,
+`codex exec resume <thread>`, `gemini --resume <id>`,
+`opencode run --session <id>`), so the driver reports the profile's answer
+rather than a hard-coded provider list. Omnigent 0.10 owns its executor's
+conversation lifecycle internally and exposes no attach point, so
+`OmnigentSession` reports `provider_session_resume=False` and always refuses.
 
 ### Drivers must report restarts
 
@@ -82,14 +84,15 @@ A driver that drops and restarts the conversation a session names must return
 `SessionDisposition.RESET_REQUIRED` on that turn's `AgentTurnResult`. The client
 then evicts the live session and clears the checkpoint, so nothing later claims
 continuity with history that no longer exists. The AgentShim session reports a
-reset for all three of its restarts:
+reset for both of its restarts:
 
 - retiring an over-budget Codex thread (turn count or heavy-turn usage),
   evaluated after the turn so the decision reads the usage it just produced;
-- retrying a turn whose Codex thread has no rollout on disk;
-- retrying a resumed Claude turn once from a fresh conversation, because Claude
-  Code reports a refused `--resume` as a bare nonzero exit that would otherwise
-  end the run.
+- retrying a resumed turn once from a fresh conversation after agentshim raises
+  `SessionResumeFailed`, which is how each provider reports that the
+  conversation the turn named is gone (a missing Codex rollout, a refused
+  `claude --resume`). Only a resumed turn is retried, and only once, so a
+  second failure is a real agent failure and propagates.
 
 A turn that merely raises is not a restart. Timeouts and cancellations say
 nothing about whether the conversation is still resumable, so the client keeps
@@ -110,9 +113,9 @@ its instructions, so `AgentClient` answers both questions separately:
 
 An over-budget Codex thread is retired after it has answered, so the two
 disagree only from the next turn onward: that answer stands, and the next
-prompt is a cold one. A missing rollout or a refused `claude --resume` is
-replaced mid-turn, so the last turn ran somewhere the caller did not intend,
-and a caller that shortened its prompt has to ask again in full. The
+prompt is a cold one. A conversation the provider refuses to resume is replaced
+mid-turn, so the last turn ran somewhere the caller did not intend, and a
+caller that shortened its prompt has to ask again in full. The
 experiment chat is the caller that does this today
 (`src/server/chat/session.py`).
 
@@ -170,7 +173,11 @@ stays an implementation detail.
 
 ## Sandboxing
 
-The agentshim driver wraps the agent in a `vs_sandbox` host sandbox. The
+The agentshim driver applies its `vs_sandbox` host sandbox as an executor
+transform: `confine_to_sandbox` wraps every command that names a working
+directory, which is the single chokepoint through which the provider CLI is
+launched. A command without a working directory (the binary health check, and
+a container-executed turn) is left alone. The
 Omnigent driver builds an `OSEnvSpec` that grants workspace write access and
 narrow read access to the active Rust toolchain. It selects bubblewrap on Linux
 or Seatbelt on macOS and never permits an unconfined fallback.
