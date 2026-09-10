@@ -35,6 +35,7 @@ from vibesys.agents.contracts import (
     MCPServerSpec,
     SessionDisposition,
 )
+from vibesys.agents.docker_executor import DockerCommandExecutor
 from vibesys.agents.drivers import agentshim as agentshim_driver
 from vibesys.agents.drivers.agentshim import AgentShimDriver
 from vs_sandbox import HostResource, HostResourceAccess
@@ -327,3 +328,100 @@ def test_a_session_mcp_server_is_reachable_from_inside_confinement(
         _report(f"{provider} mcp", text=result.text, tools=calls, usage=result.usage)
         assert any(_is_add_call(call) for call in calls), calls
         assert "1563554" in result.text.replace(",", "")
+
+
+#: How long the "upstream still broken" probe allows a resumed turn before
+#: concluding it did not exit on its own. The prompts are tiny, so this only
+#: needs to be generous enough to absorb normal CLI startup and model latency.
+_UPSTREAM_PROBE_TIMEOUT_S = 90.0
+
+#: A running container with a working, authenticated ``codex`` install, for
+#: the container variant of the same probe. Unset by default: this is a
+#: separate opt-in from ``VIBESYS_E2E_AGENTS`` because it also requires a
+#: container prepared outside this test run.
+_CODEX_CONTAINER_ENV = "VIBESYS_E2E_CODEX_CONTAINER"
+
+
+def _codex_container_id() -> str | None:
+    return os.environ.get(_CODEX_CONTAINER_ENV)
+
+
+@requires_cli("codex")
+@pytest.mark.usefixtures("agent_env")
+def test_upstream_codex_resume_exit_bug_probe_on_the_host(workspace: Path) -> None:
+    """Whether the resumed-turn-never-exits bug is container-specific.
+
+    ``CodexRolloutWatchdogExecutor`` in ``vibesys.agents.docker_executor``
+    exists because a resumed ``codex exec resume <id> --json`` finishes its
+    turn but never exits *inside a container*. This drives the identical
+    resumed-turn shape through plain ``agentshim.CliAgent`` on the host --
+    no container, no ``DockerCommandExecutor``, no watchdog -- to check
+    whether the same failure to exit also shows up there.
+
+    A PASS here is expected: the bug as documented is container-specific, so
+    the host path should resume and exit normally on its own. A FAILURE
+    (the second turn hangs until ``timeout`` kills it, raising
+    ``agentshim.CliTimeoutError``) means the bug reproduces on the host too,
+    which the watchdog's docstring does not currently account for.
+    """
+    agent = agentshim.CliAgent("codex")
+    first = agent.start_session(cwd=str(workspace)).turn(
+        agentshim.TurnRequest(
+            prompt="Remember the word 'juniper'. Reply with exactly: ok",
+            timeout=_UPSTREAM_PROBE_TIMEOUT_S,
+        )
+    )
+    resumed = agent.start_session(cwd=str(workspace), session_id=first.session_id)
+
+    second = resumed.turn(
+        agentshim.TurnRequest(
+            prompt="What word did I ask you to remember? Reply with just that word.",
+            timeout=_UPSTREAM_PROBE_TIMEOUT_S,
+        )
+    )
+
+    _report("codex host upstream probe", text=second.text, duration_ms=second.duration_ms)
+    assert "juniper" in second.text.lower()
+
+
+@pytest.mark.skipif(
+    not _enabled() or not _codex_container_id(),
+    reason=f"set {ENABLE_ENV}=1 and {_CODEX_CONTAINER_ENV} to a running container with codex",
+)
+@pytest.mark.usefixtures("agent_env")
+def test_watchdog_retire_signal_resumed_codex_turn_exits_on_its_own_in_a_container() -> None:
+    """The real retire signal for ``CodexRolloutWatchdogExecutor``.
+
+    The watchdog (``vibesys.agents.docker_executor.CodexRolloutWatchdogExecutor``)
+    exists only because this does not happen today: a resumed
+    ``codex exec --json`` run inside a container finishes its turn but never
+    exits, so the ``docker exec`` fronting it blocks until the turn budget is
+    spent. This drives that exact shape -- a resumed turn inside a real
+    container, through the plain ``DockerCommandExecutor`` transport, with no
+    watchdog in front of it.
+
+    A PASS means the upstream bug is fixed and the watchdog can be deleted.
+    It is expected to FAIL (the second turn hangs until ``timeout`` kills it)
+    for as long as the bug is present.
+    """
+    container_id = _codex_container_id()
+    assert container_id
+    executor = DockerCommandExecutor(lambda: container_id)
+    agent = agentshim.CliAgent("codex", executor=executor)
+    first = agent.start_session().turn(
+        agentshim.TurnRequest(
+            prompt="Remember the word 'juniper'. Reply with exactly: ok",
+            timeout=TURN_TIMEOUT_S,
+        )
+    )
+    resumed = agent.start_session(session_id=first.session_id)
+
+    second = resumed.turn(
+        agentshim.TurnRequest(
+            prompt="What word did I ask you to remember? Reply with just that word.",
+            timeout=TURN_TIMEOUT_S,
+        )
+    )
+
+    _report("codex container retire-signal", text=second.text, duration_ms=second.duration_ms)
+    assert "juniper" in second.text.lower()

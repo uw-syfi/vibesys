@@ -4,7 +4,7 @@ import json
 import subprocess
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from agentshim import (
@@ -17,18 +17,22 @@ from agentshim import (
 from agentshim.testing import FakeExecutor, FakeRun, scripted_turn
 
 from vibesys.agents.docker_executor import (
+    _CODEX_RESUME_TERMINATION_SCRIPT,
     CodexRolloutWatchdogExecutor,
     DockerCommandExecutor,
+    _codex_resume_argv_matches,
     _codex_resume_thread_id,
     _codex_started_thread_id,
     _CodexRolloutCompletion,
+    _discard,
+    _scan_codex_rollout_completion,
     repair_workspace_ownership,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
-    from agentshim import CommandStreamSink
+    from agentshim import CommandExecutor, CommandStreamSink
 
 THREAD_ID = "019fc654-87f2-7702-8bf2-05b6f4f006dc"
 
@@ -299,13 +303,22 @@ class _StalledExecutor:
         )
 
 
-def _impatient(executor: CodexRolloutWatchdogExecutor) -> CodexRolloutWatchdogExecutor:
-    """Collapse the watchdog's real-time budgets so a test can drive it."""
-    executor.tick_seconds = 0.001
-    executor.rollout_poll_seconds = 0.0
-    executor.completion_grace_seconds = 0.0
-    executor.termination_grace_seconds = 1.0
-    return executor
+def _impatient(
+    inner: CommandExecutor,
+    container_id_resolver: Callable[[], str],
+    *,
+    log: Callable[[str], None] = _discard,
+) -> CodexRolloutWatchdogExecutor:
+    """Build a watchdog with its real-time budgets collapsed so a test can drive it."""
+    return CodexRolloutWatchdogExecutor(
+        inner,
+        container_id_resolver,
+        log=log,
+        tick_seconds=0.001,
+        rollout_poll_seconds=0.0,
+        completion_grace_seconds=0.0,
+        termination_grace_seconds=1.0,
+    )
 
 
 class TestCodexRolloutWatchdog:
@@ -333,6 +346,21 @@ class TestCodexRolloutWatchdog:
 
         assert result.returncode == 7
 
+    def test_default_timing_budgets_are_the_documented_production_values(self) -> None:
+        """A change to these defaults should be deliberate, not incidental.
+
+        Every other test in this module overrides the budgets through
+        ``_impatient`` so it can drive the watchdog without real waits; this
+        is the one test that constructs the executor with no overrides at all
+        and pins what production actually runs with.
+        """
+        executor = CodexRolloutWatchdogExecutor(FakeExecutor(FakeRun()), lambda: "container-123")
+
+        assert executor.tick_seconds == 5.0
+        assert executor.rollout_poll_seconds == 15.0
+        assert executor.completion_grace_seconds == 30.0
+        assert executor.termination_grace_seconds == 5.0
+
     def test_delegates_binary_lookup_and_the_health_check(self) -> None:
         inner = FakeExecutor(FakeRun())
         executor = CodexRolloutWatchdogExecutor(inner, lambda: "container-123")
@@ -357,9 +385,7 @@ class TestCodexRolloutWatchdog:
         )
         inner = _StalledExecutor(stdout=[])
         logs: list[str] = []
-        executor = _impatient(
-            CodexRolloutWatchdogExecutor(inner, lambda: "container-123", log=logs.append)
-        )
+        executor = _impatient(inner, lambda: "container-123", log=logs.append)
         docker_calls: list[list[str]] = []
 
         def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -393,7 +419,7 @@ class TestCodexRolloutWatchdog:
         completion = _CodexRolloutCompletion(fingerprint="ts", message="done")
         # The provider's real stream format, from the library that owns it.
         inner = _StalledExecutor(stdout=list(scripted_turn("codex", session_id=THREAD_ID).stdout))
-        executor = _impatient(CodexRolloutWatchdogExecutor(inner, lambda: "container-123"))
+        executor = _impatient(inner, lambda: "container-123")
         seen_threads: list[str] = []
 
         monkeypatch.setattr(
@@ -419,9 +445,7 @@ class TestCodexRolloutWatchdog:
         """The watchdog killed the run, so the signal it caused is not the answer."""
         inner = _StalledExecutor(stdout=[])
         logs: list[str] = []
-        executor = _impatient(
-            CodexRolloutWatchdogExecutor(inner, lambda: "container-123", log=logs.append)
-        )
+        executor = _impatient(inner, lambda: "container-123", log=logs.append)
 
         monkeypatch.setattr(
             "vibesys.agents.docker_executor.subprocess.run",
@@ -457,9 +481,7 @@ class TestCodexRolloutWatchdog:
         """
         inner = _StalledExecutor(stdout=[], returncode=2)
         logs: list[str] = []
-        executor = _impatient(
-            CodexRolloutWatchdogExecutor(inner, lambda: "container-123", log=logs.append)
-        )
+        executor = _impatient(inner, lambda: "container-123", log=logs.append)
         monkeypatch.setattr(
             executor,
             "_read_codex_rollout_completion",
@@ -493,7 +515,7 @@ class TestCodexRolloutWatchdog:
         """The rollout proves the turn finished, whatever signal stopped the shell."""
         completion = _CodexRolloutCompletion(fingerprint="ts", message="done")
         inner = _StalledExecutor(stdout=[], returncode=-15)
-        executor = _impatient(CodexRolloutWatchdogExecutor(inner, lambda: "container-123"))
+        executor = _impatient(inner, lambda: "container-123")
 
         monkeypatch.setattr(
             "vibesys.agents.docker_executor.subprocess.run",
@@ -653,6 +675,56 @@ class TestCodexRolloutReading:
         assert after.message == "two"
 
 
+def _rollout_event(payload_type: str, timestamp: str, **payload: object) -> dict[str, object]:
+    """One already-parsed ``event_msg`` event, the shape the scanner consumes."""
+    return json.loads(_rollout_line(payload_type, timestamp, **payload))
+
+
+class TestScanCodexRolloutCompletion:
+    """The pure scan over already-parsed rollout events.
+
+    This is the seam the ``_read_codex_rollout_completion`` split created: the
+    docker-exec plumbing (finding the file, tailing it, parsing JSON lines) is
+    exercised through ``TestCodexRolloutReading`` above, and this class drives
+    the terminal-state logic directly on plain event dicts, with no
+    ``subprocess.run`` mocking at all.
+    """
+
+    def test_no_events_is_no_evidence(self) -> None:
+        assert _scan_codex_rollout_completion([]) is None
+
+    def test_a_rollout_still_running_is_no_evidence(self) -> None:
+        events = [
+            _rollout_event("task_started", "2026-08-03T10:00:00.000Z"),
+            _rollout_event("agent_message", "2026-08-03T10:00:01.000Z", message="earlier"),
+        ]
+
+        assert _scan_codex_rollout_completion(events) is None
+
+    def test_a_completed_rollout_reports_its_last_message_and_timestamp(self) -> None:
+        events = [
+            _rollout_event("task_started", "2026-08-03T10:00:00.000Z"),
+            _rollout_event("agent_message", "2026-08-03T10:00:01.000Z", message="first"),
+            _rollout_event("agent_message", "2026-08-03T10:00:02.000Z", message="final"),
+            _rollout_event("task_complete", "2026-08-03T10:00:03.000Z"),
+            # Written after the turn finished, so it is not this turn's answer.
+            _rollout_event("agent_message", "2026-08-03T10:00:04.000Z", message="later"),
+        ]
+
+        assert _scan_codex_rollout_completion(events) == _CodexRolloutCompletion(
+            fingerprint="2026-08-03T10:00:03.000Z",
+            message="final",
+        )
+
+    def test_a_completion_with_no_preceding_message_is_no_evidence(self) -> None:
+        events = [
+            _rollout_event("task_started", "2026-08-03T10:00:00.000Z"),
+            _rollout_event("task_complete", "2026-08-03T10:00:03.000Z"),
+        ]
+
+        assert _scan_codex_rollout_completion(events) is None
+
+
 class TestCodexArgvRecognition:
     """Only a machine-readable Codex exec run is watched."""
 
@@ -678,3 +750,30 @@ class TestCodexArgvRecognition:
             )
             is None
         )
+
+
+class TestCodexResumeArgvMatches:
+    """The one predicate the host and the container termination script share."""
+
+    def test_matches_the_native_binary_and_the_node_wrapper(self) -> None:
+        tail = ["exec", "resume", THREAD_ID, "-", "--json"]
+        assert _codex_resume_argv_matches(["/opt/codex/vendor/codex", *tail], THREAD_ID)
+        assert _codex_resume_argv_matches(["node", "/usr/local/bin/codex", *tail], THREAD_ID)
+
+    def test_rejects_other_shapes(self) -> None:
+        assert not _codex_resume_argv_matches(["codex", "exec", "-", "--json"], THREAD_ID)
+        assert not _codex_resume_argv_matches(
+            ["codex", "exec", "resume", "other", "--json"], THREAD_ID
+        )
+        assert not _codex_resume_argv_matches(["codex", "exec", "resume", THREAD_ID], THREAD_ID)
+        assert not _codex_resume_argv_matches(["bash", "-c", "codex exec resume"], THREAD_ID)
+        assert not _codex_resume_argv_matches([], THREAD_ID)
+
+    def test_the_termination_script_embeds_the_same_predicate(self) -> None:
+        namespace: dict[str, object] = {}
+        header = _CODEX_RESUME_TERMINATION_SCRIPT.split("\nthread_id = ")[0]
+        exec(header, namespace)  # noqa: S102
+        embedded = cast("Callable[[list[str], str], bool]", namespace["_codex_resume_argv_matches"])
+        argv = ["node", "/usr/local/bin/codex", "exec", "resume", THREAD_ID, "-", "--json"]
+        assert embedded(argv, THREAD_ID) is True
+        assert embedded(argv[:-1], THREAD_ID) is False

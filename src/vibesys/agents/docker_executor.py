@@ -20,6 +20,7 @@ Three pieces live here:
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import re
@@ -174,10 +175,42 @@ class _CodexRolloutCompletion:
     message: str
 
 
-_CODEX_RESUME_TERMINATION_SCRIPT = r"""
-import os
-import signal
-import sys
+# The container-side process argv is exactly the request.argv the host built
+# (``DockerCommandExecutor`` only prepends ``docker exec ... <container>``), so
+# this script's match criteria are written to agree with the host-side
+# ``_is_codex_json_command``/``_codex_resume_thread_id`` predicate: the binary
+# basename is ``codex``, ``exec`` and ``--json`` are both present, and the
+# thread ID sits immediately after ``resume``. That precision is required here
+# and not in ``_codex_process_alive`` because a container can carry more than
+# one stale resumed Codex process at a time (that is the situation this
+# watchdog exists to clean up), so termination must single out the exact
+# thread instead of matching any Codex process in the container.
+def _codex_resume_argv_matches(argv: list[str], thread_id: str) -> bool:
+    """Return whether *argv* is the resumed Codex JSON run for *thread_id*.
+
+    Shared verbatim with the container-side termination script (its source is
+    embedded below), so the host and the container agree on what a resumed
+    Codex process looks like. Inside a container the CLI is a node script, so
+    the process argv reads ``node /usr/local/bin/codex exec resume ...`` while
+    its native child reads ``.../codex exec resume ...``; both must match.
+    """
+    if len(argv) > 1 and os.path.basename(argv[0]) != "codex":  # noqa: PTH119  # tracked: #288
+        argv = argv[1:]
+    if not argv or os.path.basename(argv[0]) != "codex":  # noqa: PTH119  # tracked: #288
+        return False
+    if "exec" not in argv or "--json" not in argv:
+        return False
+    try:
+        resume_index = argv.index("resume")
+    except ValueError:
+        return False
+    return argv[resume_index + 1 : resume_index + 2] == [thread_id]
+
+
+_CODEX_RESUME_TERMINATION_SCRIPT = (
+    "from __future__ import annotations\n\nimport os\nimport signal\nimport sys\n\n"
+    + inspect.getsource(_codex_resume_argv_matches)
+    + r"""
 
 thread_id = sys.argv[1]
 own_pid = os.getpid()
@@ -189,15 +222,14 @@ for entry in os.listdir("/proc"):
     except (FileNotFoundError, PermissionError, ProcessLookupError):
         continue
     argv = [part.decode("utf-8", errors="replace") for part in raw.split(b"\0") if part]
-    if "exec" not in argv or "resume" not in argv or thread_id not in argv:
-        continue
-    if not any(os.path.basename(part) == "codex" for part in argv):
+    if not _codex_resume_argv_matches(argv, thread_id):
         continue
     try:
         os.kill(int(entry), signal.SIGTERM)
     except ProcessLookupError:
         pass
 """
+)
 
 
 class _WatchdogState:
@@ -296,27 +328,44 @@ class CodexRolloutWatchdogExecutor:
     after ``run`` returns, so the replay still reaches it.
     """
 
-    #: Seconds between liveness checks while a Codex JSON run is in flight.
-    tick_seconds = 5.0
-    #: Seconds between rollout-file reads.
-    rollout_poll_seconds = 15.0
-    #: How long a terminal rollout state must hold before it is trusted.
-    completion_grace_seconds = 30.0
-    #: How long to wait for the run to end after the in-container SIGTERM.
-    termination_grace_seconds = 5.0
-
-    def __init__(
+    # Each keyword argument is an independent documented timing knob; folding
+    # them into a config object would break the constructors already calling
+    # this with the current keyword spellings.
+    def __init__(  # noqa: PLR0913
         self,
         inner: CommandExecutor,
         container_id_resolver: Callable[[], str],
         *,
         log: Callable[[str], None] = _discard,
+        tick_seconds: float = 5.0,
+        rollout_poll_seconds: float = 15.0,
+        completion_grace_seconds: float = 30.0,
+        termination_grace_seconds: float = 5.0,
     ) -> None:
-        """Wrap *inner*, watching containers named by *container_id_resolver*."""
+        """Wrap *inner*, watching containers named by *container_id_resolver*.
+
+        Args:
+            inner: The transport a Codex JSON command ultimately runs through.
+            container_id_resolver: Names the container to poll, read each time
+                a Codex run needs it.
+            log: Sink for the watchdog's own progress lines; dropped by
+                default.
+            tick_seconds: Seconds between liveness checks while a Codex JSON
+                run is in flight.
+            rollout_poll_seconds: Seconds between rollout-file reads.
+            completion_grace_seconds: How long a terminal rollout state must
+                hold before it is trusted.
+            termination_grace_seconds: How long to wait for the run to end
+                after the in-container SIGTERM.
+        """
         self._inner = inner
         self._container_id_resolver = container_id_resolver
         self._log = log
         self._codex_rollout_paths: dict[str, str] = {}
+        self.tick_seconds = tick_seconds
+        self.rollout_poll_seconds = rollout_poll_seconds
+        self.completion_grace_seconds = completion_grace_seconds
+        self.termination_grace_seconds = termination_grace_seconds
 
     def find_binary(self, name: str, env: Mapping[str, str]) -> str:
         """Delegate binary lookup to the wrapped executor."""
@@ -450,7 +499,15 @@ class CodexRolloutWatchdogExecutor:
                 return
 
     def _codex_process_alive(self, container_id: str, child_binary: str) -> bool:
-        """Return whether the CLI this ``docker exec`` fronts is still running."""
+        """Return whether the CLI this ``docker exec`` fronts is still running.
+
+        This deliberately matches by binary name alone, unlike the thread-exact
+        predicate ``_CODEX_RESUME_TERMINATION_SCRIPT`` uses: this call answers
+        only "has this ``docker exec``'s CLI stopped running", where a false
+        positive (some other Codex process still alive) merely means the poll
+        loop keeps waiting one more tick, which is cheap. Terminating the wrong
+        process would not be.
+        """
         try:
             check = subprocess.run(  # noqa: S603  # tracked: #288
                 ["docker", "exec", container_id, "pgrep", "-f", child_binary],  # noqa: S607  # tracked: #288
@@ -464,38 +521,56 @@ class CodexRolloutWatchdogExecutor:
             return True
         return check.returncode == 0
 
-    def _read_codex_rollout_completion(  # noqa: C901, PLR0912  # tracked: #288
+    def _read_codex_rollout_completion(
         self,
         container_id: str,
         thread_id: str,
     ) -> _CodexRolloutCompletion | None:
         """Read stable terminal evidence from a resumed Codex rollout, if any."""
-        rollout_path = self._codex_rollout_paths.get(thread_id)
+        rollout_path = self._locate_codex_rollout(container_id, thread_id)
         if rollout_path is None:
-            located = subprocess.run(  # noqa: S603  # tracked: #288
-                [  # noqa: S607  # tracked: #288
-                    "docker",
-                    "exec",
-                    container_id,
-                    "find",
-                    "/root/.codex/sessions",
-                    "-type",
-                    "f",
-                    "-name",
-                    f"rollout-*-{thread_id}.jsonl",
-                    "-print",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=_DOCKER_QUERY_TIMEOUT_S,
-                check=False,
-            )
-            paths = [line for line in located.stdout.splitlines() if line]
-            if located.returncode != 0 or not paths:
-                return None
-            rollout_path = max(paths)
-            self._codex_rollout_paths[thread_id] = rollout_path
+            return None
+        events = self._tail_codex_rollout_events(container_id, rollout_path)
+        if events is None:
+            return None
+        return _scan_codex_rollout_completion(events)
 
+    def _locate_codex_rollout(self, container_id: str, thread_id: str) -> str | None:
+        """Find, and cache, the rollout file a resumed thread is writing to."""
+        cached = self._codex_rollout_paths.get(thread_id)
+        if cached is not None:
+            return cached
+        located = subprocess.run(  # noqa: S603  # tracked: #288
+            [  # noqa: S607  # tracked: #288
+                "docker",
+                "exec",
+                container_id,
+                "find",
+                "/root/.codex/sessions",
+                "-type",
+                "f",
+                "-name",
+                f"rollout-*-{thread_id}.jsonl",
+                "-print",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_DOCKER_QUERY_TIMEOUT_S,
+            check=False,
+        )
+        paths = [line for line in located.stdout.splitlines() if line]
+        if located.returncode != 0 or not paths:
+            return None
+        rollout_path = max(paths)
+        self._codex_rollout_paths[thread_id] = rollout_path
+        return rollout_path
+
+    def _tail_codex_rollout_events(
+        self,
+        container_id: str,
+        rollout_path: str,
+    ) -> list[dict[str, Any]] | None:
+        """Read the tail of one rollout file and parse its JSON lines."""
         result = subprocess.run(  # noqa: S603  # tracked: #288
             ["docker", "exec", container_id, "tail", "-n", "512", rollout_path],  # noqa: S607  # tracked: #288
             capture_output=True,
@@ -514,40 +589,63 @@ class CodexRolloutWatchdogExecutor:
                 continue
             if isinstance(event, dict):
                 events.append(event)
+        return events
 
-        last_lifecycle_index = -1
-        last_lifecycle_type: str | None = None
-        for index, event in enumerate(events):
-            if event.get("type") != "event_msg":
-                continue
-            payload = event.get("payload")
-            if not isinstance(payload, dict):
-                continue
-            payload_type = payload.get("type")
-            if payload_type in {"task_started", "task_complete"}:
-                last_lifecycle_index = index
-                last_lifecycle_type = cast("str", payload_type)
-        if last_lifecycle_type != "task_complete":
-            return None
 
-        message: str | None = None
-        for event in reversed(events[: last_lifecycle_index + 1]):
-            if event.get("type") != "event_msg":
-                continue
-            payload = event.get("payload")
-            if not isinstance(payload, dict) or payload.get("type") != "agent_message":
-                continue
-            candidate_message = payload.get("message")
-            if isinstance(candidate_message, str) and candidate_message:
-                message = candidate_message
-                break
-        if message is None:
-            return None
+def _scan_codex_rollout_completion(
+    events: Sequence[dict[str, Any]],
+) -> _CodexRolloutCompletion | None:
+    """Scan already-parsed rollout events for a stable terminal state.
 
-        fingerprint = events[last_lifecycle_index].get("timestamp")
-        if not isinstance(fingerprint, str) or not fingerprint:
-            return None
-        return _CodexRolloutCompletion(fingerprint=fingerprint, message=message)
+    The last lifecycle event has to be ``task_complete``: a rollout still
+    running, or one whose most recent turn merely started, is not evidence.
+    From there the completion carries the last ``agent_message`` written
+    before that lifecycle event, and the lifecycle event's own timestamp as
+    the fingerprint the watchdog waits to see hold steady across two polls.
+    """
+    last_lifecycle_index, last_lifecycle_type = _last_codex_lifecycle_event(events)
+    if last_lifecycle_type != "task_complete":
+        return None
+
+    message = _last_codex_agent_message(events[: last_lifecycle_index + 1])
+    if message is None:
+        return None
+
+    fingerprint = events[last_lifecycle_index].get("timestamp")
+    if not isinstance(fingerprint, str) or not fingerprint:
+        return None
+    return _CodexRolloutCompletion(fingerprint=fingerprint, message=message)
+
+
+def _last_codex_lifecycle_event(events: Sequence[dict[str, Any]]) -> tuple[int, str | None]:
+    """Return the index and type of the last ``task_started``/``task_complete`` event."""
+    last_index = -1
+    last_type: str | None = None
+    for index, event in enumerate(events):
+        if event.get("type") != "event_msg":
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        payload_type = payload.get("type")
+        if payload_type in {"task_started", "task_complete"}:
+            last_index = index
+            last_type = cast("str", payload_type)
+    return last_index, last_type
+
+
+def _last_codex_agent_message(events: Sequence[dict[str, Any]]) -> str | None:
+    """Return the last non-empty ``agent_message`` text among *events*, if any."""
+    for event in reversed(events):
+        if event.get("type") != "event_msg":
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict) or payload.get("type") != "agent_message":
+            continue
+        candidate_message = payload.get("message")
+        if isinstance(candidate_message, str) and candidate_message:
+            return candidate_message
+    return None
 
 
 def _is_codex_json_command(cmd: Sequence[str]) -> bool:
@@ -567,6 +665,8 @@ def _codex_resume_thread_id(cmd: Sequence[str]) -> str | None:
     except (ValueError, IndexError):
         return None
     if not re.fullmatch(r"[0-9a-fA-F-]{32,64}", thread_id):
+        return None
+    if not _codex_resume_argv_matches(list(cmd), thread_id):
         return None
     return thread_id
 
