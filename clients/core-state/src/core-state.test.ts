@@ -159,6 +159,32 @@ describe('core state projection', () => {
     expect(replayed.transcript.map(entry => entry.content)).toEqual(['one']);
   });
 
+  it('preserves published run-map arrays through core-state clone paths', () => {
+    const started = reduceEvent(
+      initialCoreState(),
+      executionEvent(1, 'agent_execution_started', 'exec', startedData('Implement')),
+    );
+    const rounds = started.rounds;
+    const phases = started.phases;
+
+    const streamed = reduceEvent(started, outputEvent(2, 'working', 'exec'));
+    const diagnosed = reduceEvent(
+      streamed,
+      diagnosticEvent(3, 'agent_output_chunk', 'warning', 'warning', 'Check output'),
+    );
+    const batched = reduceEventBatch(diagnosed, [outputEvent(4, 'still working', 'exec')]);
+    const chatted = reduceEvent(batched, chatAnswerEvent(5, 'status'));
+
+    expect(streamed.rounds).toBe(rounds);
+    expect(streamed.phases).toBe(phases);
+    expect(diagnosed.rounds).toBe(rounds);
+    expect(diagnosed.phases).toBe(phases);
+    expect(batched.rounds).toBe(rounds);
+    expect(batched.phases).toBe(phases);
+    expect(chatted.rounds).toBe(rounds);
+    expect(chatted.phases).toBe(phases);
+  });
+
   it('applies event batches before reconciling their execution checkpoint', () => {
     const started = executionEvent(1, 'agent_execution_started', 'stale', {
       kind: 'agent_execution_started',

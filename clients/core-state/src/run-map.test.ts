@@ -88,6 +88,103 @@ describe('run map projection', () => {
     expect(roundAgentElapsedMs(round, new Date('2026-01-01T00:00:10Z'))).toBe(3000);
     expect(roundAgentElapsedMs(round, new Date('2026-01-01T00:10:00Z'))).toBe(3000);
   });
+
+  it('publishes ordinary array behavior from persistent run-map storage', () => {
+    let state = applyRunMapEvent(initialRunMap(), runStarted('agent'));
+    state = applyRunMapEvent(state, execution(2, 'agent_execution_started', 'a'));
+    state = applyRunMapEvent(state, execution(3, 'agent_execution_finished', 'a'));
+
+    expect(Array.isArray(state.rounds)).toBe(true);
+    expect(Array.isArray(state.phases)).toBe(true);
+    expect(state.rounds).toMatchObject([{number: 1, status: 'active'}]);
+    expect([...state.rounds]).toEqual(state.rounds);
+    expect(state.phases.map(phase => phase.kind)).toEqual([
+      'orchestrator',
+      'implementer',
+      'judge',
+      'profiler',
+    ]);
+    expect(state.phases.findIndex(phase => phase.executionId === 'a')).toBe(1);
+    expect(state.phases.slice(1, 3)).toEqual(
+      state.phases.filter((_, index) => index === 1 || index === 2),
+    );
+    expect(state.phases.at(-1)?.kind).toBe('profiler');
+    expect(state.phases.concat([])).toEqual(state.phases);
+    expect(Object.keys(state.phases)).toEqual(['0', '1', '2', '3']);
+    expect(Object.getOwnPropertyDescriptor(state.phases, 'length')?.value).toBe(4);
+    expect(JSON.parse(JSON.stringify(state.phases))).toEqual(state.phases);
+  });
+
+  it('keeps older public snapshots unchanged across indexed replacement and branching', () => {
+    const started = applyRunMapEvent(
+      applyRunMapEvent(initialRunMap(), runStarted('agent')),
+      execution(2, 'agent_execution_started', 'a'),
+    );
+    const finished = applyRunMapEvent(started, execution(3, 'agent_execution_finished', 'a'));
+    const branched = applyRunMapEvent(started, execution(4, 'agent_execution_started', 'b'));
+
+    expect(started.phases[1]).toMatchObject({executionId: 'a', status: 'active'});
+    expect(finished.phases[1]).toMatchObject({executionId: 'a', status: 'completed'});
+    expect(branched.phases.filter(phase => phase.kind === 'implementer')).toMatchObject([
+      {executionId: 'a', status: 'active'},
+      {executionId: 'b', status: 'active'},
+    ]);
+    expect(started.rounds[0]?.activeAgentStarts).toEqual({
+      'implementer:a': '2026-01-01T00:00:02Z',
+    });
+  });
+
+  it('reuses public arrays when an event changes no round or phase fact', () => {
+    const started = applyRunMapEvent(
+      applyRunMapEvent(initialRunMap(), runStarted('agent')),
+      execution(2, 'agent_execution_started', 'a'),
+    );
+    const output = applyRunMapEvent(started, execution(3, 'agent_output_chunk', 'a'));
+
+    expect(output.rounds).toBe(started.rounds);
+    expect(output.phases).toBe(started.phases);
+    expect(output.lastEventTimestamp).toBe('2026-01-01T00:00:03Z');
+  });
+
+  it('preserves legacy finish precedence across concurrent same-role executions', () => {
+    let state = applyRunMapEvent(emptyRunMap(), execution(1, 'agent_execution_started', 'a'));
+    state = applyRunMapEvent(state, execution(2, 'agent_execution_started', 'b'));
+    state = applyRunMapEvent(state, {
+      sequence: 3,
+      timestamp: '2026-01-01T00:00:03Z',
+      type: 'phase_finished',
+      status: 'completed',
+      agent_kind: 'implementer',
+      round_label: 'round-1-implementer',
+      data: {kind: 'phase', phase: 'implementer', attempt: null},
+    });
+
+    expect(state.phases.filter(phase => phase.kind === 'implementer')).toMatchObject([
+      {executionId: 'a', status: 'completed'},
+      {executionId: 'b', status: 'active'},
+    ]);
+  });
+
+  it('keeps native array length and indexed endpoints across tree depths', () => {
+    let state = emptyRunMap();
+    for (let round = 1; round <= 1_100; round += 1) {
+      state = applyRunMapEvent(
+        state,
+        execution(round, 'agent_execution_started', `exec-${round}`, round),
+      );
+    }
+
+    expect(state.rounds).toHaveLength(1_100);
+    expect(state.rounds[0]?.number).toBe(1);
+    expect(state.rounds.at(-1)?.number).toBe(1_100);
+    expect(state.phases).toHaveLength(4_400);
+    expect(state.phases[0]?.kind).toBe('orchestrator');
+    expect(state.phases.at(-1)).toMatchObject({
+      kind: 'profiler',
+      roundNumber: 1_100,
+      status: 'pending',
+    });
+  });
 });
 
 describe('run-level closeout', () => {
