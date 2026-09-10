@@ -1,38 +1,164 @@
-"""agentshim command executor for existing vibesys Docker sandboxes."""
+"""Run agentshim CLI commands inside an already-running VibeSys Docker sandbox.
+
+Three pieces live here:
+
+* :class:`DockerCommandExecutor` -- a ``docker exec`` transport built on the
+  library's ``TransformingExecutor``. It carries no provider knowledge: it
+  rewrites argv, decides which environment entries cross into the container,
+  and lets agentshim own everything else.
+* :func:`repair_workspace_ownership` -- returns bind-mounted workspace files to
+  the host user after a container turn.
+* :class:`CodexRolloutWatchdogExecutor` -- provider-behaviour compensation, not
+  transport. A resumed ``codex exec ... --json`` run inside a container
+  regularly finishes its work and writes the terminal events to its rollout
+  file, then never exits, so the ``docker exec`` in front of it blocks until
+  the turn budget expires. The watchdog reads the rollout, replays the
+  completion into the stream, and stops the process. This stays in VibeSys
+  until Codex resume inside containers is verified fixed upstream; it does not
+  belong in agentshim, which models what a provider is documented to do.
+"""
 
 from __future__ import annotations
 
 import json
 import os
 import re
-import signal
 import subprocess
 import threading
 import time
-from collections.abc import Callable, Sequence  # noqa: TC003  # tracked: #288
-from dataclasses import dataclass
-from typing import Any, cast
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, cast
 
-from agentshim.executor import CommandRequest, CommandResult, CommandStreamSink
+from agentshim import (
+    CommandRequest,
+    CommandResult,
+    HostCommandExecutor,
+    TransformingExecutor,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+
+    from agentshim import CommandExecutor, CommandHandle, CommandStreamSink
+
+#: Where a container turn runs when the request does not name a directory.
+DEFAULT_CONTAINER_WORKDIR = "/workspace"
+
+_OWNERSHIP_REPAIR_TIMEOUT_S = 120
+_DOCKER_QUERY_TIMEOUT_S = 5
 
 
-@dataclass
-class DockerCommandHandle:
-    """Command handle for a running ``docker exec`` process."""
+def _binary_in_container(name: str, env: Mapping[str, str]) -> str:
+    """Resolve the provider binary inside the container, not on the host.
 
-    process: subprocess.Popen[str]
+    The host running VibeSys usually has no copy of the CLI, so the bare name
+    is the right ``argv[0]``: the container's ``PATH`` resolves it.
+    """
+    del env
+    return name
 
-    def terminate(self) -> None:  # noqa: D102  # tracked: #288
-        try:
-            os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-        except (ProcessLookupError, OSError):
-            self.process.terminate()
 
-    def kill(self) -> None:  # noqa: D102  # tracked: #288
-        try:
-            os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
-        except (ProcessLookupError, OSError):
-            self.process.kill()
+class DockerCommandExecutor(TransformingExecutor):
+    """Prefix every agentshim command with ``docker exec`` into one container.
+
+    ``container_id_resolver`` is read once per request rather than captured at
+    construction, so a sandbox that replaces its container (a GPU reselect, for
+    instance) needs no new executor.
+
+    The health check goes through the same transform, so ``<binary> --help`` is
+    checked inside the container where the binary actually exists.
+    """
+
+    def __init__(
+        self,
+        container_id_resolver: Callable[[], str],
+        *,
+        workdir: str = DEFAULT_CONTAINER_WORKDIR,
+        inner: CommandExecutor | None = None,
+    ) -> None:
+        """Wrap *inner* (the local host by default) in ``docker exec``."""
+        self._container_id_resolver = container_id_resolver
+        self._workdir = workdir
+        super().__init__(
+            inner if inner is not None else HostCommandExecutor(),
+            self._to_docker_exec,
+            find_binary=_binary_in_container,
+        )
+
+    def _to_docker_exec(self, request: CommandRequest) -> CommandRequest:
+        """Rewrite one request into the equivalent ``docker exec`` invocation."""
+        argv: list[str] = ["docker", "exec", "-i", "-w", request.cwd or self._workdir]
+        for key, value in _forwarded_env(request.env).items():
+            argv += ["-e", f"{key}={value}"]
+        argv.append(self._container_id_resolver())
+        argv.extend(request.argv)
+        return CommandRequest(
+            argv=argv,
+            stdin=request.stdin,
+            cwd=None,
+            # The transformed command is `docker` itself, running on the host:
+            # it needs the host environment (PATH, DOCKER_HOST, certificates)
+            # to reach the daemon at all.
+            env=os.environ,
+            timeout=request.timeout,
+        )
+
+
+def _forwarded_env(env: Mapping[str, str]) -> dict[str, str]:
+    """Return the request environment entries that belong inside the container.
+
+    A container starts from its image's environment, not the host's. The agent
+    environment agentshim assembles describes the *host* (``PATH``, ``HOME``,
+    interpreter and toolchain locations), and forwarding it wholesale would
+    point the container CLI at paths that do not exist there.
+
+    The rule is therefore: forward every entry whose value differs from this
+    process's environment. What survives is exactly what a caller layered on
+    top of ``interactive_env()`` -- the session environment overlay and the
+    provider auth passthrough -- while the shared host environment stays out.
+    """
+    return {key: value for key, value in env.items() if os.environ.get(key) != value}
+
+
+def repair_workspace_ownership(container_id: str, *, uid: int, gid: int) -> None:
+    """Return bind-mounted workspace files to the host user.
+
+    CLI agents run as root in the editor container. Some editors replace files
+    atomically, which leaves the replacement owned by root and can make the
+    host-side checkpoint code unable to read it. Repair ownership before
+    control returns to the framework rather than waiting until a later resume.
+
+    Raises:
+        RuntimeError: if the in-container ``chown`` sweep failed.
+    """
+    result = subprocess.run(  # noqa: S603  # tracked: #288
+        [  # noqa: S607  # tracked: #288
+            "docker",
+            "exec",
+            container_id,
+            "find",
+            "/workspace",
+            "-xdev",
+            "-user",
+            "0",
+            "-writable",
+            "-exec",
+            "chown",
+            f"{uid}:{gid}",
+            "{}",
+            "+",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=_OWNERSHIP_REPAIR_TIMEOUT_S,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(
+            "failed to restore writable Docker workspace ownership"
+            + (f": {detail}" if detail else "")
+        )
 
 
 @dataclass(frozen=True)
@@ -69,278 +195,235 @@ for entry in os.listdir("/proc"):
 """
 
 
-class DockerCommandExecutor:
-    """Run agentshim CLI commands inside an already-running Docker container."""
+def _no_lines() -> list[str]:
+    return []
 
-    _CODEX_ROLLOUT_POLL_SECONDS = 15.0
-    _CODEX_COMPLETION_GRACE_SECONDS = 30.0
 
-    def __init__(self, container_id: str) -> None:  # noqa: D107  # tracked: #288
-        self.container_id = container_id
+@dataclass
+class _WatchdogState:
+    """What the watchdog thread observed, shared with the calling thread."""
+
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    stdout_lines: list[str] = field(default_factory=_no_lines)
+    recovered_completion: _CodexRolloutCompletion | None = None
+    stalled_after_exit: bool = False
+
+    def record(self, line: str) -> None:
+        """Keep a stdout line so the watchdog can learn the thread ID from it."""
+        with self.lock:
+            self.stdout_lines.append(line)
+
+    def snapshot(self) -> list[str]:
+        """Return a stable copy of the stdout seen so far."""
+        with self.lock:
+            return list(self.stdout_lines)
+
+
+class _WatchdogSink:
+    """Sink decorator: records stdout and hands the handle to the watchdog."""
+
+    def __init__(
+        self,
+        inner: CommandStreamSink,
+        state: _WatchdogState,
+        on_started: Callable[[CommandHandle], None],
+    ) -> None:
+        self._inner = inner
+        self._state = state
+        self._on_started = on_started
+
+    def started(self, handle: CommandHandle) -> None:
+        """Forward the handle downstream, then arm the watchdog with it."""
+        self._inner.started(handle)
+        self._on_started(handle)
+
+    def stdout(self, line: str) -> None:
+        """Record and forward one stdout line."""
+        self._state.record(line)
+        self._inner.stdout(line)
+
+    def stderr(self, line: str) -> None:
+        """Forward one stderr line."""
+        self._inner.stderr(line)
+
+
+def _discard(message: str) -> None:
+    """Default log sink: drop the message."""
+
+
+class CodexRolloutWatchdogExecutor:
+    """Rescue a resumed ``codex exec --json`` run that finished but never exited.
+
+    Every other command passes straight through. For a Codex JSON run the
+    executor watches the container from a helper thread while the inner
+    executor blocks: it locates the rollout file for the thread, waits for a
+    ``task_complete`` that stays stable across two polls, then stops the
+    process. It also stops a ``docker exec`` that outlived the Codex process it
+    was fronting.
+
+    Recovered lines are replayed through the sink on the *calling* thread once
+    the inner run has returned, because agentshim documents every sink callback
+    as running on the thread that called ``run``. The parser is finished only
+    after ``run`` returns, so the replay still reaches it.
+    """
+
+    #: Seconds between liveness checks while a Codex JSON run is in flight.
+    tick_seconds = 5.0
+    #: Seconds between rollout-file reads.
+    rollout_poll_seconds = 15.0
+    #: How long a terminal rollout state must hold before it is trusted.
+    completion_grace_seconds = 30.0
+    #: How long to wait for the run to end after the in-container SIGTERM.
+    termination_grace_seconds = 5.0
+
+    def __init__(
+        self,
+        inner: CommandExecutor,
+        container_id_resolver: Callable[[], str],
+        *,
+        log: Callable[[str], None] = _discard,
+    ) -> None:
+        """Wrap *inner*, watching containers named by *container_id_resolver*."""
+        self._inner = inner
+        self._container_id_resolver = container_id_resolver
+        self._log = log
         self._codex_rollout_paths: dict[str, str] = {}
 
-    def find_binary(self, binary_name: str, env: dict[str, str]) -> str:  # noqa: ARG002, D102  # tracked: #288
-        return binary_name
+    def find_binary(self, name: str, env: Mapping[str, str]) -> str:
+        """Delegate binary lookup to the wrapped executor."""
+        return self._inner.find_binary(name, env)
 
-    def check_binary(  # noqa: D102  # tracked: #288
-        self,
-        binary_path: str,  # noqa: ARG002  # tracked: #288
-        env: dict[str, str],  # noqa: ARG002  # tracked: #288
-        *,
-        timeout: int,  # noqa: ARG002  # tracked: #288
-    ) -> None:
-        return None
+    def check_binary(self, path: str, env: Mapping[str, str], *, timeout: float) -> None:
+        """Delegate the health check to the wrapped executor."""
+        self._inner.check_binary(path, env, timeout=timeout)
 
-    def repair_workspace_ownership(self, *, uid: int, gid: int) -> None:
-        """Return bind-mounted workspace files to the host user.
+    def run(self, request: CommandRequest, sink: CommandStreamSink) -> CommandResult:
+        """Run *request*, watching it when it is a Codex JSON invocation."""
+        if not _is_codex_json_command(request.argv):
+            return self._inner.run(request, sink)
 
-        CLI agents run as root in the editor container. Some editors replace
-        files atomically, which leaves the replacement owned by root and can
-        make the host-side checkpoint code unable to read it. Repair ownership
-        before control returns to the framework rather than waiting until a
-        later resume.
-        """
-        result = subprocess.run(  # noqa: S603  # tracked: #288
-            [  # noqa: S607  # tracked: #288
-                "docker",
-                "exec",
-                self.container_id,
-                "find",
-                "/workspace",
-                "-xdev",
-                "-user",
-                "0",
-                "-writable",
-                "-exec",
-                "chown",
-                f"{uid}:{gid}",
-                "{}",
-                "+",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-        if result.returncode != 0:
-            detail = result.stderr.strip() or result.stdout.strip()
-            raise RuntimeError(
-                "failed to restore writable Docker workspace ownership"
-                + (f": {detail}" if detail else "")
+        state = _WatchdogState()
+        stopped = threading.Event()
+        watcher: threading.Thread | None = None
+
+        def arm(handle: CommandHandle) -> None:
+            nonlocal watcher
+            watcher = threading.Thread(
+                target=self._watch,
+                args=(request.argv, handle, state, stopped),
+                daemon=True,
             )
+            watcher.start()
 
-    def run(  # noqa: C901, D102  # tracked: #288
+        try:
+            result = self._inner.run(request, _WatchdogSink(sink, state, arm))
+        finally:
+            stopped.set()
+            if watcher is not None:
+                watcher.join(timeout=self.termination_grace_seconds)
+
+        return self._apply_recovery(result, state, sink)
+
+    def _apply_recovery(
         self,
-        request: CommandRequest,
+        result: CommandResult,
+        state: _WatchdogState,
         sink: CommandStreamSink,
     ) -> CommandResult:
-        docker_cmd = [
-            "docker",
-            "exec",
-            "-i",
-            "-w",
-            "/workspace",
-            self.container_id,
-            *request.argv,
-        ]
-        process = subprocess.Popen(  # noqa: S603  # tracked: #288
-            docker_cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            env=os.environ.copy(),
-            start_new_session=True,
-        )
+        """Replay recovered output and clear the exit code the watchdog caused."""
+        completion = state.recovered_completion
+        if completion is not None:
+            replayed = _forward_codex_completion(completion, sink)
+            self._log(
+                "codex rollout watchdog: replayed the completed turn from the "
+                "rollout file and stopped a `docker exec` that never exited; "
+                "reporting the turn as successful"
+            )
+            return CommandResult(
+                returncode=0,
+                stdout=result.stdout + "".join(replayed),
+                stderr=result.stderr,
+            )
+        if state.stalled_after_exit:
+            self._log(
+                "codex rollout watchdog: the codex process is gone but its "
+                "`docker exec` never exited; stopped it and reporting the turn "
+                "as successful"
+            )
+            return CommandResult(returncode=0, stdout=result.stdout, stderr=result.stderr)
+        return result
 
-        sink.started(DockerCommandHandle(process))
-
-        stdout_lines: list[str] = []
-        stderr_lines: list[str] = []
-
-        def read_pipe(pipe: Any, callback: Callable[[str], None], sink: list[str]) -> None:  # noqa: ANN401  # tracked: #288
-            try:
-                for line in iter(pipe.readline, ""):
-                    if not line:
-                        break
-                    sink.append(line)
-                    callback(line)
-            except (OSError, ValueError):
-                pass
-            finally:
-                try:  # noqa: SIM105  # tracked: #288
-                    pipe.close()
-                except (OSError, ValueError):
-                    pass
-
-        stdout_thread = threading.Thread(
-            target=read_pipe,
-            args=(process.stdout, sink.stdout, stdout_lines),
-            daemon=True,
-        )
-        stderr_thread = threading.Thread(
-            target=read_pipe,
-            args=(process.stderr, sink.stderr, stderr_lines),
-            daemon=True,
-        )
-        stdout_thread.start()
-        stderr_thread.start()
-
-        try:
-            if process.stdin:
-                process.stdin.write(request.stdin)
-                process.stdin.close()
-        except BrokenPipeError:
-            pass
-
-        watchdog_killed = False
-        try:
-            if request.timeout is not None and not self._is_codex_json_command(request.argv):
-                process.wait(timeout=request.timeout)
-            else:
-                watchdog_killed = self._wait_with_docker_exec_watchdog(
-                    process,
-                    request.argv,
-                    sink=sink,
-                    stdout_lines=stdout_lines,
-                    timeout=request.timeout,
-                )
-        except subprocess.TimeoutExpired:
-            self._kill_process_group(process)
-            process.wait()
-            # TimeoutExpired is only raised by the wait(timeout=...) branch,
-            # so request.timeout is non-None on this path.
-            raise subprocess.TimeoutExpired(
-                list(request.argv), cast("float", request.timeout)
-            ) from None
-        finally:
-            if process.poll() is None:
-                self._kill_process_group(process)
-                process.wait()
-
-        stdout_thread.join(timeout=1)
-        stderr_thread.join(timeout=1)
-
-        returncode = 0 if watchdog_killed else process.returncode
-        return CommandResult(
-            returncode=returncode,
-            stdout="".join(stdout_lines),
-            stderr="".join(stderr_lines),
-        )
-
-    def _wait_with_docker_exec_watchdog(  # noqa: C901  # tracked: #288
+    def _watch(
         self,
-        process: subprocess.Popen[str],
-        cmd: Sequence[str],
-        *,
-        sink: CommandStreamSink,
-        stdout_lines: list[str],
-        timeout: float | None,
-    ) -> bool:
-        child_binary = os.path.basename(cmd[0]) if cmd else ""  # noqa: PTH119  # tracked: #288
-        watchdog_killed = False
-        codex_thread_id = self._codex_resume_thread_id(cmd)
-        watch_codex_rollout = self._is_codex_json_command(cmd)
-        next_codex_poll = time.monotonic()
-        completion_fingerprint: str | None = None
-        completion_seen_at: float | None = None
-        deadline = time.monotonic() + timeout if timeout is not None else None
-        while True:
-            now = time.monotonic()
-            if deadline is not None and now >= deadline:
-                assert timeout is not None  # noqa: S101  # tracked: #288
-                raise subprocess.TimeoutExpired(list(cmd), timeout)
-            wait_seconds = 5.0 if deadline is None else min(5.0, deadline - now)
-            try:
-                process.wait(timeout=wait_seconds)
-                return watchdog_killed  # noqa: TRY300  # tracked: #288
-            except subprocess.TimeoutExpired:
-                now = time.monotonic()
-                if deadline is not None and now >= deadline:
-                    assert timeout is not None  # noqa: S101  # tracked: #288
-                    raise subprocess.TimeoutExpired(list(cmd), timeout) from None
-                if codex_thread_id is None and watch_codex_rollout:
-                    codex_thread_id = self._codex_started_thread_id(stdout_lines)
-                if codex_thread_id is not None and now >= next_codex_poll:
-                    next_codex_poll = now + self._CODEX_ROLLOUT_POLL_SECONDS
-                    completion = self._read_codex_rollout_completion(codex_thread_id)
-                    if completion is None:
-                        completion_fingerprint = None
-                        completion_seen_at = None
-                    elif completion.fingerprint != completion_fingerprint:
-                        completion_fingerprint = completion.fingerprint
-                        completion_seen_at = now
-                    elif (
-                        completion_seen_at is not None
-                        and now - completion_seen_at >= self._CODEX_COMPLETION_GRACE_SECONDS
-                    ):
-                        self._forward_codex_completion(completion, sink, stdout_lines)
-                        self._terminate_codex_resume(codex_thread_id)
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait()
-                        return True
-
-                check = subprocess.run(  # noqa: S603  # tracked: #288
-                    [  # noqa: S607  # tracked: #288
-                        "docker",
-                        "exec",
-                        self.container_id,
-                        "pgrep",
-                        "-f",
-                        child_binary,
-                    ],
-                    capture_output=True,
-                    timeout=5,
-                    check=False,
-                )
-                if check.returncode != 0:
-                    watchdog_killed = True
-                    process.kill()
-                    process.wait()
-                    return watchdog_killed
-
-    @staticmethod
-    def _is_codex_json_command(cmd: Sequence[str]) -> bool:
-        """Return whether *cmd* is a machine-readable Codex exec invocation."""
-        if not cmd or os.path.basename(cmd[0]) != "codex" or "--json" not in cmd:  # noqa: PTH119  # tracked: #288
-            return False
-        return "exec" in cmd
-
-    @classmethod
-    def _codex_resume_thread_id(cls, cmd: Sequence[str]) -> str | None:
-        """Return the validated thread ID for ``codex exec resume`` commands."""
-        if not cls._is_codex_json_command(cmd):
-            return None
+        argv: Sequence[str],
+        handle: CommandHandle,
+        state: _WatchdogState,
+        stopped: threading.Event,
+    ) -> None:
+        """Poll the container until the run ends or the watchdog stops it."""
         try:
-            resume_index = cmd.index("resume")
-            thread_id = cmd[resume_index + 1]
-        except (ValueError, IndexError):
-            return None
-        if not re.fullmatch(r"[0-9a-fA-F-]{32,64}", thread_id):
-            return None
-        return thread_id
+            self._poll(argv, handle, state, stopped)
+        except Exception as exc:  # noqa: BLE001  # tracked: #288
+            # This runs on a helper thread: an escaping exception would vanish
+            # and leave the turn to burn its whole budget with no explanation.
+            self._log(f"codex rollout watchdog stopped after an unexpected error: {exc}")
 
-    @staticmethod
-    def _codex_started_thread_id(stdout_lines: Sequence[str]) -> str | None:
-        """Recover a fresh invocation's thread ID from its streamed JSON."""
-        for line in reversed(stdout_lines):
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(event, dict) or event.get("type") != "thread.started":
-                continue
-            thread_id = event.get("thread_id")
-            if isinstance(thread_id, str) and re.fullmatch(r"[0-9a-fA-F-]{32,64}", thread_id):
-                return thread_id
-        return None
+    def _poll(
+        self,
+        argv: Sequence[str],
+        handle: CommandHandle,
+        state: _WatchdogState,
+        stopped: threading.Event,
+    ) -> None:
+        container_id = self._container_id_resolver()
+        child_binary = os.path.basename(argv[0]) if argv else ""  # noqa: PTH119  # tracked: #288
+        thread_id = _codex_resume_thread_id(argv)
+        next_poll = time.monotonic()
+        fingerprint: str | None = None
+        seen_at: float | None = None
+
+        while not stopped.wait(self.tick_seconds):
+            now = time.monotonic()
+            if thread_id is None:
+                thread_id = _codex_started_thread_id(state.snapshot())
+            if thread_id is not None and now >= next_poll:
+                next_poll = now + self.rollout_poll_seconds
+                completion = self._read_codex_rollout_completion(container_id, thread_id)
+                if completion is None:
+                    fingerprint = None
+                    seen_at = None
+                elif completion.fingerprint != fingerprint:
+                    fingerprint = completion.fingerprint
+                    seen_at = now
+                elif seen_at is not None and now - seen_at >= self.completion_grace_seconds:
+                    state.recovered_completion = completion
+                    _terminate_codex_resume(container_id, thread_id)
+                    if not stopped.wait(self.termination_grace_seconds):
+                        handle.kill()
+                    return
+            if not self._codex_process_alive(container_id, child_binary):
+                state.stalled_after_exit = True
+                handle.kill()
+                return
+
+    def _codex_process_alive(self, container_id: str, child_binary: str) -> bool:
+        """Return whether the CLI this ``docker exec`` fronts is still running."""
+        try:
+            check = subprocess.run(  # noqa: S603  # tracked: #288
+                ["docker", "exec", container_id, "pgrep", "-f", child_binary],  # noqa: S607  # tracked: #288
+                capture_output=True,
+                timeout=_DOCKER_QUERY_TIMEOUT_S,
+                check=False,
+            )
+        except (subprocess.SubprocessError, OSError):
+            # A busy or unreachable daemon is not evidence that the CLI died;
+            # assume it is alive and re-check on the next tick.
+            return True
+        return check.returncode == 0
 
     def _read_codex_rollout_completion(  # noqa: C901, PLR0912  # tracked: #288
         self,
+        container_id: str,
         thread_id: str,
     ) -> _CodexRolloutCompletion | None:
         """Read stable terminal evidence from a resumed Codex rollout, if any."""
@@ -350,7 +433,7 @@ class DockerCommandExecutor:
                 [  # noqa: S607  # tracked: #288
                     "docker",
                     "exec",
-                    self.container_id,
+                    container_id,
                     "find",
                     "/root/.codex/sessions",
                     "-type",
@@ -361,7 +444,7 @@ class DockerCommandExecutor:
                 ],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=_DOCKER_QUERY_TIMEOUT_S,
                 check=False,
             )
             paths = [line for line in located.stdout.splitlines() if line]
@@ -371,10 +454,10 @@ class DockerCommandExecutor:
             self._codex_rollout_paths[thread_id] = rollout_path
 
         result = subprocess.run(  # noqa: S603  # tracked: #288
-            ["docker", "exec", self.container_id, "tail", "-n", "512", rollout_path],  # noqa: S607  # tracked: #288
+            ["docker", "exec", container_id, "tail", "-n", "512", rollout_path],  # noqa: S607  # tracked: #288
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=_DOCKER_QUERY_TIMEOUT_S,
             check=False,
         )
         if result.returncode != 0 or not result.stdout.strip():
@@ -423,51 +506,81 @@ class DockerCommandExecutor:
             return None
         return _CodexRolloutCompletion(fingerprint=fingerprint, message=message)
 
-    @staticmethod
-    def _forward_codex_completion(
-        completion: _CodexRolloutCompletion,
-        sink: CommandStreamSink,
-        stdout_lines: list[str],
-    ) -> None:
-        """Send recovered output through agentshim's ordinary Codex parser."""
-        synthetic_lines = [
-            json.dumps(
-                {
-                    "type": "item.completed",
-                    "item": {
-                        "id": "vibesys-codex-rollout-watchdog",
-                        "type": "agent_message",
-                        "text": completion.message,
-                    },
-                }
-            )
-            + "\n",
-            json.dumps({"type": "turn.completed"}) + "\n",
-        ]
-        for line in synthetic_lines:
-            stdout_lines.append(line)
-            sink.stdout(line)
 
-    def _terminate_codex_resume(self, thread_id: str) -> None:
-        """Stop only the completed resumed Codex process inside this container."""
-        subprocess.run(  # noqa: S603  # tracked: #288
-            [  # noqa: S607  # tracked: #288
-                "docker",
-                "exec",
-                self.container_id,
-                "python3",
-                "-c",
-                _CODEX_RESUME_TERMINATION_SCRIPT,
-                thread_id,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
+def _is_codex_json_command(cmd: Sequence[str]) -> bool:
+    """Return whether *cmd* is a machine-readable Codex exec invocation."""
+    if not cmd or os.path.basename(cmd[0]) != "codex" or "--json" not in cmd:  # noqa: PTH119  # tracked: #288
+        return False
+    return "exec" in cmd
+
+
+def _codex_resume_thread_id(cmd: Sequence[str]) -> str | None:
+    """Return the validated thread ID for ``codex exec resume`` commands."""
+    if not _is_codex_json_command(cmd):
+        return None
+    try:
+        resume_index = list(cmd).index("resume")
+        thread_id = cmd[resume_index + 1]
+    except (ValueError, IndexError):
+        return None
+    if not re.fullmatch(r"[0-9a-fA-F-]{32,64}", thread_id):
+        return None
+    return thread_id
+
+
+def _codex_started_thread_id(stdout_lines: Sequence[str]) -> str | None:
+    """Recover a fresh invocation's thread ID from its streamed JSON."""
+    for line in reversed(stdout_lines):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("type") != "thread.started":
+            continue
+        thread_id = event.get("thread_id")
+        if isinstance(thread_id, str) and re.fullmatch(r"[0-9a-fA-F-]{32,64}", thread_id):
+            return thread_id
+    return None
+
+
+def _forward_codex_completion(
+    completion: _CodexRolloutCompletion,
+    sink: CommandStreamSink,
+) -> list[str]:
+    """Send recovered output through agentshim's ordinary Codex parser."""
+    synthetic_lines = [
+        json.dumps(
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "vibesys-codex-rollout-watchdog",
+                    "type": "agent_message",
+                    "text": completion.message,
+                },
+            }
         )
+        + "\n",
+        json.dumps({"type": "turn.completed"}) + "\n",
+    ]
+    for line in synthetic_lines:
+        sink.stdout(line)
+    return synthetic_lines
 
-    def _kill_process_group(self, process: subprocess.Popen[str]) -> None:
-        try:  # noqa: SIM105  # tracked: #288
-            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-        except (ProcessLookupError, OSError):
-            pass
+
+def _terminate_codex_resume(container_id: str, thread_id: str) -> None:
+    """Stop only the completed resumed Codex process inside this container."""
+    subprocess.run(  # noqa: S603  # tracked: #288
+        [  # noqa: S607  # tracked: #288
+            "docker",
+            "exec",
+            container_id,
+            "python3",
+            "-c",
+            _CODEX_RESUME_TERMINATION_SCRIPT,
+            thread_id,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=_DOCKER_QUERY_TIMEOUT_S,
+        check=False,
+    )
