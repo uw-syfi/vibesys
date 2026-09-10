@@ -176,7 +176,7 @@ rg "register.*backend" $SERVE_REPOS/vllm/vllm/v1/attention/backends/
 
 Tell the reader to export `SERVE_REPOS=$(git rev-parse --show-toplevel)/resources/skills/serving-systems/repos` or substitute inline.
 
-The `repos/` directory is **excluded** from agent materialization (see `src/vibesys/agents/cli_runner.py::_materialize_skills`); reference paths into it are advisory grep recipes, not runtime imports.
+The `repos/` directory is **excluded** from agent materialization (see `src/vibesys/agents/cli_common.py::materialize_skills`); reference paths into it are advisory grep recipes, not runtime imports.
 
 ## What not to include
 

@@ -5,6 +5,7 @@ import json
 import threading
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Protocol
 from unittest.mock import MagicMock
@@ -23,11 +24,11 @@ from vibesys.agents.contracts import (
 from vibesys.agents.drivers import agentshim as subject
 from vibesys.render.sink import output_sink
 from vibesys.run.events import CommandResultPayload, CoreEvent, ToolCallData, ToolResultData
-from vs_sandbox import ProjectPathPolicy
+from vibesys.schemas import ImplementerResponse, JudgeResponse
+from vs_sandbox import HostResource, ProjectPathPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 
 @dataclass
@@ -155,6 +156,47 @@ def fake_agent(monkeypatch: pytest.MonkeyPatch) -> list[_FakeAgent]:
     monkeypatch.setattr(subject, "declare_agent_host_resources", lambda *_args, **_kwargs: ())
     monkeypatch.setattr(subject, "build_host_sandbox", lambda *_args, **_kwargs: "sandbox")
     return built
+
+
+def _register_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    built: list[_FakeAgent],
+    **class_flags: bool,
+) -> None:
+    """Register a fake agent class under ``provider``.
+
+    ``class_flags`` become class attributes because the driver reads the
+    native-schema declarations off ``type(agent)``, not the instance.
+    """
+    agent_cls = type("_ConfiguredFakeAgent", (_FakeAgent,), dict(class_flags))
+
+    def factory(
+        model: str | None = None,
+        event_handler: Any | None = None,  # noqa: ANN401  # tracked: #288
+        *,
+        executor: Any | None = None,  # noqa: ANN401  # tracked: #288
+    ) -> _FakeAgent:
+        agent = agent_cls(model, event_handler, executor=executor)
+        built.append(agent)
+        return agent
+
+    monkeypatch.setitem(subject._PROVIDER_CLASSES, provider, factory)  # noqa: SLF001
+
+
+def _driver_for(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    built: list[_FakeAgent],
+    *,
+    log: Callable[[str], None] | None = None,
+    **class_flags: bool,
+) -> subject.AgentShimDriver:
+    """Build a driver whose provider is a fake agent and whose sandbox is inert."""
+    _register_provider(monkeypatch, provider, built, **class_flags)
+    monkeypatch.setattr(subject, "declare_agent_host_resources", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(subject, "build_host_sandbox", lambda *_args, **_kwargs: "sandbox")
+    return subject.AgentShimDriver(provider=provider, log=log)
 
 
 def _spec(tmp_path: Path, **changes: Any) -> AgentSessionSpec:  # noqa: ANN401
@@ -618,12 +660,24 @@ def test_codex_thread_budget_renewal_reports_a_reset(
     assert fake_agent[0].session_id is None
 
 
+@pytest.mark.parametrize(
+    ("final_usage", "duration_ms"),
+    [
+        pytest.param({"input_tokens": 20_000_000}, 1, id="context"),
+        pytest.param({"input_tokens": 1}, 600_000, id="duration"),
+    ],
+)
 def test_heavy_codex_turn_renewal_reports_a_reset(
-    fake_agent: list[_FakeAgent], tmp_path: Path
+    fake_agent: list[_FakeAgent],
+    tmp_path: Path,
+    final_usage: dict[str, int],
+    duration_ms: int,
 ) -> None:
+    """Either budget alone retires the thread: context size or wall-clock cost."""
     driver = subject.AgentShimDriver(provider="codex")
     session = driver.create_session(_spec(tmp_path))
-    fake_agent[0]._last_session.final_usage = {"input_tokens": 20_000_000}  # noqa: SLF001
+    fake_agent[0]._last_session.final_usage = final_usage  # noqa: SLF001
+    fake_agent[0]._last_session.duration_ms = duration_ms  # noqa: SLF001
 
     result = session.run_turn(AgentTurnRequest(message="one"))
 
@@ -660,21 +714,7 @@ def _claude_driver(
     monkeypatch: pytest.MonkeyPatch, built: list[_FakeAgent]
 ) -> subject.AgentShimDriver:
     """Register the fake agent under ``claude`` and build a driver for it."""
-
-    def factory(
-        model: str | None = None,
-        event_handler: Any | None = None,  # noqa: ANN401  # tracked: #288
-        *,
-        executor: Any | None = None,  # noqa: ANN401  # tracked: #288
-    ) -> _FakeAgent:
-        agent = _FakeAgent(model, event_handler, executor=executor)
-        built.append(agent)
-        return agent
-
-    monkeypatch.setitem(subject._PROVIDER_CLASSES, "claude", factory)  # noqa: SLF001
-    monkeypatch.setattr(subject, "declare_agent_host_resources", lambda *_args, **_kwargs: ())
-    monkeypatch.setattr(subject, "build_host_sandbox", lambda *_args, **_kwargs: "sandbox")
-    return subject.AgentShimDriver(provider="claude")
+    return _driver_for(monkeypatch, "claude", built)
 
 
 def test_stale_claude_session_retries_fresh_instead_of_killing_the_run(
@@ -722,3 +762,195 @@ def test_a_fresh_claude_turn_that_fails_is_not_retried(
     with pytest.raises(RuntimeError):
         session.run_turn(AgentTurnRequest(message="one"))
     assert attempts == [None]
+
+
+@pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
+def test_declared_host_resources_reach_the_sandbox_for_every_local_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, provider: str
+) -> None:
+    """Caller-declared resources survive each provider's default declaration.
+
+    The defaults are provider-specific, so a provider whose declaration
+    dropped the caller's intent would silently deny the agent a toolchain it
+    was granted.
+    """
+    built: list[_FakeAgent] = []
+    _register_provider(monkeypatch, provider, built)
+    builds: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        subject,
+        "build_host_sandbox",
+        lambda *args, **kwargs: builds.append({"args": args, **kwargs}),
+    )
+    resource = HostResource(tmp_path / "toolchain", purpose="test toolchain")
+    driver = subject.AgentShimDriver(provider=provider)
+
+    driver.create_session(
+        _spec(
+            tmp_path,
+            provider=provider,
+            policy=AgentExecutionPolicy(host_resources=(resource,), require_enforcement=True),
+        )
+    )
+
+    assert resource in builds[0]["resources"]
+
+
+def test_mcp_interpreter_resolution_is_host_only_and_python_only() -> None:
+    """Host runs pin ``python``; containers and other commands are untouched.
+
+    A host agent inherits a login shell's PATH, where a bare ``python`` may be
+    missing the MCP dependencies; a container image resolves its own.
+    """
+    servers = [
+        MCPServerSpec(name="issues", command="python", args=("-m", "x")),
+        MCPServerSpec(name="profiler", command="python3", args=("p/server.py",)),
+        MCPServerSpec(name="other", command="node", args=("server.js",)),
+    ]
+
+    host = [subject._as_agentshim_mcp(server, in_container=False) for server in servers]  # noqa: SLF001
+    container = [subject._as_agentshim_mcp(server, in_container=True) for server in servers]  # noqa: SLF001
+
+    assert [server.command for server in host] == [
+        subject.sys.executable,
+        subject.sys.executable,
+        "node",
+    ]
+    # Names and args survive the rewrite, and the container keeps its own python.
+    assert [server.name for server in host] == [server.name for server in servers]
+    assert [server.args for server in host] == [list(server.args) for server in servers]
+    assert [server.command for server in container] == ["python", "python3", "node"]
+
+
+def test_native_output_schema_replaces_the_prompt_hint_and_is_cleared_next_turn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A native schema is materialized per turn, so a reused session cannot keep it."""
+    built: list[_FakeAgent] = []
+    driver = _driver_for(monkeypatch, "codex", built, supports_native_output_schema=True)
+    session = driver.create_session(_spec(tmp_path))
+
+    session.run_turn(
+        AgentTurnRequest(message="usr", instructions="sys", output_schema=JudgeResponse)
+    )
+    session.run_turn(AgentTurnRequest(message="usr", instructions="sys"))
+
+    agent = built[0]
+    relative = agent.output_schema_paths[0]
+    assert relative is not None
+    assert relative.startswith(".cache/vibesys/response-schemas/")
+    assert (tmp_path / relative).is_file()
+    assert "Schema for JudgeResponse" not in agent.generate_calls[0][0]
+    # The plain-text turn drops the previous turn's response contract.
+    assert agent.output_schema_paths[1] is None
+
+
+def test_a_provider_without_native_schemas_gets_the_prompt_hint(
+    fake_agent: list[_FakeAgent], tmp_path: Path
+) -> None:
+    session = subject.AgentShimDriver(provider="codex").create_session(_spec(tmp_path))
+
+    session.run_turn(
+        AgentTurnRequest(
+            message="usr", instructions="THE-SYSTEM-PROMPT", output_schema=JudgeResponse
+        )
+    )
+
+    prompt = fake_agent[0].generate_calls[0][0]
+    assert prompt.startswith("THE-SYSTEM-PROMPT")
+    assert "Schema for JudgeResponse" in prompt
+    assert fake_agent[0].output_schema_paths == [None]
+
+
+def test_native_schema_materialization_failure_falls_back_to_the_prompt_hint(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    built: list[_FakeAgent] = []
+    logs: list[str] = []
+    driver = _driver_for(
+        monkeypatch, "codex", built, log=logs.append, supports_native_output_schema=True
+    )
+
+    def unsupported(*_args: Any, **_kwargs: Any) -> str:  # noqa: ANN401
+        raise ValueError("unsupported")
+
+    monkeypatch.setattr(subject, "materialize_native_output_schema", unsupported)
+    session = driver.create_session(_spec(tmp_path))
+
+    session.run_turn(
+        AgentTurnRequest(message="usr", instructions="sys", output_schema=JudgeResponse)
+    )
+
+    assert built[0].output_schema_paths == [None]
+    assert "Schema for JudgeResponse" in built[0].generate_calls[0][0]
+    assert any("using prompt fallback" in message for message in logs)
+
+
+def test_a_provider_wanting_an_absolute_schema_path_gets_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Providers reading the schema at command-build time cannot use a cwd-relative path."""
+    built: list[_FakeAgent] = []
+    driver = _driver_for(
+        monkeypatch,
+        "claude",
+        built,
+        supports_native_output_schema=True,
+        native_output_schema_wants_absolute_path=True,
+    )
+    session = driver.create_session(_spec(tmp_path, provider="claude"))
+
+    session.run_turn(
+        AgentTurnRequest(message="usr", instructions="sys", output_schema=JudgeResponse)
+    )
+
+    passed = built[0].output_schema_paths[-1]
+    assert passed is not None
+    assert Path(passed).is_absolute()
+    assert Path(passed).parent == tmp_path / ".cache/vibesys/response-schemas"
+
+
+def test_mapping_response_stays_native_on_a_permissive_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``ImplementerResponse.metrics`` is a mapping; Claude's schema dialect takes it."""
+    built: list[_FakeAgent] = []
+    driver = _driver_for(
+        monkeypatch,
+        "claude",
+        built,
+        supports_native_output_schema=True,
+        native_output_schema_wants_absolute_path=True,
+        native_output_schema_allows_arbitrary_keys=True,
+    )
+    session = driver.create_session(_spec(tmp_path, provider="claude"))
+
+    session.run_turn(
+        AgentTurnRequest(message="usr", instructions="sys", output_schema=ImplementerResponse)
+    )
+
+    passed = built[0].output_schema_paths[-1]
+    assert passed is not None
+    schema = json.loads(Path(passed).read_text())
+    assert schema["properties"]["metrics"]["additionalProperties"] == {"type": "number"}
+    assert "Schema for ImplementerResponse" not in built[0].generate_calls[0][0]
+
+
+def test_mapping_response_falls_back_on_a_strict_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex's schema subset cannot express the mapping, so the prompt hint stays."""
+    built: list[_FakeAgent] = []
+    logs: list[str] = []
+    driver = _driver_for(
+        monkeypatch, "codex", built, log=logs.append, supports_native_output_schema=True
+    )
+    session = driver.create_session(_spec(tmp_path))
+
+    session.run_turn(
+        AgentTurnRequest(message="usr", instructions="sys", output_schema=ImplementerResponse)
+    )
+
+    assert built[0].output_schema_paths == [None]
+    assert "Schema for ImplementerResponse" in built[0].generate_calls[0][0]
+    assert any("using prompt fallback" in message for message in logs)

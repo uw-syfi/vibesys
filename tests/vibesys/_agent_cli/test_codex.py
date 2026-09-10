@@ -693,7 +693,7 @@ class TestToolEventPairing:
 
 class TestProcessStderr:
     def test_stderr_forwarded_to_event_handler(self):  # noqa: ANN202  # tracked: #288
-        """Stderr must surface in the log regardless of ``silent``; cli_runner
+        """Stderr must surface in the log regardless of ``silent``; the driver
         always passes ``silent=True`` and the base class's stderr path is
         gated on it."""
         handler = MagicMock()
