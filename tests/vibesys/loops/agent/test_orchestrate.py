@@ -1009,6 +1009,40 @@ def test_pareto_archive_summary_bounds_pending_claims_with_an_omission_notice():
     assert "do not treat any omitted claim as a trusted parent" in summary
 
 
+def test_pareto_archive_summary_omission_notice_agrees_with_its_own_count():  # noqa: ANN201  # tracked: #288
+    """One omitted claim reads as singular, and one omitted round is not a range.
+
+    The notice goes into prompt context a model reads, so "1 older untrusted
+    claims ... (rounds 3-3)" is not merely untidy: it invites the reader to
+    infer a plural set and a span where neither exists.
+    """
+    pending_records = [
+        RoundRecord(
+            round_number,
+            chr(ord("a") + round_number) * 40,
+            None,
+            None,
+            False,  # noqa: FBT003  # tracked: #288
+            reviewed=False,
+            candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
+            candidate_metrics={
+                "throughput": 6000.0 + round_number,
+                "latency": 3000.0 + round_number,
+            },
+            candidate_evaluation_artifact=f"h{round_number}.json",
+            candidate_operating_point="concurrency=192",
+            candidate_retention_reason="higher-throughput tradeoff",
+        )
+        # Nine records against a limit of eight omits exactly one.
+        for round_number in range(1, 10)
+    ]
+
+    summary = _pareto_archive_summary(pending_records, _THROUGHPUT_LATENCY)
+    assert "1 older untrusted claim omitted from this context (round 1)" in summary
+    assert "claims omitted" not in summary
+    assert "rounds 1-1" not in summary
+
+
 def test_pareto_archive_summary_lists_all_pending_claims_within_the_limit():  # noqa: ANN201  # tracked: #288
     """A short pending list needs no omission notice."""
     pending_records = [

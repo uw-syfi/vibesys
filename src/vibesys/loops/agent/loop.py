@@ -395,10 +395,17 @@ def _pareto_archive_summary(records: list[RoundRecord], space: MetricSpace) -> s
         )
         omitted = pending[:-_PARETO_ARCHIVE_PENDING_CLAIM_LIMIT]
         if omitted:
+            # This line is read by a model, so it agrees with itself: one
+            # omitted claim says "1 older untrusted claim", and a single
+            # omitted round says "round 4" rather than the degenerate
+            # "rounds 4-4".
+            claims = "claim" if len(omitted) == 1 else "claims"
+            first = omitted[0].round_number
+            last = omitted[-1].round_number
+            rounds = f"round {first}" if first == last else f"rounds {first}-{last}"
             lines.append(
-                f"- {len(omitted)} older untrusted claims omitted from this context "
-                f"(rounds {omitted[0].round_number}-{omitted[-1].round_number}); do not "
-                "treat any omitted claim as a trusted parent."
+                f"- {len(omitted)} older untrusted {claims} omitted from this context "
+                f"({rounds}); do not treat any omitted claim as a trusted parent."
             )
         for record in pending[-_PARETO_ARCHIVE_PENDING_CLAIM_LIMIT:]:
             assert record.commit is not None  # noqa: S101  # tracked: #288
