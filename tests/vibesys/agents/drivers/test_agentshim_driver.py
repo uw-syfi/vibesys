@@ -1441,3 +1441,49 @@ def test_a_container_policy_on_a_host_driver_is_rejected(
                 policy=AgentExecutionPolicy(containerized=True),
             )
         )
+
+
+# ---------------------------------------------------------------------------
+# Environment hygiene
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_the_launch_drops_the_inherited_pwd(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """A stale ``PWD`` must not reach the CLI: bun-based CLIs trust it over the cwd."""
+    del sandbox_builds
+    driver, fake = _driver(provider, scripted_turn(provider, text="ok"))
+    session = driver.create_session(
+        _spec(tmp_path, provider=provider, environment=(("PWD", "/somewhere/stale"), ("GPU", "1")))
+    )
+
+    session.run_turn(AgentTurnRequest(message="Do it"))
+
+    env = fake.requests[-1].env
+    assert "PWD" not in env
+    assert env["GPU"] == "1"
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_container_turn_does_not_forward_the_inherited_pwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    driver, fake, _repairs = _container_driver(
+        monkeypatch, provider, scripted_turn(provider, text="ok")
+    )
+    session = driver.create_session(
+        _container_spec(tmp_path, provider, environment=(("PWD", "/somewhere/stale"), ("GPU", "1")))
+    )
+
+    session.run_turn(AgentTurnRequest(message="Do it"))
+
+    argv = list(fake.requests[-1].argv)
+    forwarded = [argv[index + 1] for index, item in enumerate(argv) if item == "-e"]
+    assert "GPU=1" in forwarded
+    assert not any(entry.startswith("PWD=") for entry in forwarded)

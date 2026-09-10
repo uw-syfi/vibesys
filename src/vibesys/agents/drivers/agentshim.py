@@ -614,6 +614,18 @@ def _heavy_codex_turn_reason(result: agentshim.TurnResult) -> str | None:
     return " and ".join(reasons) or None
 
 
+def _without_stale_pwd(env: Mapping[str, str]) -> dict[str, str]:
+    """Drop ``PWD`` so the CLI trusts its real working directory.
+
+    A subprocess cwd does not rewrite ``$PWD``, and bun-based CLIs (opencode)
+    trust ``$PWD`` over the real cwd for workspace config discovery, so a
+    stale value makes them miss ``<workspace>/opencode.json``. Applied to the
+    session environment on the host and to the overlay forwarded into a
+    container, so the cwd wins in both.
+    """
+    return {key: value for key, value in env.items() if key != "PWD"}
+
+
 class AgentShimDriver:
     """Create AgentShim sessions and translate VibeSys execution policy."""
 
@@ -694,10 +706,10 @@ class AgentShimDriver:
             # The container's own environment is built by the image and the
             # exec invocation; the session overlay is forwarded per turn so it
             # reaches the CLI inside the container instead of the docker client.
-            env = agentshim.interactive_env()
-            turn_env = overlay
+            env = _without_stale_pwd(agentshim.interactive_env())
+            turn_env = _without_stale_pwd(overlay)
         else:
-            env = {**agentshim.interactive_env(), **overlay}
+            env = _without_stale_pwd({**agentshim.interactive_env(), **overlay})
             executor = self._executor_factory(self._host_sandbox(spec, env))
 
         agent = agentshim.CliAgent(
