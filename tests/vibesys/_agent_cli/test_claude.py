@@ -2,6 +2,7 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
+from agentshim.events import NullEventHandler
 
 from vibesys._agent_cli.claude import (
     ClaudeCodeCodingAgent,
@@ -102,6 +103,14 @@ class TestClaudeCommandConstruction:
         assert "--output-format" in cmd
         assert "stream-json" in cmd
         assert "--verbose" in cmd
+
+    def test_command_requests_partial_messages(self, agent):  # noqa: ANN001, ANN202  # tracked: #288
+        """Token deltas only appear in stream-json behind this flag."""
+        assert "--include-partial-messages" in agent._get_command("test prompt")  # noqa: SLF001  # tracked: #288
+
+    def test_resume_command_requests_partial_messages(self, agent):  # noqa: ANN001, ANN202  # tracked: #288
+        # A resumed turn streams the same way a fresh one does.
+        assert "--include-partial-messages" in agent._get_resume_command("p", "sess-1")  # noqa: SLF001  # tracked: #288
 
     def test_command_includes_model_when_set(self, agent):  # noqa: ANN001, ANN202  # tracked: #288
         cmd = agent._get_command("test prompt")  # noqa: SLF001  # tracked: #288
@@ -456,3 +465,289 @@ class TestStructuredOutputClaudeSession:
         # Must not raise even though LegacyHandler has no on_usage method.
         session._process_stdout(line)  # noqa: SLF001  # tracked: #288
         assert handler.text_calls == ["hi"]
+
+
+# Recorded from ``claude --include-partial-messages`` (CLI 2.1.247), trimmed to
+# three thinking deltas and five text deltas. The interleaving is the
+# load-bearing part: the whole-message ``assistant`` echo of a content block
+# arrives *before* that block's ``content_block_stop``.
+_THINKING_DELTAS = (" managing continuous data streams", ".", "\n\n")
+_TEXT_DELTAS = (
+    "A ring buffer",
+    ", also known as",
+    " a circular buffer,",
+    " is a fixed-",
+    "size data structure using",
+)
+_ANSWER = "".join(_TEXT_DELTAS)
+_TURN_USAGE = {
+    "input_tokens": 9,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 32056,
+    "output_tokens": 3,
+}
+
+
+def _stream_event(event):  # noqa: ANN001, ANN202  # tracked: #288
+    return json.dumps({"type": "stream_event", "event": event, "session_id": "sess-1"}) + "\n"
+
+
+def _block_delta(index, delta):  # noqa: ANN001, ANN202  # tracked: #288
+    return _stream_event({"type": "content_block_delta", "index": index, "delta": delta})
+
+
+def _assistant_echo(block):  # noqa: ANN001, ANN202  # tracked: #288
+    """Whole-message echo of one finished content block, carrying turn usage."""
+    message = {"role": "assistant", "content": [block], "usage": _TURN_USAGE}
+    return json.dumps({"type": "assistant", "message": message}) + "\n"
+
+
+def _recorded_turn(result_line=None):  # noqa: ANN001, ANN202  # tracked: #288
+    """Return the stdout lines of one recorded thinking-then-text turn."""
+    lines = [
+        _stream_event({"type": "message_start", "message": {"role": "assistant", "content": []}}),
+        _stream_event(
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "thinking", "thinking": ""},
+            }
+        ),
+    ]
+    for chunk in _THINKING_DELTAS:
+        lines.append(
+            _block_delta(0, {"type": "thinking_delta", "thinking": chunk, "estimated_tokens": None})
+        )
+        lines.append(
+            json.dumps({"type": "system", "subtype": "thinking_tokens", "session_id": "sess-1"})
+            + "\n"
+        )
+    lines.append(_block_delta(0, {"type": "signature_delta", "signature": "ErkDCrIBCBEYAipA"}))
+    lines.append(_assistant_echo({"type": "thinking", "thinking": "".join(_THINKING_DELTAS)}))
+    lines.append(_stream_event({"type": "content_block_stop", "index": 0}))
+    lines.append(
+        _stream_event(
+            {
+                "type": "content_block_start",
+                "index": 1,
+                "content_block": {"type": "text", "text": ""},
+            }
+        )
+    )
+    lines.extend(_block_delta(1, {"type": "text_delta", "text": chunk}) for chunk in _TEXT_DELTAS)
+    lines.append(_assistant_echo({"type": "text", "text": _ANSWER}))
+    lines.append(_stream_event({"type": "content_block_stop", "index": 1}))
+    lines.append(_stream_event({"type": "message_delta", "delta": {"stop_reason": "end_turn"}}))
+    lines.append(_stream_event({"type": "message_stop"}))
+    lines.append(result_line or json.dumps({"type": "result", "result": _ANSWER}) + "\n")
+    return lines
+
+
+class _RecordingHandler:
+    """Streaming-aware handler that records every callback in arrival order."""
+
+    def __init__(self):  # noqa: ANN204  # tracked: #288
+        self.calls = []
+
+    def on_text(self, text):  # noqa: ANN001, ANN202  # tracked: #288
+        self.calls.append(("text", text))
+
+    def on_thinking(self, text):  # noqa: ANN001, ANN202  # tracked: #288
+        self.calls.append(("thinking", text))
+
+    def on_tool_call(self, tool, args=None):  # noqa: ANN001, ANN202, ARG002  # tracked: #288
+        self.calls.append(("tool_call", tool))
+
+    def on_tool_result(self, tool, stdout="", stderr="", exit_code=None, duration=None):  # noqa: ANN001, ANN202, ARG002  # tracked: #288
+        self.calls.append(("tool_result", tool))
+
+    def on_usage(self, usage):  # noqa: ANN001, ANN202  # tracked: #288
+        self.calls.append(("usage", usage))
+
+    def of_kind(self, kind):  # noqa: ANN001, ANN202  # tracked: #288
+        return [payload for call_kind, payload in self.calls if call_kind == kind]
+
+
+class _NoTextHandler:
+    """Handler predating ``on_text``; must see the pre-streaming behavior."""
+
+    def __init__(self):  # noqa: ANN204  # tracked: #288
+        self.calls = []
+
+    def on_thinking(self, text):  # noqa: ANN001, ANN202  # tracked: #288
+        self.calls.append(("thinking", text))
+
+    def on_tool_call(self, tool, args=None):  # noqa: ANN001, ANN202, ARG002  # tracked: #288
+        self.calls.append(("tool_call", tool))
+
+    def on_tool_result(self, tool, stdout="", stderr="", exit_code=None, duration=None):  # noqa: ANN001, ANN202, ARG002  # tracked: #288
+        self.calls.append(("tool_result", tool))
+
+    def on_usage(self, usage):  # noqa: ANN001, ANN202  # tracked: #288
+        self.calls.append(("usage", usage))
+
+    def of_kind(self, kind):  # noqa: ANN001, ANN202  # tracked: #288
+        return [payload for call_kind, payload in self.calls if call_kind == kind]
+
+
+class TestPartialAssistantTextStreaming:
+    """Tests for token-by-token assistant text from ``stream_event`` lines."""
+
+    def _make_session(self, event_handler=None):  # noqa: ANN001, ANN202  # tracked: #288
+        return StructuredOutputClaudeSession(
+            binary_name="claude",
+            env={},
+            log_prefix="[Claude]",
+            cmd=["claude", "-p"],
+            logger=MagicMock(),
+            silent=True,
+            event_handler=event_handler,
+        )
+
+    def _replay(self, lines, event_handler=None):  # noqa: ANN001, ANN202  # tracked: #288
+        session = self._make_session(event_handler=event_handler)
+        for line in lines:
+            session._process_stdout(line)  # noqa: SLF001  # tracked: #288
+        return session
+
+    def test_recorded_turn_streams_text_deltas_in_order(self):  # noqa: ANN202  # tracked: #288
+        handler = _RecordingHandler()
+        self._replay(_recorded_turn(), event_handler=handler)
+
+        assert handler.of_kind("text") == list(_TEXT_DELTAS)
+        assert "".join(handler.of_kind("text")) == _ANSWER
+
+    def test_recorded_turn_reports_the_answer_exactly_once(self):  # noqa: ANN202  # tracked: #288
+        """The ``assistant`` echo of a streamed block must not be replayed."""
+        handler = _RecordingHandler()
+        self._replay(_recorded_turn(), event_handler=handler)
+
+        assert _ANSWER not in handler.of_kind("thinking")
+        assert not any(_ANSWER in text for text in handler.of_kind("thinking"))
+
+    def test_thinking_stays_invisible(self):  # noqa: ANN202  # tracked: #288
+        """Reasoning is neither promoted to text nor newly surfaced.
+
+        Claude's thinking blocks produce no agentshim events today (``from_dict``
+        ignores them), and folding ``thinking_delta`` into ``on_text`` would
+        publish reasoning on the assistant channel.
+        """
+        handler = _RecordingHandler()
+        self._replay(_recorded_turn(), event_handler=handler)
+
+        reasoning = "".join(_THINKING_DELTAS)
+        assert not any(chunk in reasoning for chunk in handler.of_kind("text"))
+        assert handler.of_kind("thinking") == []
+
+    def test_assistant_usage_survives_text_suppression(self):  # noqa: ANN202  # tracked: #288
+        """Suppression is per text block, so ``message.usage`` still arrives.
+
+        The regression this design avoids: dropping ``assistant`` lines whole
+        would silence the per-turn usage that refreshes context-window tracking.
+        """
+        handler = _RecordingHandler()
+        self._replay(_recorded_turn(), event_handler=handler)
+
+        # Only the text echo yields events; a thinking-only echo parses to none.
+        assert handler.of_kind("usage") == [_TURN_USAGE]
+
+    def test_session_id_still_read_from_system_line(self):  # noqa: ANN202  # tracked: #288
+        session = self._replay(_recorded_turn(), event_handler=_RecordingHandler())
+        assert session.session_id == "sess-1"
+
+    def test_handler_without_on_text_keeps_whole_message_delivery(self):  # noqa: ANN202  # tracked: #288
+        """A handler predating ``on_text`` sees exactly today's behavior."""
+        handler = _NoTextHandler()
+        session = self._replay(_recorded_turn(), event_handler=handler)
+
+        assert session._partial is None  # noqa: SLF001  # tracked: #288
+        assert handler.of_kind("thinking") == [_ANSWER]
+        assert handler.of_kind("usage") == [_TURN_USAGE]
+        assert _ANSWER in session.stdout_lines
+
+    def test_absent_handler_keeps_agentshims_substitute(self):  # noqa: ANN202  # tracked: #288
+        """Wrapping ``None`` would defeat agentshim's Null/Console selection."""
+        session = self._replay(_recorded_turn(), event_handler=None)
+
+        assert session._partial is None  # noqa: SLF001  # tracked: #288
+        assert isinstance(session.event_handler, NullEventHandler)
+
+    def test_wrapper_exposes_the_inner_handler_for_context_binding(self):  # noqa: ANN202  # tracked: #288
+        """agentshim binds logger context by recursing through ``handlers``."""
+        handler = _RecordingHandler()
+        session = self._make_session(event_handler=handler)
+
+        assert session.event_handler.handlers == (handler,)
+
+    def test_unmatched_echo_is_forwarded_rather_than_dropped(self):  # noqa: ANN202  # tracked: #288
+        """Only an exact duplicate of the open block is suppressed."""
+        handler = _RecordingHandler()
+        self._replay(
+            [
+                _stream_event(
+                    {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {"type": "text", "text": ""},
+                    }
+                ),
+                _block_delta(0, {"type": "text_delta", "text": "streamed "}),
+                _block_delta(0, {"type": "text_delta", "text": "prefix"}),
+                _assistant_echo({"type": "text", "text": "something else entirely"}),
+            ],
+            event_handler=handler,
+        )
+
+        assert handler.of_kind("text") == ["streamed ", "prefix"]
+        assert handler.of_kind("thinking") == ["something else entirely"]
+
+    def test_unstreamed_text_block_still_reaches_the_handler(self):  # noqa: ANN202  # tracked: #288
+        """An ``assistant`` line with no preceding deltas is never suppressed."""
+        handler = _RecordingHandler()
+        self._replay(
+            [_assistant_echo({"type": "text", "text": "no deltas"})], event_handler=handler
+        )
+
+        assert handler.of_kind("text") == []
+        assert handler.of_kind("thinking") == ["no deltas"]
+
+    def test_structured_output_survives_the_partial_stream(self):  # noqa: ANN202  # tracked: #288
+        """``stream_event`` routing must not bypass ``structured_output`` capture."""
+        payload = {"a": 3, "b": 5}
+        result_line = json.dumps(
+            {"type": "result", "result": _ANSWER, "structured_output": payload}
+        )
+        handler = _RecordingHandler()
+        session = self._replay(
+            _recorded_turn(result_line=result_line + "\n"), event_handler=handler
+        )
+
+        assert session.structured_output == payload
+        # The turn's text still streamed; capture and streaming are independent.
+        assert handler.of_kind("text") == list(_TEXT_DELTAS)
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            '{"type":"stream_event"}\n',
+            '{"type":"stream_event","event":null}\n',
+            '{"type":"stream_event","event":[]}\n',
+            '{"type":"stream_event","event":"content_block_delta"}\n',
+            '{"type":"stream_event","event":{"type":"content_block_delta"}}\n',
+            '{"type":"stream_event","event":{"type":"content_block_delta","delta":"oops"}}\n',
+            '{"type":"stream_event","event":{"type":"content_block_delta","delta":{}}}\n',
+            '{"type":"stream_event","event":{"type":"content_block_delta",'
+            '"delta":{"type":"text_delta"}}}\n',
+            '{"type":"stream_event","event":{"type":"content_block_delta",'
+            '"delta":{"type":"text_delta","text":17}}}\n',
+            '{"type":"stream_event","event":{"type":"content_block_delta"\n',
+            "not json at all\n",
+            "\n",
+        ],
+    )
+    def test_malformed_stream_lines_do_not_raise(self, line):  # noqa: ANN001, ANN202  # tracked: #288
+        """A partial or garbled line must not kill the stdout reader thread."""
+        handler = _RecordingHandler()
+        self._replay([line], event_handler=handler)
+
+        assert handler.of_kind("text") == []

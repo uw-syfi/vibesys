@@ -302,6 +302,12 @@ class ExperimentChatFactory:
                 session_key=AgentSessionKey(
                     SessionScope.CHAT, DEFAULT_CHAT_THREAD if thread_id is None else thread_id
                 ),
+                # The wire leaves the default thread's ID absent instead of
+                # naming it, so the session key above and this field disagree
+                # for that one thread on purpose. Stamping DEFAULT_CHAT_THREAD
+                # here would file the session's events under a thread the
+                # terminal answer event does not claim.
+                chat_thread_id=thread_id,
                 workspace=self._workspace,
                 state_dir=state_dir,
                 agent_shared_state_dir=resources.agent_shared_state_dir,

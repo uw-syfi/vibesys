@@ -56,6 +56,10 @@ class ExperimentChatDependencies:
     #: Identity of this thread's provider conversation. Follow-ups reuse it so
     #: the agent keeps the context of the questions before them.
     session_key: AgentSessionKey
+    #: Thread this session answers on, as the wire names it. ``None`` is the
+    #: run's default chat, which carries no thread ID of its own, so streamed
+    #: output lands in the same transcript as the terminal answer event.
+    chat_thread_id: str | None
     workspace: Path
     state_dir: Path
     agent_shared_state_dir: str
@@ -83,6 +87,7 @@ class ExperimentChatSession:
         self._executions = dependencies.executions
         self._agent_client = dependencies.agent_client
         self._session_key = dependencies.session_key
+        self._chat_thread_id = dependencies.chat_thread_id
         self._workspace = dependencies.workspace
         self._state_dir = dependencies.state_dir
         self._evidence = dependencies.evidence
@@ -161,6 +166,7 @@ class ExperimentChatSession:
             agent_kind="chat",
             round_label="experiment-chat",
             invocation_id=execution.execution_id,
+            chat_thread_id=self._chat_thread_id,
         ):
             try:
                 answer = self._agent_client.invoke_text(

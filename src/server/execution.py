@@ -127,6 +127,7 @@ class ExecutionTracker:
         scoped_kind = getattr(self._presentation_local, "agent_kind", None)
         scoped_round = getattr(self._presentation_local, "round_label", None)
         scoped_invocation = getattr(self._presentation_local, "invocation_id", None)
+        scoped_chat_thread = getattr(self._presentation_local, "chat_thread_id", None)
         execution_id = invocation_id or scoped_invocation
         if execution_id is not None:
             activity = self._activity_for_presentation(event_type, data, execution_id)
@@ -139,6 +140,7 @@ class ExecutionTracker:
             agent_kind=agent_kind or scoped_kind or current_kind,
             round_label=round_label or scoped_round or current_round,
             execution_id=execution_id,
+            chat_thread_id=scoped_chat_thread,
             data=data,
         )
 
@@ -374,17 +376,30 @@ class ExecutionTracker:
 
     @contextmanager
     def presentation_scope(
-        self, *, agent_kind: str, round_label: str, invocation_id: str
+        self,
+        *,
+        agent_kind: str,
+        round_label: str,
+        invocation_id: str,
+        chat_thread_id: str | None = None,
     ) -> Generator[None]:
-        """Scope presentation events to one execution on the current thread."""
+        """Scope presentation events to one execution on the current thread.
+
+        ``chat_thread_id`` names the experiment-chat thread whose question this
+        execution answers, so streamed output reaches the transcript that asked
+        for it. ``None`` covers both a non-chat agent and the run's default
+        chat, which is how the terminal ``chat`` answer identifies that thread.
+        """
         previous = (
             getattr(self._presentation_local, "agent_kind", None),
             getattr(self._presentation_local, "round_label", None),
             getattr(self._presentation_local, "invocation_id", None),
+            getattr(self._presentation_local, "chat_thread_id", None),
         )
         self._presentation_local.agent_kind = agent_kind
         self._presentation_local.round_label = round_label
         self._presentation_local.invocation_id = invocation_id
+        self._presentation_local.chat_thread_id = chat_thread_id
         try:
             yield
         finally:
@@ -392,6 +407,7 @@ class ExecutionTracker:
                 self._presentation_local.agent_kind,
                 self._presentation_local.round_label,
                 self._presentation_local.invocation_id,
+                self._presentation_local.chat_thread_id,
             ) = previous
 
     def _discard_locked(self, execution_id: str) -> None:

@@ -146,6 +146,12 @@ class _AgentShimEventHandler:
     def on_thinking(self, text: str) -> None:
         self._emit(AgentEvent(kind=AgentEventKind.THINKING, text=text))
 
+    def on_text(self, text: str) -> None:
+        # Assistant text and reasoning are separate channels downstream
+        # (``assistant`` vs ``analysis``), so a provider that can tell them
+        # apart reports text here rather than through ``on_thinking``.
+        self._emit(AgentEvent(kind=AgentEventKind.TEXT, text=text))
+
     def on_tool_call(self, tool: str, args: dict[str, Any] | str | None = None) -> None:
         self._emit(
             AgentEvent(

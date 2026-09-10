@@ -22,7 +22,13 @@ from vibesys.agents.contracts import (
 )
 from vibesys.agents.drivers import agentshim as subject
 from vibesys.render.sink import output_sink
-from vibesys.run.events import CommandResultPayload, CoreEvent, ToolCallData, ToolResultData
+from vibesys.run.events import (
+    AgentOutputChunkData,
+    CommandResultPayload,
+    CoreEvent,
+    ToolCallData,
+    ToolResultData,
+)
 from vs_sandbox import ProjectPathPolicy
 
 if TYPE_CHECKING:
@@ -358,6 +364,44 @@ def test_codex_item_lifecycles_reach_the_driver_as_separate_pairs(
         assert [json.loads(result.content) for result in results] == [
             next(iter(completion.values()))
         ] * item_count
+
+
+def test_on_text_emits_a_text_event_distinct_from_thinking() -> None:
+    handler = subject._AgentShimEventHandler()  # noqa: SLF001
+    observer = _Observer()
+    handler.observer = observer
+
+    handler.on_text("Ring ")
+    handler.on_text("buffers.")
+    handler.on_thinking("reasoning")
+
+    assert observer.events == [
+        AgentEvent(kind=subject.AgentEventKind.TEXT, text="Ring "),
+        AgentEvent(kind=subject.AgentEventKind.TEXT, text="buffers."),
+        AgentEvent(kind=subject.AgentEventKind.THINKING, text="reasoning"),
+    ]
+
+
+def test_on_text_publishes_on_the_assistant_channel() -> None:
+    """``on_text`` deltas reach the logger as assistant text, not analysis."""
+    handler = subject._AgentShimEventHandler()  # noqa: SLF001
+    handler.observer = _LoggerObserver(AgentLogger())
+    seen: list[CoreEvent] = []
+    unsubscribe = output_sink().subscribe(seen.append)
+    try:
+        handler.on_text("Ring ")
+        handler.on_text("buffers.")
+        handler.on_thinking("reasoning")
+    finally:
+        unsubscribe()
+
+    chunks = [event.data for event in seen if isinstance(event.data, AgentOutputChunkData)]
+    assert [(chunk.channel, chunk.content) for chunk in chunks] == [
+        ("assistant", "Ring "),
+        ("assistant", "buffers."),
+        ("assistant", "\n"),
+        ("analysis", "reasoning"),
+    ]
 
 
 def test_a_repeat_call_after_a_result_is_its_own_turn() -> None:
