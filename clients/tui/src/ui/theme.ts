@@ -65,6 +65,16 @@ export interface MarkdownColors {
   comment: string;
   /** Tree-sitter `number` captures inside a fence with a shipped grammar. */
   number: string;
+  /** Tree-sitter `function` captures inside a fence with a shipped grammar. */
+  function: string;
+  /** Tree-sitter `type` captures inside a fence with a shipped grammar. */
+  type: string;
+  /** Tree-sitter `operator` captures inside a fence with a shipped grammar. */
+  operator: string;
+  /** Tree-sitter `variable` captures inside a fence with a shipped grammar. */
+  variable: string;
+  /** Tree-sitter `punctuation.*` captures inside a fence with a shipped grammar. */
+  punctuation: string;
 }
 
 export interface Theme {
@@ -345,6 +355,13 @@ function buildMarkdown(spec: ThemeSpec): MarkdownColors {
     string: ensureContrast(spec.success, codeBackground, spec.minContrast),
     number: ensureContrast(spec.warning, codeBackground, spec.minContrast),
     comment: ensureContrast(spec.textMuted, codeBackground, spec.minContrast),
+    function: ensureContrast(spec.borderStrong, codeBackground, spec.minContrast),
+    type: ensureContrast(spec.borderFocus, codeBackground, spec.minContrast),
+    operator: ensureContrast(spec.border, codeBackground, spec.minContrast),
+    variable: ensureContrast(spec.textPrimary, codeBackground, spec.minContrast),
+    // The lower floor, like `textSubtle` itself: punctuation and rules, not
+    // words.
+    punctuation: ensureContrast(spec.textSubtle, codeBackground, SUBTLE_TEXT_MIN_CONTRAST),
   };
   return {...derived, ...spec.overrides?.markdown};
 }

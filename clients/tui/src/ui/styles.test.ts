@@ -1,4 +1,4 @@
-import {afterEach, describe, expect, it} from 'bun:test';
+import {afterEach, describe, expect, it, spyOn} from 'bun:test';
 import {
   type CapturedFrame,
   type CapturedSpan,
@@ -128,10 +128,27 @@ function codeBlocks(renderable: Renderable): CodeRenderable[] {
   return blocks;
 }
 
+/**
+ * The renderable directly under `markdown` that eventually contains `node`.
+ *
+ * A top-level fence is wrapped in a surface box (`wrapOnCodeSurface`), so the
+ * `CodeRenderable` itself is no longer that direct child; this walks up to
+ * whichever ancestor is. For anything `wrapOnCodeSurface` never reaches
+ * (unwrapped blocks, or `node` already being the direct child), the loop
+ * exits immediately and returns `node` unchanged.
+ */
+function topLevelRenderable(markdown: MarkdownRenderable, node: Renderable): Renderable {
+  let current = node;
+  while (current.parent !== null && current.parent !== markdown) {
+    current = current.parent;
+  }
+  return current;
+}
+
 /** Blank rows between the fenced block and the block after it. */
 function gapAfterFence({markdown}: MarkdownFixture, body: string): number {
   const blocks = markdown.getChildren();
-  const fence = fencedBlock(markdown, body);
+  const fence = topLevelRenderable(markdown, fencedBlock(markdown, body));
   const next = blocks[blocks.indexOf(fence) + 1];
   expect(next).toBeDefined();
   return (next as (typeof blocks)[number]).y - (fence.y + fence.height);
@@ -411,5 +428,42 @@ describe('markdown code blocks', () => {
       }));
     expect(surfaces(markdown)).toEqual(surfaces(plain));
     expect(markdown.getChildren().some(child => child instanceof TextTableRenderable)).toBe(true);
+  });
+
+  it('surfaces a oneshot highlight result the renderer itself discards', async () => {
+    const theme = resolveTheme('dark');
+
+    // Unique to this test: `warnIfHighlightSignalsTrouble` probes a filetype
+    // once per process, so a name another test already rendered would find
+    // the probe already spent and never call `console.debug`/`.warn` again.
+    const unsupported = await renderMarkdown('```ruby\nputs "hi"\n```\n', theme);
+    const debugSpy = spyOn(console, 'debug').mockImplementation(() => {});
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+    unsupported.treeSitterClient.setMockResult({warning: 'no parser registered for filetype ruby'});
+    unsupported.treeSitterClient.resolveAllHighlightOnce();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('ruby'));
+    expect(warnSpy).not.toHaveBeenCalled();
+    debugSpy.mockRestore();
+    warnSpy.mockRestore();
+
+    // A grammar issue 575's vendoring didn't (a genuine parse failure, not a
+    // missing parser) is a `console.warn`, not a `console.debug`. "elixir" is
+    // never registered by this codebase and so has no grammar either, but the
+    // mock's `error` field stands in for a broken one the code cannot tell
+    // apart from "no parser" any other way.
+    const broken = await renderMarkdown('```elixir\nIO.puts "hi"\n```\n', theme);
+    const debugSpy2 = spyOn(console, 'debug').mockImplementation(() => {});
+    const warnSpy2 = spyOn(console, 'warn').mockImplementation(() => {});
+    broken.treeSitterClient.setMockResult({error: 'grammar failed to load'});
+    broken.treeSitterClient.resolveAllHighlightOnce();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(warnSpy2).toHaveBeenCalledWith(expect.stringContaining('elixir'));
+    debugSpy2.mockRestore();
+    warnSpy2.mockRestore();
   });
 });
