@@ -4,6 +4,7 @@ import {
   closeActiveAgentTimings,
   finishAgentTiming,
   hasActiveAgentTiming,
+  mergeAgentTimingPrefix,
   type RoundTimingState,
   startAgentTiming,
 } from './round-timing.js';
@@ -75,9 +76,11 @@ export function applyRunMapEvent(
   // keyed by that scope and would drop them, which is why the closeout runs
   // first and returns: one owner for "the run ended", sweeping the whole map
   // rather than the one round a label happened to name.
-  if (event.type === 'run_failed') return closeOpenRunState(seen, 'failed', event.timestamp);
+  if (event.type === 'run_failed') {
+    return closeOpenRunState(seen, 'failed', event.timestamp, event.sequence ?? null);
+  }
   if (event.type === 'run_interrupted') {
-    return closeOpenRunState(seen, 'interrupted', event.timestamp);
+    return closeOpenRunState(seen, 'interrupted', event.timestamp, event.sequence ?? null);
   }
   const base =
     event.type === 'run_started'
@@ -113,10 +116,11 @@ function closeOpenRunState(
   state: RunMapState,
   activeStatus: Extract<AgentPhaseStatus, 'failed' | 'interrupted'>,
   timestamp: string,
+  sequence: number | null = null,
 ): RunMapState {
   return {
     ...state,
-    rounds: state.rounds.map(round => closeRound(round, timestamp)),
+    rounds: state.rounds.map(round => closeRound(round, timestamp, sequence)),
     phases: state.phases.map(phase => closePhase(phase, activeStatus, timestamp)),
   };
 }
@@ -150,7 +154,7 @@ function isRoundClosed(status: RoundStatus): boolean {
   return status === 'completed' || status === 'failed';
 }
 
-function closeRound(round: RoundSummary, timestamp: string): RoundSummary {
+function closeRound(round: RoundSummary, timestamp: string, sequence: number | null): RoundSummary {
   const closed = isRoundClosed(round.status)
     ? round
     : {
@@ -159,7 +163,9 @@ function closeRound(round: RoundSummary, timestamp: string): RoundSummary {
         finishedAt: round.finishedAt ?? timestamp,
         closedByRunBoundary: true as const,
       };
-  return hasActiveAgentTiming(closed) ? closeActiveAgentTimings(closed, timestamp) : closed;
+  return hasActiveAgentTiming(closed)
+    ? closeActiveAgentTimings(closed, timestamp, sequence)
+    : closed;
 }
 
 function closePhase(
@@ -195,10 +201,8 @@ export function phasesForRound(phases: AgentPhase[], roundNumber: number | null)
  * Intervals recorded on either side are both real, so they concatenate instead
  * of last-write-wins, and open starts union.
  *
- * Known boundary: an agent execution whose start is in `older` and whose finish
- * is in `newer` loses its interval. The newer fold saw a finish with no start
- * and dropped it, and the finish timestamp is not recoverable from the merged
- * state. Rounds that do not straddle the boundary are exact.
+ * Unmatched finishes retained in the newer suffix reconcile with starts in the
+ * older prefix by event sequence, so a chunk boundary does not lose intervals.
  */
 export function mergeRoundLists(
   older: readonly RoundSummary[],
@@ -246,14 +250,7 @@ export function mergePhaseLists(
 
 function mergeRoundPrefix(older: RoundSummary, newer: RoundSummary): RoundSummary {
   const round = mergeRound(older, newer);
-  const agentIntervals =
-    older.agentIntervals === undefined && newer.agentIntervals === undefined
-      ? undefined
-      : [...(older.agentIntervals ?? []), ...(newer.agentIntervals ?? [])];
-  const activeAgentStarts =
-    older.activeAgentStarts === undefined && newer.activeAgentStarts === undefined
-      ? undefined
-      : {...older.activeAgentStarts, ...newer.activeAgentStarts};
+  const timing = mergeAgentTimingPrefix(older, newer);
   const preserveRunBoundary =
     older.closedByRunBoundary === true && newer.closedByRoundFinished !== true;
   return {
@@ -270,8 +267,7 @@ function mergeRoundPrefix(older: RoundSummary, newer: RoundSummary): RoundSummar
       : isRoundClosed(older.status) && !isRoundClosed(newer.status)
         ? {status: older.status}
         : {}),
-    ...(agentIntervals === undefined ? {} : {agentIntervals}),
-    ...(activeAgentStarts === undefined ? {} : {activeAgentStarts}),
+    ...timing,
   };
 }
 
@@ -487,7 +483,7 @@ function updateRoundAgentElapsed(
   const finished = event.type === 'agent_execution_finished' || event.type === 'phase_finished';
   if (!started && !finished) {
     if (event.type !== 'round_finished') return round;
-    return closeActiveAgentTimings(round, event.timestamp);
+    return closeActiveAgentTimings(round, event.timestamp, event.sequence ?? null);
   }
   if (event.type === 'phase_started' || event.type === 'phase_finished') {
     const executionId = event.execution_id ?? event.invocation_id;

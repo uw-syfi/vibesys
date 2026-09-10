@@ -7,7 +7,6 @@ import {
   reduceEventBatch,
   reduceEventPrefix,
 } from './core-state.js';
-import type {RoundSummary} from './run-map.js';
 
 /**
  * Equivalence harness for the tail bootstrap.
@@ -16,14 +15,7 @@ import type {RoundSummary} from './run-map.js';
  * the same `CoreState` as folding its tail and then backfilling the preceding
  * chunks through `reduceEventPrefix`.
  *
- * One exception is scoped out of the comparison, see `mergeRoundLists`: an agent
- * execution whose `agent_execution_started` falls in a backfilled chunk and
- * whose `agent_execution_finished` falls after the boundary loses its timing
- * interval, because the newer fold saw a finish with no start and dropped the
- * timestamp. `withoutRoundTiming` scopes exactly that, and the round-aligned
- * case below asserts full equality including timing.
- *
- * Two further divergences are inherent to folding a bare suffix, and each has a
+ * Two divergences are inherent to folding a bare suffix, and each has a
  * test of its own below rather than a normalization here:
  * - `status` and the expected-phase seeding both need `run_started`, which a
  *   suffix does not carry.
@@ -44,7 +36,7 @@ describe('prefix backfill equivalence', () => {
           const bootstrapped = backfill(events, tail, 97);
 
           expect(bootstrapped.historyAfterSequence).toBe(0);
-          expect(withoutRoundTiming(bootstrapped)).toEqual(withoutRoundTiming(full));
+          expect(bootstrapped).toEqual(full);
         }
       });
     }
@@ -416,10 +408,7 @@ describe('prefix merges across the chunk boundary', () => {
     ]);
   });
 
-  // Documents the one field the merge cannot reconstruct. The chunk holds an
-  // open start, the tail holds a finish with nothing to close, and the finish
-  // timestamp is gone by the time the two states meet.
-  it('loses the timing interval of an execution split across the boundary', () => {
+  it('reconciles the timing interval of an execution split across the boundary', () => {
     const events = [
       executionStartedEvent(1, 'exec-a'),
       executionFinishedEvent(2, 'exec-a'),
@@ -429,12 +418,85 @@ describe('prefix merges across the chunk boundary', () => {
 
     const merged = foldAsPrefix(events, 1);
 
-    expect(withoutRoundTiming(merged)).toEqual(withoutRoundTiming(full));
+    expect(merged).toEqual(full);
     expect(full.rounds[0]?.agentIntervals).toEqual([
       {startedAt: timestamp(1), finishedAt: timestamp(2)},
     ]);
-    expect(merged.rounds[0]?.agentIntervals).toEqual([]);
-    expect(merged.rounds[0]?.activeAgentStarts).toEqual({'implementer:exec-a': timestamp(1)});
+    expect(merged.rounds[0]?.agentIntervals).toEqual([
+      {startedAt: timestamp(1), finishedAt: timestamp(2)},
+    ]);
+    expect(merged.rounds[0]?.activeAgentStarts).toEqual({});
+  });
+
+  for (const terminal of ['round_finished', 'run_failed', 'run_interrupted'] as const) {
+    it(`closes a backfilled active timing at a tail ${terminal}`, () => {
+      const terminalEvent: RunEvent =
+        terminal === 'round_finished'
+          ? roundFinishedEvent(2)
+          : {sequence: 2, timestamp: timestamp(2), type: terminal};
+      const events = [executionStartedEvent(1, 'exec-a'), terminalEvent];
+
+      const merged = foldAsPrefix(events, 1);
+      const full = reduceEventBatch(initialCoreState(), events);
+
+      expect({...merged, activeExecutions: {}}).toEqual({...full, activeExecutions: {}});
+      expect(merged.rounds[0]?.agentIntervals).toEqual([
+        {startedAt: timestamp(1), finishedAt: timestamp(2)},
+      ]);
+      expect(merged.rounds[0]?.activeAgentStarts).toEqual({});
+    });
+  }
+
+  it('deduplicates modern and compatibility finishes split across chunks', () => {
+    const events = [
+      executionStartedEvent(1, 'exec-a'),
+      executionFinishedEvent(2, 'exec-a'),
+      phaseFinishedEvent(3, 'exec-a'),
+      roundFinishedEvent(4),
+    ];
+
+    const merged = backfillAt(events, [1, 2, 3]);
+    const full = reduceEventBatch(initialCoreState(), events);
+
+    expect(merged.rounds).toEqual(full.rounds);
+    expect(merged.rounds[0]?.agentIntervals).toEqual([
+      {startedAt: timestamp(1), finishedAt: timestamp(2)},
+    ]);
+  });
+
+  it('reconciles a reused legacy key across more than two prefix chunks', () => {
+    const sharedTimestamp = timestamp(9);
+    const events = [
+      {...legacyExecutionEvent(1, 'agent_execution_started'), timestamp: sharedTimestamp},
+      {...legacyExecutionEvent(2, 'agent_execution_finished'), timestamp: sharedTimestamp},
+      {...legacyExecutionEvent(3, 'agent_execution_started'), timestamp: sharedTimestamp},
+    ];
+
+    const merged = backfillAt(events, [1, 2]);
+    const full = reduceEventBatch(initialCoreState(), events);
+
+    expect(merged.rounds).toEqual(full.rounds);
+    expect(merged.rounds[0]?.agentIntervals).toEqual([
+      {startedAt: sharedTimestamp, finishedAt: sharedTimestamp},
+    ]);
+    expect(merged.rounds[0]?.activeAgentStarts).toEqual({'implementer:': sharedTimestamp});
+  });
+
+  it('retains timing provenance when profileSkipped copies the round', () => {
+    const events = [
+      executionStartedEvent(1, 'exec-a'),
+      roundFinishedEvent(2, {profile_skipped: true}),
+    ];
+
+    const merged = foldAsPrefix(events, 1);
+
+    const full = reduceEventBatch(initialCoreState(), events);
+    expect({...merged, activeExecutions: {}}).toEqual({...full, activeExecutions: {}});
+    expect(merged.rounds[0]).toMatchObject({
+      profileSkipped: true,
+      agentIntervals: [{startedAt: timestamp(1), finishedAt: timestamp(2)}],
+      activeAgentStarts: {},
+    });
   });
 
   // A bare suffix has no `run_started`, so the tail fold has no run status and
@@ -549,18 +611,6 @@ function foldWithSpineBackfill(
 
 function sequenceAt(events: readonly RunEvent[], index: number): number {
   return index < 0 ? 0 : (events[index]?.sequence ?? 0);
-}
-
-/** The state minus the round timing fields a split execution cannot recover. */
-function withoutRoundTiming(state: CoreState): CoreState {
-  return {
-    ...state,
-    rounds: state.rounds.map(
-      ({agentIntervals: _intervals, activeAgentStarts: _starts, ...rest}) => {
-        return rest as RoundSummary;
-      },
-    ),
-  };
 }
 
 // A deterministic 32-bit generator, so a failing seed is reproducible.
@@ -971,6 +1021,28 @@ function executionFinishedEvent(sequence: number, executionId: string): RunEvent
     status: 'completed',
     data: {kind: 'agent_execution_finished', error: null},
   };
+}
+
+function phaseFinishedEvent(sequence: number, executionId: string): RunEvent {
+  return {
+    ...baseEvent(sequence, 'phase_finished'),
+    round_label: 'round-1',
+    execution_id: executionId,
+    status: 'completed',
+    data: {kind: 'phase', phase: 'implementer', attempt: null},
+  };
+}
+
+function legacyExecutionEvent(
+  sequence: number,
+  type: 'agent_execution_started' | 'agent_execution_finished',
+): RunEvent {
+  const event =
+    type === 'agent_execution_started'
+      ? executionStartedEvent(sequence, 'discarded')
+      : executionFinishedEvent(sequence, 'discarded');
+  const {execution_id: _discarded, ...legacy} = event;
+  return legacy;
 }
 
 function threadCreatedEvent(sequence: number, threadId: string): RunEvent {
