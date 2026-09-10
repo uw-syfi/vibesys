@@ -307,6 +307,29 @@ class TestDockerInitCommands:
         assert apt_steps
         assert all("apt retry $i" in step for step in apt_steps)
 
+    def test_runs_a_shared_step_once_when_the_recipe_already_has_it(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        fake_profiles.install(
+            monkeypatch,
+            {
+                "fixture": fake_profiles.profile(
+                    "fixture",
+                    container_install=(
+                        "apt-get update && apt-get install -y --no-install-recommends "
+                        "curl ca-certificates",
+                        "install-the-cli",
+                    ),
+                )
+            },
+        )
+
+        commands = cli_docker.docker_init_commands("fixture")
+
+        assert len(commands) == len(set(commands))
+        assert commands[1] == "install-the-cli"
+
     def test_pins_an_unpinned_codex_cli_install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         fake_profiles.install(
             monkeypatch,

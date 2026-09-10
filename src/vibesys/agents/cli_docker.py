@@ -157,7 +157,10 @@ def docker_init_commands(provider: str) -> list[str]:
         _pin_codex_cli(_PROFILE_STEP_OVERRIDES.get(step, step))
         for step in provider_profiles.provider_profile(provider).container_install
     ]
-    return [*recipe, *_COMMON_DOCKER_TOOLING_INSTALL]
+    # A recipe whose bootstrap was replaced by a VibeSys step already contains
+    # that step; running it twice is harmless but hides what the recipe does.
+    tail = [step for step in _COMMON_DOCKER_TOOLING_INSTALL if step not in recipe]
+    return [*recipe, *tail]
 
 
 @dataclass(frozen=True)
