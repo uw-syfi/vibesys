@@ -162,6 +162,31 @@ class TestOnThinkingChannel:
         assert chunk.content == "[codex stderr] permission denied"
 
 
+class TestOnDiagnostic:
+    """The explicit hook a driver-marked event routes to."""
+
+    @staticmethod
+    def _chunks(text: str) -> list[AgentOutputChunkData]:
+        seen = []
+        unsubscribe = output_sink().subscribe(seen.append)
+        try:
+            AgentLogger().on_diagnostic(text)
+        finally:
+            unsubscribe()
+        return [event.data for event in seen if isinstance(event.data, AgentOutputChunkData)]
+
+    def test_text_publishes_verbatim_on_the_diagnostic_channel(self) -> None:
+        chunks = self._chunks("agentshim: restarting the provider process")
+
+        assert [chunk.channel for chunk in chunks] == ["diagnostic"]
+        # Nothing inspects the text: the caller already classified it, so a
+        # diagnostic that carries no lifecycle marker still lands here.
+        assert [chunk.content for chunk in chunks] == ["agentshim: restarting the provider process"]
+
+    def test_empty_text_publishes_nothing(self) -> None:
+        assert self._chunks("") == []
+
+
 class TestOnToolStart:
     def test_is_noop(self, capsys):  # noqa: ANN001, ANN201  # tracked: #288
         logger = AgentLogger()

@@ -88,7 +88,10 @@ class _LoggerObserver:
 
         self._logger.end_text()
         if event.kind is AgentEventKind.THINKING:
-            self._logger.on_thinking(event.text or "")
+            if event.payload.get("channel") == "diagnostic":
+                self._logger.on_diagnostic(event.text or "")
+            else:
+                self._logger.on_thinking(event.text or "")
         elif event.kind is AgentEventKind.TOOL_CALL:
             tool = str(event.payload.get("tool", "unknown"))
             args = event.payload.get("args")

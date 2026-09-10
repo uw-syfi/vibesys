@@ -98,7 +98,15 @@ class AgentUsage:
 
 @dataclass(frozen=True, slots=True)
 class AgentEvent:
-    """One normalized event emitted while an agent turn is running."""
+    """One normalized event emitted while an agent turn is running.
+
+    A ``THINKING`` event carrying ``payload={"channel": "diagnostic"}`` is
+    driver plumbing (a provider heartbeat, a stderr line, a thread or turn
+    marker), not the agent's reasoning. Consumers route it to the diagnostic
+    channel so a transcript never presents plumbing as chain of thought. A
+    driver that has no separate diagnostic stream marks such events itself;
+    every other ``THINKING`` event is agent reasoning.
+    """
 
     kind: AgentEventKind
     text: str | None = None

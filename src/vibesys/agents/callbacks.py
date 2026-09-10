@@ -457,10 +457,27 @@ class AgentLogger(BaseCallbackHandler):
         if not text:
             return
         status = self._status()
+        # Superseded by the ``payload={"channel": "diagnostic"}`` convention on
+        # ``AgentEvent``: a driver that knows an event is plumbing marks it, and
+        # the observer calls ``on_diagnostic`` instead. This text match stays
+        # only until the AgentShim driver emits the marker itself.
         channel: AgentOutputChannel = (
             "diagnostic" if _DRIVER_LIFECYCLE_RE.match(text) else "analysis"
         )
         self._publish(text, channel, status=status)
+        self._log_line(f"{format_status_prefix(status)}{text}")
+
+    def on_diagnostic(self, text: str) -> None:
+        """Publish driver plumbing on the diagnostic channel.
+
+        The caller has already classified ``text`` as plumbing rather than
+        agent reasoning, so nothing here inspects it. The text is published
+        verbatim; only the channel differs from :meth:`on_thinking`.
+        """
+        if not text:
+            return
+        status = self._status()
+        self._publish(text, "diagnostic", status=status)
         self._log_line(f"{format_status_prefix(status)}{text}")
 
     def on_tool_call(self, tool: str, args: dict[str, Any] | str | None = None) -> None:  # noqa: D102  # tracked: #288

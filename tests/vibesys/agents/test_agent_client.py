@@ -302,6 +302,44 @@ def test_invoke_closes_text_before_tool_event(tmp_path: Path) -> None:
     ]
 
 
+def test_thinking_payload_channel_routes_to_the_diagnostic_channel(tmp_path: Path) -> None:
+    session = _FakeSession(
+        results=[AgentTurnResult("Done")],
+        events=[
+            AgentEvent(AgentEventKind.THINKING, text="the hot path is the ring buffer"),
+            AgentEvent(
+                AgentEventKind.THINKING,
+                text="restarting the provider process",
+                payload={"channel": "diagnostic"},
+            ),
+        ],
+    )
+    client = AgentClient(_FakeDriver([session]))
+    seen = []
+    unsubscribe = output_sink().subscribe(seen.append)
+    try:
+        client.invoke_text(
+            kind="implementer",
+            workspace=tmp_path,
+            system_prompt="system",
+            user_prompt="user",
+            round_label="round-1",
+        )
+    finally:
+        unsubscribe()
+
+    # The marked event is plumbing regardless of its wording; the unmarked one
+    # is the agent's own reasoning.
+    assert [
+        (event.data.channel, event.data.content)
+        for event in seen
+        if isinstance(event.data, AgentOutputChunkData) and event.agent_kind == "implementer"
+    ] == [
+        ("analysis", "the hot path is the ring buffer"),
+        ("diagnostic", "restarting the provider process"),
+    ]
+
+
 def test_invoke_closes_streamed_text_before_reporting_error(tmp_path: Path) -> None:
     session = _FakeSession(
         results=[],
