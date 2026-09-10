@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import threading
+import time
 from typing import TYPE_CHECKING
 
 import pytest
@@ -417,6 +418,7 @@ class TestCodexRolloutWatchdog:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """The watchdog killed the run, so the signal it caused is not the answer."""
         inner = _StalledExecutor(stdout=[])
         logs: list[str] = []
         executor = _impatient(
@@ -443,6 +445,75 @@ class TestCodexRolloutWatchdog:
         assert result.returncode == 0
         assert len(logs) == 1
         assert "never exited" in logs[0]
+
+    def test_a_run_that_ended_on_its_own_keeps_its_exit_code(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``pgrep`` finding no codex is not evidence the turn succeeded.
+
+        A Codex that crashed leaves ``pgrep`` nothing to find either, and its
+        ``docker exec`` then ends on its own carrying the failure's exit code.
+        The watchdog clears an exit code only when it caused one, so a crashed
+        turn is not reported as a successful one.
+        """
+        inner = _StalledExecutor(stdout=[], returncode=2)
+        logs: list[str] = []
+        executor = _impatient(
+            CodexRolloutWatchdogExecutor(inner, lambda: "container-123", log=logs.append)
+        )
+        monkeypatch.setattr(
+            executor,
+            "_read_codex_rollout_completion",
+            lambda _container, _thread: None,
+        )
+
+        def crashed(_container: str, _binary: str) -> bool:
+            # The CLI died and its `docker exec` is already unwinding: release
+            # the inner run, then answer the liveness probe. By the time the
+            # watchdog acts on the answer the run has returned on its own.
+            inner.released.set()
+            time.sleep(0.05)
+            return False
+
+        monkeypatch.setattr(executor, "_codex_process_alive", crashed)
+
+        result = executor.run(
+            _request(argv=["codex", "exec", "resume", THREAD_ID, "-", "--json"]),
+            _sink(),
+        )
+
+        assert result.returncode == 2
+        assert inner.handle is not None
+        assert not inner.handle.killed
+        assert logs == []
+
+    def test_a_recovered_completion_clears_the_exit_code_the_kill_caused(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The rollout proves the turn finished, whatever signal stopped the shell."""
+        completion = _CodexRolloutCompletion(fingerprint="ts", message="done")
+        inner = _StalledExecutor(stdout=[], returncode=-15)
+        executor = _impatient(CodexRolloutWatchdogExecutor(inner, lambda: "container-123"))
+
+        monkeypatch.setattr(
+            "vibesys.agents.docker_executor.subprocess.run",
+            lambda cmd, **_kwargs: subprocess.CompletedProcess(cmd, 0, "24190\n", ""),
+        )
+        monkeypatch.setattr(
+            executor,
+            "_read_codex_rollout_completion",
+            lambda _container, _thread: completion,
+        )
+
+        result = executor.run(
+            _request(argv=["codex", "exec", "resume", THREAD_ID, "-", "--json"]),
+            _sink(),
+        )
+
+        assert result.returncode == 0
+        assert "done" in result.stdout
 
 
 class TestCodexArgvRecognition:

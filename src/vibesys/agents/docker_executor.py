@@ -26,7 +26,7 @@ import re
 import subprocess
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from agentshim import (
@@ -200,28 +200,52 @@ for entry in os.listdir("/proc"):
 """
 
 
-def _no_lines() -> list[str]:
-    return []
-
-
-@dataclass
 class _WatchdogState:
-    """What the watchdog thread observed, shared with the calling thread."""
+    """What the watchdog thread observed, shared with the calling thread.
 
-    lock: threading.Lock = field(default_factory=threading.Lock)
-    stdout_lines: list[str] = field(default_factory=_no_lines)
-    recovered_completion: _CodexRolloutCompletion | None = None
-    stalled_after_exit: bool = False
+    Every field is written on the watchdog's helper thread and read on the
+    thread that called ``run``, so one lock guards all of them rather than the
+    stdout buffer alone.
+    """
+
+    def __init__(self) -> None:
+        """Start with nothing observed."""
+        self._lock = threading.Lock()
+        self._stdout_lines: list[str] = []
+        self._recovered_completion: _CodexRolloutCompletion | None = None
+        self._killed_by_watchdog = False
 
     def record(self, line: str) -> None:
         """Keep a stdout line so the watchdog can learn the thread ID from it."""
-        with self.lock:
-            self.stdout_lines.append(line)
+        with self._lock:
+            self._stdout_lines.append(line)
 
     def snapshot(self) -> list[str]:
         """Return a stable copy of the stdout seen so far."""
-        with self.lock:
-            return list(self.stdout_lines)
+        with self._lock:
+            return list(self._stdout_lines)
+
+    def recover(self, completion: _CodexRolloutCompletion) -> None:
+        """Record the terminal response read out of the rollout file."""
+        with self._lock:
+            self._recovered_completion = completion
+
+    def note_kill(self) -> None:
+        """Record that the watchdog, not the CLI, is what ended this run."""
+        with self._lock:
+            self._killed_by_watchdog = True
+
+    @property
+    def recovered_completion(self) -> _CodexRolloutCompletion | None:
+        """The rollout completion the watchdog recovered, if it recovered one."""
+        with self._lock:
+            return self._recovered_completion
+
+    @property
+    def killed_by_watchdog(self) -> bool:
+        """Whether the watchdog stopped the run rather than letting it end."""
+        with self._lock:
+            return self._killed_by_watchdog
 
 
 class _WatchdogSink:
@@ -335,7 +359,14 @@ class CodexRolloutWatchdogExecutor:
         state: _WatchdogState,
         sink: CommandStreamSink,
     ) -> CommandResult:
-        """Replay recovered output and clear the exit code the watchdog caused."""
+        """Replay recovered output and clear only an exit code the watchdog caused.
+
+        The exit code is cleared in exactly two cases: a rollout completion was
+        recovered, so the turn demonstrably finished; or the watchdog itself
+        stopped the run, so the code describes the watchdog's signal rather
+        than the CLI's answer. A run that ended on its own keeps its code,
+        including a Codex that crashed and left ``pgrep`` nothing to find.
+        """
         completion = state.recovered_completion
         if completion is not None:
             replayed = _forward_codex_completion(completion, sink)
@@ -349,7 +380,7 @@ class CodexRolloutWatchdogExecutor:
                 stdout=result.stdout + "".join(replayed),
                 stderr=result.stderr,
             )
-        if state.stalled_after_exit:
+        if state.killed_by_watchdog:
             self._log(
                 "codex rollout watchdog: the codex process is gone but its "
                 "`docker exec` never exited; stopped it and reporting the turn "
@@ -401,13 +432,20 @@ class CodexRolloutWatchdogExecutor:
                     fingerprint = completion.fingerprint
                     seen_at = now
                 elif seen_at is not None and now - seen_at >= self.completion_grace_seconds:
-                    state.recovered_completion = completion
+                    state.recover(completion)
                     _terminate_codex_resume(container_id, thread_id)
                     if not stopped.wait(self.termination_grace_seconds):
+                        state.note_kill()
                         handle.kill()
                     return
             if not self._codex_process_alive(container_id, child_binary):
-                state.stalled_after_exit = True
+                if stopped.is_set():
+                    # The `docker exec` returned while this tick was in
+                    # flight. Whatever code it carries is the run's own
+                    # answer, including a nonzero one from a Codex that
+                    # crashed; the watchdog has nothing to correct.
+                    return
+                state.note_kill()
                 handle.kill()
                 return
 
