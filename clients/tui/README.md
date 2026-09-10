@@ -262,11 +262,17 @@ the input still runs on its own Enter. `/theme <name>` re-themes every view in
 place without opening the list.
 
 `ui/theme.ts` is the only module holding color literals. A theme declares
-semantic roles — `canvas`, `surface`, `elevatedSurface`, `selectedSurface`;
-`textPrimary`, `textMuted`, `textSubtle`, `textStrong`; `border`,
-`borderStrong`, `borderFocus`; `accent`, `info`; `success`, `warning`, `error`;
-per-role conversation card colors; and Markdown/code colors. Views ask for a
-role and never for a color.
+semantic roles — `canvas`, `surface`, `selectedSurface`; `textPrimary`,
+`textMuted`, `textSubtle`, `textStrong`; `border`, `borderStrong`,
+`borderFocus`; `accent`, `info`; `success`, `warning`, `error`; per-role
+conversation card colors; and Markdown/code colors. Views ask for a role and
+never for a color.
+
+`canvas` is the only background the UI paints: every pane, modal, the header,
+the error banner and the composer fill with it, and a box is told from the page
+by its border rather than by a shade of its own. The other two fills name a
+state and not a depth — `selectedSurface` is what the cursor is on, and
+`surface` backs a code block, which has no border to delimit it.
 
 Adding a theme means adding one `ThemeSpec`: a semantic core plus one accent
 per conversation role. Card fills, labels, body text, the tool-call band, and

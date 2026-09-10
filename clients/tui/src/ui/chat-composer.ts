@@ -171,7 +171,7 @@ export class ChatComposerView {
       // it shows through between the rows.
       borderStyle: 'single',
       borderColor: theme.border,
-      backgroundColor: theme.elevatedSurface,
+      backgroundColor: theme.canvas,
       paddingLeft: 1,
       paddingRight: 1,
     });
@@ -352,7 +352,7 @@ export class ChatComposerView {
     this.#editor.focusedTextColor = theme.textStrong;
     this.#hint.fg = theme.textSubtle;
     this.menu.borderColor = theme.border;
-    this.menu.backgroundColor = theme.elevatedSurface;
+    this.menu.backgroundColor = theme.canvas;
     this.#menuList.fg = theme.textPrimary;
   }
 

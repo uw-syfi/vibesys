@@ -26,7 +26,7 @@ import {hasRunEnded} from '@vibesys/core-state';
 import {runStatusLabel, type SessionState} from '../session-model.js';
 import {agentKindText, describePhase, phaseText} from './phase-label.js';
 import {displayWidth, truncateToWidth} from './text-width.js';
-import {ensureContrast, SUBTLE_TEXT_MIN_CONTRAST, type Theme} from './theme.js';
+import type {Theme} from './theme.js';
 
 /** Separator between header segments, matching the rest of the interface. */
 const SEPARATOR = ' · ';
@@ -271,17 +271,19 @@ export function renderHeader(state: SessionState, showLog: boolean, width: numbe
  * The surface the header paints, and therefore the surface its text is read
  * against.
  *
- * One definition for both: `app.ts` fills the frame with it and
- * `headerSpanStyle` derives every tone against it. Two independent statements
- * of where the header sits is how the contrast guarantee below comes to be
- * measured against a background nothing draws.
+ * One definition for both: `app.ts` fills the frame with it and the tones below
+ * are held against it. Two independent statements of where the header sits is
+ * how a contrast guarantee comes to be measured against a background nothing
+ * draws.
  *
- * `elevatedSurface` because the header is a pane, and that is the surface every
- * other pane sits on. Which shade that is belongs to the theme: #574 is open on
- * the ladder being inverted, and moving it there moves the header with it.
+ * `canvas`, because that is the only background the theme has (#574). This
+ * returned `elevatedSurface` until then. The cells the header paints have not
+ * changed colour: the collapse kept the value the panes and the header already
+ * used and brought `canvas` down to meet it. What changed is that the header
+ * now matches everything around it and not only the other panes.
  */
 export function headerBackground(theme: Theme): string {
-  return theme.elevatedSurface;
+  return theme.canvas;
 }
 
 /**
@@ -295,40 +297,32 @@ export function headerBackground(theme: Theme): string {
  * metadata and recede to muted. The separators recede further still: dots
  * divide the words without competing with them.
  *
- * Every colour comes from the theme, which holds each of these tokens to
- * `minContrast` against the canvas. The header does not sit on the canvas, so
- * that guarantee is not the one it needs, and each tone is put back through
- * `ensureContrast` against the surface the header actually paints. In all eight
- * built-in themes that is a no-op, because their elevated surface is further
- * from mid grey than their canvas in every case. It is a no-op the header
- * cannot assume: a theme, or #574 moving the ladder, can make the two
- * disagree, and a tone that clears 4.5:1 on a background nothing draws is not
- * a readable header.
+ * Every colour comes from the theme as `buildTheme` made it, which is enough
+ * because the header paints the canvas and `buildTheme` holds each of these
+ * tokens to `minContrast` against exactly that. Each tone used to be put back
+ * through `ensureContrast` here; that pass existed only to cross from the
+ * canvas to a second surface, and since #574 there is no second surface to
+ * cross to.
  *
  * `textSubtle` is the exception the theme itself makes, at a floor of 3 rather
  * than 4.5 or 7, which is why only the punctuation is drawn in it and every
  * word clears the full floor.
  */
 export function headerSpanStyle(theme: Theme, span: HeaderSpan): HeaderSpanStyle {
-  const surface = headerBackground(theme);
-  const readable = (color: string): string => ensureContrast(color, surface, theme.minContrast);
   switch (span.role) {
     case 'brand':
-      return {fg: readable(theme.accent), bold: true};
+      return {fg: theme.accent, bold: true};
     case 'state':
-      return {fg: readable(stateColor(theme, span.text)), bold: true};
+      return {fg: stateColor(theme, span.text), bold: true};
     case 'phase':
     case 'title':
-      return {fg: readable(theme.textPrimary), bold: false};
+      return {fg: theme.textPrimary, bold: false};
     case 'usage':
     case 'selection':
     case 'hint':
-      return {fg: readable(theme.textMuted), bold: false};
+      return {fg: theme.textMuted, bold: false};
     case 'separator':
-      return {
-        fg: ensureContrast(theme.textSubtle, surface, SUBTLE_TEXT_MIN_CONTRAST),
-        bold: false,
-      };
+      return {fg: theme.textSubtle, bold: false};
   }
 }
 

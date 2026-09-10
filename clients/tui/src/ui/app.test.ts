@@ -2506,7 +2506,7 @@ describe('theming', () => {
     expect(spanColors(testRenderer, 'implementer')?.fg).toBe(light.conversation.assistant.label);
   });
 
-  it('keeps the dark baseline identical to the pre-theme palette', async () => {
+  it('keeps the dark baseline identical to the pre-theme palette, background aside', async () => {
     const testRenderer = await createTestRenderer({width: 90, height: 20});
     const controller = new FakeController({
       ...initialSessionState(),
@@ -2523,10 +2523,43 @@ describe('theming', () => {
     expect(spanColors(testRenderer, 'VibeSys')?.fg).toBe('#22d3ee');
     const body = spanColors(testRenderer, 'themed body text');
     expect(body?.fg).toBe('#e2e8f0');
-    // No card fill: the role lives on the top-edge divider rule, so a card
-    // body is the canvas.
-    expect(body?.bg).toBe('#0f172a');
+    // Both changes land on this one cell. #565 removed the card's fill, so the
+    // body reports whatever is behind it, and #574 collapsed the palette, so
+    // what is behind it is the one universal background rather than the old
+    // lighter `canvas`. Neither value either change asserted on its own
+    // survives: not `#0f172a` (the canvas before the collapse) and not
+    // `#03192d` (a role tint the card no longer paints).
+    expect(body?.bg).toBe('#020617');
     expect(spanColors(testRenderer, 'implementer')?.fg).toBe('#5cb6cc');
+  });
+
+  it('gives the key-help line the same background as the chrome above it', async () => {
+    // #574's second symptom, and the one visible without comparing two panes:
+    // the key-help line sets no background of its own, so it fell through to
+    // the root frame. The root was painted `canvas` while every pane and the
+    // header were painted the darker `elevatedSurface`, which left a pale rule
+    // across the bottom of the screen under a dark theme. With one background
+    // there is nothing left to fall through to that disagrees.
+    //
+    // Asserted against the header's own cells rather than a literal, because
+    // the symptom is that two rows disagree; that stays the property being
+    // checked if the palette moves again.
+    const testRenderer = await createTestRenderer({width: 150, height: 40});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      core: {
+        ...initialSessionState().core,
+        status: 'running',
+        transcript: [assistantEntry],
+      },
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('F4: zoom'));
+
+    const help = spanColors(testRenderer, 'F4: zoom');
+    expect(help?.bg).toBe(spanColors(testRenderer, 'VibeSys')?.bg);
+    expect(help?.bg).toBe(resolveTheme('dark').canvas);
   });
 
   it('repaints live when the selected theme changes', async () => {
@@ -5609,7 +5642,11 @@ describe('modal scrim', () => {
 
     const floor = themeName.startsWith('high-contrast') ? 7 : 4.5;
     const modalBody = requireSpanColors(testRenderer, 'Available commands');
-    expect(modalBody).toEqual({fg: theme.textPrimary, bg: theme.elevatedSurface});
+    // The modal keeps a fill and squares its border (#642), and that fill is
+    // now the one background the theme has (#574), so this reads `canvas`
+    // where it used to read the separate elevated surface. The property is
+    // unchanged: the modal is the one surface the scrim does not paint over.
+    expect(modalBody).toEqual({fg: theme.textPrimary, bg: theme.canvas});
     expect(contrastRatio(modalBody.fg, modalBody.bg)).toBeGreaterThanOrEqual(floor);
     // Background text recedes below the floor the theme guarantees, and stays
     // above the point where the run behind the modal would be erased.

@@ -36,7 +36,7 @@ export class ThemePickerView {
       // opaque over whatever it covers.
       borderStyle: 'single',
       borderColor: theme.info,
-      backgroundColor: theme.elevatedSurface,
+      backgroundColor: theme.canvas,
       title: ' Themes ',
       visible: false,
       zIndex: 30,
@@ -46,7 +46,7 @@ export class ThemePickerView {
   applyTheme(theme: Theme): void {
     this.#theme = theme;
     this.output.borderColor = theme.info;
-    this.output.backgroundColor = theme.elevatedSurface;
+    this.output.backgroundColor = theme.canvas;
     // Rows carry theme colors, so they are rebuilt on the next render.
     this.#renderedSelection = null;
     this.#renderedActive = null;
@@ -78,7 +78,7 @@ export class ThemePickerView {
         new TextRenderable(this.renderer, {
           content: `${marker} ${theme.name.padEnd(NAME_WIDTH)} ${theme.label} (${theme.appearance})${suffix}`,
           fg: selected ? this.#theme.textStrong : this.#theme.textPrimary,
-          bg: selected ? this.#theme.selectedSurface : this.#theme.elevatedSurface,
+          bg: selected ? this.#theme.selectedSurface : this.#theme.canvas,
           width: '100%',
         }),
       );
