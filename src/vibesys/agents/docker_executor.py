@@ -4,8 +4,8 @@ Three pieces live here:
 
 * :class:`DockerCommandExecutor` -- a ``docker exec`` transport built on the
   library's ``TransformingExecutor``. It carries no provider knowledge: it
-  rewrites argv, decides which environment entries cross into the container,
-  and lets agentshim own everything else.
+  rewrites argv, forwards the environment entries its caller nominated, and
+  lets agentshim own everything else.
 * :func:`repair_workspace_ownership` -- returns bind-mounted workspace files to
   the host user after a container turn.
 * :class:`CodexRolloutWatchdogExecutor` -- provider-behaviour compensation, not
@@ -74,21 +74,42 @@ class DockerCommandExecutor(TransformingExecutor):
         container_id_resolver: Callable[[], str],
         *,
         workdir: str = DEFAULT_CONTAINER_WORKDIR,
+        forward_env: Sequence[str] = (),
         inner: CommandExecutor | None = None,
     ) -> None:
-        """Wrap *inner* (the local host by default) in ``docker exec``."""
+        """Wrap *inner* (the local host by default) in ``docker exec``.
+
+        *forward_env* names the environment variables that cross into the
+        container; their values are read from each request, so a per-turn
+        override still takes effect. Everything else stays outside.
+        """
         self._container_id_resolver = container_id_resolver
         self._workdir = workdir
+        self._forward_env = tuple(forward_env)
         super().__init__(
             inner if inner is not None else HostCommandExecutor(),
             self._to_docker_exec,
             find_binary=_binary_in_container,
         )
 
+    def _forwarded_env(self, env: Mapping[str, str]) -> dict[str, str]:
+        """Return the request environment entries that belong in the container.
+
+        A container starts from its image's environment, not the host's. The
+        environment agentshim assembles for a turn describes the *host*
+        (``PATH``, ``HOME``, interpreter and toolchain locations, whatever a
+        login shell exports), so forwarding entries by inspection would point
+        the container CLI at directories that do not exist inside it and could
+        smuggle host settings such as a model override past the container's own
+        configuration. The caller that knows which variables are meant for the
+        container names them instead.
+        """
+        return {key: env[key] for key in self._forward_env if key in env}
+
     def _to_docker_exec(self, request: CommandRequest) -> CommandRequest:
         """Rewrite one request into the equivalent ``docker exec`` invocation."""
         argv: list[str] = ["docker", "exec", "-i", "-w", request.cwd or self._workdir]
-        for key, value in _forwarded_env(request.env).items():
+        for key, value in self._forwarded_env(request.env).items():
             argv += ["-e", f"{key}={value}"]
         argv.append(self._container_id_resolver())
         argv.extend(request.argv)
@@ -102,22 +123,6 @@ class DockerCommandExecutor(TransformingExecutor):
             env=os.environ,
             timeout=request.timeout,
         )
-
-
-def _forwarded_env(env: Mapping[str, str]) -> dict[str, str]:
-    """Return the request environment entries that belong inside the container.
-
-    A container starts from its image's environment, not the host's. The agent
-    environment agentshim assembles describes the *host* (``PATH``, ``HOME``,
-    interpreter and toolchain locations), and forwarding it wholesale would
-    point the container CLI at paths that do not exist there.
-
-    The rule is therefore: forward every entry whose value differs from this
-    process's environment. What survives is exactly what a caller layered on
-    top of ``interactive_env()`` -- the session environment overlay and the
-    provider auth passthrough -- while the shared host environment stays out.
-    """
-    return {key: value for key, value in env.items() if os.environ.get(key) != value}
 
 
 def repair_workspace_ownership(container_id: str, *, uid: int, gid: int) -> None:

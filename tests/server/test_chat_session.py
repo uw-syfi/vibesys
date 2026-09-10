@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
-import agentshim
 import pytest
 from agentshim.testing import FakeExecutor, FakeRun, scripted_turn
 
@@ -22,6 +21,8 @@ from vibesys.agents.session_key import AgentSessionKey, SessionScope
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+
+    import agentshim
 
 _SHARED_STATE_DIR = "/state/server/chat"
 _FULL_PROMPT = experiment_chat_system_prompt(_SHARED_STATE_DIR, _SHARED_STATE_DIR)
@@ -182,10 +183,6 @@ def _prompts(fake: FakeExecutor) -> list[str]:
     return [request.stdin or "" for request in fake.requests]
 
 
-@pytest.mark.skipif(
-    "codex" not in agentshim.provider_names(),
-    reason="codex provider not yet in the library snapshot",
-)
 def test_codex_thread_renewal_puts_the_read_only_rules_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

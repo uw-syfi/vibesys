@@ -118,19 +118,6 @@ def build_host_executor(sandbox: WorkspaceSandbox | None) -> agentshim.CommandEx
     return host if sandbox is None else confine_to_sandbox(host, sandbox)
 
 
-def _shipped_profile(provider: str) -> agentshim.ProviderProfile | None:
-    """Return the library profile for *provider*, or ``None`` if it has none yet.
-
-    :func:`supported_providers` names the CLIs VibeSys ships; the installed
-    library carries the ones that have been ported. A provider the library
-    does not carry cannot create a session at all, so a capability query about
-    it answers from the invariant set rather than raising during preflight.
-    """
-    if provider not in agentshim.provider_names():
-        return None
-    return agentshim.get_provider(provider).profile
-
-
 def _resolve_binary_path(binary: str, env: Mapping[str, str]) -> str | None:
     """Locate *binary* for the host resource declaration, or ``None`` if absent.
 
@@ -160,6 +147,37 @@ def _as_mcp_server(spec: MCPServerSpec, *, in_container: bool) -> agentshim.Stdi
         command=command,
         args=tuple(spec.args),
         env=dict(spec.env),
+    )
+
+
+def _reject_unsupported_container_mcp(
+    spec: AgentSessionSpec,
+    profile: agentshim.ProviderProfile,
+) -> None:
+    """Refuse a containerized session whose MCP servers could not be installed.
+
+    A provider that discovers MCP servers from a config file needs a directory
+    to write it into, and agentshim derives that directory from the turn's
+    ``cwd``. A containerized turn names no ``cwd``: the ``docker exec``
+    transport supplies the container-side working directory itself, so the
+    library sees ``None`` and ``install_mcp`` raises part-way through the first
+    turn. Fail here instead, before the session exists, with a message that
+    names the provider, the servers, and the way out.
+
+    The library gap is being closed by a ``TurnRequest.mcp_workspace`` field
+    that lets a container turn name the workspace path the config belongs in
+    without claiming it as the process working directory. Delete this check
+    once VibeSys depends on a release that carries it.
+    """
+    if not spec.mcp_servers or profile.mcp is not agentshim.McpMechanism.CONFIG_FILE:
+        return
+    names = ", ".join(server.name for server in spec.mcp_servers)
+    raise agentshim.ProviderCapabilityError(  # noqa: TRY003  # tracked: #288
+        f"{profile.name} discovers MCP servers from a config file in the turn's "
+        f"working directory, and a containerized turn has none, so the session MCP "
+        f"servers requested for role {spec.role!r} ({names}) cannot be installed. "
+        f"Run this role on the host, or choose a provider that passes MCP servers "
+        f"on the command line."
     )
 
 
@@ -260,10 +278,15 @@ class _AgentShimEventHandler:
             observer.on_event(translated)
 
 
-class _ContainerWorkspace(Protocol):
-    """The container-side cleanup a container session owns."""
+class _ContainerCleanup(Protocol):
+    """The container-side cleanup a container session owns.
 
-    def repair_workspace_ownership(self, *, uid: int, gid: int) -> None:
+    The driver binds this to
+    :func:`vibesys.agents.docker_executor.repair_workspace_ownership` for the
+    session's container; the session only knows there is one to run.
+    """
+
+    def __call__(self) -> None:
         """Return bind-mounted workspace files to the host user."""
         ...
 
@@ -280,7 +303,7 @@ class AgentShimSession:
         timeout: int | None,
         event_handler: _AgentShimEventHandler,
         turn_env: Mapping[str, str] | None,
-        container_workspace: _ContainerWorkspace | None,
+        container_cleanup: _ContainerCleanup | None,
         log: Callable[[str], None],
     ) -> None:
         """Bind one library session to the VibeSys policy that drives it."""
@@ -290,7 +313,7 @@ class AgentShimSession:
         self._timeout = timeout
         self._event_handler = event_handler
         self._turn_env = dict(turn_env) if turn_env else None
-        self._container_workspace = container_workspace
+        self._container_cleanup = container_cleanup
         self._log = log
         self._mcp_servers = tuple(
             _as_mcp_server(server, in_container=self._in_container) for server in spec.mcp_servers
@@ -308,7 +331,7 @@ class AgentShimSession:
         The container-side cleanup hook is the one thing only a container
         session owns, so its presence is what the mode is read from.
         """
-        return self._container_workspace is not None
+        return self._container_cleanup is not None
 
     def run_turn(
         self,
@@ -500,9 +523,9 @@ class AgentShimSession:
         return True
 
     def _repair_workspace_ownership(self) -> None:
-        if self._container_workspace is None:
+        if self._container_cleanup is None:
             return
-        self._container_workspace.repair_workspace_ownership(uid=os.getuid(), gid=os.getgid())
+        self._container_cleanup()
 
 
 def _result_text(result: agentshim.TurnResult) -> str:
@@ -554,15 +577,12 @@ class AgentShimDriver:
     @property
     def capabilities(self) -> AgentCapabilities:
         """Describe the policy and lifecycle features this driver enforces."""
-        profile = _shipped_profile(self._provider)
         return replace(
             AGENTSHIM_CAPABILITIES,
             host_path_grants=self._docker_sandboxes is None,
             container_execution=self._docker_sandboxes is not None,
             provider_session_resume=(
-                profile.supports_resume
-                if profile is not None
-                else AGENTSHIM_CAPABILITIES.provider_session_resume
+                agentshim.get_provider(self._provider).profile.supports_resume
             ),
         )
 
@@ -584,13 +604,13 @@ class AgentShimDriver:
         provider = agentshim.get_provider(spec.provider)
         event_handler = _AgentShimEventHandler()
         overlay = dict(spec.environment)
-        container_workspace: _ContainerWorkspace | None = None
+        container_cleanup: _ContainerCleanup | None = None
         turn_env: Mapping[str, str] | None = None
         executor: agentshim.CommandExecutor
         if in_container:
-            container_executor = self._container_executor(spec)
-            executor = container_executor
-            container_workspace = container_executor
+            _reject_unsupported_container_mcp(spec, provider.profile)
+            executor = self._container_executor(spec, forward_env=tuple(overlay))
+            container_cleanup = self._container_cleanup(spec)
             # The container's own environment is built by the image and the
             # exec invocation; the session overlay is forwarded per turn so it
             # reaches the CLI inside the container instead of the docker client.
@@ -620,7 +640,7 @@ class AgentShimDriver:
             timeout=self._timeout,
             event_handler=event_handler,
             turn_env=turn_env,
-            container_workspace=container_workspace,
+            container_cleanup=container_cleanup,
             log=self._log,
         )
         self._sessions.add(session)
@@ -647,22 +667,61 @@ class AgentShimDriver:
             require_enforcement=spec.policy.require_enforcement,
         )
 
-    def _container_executor(self, spec: AgentSessionSpec) -> Any:  # noqa: ANN401  # tracked: #288
+    def _container_id_resolver(self, spec: AgentSessionSpec) -> Callable[[], str]:
+        """Return the sandbox's current container ID, read at every call.
+
+        Read through the sandbox rather than captured, because a GPU reselect
+        replaces the container and nothing should then have to rebuild the
+        executor or the cleanup hook.
+        """
         assert self._docker_sandboxes is not None  # noqa: S101  # tracked: #288
         sandbox = self._docker_sandboxes.get(spec.role)
         if sandbox is None:
             raise ValueError(  # noqa: TRY003  # tracked: #288
                 f"no AgentShim Docker sandbox configured for role {spec.role!r}"
             )
+        return lambda: str(sandbox.container_id)
+
+    def _container_executor(
+        self,
+        spec: AgentSessionSpec,
+        *,
+        forward_env: tuple[str, ...] = (),
+    ) -> agentshim.CommandExecutor:
+        """Build the ``docker exec`` transport this session's turns run through.
+
+        *forward_env* names the session-overlay variables that cross into the
+        container. Their values arrive per turn through ``TurnRequest.env``,
+        which is why the transport is told the names rather than the values.
+        """
+        resolve = self._container_id_resolver(spec)
         # Imported here because the Docker executor is only reachable in
         # container mode and pulls in the docker command plumbing with it.
-        from vibesys.agents.docker_executor import DockerCommandExecutor  # noqa: PLC0415
+        from vibesys.agents.docker_executor import (  # noqa: PLC0415
+            CodexRolloutWatchdogExecutor,
+            DockerCommandExecutor,
+        )
 
-        # Read through the sandbox on every command: a GPU reselect replaces
-        # the container, and nothing then has to mutate the executor. The
-        # resolver constructor arrives with the Docker executor's own rewrite
-        # onto the 0.6 executor protocol.
-        return DockerCommandExecutor(lambda: sandbox.container_id)  # ty: ignore[invalid-argument-type]
+        executor: agentshim.CommandExecutor = DockerCommandExecutor(
+            resolve, forward_env=forward_env
+        )
+        if self._provider == "codex":
+            # A resumed containerized `codex exec --json` regularly finishes
+            # its work and then never exits; the watchdog recovers the answer
+            # from the rollout file and stops the process. Provider-behaviour
+            # compensation, so it wraps the transport rather than replacing it.
+            executor = CodexRolloutWatchdogExecutor(executor, resolve, log=self._log)
+        return executor
+
+    def _container_cleanup(self, spec: AgentSessionSpec) -> _ContainerCleanup:
+        """Bind the module-level ownership repair to this session's container."""
+        resolve = self._container_id_resolver(spec)
+        from vibesys.agents.docker_executor import repair_workspace_ownership  # noqa: PLC0415
+
+        def repair() -> None:
+            repair_workspace_ownership(resolve(), uid=os.getuid(), gid=os.getgid())
+
+        return repair
 
     def close(self) -> None:
         """Close every session created by this driver, idempotently."""

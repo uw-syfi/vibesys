@@ -92,16 +92,24 @@ class TestDockerCommandExecutor:
             "container-123",
         ]
 
-    def test_forwards_only_environment_entries_that_differ_from_the_host(
+    def test_forwards_only_the_nominated_environment_entries(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """The host environment describes the host, not the container.
+
+        ``PATH`` and the rest of the turn environment name directories that do
+        not exist inside the image, so only the variables the caller nominated
+        cross the boundary.
+        """
         monkeypatch.setenv("PATH", "/host/bin")
-        monkeypatch.setenv("SHARED", "same")
-        monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
         inner = FakeExecutor(FakeRun())
 
-        DockerCommandExecutor(lambda: "container-123", inner=inner).run(
+        DockerCommandExecutor(
+            lambda: "container-123",
+            forward_env=("ANTHROPIC_AUTH_TOKEN", "VIBESYS_ROUND", "ABSENT"),
+            inner=inner,
+        ).run(
             _request(
                 env={
                     "PATH": "/host/bin",
@@ -115,9 +123,21 @@ class TestDockerCommandExecutor:
 
         argv = inner.requests[0].argv
         forwarded = [argv[index + 1] for index, part in enumerate(argv) if part == "-e"]
+        # A nominated variable the turn does not carry is simply absent; it is
+        # not forwarded as an empty value that would shadow the image's own.
         assert forwarded == ["ANTHROPIC_AUTH_TOKEN=token", "VIBESYS_ROUND=3"]
         # The docker CLI itself still runs with the host environment.
         assert inner.requests[0].env["PATH"] == "/host/bin"
+
+    def test_forwards_nothing_when_the_caller_nominated_nothing(self) -> None:
+        inner = FakeExecutor(FakeRun())
+
+        DockerCommandExecutor(lambda: "container-123", inner=inner).run(
+            _request(env={"PATH": "/host/bin", "VIBESYS_ROUND": "3"}),
+            _sink(),
+        )
+
+        assert "-e" not in inner.requests[0].argv
 
     def test_passes_stdin_through_untouched(self) -> None:
         inner = FakeExecutor(FakeRun())

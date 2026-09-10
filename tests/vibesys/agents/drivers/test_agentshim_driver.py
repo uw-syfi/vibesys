@@ -10,24 +10,22 @@ conversation is retired.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-import pytest
-
-
 import concurrent.futures
 import json
+import os
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import agentshim
 import pytest
 from agentshim.testing import FakeExecutor, FakeRun, TokenUsage, scripted_turn
 
+from vibesys.agents import docker_executor
 from vibesys.agents.contracts import (
     AgentEvent,
     AgentEventKind,
@@ -48,17 +46,34 @@ if TYPE_CHECKING:
 
     from vibesys.agents.contracts import AgentSession
 
-SCRIPTED_PROVIDERS = ("claude",)
-"""Providers whose stream format the installed library can script.
+SCRIPTED_PROVIDERS = ("claude", "codex", "gemini", "opencode")
+"""Every provider VibeSys ships, each scripted in its own stream format.
 
-Every provider VibeSys ships behaves the same way through the driver, so these
-cases are parametrized rather than written per provider.
+The driver treats them all the same way, so these cases are parametrized
+rather than written per provider. Where a provider's declared capabilities
+change what the driver should do, the expectation is read from
+``agentshim.get_provider(provider).profile`` instead of being branched on the
+provider name.
 """
 
-requires_codex = pytest.mark.skipif(
-    "codex" not in agentshim.provider_names(),
-    reason="codex provider not yet in the library snapshot",
-)
+CACHE_WRITE_PROVIDERS = ("claude", "opencode")
+"""Providers whose stream reports cache creation apart from cache reads.
+
+Codex and Gemini print one cached-token total, so no scripted turn can carry a
+separate cache-write count through them. The neutral usage contract keeps the
+two fields distinct regardless; these are the providers that can fill both.
+"""
+
+RESUME_FAILURE_STDERR = {
+    "claude": "no conversation found\n",
+    "codex": "thread/resume failed: no rollout found for thread id thread-1\n",
+}
+"""Providers whose CLI makes a refused resume distinguishable, and how.
+
+agentshim maps only these onto ``SessionResumeError``: Gemini and opencode
+report a refused resume exactly as they report any other startup failure, so
+the driver's retry cannot fire for them and nothing here pretends otherwise.
+"""
 
 
 @dataclass
@@ -166,7 +181,6 @@ def test_a_turn_reports_its_text_conversation_and_usage(
                 input_tokens=1200,
                 output_tokens=30,
                 cached_input_tokens=1000,
-                cache_write_input_tokens=200,
             ),
         ),
     )
@@ -176,13 +190,41 @@ def test_a_turn_reports_its_text_conversation_and_usage(
     assert result.text == "done"
     assert result.provider_session_id == "session-1"
     assert result.disposition is SessionDisposition.REUSABLE
-    # Cached tokens are part of the input total on every provider, and the two
-    # cache fields keep their separate meanings.
+    # Cached tokens are part of the input total on every provider.
     assert result.usage.input_tokens == 1200
     assert result.usage.output_tokens == 30
     assert result.usage.cache_read_input_tokens == 1000
-    assert result.usage.cache_creation_input_tokens == 200
     assert result.usage.duration_ms is not None
+
+
+@pytest.mark.parametrize("provider", CACHE_WRITE_PROVIDERS)
+def test_cache_creation_keeps_its_own_field(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """Writing the cache and reading it are separate costs, not one number."""
+    del sandbox_builds
+    session, _fake = _session(
+        tmp_path,
+        provider,
+        scripted_turn(
+            provider,
+            text="done",
+            usage=TokenUsage(
+                input_tokens=1200,
+                output_tokens=30,
+                cached_input_tokens=1000,
+                cache_write_input_tokens=200,
+            ),
+        ),
+    )
+
+    result = session.run_turn(AgentTurnRequest(message="Do it"))
+
+    assert result.usage.input_tokens == 1200
+    assert result.usage.cache_read_input_tokens == 1000
+    assert result.usage.cache_creation_input_tokens == 200
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
@@ -240,7 +282,10 @@ def test_the_reasoning_effort_reaches_a_provider_that_supports_it(
     session.run_turn(AgentTurnRequest(message="Do it"))
 
     profile = agentshim.get_provider(provider).profile
-    assert ("high" in fake.requests[-1].argv) is profile.supports_reasoning_effort
+    # Codex carries the level inside a ``--config`` assignment rather than as
+    # its own argument, so the whole command line is what is searched.
+    launched = " ".join(fake.requests[-1].argv)
+    assert ("high" in launched) is profile.supports_reasoning_effort
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
@@ -269,18 +314,23 @@ def test_the_turn_streams_neutral_events(
     assert kinds.index(AgentEventKind.TOOL_CALL) < kinds.index(AgentEventKind.TOOL_RESULT)
     assert kinds[-1] is AgentEventKind.USAGE
     call = observer.of_kind(AgentEventKind.TOOL_CALL)[0]
-    assert call.payload["tool"] == "shell"
+    # Each CLI names its own shell tool (Codex calls it ``execute``), so the
+    # neutral event carries whatever the provider reported; what has to
+    # survive translation is that a name and the arguments are both there.
+    assert call.payload["tool"]
     assert call.payload["args"] == {"command": "cargo test"}
     result = observer.of_kind(AgentEventKind.TOOL_RESULT)[0]
     assert result.text == "ok"
-    duration = result.payload["duration"]
-    assert result.payload["result_payload"] == CommandResultPayload(
-        stdout="ok",
-        stderr="",
-        exit_code=None,
-        duration=duration if isinstance(duration, float) else None,
-    )
-    # The flat fields remain for consumers that predate the typed payload.
+    # The flat fields remain for consumers that predate the typed payload, and
+    # the typed payload restates exactly them. Which of them a provider fills
+    # differs (only Codex reports the command's exit status), so the two views
+    # are compared against each other rather than against fixed values.
+    payload = result.payload["result_payload"]
+    assert isinstance(payload, CommandResultPayload)
+    assert payload.stdout == result.payload["stdout"]
+    assert payload.stderr == result.payload["stderr"]
+    assert payload.exit_code == result.payload["exit_code"]
+    assert payload.duration == result.payload["duration"]
     assert result.payload["stdout"] == "ok"
     assert result.payload["stderr"] == ""
 
@@ -466,6 +516,154 @@ def test_a_non_python_mcp_command_is_left_alone(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Container execution
+# ---------------------------------------------------------------------------
+
+
+def _container_driver(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    runs: FakeRun | Sequence[FakeRun] | Callable[[agentshim.CommandRequest], FakeRun],
+) -> tuple[subject.AgentShimDriver, FakeExecutor, list[tuple[str, int, int]]]:
+    """Build a container-mode driver whose ``docker`` client is the fake.
+
+    The Docker executor rewrites each request into a ``docker exec`` command
+    and hands it to a host executor; substituting that inner executor is what
+    lets the argv the container would have received be asserted directly.
+    """
+    fake = FakeExecutor(runs)
+    repairs: list[tuple[str, int, int]] = []
+
+    monkeypatch.setattr(docker_executor, "HostCommandExecutor", lambda: fake)
+    monkeypatch.setattr(
+        docker_executor,
+        "repair_workspace_ownership",
+        lambda container_id, *, uid, gid: repairs.append((container_id, uid, gid)),
+    )
+    driver = subject.AgentShimDriver(
+        provider=provider,
+        docker_sandboxes={"implementer": SimpleNamespace(container_id="container-1")},
+    )
+    return driver, fake, repairs
+
+
+def _container_spec(tmp_path: Path, provider: str, **changes: Any) -> AgentSessionSpec:  # noqa: ANN401
+    return _spec(
+        tmp_path,
+        provider=provider,
+        policy=AgentExecutionPolicy(containerized=True),
+        **changes,
+    )
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_container_turn_carries_the_session_environment_and_workdir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """The overlay reaches the CLI inside the container, not the docker client.
+
+    A container starts from its image's environment, so the session overlay has
+    to be handed to ``docker exec`` as ``-e`` flags; and the container turn
+    names no ``cwd`` of its own, so the executor supplies ``-w``.
+    """
+    driver, fake, _repairs = _container_driver(
+        monkeypatch, provider, scripted_turn(provider, text="ok")
+    )
+    session = driver.create_session(_container_spec(tmp_path, provider))
+
+    session.run_turn(AgentTurnRequest(message="Do it"))
+
+    argv = list(fake.requests[-1].argv)
+    assert argv[:3] == ["docker", "exec", "-i"]
+    assert argv[argv.index("-w") + 1] == docker_executor.DEFAULT_CONTAINER_WORKDIR
+    forwarded = [argv[index + 1] for index, item in enumerate(argv) if item == "-e"]
+    assert "GPU=0" in forwarded
+    # The host paths agentshim assembled for this process must not cross over:
+    # they name directories that do not exist inside the container.
+    assert not any(entry.startswith("PATH=") for entry in forwarded)
+    assert "container-1" in argv
+    assert argv[argv.index("container-1") + 1].endswith(
+        agentshim.get_provider(provider).profile.binary
+    )
+    # The turn's own working directory stays unset: `-w` is what carries it.
+    assert fake.requests[-1].cwd is None
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_container_turn_repairs_workspace_ownership_afterwards(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """CLI agents run as root in the container; the host user gets its files back."""
+    driver, _fake, repairs = _container_driver(
+        monkeypatch, provider, scripted_turn(provider, text="ok")
+    )
+    session = driver.create_session(_container_spec(tmp_path, provider))
+
+    session.run_turn(AgentTurnRequest(message="Do it"))
+
+    assert repairs == [("container-1", os.getuid(), os.getgid())]
+
+
+def test_a_container_codex_run_is_watched_for_a_stalled_resume(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A resumed containerized ``codex exec --json`` can finish without exiting."""
+    driver, _fake, _repairs = _container_driver(
+        monkeypatch, "codex", scripted_turn("codex", text="ok")
+    )
+    session = driver.create_session(_container_spec(tmp_path, "codex"))
+
+    assert isinstance(
+        driver._container_executor(_container_spec(tmp_path, "codex")),  # noqa: SLF001
+        docker_executor.CodexRolloutWatchdogExecutor,
+    )
+    session.close()
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_container_session_mcp_servers_are_refused_before_the_session_starts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """A config-file provider has nowhere to write its MCP config in a container.
+
+    Pending the library's ``TurnRequest.mcp_workspace`` field, the only honest
+    answer is to refuse, and to say which servers and which role were dropped
+    rather than failing part-way through the first turn.
+    """
+    driver, _fake, _repairs = _container_driver(
+        monkeypatch, provider, scripted_turn(provider, text="ok")
+    )
+    spec = _container_spec(
+        tmp_path,
+        provider,
+        mcp_servers=(MCPServerSpec(name="issues", command="python", args=("-m", "issues")),),
+    )
+    profile = agentshim.get_provider(provider).profile
+
+    if profile.mcp is not agentshim.McpMechanism.CONFIG_FILE:
+        # Codex passes its servers on the command line, so it needs no
+        # workspace and the container session is supported.
+        driver.create_session(spec).close()
+        return
+
+    with pytest.raises(agentshim.ProviderCapabilityError) as raised:
+        driver.create_session(spec)
+
+    message = str(raised.value)
+    assert provider in message
+    assert "issues" in message
+    assert "implementer" in message
+    assert "containerized" in message
+
+
+# ---------------------------------------------------------------------------
 # Structured output
 # ---------------------------------------------------------------------------
 
@@ -477,18 +675,32 @@ def test_a_native_schema_replaces_the_prompt_contract(
     provider: str,
 ) -> None:
     del sandbox_builds
+    profile = agentshim.get_provider(provider).profile
+    native = profile.output_schema is not agentshim.OutputSchemaStyle.NONE
     payload = {"analysis": "it improved", "verdict": "accept"}
+    logs: list[str] = []
     session, fake = _session(
         tmp_path,
         provider,
-        scripted_turn(provider, text="", structured_output=payload),
+        # A provider with no schema flag answers in prose, so the payload has
+        # to arrive as the message text instead of out of band.
+        scripted_turn(
+            provider,
+            text="" if native else json.dumps(payload),
+            structured_output=payload if native else None,
+        ),
+        log=logs.append,
     )
 
     result = session.run_turn(
         AgentTurnRequest(message="usr", instructions="sys", output_schema=JudgeResponse)
     )
 
-    assert "Schema for JudgeResponse" not in (fake.requests[-1].stdin or "")
+    # The prompt contract is the portable fallback: it appears exactly where
+    # the provider has no native schema of its own.
+    contract_in_prompt = "Schema for JudgeResponse" in (fake.requests[-1].stdin or "")
+    assert contract_in_prompt is not native
+    assert any("using prompt fallback" in message for message in logs) is not native
     # The caller parses the answer back into its response model, so the
     # schema-conformant payload is what the turn reports as its text.
     assert json.loads(result.text) == payload
@@ -514,7 +726,6 @@ def test_a_mapping_response_stays_native_where_the_dialect_allows_it(
     assert "Schema for ImplementerResponse" not in (fake.requests[-1].stdin or "")
 
 
-@requires_codex
 def test_a_mapping_response_falls_back_on_a_strict_provider(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
@@ -583,7 +794,15 @@ def test_a_plain_turn_carries_no_response_contract(
     result = session.run_turn(AgentTurnRequest(message="usr", instructions="sys"))
 
     assert result.text == "prose"
-    assert len(fake.requests[0].argv) > len(fake.requests[1].argv)
+    assert "Schema for JudgeResponse" not in (fake.requests[1].stdin or "")
+    # A native schema rides in argv and a fallback contract rides in the
+    # prompt, so which channel shrinks depends on the provider; neither may
+    # carry anything over into the plain turn.
+    profile = agentshim.get_provider(provider).profile
+    if profile.output_schema is agentshim.OutputSchemaStyle.NONE:
+        assert len(fake.requests[0].argv) == len(fake.requests[1].argv)
+    else:
+        assert len(fake.requests[0].argv) > len(fake.requests[1].argv)
 
 
 # ---------------------------------------------------------------------------
@@ -630,7 +849,7 @@ def test_a_checkpoint_is_adopted_only_while_no_conversation_is_live(
     assert "session-1" in fake.requests[1].argv
 
 
-@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+@pytest.mark.parametrize("provider", sorted(RESUME_FAILURE_STDERR))
 def test_a_failed_resume_retries_once_from_a_fresh_conversation(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
@@ -640,13 +859,14 @@ def test_a_failed_resume_retries_once_from_a_fresh_conversation(
     del sandbox_builds
 
     attempts: list[int] = []
+    refusal = RESUME_FAILURE_STDERR[provider]
 
     def run(request: agentshim.CommandRequest) -> FakeRun:
         attempts.append(len(attempts))
         if not attempts[:-1]:
             return scripted_turn(provider, text="ok", session_id="session-1")
         if "session-1" in request.argv:
-            return FakeRun(returncode=1, stderr=["no conversation found\n"])
+            return FakeRun(returncode=1, stderr=[refusal])
         return scripted_turn(provider, text="recovered", session_id="session-2")
 
     session, fake = _session(tmp_path, provider, run)
@@ -692,7 +912,6 @@ def test_a_turn_that_times_out_is_reported_as_a_subprocess_timeout(
     assert raised.value.timeout == 45
 
 
-@requires_codex
 def test_the_codex_thread_budget_retires_a_conversation(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
@@ -712,7 +931,6 @@ def test_the_codex_thread_budget_retires_a_conversation(
     assert second.provider_session_id == "thread-1"
 
 
-@requires_codex
 def test_a_heavy_codex_turn_retires_its_conversation(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
@@ -731,36 +949,6 @@ def test_a_heavy_codex_turn_retires_its_conversation(
 
     result = session.run_turn(AgentTurnRequest(message="one"))
 
-    assert result.disposition is SessionDisposition.RESET_REQUIRED
-
-
-@requires_codex
-def test_a_missing_codex_rollout_restarts_the_conversation(
-    sandbox_builds: list[dict[str, Any]],
-    tmp_path: Path,
-) -> None:
-    """Codex names the cause: the rollout the thread ID points at is gone."""
-    del sandbox_builds
-
-    attempts: list[int] = []
-
-    def run(request: agentshim.CommandRequest) -> FakeRun:
-        attempts.append(len(attempts))
-        if not attempts[:-1]:
-            return scripted_turn("codex", text="ok", session_id="thread-1")
-        if "thread-1" in request.argv:
-            return FakeRun(
-                returncode=1,
-                stderr=["thread/resume failed: no rollout found for thread id thread-1\n"],
-            )
-        return scripted_turn("codex", text="recovered", session_id="thread-2")
-
-    session, _fake = _session(tmp_path, "codex", run)
-    session.run_turn(AgentTurnRequest(message="one"))
-
-    result = session.run_turn(AgentTurnRequest(message="two"))
-
-    assert result.text == "recovered"
     assert result.disposition is SessionDisposition.RESET_REQUIRED
 
 
@@ -897,9 +1085,10 @@ def test_a_session_spec_for_another_provider_is_rejected(
     provider: str,
 ) -> None:
     driver, _fake = _driver(provider, scripted_turn(provider, text="ok"))
+    other = next(name for name in SCRIPTED_PROVIDERS if name != provider)
 
     with pytest.raises(ValueError, match="cannot create"):
-        driver.create_session(_spec(tmp_path, provider="gemini"))
+        driver.create_session(_spec(tmp_path, provider=other))
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
