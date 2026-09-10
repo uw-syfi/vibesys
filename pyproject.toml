@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "agentshim>=0.5.0",
+    "agentshim>=0.6.0",
     "cbor2<6",
     "cryptography<50",
     "deepagents",
@@ -302,3 +302,6 @@ members = ["sdk/*"]
 
 [tool.uv.sources]
 vs-bench = { workspace = true }
+# Local development override while agentshim 0.6 is unreleased; becomes a git
+# rev source, then the PyPI release, before this ships.
+agentshim = { path = "/mnt/data/shli/worktrees/agentshim-snapshot", editable = true }

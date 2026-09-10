@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+# the module-level skip below has to precede the imports it guards
+from typing import TYPE_CHECKING
+
+import pytest
+
+# Guarded so type checkers still see the module body: the names below are
+# imported by other test modules, and an unconditional skip makes a checker
+# infer every one of them as unreachable.
+if not TYPE_CHECKING:
+    pytest.skip("superseded by the 0.6 driver rewrite", allow_module_level=True)
+
 import concurrent.futures
 import json
 import threading
