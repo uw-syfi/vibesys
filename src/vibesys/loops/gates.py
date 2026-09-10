@@ -21,9 +21,12 @@ from vs_evaluator_protocol import (
     parse_records,
     read_measurement,
 )
+from vs_sandbox import SandboxExecutionResult
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from deepagents.backends.protocol import ExecuteResponse
 
 # Truncation lengths for gate failure output. All three values are defined
 # here so that the logged window, the agent-feedback window, and the record
@@ -99,7 +102,7 @@ def run_accuracy_gate(
             result = ctx.judge_backend.execute(command_to_execute, timeout=timeout_seconds)
         output = result.output.strip()
         passed = result.exit_code == 0
-        _publish_subprocess_output(ctx, process_id=process_id, content=result.output)
+        _publish_subprocess_output(ctx, process_id=process_id, result=result)
     except Exception as exc:  # noqa: BLE001  # tracked: #288
         output = f"accuracy command could not be executed: {exc}"
         passed = False
@@ -132,20 +135,25 @@ def _publish_subprocess_output(
     ctx: LoopContext,
     *,
     process_id: str,
-    content: str,
+    result: ExecuteResponse,
     process_kind: str = "accuracy_checker",
 ) -> None:
-    if not content:
-        return
-    ctx.events.emit(
-        CoreEventType.SUBPROCESS_OUTPUT,
-        data=SubprocessOutputData(
-            process_id=process_id,
-            process_kind=process_kind,
-            stream="stdout",
-            content=content,
-        ),
+    streams = (
+        (("stdout", result.stdout), ("stderr", result.stderr))
+        if isinstance(result, SandboxExecutionResult)
+        else (("stdout", result.output),)
     )
+    for stream, content in streams:
+        if content:
+            ctx.events.emit(
+                CoreEventType.SUBPROCESS_OUTPUT,
+                data=SubprocessOutputData(
+                    process_id=process_id,
+                    process_kind=process_kind,
+                    stream=stream,
+                    content=content,
+                ),
+            )
 
 
 FRAMEWORK_BENCHMARK_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
@@ -431,7 +439,7 @@ def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #28
             _publish_subprocess_output(
                 ctx,
                 process_id=process_id,
-                content=result.output,
+                result=result,
                 process_kind="benchmark",
             )
         except Exception as exc:  # noqa: BLE001  # tracked: #288

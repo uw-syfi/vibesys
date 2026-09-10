@@ -3,7 +3,7 @@
 import json
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -297,6 +297,49 @@ class TestExecute:
 
         assert result.truncated is True
         assert len(result.output) <= 50 + 100  # some overhead for truncation message
+
+    @patch("subprocess.run")
+    def test_failed_execute_preserves_stderr_tail_with_bounded_output(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+        mock_run.reset_mock()
+        sandbox._max_output_bytes = 80  # noqa: SLF001
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="x" * 200, stderr="fatal compiler error\n"
+        )
+
+        result = sandbox.execute("failing compiler")
+
+        assert len(result.output) <= 80
+        assert result.output.endswith("fatal compiler error\n")
+        assert result.stdout.startswith("x")
+        assert result.stderr.endswith("fatal compiler error\n")
+        assert result.truncated
+
+    @patch("subprocess.run")
+    def test_failed_stderr_only_execute_bounds_and_keeps_tail(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+        mock_run.reset_mock()
+        sandbox._max_output_bytes = 60  # noqa: SLF001
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="old\n" * 100 + "fatal tail\n"
+        )
+
+        result = sandbox.execute("failing compiler")
+
+        assert len(result.output) == 60
+        assert result.stdout == ""
+        assert result.stderr.endswith("fatal tail\n")
+        assert result.truncated
 
     @patch("subprocess.run")
     def test_execute_combines_stdout_stderr(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288

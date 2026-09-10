@@ -32,7 +32,6 @@ from typing import TYPE_CHECKING, TypeVar, cast
 
 import modal
 from deepagents.backends.protocol import (
-    ExecuteResponse,
     FileDownloadResponse,
     FileUploadResponse,
     WriteResult,
@@ -40,6 +39,7 @@ from deepagents.backends.protocol import (
 from deepagents.backends.sandbox import BaseSandbox
 from modal.volume import AbstractVolumeUploadContextManager  # noqa: TC002  # tracked: #288
 
+from vs_sandbox.execution import SandboxExecutionResult, bounded_execution_result
 from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
 
 if TYPE_CHECKING:
@@ -215,7 +215,7 @@ class ModalSandbox(BaseSandbox):
             idle_timeout: Auto-terminate if no activity for this many
                 seconds.  None disables the idle check.
             max_output_bytes: Truncate combined stdout+stderr beyond this
-                length (matches DockerSandbox semantics).
+                character count (matches DockerSandbox semantics).
             env: Environment variables to set in the sandbox.
             bind_mounts: List of ``(host_path, container_path, readonly)``
                 tuples.  Paths under ``/workspace`` are uploaded to the
@@ -636,7 +636,7 @@ class ModalSandbox(BaseSandbox):
         command: str,
         *,
         timeout: int | None = None,
-    ) -> ExecuteResponse:
+    ) -> SandboxExecutionResult:
         if self._sandbox is None:
             raise RuntimeError("Sandbox not started — call start() first")  # noqa: TRY003  # tracked: #288
 
@@ -665,32 +665,26 @@ class ModalSandbox(BaseSandbox):
             )
         except TimeoutError:
             self._log(f"exec timeout after {effective_timeout}s")
-            return ExecuteResponse(
-                output=f"Command timed out after {effective_timeout}s",
+            return bounded_execution_result(
+                stdout="",
+                stderr=f"Command timed out after {effective_timeout}s",
                 exit_code=-1,
-                truncated=False,
+                max_output_chars=self._max_output_bytes,
             )
         except Exception as exc:  # noqa: BLE001  # tracked: #288
             self._log(f"exec error: {exc}")
-            return ExecuteResponse(
-                output=f"Modal exec error: {exc}",
+            return bounded_execution_result(
+                stdout="",
+                stderr=f"Modal exec error: {exc}",
                 exit_code=-1,
-                truncated=False,
+                max_output_chars=self._max_output_bytes,
             )
 
-        output = (stdout or "") + (stderr or "")
-        truncated = False
-        if len(output) > self._max_output_bytes:
-            total = len(output)
-            output = (
-                output[: self._max_output_bytes]
-                + f"\n... [truncated, {total - self._max_output_bytes} bytes omitted]"
-            )
-            truncated = True
-        return ExecuteResponse(
-            output=output,
+        return bounded_execution_result(
+            stdout=stdout or "",
+            stderr=stderr or "",
             exit_code=exit_code,
-            truncated=truncated,
+            max_output_chars=self._max_output_bytes,
         )
 
     # -- file ops ----------------------------------------------------------

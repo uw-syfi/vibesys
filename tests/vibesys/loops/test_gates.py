@@ -21,9 +21,11 @@ from vibesys.input_manifest import BenchmarkResult
 from vibesys.loops.gates import (
     _BENCHMARK_OUTPUT_PREFIX,
     read_protocol_benchmark,
+    run_accuracy_gate,
     run_benchmark_gate,
 )
 from vibesys.loops.metrics import Objective
+from vs_sandbox import SandboxExecutionResult
 
 _SCALAR_SPEC = BenchmarkResult(json_argument="--out", metric="tok_per_sec")
 
@@ -82,6 +84,46 @@ def _transport_artifact(command: str) -> Path:
     match = re.search(rf"cat ({re.escape(_BENCHMARK_OUTPUT_PREFIX)}\S+\.json)", command)
     assert match is not None
     return Path(match.group(1))
+
+
+def test_accuracy_gate_publishes_sandbox_streams_with_accurate_labels() -> None:
+    ctx = MagicMock()
+    ctx.judge_accuracy_command = "check"
+    ctx.trusted_input_changes.return_value = []
+    ctx.judge_backend.execute.return_value = SandboxExecutionResult(
+        output="normal output\nfatal error\n",
+        exit_code=1,
+        truncated=False,
+        stdout="normal output\n",
+        stderr="fatal error\n",
+    )
+
+    result = run_accuracy_gate(ctx, process_id="accuracy-1")
+
+    assert not result.passed
+    payloads = [call.kwargs["data"] for call in ctx.events.emit.call_args_list]
+    assert [(payload.stream, payload.content) for payload in payloads] == [
+        ("stdout", "normal output\n"),
+        ("stderr", "fatal error\n"),
+    ]
+
+
+def test_accuracy_gate_keeps_combined_only_backend_compatibility() -> None:
+    ctx = MagicMock()
+    ctx.judge_accuracy_command = "check"
+    ctx.trusted_input_changes.return_value = []
+    ctx.judge_backend.execute.return_value = SimpleNamespace(
+        output="legacy combined output",
+        exit_code=1,
+        truncated=False,
+    )
+
+    run_accuracy_gate(ctx, process_id="accuracy-1")
+
+    payloads = [call.kwargs["data"] for call in ctx.events.emit.call_args_list]
+    assert [(payload.stream, payload.content) for payload in payloads] == [
+        ("stdout", "legacy combined output")
+    ]
 
 
 def test_benchmark_gate_fails_instead_of_reporting_a_stale_result() -> None:

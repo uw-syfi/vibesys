@@ -1,10 +1,16 @@
 """Tests for ModalSandbox — all mock modal.Sandbox/Volume, no Modal auth required."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 
 from vs_sandbox import BeforeReadyContext, SandboxLifecycleError, SandboxLifecycleHooks
+
+if TYPE_CHECKING:
+    from vs_sandbox.modal_sandbox import ModalSandbox
 
 
 class _RecordingHooks(SandboxLifecycleHooks):
@@ -393,6 +399,25 @@ class TestExecute:
         resp = sandbox.execute("big")
         assert resp.truncated
         assert "truncated" in resp.output
+
+    def test_failed_execute_preserves_stderr_tail_with_bounded_output(
+        self,
+        sandbox: ModalSandbox,
+        mock_modal: dict[str, MagicMock],
+    ) -> None:
+        sandbox.start()
+        mock_modal["proc"].stdout.read.return_value = "x" * 200
+        mock_modal["proc"].stderr.read.return_value = "fatal compiler error\n"
+        mock_modal["proc"].wait.return_value = 1
+        sandbox._max_output_bytes = 80  # noqa: SLF001
+
+        result = sandbox.execute("failing compiler")
+
+        assert len(result.output) <= 80
+        assert result.output.endswith("fatal compiler error\n")
+        assert result.stdout.startswith("x")
+        assert result.stderr.endswith("fatal compiler error\n")
+        assert result.truncated
 
     def test_execute_handles_exception_gracefully(self, sandbox, mock_modal):  # noqa: ANN001, ANN201  # tracked: #288
         sandbox.start()

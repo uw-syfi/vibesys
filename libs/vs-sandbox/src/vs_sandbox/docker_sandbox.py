@@ -16,13 +16,13 @@ from typing import TYPE_CHECKING
 
 from deepagents.backends.protocol import (
     EditResult,
-    ExecuteResponse,
     FileDownloadResponse,
     FileUploadResponse,
     WriteResult,
 )
 from deepagents.backends.sandbox import BaseSandbox
 
+from vs_sandbox.execution import SandboxExecutionResult, bounded_execution_result
 from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
 
 if TYPE_CHECKING:
@@ -188,7 +188,7 @@ class DockerSandbox(BaseSandbox):
             start_timeout: Timeout in seconds for the initial ``docker run``.
                 This bounds hidden image pulls or Docker daemon stalls before
                 the first agent has a chance to start.
-            max_output_bytes: Maximum output bytes before truncation.
+            max_output_bytes: Maximum output characters before truncation.
             env: Environment variables to set in the container.
             bind_mounts: List of (host_path, container_path, readonly) tuples.
             passthrough_paths: Container paths outside /workspace that should
@@ -617,7 +617,7 @@ class DockerSandbox(BaseSandbox):
         command: str,
         *,
         timeout: int | None = None,
-    ) -> ExecuteResponse:
+    ) -> SandboxExecutionResult:
         """Execute a command inside the Docker container."""
         if self._container_id is None:
             raise RuntimeError("Container not started — call start() first")  # noqa: TRY003  # tracked: #288
@@ -644,10 +644,11 @@ class DockerSandbox(BaseSandbox):
             )
         except subprocess.TimeoutExpired:
             self._log_cmd(exec_cmd, error=f"timeout after {effective_timeout}s")
-            return ExecuteResponse(
-                output=f"Command timed out after {effective_timeout}s",
+            return bounded_execution_result(
+                stdout="",
+                stderr=f"Command timed out after {effective_timeout}s",
                 exit_code=-1,
-                truncated=False,
+                max_output_chars=self._max_output_bytes,
             )
         self._log_cmd(exec_cmd, result)
 
@@ -655,26 +656,18 @@ class DockerSandbox(BaseSandbox):
         # lands in stderr with nothing in stdout.  Treat this as a container-
         # level error so callers that parse stdout don't choke on it.
         if result.returncode != 0 and not result.stdout and result.stderr:
-            return ExecuteResponse(
-                output=result.stderr.strip(),
+            return bounded_execution_result(
+                stdout="",
+                stderr=result.stderr,
                 exit_code=result.returncode,
-                truncated=False,
+                max_output_chars=self._max_output_bytes,
             )
 
-        output = result.stdout + result.stderr
-        truncated = False
-
-        if len(output) > self._max_output_bytes:
-            output = (
-                output[: self._max_output_bytes]
-                + f"\n... [truncated, {len(result.stdout + result.stderr) - self._max_output_bytes} bytes omitted]"
-            )
-            truncated = True
-
-        return ExecuteResponse(
-            output=output,
+        return bounded_execution_result(
+            stdout=result.stdout,
+            stderr=result.stderr,
             exit_code=result.returncode,
-            truncated=truncated,
+            max_output_chars=self._max_output_bytes,
         )
 
     def upload_files(
