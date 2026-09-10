@@ -292,7 +292,6 @@ class AgentShimSession:
         self._turn_env = dict(turn_env) if turn_env else None
         self._container_workspace = container_workspace
         self._log = log
-        self._in_container = container_workspace is not None
         self._mcp_servers = tuple(
             _as_mcp_server(server, in_container=self._in_container) for server in spec.mcp_servers
         )
@@ -301,6 +300,15 @@ class AgentShimSession:
         # serving the current turn, so the turn's result can report it.
         self._restarted = False
         self._closed = False
+
+    @property
+    def _in_container(self) -> bool:
+        """Whether this session's CLI runs inside a container.
+
+        The container-side cleanup hook is the one thing only a container
+        session owns, so its presence is what the mode is read from.
+        """
+        return self._container_workspace is not None
 
     def run_turn(
         self,
