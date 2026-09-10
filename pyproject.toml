@@ -106,6 +106,10 @@ markers = [
     # maps it onto an xdist scheduling group so CI's `-n auto --dist loadgroup`
     # keeps these tests off each other's worker.
     "serial: claims a process-wide or host-wide resource and must not run beside another such test",
+    # Real provider CLIs, real credentials, real network. Every such test is
+    # skipped unless its opt-in environment variable is set, so no addopts
+    # deselection is needed; the marker exists to select or exclude them.
+    "e2e: drives an installed agent CLI for real; opt in with VIBESYS_E2E_AGENTS=1",
 ]
 
 [tool.coverage.run]

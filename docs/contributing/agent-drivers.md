@@ -119,6 +119,49 @@ caller that shortened its prompt has to ask again in full. The
 experiment chat is the caller that does this today
 (`src/server/chat/session.py`).
 
+## Container execution
+
+`--docker` runs the provider CLI inside the role's editor container. The
+driver keeps a `DockerCommandExecutor` that rewrites every agentshim command
+into `docker exec -i -w <workdir> [-e ...] <container> <argv>`, so the library
+still builds argv, parses the stream, and owns the session.
+
+- The container ID is read from the sandbox on every command, so a GPU
+  reselect that replaces the container needs no new executor.
+- A container turn names no working directory of its own. `-w` carries it, and
+  the executor's default is `/workspace`.
+- `AgentSessionSpec.environment` reaches the CLI through `TurnRequest.env`,
+  which the executor turns into `-e` flags. Which variables cross is declared
+  by the driver, not inferred: a container starts from its image's
+  environment, and the environment agentshim assembles for a turn describes
+  the host. Forwarding by inspection would point the container CLI at host
+  paths and could carry a host `ANTHROPIC_MODEL` past the container's own
+  configuration.
+- After every container turn the driver repairs workspace ownership. CLI
+  agents run as root in the editor container, and an atomic file replacement
+  leaves the replacement owned by root on a bind-mounted workspace.
+- Codex gets a `CodexRolloutWatchdogExecutor` in front of the transport. A
+  resumed `codex exec --json` inside a container regularly finishes its work,
+  writes the terminal events to its rollout file, and never exits; the
+  watchdog reads the rollout, replays the completion into the stream, and
+  stops the process. It is provider-behaviour compensation and stays in
+  VibeSys until the behaviour is verified fixed upstream.
+
+### Session MCP servers are host-only for now
+
+A provider that discovers MCP servers from a config file (`claude`, `gemini`,
+`opencode`) needs a directory to write it into, and agentshim derives that
+directory from the turn's working directory. A container turn has none, so
+the driver refuses such a session up front with a `ProviderCapabilityError`
+naming the provider, the servers, and the role, rather than failing part-way
+through the first turn. Codex passes its servers as `--config` flags and is
+unaffected.
+
+The library gap is a `TurnRequest.mcp_workspace` field that lets a container
+turn name the workspace path the config belongs in without claiming it as the
+process working directory. When VibeSys depends on a release that carries it,
+delete the check in `vibesys.agents.drivers.agentshim`.
+
 ## Mock driver
 
 `driver = "mock"` is test infrastructure. It satisfies the same driver
@@ -182,6 +225,15 @@ Omnigent driver builds an `OSEnvSpec` that grants workspace write access and
 narrow read access to the active Rust toolchain. It selects bubblewrap on Linux
 or Seatbelt on macOS and never permits an unconfined fallback.
 
+Provider state comes from `ProviderProfile.state_dirs` and is granted whole,
+because a CLI writes session history and caches there and needs them back on
+resume. Codex is the exception: a Codex checkout may itself live under
+`$CODEX_HOME/worktrees`, so only named leaves are granted (`auth.json`,
+`config.toml`, `sessions`). `sessions` is not optional: a rollout that does
+not outlive its turn makes `codex exec resume` report no rollout for the
+thread, and a confined run then loses the conversation continuity it was told
+it had.
+
 VibeSys exposes only the Rust sysroot's `bin`, `lib`, and optional `libexec`
 trees. Each executor gets an ephemeral writable Cargo home, removed when the
 executor closes. Cargo keeps its conventional workspace `target` directory.
@@ -207,3 +259,22 @@ there unless `VIBESYS_REQUIRE_SANDBOX_TESTS` is enabled.
 Automated tests cover provider wiring, sandbox construction, tool dispatch,
 event handling, and teardown. Credentialed live CLI validation is outside the
 repository test suite.
+
+## End-to-end tests
+
+`tests/e2e/test_agentshim_driver_e2e.py` drives `AgentShimDriver` against the
+installed `claude` and `codex` binaries on the host path: one turn, a resumed
+second turn, a structured turn, and a session-scoped stdio MCP server
+(`tests/support/mcp_add_server.py`). Every case is skipped unless
+`VIBESYS_E2E_AGENTS=1` and the provider binary is on PATH, so an ordinary
+`uv run pytest` needs no credentials and makes no network calls.
+
+```bash
+VIBESYS_E2E_AGENTS=1 uv run pytest tests/e2e -q -p no:cacheprovider -s
+```
+
+`-s` is worth passing: each case prints what the CLI actually returned. The
+tests are marked `e2e`, so `-m e2e` selects them and `-m "not e2e"` excludes
+them even when the environment variable is set. The agent environment has
+`CLAUDECODE` removed, because an outer Claude Code session exports it and a
+nested CLI behaves differently with it set.
