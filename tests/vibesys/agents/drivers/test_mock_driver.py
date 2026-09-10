@@ -217,6 +217,25 @@ def test_an_unscripted_response_schema_is_rejected_rather_than_faked(tmp_path): 
         session.run_turn(AgentTurnRequest(message="go", output_schema=UnknownResponse))
 
 
+def test_cancel_is_idempotent_and_leaves_the_session_usable(tmp_path):  # noqa: ANN001, ANN201
+    driver = MockDriver(ScriptedPlaybook())
+    session = driver.create_session(
+        AgentSessionSpec(
+            role="orchestrator",
+            provider="mock",
+            workspace=tmp_path,
+            policy=AgentExecutionPolicy(require_enforcement=False),
+        )
+    )
+
+    session.cancel()
+    session.cancel()
+
+    # The mock has no in-flight turn to stop, so cancelling must not act like
+    # close(): the next turn still runs.
+    assert session.run_turn(AgentTurnRequest(message="go")).text
+
+
 def test_a_closed_driver_refuses_new_sessions(tmp_path):  # noqa: ANN001, ANN201
     driver = MockDriver(ScriptedPlaybook())
     driver.close()

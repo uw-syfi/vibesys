@@ -532,6 +532,24 @@ class OmnigentSession:
         del session_id
         return False
 
+    def cancel(self) -> None:
+        """Cancel the in-flight turn, if any, and wait for it to unwind.
+
+        Omnigent runs each turn as a task on the driver's event loop, so this
+        cancels through that loop and is safe from any other thread. It is a
+        no-op once the turn has completed or the session has begun closing,
+        which is what makes repeated calls idempotent. The cancelled turn's
+        failure still surfaces in ``run_turn``, not here.
+        """
+        if self.owns_current_loop_thread():
+            raise RuntimeError("Omnigent session cannot be cancelled from its event-loop thread")
+        with self._lifecycle:
+            if self._close_lifecycle.state is not _LifecycleState.OPEN:
+                return
+            active = self._active_turn
+        if active is not None:
+            active.cancel_and_wait()
+
     def close(self) -> None:
         """Release the executor exactly once."""
         if self.owns_current_loop_thread():

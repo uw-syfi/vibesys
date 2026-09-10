@@ -223,6 +223,14 @@ class MockSession:
             ),
         )
 
+    def cancel(self) -> None:
+        """Do nothing: a mock turn is synchronous and always already finished.
+
+        ``run_turn`` emits its scripted events on the calling thread and
+        returns, so there is never an in-flight turn for another thread to
+        stop. Kept so the mock satisfies the whole session contract.
+        """
+
     def close(self) -> None:
         """Release this session. Idempotent; the mock owns no resources."""
         self._closed = True

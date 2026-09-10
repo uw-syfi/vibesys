@@ -309,6 +309,9 @@ class _FakeSession:
         self.offered.append(session_id)
         return self.adopts
 
+    def cancel(self) -> None:
+        """Accept the contract's cancel; the fake has no in-flight turn."""
+
     def close(self) -> None:
         self.close_calls += 1
 

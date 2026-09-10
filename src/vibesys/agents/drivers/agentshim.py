@@ -298,6 +298,14 @@ class AgentShimSession:
             ),
         )
 
+    def cancel(self) -> None:
+        """Do nothing for now: the current CLI path has no interruption hook.
+
+        A turn is a blocking subprocess call, and the vendored ``_agent_cli``
+        agents expose no way to signal it. Placeholder until the agentshim 0.6
+        driver, which owns the process, can terminate it here.
+        """
+
     def close(self) -> None:
         """Release this logical session. AgentShim processes are per-turn."""
         self._closed = True

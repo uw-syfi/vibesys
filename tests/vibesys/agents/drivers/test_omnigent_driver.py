@@ -580,6 +580,42 @@ def test_close_cancels_an_active_turn_from_another_thread(tmp_path: Path) -> Non
     assert executor.close_calls == 1
 
 
+def test_cancel_stops_an_active_turn_without_closing_the_session(tmp_path: Path) -> None:
+    started = threading.Event()
+    finalized = threading.Event()
+
+    class NeverEndingExecutor(_FakeExecutor):
+        def run_turn(self, *_args: object, **_kwargs: object):  # noqa: ANN202
+            async def stream():  # noqa: ANN202
+                started.set()
+                try:
+                    await asyncio.Future()
+                finally:
+                    finalized.set()
+                if False:
+                    yield None
+
+            return stream()
+
+    executor = NeverEndingExecutor([])
+    driver, session = _session(tmp_path, executor)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        turn = pool.submit(session.run_turn, AgentTurnRequest("work forever"))
+        assert started.wait(timeout=2)
+        session.cancel()
+        session.cancel()  # idempotent once the turn is gone
+        with pytest.raises(concurrent.futures.CancelledError):
+            turn.result(timeout=2)
+
+    assert finalized.is_set()
+    # Unlike close(), cancel leaves the session's resources alone.
+    assert executor.close_calls == 0
+    session.close()
+    driver.close()
+    assert executor.close_calls == 1
+
+
 def test_close_waits_for_turn_cancellation_cleanup_before_executor_close(
     tmp_path: Path,
 ) -> None:

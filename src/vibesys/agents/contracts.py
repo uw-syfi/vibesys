@@ -190,6 +190,10 @@ class AgentSession(Protocol):
         """
         ...
 
+    def cancel(self) -> None:
+        """Stop an in-flight turn, if any. Idempotent. Safe to call from another thread."""
+        ...
+
     def close(self) -> None:
         """Release session resources. Implementations must be idempotent."""
         ...

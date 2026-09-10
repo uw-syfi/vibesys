@@ -611,7 +611,15 @@ class AgentClient:
 
     def _evict(self, key: AgentSessionKey) -> None:
         cached = self._sessions.pop(key, None)
-        if cached is not None:
+        if cached is None:
+            return
+        # Stop an in-flight turn before releasing the session's resources:
+        # a client closed from another thread (a kill, a context exit) would
+        # otherwise pull the workspace and driver state out from under a turn
+        # that is still running.
+        try:
+            cached.session.cancel()
+        finally:
             cached.session.close()
 
     def _create_session(self, spec: AgentSessionSpec) -> AgentSession:

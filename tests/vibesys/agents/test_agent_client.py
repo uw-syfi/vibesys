@@ -46,6 +46,8 @@ class _FakeSession:
     observers: list[AgentObserver | None] = field(default_factory=list)
     events: list[AgentEvent] = field(default_factory=list)
     resumed: list[str] = field(default_factory=list)
+    lifecycle_calls: list[str] = field(default_factory=list)
+    cancel_error: BaseException | None = None
 
     def run_turn(
         self,
@@ -66,7 +68,13 @@ class _FakeSession:
         self.resumed.append(session_id)
         return True
 
+    def cancel(self) -> None:
+        self.lifecycle_calls.append("cancel")
+        if self.cancel_error is not None:
+            raise self.cancel_error
+
     def close(self) -> None:
+        self.lifecycle_calls.append("close")
         self.close_calls += 1
 
 
@@ -421,6 +429,29 @@ def test_close_is_idempotent_and_rejects_future_turns() -> None:
     assert driver.close_calls == 1
     with pytest.raises(RuntimeError, match="closed"):
         client.run(session_spec=_spec(), turn=AgentTurnRequest("two"))
+
+
+def test_evicting_a_session_cancels_its_turn_before_closing_it() -> None:
+    session = _FakeSession(results=[AgentTurnResult("ok")])
+    client = AgentClient(_FakeDriver([session]))
+    client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
+
+    client.close()
+
+    # Order matters: a client closed from another thread must stop the turn
+    # before releasing the resources that turn is still using.
+    assert session.lifecycle_calls == ["cancel", "close"]
+
+
+def test_a_failing_cancel_still_closes_the_session() -> None:
+    session = _FakeSession(results=[AgentTurnResult("ok")], cancel_error=ValueError("no hook"))
+    client = AgentClient(_FakeDriver([session]))
+    client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
+
+    with pytest.raises(ValueError, match="no hook"):
+        client.close()
+
+    assert session.close_calls == 1
 
 
 def test_invoke_builds_session_and_turn_contracts_and_records_usage(tmp_path: Path) -> None:
