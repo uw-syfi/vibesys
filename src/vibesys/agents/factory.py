@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from vibesys.agents.client import AgentClient, AgentDiagnosticLog
+from vibesys.agents.provider_policy import DEFAULT_CLI_PROVIDER
 from vibesys.constants import DEFAULT_AGENT_BACKEND
 
 if TYPE_CHECKING:
@@ -148,7 +149,7 @@ def build_agent_client(  # noqa: C901, PLR0912, PLR0913
         raise SystemExit(f"unknown agent backend: {backend!r}")  # noqa: TRY003  # tracked: #288
 
     driver_name = resolve_agent_driver(config)
-    provider = cli_provider or agent_cfg.cli_provider or "codex"
+    provider = cli_provider or agent_cfg.cli_provider or DEFAULT_CLI_PROVIDER
     timeout = agent_cfg.cli_timeout
     driver_log = AgentDiagnosticLog(run_log_file)
 

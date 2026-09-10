@@ -2,10 +2,12 @@
 
 Provider facts come from ``agentshim``'s ``ProviderProfile`` at call time:
 state directories, auth environment variables, and the CLI's own container
-install recipe. What stays here is VibeSys policy: the environment a VibeSys
-container needs, the toolchain a candidate repository needs, which leaf files
-inside a provider state directory carry credentials, and the overrides VibeSys
-applies to a library recipe.
+install recipe. What stays here is VibeSys policy that is not itself a
+provider *decision*: which leaf files inside a provider state directory carry
+credentials, the toolchain a candidate repository needs, and the overrides
+VibeSys applies to a library recipe. The container environment table and the
+Codex CLI version pin are provider decisions and live in
+:mod:`vibesys.agents.provider_policy`; this module imports them.
 """
 
 from __future__ import annotations
@@ -17,31 +19,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from vibesys.agents import provider_profiles
+from vibesys.agents.provider_policy import (
+    CODEX_DOCKER_CLI_VERSION,
+    DOCKER_PROVIDER_ENV,
+)
 
-# Per-provider environment variables to set inside the container.  Used as
-# the canonical "supported with --docker" registry — providers absent from
-# this dict are rejected up front in ``build_agent_client``.
-#
-# Claude Code refuses ``--dangerously-skip-permissions`` when running as
-# root unless ``IS_SANDBOX=1`` is set, so we set it here.  We run everything
-# as root inside the container (the default) to avoid uv/pip permission
-# errors when the agent installs packages.
-# Every provider also gets ``PYTHONPATH=/opt/vibesys`` so the in-container
-# CLI can spawn ``python -m vs_issue_board.mcp`` against the
-# bind-mounted project root (added in ``DockerSandbox.start`` for all four
-# CLI providers). Without this the MCP server module wouldn't be importable
-# inside the container.
-DOCKER_PROVIDER_ENV: dict[str, dict[str, str]] = {
-    "claude": {"IS_SANDBOX": "1", "PYTHONPATH": "/opt/vibesys"},
-    "gemini": {"PYTHONPATH": "/opt/vibesys"},
-    "codex": {"PYTHONPATH": "/opt/vibesys"},
-    "opencode": {"PYTHONPATH": "/opt/vibesys"},
-}
-
-
-# Keep the editor container aligned with the verified host CLI feature set.
-# Luna and its Max reasoning level require a newer CLI than the old 0.125 pin.
-CODEX_DOCKER_CLI_VERSION = "0.144.4"
+# Re-exported for existing importers (``vibesys.agents.factory``,
+# ``vibesys.sandbox.run_environment``, and this module's own tests reach them
+# as ``cli_docker.DOCKER_PROVIDER_ENV`` / ``cli_docker.CODEX_DOCKER_CLI_VERSION``);
+# the values themselves live in ``provider_policy`` now.
+__all__ = ["CODEX_DOCKER_CLI_VERSION", "DOCKER_PROVIDER_ENV"]
 
 # Native implementations are valid candidate designs across domains, so the
 # editor container must be able to build and test them before paid target work.

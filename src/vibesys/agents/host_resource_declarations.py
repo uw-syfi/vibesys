@@ -17,6 +17,7 @@ from pathlib import Path
 
 import vibesys
 from vibesys.agents import provider_profiles
+from vibesys.agents.provider_policy import is_codex
 from vs_sandbox import (
     HostResource,
     HostResourceAccess,
@@ -215,7 +216,7 @@ _NARROWED_STATE_DIRS: dict[str, tuple[str, ...]] = {
 
 
 def _state_root(state_dir: str, *, home: Path, ctx: HostResourceContext) -> Path:
-    if state_dir == _CODEX_DEFAULT_HOME and ctx.provider == "codex":
+    if state_dir == _CODEX_DEFAULT_HOME and is_codex(ctx.provider):
         return Path(ctx.env.get("CODEX_HOME", home / _CODEX_DEFAULT_HOME)).expanduser()
     return home / state_dir
 

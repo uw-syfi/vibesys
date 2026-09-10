@@ -17,19 +17,16 @@ from typing import TextIO
 from pydantic import BaseModel  # noqa: TC002  # tracked: #288
 
 from vibesys.agent_runner import log_and_print
+from vibesys.agents.provider_policy import cli_skill_dirs
 from vibesys.constants import ComputeBackend  # noqa: TC001  # tracked: #288
 from vibesys.skills import foreign_platform_names, is_platforms_parent
 
 # Per-provider CLI skill-discovery paths, matching upstream
-# vibesys-skills install.sh conventions. Each CLI tool auto-loads
-# skills from a flat directory of `<skill-name>/SKILL.md`.
-CLI_SKILL_DIRS: tuple[str, ...] = (
-    ".claude/skills",
-    ".agents/skills",
-    ".gemini/skills",
-    ".cursor/skills",
-    ".opencode/skills",
-)
+# vibesys-skills install.sh conventions. Each CLI tool auto-loads skills from
+# a flat directory of `<skill-name>/SKILL.md`. Derived from the shipped
+# providers' agentshim profiles (plus the VibeSys-only Cursor addition) so a
+# new shipped provider's convention is not hand-copied here.
+CLI_SKILL_DIRS: tuple[str, ...] = cli_skill_dirs()
 
 
 def agent_label(kind: str) -> str:
@@ -77,13 +74,12 @@ def materialize_skills(  # noqa: C901  # tracked: #288
 
     Walks each ``skill_dirs`` entry for ``SKILL.md`` files and flattens each
     parent directory into the workspace root and every path under
-    :data:`CLI_SKILL_DIRS` (one per CLI convention: ``.claude/skills``,
-    ``.agents/skills``, ``.gemini/skills``, ``.cursor/skills``,
-    ``.opencode/skills``). The root copy preserves the documented
-    ``<skill-name>/references/...`` paths used by prompts and agents, while the
-    hidden copies support native CLI discovery. When a compute backend is set,
-    foreign ``references/platforms/<backend>/`` directories are omitted from
-    every materialized copy.
+    :data:`CLI_SKILL_DIRS` (one per shipped provider's skill-discovery
+    convention, plus the VibeSys-only ``.cursor/skills``). The root copy
+    preserves the documented ``<skill-name>/references/...`` paths used by
+    prompts and agents, while the hidden copies support native CLI discovery.
+    When a compute backend is set, foreign ``references/platforms/<backend>/``
+    directories are omitted from every materialized copy.
 
     Existing destinations are replaced on every invocation so skill edits are
     picked up across iterations and after candidate checkpoint rollback. Errors

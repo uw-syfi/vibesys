@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from vibesys.agents.provider_policy import cli_skill_dirs
 from vibesys.input_manifest import WorkspaceSource
 from vibesys.input_project import materialize_input_project
 from vibesys.skills import foreign_platform_names, is_platforms_parent
@@ -51,14 +52,9 @@ EXCLUDED_WORKSPACE_DIRS: frozenset[str] = frozenset(
     }
 )
 
-# Skill destinations mirrored by materialize_skills in agents.cli_common.
-_CLI_SKILL_DIRS: tuple[str, ...] = (
-    ".agents/skills",
-    ".claude/skills",
-    ".gemini/skills",
-    ".cursor/skills",
-    ".opencode/skills",
-)
+# Skill destinations mirrored by materialize_skills in agents.cli_common; both
+# derive from the same vibesys.agents.provider_policy.cli_skill_dirs union.
+_CLI_SKILL_DIRS: tuple[str, ...] = cli_skill_dirs()
 
 
 @dataclass(frozen=True)

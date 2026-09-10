@@ -32,6 +32,7 @@ from vibesys.agents.contracts import (
     SessionDisposition,
     session_spec_fingerprint,
 )
+from vibesys.agents.provider_policy import DEFAULT_CLI_PROVIDER
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.agents.session_store import NullSessionStore, SessionStore
 from vibesys.run.events import CommandResultPayload, JsonResultPayload
@@ -227,7 +228,7 @@ class AgentClient:
     @property
     def provider(self) -> str | None:
         """Return the configured CLI provider (``"codex"``, ``"claude"``, ...)."""
-        return self._provider or "codex"
+        return self._provider or DEFAULT_CLI_PROVIDER
 
     def model_for_kind(self, kind: str) -> str | None:
         """Return the effective model for ``kind``, honoring role overrides."""
@@ -364,7 +365,7 @@ class AgentClient:
         reasoning_effort = self._role_reasoning_efforts.get(kind, self._default_reasoning_effort)
         spec = AgentSessionSpec(
             role=kind,
-            provider=self._provider or "codex",
+            provider=self._provider or DEFAULT_CLI_PROVIDER,
             workspace=workspace,
             policy=self._policy,
             model=model,

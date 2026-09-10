@@ -35,6 +35,7 @@ from vibesys.agents.contracts import (
     SessionDisposition,
 )
 from vibesys.agents.host_resource_declarations import declare_agent_host_resources
+from vibesys.agents.provider_policy import SHIPPED_PROVIDERS, is_codex
 from vibesys.run.events import CommandResultPayload
 from vs_sandbox import build_host_sandbox
 
@@ -57,13 +58,6 @@ AGENTSHIM_CAPABILITIES = AgentCapabilities(
 
 ``provider_session_resume`` is narrowed per provider from
 :attr:`agentshim.ProviderProfile.supports_resume` when the driver is built.
-"""
-
-_SHIPPED_PROVIDERS: tuple[str, ...] = ("claude", "codex", "gemini", "opencode")
-"""The CLI providers VibeSys ships.
-
-The library also carries ``copilot``, which VibeSys has neither host-resource
-declarations nor a container install recipe for, so it is not offered here.
 """
 
 _PYTHON_MCP_COMMANDS = frozenset({"python", "python3"})
@@ -90,7 +84,7 @@ _MAX_CODEX_SESSION_DURATION_MS = 600_000
 
 def supported_providers() -> list[str]:
     """Return the sorted provider names the AgentShim driver can run."""
-    return sorted(_SHIPPED_PROVIDERS)
+    return sorted(SHIPPED_PROVIDERS)
 
 
 def _ignore_log(_message: str) -> None:
@@ -557,7 +551,7 @@ class AgentShimSession:
         usage of the turn that just finished and the caller learns about the
         restart from that turn's result instead of discovering it on the next.
         """
-        if self._profile.name != "codex":
+        if not is_codex(self._profile.name):
             return False
         reason = (
             f"{_MAX_CODEX_SESSION_TURNS} successful turns"
@@ -646,7 +640,7 @@ class AgentShimDriver:
         mode's budget: a container check crosses a ``docker exec`` and is given
         four times as long as a host one.
         """
-        if provider not in _SHIPPED_PROVIDERS:
+        if provider not in SHIPPED_PROVIDERS:
             raise ValueError(  # noqa: TRY003  # tracked: #288
                 f"unknown AgentShim provider {provider!r}; expected one of: {supported_providers()}"
             )
@@ -798,7 +792,7 @@ class AgentShimDriver:
         executor: agentshim.CommandExecutor = DockerCommandExecutor(
             resolve, forward_env=forward_env
         )
-        if self._provider == "codex":
+        if is_codex(self._provider):
             # A resumed containerized `codex exec --json` regularly finishes
             # its work and then never exits; the watchdog recovers the answer
             # from the rollout file and stops the process. Provider-behaviour

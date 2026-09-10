@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from vibesys import boot_trace
+from vibesys.agents.provider_policy import SHIPPED_PROVIDERS
 from vibesys.config import Config, load_config
 from vibesys.constants import (
     KNOWN_COMPUTE_BACKENDS,
@@ -620,7 +621,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--cli-provider",
-        choices=["claude", "gemini", "codex", "opencode"],
+        choices=list(SHIPPED_PROVIDERS),
         default=None,
         help=(
             "Which CLI tool to drive when --agent-backend=cli. Overrides "
