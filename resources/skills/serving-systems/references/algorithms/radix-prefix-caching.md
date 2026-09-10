@@ -65,6 +65,10 @@ object store (unbounded, remote)
 
 On a prefix match whose pages have been evicted to a lower tier, the scheduler either (a) fetches them back before computing attention, or (b) recomputes. Fetching is usually a win for long prefixes; recomputing is better for short ones. Implementations maintain a cost model.
 
+Under unified memory generally (the `unified-memory` property: `metal`, and unified-memory SKUs on other backends such as MI300A-class APUs on `rocm`), the same reasoning applies: host and device share one pool, so there is nothing to tier outward to. Radix matching and reuse are unaffected; only the eviction ladder is inapplicable.
+
+Status: verified. Public property of unified memory (shared host/device pool); 2026-09-05.
+
 ## Compatibility
 
 | Implementation | Engine | Granularity | Tiers | Notes |
@@ -73,6 +77,7 @@ On a prefix match whose pages have been evicted to a lower tier, the scheduler e
 | HiCache (radix + tiered) | SGLang | token | GPU → CPU → disk → object store | `hiradix_cache.py`, `hicache_storage.py` |
 | Automatic Prefix Caching (APC) | vLLM | block | GPU | enabled by flag |
 | KV cache reuse | TensorRT-LLM | block | GPU (CPU offload in progress) | |
+| HiCache / offload tier ladder | SGLang | token | **N/A** under `unified-memory` | host and device share one pool (e.g. MI300A-class APUs); radix matching and reuse work unchanged, only the GPU-to-CPU-to-NVMe eviction ladder is inapplicable |
 
 ## Engine pointers
 
@@ -106,7 +111,7 @@ Without UUIDs, there is no cross-session hit because each new request re-hashes 
 
 - **Speculative decoding**: verify rewinds can invalidate a suffix of the committed prefix; the cache must handle "un-commit" correctly, or be conservative about what's shared.
 - **Tool calling / branching**: each branch shares the prompt prefix; radix sharing is exactly the right model.
-- **Multi-turn conversations**: each turn shares the history; prompt caching matters more as conversations grow.
+- **Multi-turn conversations**: each turn shares the history; prompt caching matters more as conversations grow. On a multi-turn chat workload the prior turns' generated tokens are already committed in the tree, so a turn-2+ request should prefill only the new user message; whether this holds must be verified per deployment (tokenizer, chat template, and eviction pressure vary). Scope: multi-turn chat serving, engine-agnostic. Status: candidate, unverified in the campaign that surfaced it; sglang-v0.5.18-rocm700-mi30x, 2026-09-05.
 - **Quantized KV**: cache must track the quant scheme as part of the key, else a reuse across schemes silently produces wrong outputs.
 - **Sampling**: output tokens are per-request; only the prefix KV is shared.
 

@@ -77,7 +77,7 @@ one. Backend values are exact `ComputeBackend` names.
 | AWQ INT4 | ✓ | ✓ | ✓ | Ampere+ |
 | GPTQ INT4 | ✓ | ✓ | ✓ | Ampere+ |
 | Marlin (AWQ/GPTQ kernel) | ✓ | ✓ | via CUTLASS | Ampere+ |
-| MXFP4 | ✓ (mxfp4.py) | ✓ (mxfp4.py) | ✓ | portable |
+| MXFP4 | ✓ (mxfp4.py) | ✓ (mxfp4.py) | ✓ | native: gfx950 (CDNA4), `cuda` Blackwell; weight-only via a dequant-in-kernel fallback on gfx942 (CDNA3) |
 | NVFP4 | ✓ (modelopt) | ✓ (modelopt_quant) | ✓ (fp4_utils) | Blackwell |
 | GGUF | ✓ | ✓ | — | CPU or GPU |
 | bitsandbytes (nf4 / int8) | ✓ | ✓ | — | wide |
@@ -88,10 +88,12 @@ one. Backend values are exact `ComputeBackend` names.
 
 | Backend | Native path | Notes |
 |:--|:--|:--|
-| `rocm` | FP8 (E4M3/E5M2), INT8, INT4 weight-only | FP8 native from MI300 (CDNA3), FP4 from CDNA4. Kernel coverage is narrower than NVIDIA — confirm the scheme is implemented before designing around it. |
+| `rocm` | FP8 (E4M3/E5M2), INT8, INT4 weight-only | FP8 native from MI300 (CDNA3, gfx942). MXFP4 is native only from CDNA4 (gfx950); on gfx942 (MI300A, MI300X) there is no native MXFP4 tensor path, so MXFP4 checkpoints run weight-only via a dequant-in-kernel fallback. Kernel coverage is narrower than NVIDIA: confirm the scheme is implemented before designing around it. |
 | `metal` | `mx.quantize` group-wise INT4 / INT8 | No external toolchain; the fast kernels consume quantized weights directly. **The highest-leverage optimization on this backend** — decode is bandwidth-bound, so fewer bytes per token converts almost linearly to tokens/sec. Group size 64 is a reasonable default. No FP8/FP4. |
 | `trainium` | BF16 default; FP8 on Trn2 | Quantization is secondary here — the decisive decode win is the device-resident KV cache, not precision. |
 | `cpu` | INT8 / INT4 weight-only, GGUF (Q4_K_M, Q5_K_S) | Largest single win on CPU: decode is bandwidth-bound and the arithmetic units are narrow. |
+
+Status: verified (MXFP4 gfx942/gfx950 split, observed and explained by mechanism read in aiter source). Scope: `rocm`, gfx942 vs gfx950. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job 623402.
 
 ## Engine pointers
 

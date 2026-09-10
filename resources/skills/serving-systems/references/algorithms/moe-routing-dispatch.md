@@ -67,6 +67,10 @@ Expert popularity is skewed in practice. Static assignment + skewed traffic = GP
 | vLLM fused_moe | vLLM | many backends (see `fused_moe/prepare_finalize/`, `.../runner/`) | Triton / CUTLASS / Marlin / DeepGEMM / FlashInfer | NVIDIA / ROCm / XPU |
 | SGLang MoE | SGLang | `token_dispatcher/` (padded / DeepEP / Mori / NIXL) | `moe_runner/`, `cutlass_moe.py`, `fused_moe_triton/` | NVIDIA / ROCm |
 | TensorRT-LLM MoE | TRT-LLM | C++ kernels | TRT-LLM MoE (FP8/FP4) | NVIDIA |
+| MXFP4 fused MoE, AITER path | SGLang | `moe_runner/` | aiter fused MXFP4 grouped GEMM | `rocm` gfx950 |
+| MXFP4 fused MoE, gfx942 | SGLang | `moe_runner/` | **N/A**: no AITER MXFP4 MoE kernel in the aiter build bundled with sglang-v0.5.18-rocm700; falls back to a Triton w4a16 kernel with in-kernel dequant | `rocm` gfx942 (MI300A, MI300X) |
+
+Status: verified (gfx942 row, observed and explained by mechanism read in source), candidate on the gfx950 row (public target, not exercised in this campaign). sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job 623402.
 
 ## Engine pointers
 
