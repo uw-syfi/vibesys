@@ -520,6 +520,20 @@ def test_a_non_python_mcp_command_is_left_alone(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _workspace_files(root: Path) -> dict[str, str]:
+    """Every file under *root* by relative path, with its text.
+
+    Each config-file provider names its own file (`.mcp.json`, `opencode.json`,
+    `.gemini/settings.json`), so the workspace is read whole rather than
+    branched on the provider.
+    """
+    return {
+        str(path.relative_to(root)): path.read_text()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
 def _container_driver(
     monkeypatch: pytest.MonkeyPatch,
     provider: str,
@@ -626,41 +640,50 @@ def test_a_container_codex_run_is_watched_for_a_stalled_resume(
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
-def test_container_session_mcp_servers_are_refused_before_the_session_starts(
+def test_container_session_mcp_servers_are_installed_on_the_host_workspace(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     provider: str,
 ) -> None:
-    """A config-file provider has nowhere to write its MCP config in a container.
+    """A container turn writes its MCP config on the bind-mounted host workspace.
 
-    Pending the library's ``TurnRequest.mcp_workspace`` field, the only honest
-    answer is to refuse, and to say which servers and which role were dropped
-    rather than failing part-way through the first turn.
+    The CLI runs at the container's own path, so the turn names no host
+    working directory for agentshim to derive the config directory from. The
+    driver points ``mcp_workspace`` at the host workspace instead, which the
+    container sees as ``/workspace``. As on the host, the file exists only
+    while the provider process is running, so the scripted run is the moment
+    it can be observed.
     """
-    driver, _fake, _repairs = _container_driver(
-        monkeypatch, provider, scripted_turn(provider, text="ok")
-    )
-    spec = _container_spec(
-        tmp_path,
-        provider,
-        mcp_servers=(MCPServerSpec(name="issues", command="python", args=("-m", "issues")),),
-    )
-    profile = agentshim.get_provider(provider).profile
+    server = MCPServerSpec(name="issues", command="python", args=("-m", "issues"))
+    during: list[dict[str, str]] = []
 
-    if profile.mcp is not agentshim.McpMechanism.CONFIG_FILE:
-        # Codex passes its servers on the command line, so it needs no
-        # workspace and the container session is supported.
-        driver.create_session(spec).close()
+    def run(_request: agentshim.CommandRequest) -> FakeRun:
+        # Every container command is scripted, the provider health check
+        # included, so the turn is the last snapshot rather than the only one.
+        during.append(_workspace_files(tmp_path))
+        return scripted_turn(provider, text="ok")
+
+    driver, fake, _repairs = _container_driver(monkeypatch, provider, run)
+    session = driver.create_session(_container_spec(tmp_path, provider, mcp_servers=(server,)))
+
+    session.run_turn(AgentTurnRequest(message="review"))
+
+    if agentshim.get_provider(provider).profile.mcp is not agentshim.McpMechanism.CONFIG_FILE:
+        # Codex passes its servers as `--config` flags, so nothing is written
+        # to the workspace in either execution mode.
+        assert during[-1] == {}
+        assert 'mcp_servers.issues.command="python"' in fake.requests[-1].argv
         return
 
-    with pytest.raises(agentshim.ProviderCapabilityError) as raised:
-        driver.create_session(spec)
-
-    message = str(raised.value)
-    assert provider in message
-    assert "issues" in message
-    assert "implementer" in message
-    assert "containerized" in message
+    written = during[-1]
+    assert written, f"{provider} wrote no MCP config on the host workspace"
+    config = "".join(written.values())
+    assert "issues" in config
+    # The container image resolves its own interpreter: the host substitution
+    # would name a path that does not exist inside it.
+    assert subject.sys.executable not in config
+    assert '"python"' in config
+    assert _workspace_files(tmp_path) == {}, "the MCP config outlived the turn"
 
 
 # ---------------------------------------------------------------------------

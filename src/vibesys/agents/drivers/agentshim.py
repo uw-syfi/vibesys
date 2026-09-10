@@ -150,37 +150,6 @@ def _as_mcp_server(spec: MCPServerSpec, *, in_container: bool) -> agentshim.Stdi
     )
 
 
-def _reject_unsupported_container_mcp(
-    spec: AgentSessionSpec,
-    profile: agentshim.ProviderProfile,
-) -> None:
-    """Refuse a containerized session whose MCP servers could not be installed.
-
-    A provider that discovers MCP servers from a config file needs a directory
-    to write it into, and agentshim derives that directory from the turn's
-    ``cwd``. A containerized turn names no ``cwd``: the ``docker exec``
-    transport supplies the container-side working directory itself, so the
-    library sees ``None`` and ``install_mcp`` raises part-way through the first
-    turn. Fail here instead, before the session exists, with a message that
-    names the provider, the servers, and the way out.
-
-    The library gap is being closed by a ``TurnRequest.mcp_workspace`` field
-    that lets a container turn name the workspace path the config belongs in
-    without claiming it as the process working directory. Delete this check
-    once VibeSys depends on a release that carries it.
-    """
-    if not spec.mcp_servers or profile.mcp is not agentshim.McpMechanism.CONFIG_FILE:
-        return
-    names = ", ".join(server.name for server in spec.mcp_servers)
-    raise agentshim.ProviderCapabilityError(  # noqa: TRY003  # tracked: #288
-        f"{profile.name} discovers MCP servers from a config file in the turn's "
-        f"working directory, and a containerized turn has none, so the session MCP "
-        f"servers requested for role {spec.role!r} ({names}) cannot be installed. "
-        f"Run this role on the host, or choose a provider that passes MCP servers "
-        f"on the command line."
-    )
-
-
 def _usage_from(
     usage: agentshim.ProviderUsage,
     *,
@@ -407,6 +376,15 @@ class AgentShimSession:
         return self._session.adopt(session_id)
 
     def _build_request(self, request: AgentTurnRequest) -> agentshim.TurnRequest:
+        """Translate one VibeSys turn into the library's request.
+
+        A config-file provider writes its MCP config into the workspace, and
+        agentshim derives that directory from the turn's ``cwd``. A container
+        turn names none, so it points ``mcp_workspace`` at the host workspace
+        that is bind-mounted into the container: the file the library writes on
+        the host is the one the CLI reads at ``/workspace``. A host turn already
+        runs in the workspace, so it leaves the field unset.
+        """
         schema, schema_hint = self._output_schema(request.output_schema)
         timeout = self._timeout
         if request.timeout is not None:
@@ -420,6 +398,7 @@ class AgentShimSession:
             ),
             env=self._turn_env,
             mcp_servers=self._mcp_servers,
+            mcp_workspace=self._spec.workspace if self._in_container else None,
         )
 
     def _output_schema(
@@ -608,7 +587,6 @@ class AgentShimDriver:
         turn_env: Mapping[str, str] | None = None
         executor: agentshim.CommandExecutor
         if in_container:
-            _reject_unsupported_container_mcp(spec, provider.profile)
             executor = self._container_executor(spec, forward_env=tuple(overlay))
             container_cleanup = self._container_cleanup(spec)
             # The container's own environment is built by the image and the

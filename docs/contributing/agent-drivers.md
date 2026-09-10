@@ -147,20 +147,19 @@ still builds argv, parses the stream, and owns the session.
   stops the process. It is provider-behaviour compensation and stays in
   VibeSys until the behaviour is verified fixed upstream.
 
-### Session MCP servers are host-only for now
+### Session MCP servers in a container
 
 A provider that discovers MCP servers from a config file (`claude`, `gemini`,
 `opencode`) needs a directory to write it into, and agentshim derives that
-directory from the turn's working directory. A container turn has none, so
-the driver refuses such a session up front with a `ProviderCapabilityError`
-naming the provider, the servers, and the role, rather than failing part-way
-through the first turn. Codex passes its servers as `--config` flags and is
-unaffected.
+directory from the turn's working directory. A container turn has none, so it
+names the host workspace in `TurnRequest.mcp_workspace` instead: the library
+writes the config there for the turn and removes it afterwards, and the CLI
+reads it through the bind mount at `/workspace`. Codex passes its servers as
+`--config` flags and touches no workspace file either way.
 
-The library gap is a `TurnRequest.mcp_workspace` field that lets a container
-turn name the workspace path the config belongs in without claiming it as the
-process working directory. When VibeSys depends on a release that carries it,
-delete the check in `vibesys.agents.drivers.agentshim`.
+The MCP command is left as the caller wrote it in container mode. Only a host
+turn rewrites a bare `python` to the interpreter running VibeSys, because the
+container image resolves its own.
 
 ## Mock driver
 
