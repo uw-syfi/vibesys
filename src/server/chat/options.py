@@ -14,7 +14,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys._agent_cli.opencode import OPENCODE_DEFAULT_MODEL
 from vibesys.agents.factory import supported_cli_providers
 
 ChatModelSource = Literal["run", "role", "suggested"]
@@ -45,6 +44,12 @@ class ChatOptions(_ChatOptionModel):
     providers: list[ChatProviderOptions] = Field(default_factory=list)
 
 
+# A deployment default, not the library's: this is the opencode model VibeSys
+# offers first, and it is stated here so the chat surface does not depend on the
+# agent CLI package for it.
+_OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
+
+
 # A short suggestion list, not a registry: the model a thread actually runs is
 # whatever the provider's CLI accepts, and the client's free-text entry stays
 # the escape hatch for anything not named here.
@@ -63,7 +68,7 @@ _SUGGESTED_MODELS: dict[str, tuple[str, ...]] = {
         "claude-haiku-4-5",
     ),
     "gemini": (),
-    "opencode": (OPENCODE_DEFAULT_MODEL,),
+    "opencode": (_OPENCODE_DEFAULT_MODEL,),
 }
 
 
