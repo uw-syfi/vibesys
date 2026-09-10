@@ -173,6 +173,7 @@ _CLI_PROFILES = {
     "claude": fake_profiles.profile(
         "claude",
         state_dirs=(".claude", ".claude.json", ".config/claude"),
+        auth_files=(".claude/.credentials.json", ".claude.json"),
         auth_env_vars=(
             "ANTHROPIC_AUTH_TOKEN",
             "ANTHROPIC_API_KEY",
@@ -184,6 +185,7 @@ _CLI_PROFILES = {
     "codex": fake_profiles.profile(
         "codex",
         state_dirs=(".codex", ".config/codex"),
+        auth_files=(".codex/auth.json",),
         auth_env_vars=("OPENAI_API_KEY", "OPENAI_BASE_URL"),
         container_install=("install-codex",),
     ),

@@ -26,6 +26,12 @@ _FAKE_PROFILES = {
             "ANTHROPIC_BASE_URL",
             "ANTHROPIC_CUSTOM_HEADERS",
         ),
+        auth_files=(
+            ".claude/.credentials.json",
+            ".claude/settings.json",
+            ".claude/settings.local.json",
+            ".claude.json",
+        ),
         container_install=(
             "apt-get update && apt-get install -y --no-install-recommends curl ca-certificates",
             "curl -fsSL https://claude.ai/install.sh | bash",
@@ -36,6 +42,7 @@ _FAKE_PROFILES = {
         "codex",
         state_dirs=(".codex", ".config/codex"),
         auth_env_vars=("OPENAI_API_KEY", "OPENAI_BASE_URL"),
+        auth_files=(".codex/auth.json", ".codex/config.toml"),
         container_install=(
             "curl -fsSL https://nodejs.org/install | bash",
             "npm install -g @openai/codex",
@@ -45,12 +52,26 @@ _FAKE_PROFILES = {
         "gemini",
         state_dirs=(".gemini", ".config/gemini"),
         auth_env_vars=("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        auth_files=(
+            ".gemini/oauth_creds.json",
+            ".gemini/google_accounts.json",
+            ".gemini/settings.json",
+            ".gemini/.env",
+        ),
         container_install=("npm install -g @google/gemini-cli",),
     ),
     "opencode": fake_profiles.profile(
         "opencode",
         state_dirs=(".local/share/opencode", ".config/opencode"),
         auth_env_vars=(),
+        auth_files=(
+            ".local/share/opencode/auth.json",
+            ".config/opencode/opencode.json",
+            ".config/opencode/opencode.jsonc",
+            ".config/opencode/config.json",
+            ".config/opencode/config.jsonc",
+            ".config/opencode/.env",
+        ),
         container_install=("curl -fsSL https://opencode.ai/install | bash",),
     ),
 }
@@ -65,46 +86,28 @@ def fake_profiles_installed(monkeypatch: pytest.MonkeyPatch) -> None:
 class TestAuthPaths:
     """Which provider state files are staged into an editor container."""
 
-    def test_stages_the_credential_leaves_of_each_profile_state_directory(
+    def test_stages_exactly_the_profiles_declared_auth_files(
         self,
         fake_profiles_installed: None,
     ) -> None:
+        """``auth_paths`` derives entirely from ``ProviderProfile.auth_files``.
+
+        Expectations come from the fake profile itself, not a second
+        hand-typed list, so this fails only when the derivation rule changes.
+        """
         del fake_profiles_installed
         home = Path.home()
-        staged = {
-            provider: [
+
+        for provider in _SHIPPED:
+            expected = [
+                (auth_file, f"/root/{auth_file}")
+                for auth_file in _FAKE_PROFILES[provider].auth_files
+            ]
+            staged = [
                 (spec.host_path.relative_to(home).as_posix(), spec.container_path)
                 for spec in cli_docker.auth_paths(provider)
             ]
-            for provider in _SHIPPED
-        }
-
-        assert staged == {
-            "claude": [
-                (".claude/.credentials.json", "/root/.claude/.credentials.json"),
-                (".claude/settings.json", "/root/.claude/settings.json"),
-                (".claude/settings.local.json", "/root/.claude/settings.local.json"),
-                (".claude.json", "/root/.claude.json"),
-            ],
-            "gemini": [
-                (".gemini/oauth_creds.json", "/root/.gemini/oauth_creds.json"),
-                (".gemini/google_accounts.json", "/root/.gemini/google_accounts.json"),
-                (".gemini/settings.json", "/root/.gemini/settings.json"),
-                (".gemini/.env", "/root/.gemini/.env"),
-            ],
-            "codex": [
-                (".codex/auth.json", "/root/.codex/auth.json"),
-                (".codex/config.toml", "/root/.codex/config.toml"),
-            ],
-            "opencode": [
-                (".local/share/opencode/auth.json", "/root/.local/share/opencode/auth.json"),
-                (".config/opencode/opencode.json", "/root/.config/opencode/opencode.json"),
-                (".config/opencode/opencode.jsonc", "/root/.config/opencode/opencode.jsonc"),
-                (".config/opencode/config.json", "/root/.config/opencode/config.json"),
-                (".config/opencode/config.jsonc", "/root/.config/opencode/config.jsonc"),
-                (".config/opencode/.env", "/root/.config/opencode/.env"),
-            ],
-        }
+            assert staged == expected
 
     def test_never_stages_a_bulk_runtime_root(self, fake_profiles_installed: None) -> None:
         del fake_profiles_installed
@@ -122,7 +125,7 @@ class TestAuthPaths:
             }
         )
 
-    def test_skips_a_state_directory_with_no_declared_credential_leaves(
+    def test_stages_nothing_when_the_profile_declares_no_auth_files(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -158,6 +161,7 @@ class TestAuthImport:
                 "fixture": fake_profiles.profile(
                     "fixture",
                     state_dirs=(".codex", ".claude.json"),
+                    auth_files=(".codex/auth.json", ".codex/config.toml", ".claude.json"),
                 )
             },
         )
@@ -184,7 +188,13 @@ class TestAuthImport:
         monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
         fake_profiles.install(
             monkeypatch,
-            {"fixture": fake_profiles.profile("fixture", state_dirs=(".codex",))},
+            {
+                "fixture": fake_profiles.profile(
+                    "fixture",
+                    state_dirs=(".codex",),
+                    auth_files=(".codex/auth.json", ".codex/config.toml"),
+                )
+            },
         )
 
         # The mount index is the position in the full list, so a missing
@@ -382,36 +392,24 @@ class TestShippedProfileAssumptions:
     """
 
     @pytest.mark.parametrize("provider", _SHIPPED)
-    def test_every_named_state_directory_stages_at_least_one_leaf(self, provider: str) -> None:
+    def test_auth_paths_mirrors_the_profiles_own_auth_files(self, provider: str) -> None:
         profile = agentshim.get_provider(provider).profile
         home = Path.home()
-        staged = [
-            spec.host_path.relative_to(home).as_posix() for spec in cli_docker.auth_paths(provider)
-        ]
-        named = [
-            state_dir
-            for state_dir in profile.state_dirs
-            if state_dir in cli_docker._AUTH_LEAF_FILES  # noqa: SLF001
-        ]
 
-        # A state directory with no leaf table entry stages nothing, which is
-        # fine, but a provider that stages nothing at all starts its container
-        # CLI logged out.
-        assert staged
-        for state_dir in named:
-            assert any(path == state_dir or path.startswith(f"{state_dir}/") for path in staged), (
-                state_dir
-            )
-
-    def test_no_leaf_table_entry_names_a_directory_no_profile_declares(self) -> None:
-        declared = {
-            state_dir
-            for provider in _SHIPPED
-            for state_dir in agentshim.get_provider(provider).profile.state_dirs
-        }
-
-        # A stale key stages nothing and reads as coverage that is not there.
-        assert set(cli_docker._AUTH_LEAF_FILES) <= declared  # noqa: SLF001
+        assert [
+            (spec.host_path, spec.container_path) for spec in cli_docker.auth_paths(provider)
+        ] == [(home / auth_file, f"/root/{auth_file}") for auth_file in profile.auth_files]
+        # A provider that declares no auth files starts its container CLI
+        # logged out.
+        assert profile.auth_files
+        # Every declared auth file lies inside a declared state directory;
+        # agentshim's own `test_conventions.py` pins that per provider, so
+        # this only checks that VibeSys's read seam still sees it that way.
+        for auth_file in profile.auth_files:
+            assert any(
+                auth_file == state_dir or auth_file.startswith(f"{state_dir}/")
+                for state_dir in profile.state_dirs
+            ), auth_file
 
     @pytest.mark.parametrize("provider", _SHIPPED)
     def test_auth_env_vars_carry_credentials_and_no_model_selection(self, provider: str) -> None:

@@ -23,7 +23,14 @@ from typing import TYPE_CHECKING, Any
 
 import agentshim
 import pytest
-from agentshim.testing import FakeExecutor, FakeRun, TokenUsage, scripted_turn
+from agentshim.testing import (
+    FakeExecutor,
+    FakeRun,
+    TokenUsage,
+    installed_mcp_servers,
+    scripted_resume_failure,
+    scripted_turn,
+)
 
 from vibesys.agents import docker_executor
 from vibesys.agents.contracts import (
@@ -63,17 +70,6 @@ Codex and Gemini print one cached-token total, so no scripted turn can carry a
 separate cache-write count through them. The neutral usage contract keeps the
 two fields distinct regardless; these are the providers that can fill both.
 """
-
-RESUME_FAILURE_STDERR = {
-    "claude": "no conversation found\n",
-    "codex": "thread/resume failed: no rollout found for thread id thread-1\n",
-    # Gemini and opencode print nothing that separates a refused resume from
-    # any other startup failure, which is why agentshim applies the Claude
-    # rule to them: any nonzero exit of a resumed turn is a lost conversation.
-    "gemini": "fatal: failed to start\n",
-    "opencode": "error: failed to start\n",
-}
-"""How each provider's CLI reports a resume it will not honour."""
 
 
 @dataclass
@@ -469,13 +465,14 @@ def test_declared_host_resources_reach_the_sandbox(
 def test_mcp_servers_are_installed_for_the_turn_and_removed_after(tmp_path: Path) -> None:
     """The config exists only while the provider process is running.
 
-    Claude discovers MCP servers from ``<workspace>/.mcp.json``, so the file is
-    read from inside the scripted run: that is the only moment it exists.
+    Claude discovers MCP servers from a workspace config file, so it is read
+    with ``installed_mcp_servers`` from inside the scripted run: that is the
+    only moment it exists.
     """
-    observed: list[dict[str, Any]] = []
+    installed: list[dict[str, dict[str, Any]]] = []
 
-    def run(_request: agentshim.CommandRequest) -> FakeRun:
-        observed.append(json.loads((tmp_path / ".mcp.json").read_text()))
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        installed.append(installed_mcp_servers("claude", request, tmp_path))
         return scripted_turn("claude", text="ok")
 
     driver, _fake = _driver("claude", run)
@@ -488,20 +485,20 @@ def test_mcp_servers_are_installed_for_the_turn_and_removed_after(tmp_path: Path
 
     session.run_turn(AgentTurnRequest(message="review"))
 
-    entry = observed[0]["mcpServers"]["issues"]
+    entry = installed[0]["issues"]
     # A host run pins the interpreter that VibeSys itself is running under: a
     # login shell's bare ``python`` may not have the MCP dependencies.
     assert entry["command"] == subject.sys.executable
     assert entry["args"] == ["-m", "issues"]
-    assert not (tmp_path / ".mcp.json").exists()
+    assert _workspace_files(tmp_path) == {}
 
 
 @pytest.mark.usefixtures("sandbox_builds")
 def test_a_non_python_mcp_command_is_left_alone(tmp_path: Path) -> None:
-    observed: list[dict[str, Any]] = []
+    installed: list[dict[str, dict[str, Any]]] = []
 
-    def run(_request: agentshim.CommandRequest) -> FakeRun:
-        observed.append(json.loads((tmp_path / ".mcp.json").read_text()))
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        installed.append(installed_mcp_servers("claude", request, tmp_path))
         return scripted_turn("claude", text="ok")
 
     driver, _fake = _driver("claude", run)
@@ -514,7 +511,7 @@ def test_a_non_python_mcp_command_is_left_alone(tmp_path: Path) -> None:
 
     session.run_turn(AgentTurnRequest(message="review"))
 
-    assert observed[0]["mcpServers"]["other"]["command"] == "node"
+    assert installed[0]["other"]["command"] == "node"
 
 
 # ---------------------------------------------------------------------------
@@ -803,33 +800,33 @@ def test_container_session_mcp_servers_are_installed_on_the_host_workspace(
     """
     server = MCPServerSpec(name="issues", command="python", args=("-m", "issues"))
     during: list[dict[str, str]] = []
+    installed: list[dict[str, dict[str, Any]]] = []
 
-    def run(_request: agentshim.CommandRequest) -> FakeRun:
+    def run(request: agentshim.CommandRequest) -> FakeRun:
         # Every container command is scripted, the provider health check
         # included, so the turn is the last snapshot rather than the only one.
         during.append(_workspace_files(tmp_path))
+        installed.append(installed_mcp_servers(provider, request, tmp_path))
         return scripted_turn(provider, text="ok")
 
-    driver, fake, _repairs = _container_driver(monkeypatch, provider, run)
+    driver, _fake, _repairs = _container_driver(monkeypatch, provider, run)
     session = driver.create_session(_container_spec(tmp_path, provider, mcp_servers=(server,)))
 
     session.run_turn(AgentTurnRequest(message="review"))
 
-    if agentshim.get_provider(provider).profile.mcp is not agentshim.McpMechanism.CONFIG_FILE:
-        # Codex passes its servers as `--config` flags, so nothing is written
-        # to the workspace in either execution mode.
-        assert during[-1] == {}
-        assert 'mcp_servers.issues.command="python"' in fake.requests[-1].argv
-        return
-
-    written = during[-1]
-    assert written, f"{provider} wrote no MCP config on the host workspace"
-    config = "".join(written.values())
-    assert "issues" in config
+    entry = installed[-1]["issues"]
     # The container image resolves its own interpreter: the host substitution
-    # would name a path that does not exist inside it.
-    assert subject.sys.executable not in config
-    assert '"python"' in config
+    # would name a path that does not exist inside it, so the command must
+    # reach the CLI unsubstituted.
+    assert entry["command"] == "python"
+    assert entry["args"] == ["-m", "issues"]
+
+    if agentshim.get_provider(provider).profile.mcp is not agentshim.McpMechanism.CONFIG_FILE:
+        # Codex passes its servers as flags, so nothing is written to the
+        # workspace in either execution mode.
+        assert during[-1] == {}
+    else:
+        assert during[-1], f"{provider} wrote no MCP config on the host workspace"
     assert _workspace_files(tmp_path) == {}, "the MCP config outlived the turn"
 
 
@@ -1098,14 +1095,13 @@ def test_a_failed_resume_retries_once_from_a_fresh_conversation(
     del sandbox_builds
 
     attempts: list[int] = []
-    refusal = RESUME_FAILURE_STDERR[provider]
 
     def run(request: agentshim.CommandRequest) -> FakeRun:
         attempts.append(len(attempts))
         if not attempts[:-1]:
             return scripted_turn(provider, text="ok", session_id="session-1")
         if "session-1" in request.argv:
-            return FakeRun(returncode=1, stderr=[refusal])
+            return scripted_resume_failure(provider, session_id="session-1")
         return scripted_turn(provider, text="recovered", session_id="session-2")
 
     session, fake = _session(tmp_path, provider, run)
@@ -1136,7 +1132,7 @@ def test_a_second_failure_after_a_resume_retry_propagates(
         attempts.append(len(attempts))
         if not attempts[:-1]:
             return scripted_turn(provider, text="ok", session_id="session-1")
-        return FakeRun(returncode=1, stderr=[RESUME_FAILURE_STDERR[provider]])
+        return scripted_resume_failure(provider, session_id="session-1")
 
     session, fake = _session(tmp_path, provider, run)
     session.run_turn(AgentTurnRequest(message="one"))

@@ -1,13 +1,13 @@
 """Docker configuration for CLI agent providers.
 
 Provider facts come from ``agentshim``'s ``ProviderProfile`` at call time:
-state directories, auth environment variables, and the CLI's own container
-install recipe. What stays here is VibeSys policy that is not itself a
-provider *decision*: which leaf files inside a provider state directory carry
-credentials, the toolchain a candidate repository needs, and the overrides
-VibeSys applies to a library recipe. The container environment table and the
-Codex CLI version pin are provider decisions and live in
-:mod:`vibesys.agents.provider_policy`; this module imports them.
+state directories, auth environment variables, which files carry credentials,
+and the CLI's own container install recipe. What stays here is VibeSys policy
+that is not itself a provider *decision*: the toolchain a candidate
+repository needs, and the overrides VibeSys applies to a library recipe. The
+container environment table and the Codex CLI version pin are provider
+decisions and live in :mod:`vibesys.agents.provider_policy`; this module
+imports them.
 """
 
 from __future__ import annotations
@@ -167,58 +167,26 @@ class DockerAuthPath:
     container_path: str
 
 
-# Which leaf files VibeSys stages out of each provider state directory named by
-# ``ProviderProfile.state_dirs``.
-#
-# The profile names directories; those directories also hold caches,
-# worktrees, session history, package installations, and databases that are
-# neither required for authentication nor appropriate to duplicate for every
-# sandbox. ``None`` marks a state entry that is itself a single file and is
-# staged as-is. A state directory with no entry here stages nothing.
-#
-# This is the one piece of per-provider knowledge that did not move to the
-# library: ``ProviderProfile`` carries no "which files hold credentials" field.
-# An ``auth_files`` tuple per state directory would let this table go away.
-_AUTH_LEAF_FILES: dict[str, tuple[str, ...] | None] = {
-    ".claude": (".credentials.json", "settings.json", "settings.local.json"),
-    ".claude.json": None,
-    ".gemini": ("oauth_creds.json", "google_accounts.json", "settings.json", ".env"),
-    ".codex": ("auth.json", "config.toml"),
-    ".local/share/opencode": ("auth.json",),
-    ".config/opencode": (
-        "opencode.json",
-        "opencode.jsonc",
-        # Older OpenCode releases used config.json/config.jsonc.
-        "config.json",
-        "config.jsonc",
-        ".env",
-    ),
-}
-
-
 def auth_paths(provider: str) -> list[DockerAuthPath]:
     """Return the provider state files to stage into a container, in order.
 
     Authentication and user configuration are mounted read-only under
     ``/opt/vibesys-auth`` and copied into the container's ephemeral writable
-    layer before the CLI starts.
+    layer before the CLI starts. Which home-relative paths those are comes
+    straight from ``ProviderProfile.auth_files`` (agentshim 0.6.1+): each
+    entry is either a state directory's leaf file or a state entry that is
+    itself a single file, and is staged at the same relative path under
+    ``/root``. A state directory the profile does not list a leaf for
+    contributes nothing.
 
     Raises:
         ValueError: if agentshim does not register *provider*.
     """
     home = Path.home()
-    paths: list[DockerAuthPath] = []
-    for state_dir in provider_profiles.provider_profile(provider).state_dirs:
-        if state_dir not in _AUTH_LEAF_FILES:
-            continue
-        leaves = _AUTH_LEAF_FILES[state_dir]
-        if leaves is None:
-            paths.append(DockerAuthPath(home / state_dir, f"/root/{state_dir}"))
-            continue
-        paths.extend(
-            DockerAuthPath(home / state_dir / leaf, f"/root/{state_dir}/{leaf}") for leaf in leaves
-        )
-    return paths
+    return [
+        DockerAuthPath(home / auth_file, f"/root/{auth_file}")
+        for auth_file in provider_profiles.provider_profile(provider).auth_files
+    ]
 
 
 def auth_env_vars(provider: str) -> tuple[str, ...]:

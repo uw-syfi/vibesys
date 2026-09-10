@@ -55,16 +55,16 @@ server module would not be importable inside the container."""
 # Claude Code refuses ``--dangerously-skip-permissions`` when running as root
 # unless ``IS_SANDBOX=1`` is set, and VibeSys runs every container provider as
 # root (the default) to avoid uv/pip permission errors when the agent installs
-# packages. A later agentshim release is expected to set this itself; keeping
-# it in its own constant means dropping it later is a one-line change instead
-# of a hunt through ``DOCKER_PROVIDER_ENV``.
-_CLAUDE_CONTAINER_SANDBOX_ENV: dict[str, str] = {"IS_SANDBOX": "1"}
-
+# packages. agentshim 0.6.1 declares this on ``ProviderProfile.container_env``
+# for every provider that needs container-only environment beyond auth
+# (Claude Code today), so VibeSys folds each shipped profile's answer into the
+# common table rather than pinning Claude's requirement by hand.
 DOCKER_PROVIDER_ENV: dict[str, dict[str, str]] = {
-    "claude": {**_COMMON_DOCKER_ENV, **_CLAUDE_CONTAINER_SANDBOX_ENV},
-    "gemini": dict(_COMMON_DOCKER_ENV),
-    "codex": dict(_COMMON_DOCKER_ENV),
-    "opencode": dict(_COMMON_DOCKER_ENV),
+    provider: {
+        **_COMMON_DOCKER_ENV,
+        **provider_profiles.provider_profile(provider).container_env,
+    }
+    for provider in SHIPPED_PROVIDERS
 }
 """Per-provider environment variables to set inside the container.
 

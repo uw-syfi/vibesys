@@ -14,10 +14,10 @@ import subprocess
 import sys
 from collections.abc import Iterable, Mapping  # noqa: TC003  # tracked: #288
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import vibesys
 from vibesys.agents import provider_profiles
-from vibesys.agents.provider_policy import is_codex
 from vs_sandbox import (
     HostResource,
     HostResourceAccess,
@@ -25,6 +25,9 @@ from vs_sandbox import (
     HostResourceDeclarer,
     declare_resources,
 )
+
+if TYPE_CHECKING:
+    from agentshim import ProviderProfile
 
 ALLOW_ENV = "VIBESYS_AGENT_SANDBOX_ALLOW"
 
@@ -191,19 +194,21 @@ def _agent_runtime(ctx: HostResourceContext) -> Iterable[HostResource]:
     return _resources(paths, purpose="agent and VibeSys runtime")
 
 
-#: Codex relocates its whole state tree when ``CODEX_HOME`` is set. The profile
-#: names the default location; VibeSys knows which environment variable moves
-#: it, because ``ProviderProfile`` carries no "state root variable" field.
-_CODEX_DEFAULT_HOME = ".codex"
-
 #: State directories granted as named leaves rather than whole.
 #:
-#: A Codex checkout may itself live under ``$CODEX_HOME/worktrees``: granting
-#: the directory would expose sibling tasks to the agent, while dropping it
-#: makes the CLI appear logged out inside confinement (#185). Bubblewrap
-#: creates the ephemeral parent directory these leaf mounts need. Every other
-#: state directory is granted whole, because a CLI writes session history and
-#: caches there and needs them back on resume.
+#: This is VibeSys sandbox policy, not a provider fact: a Codex checkout may
+#: itself live under the CLI's own state root (``$CODEX_HOME/worktrees`` by
+#: default), so granting the directory would expose sibling tasks to the
+#: agent, while dropping it makes the CLI appear logged out inside
+#: confinement (#185). Bubblewrap creates the ephemeral parent directory
+#: these leaf mounts need. Every other state directory is granted whole,
+#: because a CLI writes session history and caches there and needs them back
+#: on resume.
+#:
+#: Keyed on the profile's *default* directory name, ``.codex``, regardless of
+#: where ``CODEX_HOME`` relocates it at runtime: :func:`_state_root` resolves
+#: the actual root, and this table only says which leaves of Codex's state
+#: directory are narrowed once that root is known.
 #:
 #: ``sessions`` is that session history for Codex. Without it the rollout a
 #: turn writes lands in the sandbox's ephemeral view of ``$CODEX_HOME`` and is
@@ -211,13 +216,29 @@ _CODEX_DEFAULT_HOME = ".codex"
 #: thread, the driver restarts the conversation, and a confined run silently
 #: loses continuity it was told it had.
 _NARROWED_STATE_DIRS: dict[str, tuple[str, ...]] = {
-    _CODEX_DEFAULT_HOME: ("auth.json", "config.toml", "sessions"),
+    ".codex": ("auth.json", "config.toml", "sessions"),
 }
 
 
-def _state_root(state_dir: str, *, home: Path, ctx: HostResourceContext) -> Path:
-    if state_dir == _CODEX_DEFAULT_HOME and is_codex(ctx.provider):
-        return Path(ctx.env.get("CODEX_HOME", home / _CODEX_DEFAULT_HOME)).expanduser()
+def _state_root(
+    state_dir: str, *, home: Path, ctx: HostResourceContext, profile: ProviderProfile
+) -> Path:
+    """Return where *state_dir* actually lives, honoring the CLI's own relocation variable.
+
+    ``ProviderProfile.state_root_env`` (agentshim 0.6.1+) names the
+    environment variable a CLI documents for relocating its primary state
+    directory, ``state_dirs[0]`` (``CLAUDE_CONFIG_DIR`` for Claude,
+    ``CODEX_HOME`` for Codex; ``None`` for a provider that documents none).
+    Only that first directory can move this way, and only when the run
+    environment actually sets the variable; every other state directory, and
+    every provider with no such variable, stays under ``home``.
+    """
+    if (
+        profile.state_root_env
+        and state_dir == profile.state_dirs[0]
+        and profile.state_root_env in ctx.env
+    ):
+        return Path(ctx.env[profile.state_root_env]).expanduser()
     return home / state_dir
 
 
@@ -238,7 +259,7 @@ def _provider_state(ctx: HostResourceContext) -> Iterable[HostResource]:
 
     paths: list[Path] = []
     for state_dir in state_dirs:
-        root = _state_root(state_dir, home=Path(home), ctx=ctx)
+        root = _state_root(state_dir, home=Path(home), ctx=ctx, profile=profile)
         leaves = _NARROWED_STATE_DIRS.get(state_dir)
         if leaves is None:
             paths.append(root)

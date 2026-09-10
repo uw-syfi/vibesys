@@ -27,6 +27,7 @@ _FAKE_PROFILES = {
             "Library/Application Support/claude",
             "Library/Caches/claude",
         ),
+        state_root_env="CLAUDE_CONFIG_DIR",
     ),
     "codex": fake_profiles.profile(
         "codex",
@@ -36,6 +37,7 @@ _FAKE_PROFILES = {
             "Library/Application Support/com.openai.codex",
             "Library/Caches/codex",
         ),
+        state_root_env="CODEX_HOME",
     ),
     "gemini": fake_profiles.profile("gemini", state_dirs=(".gemini", ".config/gemini")),
     "opencode": fake_profiles.profile(
@@ -251,6 +253,23 @@ def test_codex_home_relocates_the_state_leaves(tmp_path, _fake_profiles_installe
     assert ".codex/auth.json" not in writable
     # $CODEX_HOME does not move the XDG config directory.
     assert ".config/codex" in writable
+
+
+def test_claude_config_dir_relocates_the_state_root(tmp_path, _fake_profiles_installed):  # noqa: ANN001, ANN201, PT019
+    """A second provider with a state root variable gets the same generic rule.
+
+    Claude declares no narrowed leaves, so its whole relocated directory is
+    granted, unlike Codex's leaf-only grant.
+    """
+    relocated = tmp_path / "relocated-claude"
+
+    writable = _writable_state(tmp_path, "claude", {"CLAUDE_CONFIG_DIR": str(relocated)})
+
+    assert "relocated-claude" in writable
+    assert ".claude" not in writable
+    # $CLAUDE_CONFIG_DIR only relocates the first state directory.
+    assert ".claude.json" in writable
+    assert ".config/claude" in writable
 
 
 def test_a_provider_agentshim_does_not_register_is_rejected(tmp_path):  # noqa: ANN001, ANN201

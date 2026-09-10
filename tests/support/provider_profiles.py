@@ -17,6 +17,8 @@ from agentshim import McpMechanism, OutputSchemaStyle, ProviderProfile, SchemaDi
 from vibesys.agents import provider_profiles
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import pytest
 
 
@@ -33,6 +35,10 @@ def profile(  # noqa: PLR0913
     auth_env_vars: tuple[str, ...] = (),
     skill_dirs: tuple[str, ...] = (),
     container_install: tuple[str, ...] = (),
+    container_env: Mapping[str, str] | None = None,
+    state_root_env: str | None = None,
+    auth_files: tuple[str, ...] = (),
+    mcp_config_file: str | None = None,
 ) -> ProviderProfile:
     """Build a profile for *name*, defaulting every field a test ignores.
 
@@ -54,6 +60,10 @@ def profile(  # noqa: PLR0913
         auth_env_vars=auth_env_vars,
         skill_dirs=skill_dirs,
         container_install=container_install,
+        container_env=container_env if container_env is not None else {},
+        state_root_env=state_root_env,
+        auth_files=auth_files,
+        mcp_config_file=mcp_config_file,
     )
 
 
