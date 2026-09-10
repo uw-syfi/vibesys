@@ -5,8 +5,10 @@ import type {HypothesisRound} from '@vibesys/backend-client';
 import type {AgentPhase, RoundSummary} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {SPINNER_FRAMES} from './activity-bar.js';
 import {STACKED_WIDTH, TRANSCRIPT_MIN} from './agent-map.js';
 import {
+  agentMarker,
   RAIL_COMPACT_WIDTH,
   RAIL_FULL_WIDTH,
   RoundRailView,
@@ -14,6 +16,7 @@ import {
   roundRailVisible,
   roundRailWidth,
 } from './round-rail.js';
+import {displayWidth} from './text-width.js';
 import {resolveTheme} from './theme.js';
 
 function rounds(count: number): RoundSummary[] {
@@ -586,9 +589,11 @@ describe('expanded round agents', () => {
     const implementer = rows.find(row => row.includes('implementer')) ?? '';
     const judge = rows.find(row => row.includes('judge')) ?? '';
     // Status never depends on colour alone, and the glyphs are the ones the
-    // graph nodes used so the vocabulary is the same one.
+    // graph nodes used so the vocabulary is the same one. Active is the
+    // exception: the rail has not ticked yet, so it carries the spinner's
+    // first frame rather than the graph's static dot.
     expect(orchestrator).toContain('✓');
-    expect(implementer).toContain('●');
+    expect(implementer).toContain(agentMarker('active', 0));
     expect(judge).toContain('○');
     // Per-agent duration, off the phase's own stamps rather than the round's.
     expect(orchestrator).toContain('1m 30s');
@@ -616,5 +621,22 @@ describe('expanded round agents', () => {
     for (const row of await textRows([2])) {
       expect(row.length).toBeLessThanOrEqual(RAIL_FULL_WIDTH - 4);
     }
+  });
+});
+
+describe('agentMarker', () => {
+  test('animates only the active status, off the same frame the rail ticks on', () => {
+    // Successive ticks land on different frames…
+    expect(agentMarker('active', 0)).not.toBe(agentMarker('active', 1));
+    // …and the sequence wraps rather than running off the end of SPINNER_FRAMES.
+    expect(agentMarker('active', SPINNER_FRAMES.length)).toBe(agentMarker('active', 0));
+    // Every other status keeps its static STATUS_MARKER glyph, tick or no tick.
+    for (const status of ['pending', 'completed', 'failed', 'cancelled', 'interrupted'] as const) {
+      expect(agentMarker(status, 0)).toBe(agentMarker(status, 5));
+    }
+  });
+
+  test('every spinner frame is one cell, so an animating row never jitters', () => {
+    for (const frame of SPINNER_FRAMES) expect(displayWidth(frame)).toBe(1);
   });
 });

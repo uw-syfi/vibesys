@@ -14,6 +14,7 @@ import {
   stripRounds,
   visibleRoundNumber,
 } from '../session-model.js';
+import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {
   agentGraphEnabled,
   STACKED_WIDTH,
@@ -206,6 +207,8 @@ export class RoundRailView {
    * too, and two mechanisms for one clock is one more than the rail needs.
    */
   #ticking: Array<{text: TextRenderable; content: () => string}> = [];
+  /** Advances every tick; an active agent's marker indexes it into `SPINNER_FRAMES`. */
+  #frame = 0;
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -374,7 +377,8 @@ export class RoundRailView {
    */
   #renderAgent(phase: AgentPhase, state: SessionState, compact: boolean): TextRenderable {
     const selected = state.selectedAgentKind === phase.kind;
-    const label = (): string => agentLabel(phase, this.#innerWidth(), compact, new Date());
+    const label = (): string =>
+      agentLabel(phase, this.#innerWidth(), compact, new Date(), this.#frame);
     const text = new TextRenderable(this.renderer, {
       content: label(),
       fg: selected ? this.#theme.accent : statusColor(this.#theme, phase.status),
@@ -386,7 +390,7 @@ export class RoundRailView {
       },
     });
     // Only a running agent has a clock to advance; a finished one's duration is
-    // already final.
+    // already final, and only a running agent's marker spins.
     if (phase.status === 'active') this.#ticking.push({content: label, text});
     return text;
   }
@@ -434,9 +438,14 @@ export class RoundRailView {
 
   #syncElapsedTimer(): void {
     if (this.#ticking.length === 0 || this.#elapsedTimer !== null) return;
+    // One timer for both jobs: elapsed-time text and the active-agent spinner
+    // both refresh off this tick rather than each owning one. SPINNER_INTERVAL_MS
+    // is the app's one animation cadence (activity-bar.ts), not a value picked
+    // for this rail alone.
     this.#elapsedTimer = setInterval(() => {
+      this.#frame = (this.#frame + 1) % SPINNER_FRAMES.length;
       for (const row of this.#ticking) row.text.content = row.content();
-    }, 1000);
+    }, SPINNER_INTERVAL_MS);
   }
 
   #stopElapsedTimer(): void {
@@ -469,10 +478,17 @@ function roundMetric(round: RoundState, state: SessionState, now: Date): string 
  * the agent ran, right aligned. The glyph carries status without colour and uses
  * the same vocabulary the graph's nodes did, so an operator who learned it there
  * reads it here. The word is dropped before the time when the rail is too narrow
- * for both, because the glyph already says what the word says.
+ * for both, because the glyph already says what the word says. An active agent's
+ * glyph animates (`agentMarker`); every other status keeps the static one.
  */
-function agentLabel(phase: AgentPhase, inner: number, compact: boolean, now: Date): string {
-  const head = `${AGENT_INDENT}${STATUS_MARKER[phase.status]} ${phase.kind}`;
+function agentLabel(
+  phase: AgentPhase,
+  inner: number,
+  compact: boolean,
+  now: Date,
+  frame: number,
+): string {
+  const head = `${AGENT_INDENT}${agentMarker(phase.status, frame)} ${phase.kind}`;
   if (compact) return truncateToWidth(head, inner);
   const timing = agentElapsed(phase, now);
   const headWidth = displayWidth(head);
@@ -482,6 +498,19 @@ function agentLabel(phase: AgentPhase, inner: number, compact: boolean, now: Dat
     if (gap >= 1) return `${head}${' '.repeat(gap)}${tail}`;
   }
   return truncateToWidth(head, inner);
+}
+
+/**
+ * The status glyph for an agent row. Active is the one status still changing,
+ * so it is the one that animates: `frame` indexes the same braille spinner
+ * every other in-flight indicator in the app already shows (`activity-bar.ts`),
+ * off the rail's own tick rather than a second timer. Every other status keeps
+ * its static `STATUS_MARKER` glyph, tick to tick, so a finished or waiting
+ * agent never appears to still be doing something.
+ */
+export function agentMarker(status: AgentPhase['status'], frame: number): string {
+  if (status !== 'active') return STATUS_MARKER[status];
+  return SPINNER_FRAMES[frame % SPINNER_FRAMES.length] ?? STATUS_MARKER.active;
 }
 
 /**
