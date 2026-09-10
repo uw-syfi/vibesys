@@ -10,11 +10,13 @@ from vibesys.agents import cli_docker
 
 _SHIPPED = ("claude", "codex", "gemini", "opencode")
 
-# What VibeSys expects the four shipped profiles to declare. `claude` is
-# asserted against the real library profile below; the other three are not
-# registered by the agentshim release VibeSys builds against yet, so tests that
-# need them install these.
-_PROFILES = {
+# Stand-in profiles for the tests whose subject is VibeSys's derivation rather
+# than any CLI's declared behaviour. agentshim registers real profiles for all
+# four (and for providers VibeSys does not ship), but a test of the derivation
+# should fail when the derivation changes, not when a library release edits one
+# CLI's install recipe. `TestShippedProfileAssumptions` covers the real
+# profiles.
+_FAKE_PROFILES = {
     "claude": fake_profiles.profile(
         "claude",
         state_dirs=(".claude", ".claude.json", ".config/claude"),
@@ -55,9 +57,9 @@ _PROFILES = {
 
 
 @pytest.fixture
-def shipped_profiles(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Answer every profile lookup from the four providers VibeSys ships."""
-    fake_profiles.install(monkeypatch, _PROFILES)
+def fake_profiles_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answer every profile lookup from the fakes above, not from agentshim."""
+    fake_profiles.install(monkeypatch, _FAKE_PROFILES)
 
 
 class TestAuthPaths:
@@ -65,9 +67,9 @@ class TestAuthPaths:
 
     def test_stages_the_credential_leaves_of_each_profile_state_directory(
         self,
-        shipped_profiles: None,
+        fake_profiles_installed: None,
     ) -> None:
-        del shipped_profiles
+        del fake_profiles_installed
         home = Path.home()
         staged = {
             provider: [
@@ -104,8 +106,8 @@ class TestAuthPaths:
             ],
         }
 
-    def test_never_stages_a_bulk_runtime_root(self, shipped_profiles: None) -> None:
-        del shipped_profiles
+    def test_never_stages_a_bulk_runtime_root(self, fake_profiles_installed: None) -> None:
+        del fake_profiles_installed
         configured = {
             spec.host_path for provider in _SHIPPED for spec in cli_docker.auth_paths(provider)
         }
@@ -206,8 +208,8 @@ class TestAuthEnvVars:
             "ANTHROPIC_CUSTOM_HEADERS",
         )
 
-    def test_carries_no_model_selection_variable(self, shipped_profiles: None) -> None:
-        del shipped_profiles
+    def test_carries_no_model_selection_variable(self, fake_profiles_installed: None) -> None:
+        del fake_profiles_installed
         forwarded = {name for provider in _SHIPPED for name in cli_docker.auth_env_vars(provider)}
 
         # VibeSys owns per-role model selection; a host export must not
@@ -266,8 +268,8 @@ class TestDockerInitCommands:
         assert commands[2:] == cli_docker.docker_init_commands("bare")
 
     @pytest.mark.parametrize("provider", _SHIPPED)
-    def test_installs_only_mcp_v1(self, provider: str, shipped_profiles: None) -> None:
-        del shipped_profiles
+    def test_installs_only_mcp_v1(self, provider: str, fake_profiles_installed: None) -> None:
+        del fake_profiles_installed
         commands = cli_docker.docker_init_commands(provider)
 
         assert any("command -v pip3" in command for command in commands)
@@ -279,9 +281,9 @@ class TestDockerInitCommands:
     def test_installs_the_pinned_rust_toolchain(
         self,
         provider: str,
-        shipped_profiles: None,
+        fake_profiles_installed: None,
     ) -> None:
-        del shipped_profiles
+        del fake_profiles_installed
         commands = cli_docker.docker_init_commands(provider)
         rust_install = next(command for command in commands if "rustup-init.sh" in command)
 
@@ -367,6 +369,98 @@ class TestDockerInitCommands:
     def test_rejects_a_provider_agentshim_does_not_register(self) -> None:
         with pytest.raises(ValueError, match="unregistered-provider"):
             cli_docker.docker_init_commands("unregistered-provider")
+
+
+class TestShippedProfileAssumptions:
+    """The real agentshim profiles, run through the tables above.
+
+    Nothing here is monkeypatched: these pin that what the four shipped
+    providers actually declare still satisfies what VibeSys derives from it, so
+    a library release that renames a state directory, adds a model-selection
+    variable, or rewrites an install recipe fails here rather than at container
+    start.
+    """
+
+    @pytest.mark.parametrize("provider", _SHIPPED)
+    def test_every_named_state_directory_stages_at_least_one_leaf(self, provider: str) -> None:
+        profile = agentshim.get_provider(provider).profile
+        home = Path.home()
+        staged = [
+            spec.host_path.relative_to(home).as_posix() for spec in cli_docker.auth_paths(provider)
+        ]
+        named = [
+            state_dir
+            for state_dir in profile.state_dirs
+            if state_dir in cli_docker._AUTH_LEAF_FILES  # noqa: SLF001
+        ]
+
+        # A state directory with no leaf table entry stages nothing, which is
+        # fine, but a provider that stages nothing at all starts its container
+        # CLI logged out.
+        assert staged
+        for state_dir in named:
+            assert any(path == state_dir or path.startswith(f"{state_dir}/") for path in staged), (
+                state_dir
+            )
+
+    def test_no_leaf_table_entry_names_a_directory_no_profile_declares(self) -> None:
+        declared = {
+            state_dir
+            for provider in _SHIPPED
+            for state_dir in agentshim.get_provider(provider).profile.state_dirs
+        }
+
+        # A stale key stages nothing and reads as coverage that is not there.
+        assert set(cli_docker._AUTH_LEAF_FILES) <= declared  # noqa: SLF001
+
+    @pytest.mark.parametrize("provider", _SHIPPED)
+    def test_auth_env_vars_carry_credentials_and_no_model_selection(self, provider: str) -> None:
+        forwarded = cli_docker.auth_env_vars(provider)
+
+        assert forwarded == agentshim.get_provider(provider).profile.auth_env_vars
+        # VibeSys owns per-role model selection, so no shipped profile may hand
+        # the container a host override of it (see `auth_env_vars`).
+        assert [name for name in forwarded if name.endswith("_MODEL")] == []
+
+    @pytest.mark.parametrize("provider", _SHIPPED)
+    def test_recipe_ends_with_the_common_tooling_it_does_not_already_run(
+        self,
+        provider: str,
+    ) -> None:
+        common = cli_docker._COMMON_DOCKER_TOOLING_INSTALL  # noqa: SLF001
+        commands = cli_docker.docker_init_commands(provider)
+        split = len(commands)
+        while split and commands[split - 1] in common:
+            split -= 1
+        head, tail = commands[:split], commands[split:]
+
+        # The trailing common steps keep their order and gain nothing, and the
+        # ones missing from the tail are exactly the ones the profile recipe
+        # already runs.
+        assert tail == [step for step in common if step in tail]
+        assert all(step in head for step in common if step not in tail)
+        assert len(commands) == len(set(commands))
+
+    @pytest.mark.parametrize("provider", _SHIPPED)
+    def test_every_npm_step_runs_after_node_is_on_the_path(self, provider: str) -> None:
+        commands = cli_docker.docker_init_commands(provider)
+
+        # The node bootstrap is inside the recipe, ahead of the common tooling,
+        # so a profile that drops its `command -v node` guard would run npm on
+        # an image without node.
+        for index, command in enumerate(commands):
+            if "npm " not in command:
+                continue
+            assert any("command -v node" in earlier for earlier in commands[: index + 1]), command
+
+    def test_codex_installs_the_verified_cli_version(self) -> None:
+        commands = cli_docker.docker_init_commands("codex")
+
+        # Either the profile pins this version or `_pin_codex_cli` supplies it;
+        # a profile that starts pinning a different one fails here instead of
+        # silently changing the editor mid-campaign.
+        pin = f"@openai/codex@{cli_docker.CODEX_DOCKER_CLI_VERSION}"
+        assert any(pin in command for command in commands), commands
 
 
 def test_docker_provider_env_covers_every_provider_vibesys_ships() -> None:

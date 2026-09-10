@@ -3,15 +3,22 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import agentshim
 import pytest
 from tests.support import provider_profiles as fake_profiles
 
 from vibesys.agents import host_resource_declarations
-from vs_sandbox import HostResourceAccess
+from vs_sandbox import HostResource, HostResourceAccess
 
-# The agentshim release VibeSys builds against registers `claude` only; these
-# are what VibeSys expects the four shipped profiles to declare.
-_PROVIDER_PROFILES = {
+_SHIPPED = ("claude", "codex", "gemini", "opencode")
+
+# Stand-in profiles for the tests whose subject is VibeSys's declaration table
+# rather than any CLI's declared state layout. agentshim registers real
+# profiles for all four (and for providers VibeSys does not ship), but a test
+# of the table should fail when the table changes, not when a library release
+# moves one CLI's state directory. `TestShippedProfileState` covers the real
+# profiles.
+_FAKE_PROFILES = {
     "claude": fake_profiles.profile(
         "claude",
         state_dirs=(".claude", ".claude.json", ".config/claude"),
@@ -165,8 +172,9 @@ def _writable_state(
 
 
 @pytest.fixture
-def _shipped_profiles(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_profiles.install(monkeypatch, _PROVIDER_PROFILES)
+def _fake_profiles_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answer every profile lookup from the fakes above, not from agentshim."""
+    fake_profiles.install(monkeypatch, _FAKE_PROFILES)
 
 
 @pytest.mark.parametrize(
@@ -183,7 +191,7 @@ def test_provider_state_is_scoped_to_selected_agent(  # noqa: ANN201
     provider,  # noqa: ANN001
     expected,  # noqa: ANN001
     forbidden,  # noqa: ANN001
-    _shipped_profiles,  # noqa: ANN001, PT019
+    _fake_profiles_installed,  # noqa: ANN001, PT019
 ):
     writable = _writable_state(tmp_path, provider)
 
@@ -193,7 +201,7 @@ def test_provider_state_is_scoped_to_selected_agent(  # noqa: ANN201
 
 def test_codex_state_is_declared_as_leaf_files_not_the_whole_home(  # noqa: ANN201
     tmp_path,  # noqa: ANN001
-    _shipped_profiles,  # noqa: ANN001, PT019
+    _fake_profiles_installed,  # noqa: ANN001, PT019
 ):
     writable = _writable_state(tmp_path, "codex")
 
@@ -208,7 +216,7 @@ def test_codex_state_is_declared_as_leaf_files_not_the_whole_home(  # noqa: ANN2
     }
 
 
-def test_codex_home_relocates_the_state_leaves(tmp_path, _shipped_profiles):  # noqa: ANN001, ANN201, PT019
+def test_codex_home_relocates_the_state_leaves(tmp_path, _fake_profiles_installed):  # noqa: ANN001, ANN201, PT019
     relocated = tmp_path / "relocated-codex"
 
     writable = _writable_state(tmp_path, "codex", {"CODEX_HOME": str(relocated)})
@@ -224,6 +232,52 @@ def test_codex_home_relocates_the_state_leaves(tmp_path, _shipped_profiles):  # 
 def test_a_provider_agentshim_does_not_register_is_rejected(tmp_path):  # noqa: ANN001, ANN201
     with pytest.raises(ValueError, match="unregistered-provider"):
         _writable_state(tmp_path, "unregistered-provider")
+
+
+class TestShippedProfileState:
+    """The real agentshim profiles, run through the declaration table.
+
+    Nothing here is monkeypatched: these pin that what the four shipped
+    providers actually declare still satisfies what VibeSys derives from it, so
+    a library release that renames or relocates a state directory fails here
+    rather than confining an agent away from its own credentials.
+    """
+
+    @staticmethod
+    def _declarations(tmp_path: Path, provider: str) -> tuple[HostResource, ...]:
+        return tuple(
+            host_resource_declarations._provider_state(  # noqa: SLF001
+                host_resource_declarations.HostResourceContext(
+                    env={"HOME": str(tmp_path)},
+                    provider=provider,
+                )
+            )
+        )
+
+    @pytest.mark.parametrize("provider", _SHIPPED)
+    def test_every_declared_state_directory_is_granted(self, tmp_path: Path, provider: str) -> None:
+        declarations = self._declarations(tmp_path, provider)
+        granted = {resource.path for resource in declarations}
+
+        assert all(resource.access is HostResourceAccess.READ_WRITE for resource in declarations), (
+            declarations
+        )
+        for state_dir in agentshim.get_provider(provider).profile.state_dirs:
+            root = tmp_path / state_dir
+            assert any(path == root or path.is_relative_to(root) for path in granted), state_dir
+
+    def test_codex_state_stays_on_the_named_leaves(self, tmp_path: Path) -> None:
+        granted = {resource.path for resource in self._declarations(tmp_path, "codex")}
+        codex_home = tmp_path / ".codex"
+
+        # A Codex checkout may live under $CODEX_HOME/worktrees, so the profile
+        # naming the directory must still not widen the grant to it (#185).
+        assert codex_home not in granted
+        assert {path.name for path in granted if path.is_relative_to(codex_home)} == {
+            "auth.json",
+            "config.toml",
+            "sessions",
+        }
 
 
 class TestContainerRuntimeResources:
