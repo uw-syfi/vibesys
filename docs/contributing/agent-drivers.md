@@ -164,12 +164,35 @@ still builds argv, parses the stream, and owns the session.
 - After every container turn the driver repairs workspace ownership. CLI
   agents run as root in the editor container, and an atomic file replacement
   leaves the replacement owned by root on a bind-mounted workspace.
+- The binary health check (`<binary> --help`) runs inside the container, once
+  per session, before the first turn. See the section below for what a failure
+  costs.
 - Codex gets a `CodexRolloutWatchdogExecutor` in front of the transport. A
   resumed `codex exec --json` inside a container regularly finishes its work,
   writes the terminal events to its rollout file, and never exits; the
   watchdog reads the rollout, replays the completion into the stream, and
   stops the process. It is provider-behaviour compensation and stays in
   VibeSys until the behaviour is verified fixed upstream.
+
+### A failed health check ends the run
+
+`CliAgent` runs `<binary> --help` when a session is constructed, and raises
+`CliCheckError` when it fails. Nothing in the loop catches that: session
+construction failures propagate out of the round, so a container whose CLI is
+missing, unauthenticated, or unreachable stops the run instead of burning a
+turn budget discovering it. That is the intended behavior; the check exists
+precisely so the failure is cheap and legible.
+
+Because a failure is that expensive, the check must not be tripped by a busy
+Docker daemon. `AgentShimDriver(check_timeout=...)` bounds it, defaulting to
+60 s in container mode against 15 s on the host: the container check waits on
+`docker exec` attaching as well as on the CLI answering.
+
+Follow-up, not implemented: the loop could treat a session construction
+failure as fail-closed evidence about the round (the same way it treats an
+agent timeout) rather than letting it escape as an unclassified error. That
+would give the operator a diagnostic naming the container and the provider
+instead of a bare `CliCheckError`.
 
 ### Session MCP servers in a container
 

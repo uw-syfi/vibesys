@@ -70,6 +70,19 @@ _PYTHON_MCP_COMMANDS = frozenset({"python", "python3"})
 _SCHEMA_DIR = Path(".cache/vibesys/response-schemas")
 _DIAGNOSTIC_PAYLOAD: Mapping[str, object] = {"channel": "diagnostic"}
 
+_HOST_BINARY_CHECK_TIMEOUT_S = 15.0
+"""agentshim's own default: a host binary answers ``--help`` immediately."""
+
+_CONTAINER_BINARY_CHECK_TIMEOUT_S = 60.0
+"""How long a container's ``<binary> --help`` may take before it counts as dead.
+
+The check crosses a ``docker exec``, so it waits on the daemon as well as the
+CLI. A daemon busy starting or stopping other containers regularly takes tens
+of seconds to attach, and a false negative here ends the run (see
+``docs/contributing/agent-drivers.md``), so the container budget is four times
+the host one.
+"""
+
 _MAX_CODEX_SESSION_TURNS = 2
 _MAX_CODEX_SESSION_INPUT_TOKENS = 10_000_000
 _MAX_CODEX_SESSION_DURATION_MS = 600_000
@@ -590,7 +603,7 @@ def _heavy_codex_turn_reason(result: agentshim.TurnResult) -> str | None:
 class AgentShimDriver:
     """Create AgentShim sessions and translate VibeSys execution policy."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # tracked: #288
         self,
         *,
         provider: str,
@@ -598,8 +611,15 @@ class AgentShimDriver:
         docker_sandboxes: dict[str, Any] | None = None,
         log: Callable[[str], None] | None = None,
         executor_factory: ExecutorFactory | None = None,
+        check_timeout: float | None = None,
     ) -> None:
-        """Configure one provider; ``executor_factory`` replaces host execution."""
+        """Configure one provider; ``executor_factory`` replaces host execution.
+
+        ``check_timeout`` bounds the one-off ``<binary> --help`` health check
+        each session runs before its first turn. It defaults to the execution
+        mode's budget: a container check crosses a ``docker exec`` and is given
+        four times as long as a host one.
+        """
         if provider not in _SHIPPED_PROVIDERS:
             raise ValueError(  # noqa: TRY003  # tracked: #288
                 f"unknown AgentShim provider {provider!r}; expected one of: {supported_providers()}"
@@ -609,6 +629,15 @@ class AgentShimDriver:
         self._docker_sandboxes = docker_sandboxes
         self._log = log or _ignore_log
         self._executor_factory: ExecutorFactory = executor_factory or build_host_executor
+        self._check_timeout = (
+            check_timeout
+            if check_timeout is not None
+            else (
+                _CONTAINER_BINARY_CHECK_TIMEOUT_S
+                if docker_sandboxes is not None
+                else _HOST_BINARY_CHECK_TIMEOUT_S
+            )
+        )
         self._sessions: WeakSet[AgentShimSession] = WeakSet()
         self._closed = False
 
@@ -663,6 +692,7 @@ class AgentShimDriver:
             executor=executor,
             env=env,
             event_handler=event_handler,
+            check_timeout=self._check_timeout,
             log=self._log,
         )
         session = AgentShimSession(

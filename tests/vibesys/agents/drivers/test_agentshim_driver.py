@@ -538,6 +538,7 @@ def _container_driver(
     monkeypatch: pytest.MonkeyPatch,
     provider: str,
     runs: FakeRun | Sequence[FakeRun] | Callable[[agentshim.CommandRequest], FakeRun],
+    **options: Any,  # noqa: ANN401
 ) -> tuple[subject.AgentShimDriver, FakeExecutor, list[tuple[str, int, int]]]:
     """Build a container-mode driver whose ``docker`` client is the fake.
 
@@ -557,6 +558,7 @@ def _container_driver(
     driver = subject.AgentShimDriver(
         provider=provider,
         docker_sandboxes={"implementer": SimpleNamespace(container_id="container-1")},
+        **options,
     )
     return driver, fake, repairs
 
@@ -632,6 +634,43 @@ def test_a_container_turn_carries_no_host_device_pin(
     forwarded = [argv[index + 1] for index, item in enumerate(argv) if item == "-e"]
     assert forwarded == []
     assert not any("CUDA_VISIBLE_DEVICES" in argument for argument in argv)
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_container_binary_check_gets_the_container_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """The check crosses a ``docker exec``, so it waits on the daemon too.
+
+    A failed health check ends the run before the first turn, so the budget
+    has to survive a daemon that is busy rather than dead.
+    """
+    driver, fake, _repairs = _container_driver(
+        monkeypatch, provider, scripted_turn(provider, text="ok")
+    )
+
+    driver.create_session(_container_spec(tmp_path, provider))
+
+    check = fake.requests[0]
+    assert "--help" in check.argv
+    assert check.timeout == subject._CONTAINER_BINARY_CHECK_TIMEOUT_S  # noqa: SLF001
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_the_binary_check_budget_is_a_driver_option(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    driver, fake, _repairs = _container_driver(
+        monkeypatch, provider, scripted_turn(provider, text="ok"), check_timeout=5
+    )
+
+    driver.create_session(_container_spec(tmp_path, provider))
+
+    assert fake.requests[0].timeout == 5
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
