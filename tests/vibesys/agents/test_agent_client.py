@@ -302,6 +302,112 @@ def test_invoke_closes_text_before_tool_event(tmp_path: Path) -> None:
     ]
 
 
+def _assistant_chunks(seen: list, kind: str = "implementer") -> list[tuple[str | None, str]]:
+    """Every assistant-channel chunk, with the invocation it was attributed to."""
+    return [
+        (event.execution_id, event.data.content)
+        for event in seen
+        if isinstance(event.data, AgentOutputChunkData)
+        and event.data.channel == "assistant"
+        and event.agent_kind == kind
+    ]
+
+
+def test_a_streamed_answer_is_rendered_once_and_stays_attributed(tmp_path: Path) -> None:
+    """The driver streams the answer; the client must not print it again.
+
+    A transcript groups assistant chunks by the invocation they name, so a
+    second, unattributed copy would appear as its own orphaned entry.
+    """
+    session = _FakeSession(
+        results=[AgentTurnResult("Hello world")],
+        events=[
+            AgentEvent(AgentEventKind.TEXT, text="Hello "),
+            AgentEvent(AgentEventKind.TEXT, text="world"),
+        ],
+    )
+    client = AgentClient(_FakeDriver([session]))
+    seen: list = []
+    unsubscribe = output_sink().subscribe(seen.append)
+    try:
+        answer = client.invoke_text(
+            kind="implementer",
+            workspace=tmp_path,
+            system_prompt="system",
+            user_prompt="user",
+            round_label="round-1",
+            invocation_id="inv-1",
+        )
+    finally:
+        unsubscribe()
+
+    assert answer == "Hello world"
+    chunks = _assistant_chunks(seen)
+    assert "".join(content for _invocation, content in chunks) == "Hello world\n"
+    assert {invocation for invocation, _content in chunks} == {"inv-1"}
+
+
+def test_an_unstreamed_answer_is_rendered_once_and_stays_attributed(tmp_path: Path) -> None:
+    """A driver that streams nothing still gets its answer rendered, once."""
+    session = _FakeSession(results=[AgentTurnResult("Hello world")])
+    client = AgentClient(_FakeDriver([session]))
+    seen: list = []
+    unsubscribe = output_sink().subscribe(seen.append)
+    try:
+        client.invoke_text(
+            kind="implementer",
+            workspace=tmp_path,
+            system_prompt="system",
+            user_prompt="user",
+            round_label="round-1",
+            invocation_id="inv-1",
+        )
+    finally:
+        unsubscribe()
+
+    chunks = _assistant_chunks(seen)
+    assert "".join(content for _invocation, content in chunks) == "Hello world\n"
+    assert {invocation for invocation, _content in chunks} == {"inv-1"}
+
+
+def test_a_structured_turn_streams_nothing_on_the_assistant_channel(tmp_path: Path) -> None:
+    """The schema payload is rendered from the parsed model, not as prose.
+
+    An AgentShim structured turn marks its assistant text as diagnostic, so
+    nothing here should reach the assistant channel: the raw JSON must not
+    stream and the pretty version must not follow it.
+    """
+    session = _FakeSession(
+        results=[AgentTurnResult('{"answer":"done"}')],
+        events=[
+            AgentEvent(
+                AgentEventKind.THINKING,
+                text='{"answer":"done"}',
+                payload={"channel": "diagnostic"},
+            ),
+        ],
+    )
+    client = AgentClient(_FakeDriver([session]))
+    seen: list = []
+    unsubscribe = output_sink().subscribe(seen.append)
+    try:
+        response = client.invoke(
+            kind="judge",
+            workspace=tmp_path,
+            system_prompt="system",
+            user_prompt="user",
+            response_cls=_Response,
+            fallback_factory=lambda: _Response(answer="fallback"),
+            round_label="round-1",
+            invocation_id="inv-1",
+        )
+    finally:
+        unsubscribe()
+
+    assert response == _Response(answer="done")
+    assert _assistant_chunks(seen, kind="judge") == []
+
+
 def test_thinking_payload_channel_routes_to_the_diagnostic_channel(tmp_path: Path) -> None:
     session = _FakeSession(
         results=[AgentTurnResult("Done")],
@@ -337,6 +443,10 @@ def test_thinking_payload_channel_routes_to_the_diagnostic_channel(tmp_path: Pat
     ] == [
         ("analysis", "the hot path is the ring buffer"),
         ("diagnostic", "restarting the provider process"),
+        # No driver event carried the answer, so the client renders it once at
+        # the end, attributed to the same turn.
+        ("assistant", "Done"),
+        ("assistant", "\n"),
     ]
 
 

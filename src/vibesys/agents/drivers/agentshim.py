@@ -178,10 +178,25 @@ def _diagnostic(text: str) -> AgentEvent:
     return AgentEvent(kind=AgentEventKind.THINKING, text=text, payload=_DIAGNOSTIC_PAYLOAD)
 
 
-def _translate(event: agentshim.AgentEvent) -> AgentEvent | None:  # one arm per event type
-    """Translate one library event, or return ``None`` to drop it."""
+def _translate(  # one arm per event type
+    event: agentshim.AgentEvent,
+    *,
+    structured: bool,
+) -> AgentEvent | None:
+    """Translate one library event, or return ``None`` to drop it.
+
+    *structured* says the turn asked for a response schema. The assistant text
+    of such a turn is the raw schema payload, which reaches the caller through
+    :attr:`AgentTurnResult.text` and is rendered from the parsed model. Putting
+    it on the assistant channel as well would stream unformatted JSON and then
+    repeat it, so a structured turn's text goes to the diagnostic channel.
+    """
     if isinstance(event, agentshim.AssistantText):
-        return AgentEvent(kind=AgentEventKind.TEXT, text=event.text)
+        return (
+            _diagnostic(event.text)
+            if structured
+            else AgentEvent(kind=AgentEventKind.TEXT, text=event.text)
+        )
     if isinstance(event, agentshim.Reasoning):
         return AgentEvent(kind=AgentEventKind.THINKING, text=event.text)
     if isinstance(event, agentshim.ToolCall):
@@ -236,13 +251,15 @@ class _AgentShimEventHandler:
 
     def __init__(self) -> None:
         self.observer: AgentObserver | None = None
+        #: Whether the turn in flight asked for a response schema.
+        self.structured = False
 
     def on_event(self, event: agentshim.AgentEvent) -> None:
         """Translate and forward one library event, if anyone is listening."""
         observer = self.observer
         if observer is None:
             return
-        translated = _translate(event)
+        translated = _translate(event, structured=self.structured)
         if translated is not None:
             observer.on_event(translated)
 
@@ -312,6 +329,7 @@ class AgentShimSession:
             raise RuntimeError("agent session is closed")  # noqa: TRY003  # tracked: #288
 
         self._event_handler.observer = observer
+        self._event_handler.structured = request.output_schema is not None
         self._restarted = False
         turn_error: BaseException | None = None
         try:
@@ -332,6 +350,7 @@ class AgentShimSession:
                         f"agent error: {exc}"
                     )
             self._event_handler.observer = None
+            self._event_handler.structured = False
             if turn_error is None and cleanup_error is not None:
                 raise cleanup_error
 

@@ -12,7 +12,6 @@ from pydantic import BaseModel
 from vibesys.agent_runner import (
     log_and_print,
     log_json_and_print,
-    log_markdown_and_print,
     log_prompt_markdown_and_print,
     parse_typed_response_text,
 )
@@ -72,6 +71,18 @@ class AgentDiagnosticLog:
     def __call__(self, message: str) -> None:
         """Write one driver diagnostic to the current run log."""
         log_and_print(message, self.stream)
+
+
+def _publish_final_text(logger: AgentLogger, text: str) -> None:
+    """Render a turn's answer that no driver stream delivered.
+
+    Routed through the turn's logger rather than printed directly so the
+    chunk carries the same ``agent_kind``/``round_label``/``invocation_id``
+    attribution a streamed answer does: a transcript consumer groups by those,
+    and an unattributed chunk becomes a second, orphaned assistant entry.
+    """
+    logger.log_text(text)
+    logger.end_text()
 
 
 class _LoggerObserver:
@@ -248,7 +259,7 @@ class AgentClient:
     ) -> T:
         """Run one turn and parse its structured response."""
         del tools  # In-process tools remain a deepagents-only compatibility path.
-        result = self._invoke_turn(
+        result, logger = self._invoke_turn(
             kind=kind,
             workspace=workspace,
             system_prompt=system_prompt,
@@ -270,12 +281,12 @@ class AgentClient:
                 f"No structured response received from {label.lower()}.",
                 self._run_log_file,
             )
-            if result.text:
+            if result.text and not logger.streamed_external_text_this_turn():
                 log_and_print(
                     f"\n=== {label} ROUND OUTPUT (raw output) ===",
                     self._run_log_file,
                 )
-                log_markdown_and_print(result.text, self._run_log_file)
+                _publish_final_text(logger, result.text)
             return fallback_factory()
         log_and_print(f"\n=== {label} ROUND OUTPUT ===", self._run_log_file)
         log_json_and_print(parsed.model_dump_json(indent=2), self._run_log_file)
@@ -299,7 +310,7 @@ class AgentClient:
     ) -> str:
         """Run one conversational turn without a structured-output requirement."""
         del tools
-        result = self._invoke_turn(
+        result, logger = self._invoke_turn(
             kind=kind,
             workspace=workspace,
             system_prompt=system_prompt,
@@ -316,7 +327,11 @@ class AgentClient:
         label = agent_label(kind)
         if result.text:
             log_and_print(f"\n=== {label} ROUND OUTPUT ===", self._run_log_file)
-            log_markdown_and_print(result.text, self._run_log_file)
+            # A driver that streams assistant text has already delivered this
+            # answer, chunk by chunk and attributed to the turn. Printing it
+            # again here would render it twice, the second time unattributed.
+            if not logger.streamed_external_text_this_turn():
+                _publish_final_text(logger, result.text)
         else:
             log_and_print(f"\n=== {label} ROUND OUTPUT (missing response) ===", self._run_log_file)
             log_and_print(f"No response received from {label.lower()}.", self._run_log_file)
@@ -337,7 +352,13 @@ class AgentClient:
         mcp_servers: list[MCPServerSpec] | None,
         reuse_session: bool | None,
         session_key: AgentSessionKey | None,
-    ) -> AgentTurnResult:
+    ) -> tuple[AgentTurnResult, AgentLogger]:
+        """Run one turn, returning its result and the logger that rendered it.
+
+        The logger comes back because it holds the one fact the caller cannot
+        derive from the result: whether the answer already reached the
+        assistant channel as the driver streamed it.
+        """
         label = agent_label(kind)
         model = self._role_models.get(kind, self._model_name)
         reasoning_effort = self._role_reasoning_efforts.get(kind, self._default_reasoning_effort)
@@ -411,7 +432,7 @@ class AgentClient:
                 usage=result.usage if result is not None else AgentUsage(),
             )
         assert result is not None  # noqa: S101  # assigned or the exception propagated
-        return result
+        return result, logger
 
     def _write_usage_record(
         self,

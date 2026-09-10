@@ -85,6 +85,9 @@ class AgentLogger(BaseCallbackHandler):
     ):
         self._streaming = False
         self._external_text_streaming = False
+        # Sticky for the logger's lifetime, which is one turn: whether any
+        # assistant text reached the assistant channel from a driver's stream.
+        self._streamed_external_text = False
         self._external_text_ends_with_newline = False
         self._log_file = log_file
         self._call_count = 0
@@ -509,6 +512,17 @@ class AgentLogger(BaseCallbackHandler):
             self._input_tokens = input_tokens
             self._publish_usage()
 
+    def streamed_external_text_this_turn(self) -> bool:
+        """Whether an external driver already streamed this turn's answer.
+
+        One logger serves exactly one invocation (``AgentClient._invoke_turn``
+        builds it per turn), so this reads as "during this turn". A caller that
+        also holds the turn's final text asks this before printing it, so an
+        answer that already reached the assistant channel as it arrived is not
+        rendered a second time at the end.
+        """
+        return self._streamed_external_text
+
     def log_text(self, text: str) -> None:
         """Emit one exact assistant-text delta from an external driver."""
         if not text:
@@ -519,6 +533,7 @@ class AgentLogger(BaseCallbackHandler):
             self._log_write(format_status_prefix(status))
         self._log_write(text)
         self._external_text_streaming = True
+        self._streamed_external_text = True
         self._external_text_ends_with_newline = text.endswith("\n")
 
     def end_text(self) -> None:

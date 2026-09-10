@@ -759,6 +759,75 @@ def test_a_native_schema_replaces_the_prompt_contract(
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_structured_turn_reports_its_payload_off_the_assistant_channel(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """The schema payload is an answer to parse, not prose to stream.
+
+    The caller renders a structured turn from the parsed response model, so
+    streaming the raw JSON as assistant text would show the answer twice, once
+    unformatted. It still reaches the diagnostic channel, where the raw
+    provider output belongs.
+    """
+    del sandbox_builds
+    profile = agentshim.get_provider(provider).profile
+    payload = {"analysis": "it improved", "verdict": "accept"}
+    native = profile.output_schema is not agentshim.OutputSchemaStyle.NONE
+    session, _fake = _session(
+        tmp_path,
+        provider,
+        scripted_turn(
+            provider,
+            text=json.dumps(payload),
+            structured_output=payload if native else None,
+        ),
+    )
+    observer = _Observer()
+
+    result = session.run_turn(
+        AgentTurnRequest(message="usr", instructions="sys", output_schema=JudgeResponse),
+        observer,
+    )
+
+    assert json.loads(result.text) == payload
+    assert observer.of_kind(AgentEventKind.TEXT) == []
+    diagnostics = [
+        event.text or ""
+        for event in observer.of_kind(AgentEventKind.THINKING)
+        if event.payload.get("channel") == "diagnostic"
+    ]
+    assert any(json.dumps(payload) in text for text in diagnostics)
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_later_plain_turn_streams_its_answer_again(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """Suppressing assistant text is the structured turn's rule, not the session's."""
+    del sandbox_builds
+    session, _fake = _session(
+        tmp_path,
+        provider,
+        [
+            scripted_turn(provider, text="{}"),
+            scripted_turn(provider, text="prose"),
+        ],
+    )
+
+    session.run_turn(
+        AgentTurnRequest(message="usr", instructions="sys", output_schema=JudgeResponse)
+    )
+    observer = _Observer()
+    session.run_turn(AgentTurnRequest(message="usr", instructions="sys"), observer)
+
+    assert [event.text for event in observer.of_kind(AgentEventKind.TEXT)] == ["prose"]
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
 def test_a_mapping_response_stays_native_where_the_dialect_allows_it(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
