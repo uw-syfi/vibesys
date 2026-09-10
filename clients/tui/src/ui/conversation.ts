@@ -251,8 +251,12 @@ export class ConversationView {
     )
       return;
     if (isEntryPrefix(this.#renderedConversation, entries)) {
-      for (const entry of entries.slice(this.#renderedConversation.length)) {
-        const card = this.#renderEntry(entry);
+      // Appending cannot change any rendered card: chrome depends on the entry
+      // above, and every entry already on screen keeps the one it had.
+      for (let index = this.#renderedConversation.length; index < entries.length; index += 1) {
+        const entry = entries[index];
+        if (entry === undefined) continue;
+        const card = this.#renderEntry(entry, entries[index - 1]);
         this.output.add(card);
         this.#renderedCards.push(card);
       }
@@ -266,25 +270,36 @@ export class ConversationView {
       for (let index = revealed - 1; index >= 0; index -= 1) {
         const entry = entries[index];
         if (entry === undefined) continue;
-        const card = this.#renderEntry(entry);
+        const card = this.#renderEntry(entry, entries[index - 1]);
         this.output.add(card, 0);
         cards.unshift(card);
       }
       this.#renderedCards = [...cards, ...this.#renderedCards];
       this.#renderedConversation = entries;
+      // The old head drew its chrome for being first. It is not first any more,
+      // so it loses that chrome when the entry now above it is the same
+      // speaker. Exactly one card can be in that position, so this is one
+      // re-render, not a rebuild.
+      const head = entries[revealed];
+      const above = entries[revealed - 1];
+      if (head !== undefined && above !== undefined && sameSpeaker(above, head))
+        this.#replaceCard(revealed, entries);
       return;
     }
     const changedIndex = singleChangedEntryIndex(this.#renderedConversation, entries);
     if (changedIndex !== -1) {
-      const previousCard = this.#renderedCards[changedIndex];
+      const before = this.#renderedConversation[changedIndex];
       const entry = entries[changedIndex];
-      if (previousCard !== undefined && entry !== undefined) {
-        this.output.remove(previousCard);
-        previousCard.destroyRecursively();
-        const card = this.#renderEntry(entry);
-        this.output.add(card, changedIndex);
-        this.#renderedCards[changedIndex] = card;
+      if (
+        this.#renderedCards[changedIndex] !== undefined &&
+        before !== undefined &&
+        entry !== undefined
+      ) {
         this.#renderedConversation = entries;
+        this.#replaceCard(changedIndex, entries);
+        // A replacement that changes who is speaking also decides the chrome of
+        // the entry below it, which is the only other card that can be affected.
+        if (!sameSpeaker(before, entry)) this.#replaceCard(changedIndex + 1, entries);
         return;
       }
     }
@@ -294,15 +309,31 @@ export class ConversationView {
       const card = new TextRenderable(this.renderer, {
         content: this.#emptyContent,
         fg: this.#theme.textSubtle,
+        // Shares the gutter every card reserves for the selection rule, so the
+        // empty-transcript message keeps the same left edge as an entry's
+        // heading rather than sitting one column outside it.
+        marginLeft: 1,
       });
       this.output.add(card);
       return;
     }
-    for (const entry of entries) {
-      const card = this.#renderEntry(entry);
+    for (const [index, entry] of entries.entries()) {
+      const card = this.#renderEntry(entry, entries[index - 1]);
       this.output.add(card);
       this.#renderedCards.push(card);
     }
+  }
+
+  /** Re-renders one already-rendered card in place, chrome included. */
+  #replaceCard(index: number, entries: ConversationEntry[]): void {
+    const previousCard = this.#renderedCards[index];
+    const entry = entries[index];
+    if (previousCard === undefined || entry === undefined) return;
+    this.output.remove(previousCard);
+    previousCard.destroyRecursively();
+    const card = this.#renderEntry(entry, entries[index - 1]);
+    this.output.add(card, index);
+    this.#renderedCards[index] = card;
   }
 
   #togglePrompt(id: string): void {
@@ -326,40 +357,68 @@ export class ConversationView {
     return true;
   }
 
-  #renderEntry(entry: ConversationEntry): BoxRenderable {
+  /**
+   * Draws one entry. `previous` is the entry rendered directly above it, or
+   * `undefined` for the first one in the view, which is what decides whether
+   * this entry opens a speaker run and so draws the divider and heading.
+   */
+  #renderEntry(entry: ConversationEntry, previous: ConversationEntry | undefined): BoxRenderable {
     const palette = entryPalette(entry, this.#theme);
     const selected = this.#selectedId === entry.id;
+    // The first rendered entry always draws its chrome, whatever sits above it
+    // in the model: the window and the scrollback both start mid-run, and the
+    // topmost row on screen is the one that most has to say who is speaking.
+    // It also keeps chrome a function of the rendered window alone, so no
+    // incremental path has to look outside it.
+    const opensRun = previous === undefined || !sameSpeaker(previous, entry);
+    const borderSides: ('top' | 'left')[] = [];
+    // A rule on the top edge instead of a four-sided border (#565): it
+    // separates one entry from the next at a fraction of the row cost, with
+    // no bottom border and no blank margin row to hold the gap open. Every
+    // kind gets the same rule, including what used to be the borderless,
+    // margin-only 'status' case, so the transcript has one boundary grammar
+    // rather than two.
+    //
+    // It is drawn only where the speaker changes: consecutive entries from one
+    // agent are one block, and a divider inside that block separates nothing.
+    if (opensRun) borderSides.push('top');
+    // The cursor. An entry inside a run has no heading to carry a "▸ " marker,
+    // so selection moves out of the heading and onto a rule down the entry's
+    // left edge, which every entry can draw and which costs no row. The column
+    // it needs is reserved by `paddingLeft` when the entry is not selected, so
+    // the glyph swaps in and out without the content moving under the cursor
+    // (tui-conventions.md, "nothing moves that does not have to"); this is the
+    // same reserved-gutter treatment `paneTitle` gives a pane. The glyph is the
+    // non-colour channel WCAG 1.4.1 asks for, and `borderFocus` plus the
+    // heading's `textStrong` reinforce it where a heading exists.
+    if (selected) borderSides.push('left');
     const card = new BoxRenderable(this.renderer, {
       id: `event-${entry.id}`,
       width: '100%',
       flexDirection: 'column',
-      // A rule on the top edge instead of a four-sided border (#565): it
-      // separates one entry from the next at a fraction of the row cost, with
-      // no bottom border and no blank margin row to hold the gap open. Every
-      // kind gets the same rule, including what used to be the borderless,
-      // margin-only 'status' case, so the transcript has one boundary grammar
-      // rather than two.
-      //
-      // No side padding either: the pane this view sits in already insets its
-      // content by one column (or the chat surface's own frame does), and a
-      // card padding on top of that was a second, inconsistent inset.
-      border: ['top'],
-      borderStyle: 'single',
-      // The cursor is the rule's colour. Selection is never carried by that
-      // alone: the heading below adds a "▸ " marker and switches to
-      // `textStrong`, neither of which this change touches, so losing three
-      // of the four border sides does not weaken the WCAG 1.4.1 channel.
-      //
-      // The resting colour is held to the same 3:1 floor `textSubtle` uses
-      // for punctuation and rules: `roleAccents` in theme.ts is not run
-      // through `ensureContrast` the way the label and content derived from
-      // it are, and five of the 64 role/theme combinations sit under 3:1. A
-      // four-sided border could lean on its own area to stay noticeable at a
-      // marginal contrast; a one-row rule cannot, so this change is what
-      // makes that gap worth closing.
-      borderColor: selected
-        ? this.#theme.borderFocus
-        : ensureContrast(palette.border, this.#theme.canvas, SUBTLE_TEXT_MIN_CONTRAST),
+      // No side padding beyond that gutter: the pane this view sits in already
+      // insets its content by one column (or the chat surface's own frame
+      // does), and a card padding on top of that was a second, inconsistent
+      // inset.
+      ...(selected ? {} : {paddingLeft: 1}),
+      // OpenTUI turns a border back on if `borderStyle` or `borderColor` is
+      // passed beside `border: false`, so an entry that draws neither rule has
+      // to omit both (tui-conventions.md).
+      ...(borderSides.length === 0
+        ? {border: false}
+        : {
+            border: borderSides,
+            borderStyle: 'single' as const,
+            // The resting colour is held to the same 3:1 floor `textSubtle`
+            // uses for punctuation and rules: `roleAccents` in theme.ts is not
+            // run through `ensureContrast` the way the label and content
+            // derived from it are, and five of the 64 role/theme combinations
+            // sit under 3:1. A four-sided border could lean on its own area to
+            // stay noticeable at a marginal contrast; a one-row rule cannot.
+            borderColor: selected
+              ? this.#theme.borderFocus
+              : ensureContrast(palette.border, this.#theme.canvas, SUBTLE_TEXT_MIN_CONTRAST),
+          }),
       ...(this.#showsSelection
         ? {
             onMouseUp: () => {
@@ -381,36 +440,38 @@ export class ConversationView {
             }
           : {}),
     });
-    const heading = new BoxRenderable(this.renderer, {
-      id: `event-${entry.id}-heading`,
-      width: '100%',
-      height: 1,
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-    });
-    // The heading box is already `space-between`, and an entry that names both
-    // an agent and a round carries them as separate fields, so the role can sit
-    // at the left edge where it lines up down the column and the run id can go
-    // to the right rather than pushing the eye a variable distance across. Any
-    // other entry keeps its single label on the left, unchanged.
-    const splitHeading = entry.agentKind !== undefined && entry.roundLabel !== undefined;
-    heading.add(
-      new TextRenderable(this.renderer, {
-        content: `${selected ? '▸ ' : ''}${splitHeading ? entry.agentKind : (entry.label ?? entry.kind)}`,
-        fg: selected ? this.#theme.textStrong : palette.label,
+    if (opensRun) {
+      const heading = new BoxRenderable(this.renderer, {
+        id: `event-${entry.id}-heading`,
+        width: '100%',
         height: 1,
-      }),
-    );
-    if (splitHeading) {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+      });
+      // The heading box is already `space-between`, and an entry that names
+      // both an agent and a round carries them as separate fields, so the role
+      // can sit at the left edge where it lines up down the column and the run
+      // id can go to the right rather than pushing the eye a variable distance
+      // across. Any other entry keeps its single label on the left, unchanged.
+      const {role, runId} = speaker(entry);
       heading.add(
         new TextRenderable(this.renderer, {
-          content: entry.roundLabel as string,
-          fg: this.#theme.textSubtle,
+          content: role,
+          fg: selected ? this.#theme.textStrong : palette.label,
           height: 1,
         }),
       );
+      if (runId !== null) {
+        heading.add(
+          new TextRenderable(this.renderer, {
+            content: runId,
+            fg: this.#theme.textSubtle,
+            height: 1,
+          }),
+        );
+      }
+      card.add(heading);
     }
-    card.add(heading);
     if (this.#markdownKinds.has(entry.kind)) {
       this.#renderMarkdownEntry(card, entry);
     } else if (
@@ -527,6 +588,24 @@ export class ConversationView {
       }
     }
   }
+}
+
+/**
+ * Who an entry is from, as the heading splits it: an entry that names both an
+ * agent and a round is that pair, and anything else is its single label. One
+ * definition, so the heading and the run grouping cannot disagree about where
+ * a run ends.
+ */
+function speaker(entry: ConversationEntry): {role: string; runId: string | null} {
+  return entry.agentKind !== undefined && entry.roundLabel !== undefined
+    ? {role: entry.agentKind, runId: entry.roundLabel}
+    : {role: entry.label ?? entry.kind, runId: null};
+}
+
+function sameSpeaker(left: ConversationEntry, right: ConversationEntry): boolean {
+  const before = speaker(left);
+  const after = speaker(right);
+  return before.role === after.role && before.runId === after.runId;
 }
 
 function sameEntries(left: ConversationEntry[], right: ConversationEntry[]): boolean {
