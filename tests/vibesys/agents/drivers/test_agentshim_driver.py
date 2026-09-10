@@ -1,34 +1,59 @@
+"""Tests for the AgentShim driver against the library's public API.
+
+Every turn is scripted with :func:`agentshim.testing.scripted_turn`, which
+emits the provider's real stream format, so nothing here hand-writes provider
+JSON or reaches into ``agentshim.core``/``agentshim.providers``. The assertions
+are about VibeSys policy: what argv the provider was launched with, which
+events the observer saw, how usage maps onto the neutral contract, and when a
+conversation is retired.
+"""
+
 from __future__ import annotations
 
 import concurrent.futures
 import json
+import subprocess
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import timedelta
-from pathlib import Path
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, Protocol
-from unittest.mock import MagicMock
+from typing import TYPE_CHECKING, Any
 
+import agentshim
 import pytest
+from agentshim.testing import FakeExecutor, FakeRun, TokenUsage, scripted_turn
 
-from vibesys.agents.callbacks import AgentLogger
-from vibesys.agents.client import _LoggerObserver
 from vibesys.agents.contracts import (
     AgentEvent,
+    AgentEventKind,
     AgentExecutionPolicy,
     AgentSessionSpec,
     AgentTurnRequest,
     MCPServerSpec,
+    SessionDisposition,
 )
 from vibesys.agents.drivers import agentshim as subject
-from vibesys.render.sink import output_sink
-from vibesys.run.events import CommandResultPayload, CoreEvent, ToolCallData, ToolResultData
+from vibesys.run.events import CommandResultPayload
 from vibesys.schemas import ImplementerResponse, JudgeResponse
 from vs_sandbox import HostResource, ProjectPathPolicy
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
+    from pathlib import Path
+
+    from vibesys.agents.contracts import AgentSession
+
+SCRIPTED_PROVIDERS = ("claude",)
+"""Providers whose stream format the installed library can script.
+
+Every provider VibeSys ships behaves the same way through the driver, so these
+cases are parametrized rather than written per provider.
+"""
+
+requires_codex = pytest.mark.skipif(
+    "codex" not in agentshim.provider_names(),
+    reason="codex provider not yet in the library snapshot",
+)
 
 
 @dataclass
@@ -38,171 +63,36 @@ class _Observer:
     def on_event(self, event: AgentEvent) -> None:
         self.events.append(event)
 
+    def kinds(self) -> list[AgentEventKind]:
+        return [event.kind for event in self.events]
 
-class _GenerateOverride(Protocol):
-    def __call__(
-        self,
-        prompt: str,
-        /,
-        *,
-        cwd: str | None,
-        timeout: int | None,
-        silent: bool,
-    ) -> str:
-        """Replace one fake agent's generate behavior."""
+    def of_kind(self, kind: AgentEventKind) -> list[AgentEvent]:
+        return [event for event in self.events if event.kind is kind]
 
 
-class _FakeAgent:
-    supports_native_output_schema = False
-    native_output_schema_allows_arbitrary_keys = False
-    native_output_schema_wants_absolute_path = False
-    supports_session_resume = True
+class _StubSandbox:
+    """A confinement policy that only records that it was applied."""
 
-    def __init__(
-        self,
-        model: str | None = None,
-        event_handler: Any | None = None,  # noqa: ANN401  # tracked: #288
-        *,
-        executor: Any | None = None,  # noqa: ANN401  # tracked: #288
-    ) -> None:
-        self.model = model
-        self.event_handler = event_handler
-        self.executor = executor
-        self.env = {"BASE": "one"}
-        self.binary_path = "/bin/fake"
-        self.sandbox = None
-        self.session_id = "session-1"
-        self.generate_calls: list[tuple[str, str | None, int | None]] = []
-        self.install_calls: list[tuple[Path, list[Any]]] = []
-        self.uninstall_calls: list[tuple[Path, list[Any]]] = []
-        self.output_schema_paths: list[str | None] = []
-        self.reasoning_effort: str | None = None
-        self.error: BaseException | None = None
-        self.generate_override: _GenerateOverride | None = None
-        self.uninstall_override: Callable[[Path, list[Any]], None] | None = None
-        self.tool_call_events: list[tuple[str, dict[str, Any]]] = []
-        self.tool_result_events: list[dict[str, Any]] = []
-        self._last_session = SimpleNamespace(
-            final_usage={"input_tokens": 12, "output_tokens": 3},
-            total_cost_usd=0.25,
-            duration_ms=90,
-        )
-
-    def set_reasoning_effort(self, effort: str) -> None:
-        self.reasoning_effort = effort
-
-    def resume_from(self, session_id: str) -> bool:
-        # Same rule as ``CodingAgent.resume_from``; see the dedicated tests in
-        # tests/vibesys/_agent_cli/test_session_resume.py for the real thing.
-        if not self.supports_session_resume or self.session_id is not None:
-            return False
-        self.session_id = session_id
-        return True
-
-    def forget_session(self) -> None:
-        self.session_id = None
-
-    def set_output_schema_path(self, path: str | None) -> None:
-        self.output_schema_paths.append(path)
-
-    def install_mcp_servers(self, workspace: Path, servers: list[Any]) -> None:
-        self.install_calls.append((workspace, servers))
-
-    def uninstall_mcp_servers(self, workspace: Path, servers: list[Any]) -> None:
-        if self.uninstall_override is not None:
-            self.uninstall_override(workspace, servers)
-            return
-        self.uninstall_calls.append((workspace, servers))
-
-    def generate(
-        self,
-        prompt: str,
-        *,
-        cwd: str | None,
-        timeout: int | None,
-        silent: bool,
-    ) -> str:
-        if self.generate_override is not None:
-            return self.generate_override(prompt, cwd=cwd, timeout=timeout, silent=silent)
-        assert silent
-        assert self.event_handler is not None
-        self.generate_calls.append((prompt, cwd, timeout))
-        self.event_handler.on_thinking("working")
-        for tool, args in self.tool_call_events:
-            self.event_handler.on_tool_call(tool, args)
-        for tool_result in self.tool_result_events:
-            self.event_handler.on_tool_result(**tool_result)
-        self.event_handler.on_usage({"input_tokens": 12, "output_tokens": 3})
-        if self.error is not None:
-            raise self.error
-        return "done"
+    def wrap(self, argv: list[str]) -> list[str]:
+        return ["/usr/bin/stub-sandbox", "--", *argv]
 
 
 @pytest.fixture
-def fake_agent(monkeypatch: pytest.MonkeyPatch) -> list[_FakeAgent]:
-    built: list[_FakeAgent] = []
+def sandbox_builds(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Record every host-sandbox build and leave the fake executor unconfined."""
+    builds: list[dict[str, Any]] = []
 
-    def factory(
-        model: str | None = None,
-        event_handler: Any | None = None,  # noqa: ANN401  # tracked: #288
-        *,
-        executor: Any | None = None,  # noqa: ANN401  # tracked: #288
-    ) -> _FakeAgent:
-        agent = _FakeAgent(model, event_handler, executor=executor)
-        built.append(agent)
-        return agent
+    def build(workspace: Path, **kwargs: Any) -> None:  # noqa: ANN401
+        builds.append({"workspace": workspace, **kwargs})
 
-    monkeypatch.setitem(subject._PROVIDER_CLASSES, "codex", factory)  # noqa: SLF001
-    monkeypatch.setattr(subject, "declare_agent_host_resources", lambda *_args, **_kwargs: ())
-    monkeypatch.setattr(subject, "build_host_sandbox", lambda *_args, **_kwargs: "sandbox")
-    return built
-
-
-def _register_provider(
-    monkeypatch: pytest.MonkeyPatch,
-    provider: str,
-    built: list[_FakeAgent],
-    **class_flags: bool,
-) -> None:
-    """Register a fake agent class under ``provider``.
-
-    ``class_flags`` become class attributes because the driver reads the
-    native-schema declarations off ``type(agent)``, not the instance.
-    """
-    agent_cls = type("_ConfiguredFakeAgent", (_FakeAgent,), dict(class_flags))
-
-    def factory(
-        model: str | None = None,
-        event_handler: Any | None = None,  # noqa: ANN401  # tracked: #288
-        *,
-        executor: Any | None = None,  # noqa: ANN401  # tracked: #288
-    ) -> _FakeAgent:
-        agent = agent_cls(model, event_handler, executor=executor)
-        built.append(agent)
-        return agent
-
-    monkeypatch.setitem(subject._PROVIDER_CLASSES, provider, factory)  # noqa: SLF001
-
-
-def _driver_for(
-    monkeypatch: pytest.MonkeyPatch,
-    provider: str,
-    built: list[_FakeAgent],
-    *,
-    log: Callable[[str], None] | None = None,
-    **class_flags: bool,
-) -> subject.AgentShimDriver:
-    """Build a driver whose provider is a fake agent and whose sandbox is inert."""
-    _register_provider(monkeypatch, provider, built, **class_flags)
-    monkeypatch.setattr(subject, "declare_agent_host_resources", lambda *_args, **_kwargs: ())
-    monkeypatch.setattr(subject, "build_host_sandbox", lambda *_args, **_kwargs: "sandbox")
-    return subject.AgentShimDriver(provider=provider, log=log)
+    monkeypatch.setattr(subject, "build_host_sandbox", build)
+    return builds
 
 
 def _spec(tmp_path: Path, **changes: Any) -> AgentSessionSpec:  # noqa: ANN401
     values: dict[str, Any] = {
         "role": "implementer",
-        "provider": "codex",
+        "provider": "claude",
         "workspace": tmp_path,
         "model": "gpt-test",
         "policy": AgentExecutionPolicy(require_enforcement=True),
@@ -213,374 +103,748 @@ def _spec(tmp_path: Path, **changes: Any) -> AgentSessionSpec:  # noqa: ANN401
     return AgentSessionSpec(**values)
 
 
-def test_session_setup_applies_policy_model_environment_and_reasoning(
-    fake_agent: list[_FakeAgent],
+def _driver(
+    provider: str,
+    runs: FakeRun | Sequence[FakeRun] | Callable[[agentshim.CommandRequest], FakeRun],
+    *,
+    timeout: int | None = None,
+    log: Callable[[str], None] | None = None,
+    confined: bool = False,
+) -> tuple[subject.AgentShimDriver, FakeExecutor]:
+    """Build a driver whose provider process is the scripted fake executor."""
+    fake = FakeExecutor(runs)
+
+    def factory(sandbox: Any) -> agentshim.CommandExecutor:  # noqa: ANN401
+        if confined and sandbox is not None:
+            return subject.confine_to_sandbox(fake, sandbox)
+        return fake
+
+    driver = subject.AgentShimDriver(
+        provider=provider,
+        timeout=timeout,
+        log=log,
+        executor_factory=factory,
+    )
+    return driver, fake
+
+
+def _session(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    runs: FakeRun | Sequence[FakeRun] | Callable[[agentshim.CommandRequest], FakeRun],
+    **kwargs: Any,  # noqa: ANN401
+) -> tuple[AgentSession, FakeExecutor]:
+    driver, fake = _driver(provider, runs, **kwargs)
+    return driver.create_session(_spec(tmp_path, provider=provider)), fake
+
+
+# ---------------------------------------------------------------------------
+# One turn: result, events, launch
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_turn_reports_its_text_conversation_and_usage(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
 ) -> None:
-    policy = ProjectPathPolicy(read_only_paths=("OBJECTIVE.md",))
-    captured: dict[str, Any] = {}
-
-    def build_sandbox(workspace: Path, **kwargs: Any) -> str:  # noqa: ANN401
-        captured.update(workspace=workspace, **kwargs)
-        return "confined"
-
-    monkeypatch.setattr(subject, "build_host_sandbox", build_sandbox)
-    driver = subject.AgentShimDriver(provider="codex")
-    driver.create_session(
-        _spec(
-            tmp_path,
-            policy=AgentExecutionPolicy(project_paths=policy, require_enforcement=True),
-        )
+    del sandbox_builds
+    session, _fake = _session(
+        tmp_path,
+        provider,
+        scripted_turn(
+            provider,
+            text="done",
+            session_id="session-1",
+            usage=TokenUsage(
+                input_tokens=1200,
+                output_tokens=30,
+                cached_input_tokens=1000,
+                cache_write_input_tokens=200,
+            ),
+        ),
     )
 
-    agent = fake_agent[0]
-    assert agent.model == "gpt-test"
-    assert agent.env == {"BASE": "one", "GPU": "0"}
-    assert agent.reasoning_effort == "high"
-    assert agent.sandbox == "confined"
-    assert captured["workspace"] == tmp_path
-    assert captured["project_path_policy"] is policy
-    assert captured["require_enforcement"] is True
+    result = session.run_turn(AgentTurnRequest(message="Do it", instructions="Rules"))
+
+    assert result.text == "done"
+    assert result.provider_session_id == "session-1"
+    assert result.disposition is SessionDisposition.REUSABLE
+    # Cached tokens are part of the input total on every provider, and the two
+    # cache fields keep their separate meanings.
+    assert result.usage.input_tokens == 1200
+    assert result.usage.output_tokens == 30
+    assert result.usage.cache_read_input_tokens == 1000
+    assert result.usage.cache_creation_input_tokens == 200
+    assert result.usage.duration_ms is not None
 
 
-def test_turn_forwards_prompt_timeout_events_and_usage(
-    fake_agent: list[_FakeAgent], tmp_path: Path
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_the_launch_carries_the_prompt_model_workspace_and_environment(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
 ) -> None:
-    driver = subject.AgentShimDriver(provider="codex", timeout=30)
-    session = driver.create_session(_spec(tmp_path))
-    observer = _Observer()
+    del sandbox_builds
+    session, fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"), timeout=30)
 
-    result = session.run_turn(
+    session.run_turn(
         AgentTurnRequest(
             message="Do it",
             instructions="Follow these rules",
             timeout=timedelta(seconds=7),
-        ),
-        observer,
+        )
     )
 
-    assert result.text == "done"
-    assert result.usage.input_tokens == 12
-    assert result.usage.output_tokens == 3
-    assert result.usage.total_cost_usd == 0.25
-    assert result.provider_session_id == "session-1"
-    assert fake_agent[0].generate_calls == [("Follow these rules\n\nDo it", str(tmp_path), 7)]
-    assert [event.kind for event in observer.events] == [
-        subject.AgentEventKind.THINKING,
-        subject.AgentEventKind.USAGE,
-    ]
+    request = fake.requests[-1]
+    # The prompt is delivered on stdin, never in argv.
+    assert request.stdin == "Follow these rules\n\nDo it"
+    assert not any("Follow these rules" in argument for argument in request.argv)
+    assert "--model" in request.argv
+    assert request.argv[request.argv.index("--model") + 1] == "gpt-test"
+    assert request.cwd == str(tmp_path)
+    assert request.timeout == 7
+    # The session environment overlay reaches the provider process.
+    assert request.env["GPU"] == "0"
 
 
-def test_turn_translates_tool_results_into_typed_command_payloads(
-    fake_agent: list[_FakeAgent], tmp_path: Path
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_the_session_timeout_applies_when_a_turn_names_none(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
 ) -> None:
-    driver = subject.AgentShimDriver(provider="codex")
-    session = driver.create_session(_spec(tmp_path))
-    fake_agent[0].tool_result_events = [
-        {"tool": "shell", "stdout": "out", "stderr": "warn", "exit_code": 3, "duration": 0.7}
-    ]
+    del sandbox_builds
+    session, fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"), timeout=30)
+
+    session.run_turn(AgentTurnRequest(message="Do it"))
+
+    assert fake.requests[-1].timeout == 30
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_the_reasoning_effort_reaches_a_provider_that_supports_it(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    session, fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"))
+
+    session.run_turn(AgentTurnRequest(message="Do it"))
+
+    profile = agentshim.get_provider(provider).profile
+    assert ("high" in fake.requests[-1].argv) is profile.supports_reasoning_effort
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_the_turn_streams_neutral_events(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    session, _fake = _session(
+        tmp_path,
+        provider,
+        scripted_turn(
+            provider,
+            text="answering",
+            session_id="session-1",
+            tool_calls=[("shell", {"command": "cargo test"}, "ok")],
+        ),
+    )
     observer = _Observer()
 
     session.run_turn(AgentTurnRequest(message="Do it"), observer)
 
-    event = next(
-        event for event in observer.events if event.kind is subject.AgentEventKind.TOOL_RESULT
-    )
-    assert event.text == "out"
-    assert event.payload["result_payload"] == CommandResultPayload(
-        stdout="out",
-        stderr="warn",
-        exit_code=3,
-        duration=0.7,
+    kinds = observer.kinds()
+    assert AgentEventKind.TEXT in kinds
+    assert kinds.index(AgentEventKind.TOOL_CALL) < kinds.index(AgentEventKind.TOOL_RESULT)
+    assert kinds[-1] is AgentEventKind.USAGE
+    call = observer.of_kind(AgentEventKind.TOOL_CALL)[0]
+    assert call.payload["tool"] == "shell"
+    assert call.payload["args"] == {"command": "cargo test"}
+    result = observer.of_kind(AgentEventKind.TOOL_RESULT)[0]
+    assert result.text == "ok"
+    assert result.payload["result_payload"] == CommandResultPayload(
+        stdout="ok",
+        stderr="",
+        exit_code=None,
+        duration=result.payload["duration"],
     )
     # The flat fields remain for consumers that predate the typed payload.
-    assert event.payload["stdout"] == "out"
-    assert event.payload["stderr"] == "warn"
-    assert event.payload["exit_code"] == 3
-    assert event.payload["duration"] == 0.7
+    assert result.payload["stdout"] == "ok"
+    assert result.payload["stderr"] == ""
 
 
-def _self_referential() -> dict[str, Any]:
-    """Arguments ``json.dumps`` refuses even with a fallback serializer."""
-    args: dict[str, Any] = {}
-    args["self"] = args
-    return args
-
-
-@pytest.mark.parametrize("item_count", [1, 2])
-@pytest.mark.parametrize(
-    ("item", "completion"),
-    [
-        pytest.param(
-            {"type": "file_change", "changes": [{"path": "src/lib.rs", "kind": "delete"}]},
-            {},
-            id="file-change",
-        ),
-        pytest.param(
-            {
-                "type": "mcp_tool_call",
-                "server": "docs",
-                "tool": "search",
-                "arguments": {"query": "x"},
-                "result": None,
-                "error": None,
-            },
-            {"result": {"content": [{"type": "text", "text": "hits"}]}},
-            id="mcp-result",
-        ),
-        pytest.param(
-            {"type": "mcp_tool_call", "arguments": {}, "result": None, "error": None},
-            {"error": {"message": "unavailable"}},
-            id="mcp-error",
-        ),
-    ],
-)
-def test_codex_item_lifecycles_reach_the_driver_as_separate_pairs(
-    fake_agent: list[_FakeAgent],
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_every_tool_call_is_forwarded_as_its_own_pair(
+    sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
-    item_count: int,
-    item: dict[str, Any],
-    completion: dict[str, Any],
+    provider: str,
 ) -> None:
-    """Pair raw lifecycle IDs before the driver publishes identical tool arguments."""
-    driver = subject.AgentShimDriver(provider="codex")
-    session = driver.create_session(_spec(tmp_path))
-    codex = subject.CodexCodingAgent.__new__(subject.CodexCodingAgent)
-    codex.binary_name = "codex"
-    codex.env = {}
-    codex.logger = MagicMock()
-    codex.executor = None
-    codex.event_handler = fake_agent[0].event_handler
-    parser = codex._create_session(["codex", "exec", "--json"], silent=True)  # noqa: SLF001
-
-    def generate(_prompt: str, *, cwd: str | None, timeout: int | None, silent: bool) -> str:
-        assert cwd == str(tmp_path)
-        assert timeout is None
-        assert silent
-        for index in range(item_count):
-            for kind in ("item.started", "item.completed"):
-                parser._process_stdout(  # noqa: SLF001
-                    json.dumps(
-                        {
-                            "type": kind,
-                            "item": {
-                                "id": f"item_{index}",
-                                **item,
-                                **(completion if kind == "item.completed" else {}),
-                            },
-                        }
-                    )
-                )
-        return "done"
-
-    fake_agent[0].generate_override = generate
-    seen: list[CoreEvent] = []
-    unsubscribe = output_sink().subscribe(seen.append)
-    try:
-        session.run_turn(AgentTurnRequest(message="Do it"), _LoggerObserver(AgentLogger()))
-    finally:
-        unsubscribe()
-
-    # Exercise the serialization consumed by the journal and replay clients.
-    wire_events = [CoreEvent.model_validate_json(event.model_dump_json()) for event in seen]
-    calls = [event.data for event in wire_events if isinstance(event.data, ToolCallData)]
-    results = [event.data for event in wire_events if isinstance(event.data, ToolResultData)]
-    assert [type(event.data) for event in wire_events] == [
-        ToolCallData,
-        ToolResultData,
-    ] * item_count
-    assert len({call.call_id for call in calls}) == item_count
-    assert all(call.call_id is not None for call in calls)
-    assert [result.call_id for result in results] == [call.call_id for call in calls]
-    assert [call.args for call in calls] == [
-        {key: value for key, value in item.items() if key != "type"}
-    ] * item_count
-    if completion:
-        assert [json.loads(result.content) for result in results] == [
-            next(iter(completion.values()))
-        ] * item_count
-
-
-def test_a_repeat_call_after_a_result_is_its_own_turn() -> None:
-    handler = subject._AgentShimEventHandler()  # noqa: SLF001
-    observer = _Observer()
-    handler.observer = observer
-
-    handler.on_tool_call("execute", {"command": "cargo test"})
-    handler.on_tool_result("execute", stdout="ok", exit_code=0)
-    handler.on_tool_call("execute", {"command": "cargo test"})
-
-    kinds = [event.kind for event in observer.events]
-    assert kinds == [
-        subject.AgentEventKind.TOOL_CALL,
-        subject.AgentEventKind.TOOL_RESULT,
-        subject.AgentEventKind.TOOL_CALL,
-    ]
-
-
-def test_a_repeat_call_behind_another_tool_is_its_own_turn() -> None:
-    handler = subject._AgentShimEventHandler()  # noqa: SLF001
-    observer = _Observer()
-    handler.observer = observer
-
-    handler.on_tool_call("file_change", {"changes": []})
-    handler.on_tool_call("todo_list", {"items": []})
-    handler.on_tool_call("file_change", {"changes": []})
-
-    tools = [
-        event.payload["tool"]
-        for event in observer.events
-        if event.kind is subject.AgentEventKind.TOOL_CALL
-    ]
-    assert tools == ["file_change", "todo_list", "file_change"]
-
-
-def test_repeated_callbacks_without_lifecycle_ids_forward_every_call() -> None:
-    handler = subject._AgentShimEventHandler()  # noqa: SLF001
-    observer = _Observer()
-    handler.observer = observer
-
-    handler.on_tool_call("Read", {"path": "a.rs"})
-    handler.on_tool_call("Read", {"path": "a.rs"})
-
-    assert len(observer.events) == 2
-
-
-@pytest.mark.parametrize(
-    "args",
-    [
-        pytest.param({"cursor": object()}, id="unserializable-value"),
-        pytest.param(_self_referential(), id="circular-structure"),
-    ],
-)
-def test_call_arguments_json_cannot_render_are_preserved(
-    fake_agent: list[_FakeAgent], tmp_path: Path, args: dict[str, Any]
-) -> None:
-    """The driver preserves arbitrary arguments without serializing or deduplicating."""
-    driver = subject.AgentShimDriver(provider="codex")
-    session = driver.create_session(_spec(tmp_path))
-    fake_agent[0].tool_call_events = [("mcp_tool_call", args), ("mcp_tool_call", args)]
+    """Two identical calls are two events: the driver never deduplicates."""
+    del sandbox_builds
+    session, _fake = _session(
+        tmp_path,
+        provider,
+        scripted_turn(
+            provider,
+            text="done",
+            tool_calls=[
+                ("Read", {"path": "a.rs"}, "contents"),
+                ("Read", {"path": "a.rs"}, "contents"),
+            ],
+        ),
+    )
     observer = _Observer()
 
     session.run_turn(AgentTurnRequest(message="Do it"), observer)
 
-    calls = [event for event in observer.events if event.kind is subject.AgentEventKind.TOOL_CALL]
-    assert len(calls) == 2
-    assert all(call.payload["args"] is args for call in calls)
+    assert len(observer.of_kind(AgentEventKind.TOOL_CALL)) == 2
+    assert len(observer.of_kind(AgentEventKind.TOOL_RESULT)) == 2
 
 
-def test_independent_sessions_overlap_and_chat_cleanup_does_not_interrupt_optimizer(
-    fake_agent: list[_FakeAgent], tmp_path: Path
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_provider_plumbing_is_marked_for_the_diagnostic_channel(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
 ) -> None:
-    barrier = threading.Barrier(2)
-    release_optimizer = threading.Event()
-    optimizer_observer = _Observer()
-    chat_observer = _Observer()
-    driver = subject.AgentShimDriver(provider="codex")
-    optimizer = driver.create_session(_spec(tmp_path, role="implementer"))
-    chat = driver.create_session(
-        _spec(tmp_path, role="chat", environment=(("CHAT_MODE", "read-only"),))
+    """A stderr line is not the agent's chain of thought."""
+    del sandbox_builds
+    scripted = scripted_turn(provider, text="done", session_id="session-1")
+    session, _fake = _session(
+        tmp_path,
+        provider,
+        FakeRun(stdout=scripted.stdout, stderr=["warning: slow filesystem\n"]),
+    )
+    observer = _Observer()
+
+    session.run_turn(AgentTurnRequest(message="Do it"), observer)
+
+    plumbing = [
+        event
+        for event in observer.of_kind(AgentEventKind.THINKING)
+        if event.payload.get("channel") == "diagnostic"
+    ]
+    assert any("slow filesystem" in (event.text or "") for event in plumbing)
+    # The subprocess lifecycle itself is not agent-visible output.
+    assert not any("RunStarted" in (event.text or "") for event in observer.events)
+
+
+# ---------------------------------------------------------------------------
+# Confinement and host resources
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_the_host_sandbox_wraps_the_provider_launch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    monkeypatch.setattr(subject, "build_host_sandbox", lambda *_a, **_k: _StubSandbox())
+    driver, fake = _driver(provider, scripted_turn(provider, text="ok"), confined=True)
+    session = driver.create_session(_spec(tmp_path, provider=provider))
+
+    session.run_turn(AgentTurnRequest(message="Do it"))
+
+    argv = list(fake.requests[-1].argv)
+    assert argv[0] == "/usr/bin/stub-sandbox"
+    assert argv[argv.index("--") + 1].endswith(agentshim.get_provider(provider).profile.binary)
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_an_unconfined_host_runs_the_provider_binary_directly(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """``build_host_sandbox`` returns ``None`` where confinement is unavailable."""
+    del sandbox_builds
+    session, fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"), confined=True)
+
+    session.run_turn(AgentTurnRequest(message="Do it"))
+
+    assert fake.requests[-1].argv[0].endswith(agentshim.get_provider(provider).profile.binary)
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_declared_host_resources_reach_the_sandbox(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """A caller's grant must survive the provider's default declaration."""
+    resource = HostResource(tmp_path / "toolchain", purpose="test toolchain")
+    policy = ProjectPathPolicy(read_only_paths=("OBJECTIVE.md",))
+    driver, _fake = _driver(provider, scripted_turn(provider, text="ok"))
+
+    driver.create_session(
+        _spec(
+            tmp_path,
+            provider=provider,
+            policy=AgentExecutionPolicy(
+                project_paths=policy,
+                host_resources=(resource,),
+                require_enforcement=True,
+            ),
+        )
     )
 
-    def generate_optimizer(
-        _prompt: str,
-        *,
-        cwd: str | None,
-        timeout: int | None,
-        silent: bool,
-    ) -> str:
-        assert cwd == str(tmp_path)
-        assert timeout is None
-        assert silent
-        barrier.wait(timeout=2)
-        assert fake_agent[0].event_handler is not None
-        fake_agent[0].event_handler.on_thinking("optimizer event")
-        assert release_optimizer.wait(timeout=2)
-        return "optimizer result"
+    build = sandbox_builds[0]
+    assert build["workspace"] == tmp_path
+    assert build["project_path_policy"] is policy
+    assert build["require_enforcement"] is True
+    assert resource in build["resources"]
+    # The sandbox sees the session's environment overlay, not just the shell's.
+    assert build["env"]["GPU"] == "0"
 
-    def generate_chat(
-        _prompt: str,
-        *,
-        cwd: str | None,
-        timeout: int | None,
-        silent: bool,
-    ) -> str:
-        assert cwd == str(tmp_path)
-        assert timeout is None
-        assert silent
-        barrier.wait(timeout=2)
-        assert fake_agent[1].event_handler is not None
-        fake_agent[1].event_handler.on_thinking("chat event")
-        return "chat result"
 
-    fake_agent[0].generate_override = generate_optimizer
-    fake_agent[1].generate_override = generate_chat
+# ---------------------------------------------------------------------------
+# MCP servers
+# ---------------------------------------------------------------------------
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        optimizer_turn = pool.submit(
-            optimizer.run_turn,
-            AgentTurnRequest(message="optimize"),
-            optimizer_observer,
+
+def test_mcp_servers_are_installed_for_the_turn_and_removed_after(tmp_path: Path) -> None:
+    """The config exists only while the provider process is running.
+
+    Claude discovers MCP servers from ``<workspace>/.mcp.json``, so the file is
+    read from inside the scripted run: that is the only moment it exists.
+    """
+    observed: list[dict[str, Any]] = []
+
+    def run(_request: agentshim.CommandRequest) -> FakeRun:
+        observed.append(json.loads((tmp_path / ".mcp.json").read_text()))
+        return scripted_turn("claude", text="ok")
+
+    driver, _fake = _driver("claude", run)
+    session = driver.create_session(
+        _spec(
+            tmp_path,
+            mcp_servers=(MCPServerSpec(name="issues", command="python", args=("-m", "issues")),),
         )
-        chat_turn = pool.submit(
-            chat.run_turn,
-            AgentTurnRequest(message="explain the run"),
-            chat_observer,
-        )
-        assert chat_turn.result(timeout=3).text == "chat result"
-        chat.close()
-        assert not optimizer_turn.done()
-        release_optimizer.set()
-        assert optimizer_turn.result(timeout=3).text == "optimizer result"
-
-    assert fake_agent[0].env == {"BASE": "one", "GPU": "0"}
-    assert fake_agent[1].env == {"BASE": "one", "CHAT_MODE": "read-only"}
-    assert [event.text for event in optimizer_observer.events] == ["optimizer event"]
-    assert [event.text for event in chat_observer.events] == ["chat event"]
-    driver.close()
-
-
-def test_mcp_is_session_scoped_but_activated_only_around_turn(
-    fake_agent: list[_FakeAgent], tmp_path: Path
-) -> None:
-    server = MCPServerSpec(name="issues", command="python", args=("-m", "issues"))
-    session = subject.AgentShimDriver(provider="codex").create_session(
-        _spec(tmp_path, mcp_servers=(server,))
     )
 
     session.run_turn(AgentTurnRequest(message="review"))
 
-    installed = fake_agent[0].install_calls[0][1][0]
-    assert installed.name == "issues"
-    assert installed.command == subject.sys.executable
-    assert installed.args == ["-m", "issues"]
-    assert fake_agent[0].uninstall_calls == fake_agent[0].install_calls
+    entry = observed[0]["mcpServers"]["issues"]
+    # A host run pins the interpreter that VibeSys itself is running under: a
+    # login shell's bare ``python`` may not have the MCP dependencies.
+    assert entry["command"] == subject.sys.executable
+    assert entry["args"] == ["-m", "issues"]
+    assert not (tmp_path / ".mcp.json").exists()
 
 
-def test_mcp_cleanup_preserves_original_turn_error(
-    fake_agent: list[_FakeAgent], tmp_path: Path
-) -> None:
-    session = subject.AgentShimDriver(provider="codex").create_session(
-        _spec(tmp_path, mcp_servers=(MCPServerSpec(name="issues", command="server"),))
+def test_a_non_python_mcp_command_is_left_alone(tmp_path: Path) -> None:
+    observed: list[dict[str, Any]] = []
+
+    def run(_request: agentshim.CommandRequest) -> FakeRun:
+        observed.append(json.loads((tmp_path / ".mcp.json").read_text()))
+        return scripted_turn("claude", text="ok")
+
+    driver, _fake = _driver("claude", run)
+    session = driver.create_session(
+        _spec(
+            tmp_path,
+            mcp_servers=(MCPServerSpec(name="other", command="node", args=("server.js",)),),
+        )
     )
-    fake_agent[0].error = ValueError("turn failed")
 
-    def fail_cleanup(_workspace: Path, _servers: list[Any]) -> None:
-        raise OSError("cleanup failed")  # noqa: TRY003  # tracked: #288
+    session.run_turn(AgentTurnRequest(message="review"))
 
-    fake_agent[0].uninstall_override = fail_cleanup
-
-    with pytest.raises(ValueError, match="turn failed"):
-        session.run_turn(AgentTurnRequest(message="review"))
+    assert observed[0]["mcpServers"]["other"]["command"] == "node"
 
 
-def test_driver_and_session_close_are_idempotent(
-    fake_agent: list[_FakeAgent], tmp_path: Path
+# ---------------------------------------------------------------------------
+# Structured output
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_native_schema_replaces_the_prompt_contract(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
 ) -> None:
-    assert fake_agent == []
-    driver = subject.AgentShimDriver(provider="codex")
-    session = driver.create_session(_spec(tmp_path))
+    del sandbox_builds
+    payload = {"analysis": "it improved", "verdict": "accept"}
+    session, fake = _session(
+        tmp_path,
+        provider,
+        scripted_turn(provider, text="", structured_output=payload),
+    )
+
+    result = session.run_turn(
+        AgentTurnRequest(message="usr", instructions="sys", output_schema=JudgeResponse)
+    )
+
+    assert "Schema for JudgeResponse" not in (fake.requests[-1].stdin or "")
+    # The caller parses the answer back into its response model, so the
+    # schema-conformant payload is what the turn reports as its text.
+    assert json.loads(result.text) == payload
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_mapping_response_stays_native_where_the_dialect_allows_it(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """``ImplementerResponse.metrics`` is a ``dict[str, float]``."""
+    del sandbox_builds
+    profile = agentshim.get_provider(provider).profile
+    if profile.schema_dialect is not agentshim.SchemaDialect.OPEN:
+        pytest.skip(f"{provider} cannot express an open object map natively")
+    session, fake = _session(tmp_path, provider, scripted_turn(provider, text="{}"))
+
+    session.run_turn(
+        AgentTurnRequest(message="usr", instructions="sys", output_schema=ImplementerResponse)
+    )
+
+    assert "Schema for ImplementerResponse" not in (fake.requests[-1].stdin or "")
+
+
+@requires_codex
+def test_a_mapping_response_falls_back_on_a_strict_provider(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """Codex's ``--output-schema`` subset cannot express an open object map."""
+    del sandbox_builds
+    logs: list[str] = []
+    session, fake = _session(tmp_path, "codex", scripted_turn("codex", text="{}"), log=logs.append)
+
+    session.run_turn(
+        AgentTurnRequest(message="usr", instructions="sys", output_schema=ImplementerResponse)
+    )
+
+    assert "Schema for ImplementerResponse" in (fake.requests[-1].stdin or "")
+    assert any("using prompt fallback" in message for message in logs)
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_schema_no_dialect_accepts_falls_back_to_the_prompt_contract(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """An expensive turn must not be spent discovering the CLI rejects a schema."""
+    del sandbox_builds
+
+    class UnsupportedResponse(JudgeResponse):
+        @classmethod
+        def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:  # noqa: ANN401, ARG003
+            return {
+                "type": "object",
+                "properties": {"analysis": {"type": "string"}},
+                "not": {"required": ["analysis"]},
+            }
+
+    logs: list[str] = []
+    session, fake = _session(
+        tmp_path, provider, scripted_turn(provider, text="{}"), log=logs.append
+    )
+
+    session.run_turn(
+        AgentTurnRequest(message="usr", instructions="sys", output_schema=UnsupportedResponse)
+    )
+
+    assert "Schema for UnsupportedResponse" in (fake.requests[-1].stdin or "")
+    assert any("using prompt fallback" in message for message in logs)
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_plain_turn_carries_no_response_contract(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """A reused session must not inherit the previous turn's schema."""
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path,
+        provider,
+        [scripted_turn(provider, text="{}"), scripted_turn(provider, text="prose")],
+    )
+
+    session.run_turn(
+        AgentTurnRequest(message="usr", instructions="sys", output_schema=JudgeResponse)
+    )
+    result = session.run_turn(AgentTurnRequest(message="usr", instructions="sys"))
+
+    assert result.text == "prose"
+    assert len(fake.requests[0].argv) > len(fake.requests[1].argv)
+
+
+# ---------------------------------------------------------------------------
+# Conversation lifecycle
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_the_second_turn_continues_the_first_conversation(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path, provider, scripted_turn(provider, text="ok", session_id="session-1")
+    )
+
+    session.run_turn(AgentTurnRequest(message="one"))
+    session.run_turn(AgentTurnRequest(message="two"))
+
+    assert "session-1" not in fake.requests[0].argv
+    assert "session-1" in fake.requests[1].argv
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_checkpoint_is_adopted_only_while_no_conversation_is_live(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path, provider, scripted_turn(provider, text="ok", session_id="session-1")
+    )
+
+    assert session.resume_provider_session("checkpoint") is True
+    session.run_turn(AgentTurnRequest(message="one"))
+    # The live conversation is newer than any checkpoint the caller holds.
+    assert session.resume_provider_session("older-checkpoint") is False
+
+    session.run_turn(AgentTurnRequest(message="two"))
+    assert "checkpoint" in fake.requests[0].argv
+    assert "session-1" in fake.requests[1].argv
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_failed_resume_retries_once_from_a_fresh_conversation(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """A conversation the provider will not resume must not kill the run."""
+    del sandbox_builds
+
+    attempts: list[int] = []
+
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        attempts.append(len(attempts))
+        if not attempts[:-1]:
+            return scripted_turn(provider, text="ok", session_id="session-1")
+        if "session-1" in request.argv:
+            return FakeRun(returncode=1, stderr=["no conversation found\n"])
+        return scripted_turn(provider, text="recovered", session_id="session-2")
+
+    session, fake = _session(tmp_path, provider, run)
+    session.run_turn(AgentTurnRequest(message="one"))
+
+    result = session.run_turn(AgentTurnRequest(message="two"))
+
+    assert result.text == "recovered"
+    assert result.disposition is SessionDisposition.RESET_REQUIRED
+    assert "session-1" in fake.requests[1].argv
+    assert "session-1" not in fake.requests[2].argv
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_fresh_turn_that_fails_is_not_retried(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """Nothing was resumed, so the failure is the agent's own."""
+    del sandbox_builds
+    session, fake = _session(tmp_path, provider, FakeRun(returncode=1, stderr=["boom\n"]))
+
+    with pytest.raises(agentshim.CliExitError):
+        session.run_turn(AgentTurnRequest(message="one"))
+
+    assert len(fake.requests) == 1
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_turn_that_times_out_is_reported_as_a_subprocess_timeout(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """Loops fail closed on ``subprocess.TimeoutExpired`` and read its budget."""
+    del sandbox_builds
+    session, _fake = _session(tmp_path, provider, FakeRun(timeout=True), timeout=45)
+
+    with pytest.raises(subprocess.TimeoutExpired) as raised:
+        session.run_turn(AgentTurnRequest(message="one"))
+
+    assert raised.value.timeout == 45
+
+
+@requires_codex
+def test_the_codex_thread_budget_retires_a_conversation(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    del sandbox_builds
+    session, _fake = _session(
+        tmp_path, "codex", scripted_turn("codex", text="ok", session_id="thread-1")
+    )
+
+    first = session.run_turn(AgentTurnRequest(message="one"))
+    second = session.run_turn(AgentTurnRequest(message="two"))
+
+    assert first.disposition is SessionDisposition.REUSABLE
+    # The budget is spent, so the thread is retired and the caller is told the
+    # conversation this session named no longer exists.
+    assert second.disposition is SessionDisposition.RESET_REQUIRED
+    assert second.provider_session_id == "thread-1"
+
+
+@requires_codex
+def test_a_heavy_codex_turn_retires_its_conversation(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    del sandbox_builds
+    session, _fake = _session(
+        tmp_path,
+        "codex",
+        scripted_turn(
+            "codex",
+            text="ok",
+            session_id="thread-1",
+            usage=TokenUsage(input_tokens=20_000_000),
+        ),
+    )
+
+    result = session.run_turn(AgentTurnRequest(message="one"))
+
+    assert result.disposition is SessionDisposition.RESET_REQUIRED
+
+
+@requires_codex
+def test_a_missing_codex_rollout_restarts_the_conversation(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """Codex names the cause: the rollout the thread ID points at is gone."""
+    del sandbox_builds
+
+    attempts: list[int] = []
+
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        attempts.append(len(attempts))
+        if not attempts[:-1]:
+            return scripted_turn("codex", text="ok", session_id="thread-1")
+        if "thread-1" in request.argv:
+            return FakeRun(
+                returncode=1,
+                stderr=["thread/resume failed: no rollout found for thread id thread-1\n"],
+            )
+        return scripted_turn("codex", text="recovered", session_id="thread-2")
+
+    session, _fake = _session(tmp_path, "codex", run)
+    session.run_turn(AgentTurnRequest(message="one"))
+
+    result = session.run_turn(AgentTurnRequest(message="two"))
+
+    assert result.text == "recovered"
+    assert result.disposition is SessionDisposition.RESET_REQUIRED
+
+
+# ---------------------------------------------------------------------------
+# Cancellation and lifecycle
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_cancel_stops_the_running_provider_process(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    session, fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"))
+    reached = threading.Event()
+
+    class _HoldingObserver:
+        def on_event(self, event: AgentEvent) -> None:
+            del event
+            if reached.is_set():
+                return
+            reached.set()
+            # Hold the turn open until the canceller reaches the process handle.
+            deadline = time.monotonic() + 5
+            while not fake.handles[-1].terminated and time.monotonic() < deadline:
+                time.sleep(0.01)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        turn = pool.submit(session.run_turn, AgentTurnRequest(message="one"), _HoldingObserver())
+        assert reached.wait(5)
+        session.cancel()
+        turn.result(timeout=5)
+
+    assert fake.handles[-1].terminated
+    # The turn unwound on its own, so the harder stop was never needed.
+    assert not fake.handles[-1].killed
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_independent_sessions_run_concurrently(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """Closing one session must not interrupt another session's turn."""
+    del sandbox_builds
+    barrier = threading.Barrier(2)
+    release_optimizer = threading.Event()
+
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        barrier.wait(timeout=5)
+        if request.env.get("CHAT_MODE") == "read-only":
+            return scripted_turn(provider, text="chat result")
+        assert release_optimizer.wait(timeout=5)
+        return scripted_turn(provider, text="optimizer result")
+
+    driver, _fake = _driver(provider, run)
+    optimizer = driver.create_session(_spec(tmp_path, provider=provider, role="implementer"))
+    chat = driver.create_session(
+        _spec(
+            tmp_path,
+            provider=provider,
+            role="chat",
+            environment=(("CHAT_MODE", "read-only"),),
+        )
+    )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        optimizer_turn = pool.submit(optimizer.run_turn, AgentTurnRequest(message="optimize"))
+        chat_turn = pool.submit(chat.run_turn, AgentTurnRequest(message="explain"))
+        assert chat_turn.result(timeout=10).text == "chat result"
+        chat.close()
+        assert not optimizer_turn.done()
+        release_optimizer.set()
+        assert optimizer_turn.result(timeout=10).text == "optimizer result"
+
+    driver.close()
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_driver_and_session_close_are_idempotent(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    driver, _fake = _driver(provider, scripted_turn(provider, text="ok"))
+    session = driver.create_session(_spec(tmp_path, provider=provider))
 
     session.close()
     session.close()
@@ -590,367 +854,60 @@ def test_driver_and_session_close_are_idempotent(
     with pytest.raises(RuntimeError, match="closed"):
         session.run_turn(AgentTurnRequest(message="later"))
     with pytest.raises(RuntimeError, match="closed"):
-        driver.create_session(_spec(tmp_path))
+        driver.create_session(_spec(tmp_path, provider=provider))
 
 
-def test_capabilities_declare_cross_process_provider_session_resume() -> None:
-    assert subject.AgentShimDriver(provider="codex").capabilities.provider_session_resume
+# ---------------------------------------------------------------------------
+# Driver configuration
+# ---------------------------------------------------------------------------
 
 
-def test_resume_adopts_a_checkpoint_when_no_conversation_is_live(
-    fake_agent: list[_FakeAgent], tmp_path: Path
-) -> None:
-    driver = subject.AgentShimDriver(provider="codex")
-    session = driver.create_session(_spec(tmp_path))
-    fake_agent[0].session_id = None
-
-    assert session.resume_provider_session("thread-checkpoint") is True
-    assert fake_agent[0].session_id == "thread-checkpoint"
+def test_the_shipped_providers_are_the_ones_the_driver_accepts() -> None:
+    assert subject.supported_providers() == ["claude", "codex", "gemini", "opencode"]
+    for provider in SCRIPTED_PROVIDERS:
+        assert provider in subject.supported_providers()
 
 
-def test_resume_refuses_when_a_conversation_is_already_live(
-    fake_agent: list[_FakeAgent], tmp_path: Path
-) -> None:
-    driver = subject.AgentShimDriver(provider="codex")
-    session = driver.create_session(_spec(tmp_path))
-
-    # The live conversation is newer than any checkpoint the caller holds.
-    assert session.resume_provider_session("thread-checkpoint") is False
-    assert fake_agent[0].session_id == "session-1"
+def test_an_unknown_provider_is_rejected_by_name() -> None:
+    with pytest.raises(ValueError, match="nonesuch"):
+        subject.AgentShimDriver(provider="nonesuch")
 
 
-def test_resume_refuses_when_the_provider_cannot_resume(
-    fake_agent: list[_FakeAgent], tmp_path: Path
-) -> None:
-    driver = subject.AgentShimDriver(provider="codex")
-    session = driver.create_session(_spec(tmp_path))
-    fake_agent[0].session_id = None
-    fake_agent[0].supports_session_resume = False
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_capabilities_report_the_provider_and_execution_mode(provider: str) -> None:
+    driver, _fake = _driver(provider, scripted_turn(provider, text="ok"))
+    capabilities = driver.capabilities
 
-    assert session.resume_provider_session("thread-checkpoint") is False
-    assert fake_agent[0].session_id is None
-
-
-def test_a_turn_that_kept_its_conversation_stays_reusable(
-    fake_agent: list[_FakeAgent], tmp_path: Path
-) -> None:
-    driver = subject.AgentShimDriver(provider="codex")
-    session = driver.create_session(_spec(tmp_path))
-
-    result = session.run_turn(AgentTurnRequest(message="one"))
-
-    assert result.disposition is subject.SessionDisposition.REUSABLE
-    assert fake_agent[0].session_id == "session-1"
+    profile = agentshim.get_provider(provider).profile
+    assert capabilities.provider_session_resume is profile.supports_resume
+    assert capabilities.mcp_servers is True
+    assert capabilities.host_path_grants is True
+    assert capabilities.container_execution is False
 
 
-def test_codex_thread_budget_renewal_reports_a_reset(
-    fake_agent: list[_FakeAgent], tmp_path: Path
-) -> None:
-    driver = subject.AgentShimDriver(provider="codex")
-    session = driver.create_session(_spec(tmp_path))
-
-    first = session.run_turn(AgentTurnRequest(message="one"))
-    second = session.run_turn(AgentTurnRequest(message="two"))
-
-    assert first.disposition is subject.SessionDisposition.REUSABLE
-    # The budget is spent, so the thread is retired and the caller is told the
-    # conversation this session named no longer exists.
-    assert second.disposition is subject.SessionDisposition.RESET_REQUIRED
-    assert second.provider_session_id == "session-1"
-    assert fake_agent[0].session_id is None
-
-
-@pytest.mark.parametrize(
-    ("final_usage", "duration_ms"),
-    [
-        pytest.param({"input_tokens": 20_000_000}, 1, id="context"),
-        pytest.param({"input_tokens": 1}, 600_000, id="duration"),
-    ],
-)
-def test_heavy_codex_turn_renewal_reports_a_reset(
-    fake_agent: list[_FakeAgent],
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_session_spec_for_another_provider_is_rejected(
     tmp_path: Path,
-    final_usage: dict[str, int],
-    duration_ms: int,
+    provider: str,
 ) -> None:
-    """Either budget alone retires the thread: context size or wall-clock cost."""
-    driver = subject.AgentShimDriver(provider="codex")
-    session = driver.create_session(_spec(tmp_path))
-    fake_agent[0]._last_session.final_usage = final_usage  # noqa: SLF001
-    fake_agent[0]._last_session.duration_ms = duration_ms  # noqa: SLF001
+    driver, _fake = _driver(provider, scripted_turn(provider, text="ok"))
 
-    result = session.run_turn(AgentTurnRequest(message="one"))
-
-    assert result.disposition is subject.SessionDisposition.RESET_REQUIRED
-    assert fake_agent[0].session_id is None
+    with pytest.raises(ValueError, match="cannot create"):
+        driver.create_session(_spec(tmp_path, provider="gemini"))
 
 
-def test_missing_codex_rollout_retries_fresh_and_reports_a_reset(
-    fake_agent: list[_FakeAgent], tmp_path: Path
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_container_policy_on_a_host_driver_is_rejected(
+    tmp_path: Path,
+    provider: str,
 ) -> None:
-    driver = subject.AgentShimDriver(provider="codex")
-    session = driver.create_session(_spec(tmp_path))
-    agent = fake_agent[0]
-    attempts: list[str | None] = []
+    driver, _fake = _driver(provider, scripted_turn(provider, text="ok"))
 
-    def generate(prompt: str, /, *, cwd: str | None, timeout: int | None, silent: bool) -> str:  # noqa: ARG001
-        attempts.append(agent.session_id)
-        if len(attempts) == 1:
-            raise RuntimeError(  # noqa: TRY003
-                "thread/resume failed: no rollout found for thread id session-1"
+    with pytest.raises(ValueError, match="container policy"):
+        driver.create_session(
+            _spec(
+                tmp_path,
+                provider=provider,
+                policy=AgentExecutionPolicy(containerized=True),
             )
-        return "recovered"
-
-    agent.generate_override = generate
-
-    result = session.run_turn(AgentTurnRequest(message="one"))
-
-    assert result.text == "recovered"
-    assert attempts == ["session-1", None]
-    assert result.disposition is subject.SessionDisposition.RESET_REQUIRED
-
-
-def _claude_driver(
-    monkeypatch: pytest.MonkeyPatch, built: list[_FakeAgent]
-) -> subject.AgentShimDriver:
-    """Register the fake agent under ``claude`` and build a driver for it."""
-    return _driver_for(monkeypatch, "claude", built)
-
-
-def test_stale_claude_session_retries_fresh_instead_of_killing_the_run(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    built: list[_FakeAgent] = []
-    driver = _claude_driver(monkeypatch, built)
-    session = driver.create_session(_spec(tmp_path, provider="claude"))
-    agent = built[0]
-    attempts: list[str | None] = []
-
-    def generate(prompt: str, /, *, cwd: str | None, timeout: int | None, silent: bool) -> str:  # noqa: ARG001
-        attempts.append(agent.session_id)
-        if len(attempts) == 1:
-            # Claude Code reports a refused resume as a bare nonzero exit.
-            raise RuntimeError("claude exited with code 1: ")  # noqa: TRY003
-        return "recovered"
-
-    agent.generate_override = generate
-
-    result = session.run_turn(AgentTurnRequest(message="one"))
-
-    assert result.text == "recovered"
-    assert attempts == ["session-1", None]
-    assert result.disposition is subject.SessionDisposition.RESET_REQUIRED
-
-
-def test_a_fresh_claude_turn_that_fails_is_not_retried(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    built: list[_FakeAgent] = []
-    driver = _claude_driver(monkeypatch, built)
-    session = driver.create_session(_spec(tmp_path, provider="claude"))
-    agent = built[0]
-    agent.session_id = None
-    attempts: list[str | None] = []
-
-    def generate(prompt: str, /, *, cwd: str | None, timeout: int | None, silent: bool) -> str:  # noqa: ARG001
-        attempts.append(agent.session_id)
-        raise RuntimeError("claude exited with code 1: ")  # noqa: TRY003
-
-    agent.generate_override = generate
-
-    # Nothing was resumed, so the failure is the agent's own and propagates.
-    with pytest.raises(RuntimeError):
-        session.run_turn(AgentTurnRequest(message="one"))
-    assert attempts == [None]
-
-
-@pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
-def test_declared_host_resources_reach_the_sandbox_for_every_local_provider(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, provider: str
-) -> None:
-    """Caller-declared resources survive each provider's default declaration.
-
-    The defaults are provider-specific, so a provider whose declaration
-    dropped the caller's intent would silently deny the agent a toolchain it
-    was granted.
-    """
-    built: list[_FakeAgent] = []
-    _register_provider(monkeypatch, provider, built)
-    builds: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        subject,
-        "build_host_sandbox",
-        lambda *args, **kwargs: builds.append({"args": args, **kwargs}),
-    )
-    resource = HostResource(tmp_path / "toolchain", purpose="test toolchain")
-    driver = subject.AgentShimDriver(provider=provider)
-
-    driver.create_session(
-        _spec(
-            tmp_path,
-            provider=provider,
-            policy=AgentExecutionPolicy(host_resources=(resource,), require_enforcement=True),
         )
-    )
-
-    assert resource in builds[0]["resources"]
-
-
-def test_mcp_interpreter_resolution_is_host_only_and_python_only() -> None:
-    """Host runs pin ``python``; containers and other commands are untouched.
-
-    A host agent inherits a login shell's PATH, where a bare ``python`` may be
-    missing the MCP dependencies; a container image resolves its own.
-    """
-    servers = [
-        MCPServerSpec(name="issues", command="python", args=("-m", "x")),
-        MCPServerSpec(name="profiler", command="python3", args=("p/server.py",)),
-        MCPServerSpec(name="other", command="node", args=("server.js",)),
-    ]
-
-    host = [subject._as_agentshim_mcp(server, in_container=False) for server in servers]  # noqa: SLF001
-    container = [subject._as_agentshim_mcp(server, in_container=True) for server in servers]  # noqa: SLF001
-
-    assert [server.command for server in host] == [
-        subject.sys.executable,
-        subject.sys.executable,
-        "node",
-    ]
-    # Names and args survive the rewrite, and the container keeps its own python.
-    assert [server.name for server in host] == [server.name for server in servers]
-    assert [server.args for server in host] == [list(server.args) for server in servers]
-    assert [server.command for server in container] == ["python", "python3", "node"]
-
-
-def test_native_output_schema_replaces_the_prompt_hint_and_is_cleared_next_turn(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A native schema is materialized per turn, so a reused session cannot keep it."""
-    built: list[_FakeAgent] = []
-    driver = _driver_for(monkeypatch, "codex", built, supports_native_output_schema=True)
-    session = driver.create_session(_spec(tmp_path))
-
-    session.run_turn(
-        AgentTurnRequest(message="usr", instructions="sys", output_schema=JudgeResponse)
-    )
-    session.run_turn(AgentTurnRequest(message="usr", instructions="sys"))
-
-    agent = built[0]
-    relative = agent.output_schema_paths[0]
-    assert relative is not None
-    assert relative.startswith(".cache/vibesys/response-schemas/")
-    assert (tmp_path / relative).is_file()
-    assert "Schema for JudgeResponse" not in agent.generate_calls[0][0]
-    # The plain-text turn drops the previous turn's response contract.
-    assert agent.output_schema_paths[1] is None
-
-
-def test_a_provider_without_native_schemas_gets_the_prompt_hint(
-    fake_agent: list[_FakeAgent], tmp_path: Path
-) -> None:
-    session = subject.AgentShimDriver(provider="codex").create_session(_spec(tmp_path))
-
-    session.run_turn(
-        AgentTurnRequest(
-            message="usr", instructions="THE-SYSTEM-PROMPT", output_schema=JudgeResponse
-        )
-    )
-
-    prompt = fake_agent[0].generate_calls[0][0]
-    assert prompt.startswith("THE-SYSTEM-PROMPT")
-    assert "Schema for JudgeResponse" in prompt
-    assert fake_agent[0].output_schema_paths == [None]
-
-
-def test_native_schema_materialization_failure_falls_back_to_the_prompt_hint(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    built: list[_FakeAgent] = []
-    logs: list[str] = []
-    driver = _driver_for(
-        monkeypatch, "codex", built, log=logs.append, supports_native_output_schema=True
-    )
-
-    def unsupported(*_args: Any, **_kwargs: Any) -> str:  # noqa: ANN401
-        raise ValueError("unsupported")
-
-    monkeypatch.setattr(subject, "materialize_native_output_schema", unsupported)
-    session = driver.create_session(_spec(tmp_path))
-
-    session.run_turn(
-        AgentTurnRequest(message="usr", instructions="sys", output_schema=JudgeResponse)
-    )
-
-    assert built[0].output_schema_paths == [None]
-    assert "Schema for JudgeResponse" in built[0].generate_calls[0][0]
-    assert any("using prompt fallback" in message for message in logs)
-
-
-def test_a_provider_wanting_an_absolute_schema_path_gets_one(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Providers reading the schema at command-build time cannot use a cwd-relative path."""
-    built: list[_FakeAgent] = []
-    driver = _driver_for(
-        monkeypatch,
-        "claude",
-        built,
-        supports_native_output_schema=True,
-        native_output_schema_wants_absolute_path=True,
-    )
-    session = driver.create_session(_spec(tmp_path, provider="claude"))
-
-    session.run_turn(
-        AgentTurnRequest(message="usr", instructions="sys", output_schema=JudgeResponse)
-    )
-
-    passed = built[0].output_schema_paths[-1]
-    assert passed is not None
-    assert Path(passed).is_absolute()
-    assert Path(passed).parent == tmp_path / ".cache/vibesys/response-schemas"
-
-
-def test_mapping_response_stays_native_on_a_permissive_provider(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """``ImplementerResponse.metrics`` is a mapping; Claude's schema dialect takes it."""
-    built: list[_FakeAgent] = []
-    driver = _driver_for(
-        monkeypatch,
-        "claude",
-        built,
-        supports_native_output_schema=True,
-        native_output_schema_wants_absolute_path=True,
-        native_output_schema_allows_arbitrary_keys=True,
-    )
-    session = driver.create_session(_spec(tmp_path, provider="claude"))
-
-    session.run_turn(
-        AgentTurnRequest(message="usr", instructions="sys", output_schema=ImplementerResponse)
-    )
-
-    passed = built[0].output_schema_paths[-1]
-    assert passed is not None
-    schema = json.loads(Path(passed).read_text())
-    assert schema["properties"]["metrics"]["additionalProperties"] == {"type": "number"}
-    assert "Schema for ImplementerResponse" not in built[0].generate_calls[0][0]
-
-
-def test_mapping_response_falls_back_on_a_strict_provider(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Codex's schema subset cannot express the mapping, so the prompt hint stays."""
-    built: list[_FakeAgent] = []
-    logs: list[str] = []
-    driver = _driver_for(
-        monkeypatch, "codex", built, log=logs.append, supports_native_output_schema=True
-    )
-    session = driver.create_session(_spec(tmp_path))
-
-    session.run_turn(
-        AgentTurnRequest(message="usr", instructions="sys", output_schema=ImplementerResponse)
-    )
-
-    assert built[0].output_schema_paths == [None]
-    assert "Schema for ImplementerResponse" in built[0].generate_calls[0][0]
-    assert any("using prompt fallback" in message for message in logs)

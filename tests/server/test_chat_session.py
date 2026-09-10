@@ -6,12 +6,9 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
+import agentshim
 import pytest
-
-# The agentshim driver's own fake agent, reused rather than copied: these tests
-# are about what the real driver reports to the real client, so a second fake
-# that drifted from it would stop testing that.
-from tests.vibesys.agents.drivers.test_agentshim_driver import _FakeAgent
+from agentshim.testing import FakeExecutor, FakeRun, scripted_turn
 
 from server.chat.prompts import (
     experiment_chat_continuation_prompt,
@@ -19,10 +16,11 @@ from server.chat.prompts import (
 )
 from server.chat.session import ExperimentChatDependencies, ExperimentChatSession
 from vibesys.agents.client import AgentClient
-from vibesys.agents.drivers import agentshim
+from vibesys.agents.drivers import agentshim as agentshim_driver
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 _SHARED_STATE_DIR = "/state/server/chat"
@@ -164,77 +162,79 @@ def test_chat_never_reasks_a_cold_turn(tmp_path: Path) -> None:
     assert len(client.calls) == 1
 
 
-@pytest.fixture
-def fake_agents(monkeypatch: pytest.MonkeyPatch) -> list[_FakeAgent]:
-    """Build every provider conversation from the driver's own fake agent."""
-    built: list[_FakeAgent] = []
-
-    def factory(
-        model: str | None = None,
-        event_handler: Any | None = None,  # noqa: ANN401  # Mirrors the agent constructor.
-        *,
-        executor: Any | None = None,  # noqa: ANN401  # Mirrors the agent constructor.
-    ) -> _FakeAgent:
-        agent = _FakeAgent(model, event_handler, executor=executor)
-        built.append(agent)
-        return agent
-
-    for provider in ("codex", "claude"):
-        monkeypatch.setitem(agentshim._PROVIDER_CLASSES, provider, factory)  # noqa: SLF001
-    monkeypatch.setattr(agentshim, "declare_agent_host_resources", lambda *_a, **_k: ())
-    monkeypatch.setattr(agentshim, "build_host_sandbox", lambda *_a, **_k: "sandbox")
-    return built
+def _chat_driver(
+    provider: str,
+    runs: Callable[[agentshim.CommandRequest], FakeRun],
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[AgentClient, FakeExecutor]:
+    """Drive the real driver and client over a scripted provider process."""
+    monkeypatch.setattr(agentshim_driver, "build_host_sandbox", lambda *_a, **_k: None)
+    fake = FakeExecutor(runs)
+    driver = agentshim_driver.AgentShimDriver(
+        provider=provider,
+        executor_factory=lambda _sandbox: fake,
+    )
+    return AgentClient(driver, provider=provider), fake
 
 
-def _prompts(agents: list[_FakeAgent]) -> list[str]:
+def _prompts(fake: FakeExecutor) -> list[str]:
     """Every prompt the provider was given, in the order the turns ran."""
-    return [prompt for agent in agents for prompt, _cwd, _timeout in agent.generate_calls]
+    return [request.stdin or "" for request in fake.requests]
 
 
+@pytest.mark.skipif(
+    "codex" not in agentshim.provider_names(),
+    reason="codex provider not yet in the library snapshot",
+)
 def test_codex_thread_renewal_puts_the_read_only_rules_back(
-    fake_agents: list[_FakeAgent], tmp_path: Path
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The Codex thread budget retires a thread after a fixed number of turns.
     # Before drivers reported that, chat kept shortening its prompt into the
     # replacement thread, so a question periodically ran with no read-only
     # rules at all. The driver now reports the restart, the client drops the
     # conversation, and the next question carries the full instructions again.
-    client = AgentClient(agentshim.AgentShimDriver(provider="codex"), provider="codex")
+    client, fake = _chat_driver(
+        "codex",
+        lambda _request: scripted_turn("codex", text="done", session_id="thread-1"),
+        monkeypatch,
+    )
     chat = _chat(tmp_path, client)
 
     for question in ("what happened?", "and then?", "why?"):
         chat.ask(question)
 
-    prompts = _prompts(fake_agents)
+    prompts = _prompts(fake)
     assert len(prompts) == 3, "one provider turn per question, with no re-asks"
     assert prompts[0].startswith(_FULL_PROMPT)
     assert prompts[1].startswith(_CONTINUATION_PROMPT)
     assert prompts[2].startswith(_FULL_PROMPT)
-    assert agentshim._MAX_CODEX_SESSION_TURNS == 2  # noqa: SLF001  # the cadence above
 
 
 def test_stale_claude_session_reasks_instead_of_failing_the_question(
-    fake_agents: list[_FakeAgent], tmp_path: Path
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    client = AgentClient(agentshim.AgentShimDriver(provider="claude"), provider="claude")
+    refusals = [1]
+    conversations: list[str] = []
+
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        live = conversations[-1] if conversations else None
+        if live is not None and live in request.argv:
+            if refusals:
+                # Claude Code reports a refused resume as a bare nonzero exit.
+                refusals.pop()
+                return FakeRun(returncode=1, stderr=["claude exited with code 1\n"])
+            return scripted_turn("claude", text="done", session_id=live)
+        conversations.append(f"session-{len(conversations) + 1}")
+        return scripted_turn("claude", text="done", session_id=conversations[-1])
+
+    client, fake = _chat_driver("claude", run, monkeypatch)
     chat = _chat(tmp_path, client)
     chat.ask("what happened?")
 
-    resumed = fake_agents[0]
-    failures = [RuntimeError("claude exited with code 1")]
-
-    def refuse_the_resume(prompt: str, /, **kwargs: Any) -> str:  # noqa: ANN401
-        del kwargs
-        resumed.generate_calls.append((prompt, None, None))
-        if failures:
-            raise failures.pop()
-        return "done"
-
-    resumed.generate_override = refuse_the_resume
-
     answer = chat.ask("and then?")
 
-    prompts = _prompts(fake_agents)
+    prompts = _prompts(fake)
     # The shortened prompt, the driver's own retry of it from a fresh
     # conversation, then the question asked again with the rules restored.
     assert prompts[1].startswith(_CONTINUATION_PROMPT)

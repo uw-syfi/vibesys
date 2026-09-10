@@ -1,20 +1,26 @@
-"""AgentShim implementation of the stateful agent-driver contract."""
+"""AgentShim implementation of the stateful agent-driver contract.
+
+VibeSys consumes the ``agentshim`` library only through its public API. The
+library owns provider knowledge (argv, stream parsing, MCP config files,
+schema dialects, resume flags); this module owns VibeSys policy: host
+confinement, structured-output fallback, conversation budgets, and the
+translation between library events and :mod:`vibesys.agents.contracts`.
+"""
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 import sys
-import weakref
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol
+from weakref import WeakSet
 
-from vibesys._agent_cli.base import CodingAgent
-from vibesys._agent_cli.base import MCPServerSpec as AgentShimMCPServerSpec
-from vibesys._agent_cli.claude import ClaudeCodeCodingAgent
-from vibesys._agent_cli.codex import CodexCodingAgent
-from vibesys._agent_cli.gemini import GeminiCodingAgent
-from vibesys._agent_cli.opencode import OpencodeCodingAgent
-from vibesys.agents.cli_common import build_schema_hint, materialize_native_output_schema
+import agentshim
+
+from vibesys.agents.cli_common import build_schema_hint
 from vibesys.agents.contracts import (
     AgentCapabilities,
     AgentEvent,
@@ -28,10 +34,16 @@ from vibesys.agents.contracts import (
     MCPServerSpec,
     SessionDisposition,
 )
-from vibesys.agents.docker_executor import DockerCommandExecutor
 from vibesys.agents.host_resource_declarations import declare_agent_host_resources
 from vibesys.run.events import CommandResultPayload
 from vs_sandbox import build_host_sandbox
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+    from pydantic import BaseModel
+
+    from vs_sandbox import WorkspaceSandbox
 
 AGENTSHIM_CAPABILITIES = AgentCapabilities(
     mcp_servers=True,
@@ -41,241 +53,279 @@ AGENTSHIM_CAPABILITIES = AgentCapabilities(
     session_reuse=True,
     provider_session_resume=True,
 )
-"""Capabilities invariant across AgentShim host and container execution."""
+"""Capabilities invariant across AgentShim host and container execution.
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
+``provider_session_resume`` is narrowed per provider from
+:attr:`agentshim.ProviderProfile.supports_resume` when the driver is built.
+"""
 
+_SHIPPED_PROVIDERS: tuple[str, ...] = ("claude", "codex", "gemini", "opencode")
+"""The CLI providers VibeSys ships.
 
-class _ProviderFactory(Protocol):
-    """Constructor signature shared by AgentShim provider classes."""
+The library also carries ``copilot``, which VibeSys has neither host-resource
+declarations nor a container install recipe for, so it is not offered here.
+"""
 
-    def __call__(
-        self,
-        model: str | None = None,
-        event_handler: Any | None = None,  # noqa: ANN401  # tracked: #288
-        *,
-        executor: Any | None = None,  # noqa: ANN401  # tracked: #288
-    ) -> CodingAgent: ...
-
-
-_PROVIDER_CLASSES: dict[str, _ProviderFactory] = {
-    "claude": ClaudeCodeCodingAgent,
-    "gemini": GeminiCodingAgent,
-    "codex": CodexCodingAgent,
-    "opencode": OpencodeCodingAgent,
-}
-
-
-def supported_providers() -> list[str]:
-    """Return the sorted provider names the AgentShim driver can run."""
-    return sorted(_PROVIDER_CLASSES)
-
-
-_REASONING_EFFORT_PROVIDERS = frozenset({"codex", "claude"})
 _PYTHON_MCP_COMMANDS = frozenset({"python", "python3"})
+_SCHEMA_DIR = Path(".cache/vibesys/response-schemas")
+_DIAGNOSTIC_PAYLOAD: Mapping[str, object] = {"channel": "diagnostic"}
 
 _MAX_CODEX_SESSION_TURNS = 2
 _MAX_CODEX_SESSION_INPUT_TOKENS = 10_000_000
 _MAX_CODEX_SESSION_DURATION_MS = 600_000
 
 
+def supported_providers() -> list[str]:
+    """Return the sorted provider names the AgentShim driver can run."""
+    return sorted(_SHIPPED_PROVIDERS)
+
+
 def _ignore_log(_message: str) -> None:
     """Discard a driver diagnostic when no log sink was configured."""
 
 
-def _is_missing_codex_rollout(exc: RuntimeError) -> bool:
-    message = str(exc)
-    return "thread/resume failed" in message and "no rollout found" in message
+class ExecutorFactory(Protocol):
+    """Builds the command executor a host session runs its CLI through."""
+
+    def __call__(self, sandbox: WorkspaceSandbox | None) -> agentshim.CommandExecutor:
+        """Return an executor confined by *sandbox*, or unconfined when it is ``None``."""
+        ...
 
 
-def _heavy_codex_turn_reason(agent: CodingAgent) -> str | None:
-    session = getattr(agent, "_last_session", None)
-    usage = getattr(session, "final_usage", None) or {}
-    input_tokens = int(usage.get("input_tokens", 0) or 0)
-    duration_ms = int(getattr(session, "duration_ms", 0) or 0)
-    reasons: list[str] = []
-    if input_tokens >= _MAX_CODEX_SESSION_INPUT_TOKENS:
-        reasons.append(f"{input_tokens} input tokens")
-    if duration_ms >= _MAX_CODEX_SESSION_DURATION_MS:
-        reasons.append(f"{duration_ms} ms duration")
-    return " and ".join(reasons) or None
+def confine_to_sandbox(
+    executor: agentshim.CommandExecutor,
+    sandbox: WorkspaceSandbox,
+) -> agentshim.CommandExecutor:
+    """Return *executor* with every workspace command wrapped by *sandbox*.
+
+    A command without a working directory is left alone: that is the binary
+    health check and, in container mode, the agent itself, both of which run
+    outside the confined workspace (bwrap re-establishes the working directory
+    inside the namespace via ``--chdir``, so a wrapped command needs one).
+    """
+
+    def transform(request: agentshim.CommandRequest) -> agentshim.CommandRequest:
+        if request.cwd is None:
+            return request
+        return replace(request, argv=sandbox.wrap(list(request.argv)))
+
+    return agentshim.TransformingExecutor(executor, transform)
 
 
-def _usage_from_agent(agent: CodingAgent) -> AgentUsage:
-    session = getattr(agent, "_last_session", None)
-    raw = getattr(session, "final_usage", None) or {}
-    return AgentUsage(
-        input_tokens=raw.get("input_tokens"),
-        cache_creation_input_tokens=raw.get("cache_creation_input_tokens"),
-        cache_read_input_tokens=raw.get("cache_read_input_tokens"),
-        output_tokens=raw.get("output_tokens"),
-        total_cost_usd=getattr(session, "total_cost_usd", None),
-        duration_ms=getattr(session, "duration_ms", None),
-    )
+def build_host_executor(sandbox: WorkspaceSandbox | None) -> agentshim.CommandExecutor:
+    """Default :class:`ExecutorFactory`: run on this host, confined when possible."""
+    host = agentshim.HostCommandExecutor()
+    return host if sandbox is None else confine_to_sandbox(host, sandbox)
 
 
-def _as_agentshim_mcp(spec: MCPServerSpec, *, in_container: bool) -> AgentShimMCPServerSpec:
+def _shipped_profile(provider: str) -> agentshim.ProviderProfile | None:
+    """Return the library profile for *provider*, or ``None`` if it has none yet.
+
+    :func:`supported_providers` names the CLIs VibeSys ships; the installed
+    library carries the ones that have been ported. A provider the library
+    does not carry cannot create a session at all, so a capability query about
+    it answers from the invariant set rather than raising during preflight.
+    """
+    if provider not in agentshim.provider_names():
+        return None
+    return agentshim.get_provider(provider).profile
+
+
+def _resolve_binary_path(binary: str, env: Mapping[str, str]) -> str | None:
+    """Locate *binary* for the host resource declaration, or ``None`` if absent.
+
+    The declaration is built before the agent exists because the sandbox it
+    feeds is what the agent's executor is built from. A missing binary is not
+    reported here: constructing the agent raises the library's own
+    ``CliNotFoundError`` with the provider's name attached.
+    """
+    try:
+        return agentshim.HostCommandExecutor().find_binary(binary, env)
+    except agentshim.CliNotFoundError:
+        return None
+
+
+def _as_mcp_server(spec: MCPServerSpec, *, in_container: bool) -> agentshim.StdioMcpServer:
+    """Translate one VibeSys MCP spec into the library's stdio spec.
+
+    A host agent inherits a login shell's PATH, where a bare ``python`` may be
+    an interpreter without the MCP dependencies, so host runs are pinned to
+    the interpreter running VibeSys. A container image resolves its own.
+    """
     command = spec.command
     if not in_container and command in _PYTHON_MCP_COMMANDS:
         command = sys.executable
-    return AgentShimMCPServerSpec(
+    return agentshim.StdioMcpServer(
         name=spec.name,
         command=command,
-        args=list(spec.args),
+        args=tuple(spec.args),
         env=dict(spec.env),
     )
 
 
+def _usage_from(
+    usage: agentshim.ProviderUsage,
+    *,
+    cost_usd: float | None = None,
+    duration_ms: int | None = None,
+) -> AgentUsage:
+    """Map library token accounting onto the neutral usage contract.
+
+    ``input_tokens`` includes cached tokens on every provider: the library
+    folds Anthropic's disjoint cache counts into the input total so the same
+    field means the same thing everywhere.
+    """
+    tokens = usage.tokens
+    return AgentUsage(
+        input_tokens=tokens.input_tokens,
+        cache_creation_input_tokens=tokens.cache_write_input_tokens,
+        cache_read_input_tokens=tokens.cached_input_tokens,
+        output_tokens=tokens.output_tokens,
+        total_cost_usd=cost_usd if cost_usd is not None else usage.total_cost_usd,
+        duration_ms=duration_ms,
+    )
+
+
+def _diagnostic(text: str) -> AgentEvent:
+    """Report provider plumbing on the diagnostic channel, not as reasoning."""
+    return AgentEvent(kind=AgentEventKind.THINKING, text=text, payload=_DIAGNOSTIC_PAYLOAD)
+
+
+def _translate(event: agentshim.AgentEvent) -> AgentEvent | None:  # one arm per event type
+    """Translate one library event, or return ``None`` to drop it."""
+    if isinstance(event, agentshim.AssistantText):
+        return AgentEvent(kind=AgentEventKind.TEXT, text=event.text)
+    if isinstance(event, agentshim.Reasoning):
+        return AgentEvent(kind=AgentEventKind.THINKING, text=event.text)
+    if isinstance(event, agentshim.ToolCall):
+        return AgentEvent(
+            kind=AgentEventKind.TOOL_CALL,
+            payload={"tool": event.tool, "args": event.args if event.args is not None else {}},
+        )
+    if isinstance(event, agentshim.ToolResult):
+        return AgentEvent(
+            kind=AgentEventKind.TOOL_RESULT,
+            text=event.stdout or event.stderr,
+            payload={
+                "tool": event.tool,
+                "stdout": event.stdout,
+                "stderr": event.stderr,
+                "exit_code": event.exit_code,
+                "duration": event.duration_s,
+                "result_payload": CommandResultPayload(
+                    stdout=event.stdout,
+                    stderr=event.stderr,
+                    exit_code=event.exit_code,
+                    duration=event.duration_s,
+                ),
+            },
+        )
+    if isinstance(event, agentshim.UsageReport):
+        return AgentEvent(
+            kind=AgentEventKind.USAGE,
+            usage=_usage_from(event.usage, cost_usd=event.cost_usd),
+        )
+    return _translate_plumbing(event)
+
+
+def _translate_plumbing(event: agentshim.AgentEvent) -> AgentEvent | None:
+    """Translate the events that describe the provider, not the agent."""
+    if isinstance(event, agentshim.SessionStarted):
+        return _diagnostic(f"[session {event.session_id} started]")
+    if isinstance(event, agentshim.Lifecycle):
+        return _diagnostic(f"[{event.kind}] {event.detail}" if event.detail else f"[{event.kind}]")
+    if isinstance(event, agentshim.Stderr):
+        return _diagnostic(f"[stderr] {event.text}")
+    if isinstance(event, agentshim.RawOutput):
+        return _diagnostic(event.text)
+    if isinstance(event, agentshim.ProviderError):
+        return _diagnostic(f"[error] {event.message}")
+    # RunStarted and RunFinished describe the subprocess, not the agent.
+    return None
+
+
 class _AgentShimEventHandler:
-    """Translate AgentShim callbacks into neutral driver events."""
+    """Route the library's typed events to the turn's observer."""
 
     def __init__(self) -> None:
         self.observer: AgentObserver | None = None
 
-    def _emit(self, event: AgentEvent) -> None:
-        if self.observer is not None:
-            self.observer.on_event(event)
+    def on_event(self, event: agentshim.AgentEvent) -> None:
+        """Translate and forward one library event, if anyone is listening."""
+        observer = self.observer
+        if observer is None:
+            return
+        translated = _translate(event)
+        if translated is not None:
+            observer.on_event(translated)
 
-    def on_thinking(self, text: str) -> None:
-        self._emit(AgentEvent(kind=AgentEventKind.THINKING, text=text))
 
-    def on_tool_call(self, tool: str, args: dict[str, Any] | str | None = None) -> None:
-        self._emit(
-            AgentEvent(
-                kind=AgentEventKind.TOOL_CALL,
-                payload={"tool": tool, "args": args if args is not None else {}},
-            )
-        )
+class _ContainerWorkspace(Protocol):
+    """The container-side cleanup a container session owns."""
 
-    def on_tool_result(
-        self,
-        tool: str,
-        stdout: str = "",
-        stderr: str = "",
-        exit_code: int | None = None,
-        duration: float | None = None,
-    ) -> None:
-        self._emit(
-            AgentEvent(
-                kind=AgentEventKind.TOOL_RESULT,
-                text=stdout or stderr,
-                payload={
-                    "tool": tool,
-                    "stdout": stdout,
-                    "stderr": stderr,
-                    "exit_code": exit_code,
-                    "duration": duration,
-                    "result_payload": CommandResultPayload(
-                        stdout=stdout,
-                        stderr=stderr,
-                        exit_code=exit_code,
-                        duration=duration,
-                    ),
-                },
-            )
-        )
-
-    def on_usage(self, usage: dict[str, Any]) -> None:
-        self._emit(
-            AgentEvent(
-                kind=AgentEventKind.USAGE,
-                usage=AgentUsage(
-                    input_tokens=usage.get("input_tokens"),
-                    cache_creation_input_tokens=usage.get("cache_creation_input_tokens"),
-                    cache_read_input_tokens=usage.get("cache_read_input_tokens"),
-                    output_tokens=usage.get("output_tokens"),
-                    total_cost_usd=usage.get("total_cost_usd"),
-                    duration_ms=usage.get("duration_ms"),
-                ),
-            )
-        )
+    def repair_workspace_ownership(self, *, uid: int, gid: int) -> None:
+        """Return bind-mounted workspace files to the host user."""
+        ...
 
 
 class AgentShimSession:
     """One configured AgentShim conversation."""
 
-    def __init__(  # noqa: D107, PLR0913  # tracked: #288
+    def __init__(  # noqa: PLR0913  # tracked: #288
         self,
         *,
-        agent: CodingAgent,
+        session: agentshim.AgentSession,
         spec: AgentSessionSpec,
-        provider: str,
+        profile: agentshim.ProviderProfile,
         timeout: int | None,
         event_handler: _AgentShimEventHandler,
-        docker_sandboxes: dict[str, Any] | None,
+        turn_env: Mapping[str, str] | None,
+        container_workspace: _ContainerWorkspace | None,
         log: Callable[[str], None],
     ) -> None:
-        self._agent = agent
+        """Bind one library session to the VibeSys policy that drives it."""
+        self._session = session
         self._spec = spec
-        self._provider = provider
+        self._profile = profile
         self._timeout = timeout
         self._event_handler = event_handler
-        self._docker_sandboxes = docker_sandboxes
+        self._turn_env = dict(turn_env) if turn_env else None
+        self._container_workspace = container_workspace
         self._log = log
+        self._in_container = container_workspace is not None
+        self._mcp_servers = tuple(
+            _as_mcp_server(server, in_container=self._in_container) for server in spec.mcp_servers
+        )
         self._turn_count = 0
         # Set when the provider conversation was dropped and restarted while
         # serving the current turn, so the turn's result can report it.
         self._restarted = False
         self._closed = False
 
-    def run_turn(  # noqa: C901, D102, PLR0912  # tracked: #288
+    def run_turn(
         self,
         request: AgentTurnRequest,
         observer: AgentObserver | None = None,
     ) -> AgentTurnResult:
+        """Add one turn to the conversation and return its raw result."""
         if self._closed:
             raise RuntimeError("agent session is closed")  # noqa: TRY003  # tracked: #288
 
         self._event_handler.observer = observer
-        self._refresh_container()
-        prompt, schema_path = self._prepare_prompt(request)
-        self._set_output_schema(schema_path)
         self._restarted = False
-
-        in_container = self._docker_sandboxes is not None
-        mcp_servers = [
-            _as_agentshim_mcp(server, in_container=in_container)
-            for server in self._spec.mcp_servers
-        ]
-        if mcp_servers:
-            self._agent.install_mcp_servers(self._spec.workspace, mcp_servers)
-
-        timeout = self._timeout
-        if request.timeout is not None:
-            timeout = max(1, int(request.timeout.total_seconds()))
-        workspace_arg = None if in_container else str(self._spec.workspace)
-
         turn_error: BaseException | None = None
         try:
-            text = self._generate_with_restart_fallback(
-                prompt,
-                cwd=workspace_arg,
-                timeout=timeout,
-            )
+            result = self._turn_with_restart(self._build_request(request))
             self._turn_count += 1
         except BaseException as exc:
             turn_error = exc
             raise
         finally:
             cleanup_error: Exception | None = None
-            if mcp_servers:
-                try:
-                    self._agent.uninstall_mcp_servers(self._spec.workspace, mcp_servers)
-                except Exception as exc:  # noqa: BLE001  # tracked: #288
-                    cleanup_error = exc
-                    if turn_error is not None:
-                        self._log(
-                            "MCP config cleanup failed while preserving the original "
-                            f"agent error: {exc}"
-                        )
             try:
                 self._repair_workspace_ownership()
             except Exception as exc:  # noqa: BLE001  # tracked: #288
-                if cleanup_error is None:
-                    cleanup_error = exc
-                elif turn_error is not None:
-                    self._log(f"workspace ownership repair also failed: {exc}")
+                cleanup_error = exc
                 if turn_error is not None:
                     self._log(
                         "workspace ownership repair failed while preserving the original "
@@ -287,11 +337,15 @@ class AgentShimSession:
 
         # Read the conversation ID before the thread-budget check, which may
         # drop it: the caller still deserves to know which conversation ran.
-        provider_session_id = self._agent.session_id
-        restarted = self._restarted or self._renew_codex_thread_if_needed()
+        provider_session_id = result.session_id
+        restarted = self._restarted or self._renew_codex_thread_if_needed(result)
         return AgentTurnResult(
-            text=text,
-            usage=_usage_from_agent(self._agent),
+            text=_result_text(result),
+            usage=_usage_from(
+                result.usage,
+                cost_usd=result.cost_usd,
+                duration_ms=result.duration_ms,
+            ),
             provider_session_id=provider_session_id,
             disposition=(
                 SessionDisposition.RESET_REQUIRED if restarted else SessionDisposition.REUSABLE
@@ -299,105 +353,92 @@ class AgentShimSession:
         )
 
     def cancel(self) -> None:
-        """Do nothing for now: the current CLI path has no interruption hook.
-
-        A turn is a blocking subprocess call, and the vendored ``_agent_cli``
-        agents expose no way to signal it. Placeholder until the agentshim 0.6
-        driver, which owns the process, can terminate it here.
-        """
+        """Stop an in-flight turn by terminating the provider process."""
+        self._session.cancel()
 
     def close(self) -> None:
-        """Release this logical session. AgentShim processes are per-turn."""
+        """Release this logical session, stopping any turn it still owns."""
+        self.cancel()
         self._closed = True
         self._event_handler.observer = None
 
     def resume_provider_session(self, session_id: str) -> bool:
-        """Continue ``session_id`` on the next turn, if the agent accepts it.
+        """Continue ``session_id`` on the next turn, if the session accepts it.
 
-        The agent adopts the ID only when its provider has a resume flag and no
-        conversation is already attached, so a mid-run continuation is never
-        overwritten by an older checkpoint. A stale or deleted transcript is
-        handled later, by the restart fallback around ``generate``.
+        A session that already named a conversation keeps it: its history is
+        newer than any checkpoint the caller holds. Beyond that the library
+        decides, adopting the ID only when the provider has a resume flag and
+        no turn is in flight. A stale or deleted transcript is handled later,
+        by the restart fallback around the turn.
         """
-        return self._agent.resume_from(session_id)
-
-    def _prepare_prompt(self, request: AgentTurnRequest) -> tuple[str, str | None]:
-        response_cls = request.output_schema
-        native_schema_path: str | None = None
-        if response_cls is not None and bool(
-            getattr(type(self._agent), "supports_native_output_schema", False)
-            and callable(getattr(self._agent, "set_output_schema_path", None))
-        ):
-            try:
-                native_schema_path = materialize_native_output_schema(
-                    self._spec.workspace,
-                    response_cls,
-                    allow_arbitrary_keys=getattr(
-                        type(self._agent),
-                        "native_output_schema_allows_arbitrary_keys",
-                        False,
-                    ),
-                )
-            except (OSError, TypeError, ValueError) as exc:
-                self._log(
-                    f"[structured-output] native schema unavailable for "
-                    f"{response_cls.__name__}; using prompt fallback: "
-                    f"{type(exc).__name__}: {exc}"
-                )
-
-        schema_arg = native_schema_path
-        if native_schema_path is not None and getattr(
-            type(self._agent), "native_output_schema_wants_absolute_path", False
-        ):
-            schema_arg = str(self._spec.workspace / native_schema_path)
-        schema_hint = (
-            build_schema_hint(response_cls)
-            if response_cls is not None and native_schema_path is None
-            else ""
-        )
-        prompt = f"{request.instructions}\n\n{request.message}{schema_hint}"
-        return prompt, schema_arg
-
-    def _set_output_schema(self, path: str | None) -> None:
-        setter = getattr(self._agent, "set_output_schema_path", None)
-        if callable(setter):
-            setter(path)
-        elif path is not None:
-            raise RuntimeError(  # noqa: TRY003  # tracked: #288
-                f"{type(self._agent).__name__} advertised native output schemas "
-                "without implementing set_output_schema_path()"
-            )
-
-    def _renew_codex_thread_if_needed(self) -> bool:
-        """Retire an over-budget Codex thread, reporting whether it was dropped.
-
-        Evaluated after a turn rather than before one, so the decision reads the
-        usage of the turn that just finished and the caller learns about the
-        restart from that turn's result instead of discovering it on the next.
-        """
-        if self._provider != "codex":
+        if self._session.session_id is not None:
             return False
-        reason = (
-            f"{_MAX_CODEX_SESSION_TURNS} successful turns"
-            if self._turn_count >= _MAX_CODEX_SESSION_TURNS
-            else _heavy_codex_turn_reason(self._agent)
-        )
-        if reason is None:
-            return False
-        self._log(
-            f"renewing Codex thread after {reason}; durable workspace state remains authoritative."
-        )
-        self._agent.forget_session()
-        self._turn_count = 0
-        return True
+        return self._session.adopt(session_id)
 
-    def _generate_with_restart_fallback(
+    def _build_request(self, request: AgentTurnRequest) -> agentshim.TurnRequest:
+        schema, schema_hint = self._output_schema(request.output_schema)
+        timeout = self._timeout
+        if request.timeout is not None:
+            timeout = max(1, int(request.timeout.total_seconds()))
+        return agentshim.TurnRequest(
+            prompt=f"{request.instructions}\n\n{request.message}{schema_hint}",
+            timeout=timeout,
+            output_schema=schema,
+            reasoning_effort=(
+                self._spec.reasoning_effort if self._profile.supports_reasoning_effort else None
+            ),
+            env=self._turn_env,
+            mcp_servers=self._mcp_servers,
+        )
+
+    def _output_schema(
         self,
-        prompt: str,
-        *,
-        cwd: str | None,
-        timeout: int | None,
-    ) -> str:
+        response_cls: type[BaseModel] | None,
+    ) -> tuple[agentshim.OutputSchema | None, str]:
+        """Choose between the provider's native schema and the prompt contract.
+
+        The prompt-level instruction is the portable fallback: it is used when
+        the provider has no structured-output flag, and when the response model
+        needs JSON Schema constructs the provider's dialect rejects. Falling
+        back is logged because the two paths fail differently.
+        """
+        if response_cls is None:
+            return None, ""
+        profile = self._profile
+        if profile.output_schema is agentshim.OutputSchemaStyle.NONE:
+            self._log(
+                f"[structured-output] {profile.name} has no native output schema for "
+                f"{response_cls.__name__}; using prompt fallback"
+            )
+            return None, build_schema_hint(response_cls)
+
+        dialect = (
+            profile.schema_dialect
+            if profile.schema_dialect is not None
+            else agentshim.SchemaDialect.STRICT
+        )
+        schema = response_cls.model_json_schema()
+        problems = agentshim.dialect_problems(schema, dialect)
+        if problems:
+            self._log(
+                f"[structured-output] native schema unavailable for "
+                f"{response_cls.__name__}; using prompt fallback: {'; '.join(problems)}"
+            )
+            return None, build_schema_hint(response_cls)
+
+        host_dir = self._spec.workspace / _SCHEMA_DIR
+        return (
+            agentshim.OutputSchema(
+                schema=agentshim.normalize(schema, dialect),
+                host_dir=host_dir,
+                # The container resolves the schema path against its own
+                # workspace mount, which is not the host path it was written to.
+                cli_dir=_SCHEMA_DIR.as_posix() if self._in_container else str(host_dir),
+            ),
+            "",
+        )
+
+    def _turn_with_restart(self, request: agentshim.TurnRequest) -> agentshim.TurnResult:
         """Run one turn, retrying once from a fresh conversation if a resume failed.
 
         Only a resumed turn is retried, and only once: with the conversation
@@ -406,75 +447,115 @@ class AgentShimSession:
         conversation, which ``self._restarted`` reports to the caller.
         """
         try:
-            return self._agent.generate(prompt, cwd=cwd, timeout=timeout, silent=True)
-        except RuntimeError as exc:
-            if not self._is_failed_resume(exc):
-                raise
+            return self._turn(request)
+        except agentshim.SessionResumeFailed:
             self._log(
-                f"{self._provider} session is no longer available; "
+                f"{self._profile.name} session is no longer available; "
                 "retrying this turn with a fresh conversation."
             )
-            self._agent.forget_session()
+            self._session.forget()
             self._turn_count = 0
             self._restarted = True
-            return self._agent.generate(prompt, cwd=cwd, timeout=timeout, silent=True)
+            return self._turn(request)
 
-    def _is_failed_resume(self, exc: RuntimeError) -> bool:
-        """Whether ``exc`` is a resumed turn failing because of the resume."""
-        if self._agent.session_id is None:
+    def _turn(self, request: agentshim.TurnRequest) -> agentshim.TurnResult:
+        """Run one turn, reporting a timeout the way every VibeSys caller expects."""
+        try:
+            return self._session.turn(request)
+        except agentshim.CliTimeoutError as exc:
+            # Loops fail closed on ``subprocess.TimeoutExpired`` and read its
+            # ``timeout``; the library raises its own type, so translate here
+            # rather than teaching every catch site a second exception.
+            raise subprocess.TimeoutExpired(cmd=list(exc.argv), timeout=exc.timeout) from exc
+
+    def _renew_codex_thread_if_needed(self, result: agentshim.TurnResult) -> bool:
+        """Retire an over-budget Codex thread, reporting whether it was dropped.
+
+        Evaluated after a turn rather than before one, so the decision reads the
+        usage of the turn that just finished and the caller learns about the
+        restart from that turn's result instead of discovering it on the next.
+        """
+        if self._profile.name != "codex":
             return False
-        if self._provider == "codex":
-            # Codex names the cause: the rollout the thread ID points at is gone.
-            return _is_missing_codex_rollout(exc)
-        # Claude Code reports a rejected ``--resume`` as a plain nonzero exit
-        # with no distinguishing message, and a session it will not resume is
-        # unrecoverable, so any failed resumed turn is retried once from a
-        # fresh conversation rather than being allowed to kill the run.
-        # Timeouts do not reach here: they raise ``subprocess.TimeoutExpired``.
-        return self._provider == "claude"
-
-    def _refresh_container(self) -> None:
-        if self._docker_sandboxes is None:
-            return
-        self._agent.executor.container_id = self._docker_sandboxes[self._spec.role]._container_id  # noqa: SLF001  # tracked: #288
+        reason = (
+            f"{_MAX_CODEX_SESSION_TURNS} successful turns"
+            if self._turn_count >= _MAX_CODEX_SESSION_TURNS
+            else _heavy_codex_turn_reason(result)
+        )
+        if reason is None:
+            return False
+        self._log(
+            f"renewing Codex thread after {reason}; durable workspace state remains authoritative."
+        )
+        self._session.forget()
+        self._turn_count = 0
+        return True
 
     def _repair_workspace_ownership(self) -> None:
-        if self._docker_sandboxes is None:
+        if self._container_workspace is None:
             return
-        self._agent.executor.repair_workspace_ownership(uid=os.getuid(), gid=os.getgid())
+        self._container_workspace.repair_workspace_ownership(uid=os.getuid(), gid=os.getgid())
+
+
+def _result_text(result: agentshim.TurnResult) -> str:
+    """Return the turn's answer, preferring the schema-conformant payload.
+
+    Callers parse a structured turn's text back into their response model, so
+    a provider that reported the payload out of band still has to deliver it
+    as text.
+    """
+    if result.structured_output is not None:
+        return json.dumps(result.structured_output)
+    return result.text
+
+
+def _heavy_codex_turn_reason(result: agentshim.TurnResult) -> str | None:
+    reasons: list[str] = []
+    if result.usage.tokens.input_tokens >= _MAX_CODEX_SESSION_INPUT_TOKENS:
+        reasons.append(f"{result.usage.tokens.input_tokens} input tokens")
+    if result.duration_ms >= _MAX_CODEX_SESSION_DURATION_MS:
+        reasons.append(f"{result.duration_ms} ms duration")
+    return " and ".join(reasons) or None
 
 
 class AgentShimDriver:
     """Create AgentShim sessions and translate VibeSys execution policy."""
 
-    def __init__(  # noqa: D107  # tracked: #288
+    def __init__(
         self,
         *,
         provider: str,
         timeout: int | None = None,
         docker_sandboxes: dict[str, Any] | None = None,
         log: Callable[[str], None] | None = None,
+        executor_factory: ExecutorFactory | None = None,
     ) -> None:
-        if provider not in _PROVIDER_CLASSES:
+        """Configure one provider; ``executor_factory`` replaces host execution."""
+        if provider not in _SHIPPED_PROVIDERS:
             raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"unknown AgentShim provider {provider!r}; expected one of: "
-                f"{sorted(_PROVIDER_CLASSES)}"
+                f"unknown AgentShim provider {provider!r}; expected one of: {supported_providers()}"
             )
         self._provider = provider
-        self._provider_cls = _PROVIDER_CLASSES[provider]
         self._timeout = timeout
         self._docker_sandboxes = docker_sandboxes
         self._log = log or _ignore_log
-        self._sessions: weakref.WeakSet[AgentShimSession] = weakref.WeakSet()
+        self._executor_factory: ExecutorFactory = executor_factory or build_host_executor
+        self._sessions: WeakSet[AgentShimSession] = WeakSet()
         self._closed = False
 
     @property
     def capabilities(self) -> AgentCapabilities:
         """Describe the policy and lifecycle features this driver enforces."""
+        profile = _shipped_profile(self._provider)
         return replace(
             AGENTSHIM_CAPABILITIES,
             host_path_grants=self._docker_sandboxes is None,
             container_execution=self._docker_sandboxes is not None,
+            provider_session_resume=(
+                profile.supports_resume
+                if profile is not None
+                else AGENTSHIM_CAPABILITIES.provider_session_resume
+            ),
         )
 
     def create_session(self, spec: AgentSessionSpec) -> AgentSession:
@@ -492,56 +573,88 @@ class AgentShimDriver:
                 "AgentShim execution mode"
             )
 
+        provider = agentshim.get_provider(spec.provider)
         event_handler = _AgentShimEventHandler()
+        overlay = dict(spec.environment)
+        container_workspace: _ContainerWorkspace | None = None
+        turn_env: Mapping[str, str] | None = None
+        executor: agentshim.CommandExecutor
         if in_container:
-            assert self._docker_sandboxes is not None  # noqa: S101  # tracked: #288
-            sandbox = self._docker_sandboxes.get(spec.role)
-            if sandbox is None:
-                raise ValueError(  # noqa: TRY003  # tracked: #288
-                    f"no AgentShim Docker sandbox configured for role {spec.role!r}"
-                )
-            agent = self._provider_cls(
-                model=spec.model,
-                event_handler=event_handler,
-                executor=DockerCommandExecutor(sandbox._container_id),  # noqa: SLF001  # tracked: #288
-            )
+            container_executor = self._container_executor(spec)
+            executor = container_executor
+            container_workspace = container_executor
+            # The container's own environment is built by the image and the
+            # exec invocation; the session overlay is forwarded per turn so it
+            # reaches the CLI inside the container instead of the docker client.
+            env = agentshim.interactive_env()
+            turn_env = overlay
         else:
-            agent = self._provider_cls(model=spec.model, event_handler=event_handler)
-        if spec.environment:
-            agent.env = {**agent.env, **dict(spec.environment)}
+            env = {**agentshim.interactive_env(), **overlay}
+            executor = self._executor_factory(self._host_sandbox(spec, env))
 
-        if not in_container:
-            resources = declare_agent_host_resources(
-                agent.env,
-                binary_path=getattr(agent, "binary_path", None),
-                provider=self._provider,
-                additional=spec.policy.host_resources,
-            )
-            agent.sandbox = build_host_sandbox(
-                spec.workspace,
-                env=agent.env,
-                resources=resources,
-                log=self._log,
-                project_path_policy=spec.policy.project_paths,
-                require_enforcement=spec.policy.require_enforcement,
-            )
-
-        if spec.reasoning_effort is not None and self._provider in _REASONING_EFFORT_PROVIDERS:
-            cast("CodexCodingAgent | ClaudeCodeCodingAgent", agent).set_reasoning_effort(
-                spec.reasoning_effort
-            )
-
+        agent = agentshim.CliAgent(
+            provider,
+            model=spec.model,
+            executor=executor,
+            env=env,
+            event_handler=event_handler,
+            log=self._log,
+        )
         session = AgentShimSession(
-            agent=agent,
+            # A container command names its own working directory, so the
+            # session leaves cwd unset there and the executor supplies it.
+            session=agent.start_session(
+                cwd=None if in_container else str(spec.workspace),
+                timeout=self._timeout,
+            ),
             spec=spec,
-            provider=self._provider,
+            profile=agent.profile,
             timeout=self._timeout,
             event_handler=event_handler,
-            docker_sandboxes=self._docker_sandboxes,
+            turn_env=turn_env,
+            container_workspace=container_workspace,
             log=self._log,
         )
         self._sessions.add(session)
         return session
+
+    def _host_sandbox(
+        self,
+        spec: AgentSessionSpec,
+        env: Mapping[str, str],
+    ) -> WorkspaceSandbox | None:
+        profile = agentshim.get_provider(spec.provider).profile
+        resources = declare_agent_host_resources(
+            env,
+            binary_path=_resolve_binary_path(profile.binary, env),
+            provider=spec.provider,
+            additional=spec.policy.host_resources,
+        )
+        return build_host_sandbox(
+            spec.workspace,
+            env=dict(env),
+            resources=resources,
+            log=self._log,
+            project_path_policy=spec.policy.project_paths,
+            require_enforcement=spec.policy.require_enforcement,
+        )
+
+    def _container_executor(self, spec: AgentSessionSpec) -> Any:  # noqa: ANN401  # tracked: #288
+        assert self._docker_sandboxes is not None  # noqa: S101  # tracked: #288
+        sandbox = self._docker_sandboxes.get(spec.role)
+        if sandbox is None:
+            raise ValueError(  # noqa: TRY003  # tracked: #288
+                f"no AgentShim Docker sandbox configured for role {spec.role!r}"
+            )
+        # Imported here because the Docker executor is only reachable in
+        # container mode and pulls in the docker command plumbing with it.
+        from vibesys.agents.docker_executor import DockerCommandExecutor  # noqa: PLC0415
+
+        # Read through the sandbox on every command: a GPU reselect replaces
+        # the container, and nothing then has to mutate the executor. The
+        # resolver constructor arrives with the Docker executor's own rewrite
+        # onto the 0.6 executor protocol.
+        return DockerCommandExecutor(lambda: sandbox.container_id)  # ty: ignore[invalid-argument-type]
 
     def close(self) -> None:
         """Close every session created by this driver, idempotently."""
