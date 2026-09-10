@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from vibesys.agents.contracts import MCPServerSpec
 from vibesys.profilers import ProfilerKind, profiler_definition, require_profiler_kind
 from vibesys.schemas import ProfilerSummary
 
@@ -25,26 +26,20 @@ if TYPE_CHECKING:
     from vibesys.run import LoopContext
 
 
-def mcp_spec(profiler_kind: ProfilerKind):  # noqa: ANN201  # tracked: #288
+def mcp_spec(profiler_kind: ProfilerKind) -> MCPServerSpec | None:
     """Build an ``MCPServerSpec`` that spawns the analysis MCP server.
 
-    Returns ``None`` when ``vibesys._agent_cli`` is not importable in the
-    current environment (e.g. a unit-test process that doesn't pull in
-    the cli runner).  Callers treat ``None`` as "skip MCP"; the
-    profiler agent still runs, just without tool access.
+    Returns ``None`` for :attr:`ProfilerKind.NONE`, which callers treat as
+    "skip MCP": the profiler agent still runs, just without tool access.
     """
     kind = require_profiler_kind(profiler_kind)
     if kind is ProfilerKind.NONE:
-        return None
-    try:
-        from vibesys._agent_cli.base import MCPServerSpec  # noqa: PLC0415  # tracked: #288
-    except Exception:  # noqa: BLE001  # tracked: #288
         return None
     definition = profiler_definition(kind)
     return MCPServerSpec(
         name=definition.mcp_name,
         command="python",
-        args=[definition.server_path],
+        args=(definition.server_path,),
     )
 
 

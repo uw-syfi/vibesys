@@ -1,14 +1,14 @@
 """Tests for :func:`build_issue_mcp_spec`.
 
-The spec builder is the only issue-tracker-specific piece of the MCP path —
-everything else (file format, file path, install/uninstall) lives in
-``vibesys/_agent_cli/``. These tests verify that the per-phase policy params
-are encoded correctly into the spec's command-line args list.
+The spec builder is the only issue-tracker-specific piece of the MCP path;
+everything else (file format, file path, install/uninstall) lives in the
+driver. These tests verify that the per-phase policy params are encoded
+correctly into the spec's command-line args.
 """
 
 from __future__ import annotations
 
-from vibesys._agent_cli.base import MCPServerSpec
+from vibesys.agents.contracts import MCPServerSpec
 from vibesys.loops.plain.mcp_config import build_issue_mcp_spec
 from vs_issue_board import IssueType
 
@@ -25,7 +25,7 @@ def test_build_judge_spec_has_correct_shape():  # noqa: ANN201  # tracked: #288
     assert spec.name == "vibesys-issues"
     assert spec.command == "python"
     # Args are forwarded to the standalone server's argparse CLI.
-    assert spec.args == [
+    assert spec.args == (
         "-m",
         "vs_issue_board.mcp",
         "issues.json",
@@ -37,8 +37,8 @@ def test_build_judge_spec_has_correct_shape():  # noqa: ANN201  # tracked: #288
         "bug",
         "--cap",
         "1",
-    ]
-    assert spec.env == {}
+    )
+    assert spec.env == ()
 
 
 def test_build_perf_eval_spec_sorts_allowed_types_alphabetically():  # noqa: ANN201  # tracked: #288
@@ -50,7 +50,7 @@ def test_build_perf_eval_spec_sorts_allowed_types_alphabetically():  # noqa: ANN
         allowed_types={IssueType.BUG, IssueType.FEATURE, IssueType.PERF},
     )
     args = spec.args
-    assert args[0:2] == ["-m", "vs_issue_board.mcp"]
+    assert args[0:2] == ("-m", "vs_issue_board.mcp")
     assert args[2] == "issues.json"
     assert args[args.index("--creator") + 1] == "perf_eval"
     assert args[args.index("--iteration") + 1] == "2"

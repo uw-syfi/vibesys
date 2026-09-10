@@ -49,24 +49,29 @@ def test_profiler_mcp_spec_maps_known_kinds_exactly():  # noqa: ANN201  # tracke
     assert mcp_spec(ProfilerKind.NONE) is None
 
     nsys = mcp_spec(ProfilerKind.NSYS)
+    assert nsys is not None
     assert nsys.name == "vibesys-nsys-profiler"
-    assert nsys.args == ["nsys_profiler/server.py"]
+    assert nsys.args == ("nsys_profiler/server.py",)
 
     torch = mcp_spec(ProfilerKind.TORCH)
+    assert torch is not None
     assert torch.name == "vibesys-torch-profiler"
-    assert torch.args == ["torch_profiler/server.py"]
+    assert torch.args == ("torch_profiler/server.py",)
 
     neuron = mcp_spec(ProfilerKind.NEURON)
+    assert neuron is not None
     assert neuron.name == "vibesys-neuron-profiler"
-    assert neuron.args == ["neuron_profiler/server.py"]
+    assert neuron.args == ("neuron_profiler/server.py",)
 
     otel = mcp_spec(ProfilerKind.OTEL)
+    assert otel is not None
     assert otel.name == "vibesys-otel-profiler"
-    assert otel.args == ["otel_profiler/server.py"]
+    assert otel.args == ("otel_profiler/server.py",)
 
     macos = mcp_spec(ProfilerKind.MACOS_CPU)
+    assert macos is not None
     assert macos.name == "vibesys-macos-cpu-profiler"
-    assert macos.args == ["macos_cpu_profiler/server.py"]
+    assert macos.args == ("macos_cpu_profiler/server.py",)
 
 
 def test_profiler_mcp_spec_rejects_unknown_kind():  # noqa: ANN201  # tracked: #288

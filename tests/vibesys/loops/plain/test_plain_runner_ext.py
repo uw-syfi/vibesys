@@ -11,9 +11,8 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import BaseModel
 
-from vibesys._agent_cli.base import MCPServerSpec
 from vibesys.agents.client import AgentClient
-from vibesys.agents.contracts import AgentCapabilities
+from vibesys.agents.contracts import AgentCapabilities, MCPServerSpec
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.loops.plain.runner_ext import PlainLoopAgentClient
 from vs_issue_board import IssueBoard

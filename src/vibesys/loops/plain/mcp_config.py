@@ -1,4 +1,4 @@
-"""Build the :class:`~vibesys._agent_cli.MCPServerSpec` for the issue tracker.
+"""Build the :class:`~vibesys.agents.contracts.MCPServerSpec` for the issue tracker.
 
 The issue-loop hands one of these to ``AgentClient.invoke(mcp_servers=...)``
 each phase. The runner then forwards it to the active provider's
@@ -7,13 +7,12 @@ format that CLI expects (``.mcp.json`` for Claude, ``.gemini/settings.json``
 for Gemini, ``opencode.json`` for opencode, ``--config`` flags for Codex).
 
 This module is the only piece of issue-tracker-specific knowledge in the
-MCP path; everything else is provider-agnostic and lives in
-``vibesys/_agent_cli/``.
+MCP path; everything else is provider-agnostic and lives in the driver.
 """
 
 from __future__ import annotations
 
-from vibesys._agent_cli.base import MCPServerSpec
+from vibesys.agents.contracts import MCPServerSpec
 from vs_issue_board import IssueType  # noqa: TC001  # tracked: #288
 
 
@@ -46,5 +45,5 @@ def build_issue_mcp_spec(
     return MCPServerSpec(
         name="vibesys-issues",
         command="python",
-        args=args,
+        args=tuple(args),
     )

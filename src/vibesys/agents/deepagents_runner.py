@@ -19,7 +19,6 @@ from langchain_core.tools import BaseTool  # noqa: TC002  # tracked: #288
 from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel
 
-from vibesys._agent_cli.base import MCPServerSpec  # noqa: TC001  # tracked: #288
 from vibesys.agent_runner import (
     log_agent_config,
     run_agent,
@@ -27,7 +26,7 @@ from vibesys.agent_runner import (
 )
 from vibesys.agents.callbacks import AgentLogger
 from vibesys.agents.client import AgentClient
-from vibesys.agents.contracts import AgentCapabilities
+from vibesys.agents.contracts import AgentCapabilities, MCPServerSpec
 from vibesys.agents.progress import AgentProgress  # noqa: TC001  # tracked: #288
 from vibesys.agents.session_key import AgentSessionKey  # noqa: TC001  # tracked: #288
 

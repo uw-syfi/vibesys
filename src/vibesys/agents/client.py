@@ -44,7 +44,6 @@ if TYPE_CHECKING:
 
     from langchain_core.tools import BaseTool
 
-    from vibesys._agent_cli.base import MCPServerSpec as LegacyMCPServerSpec
     from vibesys.agents.callbacks import AgentLogger
     from vibesys.agents.progress import AgentProgress
     from vibesys.constants import ComputeBackend
@@ -130,19 +129,12 @@ def _usage_dict(usage: AgentUsage) -> dict[str, int | float | None]:
 
 
 def _normalize_mcp_servers(
-    servers: Iterable[LegacyMCPServerSpec] | None,
+    servers: Iterable[MCPServerSpec] | None,
 ) -> tuple[MCPServerSpec, ...]:
+    """Freeze the caller's server list so it can key a session spec."""
     if servers is None:
         return ()
-    return tuple(
-        MCPServerSpec(
-            name=server.name,
-            command=server.command,
-            args=tuple(server.args),
-            env=tuple(sorted(server.env.items())),
-        )
-        for server in servers
-    )
+    return tuple(servers)
 
 
 class AgentClient:
@@ -246,7 +238,7 @@ class AgentClient:
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
-        mcp_servers: list[LegacyMCPServerSpec] | None = None,
+        mcp_servers: list[MCPServerSpec] | None = None,
         tools: list[BaseTool] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
@@ -297,7 +289,7 @@ class AgentClient:
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
-        mcp_servers: list[LegacyMCPServerSpec] | None = None,
+        mcp_servers: list[MCPServerSpec] | None = None,
         tools: list[BaseTool] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
@@ -339,7 +331,7 @@ class AgentClient:
         env: dict[str, str] | None,
         invocation_id: str | None,
         progress: AgentProgress | None,
-        mcp_servers: list[LegacyMCPServerSpec] | None,
+        mcp_servers: list[MCPServerSpec] | None,
         reuse_session: bool | None,
         session_key: AgentSessionKey | None,
     ) -> AgentTurnResult:

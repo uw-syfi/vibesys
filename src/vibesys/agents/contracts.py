@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
     from langchain_core.tools import BaseTool
 
-    from vibesys._agent_cli.base import MCPServerSpec as LegacyMCPServerSpec
     from vibesys.agents.progress import AgentProgress
     from vibesys.agents.session_key import AgentSessionKey
     from vs_sandbox import HostResource, ProjectPathPolicy
@@ -272,7 +271,7 @@ class AgentClientProtocol(Protocol):
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
-        mcp_servers: list[LegacyMCPServerSpec] | None = None,
+        mcp_servers: list[MCPServerSpec] | None = None,
         tools: list[BaseTool] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
@@ -291,7 +290,7 @@ class AgentClientProtocol(Protocol):
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
-        mcp_servers: list[LegacyMCPServerSpec] | None = None,
+        mcp_servers: list[MCPServerSpec] | None = None,
         tools: list[BaseTool] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,

@@ -69,7 +69,7 @@ class TestClaudeMCP:
         # install/uninstall, which doesn't touch the binary.
         return ClaudeCodeCodingAgent.__new__(ClaudeCodeCodingAgent)
 
-    def test_install_writes_mcp_json(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_writes_mcp_json(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.install_mcp_servers(tmp_path, [_spec()])
 
@@ -82,7 +82,7 @@ class TestClaudeMCP:
         assert "trust" not in server
         assert "env" not in server
 
-    def test_install_includes_env_when_present(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_includes_env_when_present(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.install_mcp_servers(tmp_path, [_spec_with_env()])
 
@@ -90,7 +90,7 @@ class TestClaudeMCP:
         server = config["mcpServers"]["vibesys-issues"]
         assert server["env"] == {"MY_VAR": "my_value", "OTHER": "x"}
 
-    def test_install_merges_and_uninstall_restores_existing_config(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_merges_and_uninstall_restores_existing_config(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         target = tmp_path / ".mcp.json"
         original = (
             b'{"permissions":{"allow":["Bash(*)"]},"mcpServers":{"existing":{"command":"user"}}}\n'
@@ -108,7 +108,7 @@ class TestClaudeMCP:
         agent.uninstall_mcp_servers(tmp_path, [_spec()])
         assert target.read_bytes() == original
 
-    def test_uninstall_preserves_config_edits_made_during_invocation(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_uninstall_preserves_config_edits_made_during_invocation(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         target = tmp_path / ".mcp.json"
         target.write_text('{"theme":"light","mcpServers":{"existing":{"command":"user"}}}')
         agent = self._agent()
@@ -128,7 +128,7 @@ class TestClaudeMCP:
             "mcpServers": {"existing": {"command": "user"}},
         }
 
-    def test_uninstall_preserves_an_in_run_edit_to_an_injected_server(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_uninstall_preserves_an_in_run_edit_to_an_injected_server(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         target = tmp_path / ".mcp.json"
         target.write_text('{"mcpServers":{"vibesys-issues":{"command":"user"}}}')
         agent = self._agent()
@@ -144,7 +144,7 @@ class TestClaudeMCP:
             "command": "agent-edited"
         }
 
-    def test_install_replace_failure_leaves_original_config_intact(  # noqa: ANN201  # tracked: #288
+    def test_install_replace_failure_leaves_original_config_intact(  # noqa: ANN202  # tracked: #288
         self,
         tmp_path: Path,
         monkeypatch,  # noqa: ANN001  # tracked: #288
@@ -164,7 +164,7 @@ class TestClaudeMCP:
         assert target.read_bytes() == original
         assert target not in getattr(agent, "_mcp_config_backups", {})
 
-    def test_uninstall_removes_file(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_uninstall_removes_file(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.install_mcp_servers(tmp_path, [_spec()])
         assert (tmp_path / ".mcp.json").exists()
@@ -172,7 +172,7 @@ class TestClaudeMCP:
         agent.uninstall_mcp_servers(tmp_path, [_spec()])
         assert not (tmp_path / ".mcp.json").exists()
 
-    def test_uninstall_is_idempotent(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_uninstall_is_idempotent(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         # No file present yet → no error.
         agent.uninstall_mcp_servers(tmp_path, [_spec()])
@@ -189,7 +189,7 @@ class TestGeminiMCP:
     def _agent(self):  # noqa: ANN202  # tracked: #288
         return GeminiCodingAgent.__new__(GeminiCodingAgent)
 
-    def test_install_writes_settings_json_with_trust(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_writes_settings_json_with_trust(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.install_mcp_servers(tmp_path, [_spec()])
 
@@ -203,13 +203,13 @@ class TestGeminiMCP:
         # trust:true skips Gemini's per-tool approval prompts.
         assert server["trust"] is True
 
-    def test_install_creates_gemini_dir_if_missing(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_creates_gemini_dir_if_missing(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         assert not (tmp_path / ".gemini").exists()
         agent.install_mcp_servers(tmp_path, [_spec()])
         assert (tmp_path / ".gemini").is_dir()
 
-    def test_install_with_existing_gemini_dir(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_with_existing_gemini_dir(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         # Mimic a workspace where Gemini already wrote tmp/ session data.
         (tmp_path / ".gemini" / "tmp").mkdir(parents=True)
         agent = self._agent()
@@ -217,26 +217,26 @@ class TestGeminiMCP:
         assert (tmp_path / ".gemini" / "settings.json").exists()
         assert (tmp_path / ".gemini" / "tmp").is_dir()  # untouched
 
-    def test_uninstall_removes_settings_but_keeps_dir(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_uninstall_removes_settings_but_keeps_dir(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.install_mcp_servers(tmp_path, [_spec()])
         agent.uninstall_mcp_servers(tmp_path, [_spec()])
         assert not (tmp_path / ".gemini" / "settings.json").exists()
         assert (tmp_path / ".gemini").is_dir()
 
-    def test_uninstall_is_idempotent(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_uninstall_is_idempotent(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.uninstall_mcp_servers(tmp_path, [_spec()])
         agent.uninstall_mcp_servers(tmp_path, [_spec()])
 
-    def test_install_includes_env_when_present(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_includes_env_when_present(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.install_mcp_servers(tmp_path, [_spec_with_env()])
         config = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
         server = config["mcpServers"]["vibesys-issues"]
         assert server["env"] == {"MY_VAR": "my_value", "OTHER": "x"}
 
-    def test_install_merges_and_uninstall_restores_existing_config(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_merges_and_uninstall_restores_existing_config(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         target = tmp_path / ".gemini" / "settings.json"
         target.parent.mkdir()
         original = b'{"theme":"dark","mcpServers":{"existing":{"command":"user"}}}\n'
@@ -263,7 +263,7 @@ class TestOpencodeMCP:
     def _agent(self):  # noqa: ANN202  # tracked: #288
         return OpencodeCodingAgent.__new__(OpencodeCodingAgent)
 
-    def test_install_writes_opencode_json(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_writes_opencode_json(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.install_mcp_servers(tmp_path, [_spec()])
 
@@ -281,7 +281,7 @@ class TestOpencodeMCP:
         # opencode uses a single combined command array.
         assert server["command"] == ["python", *_spec().args]
 
-    def test_install_uses_environment_key_for_env(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_uses_environment_key_for_env(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.install_mcp_servers(tmp_path, [_spec_with_env()])
         config = json.loads((tmp_path / "opencode.json").read_text())
@@ -290,7 +290,7 @@ class TestOpencodeMCP:
         assert server["environment"] == {"MY_VAR": "my_value", "OTHER": "x"}
         assert "env" not in server
 
-    def test_install_merges_and_uninstall_restores_existing_config(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_merges_and_uninstall_restores_existing_config(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         target = tmp_path / "opencode.json"
         original = b'{"theme":"dark","mcp":{"existing":{"type":"local","command":["user"]}}}\n'
         target.write_bytes(original)
@@ -306,13 +306,13 @@ class TestOpencodeMCP:
         agent.uninstall_mcp_servers(tmp_path, [_spec()])
         assert target.read_bytes() == original
 
-    def test_uninstall_removes_file(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_uninstall_removes_file(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.install_mcp_servers(tmp_path, [_spec()])
         agent.uninstall_mcp_servers(tmp_path, [_spec()])
         assert not (tmp_path / "opencode.json").exists()
 
-    def test_uninstall_is_idempotent(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_uninstall_is_idempotent(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.uninstall_mcp_servers(tmp_path, [_spec()])
         agent.uninstall_mcp_servers(tmp_path, [_spec()])
@@ -330,12 +330,12 @@ class TestCodexMCP:
         agent.extra_config_args = []
         return agent
 
-    def test_install_writes_no_file_in_workspace(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_writes_no_file_in_workspace(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.install_mcp_servers(tmp_path, [_spec()])
         assert list(tmp_path.iterdir()) == []
 
-    def test_install_populates_extra_config_args(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_populates_extra_config_args(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.install_mcp_servers(tmp_path, [_spec()])
 
@@ -360,14 +360,14 @@ class TestCodexMCP:
         assert '"--cap"' in args_value
         assert '"1"' in args_value
 
-    def test_install_includes_env_overrides(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_includes_env_overrides(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.install_mcp_servers(tmp_path, [_spec_with_env()])
         joined = "\n".join(agent.extra_config_args)
         assert 'mcp_servers.vibesys_issues.env.MY_VAR="my_value"' in joined
         assert 'mcp_servers.vibesys_issues.env.OTHER="x"' in joined
 
-    def test_install_quotes_strings_with_special_characters(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_install_quotes_strings_with_special_characters(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         spec = MCPServerSpec(
             name="weird",
@@ -381,20 +381,20 @@ class TestCodexMCP:
         assert '"back\\\\slash"' in joined
         assert '"quoted\\"value"' in joined
 
-    def test_uninstall_clears_extra_config_args(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_uninstall_clears_extra_config_args(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.install_mcp_servers(tmp_path, [_spec()])
         assert agent.extra_config_args  # populated
         agent.uninstall_mcp_servers(tmp_path, [_spec()])
         assert agent.extra_config_args == []
 
-    def test_uninstall_is_idempotent(self, tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    def test_uninstall_is_idempotent(self, tmp_path: Path):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.uninstall_mcp_servers(tmp_path, [_spec()])
         agent.uninstall_mcp_servers(tmp_path, [_spec()])
         assert agent.extra_config_args == []
 
-    def test_get_command_appends_extra_config_args(self):  # noqa: ANN201  # tracked: #288
+    def test_get_command_appends_extra_config_args(self):  # noqa: ANN202  # tracked: #288
         agent = self._agent()
         agent.binary_path = "/usr/local/bin/codex"
         agent.model = None
@@ -414,7 +414,7 @@ class TestCodexMCP:
 # ---------------------------------------------------------------------------
 
 
-def test_base_class_default_install_uninstall_are_noop(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_base_class_default_install_uninstall_are_noop(tmp_path: Path):  # noqa: ANN202  # tracked: #288
     """A subclass that doesn't override should silently do nothing."""
 
     from vibesys._agent_cli.base import CodingAgent  # noqa: PLC0415  # tracked: #288

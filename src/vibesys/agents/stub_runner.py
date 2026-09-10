@@ -9,8 +9,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
-from vibesys._agent_cli.base import MCPServerSpec  # noqa: TC001  # tracked: #288
-from vibesys.agents.contracts import AgentCapabilities
+from vibesys.agents.contracts import AgentCapabilities, MCPServerSpec
 from vibesys.agents.progress import AgentProgress  # noqa: TC001  # tracked: #288
 from vibesys.agents.scripted_rounds import round_number_from_label, scripted_round_payload
 from vibesys.agents.session_key import AgentSessionKey  # noqa: TC001  # tracked: #288

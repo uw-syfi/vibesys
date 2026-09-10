@@ -25,9 +25,12 @@ from typing import Any, TextIO, TypeVar
 from langchain_core.tools import BaseTool  # noqa: TC002  # tracked: #288
 from pydantic import BaseModel
 
-from vibesys._agent_cli.base import MCPServerSpec  # noqa: TC001  # tracked: #288
 from vibesys.agents.client import AgentClient
-from vibesys.agents.contracts import AgentCapabilities, AgentClientProtocol  # noqa: TC001
+from vibesys.agents.contracts import (  # noqa: TC001
+    AgentCapabilities,
+    AgentClientProtocol,
+    MCPServerSpec,
+)
 from vibesys.agents.progress import AgentProgress  # noqa: TC001
 from vibesys.agents.session_key import AgentSessionKey  # noqa: TC001
 from vibesys.loops.plain.mcp_config import build_issue_mcp_spec
