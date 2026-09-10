@@ -198,8 +198,14 @@ def test_codex_state_is_declared_as_leaf_files_not_the_whole_home(  # noqa: ANN2
     writable = _writable_state(tmp_path, "codex")
 
     # A Codex checkout may live under $CODEX_HOME/worktrees, so the directory
-    # itself must never be granted (#185).
-    assert writable == {".codex/auth.json", ".codex/config.toml", ".config/codex"}
+    # itself must never be granted (#185). ``sessions`` is granted because a
+    # rollout that does not outlive its turn makes every resume fail.
+    assert writable == {
+        ".codex/auth.json",
+        ".codex/config.toml",
+        ".codex/sessions",
+        ".config/codex",
+    }
 
 
 def test_codex_home_relocates_the_state_leaves(tmp_path, _shipped_profiles):  # noqa: ANN001, ANN201, PT019
@@ -209,6 +215,7 @@ def test_codex_home_relocates_the_state_leaves(tmp_path, _shipped_profiles):  # 
 
     assert "relocated-codex/auth.json" in writable
     assert "relocated-codex/config.toml" in writable
+    assert "relocated-codex/sessions" in writable
     assert ".codex/auth.json" not in writable
     # $CODEX_HOME does not move the XDG config directory.
     assert ".config/codex" in writable

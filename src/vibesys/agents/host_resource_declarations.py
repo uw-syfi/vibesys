@@ -199,7 +199,7 @@ def _agent_runtime(ctx: HostResourceContext) -> Iterable[HostResource]:
 #: it, because ``ProviderProfile`` carries no "state root variable" field.
 _CODEX_DEFAULT_HOME = ".codex"
 
-#: State directories granted as named leaf files rather than whole.
+#: State directories granted as named leaves rather than whole.
 #:
 #: A Codex checkout may itself live under ``$CODEX_HOME/worktrees``: granting
 #: the directory would expose sibling tasks to the agent, while dropping it
@@ -207,8 +207,14 @@ _CODEX_DEFAULT_HOME = ".codex"
 #: creates the ephemeral parent directory these leaf mounts need. Every other
 #: state directory is granted whole, because a CLI writes session history and
 #: caches there and needs them back on resume.
+#:
+#: ``sessions`` is that session history for Codex. Without it the rollout a
+#: turn writes lands in the sandbox's ephemeral view of ``$CODEX_HOME`` and is
+#: gone by the next turn, so ``codex exec resume`` reports no rollout for the
+#: thread, the driver restarts the conversation, and a confined run silently
+#: loses continuity it was told it had.
 _NARROWED_STATE_DIRS: dict[str, tuple[str, ...]] = {
-    _CODEX_DEFAULT_HOME: ("auth.json", "config.toml"),
+    _CODEX_DEFAULT_HOME: ("auth.json", "config.toml", "sessions"),
 }
 
 
