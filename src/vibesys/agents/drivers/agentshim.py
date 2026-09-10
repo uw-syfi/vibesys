@@ -574,9 +574,23 @@ class AgentShimSession:
         return True
 
     def _repair_workspace_ownership(self) -> None:
+        """Return the container's writes to the host user, on every exit path.
+
+        Raises:
+            RuntimeError: if the repair failed, including when it timed out.
+                The repair runs from the turn's ``finally``, and it shells out
+                with its own budget, so a ``subprocess.TimeoutExpired`` from it
+                would reach the loop as the agent having timed out. That is a
+                different failure with a different response, so the timeout is
+                re-raised under a type the loop reads as a plain error.
+        """
         if self._container_cleanup is None:
             return
-        self._container_cleanup()
+        try:
+            self._container_cleanup()
+        except subprocess.TimeoutExpired as exc:
+            message = str(exc)
+            raise RuntimeError(message) from exc
 
 
 def _result_text(result: agentshim.TurnResult) -> str:

@@ -35,6 +35,7 @@ from vibesys.agents.contracts import (
     MCPServerSpec,
     SessionDisposition,
 )
+from vibesys.agents.drivers import agentshim as agentshim_driver
 from vibesys.agents.drivers.agentshim import AgentShimDriver
 from vs_sandbox import HostResource, HostResourceAccess
 
@@ -53,6 +54,28 @@ PROVIDERS = (("claude", "haiku"), ("codex", None))
 MCP_SERVER = Path(__file__).resolve().parents[1] / "support" / "mcp_add_server.py"
 
 TURN_TIMEOUT_S = 300
+
+#: How many turns the resume case runs on one session.
+TURNS_HERE = 2
+
+#: The operands the MCP tool case asks the agent to add.
+ADD_OPERANDS = ("918273", "645281")
+
+
+def _is_add_call(payload: object) -> bool:
+    """Whether one tool-call payload is a call of the MCP ``add`` tool.
+
+    Claude calls the namespaced tool by name, Codex calls a generic
+    ``mcp_tool_call`` and names the server and tool in its arguments. Either
+    way the operands have to be in the call, so a tool whose name merely
+    contains ``add`` cannot satisfy this.
+    """
+    if not isinstance(payload, dict):
+        return False
+    tool = str(payload.get("tool", ""))
+    rendered = str(payload)
+    named = tool.endswith("add") or "add" in str(payload.get("args", ""))
+    return named and all(operand in rendered for operand in ADD_OPERANDS)
 
 
 def _enabled() -> bool:
@@ -225,13 +248,15 @@ def test_a_second_turn_resumes_the_same_conversation(
         # the proof the second one resumed rather than replayed.
         assert first.disposition is SessionDisposition.REUSABLE
         assert second.provider_session_id == first.provider_session_id
-        # VibeSys retires a Codex thread once its turn budget is spent, and
-        # that budget lands on exactly this turn. The answer above still
-        # stands; only the next prompt would start cold.
+        # VibeSys retires a Codex thread once its turn budget is spent. Whether
+        # this turn is the one that spends it is read from the budget rather
+        # than assumed, so raising the budget changes the expectation instead
+        # of breaking the test. The answer above still stands either way; only
+        # the next prompt would start cold.
+        codex_turn_budget = agentshim_driver._MAX_CODEX_SESSION_TURNS  # noqa: SLF001
+        budget_spent = provider == "codex" and codex_turn_budget <= TURNS_HERE
         expected = (
-            SessionDisposition.RESET_REQUIRED
-            if provider == "codex"
-            else SessionDisposition.REUSABLE
+            SessionDisposition.RESET_REQUIRED if budget_spent else SessionDisposition.REUSABLE
         )
         assert second.disposition is expected
 
@@ -283,7 +308,8 @@ def test_a_session_mcp_server_is_reachable_from_inside_confinement(
         result = session.run_turn(
             AgentTurnRequest(
                 message=(
-                    "Use the MCP tool named 'add' to compute 918273 + 645281, "
+                    f"Use the MCP tool named 'add' to compute "
+                    f"{ADD_OPERANDS[0]} + {ADD_OPERANDS[1]}, "
                     "then reply with only the number it returned."
                 ),
                 instructions="You must call the tool. Do not compute the sum yourself.",
@@ -293,8 +319,11 @@ def test_a_session_mcp_server_is_reachable_from_inside_confinement(
 
         # Claude names the namespaced tool directly (``mcp__calc__add``);
         # Codex reports one generic ``mcp_tool_call`` item and names the server
-        # and tool in its arguments, so the whole payload is what is searched.
+        # and tool in its arguments. So the tool name is matched where each
+        # provider puts it, and the operands are required alongside it: a call
+        # to some unrelated tool whose payload merely contains the letters
+        # "add" is not evidence that the MCP server was reached.
         calls = [event.payload for event in recorder.of_kind(AgentEventKind.TOOL_CALL)]
         _report(f"{provider} mcp", text=result.text, tools=calls, usage=result.usage)
-        assert any("add" in str(call) for call in calls)
+        assert any(_is_add_call(call) for call in calls), calls
         assert "1563554" in result.text.replace(",", "")

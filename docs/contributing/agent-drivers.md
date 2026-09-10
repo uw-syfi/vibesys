@@ -208,6 +208,18 @@ The MCP command is left as the caller wrote it in container mode. Only a host
 turn rewrites a bare `python` to the interpreter running VibeSys, because the
 container image resolves its own.
 
+## Usage records
+
+`AgentClient` writes one row per invocation to `<log_dir>/usage.jsonl`, whether
+or not the turn succeeded. `input_tokens` is the whole prompt the provider
+billed for, cached tokens included, on every provider: agentshim folds
+Anthropic's disjoint cache counts into the input total so the field means the
+same thing across CLIs, and `cache_read_input_tokens` reports the cached part
+separately. Records written by Claude runs before this change excluded the
+cached tokens from `input_tokens`, so a Claude series that spans the change is
+not comparable without adding `cache_read_input_tokens` back into the older
+rows.
+
 ## Mock driver
 
 `driver = "mock"` is test infrastructure. It satisfies the same driver

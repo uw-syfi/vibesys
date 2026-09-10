@@ -55,8 +55,9 @@ RUST_DOCKER_TOOLCHAIN_VERSION = "1.92.0"
 #
 # Every provider gets the python3 + ``mcp`` install at the end so that the
 # in-container CLI can spawn ``python -m vs_issue_board.mcp``
-# as a stdio MCP child (via the per-provider config installed by the
-# active ``CodingAgent.install_mcp_servers`` hook). The default base image
+# as a stdio MCP child. agentshim installs the per-provider MCP config for the
+# turn (a config file for claude, gemini and opencode; ``--config`` flags for
+# codex) and removes it afterwards. The default base image
 # ``nvcr.io/nvidia/pytorch:25.04-py3`` already ships python3 + pip + a
 # compatible ``mcp`` install, so this is a defensive no-op for the default
 # image but keeps the install resilient on alternative images.

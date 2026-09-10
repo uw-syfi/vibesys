@@ -713,6 +713,36 @@ def _watchdog_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
     return watched
 
 
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_stuck_ownership_repair_is_not_reported_as_an_agent_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """The repair shells out with its own budget, from the turn's ``finally``.
+
+    Loops fail closed on ``subprocess.TimeoutExpired`` and read it as the agent
+    having run out of time, which is a different failure with a different
+    response, so the repair's own timeout must not wear that type.
+    """
+    driver, _fake, _repairs = _container_driver(
+        monkeypatch, provider, scripted_turn(provider, text="ok")
+    )
+
+    def stuck(container_id: str, *, uid: int, gid: int) -> None:
+        del container_id, uid, gid
+        raise subprocess.TimeoutExpired(cmd=["docker", "exec", "c", "find"], timeout=120)
+
+    monkeypatch.setattr(docker_executor, "repair_workspace_ownership", stuck)
+    session = driver.create_session(_container_spec(tmp_path, provider))
+
+    with pytest.raises(RuntimeError) as raised:
+        session.run_turn(AgentTurnRequest(message="Do it"))
+
+    assert not isinstance(raised.value, subprocess.TimeoutExpired)
+    assert "120 seconds" in str(raised.value)
+
+
 def test_a_container_codex_session_runs_its_turns_through_the_watchdog(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
