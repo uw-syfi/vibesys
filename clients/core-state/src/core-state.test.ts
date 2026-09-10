@@ -13,6 +13,7 @@ import {
   reduceEventRebootstrap,
   reduceSnapshot,
 } from './core-state.js';
+import {executionStatusFor} from './execution-status.js';
 
 describe('core state projection', () => {
   it('projects snapshots without changing event-derived history', () => {
@@ -220,6 +221,153 @@ describe('core state projection', () => {
       summary: 'Running tests',
       tool: 'Bash',
     });
+  });
+
+  it('tracks structured output and tool status independently per execution', () => {
+    let state = initialCoreState();
+    state = reduceEvent(
+      state,
+      executionEvent(1, 'agent_execution_started', 'first', startedData('First')),
+    );
+    state = reduceEvent(
+      state,
+      executionEvent(2, 'agent_execution_started', 'second', startedData('Second')),
+    );
+    state = reduceEvent(
+      state,
+      statusEvent(3, 'first', 'agent_output_chunk', {
+        progress: 'Round 1/3',
+        agent_label: 'Implementer',
+        elapsed_seconds: 12.5,
+        input_tokens: 8_000,
+        context_window: 200_000,
+      }),
+    );
+    state = reduceEvent(
+      state,
+      statusEvent(4, 'second', 'tool_call', {
+        progress: 'Reviewing',
+        agent_label: 'Judge',
+        elapsed_seconds: 3,
+        input_tokens: 2_000,
+        context_window: 100_000,
+      }),
+    );
+
+    expect(state.executionStatuses).toEqual({
+      first: {
+        executionId: 'first',
+        sequence: 3,
+        observedAt: '2026-01-01T00:00:03Z',
+        progress: 'Round 1/3',
+        agentLabel: 'Implementer',
+        elapsedSeconds: 12.5,
+        inputTokens: 8_000,
+        contextWindow: 200_000,
+      },
+      second: {
+        executionId: 'second',
+        sequence: 4,
+        observedAt: '2026-01-01T00:00:04Z',
+        progress: 'Reviewing',
+        agentLabel: 'Judge',
+        elapsedSeconds: 3,
+        inputTokens: 2_000,
+        contextWindow: 100_000,
+      },
+    });
+    expect(state.usage).toEqual({inputTokens: 2_000, contextWindow: 100_000, model: null});
+
+    state = reduceEvent(
+      state,
+      statusEvent(5, 'first', 'agent_output_chunk', {input_tokens: 9_000}),
+    );
+    expect(state.executionStatuses['first']).toMatchObject({
+      sequence: 5,
+      inputTokens: 9_000,
+      contextWindow: 200_000,
+    });
+    expect(state.usage).toEqual({inputTokens: 9_000, contextWindow: 200_000, model: null});
+  });
+
+  it('reconciles status through checkpoints and clears only the execution that finishes', () => {
+    let state = reduceEvent(initialCoreState(), statusEvent(1, 'first', 'agent_output_chunk'));
+    state = reduceEvent(state, statusEvent(2, 'second', 'tool_call'));
+    state = reconcileActiveExecutions(state, [checkpoint('first'), checkpoint('second')], 2);
+
+    expect(Object.keys(state.executionStatuses)).toEqual(['first', 'second']);
+
+    state = reduceEvent(
+      state,
+      executionEvent(3, 'agent_execution_finished', 'first', {
+        kind: 'agent_execution_finished',
+        error: null,
+      }),
+    );
+    expect(Object.keys(state.executionStatuses)).toEqual(['second']);
+
+    state = reconcileActiveExecutions(
+      state,
+      [checkpoint('second', {started_at: '2026-01-01T00:00:05Z'})],
+      3,
+    );
+    const restarted = state.activeExecutions['second'];
+    if (restarted === undefined) throw new Error('checkpoint dropped its active execution');
+    expect(executionStatusFor(state.executionStatuses, restarted)).toBeUndefined();
+
+    state = reduceEvent(state, outputEvent(4, 'legacy after checkpoint', 'second'));
+    expect(state.executionStatuses).toEqual({});
+  });
+
+  it('leaves legacy output without structured status unchanged', () => {
+    const started = reduceEvent(
+      initialCoreState(),
+      executionEvent(1, 'agent_execution_started', 'first', startedData('First')),
+    );
+    const projected = reduceEvent(started, outputEvent(2, 'legacy', 'first'));
+
+    expect(projected.executionStatuses).toBe(started.executionStatuses);
+    expect(projected.usage).toBeNull();
+  });
+
+  it('advances repeated unsequenced status without replacing sequenced status', () => {
+    let state = reduceEvent(initialCoreState(), statusEvent(0, 'first', 'agent_output_chunk'));
+    state = reduceEvent(
+      state,
+      statusEvent(0, 'first', 'tool_call', {progress: 'second unsequenced'}),
+    );
+    expect(state.executionStatuses['first']?.progress).toBe('second unsequenced');
+
+    state = reduceEvent(
+      state,
+      statusEvent(2, 'first', 'agent_output_chunk', {
+        progress: 'sequenced',
+        input_tokens: 7_000,
+        context_window: 20_000,
+      }),
+    );
+    state = reduceEvent(
+      state,
+      statusEvent(0, 'first', 'agent_output_chunk', {
+        progress: 'stale unsequenced',
+        input_tokens: 1,
+        context_window: 2,
+      }),
+    );
+    expect(state.executionStatuses['first']?.progress).toBe('sequenced');
+    expect(state.executionStatuses['first']?.sequence).toBe(2);
+    expect(state.usage).toEqual({inputTokens: 7_000, contextWindow: 20_000, model: null});
+  });
+
+  it('clears pending status when the run terminates before a checkpoint arrives', () => {
+    const pending = reduceEvent(initialCoreState(), statusEvent(1, 'first', 'agent_output_chunk'));
+    const ended = reduceEvent(pending, {
+      ...baseEvent(2, 'run_failed'),
+      agent_kind: null,
+      round_label: null,
+    });
+
+    expect(ended.executionStatuses).toEqual({});
   });
 
   it('captures runtime identity from agent_execution_started when present', () => {
@@ -1089,6 +1237,29 @@ function executionEvent(
   data: NonNullable<RunEvent['data']>,
 ): RunEvent {
   return {...baseEvent(sequence, type), execution_id: executionId, data};
+}
+
+function statusEvent(
+  sequence: number,
+  executionId: string,
+  kind: 'agent_output_chunk' | 'tool_call',
+  status: {
+    progress?: string;
+    agent_label?: string;
+    elapsed_seconds?: number;
+    input_tokens?: number;
+    context_window?: number;
+  } = {progress: `step ${sequence}`},
+): RunEvent {
+  return {
+    ...baseEvent(sequence, kind),
+    execution_id: executionId,
+    invocation_id: executionId,
+    data:
+      kind === 'agent_output_chunk'
+        ? {kind, channel: 'analysis', content: '', status}
+        : {kind, tool: 'Bash', call_id: `call-${sequence}`, args: {}, status},
+  };
 }
 
 function startedData(assignment: string): NonNullable<RunEvent['data']> {

@@ -101,6 +101,239 @@ describe('prefix backfill equivalence', () => {
 });
 
 describe('prefix merges across the chunk boundary', () => {
+  it('keeps the newest per-execution status across tail replay and prefix backfill', () => {
+    const events = [
+      executionStartedEvent(1, 'active'),
+      executionStatusEvent(2, 'active', 'agent_output_chunk', {
+        progress: 'Inspecting',
+        agent_label: 'Implementer',
+        elapsed_seconds: 2,
+        input_tokens: 4_000,
+        context_window: 200_000,
+      }),
+      executionStatusEvent(3, 'active', 'tool_call', {input_tokens: 9_000}),
+    ];
+    const checkpoint = [
+      {
+        execution_id: 'active',
+        agent_kind: 'implementer',
+        round_label: 'round-1-implementer',
+        stage: 'implementation',
+        attempt: 1,
+        assignment: 'Implement',
+        started_at: timestamp(1),
+        activity: {
+          kind: 'agent_execution_activity_changed' as const,
+          mode: 'thinking' as const,
+          summary: 'Working',
+          tool: null,
+        },
+      },
+    ];
+    const full = reduceEventBatch(initialCoreState(), events, checkpoint, 3);
+    const tail = reduceEventBatch(initialCoreState(), events.slice(2), checkpoint, 3, 2);
+    const merged = reduceEventPrefix(tail, events.slice(0, 2), 0);
+
+    expect(merged.executionStatuses).toEqual(full.executionStatuses);
+    expect(merged.executionStatuses['active']).toMatchObject({
+      sequence: 3,
+      progress: 'Inspecting',
+      agentLabel: 'Implementer',
+      inputTokens: 9_000,
+      contextWindow: 200_000,
+    });
+    expect(merged.usage).toEqual(full.usage);
+    expect(merged.usage).toEqual({inputTokens: 9_000, contextWindow: 200_000, model: null});
+  });
+
+  it('does not fill a restarted execution from an older generation with the same id', () => {
+    const older = [
+      executionStartedEvent(1, 'reused'),
+      executionStatusEvent(2, 'reused', 'agent_output_chunk', {
+        progress: 'Old work',
+        agent_label: 'Old implementer',
+        context_window: 200_000,
+      }),
+    ];
+    const tail = [
+      executionStartedEvent(4, 'reused'),
+      executionStatusEvent(5, 'reused', 'tool_call', {input_tokens: 7_000}),
+    ];
+    const full = reduceEventBatch(initialCoreState(), [
+      ...older,
+      executionFinishedEvent(3, 'reused'),
+      ...tail,
+    ]);
+    const merged = reduceEventPrefix(reduceEventBatch(initialCoreState(), tail), older, 0);
+
+    expect(merged.executionStatuses).toEqual(full.executionStatuses);
+    expect(merged.executionStatuses['reused']).toMatchObject({
+      sequence: 5,
+      progress: null,
+      agentLabel: null,
+      inputTokens: 7_000,
+      contextWindow: null,
+    });
+  });
+
+  it('does not fill terminal usage from an older generation with the same id', () => {
+    const older = [
+      executionStartedEvent(1, 'reused'),
+      executionStatusEvent(2, 'reused', 'agent_output_chunk', {
+        input_tokens: 4_000,
+        context_window: 200_000,
+      }),
+    ];
+    const tail = [
+      executionStartedEvent(4, 'reused'),
+      executionStatusEvent(5, 'reused', 'tool_call', {input_tokens: 7_000}),
+      executionFinishedEvent(6, 'reused'),
+    ];
+    const full = reduceEventBatch(initialCoreState(), [
+      ...older,
+      executionFinishedEvent(3, 'reused'),
+      ...tail,
+    ]);
+    const merged = reduceEventPrefix(reduceEventBatch(initialCoreState(), tail), older, 0);
+
+    expect(merged.executionStatuses).toEqual({});
+    expect(merged.usage).toEqual(full.usage);
+    expect(merged.usage).toEqual({inputTokens: 7_000, contextWindow: null, model: null});
+  });
+
+  for (const ending of ['execution finish', 'run failure'] as const) {
+    it(`restores status-derived usage across prefix backfill after ${ending}`, () => {
+      const older = [
+        executionStartedEvent(1, 'active'),
+        executionStatusEvent(2, 'active', 'agent_output_chunk', {
+          progress: 'Inspecting',
+          agent_label: 'Implementer',
+          input_tokens: 4_000,
+          context_window: 200_000,
+        }),
+      ];
+      const terminal =
+        ending === 'execution finish'
+          ? executionFinishedEvent(4, 'active')
+          : ({
+              ...baseEvent(4, 'run_failed'),
+              agent_kind: null,
+              round_label: null,
+              status: 'failed',
+            } satisfies RunEvent);
+      const tail = [
+        executionStatusEvent(3, 'active', 'tool_call', {input_tokens: 9_000}),
+        terminal,
+      ];
+      const full = reduceEventBatch(initialCoreState(), [...older, ...tail]);
+      const merged = reduceEventPrefix(reduceEventBatch(initialCoreState(), tail), older, 0);
+
+      expect(merged.executionStatuses).toEqual({});
+      expect(merged.usage).toEqual(full.usage);
+      expect(merged.usage).toEqual({inputTokens: 9_000, contextWindow: 200_000, model: null});
+    });
+  }
+
+  it('retains an earlier usage model when a later status owns terminal usage', () => {
+    const events: RunEvent[] = [
+      executionStartedEvent(1, 'active'),
+      {
+        ...baseEvent(2, 'usage_update'),
+        execution_id: 'active',
+        data: {
+          kind: 'usage_update',
+          input_tokens: 4_000,
+          context_window: 200_000,
+          model: 'gpt-5.6-sol',
+        },
+      },
+      executionStatusEvent(3, 'active', 'agent_output_chunk', {
+        input_tokens: 9_000,
+        context_window: 200_000,
+      }),
+      executionFinishedEvent(4, 'active'),
+      {
+        ...baseEvent(5, 'run_finished'),
+        agent_kind: null,
+        round_label: null,
+        status: 'completed',
+      },
+    ];
+    const full = reduceEventBatch(initialCoreState(), events, [], 5);
+    const merged = backfill(events, 1, 1);
+
+    expect(merged.executionStatuses).toEqual({});
+    expect(merged.usage).toEqual(full.usage);
+    expect(merged.usage).toEqual({
+      inputTokens: 9_000,
+      contextWindow: 200_000,
+      model: 'gpt-5.6-sol',
+    });
+  });
+
+  it('keeps an explicit null model from the newest preceding usage update', () => {
+    const events: RunEvent[] = [
+      executionStartedEvent(1, 'active'),
+      {
+        ...baseEvent(2, 'usage_update'),
+        execution_id: 'active',
+        data: {
+          kind: 'usage_update',
+          input_tokens: 4_000,
+          context_window: 200_000,
+          model: 'older-model',
+        },
+      },
+      {
+        ...baseEvent(3, 'usage_update'),
+        execution_id: 'active',
+        data: {
+          kind: 'usage_update',
+          input_tokens: 5_000,
+          context_window: 200_000,
+          model: null,
+        },
+      },
+      executionStatusEvent(4, 'active', 'agent_output_chunk', {
+        input_tokens: 9_000,
+        context_window: 200_000,
+      }),
+      executionFinishedEvent(5, 'active'),
+      {
+        ...baseEvent(6, 'run_finished'),
+        agent_kind: null,
+        round_label: null,
+        status: 'completed',
+      },
+    ];
+    const full = reduceEventBatch(initialCoreState(), events, [], 6);
+    const merged = backfill(events, 1, 1);
+
+    expect(merged.usage).toEqual(full.usage);
+    expect(merged.usage).toEqual({inputTokens: 9_000, contextWindow: 200_000, model: null});
+  });
+
+  it('does not mutate status provenance shared by divergent prefix forks', () => {
+    const tailEvents = [
+      executionStatusEvent(4, 'active', 'agent_output_chunk', {input_tokens: 9_000}),
+    ];
+    const tail = reduceEventBatch(initialCoreState(), tailEvents, undefined, undefined, 3);
+    const pristineTail = reduceEventBatch(initialCoreState(), tailEvents, undefined, undefined, 3);
+
+    reduceEventPrefix(tail, [executionStartedEvent(3, 'active')], 2);
+    const olderStatus = [
+      executionStatusEvent(2, 'active', 'agent_output_chunk', {
+        input_tokens: 4_000,
+        context_window: 200_000,
+      }),
+    ];
+    const forked = reduceEventPrefix(tail, olderStatus, 1);
+    const pristine = reduceEventPrefix(pristineTail, olderStatus, 1);
+
+    expect(forked.usage).toEqual(pristine.usage);
+    expect(forked.usage?.contextWindow).toBe(200_000);
+  });
+
   it('replays a resumed lifetime when backfill follows the server spine', () => {
     const events = [
       runStartedEvent(1),
@@ -886,6 +1119,29 @@ function chunkEvent(sequence: number, content = `entry ${sequence}`): RunEvent {
     ...baseEvent(sequence, 'agent_output_chunk'),
     invocation_id: 'turn',
     data: {kind: 'agent_output_chunk', channel: 'assistant', content},
+  };
+}
+
+function executionStatusEvent(
+  sequence: number,
+  executionId: string,
+  kind: 'agent_output_chunk' | 'tool_call',
+  status: {
+    progress?: string;
+    agent_label?: string;
+    elapsed_seconds?: number;
+    input_tokens?: number;
+    context_window?: number;
+  },
+): RunEvent {
+  return {
+    ...baseEvent(sequence, kind),
+    execution_id: executionId,
+    invocation_id: executionId,
+    data:
+      kind === 'agent_output_chunk'
+        ? {kind, channel: 'analysis', content: status.progress ?? '', status}
+        : {kind, tool: 'Bash', call_id: `call-${sequence}`, args: {}, status},
   };
 }
 

@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'bun:test';
-import type {ActiveAgentExecution} from '@vibesys/core-state';
-import {activitySummary, runtimeSuffix} from './activity-bar.js';
+import type {ActiveAgentExecution, ExecutionStatus} from '@vibesys/core-state';
+import {activityLine, activitySummary, runtimeSuffix, statusSuffix} from './activity-bar.js';
 
 const STARTED_AT = '2026-08-25T12:00:00.000Z';
 function execution(
@@ -36,6 +36,29 @@ describe('activity summary', () => {
       'Working',
     );
   });
+
+  it('uses structured backend progress when available', () => {
+    expect(activitySummary(execution({mode: 'thinking', summary: ''}), status())).toBe('Round 1/3');
+  });
+});
+
+describe('structured execution status', () => {
+  it('renders label, backend elapsed time, tokens, and textual context pressure', () => {
+    expect(activityLine(execution({mode: 'thinking', summary: ''}), status(), Date.now())).toBe(
+      'Implementer 2 · Round 1/3 · 1m 12s · 180k/200k context high 90%',
+    );
+    expect(statusSuffix(status({inputTokens: 198_000}))).toBe(' · 198k/200k context critical 99%');
+  });
+
+  it('falls back to the legacy line when status is absent', () => {
+    expect(
+      activityLine(
+        execution({mode: 'thinking', summary: ''}),
+        undefined,
+        Date.parse(STARTED_AT) + 5_000,
+      ),
+    ).toBe('Implementer · Working · 5s');
+  });
 });
 
 describe('runtime suffix', () => {
@@ -51,3 +74,17 @@ describe('runtime suffix', () => {
     expect(runtimeSuffix(execution({mode: 'thinking', summary: ''}))).toBe('');
   });
 });
+
+function status(overrides: Partial<ExecutionStatus> = {}): ExecutionStatus {
+  return {
+    executionId: 'execution-1',
+    sequence: 3,
+    observedAt: '2026-08-25T12:01:12.000Z',
+    progress: 'Round 1/3',
+    agentLabel: 'Implementer 2',
+    elapsedSeconds: 72.9,
+    inputTokens: 180_000,
+    contextWindow: 200_000,
+    ...overrides,
+  };
+}
