@@ -1,11 +1,11 @@
 """Provider profiles for tests, without depending on what agentshim ships.
 
-The agentshim release VibeSys builds against registers ``claude`` only;
-``codex``, ``gemini``, and ``opencode`` arrive later with the same
-``ProviderProfile`` shape. Tests that exercise VibeSys's per-provider tables
-therefore build the profiles they need here and install them through
-``vibesys.agents.provider_profiles``, so a test asserts on VibeSys's derivation
-rather than on which providers happen to be registered today.
+VibeSys derives its Docker and host-resource tables from
+``ProviderProfile``. A test of that derivation should fail when the derivation
+changes, not when a library release edits one CLI's install recipe, so tests
+build the profiles they need here and install them through
+``vibesys.agents.provider_profiles``. Tests whose subject *is* a real
+provider's declared behaviour read the shipped profile instead.
 """
 
 from __future__ import annotations

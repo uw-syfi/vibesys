@@ -112,10 +112,18 @@ _PROFILE_STEP_OVERRIDES: dict[str, str] = {
     ),
 }
 
-# Node is the next likely entry. VibeSys previously installed it from the
-# nodejs.org tarball because apt-get against archive.ubuntu.com is unreliable
-# from several of our hosts; whichever way the codex and gemini profiles
-# bootstrap node, check it against that experience when those profiles land.
+# Node needs no entry. VibeSys used to install it from the nodejs.org tarball
+# because apt-get against archive.ubuntu.com is unreliable from several of our
+# hosts, and the codex and gemini profiles now fetch the same tarball behind
+# the same `command -v node` guard, so their recipes stand as written.
+#
+# One rough edge is left as the library ships it: the codex recipe fetches that
+# tarball with curl but, unlike gemini's, carries no curl bootstrap of its own,
+# so on an image without curl it would rely on the bootstrap in the common
+# tooling below, which runs after the recipe. The default editor image
+# (`nvcr.io/nvidia/pytorch:25.04-py3`) ships curl, and the pre-profile VibeSys
+# table had the same ordering, so this is a known hazard on an alternative
+# image rather than a regression.
 
 # ``npm install -g [--flags] @openai/codex`` with no ``@<version>`` suffix.
 _UNPINNED_CODEX_NPM_INSTALL = re.compile(r"(npm install -g\b[^&|;]*?)@openai/codex(?!@)(\s|$)")

@@ -214,8 +214,9 @@ def test_codex_home_relocates_the_state_leaves(tmp_path, _shipped_profiles):  # 
     assert ".config/codex" in writable
 
 
-def test_a_provider_agentshim_does_not_register_declares_no_state(tmp_path):  # noqa: ANN001, ANN201
-    assert _writable_state(tmp_path, "unregistered-provider") == set()
+def test_a_provider_agentshim_does_not_register_is_rejected(tmp_path):  # noqa: ANN001, ANN201
+    with pytest.raises(ValueError, match="unregistered-provider"):
+        _writable_state(tmp_path, "unregistered-provider")
 
 
 class TestContainerRuntimeResources:

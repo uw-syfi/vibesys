@@ -223,12 +223,11 @@ def _provider_state(ctx: HostResourceContext) -> Iterable[HostResource]:
     home = ctx.env.get("HOME")
     if not home or not ctx.provider:
         return ()
-    try:
-        profile = provider_profiles.provider_profile(ctx.provider)
-    except ValueError:
-        # An unregistered provider has no state to declare; agent construction
-        # rejects it separately, naming the providers that are registered.
-        return ()
+    # A name agentshim does not register raises, naming the alternatives, the
+    # same way every other profile-derived table answers it. Silently declaring
+    # no state instead would confine an agent with no access to its own
+    # credentials and let it fail as if it were logged out.
+    profile = provider_profiles.provider_profile(ctx.provider)
 
     state_dirs = list(profile.state_dirs)
     if sys.platform == "darwin":
