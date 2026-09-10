@@ -1,18 +1,17 @@
 """Prompt and workspace helpers shared by external-agent drivers.
 
-The application client owns skill materialization and response parsing. Drivers
-reuse the schema helpers when translating a turn to their native API.
+The application client owns skill materialization and response parsing. A
+driver reuses :func:`build_schema_hint` when its provider cannot take the
+response schema natively; ``agentshim`` owns the native-schema dialect checks
+and materialization.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 import shutil
-import tempfile
 from collections.abc import Callable  # noqa: TC003  # tracked: #288
-from pathlib import Path
+from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TextIO
 
 from pydantic import BaseModel  # noqa: TC002  # tracked: #288
@@ -31,151 +30,6 @@ CLI_SKILL_DIRS: tuple[str, ...] = (
     ".cursor/skills",
     ".opencode/skills",
 )
-
-_NATIVE_SCHEMA_DIR = Path(".cache/vibesys/response-schemas")
-
-# Codex's native response format accepts the object/array/scalar subset used
-# by Pydantic's ordinary model schemas. Reject constructs that require schema
-# evaluation features outside that subset instead of discovering the problem
-# after an expensive agent turn has started. Field names are not inspected as
-# keywords; ``properties`` and ``$defs`` are traversed as maps of subschemas.
-_UNSUPPORTED_NATIVE_SCHEMA_KEYWORDS = frozenset(
-    {
-        "$anchor",
-        "$dynamicAnchor",
-        "$dynamicRef",
-        "$id",
-        "$schema",
-        "allOf",
-        "contains",
-        "dependentRequired",
-        "dependentSchemas",
-        "else",
-        "if",
-        "maxContains",
-        "minContains",
-        "not",
-        "oneOf",
-        "patternProperties",
-        "prefixItems",
-        "propertyNames",
-        "then",
-        "unevaluatedItems",
-        "unevaluatedProperties",
-    }
-)
-
-
-def _validate_native_output_schema(  # noqa: C901  # tracked: #288
-    schema: object,
-    *,
-    allow_arbitrary_keys: bool = False,
-) -> dict[str, object]:
-    """Normalize and validate the JSON Schema subset a provider accepts natively.
-
-    The default (strict) profile is Codex's: every declared object property is
-    required and undeclared keys are forbidden. Pydantic omits defaulted
-    properties from ``required`` and represents arbitrary mappings with a
-    schema-valued ``additionalProperties``; the former is normalized here while
-    the latter is rejected so the caller can fall back to the portable prompt
-    contract.
-
-    *allow_arbitrary_keys* selects the permissive profile used by providers
-    whose CLI accepts open-ended object maps (see
-    :attr:`~vibesys._agent_cli.base.CodingAgent.native_output_schema_allows_arbitrary_keys`).
-    An existing ``additionalProperties`` is then preserved verbatim, and a
-    schema-valued one is still traversed so nested subschemas obey the same
-    rules. Objects that do not declare one are still closed with ``False``.
-    """
-    if not isinstance(schema, dict) or schema.get("type") != "object":
-        raise ValueError("native output schema must have an object root")  # noqa: TRY003  # tracked: #288
-
-    def close_object(node: dict[str, object], location: str) -> None:
-        """Apply the profile's undeclared-key rule to one object node."""
-        additional = node.get("additionalProperties")
-        if additional in (None, False):
-            node["additionalProperties"] = False
-            return
-        if not allow_arbitrary_keys:
-            raise ValueError(f"native output schema uses arbitrary object keys at {location}")  # noqa: TRY003  # tracked: #288
-        # Preserved verbatim; a schema-valued map is traversed by the generic
-        # key walk below so nested subschemas obey the same rules.
-
-    def visit(node: object, location: str) -> None:  # noqa: C901, PLR0912  # tracked: #288
-        if isinstance(node, list):
-            for index, value in enumerate(node):
-                visit(value, f"{location}/{index}")
-            return
-        if not isinstance(node, dict):
-            return
-        reference = node.get("$ref")
-        if reference is not None:
-            if not isinstance(reference, str) or not reference.startswith("#/"):
-                raise ValueError(f"native output schema uses a non-local $ref at {location}")  # noqa: TRY003  # tracked: #288
-            # Codex follows the older strict subset where a reference may not
-            # have annotation or validation siblings.
-            node.clear()
-            node["$ref"] = reference
-            return
-        node.pop("default", None)
-        properties = node.get("properties")
-        if properties is not None:
-            if not isinstance(properties, dict):
-                raise ValueError(f"native output schema {location}/properties must be an object")  # noqa: TRY003  # tracked: #288
-            close_object(node, location)
-            node["required"] = list(properties)
-        elif node.get("type") == "object":
-            close_object(node, location)
-            node["required"] = []
-        for key, value in node.items():
-            if key in {"properties", "$defs", "definitions"}:
-                if not isinstance(value, dict):
-                    raise ValueError(f"native output schema {location}/{key} must be an object")  # noqa: TRY003  # tracked: #288
-                for name, subschema in value.items():
-                    visit(subschema, f"{location}/{key}/{name}")
-                continue
-            if key in _UNSUPPORTED_NATIVE_SCHEMA_KEYWORDS:
-                raise ValueError(  # noqa: TRY003  # tracked: #288
-                    f"native output schema uses unsupported keyword {key!r} at {location}"
-                )
-            visit(value, f"{location}/{key}")
-
-    visit(schema, "#")
-    return schema
-
-
-def materialize_native_output_schema(
-    workspace: Path,
-    response_cls: type[BaseModel],
-    *,
-    allow_arbitrary_keys: bool = False,
-) -> str:
-    """Atomically write a validated schema and return its relative CLI path.
-
-    *allow_arbitrary_keys* is the calling provider's
-    ``native_output_schema_allows_arbitrary_keys`` capability; it selects the
-    permissive validation profile for mapping-bearing response models.
-    """
-    schema = _validate_native_output_schema(
-        response_cls.model_json_schema(),
-        allow_arbitrary_keys=allow_arbitrary_keys,
-    )
-    encoded = (json.dumps(schema, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
-    digest = hashlib.sha256(encoded).hexdigest()[:16]
-    relative = _NATIVE_SCHEMA_DIR / f"{response_cls.__name__}-{digest}.json"
-    target = workspace / relative
-    target.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary_name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(encoded)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, target)  # noqa: PTH105  # tracked: #288
-    finally:
-        temporary.unlink(missing_ok=True)
-    return relative.as_posix()
 
 
 def agent_label(kind: str) -> str:
