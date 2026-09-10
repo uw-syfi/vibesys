@@ -536,7 +536,7 @@ jobs:
       - name: Run workspace-confinement tests
         env:
           VIBESYS_REQUIRE_SANDBOX_TESTS: "1"
-        run: uv run python -m pytest tests/vibesys/_agent_cli/test_hostsandbox.py -v
+        run: uv run python -m pytest tests/vibesys/agents/test_hostsandbox.py -v
 
   # macOS counterpart of sandbox-linux: exercises the Seatbelt confinement
   # boundary on a real macOS host. sandbox-exec ships with macOS, so no install
@@ -563,7 +563,7 @@ jobs:
       - name: Run workspace-confinement tests
         env:
           VIBESYS_REQUIRE_SANDBOX_TESTS: "1"
-        run: uv run python -m pytest tests/vibesys/_agent_cli/test_hostsandbox.py -v
+        run: uv run python -m pytest tests/vibesys/agents/test_hostsandbox.py -v
 
   # Reports the run's wall time against CI_WALL_TIME_BUDGET_SECONDS (issue
   # #474). Warns rather than fails: a green run that is merely slow should still

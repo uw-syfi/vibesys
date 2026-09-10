@@ -21,7 +21,7 @@ name = "gpt-5.4"
 # [agent]
 # Selects the agent backend used by the outer loops. The default is "cli",
 # which drives an external coding-agent CLI (Claude Code, Gemini, Codex, or
-# Opencode) through vibesys/_agent_cli. Set backend = "deepagents" to use the
+# Opencode) through vibesys/agents. Set backend = "deepagents" to use the
 # LangChain/deepagents runner instead.
 #
 # CLI flags --agent-backend / --cli-provider on `./vs` override these values.
