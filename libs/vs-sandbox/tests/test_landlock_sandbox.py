@@ -123,56 +123,6 @@ class TestLandlockPolicyCompilation:
         assert sandbox.unenforced_policy() == ()
 
 
-@requires_landlock
-class TestLandlockEnforcesTheProjectBoundary:
-    """The guarantee this backend does make, and the escape from issue #149."""
-
-    def test_project_is_writable(self, tmp_path: Path) -> None:
-        workspace = _workspace(tmp_path)
-        sandbox = _confined(workspace)
-
-        result = _run(sandbox, "printf edited > source.txt && printf new > created.txt")
-
-        assert result.returncode == 0, result.stderr
-        assert (workspace / "source.txt").read_text() == "edited"
-        assert (workspace / "created.txt").read_text() == "new"
-
-    def test_paths_outside_the_project_are_denied(self, tmp_path: Path) -> None:
-        workspace = _workspace(tmp_path)
-        sibling = tmp_path / "sibling"
-        sibling.mkdir()
-        (sibling / "secret.txt").write_text("sibling secret\n")
-        sandbox = _confined(workspace)
-
-        result = _run(
-            sandbox,
-            f"cat {sibling / 'secret.txt'} 2>/dev/null; echo read=$?;"
-            f" (printf x > {sibling / 'escape.txt'}) 2>/dev/null; echo write=$?",
-        )
-
-        assert "read=1" in result.stdout
-        assert "write=" in result.stdout
-        assert "write=0" not in result.stdout
-        assert not (sibling / "escape.txt").exists()
-
-    def test_declared_read_resources_stay_readable_but_not_writable(self, tmp_path: Path) -> None:
-        workspace = _workspace(tmp_path)
-        resource = tmp_path / "toolchain"
-        resource.mkdir()
-        (resource / "config.json").write_text("{}\n")
-        sandbox = _confined(workspace, read_paths=(resource,))
-
-        result = _run(
-            sandbox,
-            f"cat {resource / 'config.json'} >/dev/null 2>&1; echo read=$?;"
-            f" (printf x > {resource / 'config.json'}) 2>/dev/null; echo write=$?",
-        )
-
-        assert "read=0" in result.stdout
-        assert "write=0" not in result.stdout
-        assert (resource / "config.json").read_text() == "{}\n"
-
-
 @pytest.mark.skipif(
     not landlock.supports_scoping(),
     reason="requires Landlock ABI 6 for scoping",

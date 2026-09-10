@@ -23,11 +23,22 @@ class HostResourceAccess(StrEnum):
 
 @dataclass(frozen=True)
 class HostResource:
-    """A host path an agent needs, independent of import implementation."""
+    """A host path an agent needs, independent of import implementation.
+
+    ``agent_path`` is the path the confined process sees for this resource,
+    when it differs from ``path`` on the host. Leave it ``None`` for anything
+    imported at its own host path; only a resource a framework presents at a
+    fixed container path (for example a container's ``/workspace`` or an
+    ``/opt/vibesys-*`` toolchain mount) should set it. Host confinement
+    backends run the agent directly against the host filesystem and cannot
+    remap a resource: a mismatched ``agent_path`` on a host backend is a
+    caller error, rejected where the resource list is applied.
+    """
 
     path: Path
     access: HostResourceAccess = HostResourceAccess.READ_ONLY
     purpose: str = "caller-provided resource"
+    agent_path: str | None = None
 
 
 @dataclass(frozen=True)

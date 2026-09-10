@@ -56,11 +56,12 @@ validates them and implements their requested access.
 from __future__ import annotations
 
 import enum
+import os
 import shutil
 import subprocess
 import sys
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable  # noqa: TC003  # tracked: #288
+from collections.abc import Callable, Iterable, Mapping  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -100,7 +101,7 @@ class _BuildOptions:
     """Validated shared inputs passed to an OS-specific sandbox builder."""
 
     env: dict[str, str]
-    resources: Iterable[HostResource]
+    resources: tuple[HostResource, ...]
     log: Callable[[str], None]
     project_path_policy: ProjectPathPolicy
     require_enforcement: bool
@@ -186,10 +187,43 @@ class WorkspaceSandbox(ABC):
     read_paths: tuple[Path, ...] = ()
     write_paths: tuple[Path, ...] = ()
     project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
+    #: The environment :func:`build` was called with, or ``None`` when the
+    #: sandbox was constructed directly. Named apart from the public ``env``
+    #: property below so the two do not collide on a frozen dataclass.
+    build_env: Mapping[str, str] | None = None
 
     @abstractmethod
     def wrap(self, argv: list[str]) -> list[str]:
         """Return *argv* rewritten to run confined to :attr:`workspace`."""
+
+    def agent_path(self, host_path: Path | str) -> str:
+        """Return the path the confined process sees for *host_path*.
+
+        Host backends run the agent directly against the host filesystem, so
+        the confined process sees exactly the path the host does; there is no
+        remapping table to consult. Only a container backend (Docker) presents
+        a resource at a different path than its host location, and overrides
+        this method to look it up. The result is a normalised string: distinct
+        separators collapse and redundant ``.`` segments drop, but the path is
+        not resolved or made absolute.
+        """
+        return str(Path(host_path))
+
+    @property
+    def env(self) -> Mapping[str, str]:
+        """Return the environment variables the confined process runs with.
+
+        This is :attr:`build_env`, the environment :func:`build` was given,
+        falling back to the current process's own environment when the
+        sandbox was constructed directly. Either way, HOME and PATH are
+        guaranteed to be present: whichever of the two is missing from the
+        chosen source is filled in from ``os.environ``, so a launched agent
+        CLI can always resolve its own binaries and home-relative config.
+        """
+        base = self.build_env if self.build_env is not None else os.environ
+        if "HOME" in base and "PATH" in base:
+            return base
+        return {**os.environ, **base}
 
 
 @dataclass(frozen=True)
@@ -534,6 +568,29 @@ def _resource_paths(
     return list(imports.read_paths), list(imports.write_paths)
 
 
+def _reject_agent_path_remap(resources: Iterable[HostResource]) -> None:
+    """Fail fast when a declaration asks for a remap no host backend can do.
+
+    Bubblewrap could remap a bind mount to a different destination inside the
+    namespace, but Landlock and Seatbelt confine the process's own view of the
+    filesystem and cannot remap anything at all, so the three host backends
+    must agree: none of them honor :attr:`HostResource.agent_path`. Only a
+    container backend (Docker) may present a resource at a path other than its
+    host path.
+    """
+    for resource in resources:
+        if resource.agent_path is None:
+            continue
+        host_path = str(resource.path)
+        if resource.agent_path != host_path:
+            raise ValueError(  # noqa: TRY003  # tracked: #288
+                f"resource {resource.purpose!r} at {host_path} declares "
+                f"agent_path={resource.agent_path!r}, but host backends "
+                "(bubblewrap, Landlock, Seatbelt) cannot remap paths; set "
+                "agent_path to the host path or leave it unset."
+            )
+
+
 def build(  # noqa: PLR0913
     workspace: Path | str,
     *,
@@ -560,6 +617,10 @@ def build(  # noqa: PLR0913
             log(msg)
 
     workspace = Path(workspace).resolve()
+    # Materialize before validating: a generator would otherwise be consumed
+    # here and again by ``_resource_paths`` below, silently dropping it there.
+    resources = tuple(resources)
+    _reject_agent_path_remap(resources)
     policy = project_path_policy or ProjectPathPolicy()
     policy.validate(workspace)
     options = _BuildOptions(
@@ -657,6 +718,7 @@ def _build_linux(
                 write_paths=tuple(write_paths),
                 project_path_policy=options.project_path_policy,
                 gpu_device_nodes=tuple(_gpu_device_nodes()),
+                build_env=options.env,
             )
         reason = (
             f"'bwrap' at {bwrap} cannot create a user namespace"
@@ -692,6 +754,7 @@ def _build_linux(
         write_paths=tuple(write_paths),
         project_path_policy=options.project_path_policy,
         scratch_write_roots=_LINUX_SCRATCH_WRITE_ROOTS,
+        build_env=options.env,
     )
     # Compile eagerly so an unconfinable project layout is one clear error at
     # startup rather than a surprise on the first agent turn.
@@ -730,4 +793,5 @@ def _build_macos(
         read_paths=tuple(read_paths),
         write_paths=tuple(write_paths),
         project_path_policy=options.project_path_policy,
+        build_env=options.env,
     )

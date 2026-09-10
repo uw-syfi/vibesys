@@ -6,12 +6,14 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterable  # noqa: TC003  # tracked: #288
 from pathlib import Path
 
 import pytest
 
 import vs_sandbox
 from vs_sandbox import host_sandbox
+from vs_sandbox.host_resources import HostResource
 from vs_sandbox.project_paths import ProjectPathPolicy, ProjectPathPolicyError
 
 
@@ -331,3 +333,145 @@ class TestRequiredEnforcement:
 
         assert result is None
         assert any("bwrap" in message for message in logs)
+
+
+class TestHostResourceAgentPathRejection:
+    """Host backends run on the host filesystem, so none of them can remap.
+
+    Only a container backend may present a resource at a different path than
+    its host location; ``build()`` fails fast for the three host backends
+    rather than silently ignoring an ``agent_path`` it cannot honor.
+    """
+
+    def test_matching_agent_path_is_accepted(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        workspace = _workspace(tmp_path)
+        resource_path = tmp_path / "toolchain"
+        resource_path.mkdir()
+        resource = HostResource(resource_path, agent_path=str(resource_path))
+        monkeypatch.setattr(host_sandbox.sys, "platform", "linux")
+        monkeypatch.setattr(
+            host_sandbox.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/bwrap"
+        )
+        monkeypatch.setattr(host_sandbox, "_bwrap_confines", lambda _path: True)
+
+        sandbox = host_sandbox.build(
+            workspace,
+            env={},
+            resources=(resource,),
+            require_enforcement=True,
+        )
+
+        assert isinstance(sandbox, host_sandbox.HostSandbox)
+
+    def test_unset_agent_path_is_accepted(self, tmp_path: Path) -> None:
+        workspace = _workspace(tmp_path)
+        resource = HostResource(tmp_path / "toolchain")
+
+        # No backend needs to be available: rejection happens before dispatch.
+        host_sandbox.build(workspace, env={}, resources=(resource,))
+
+    def test_mismatched_agent_path_names_the_resource_and_the_backends(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        workspace = _workspace(tmp_path)
+        resource_path = tmp_path / "toolchain"
+        resource = HostResource(
+            resource_path,
+            purpose="test toolchain",
+            agent_path="/opt/vibesys-toolchain",
+        )
+
+        with pytest.raises(ValueError, match="test toolchain") as excinfo:
+            host_sandbox.build(workspace, env={}, resources=(resource,))
+
+        message = str(excinfo.value)
+        assert str(resource_path) in message
+        assert "/opt/vibesys-toolchain" in message
+        assert "bubblewrap" in message
+        assert "Landlock" in message
+        assert "Seatbelt" in message
+
+    def test_rejection_survives_a_one_shot_resource_iterable(self, tmp_path: Path) -> None:
+        """A generator of resources must not be silently exhausted before validation."""
+        workspace = _workspace(tmp_path)
+        resource = HostResource(
+            tmp_path / "toolchain",
+            purpose="generator resource",
+            agent_path="/opt/vibesys-toolchain",
+        )
+
+        def resources() -> Iterable[HostResource]:
+            yield resource
+
+        with pytest.raises(ValueError, match="generator resource"):
+            host_sandbox.build(workspace, env={}, resources=resources())
+
+
+class TestWorkspaceSandboxAgentPath:
+    def test_host_backends_return_the_host_path_normalised(self, tmp_path: Path) -> None:
+        sandbox = host_sandbox.HostSandbox(
+            workspace=_workspace(tmp_path),
+            bwrap_path="/usr/bin/bwrap",
+        )
+
+        assert sandbox.agent_path("/foo//bar/") == "/foo/bar"
+        assert sandbox.agent_path(Path("/foo/./bar")) == "/foo/bar"
+
+
+class TestWorkspaceSandboxEnv:
+    def test_falls_back_to_os_environ_without_a_build_env(self, tmp_path: Path) -> None:
+        sandbox = host_sandbox.HostSandbox(
+            workspace=_workspace(tmp_path),
+            bwrap_path="/usr/bin/bwrap",
+        )
+
+        assert sandbox.env is os.environ
+
+    def test_returns_the_build_env_unmodified_when_it_has_home_and_path(
+        self, tmp_path: Path
+    ) -> None:
+        build_env = {"HOME": "/home/agent", "PATH": "/usr/bin", "EXTRA": "1"}
+        sandbox = host_sandbox.HostSandbox(
+            workspace=_workspace(tmp_path),
+            bwrap_path="/usr/bin/bwrap",
+            build_env=build_env,
+        )
+
+        assert sandbox.env == build_env
+        assert sandbox.env is build_env
+
+    def test_fills_in_a_missing_home_or_path_from_os_environ(self, tmp_path: Path) -> None:
+        build_env = {"PATH": "/usr/bin"}
+        sandbox = host_sandbox.HostSandbox(
+            workspace=_workspace(tmp_path),
+            bwrap_path="/usr/bin/bwrap",
+            build_env=build_env,
+        )
+
+        env = sandbox.env
+
+        assert env["PATH"] == "/usr/bin"
+        assert env["HOME"] == os.environ["HOME"]
+
+    def test_build_passes_the_caller_env_through_to_the_sandbox(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        workspace = _workspace(tmp_path)
+        monkeypatch.setattr(host_sandbox.sys, "platform", "linux")
+        monkeypatch.setattr(
+            host_sandbox.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/bwrap"
+        )
+        monkeypatch.setattr(host_sandbox, "_bwrap_confines", lambda _path: True)
+        env = {"HOME": "/home/agent", "PATH": "/usr/bin"}
+
+        sandbox = host_sandbox.build(workspace, env=env, require_enforcement=True)
+
+        assert isinstance(sandbox, host_sandbox.HostSandbox)
+        assert sandbox.env == env
