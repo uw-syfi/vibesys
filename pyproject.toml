@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "agentshim>=0.5.0",
+    "agentshim>=0.6.0",
     "cbor2<6",
     "cryptography<50",
     "deepagents",
@@ -301,4 +301,5 @@ exclude = ["exp_env/**", "sdk/vs-evaluator"]
 members = ["sdk/*"]
 
 [tool.uv.sources]
+agentshim = { path = "/mnt/data/shli/worktrees/agentshim-snapshot", editable = true }
 vs-bench = { workspace = true }
