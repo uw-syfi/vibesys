@@ -99,6 +99,29 @@ nothing about whether the conversation is still resumable, so the client keeps
 the checkpoint and only a driver-reported reset (or a refused adoption) clears
 it.
 
+### A failed resumed turn drops the conversation
+
+A resumed turn that raises anything other than `SessionResumeError` still
+loses the conversation it was continuing: the AgentShim session calls
+`forget()` before re-raising, so the next turn on that session starts fresh.
+A raise carries no `AgentTurnResult`, so the turn cannot report
+`RESET_REQUIRED`, and forgetting is the only way the session can refuse to
+offer a conversation again.
+
+This exists because not every CLI makes a refused resume distinguishable.
+Claude maps any nonzero exit of a resumed turn onto `SessionResumeError`;
+Codex recognizes its own missing-rollout message; Gemini and opencode report a
+refused resume exactly as they report any other startup failure. Without the
+drop, a conversation the provider will not resume would be resumed again on
+every later turn and the run would make no progress. The price is that a
+genuine agent failure on a resumed turn also costs that conversation's
+history, which is the cheaper of the two.
+
+The drop is session-local. `AgentClient` evicts the live session when a turn
+raises and deliberately keeps the checkpoint, so a run whose provider cannot
+report a refused resume can still re-adopt a dead conversation ID in the next
+process. Fixing that belongs with the checkpoint, not the driver.
+
 ### Retired after a turn, or replaced during one
 
 A reset says the conversation is gone, not when it went. The two cases differ

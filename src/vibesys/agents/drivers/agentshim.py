@@ -455,7 +455,11 @@ class AgentShimSession:
         dropped, the retry takes the fresh-session branch, so a second failure
         is a real agent failure and propagates. The retry loses the earlier
         conversation, which ``self._restarted`` reports to the caller.
+
+        A resumed turn that fails some other way drops the conversation too,
+        without a retry: see :meth:`_drop_conversation_after_failed_resume`.
         """
+        resumed = self._session.session_id is not None
         try:
             return self._turn(request)
         except agentshim.SessionResumeError:
@@ -467,6 +471,34 @@ class AgentShimSession:
             self._turn_count = 0
             self._restarted = True
             return self._turn(request)
+        except agentshim.CliExitError:
+            self._drop_conversation_after_failed_resume(resumed=resumed)
+            raise
+
+    def _drop_conversation_after_failed_resume(self, *, resumed: bool) -> None:
+        """Forget the conversation a failed resumed turn was continuing.
+
+        A raise carries no ``AgentTurnResult``, so this turn cannot report
+        ``RESET_REQUIRED``; forgetting is the only way the session can say the
+        conversation is not to be offered again. It matters because a provider
+        whose CLI gives a resume failure no distinguishing message raises a
+        plain ``CliExitError`` instead of ``SessionResumeError``, and retrying
+        the same dead conversation forever is worse than losing it: the next
+        turn starts fresh and the run continues.
+
+        The cost is that a genuine agent failure on a resumed turn also drops
+        the conversation. That is the deliberate trade: an unusable
+        conversation wedges every later turn, while a dropped one costs the
+        history of one round.
+        """
+        if not (resumed and self._profile.supports_resume):
+            return
+        self._log(
+            f"the resumed {self._profile.name} turn failed; dropping the conversation "
+            "so the next turn starts fresh."
+        )
+        self._session.forget()
+        self._turn_count = 0
 
     def _turn(self, request: agentshim.TurnRequest) -> agentshim.TurnResult:
         """Run one turn, reporting a timeout the way every VibeSys caller expects."""

@@ -67,13 +67,41 @@ two fields distinct regardless; these are the providers that can fill both.
 RESUME_FAILURE_STDERR = {
     "claude": "no conversation found\n",
     "codex": "thread/resume failed: no rollout found for thread id thread-1\n",
+    # Gemini and opencode print nothing that separates a refused resume from
+    # any other startup failure, which is exactly why the library has to treat
+    # a failed resumed turn as a refused resume for them.
+    "gemini": "fatal: failed to start\n",
+    "opencode": "error: failed to start\n",
 }
-"""Providers whose CLI makes a refused resume distinguishable, and how.
+"""How each provider's CLI reports a resume it will not honour."""
 
-agentshim maps only these onto ``SessionResumeError``: Gemini and opencode
-report a refused resume exactly as they report any other startup failure, so
-the driver's retry cannot fire for them and nothing here pretends otherwise.
+PENDING_RESUME_CLASSIFICATION = ("gemini", "opencode")
+"""Providers whose ``classify_exit`` does not yield ``SessionResumeError`` yet.
+
+Their CLIs give a refused resume no distinguishing message, so agentshim
+returns a plain ``CliExitError`` and the driver's restart-once path never
+fires: a resumed turn on a dead conversation raises instead of recovering.
+The library is changing to apply the documented Claude rule (any nonzero exit
+of a resumed turn is a resume failure) to them as well; these cases are
+written for that behaviour and marked strict-xfail so they flip to passing
+when the snapshot updates.
 """
+
+
+def _resume_retry_case(provider: str) -> Any:  # noqa: ANN401
+    """Parametrize one provider, marking the ones the library cannot serve yet."""
+    if provider not in PENDING_RESUME_CLASSIFICATION:
+        return provider
+    return pytest.param(
+        provider,
+        marks=pytest.mark.xfail(
+            strict=True,
+            reason=(
+                "pending agentshim: gemini/opencode classify a failed resumed "
+                "turn as SessionResumeError"
+            ),
+        ),
+    )
 
 
 @dataclass
@@ -901,7 +929,7 @@ def test_a_checkpoint_is_adopted_only_while_no_conversation_is_live(
     assert "session-1" in fake.requests[1].argv
 
 
-@pytest.mark.parametrize("provider", sorted(RESUME_FAILURE_STDERR))
+@pytest.mark.parametrize("provider", [_resume_retry_case(name) for name in SCRIPTED_PROVIDERS])
 def test_a_failed_resume_retries_once_from_a_fresh_conversation(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
@@ -930,6 +958,38 @@ def test_a_failed_resume_retries_once_from_a_fresh_conversation(
     assert result.disposition is SessionDisposition.RESET_REQUIRED
     assert "session-1" in fake.requests[1].argv
     assert "session-1" not in fake.requests[2].argv
+
+
+def test_a_resumed_turn_that_fails_otherwise_drops_the_conversation(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """A resumed turn that raises must not leave the conversation to be retried.
+
+    Codex keeps a generic ``CliExitError`` for a resumed turn that failed for
+    a reason other than a missing rollout, so this is the case the retry path
+    cannot serve. A raise carries no ``AgentTurnResult``, so the turn cannot
+    report ``RESET_REQUIRED`` either; forgetting the conversation is what stops
+    every later turn from resuming history the provider already refused once.
+    """
+    del sandbox_builds
+
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        if "thread-1" in request.argv:
+            return FakeRun(returncode=1, stderr=["boom\n"])
+        return scripted_turn("codex", text="ok", session_id="thread-1")
+
+    session, fake = _session(tmp_path, "codex", run)
+    session.run_turn(AgentTurnRequest(message="one"))
+
+    with pytest.raises(agentshim.CliExitError) as raised:
+        session.run_turn(AgentTurnRequest(message="two"))
+
+    assert not isinstance(raised.value, agentshim.SessionResumeError)
+    assert "thread-1" in fake.requests[1].argv
+    # The conversation was dropped, so the next turn starts fresh.
+    session.run_turn(AgentTurnRequest(message="three"))
+    assert "thread-1" not in fake.requests[2].argv
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
