@@ -29,7 +29,12 @@ import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './foc
 import {elapsedLabel} from './previews.js';
 import type {Theme} from './theme.js';
 
-const STATUS_MARKER: Record<AgentPhase['status'], string> = {
+/**
+ * Status as a glyph, so status never depends on colour alone. Exported because
+ * the rounds rail lists the same agents and must speak the same vocabulary: an
+ * operator who learns these here reads them there.
+ */
+export const STATUS_MARKER: Record<AgentPhase['status'], string> = {
   pending: '○',
   active: '●',
   completed: '✓',
@@ -46,10 +51,27 @@ const PANE_VCHROME = 2;
 const HEADING_ROWS = 1;
 /** Columns the transcript needs to stay worth reading beside the graph. */
 export const TRANSCRIPT_MIN = 42;
-/** Share of the terminal the graph takes when there is room for it. */
+/**
+ * Share of the terminal the graph takes when there is room for it. Only
+ * consulted while the graph pane is on: see `agentGraphEnabled`.
+ */
 const GRAPH_SHARE = 0.55;
 
-function statusColor(theme: Theme, status: AgentPhase['status']): string {
+/**
+ * Whether the round view draws the agent graph pane.
+ *
+ * Off by default: the rounds rail lists a round's agents instead (#653), and
+ * the pane's width share is what that change reclaims for the transcript. The
+ * graph stays reachable behind the flag so the two can be compared before
+ * either is deleted. Exact `'1'`, off otherwise, which is the shape
+ * `VIBESYS_BOOT_TRACE` already set for an opt-in read at this layer.
+ */
+export function agentGraphEnabled(): boolean {
+  return process.env['VIBESYS_AGENT_GRAPH'] === '1';
+}
+
+/** The colour for an agent status, shared with the rounds rail's agent rows. */
+export function statusColor(theme: Theme, status: AgentPhase['status']): string {
   if (status === 'active') return theme.success;
   if (status === 'completed') return theme.info;
   if (status === 'failed') return theme.error;

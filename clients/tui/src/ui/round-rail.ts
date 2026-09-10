@@ -1,5 +1,11 @@
 import {BoxRenderable, type CliRenderer, TextRenderable} from '@opentui/core';
-import {hasActiveAgentTiming, type RoundState, roundAgentElapsedMs} from '@vibesys/core-state';
+import {
+  type AgentPhase,
+  hasActiveAgentTiming,
+  phasesForRound,
+  type RoundState,
+  roundAgentElapsedMs,
+} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
 import {
@@ -8,25 +14,47 @@ import {
   stripRounds,
   visibleRoundNumber,
 } from '../session-model.js';
-import {STACKED_WIDTH, TRANSCRIPT_MIN} from './agent-map.js';
+import {
+  agentGraphEnabled,
+  STACKED_WIDTH,
+  STATUS_MARKER,
+  statusColor,
+  TRANSCRIPT_MIN,
+} from './agent-map.js';
 import {elapsedLabel} from './previews.js';
 import {splitFits} from './right-pane.js';
+import {displayWidth, truncateToWidth} from './text-width.js';
 import type {Theme} from './theme.js';
 
-/** Rail width when it shows the full per-round detail. */
-export const RAIL_FULL_WIDTH = 28;
+/**
+ * Rail width when it shows the full per-round detail. Six columns wider than
+ * the rounds-only rail needed, because an expanded round's agent rows are the
+ * widest thing the rail draws: two columns of indent, a status glyph, the agent
+ * kind, and the elapsed time.
+ */
+export const RAIL_FULL_WIDTH = 34;
+/**
+ * The rail's width while the graph pane is on. It lists rounds alone then, so
+ * it keeps the width it had before agent rows existed: the graph is opted into
+ * in order to be compared against, and a comparison is worth nothing if turning
+ * it on also costs it the columns it needs to draw.
+ */
+const RAIL_ROUNDS_ONLY_WIDTH = 28;
 /** Rail width for the narrow fallback: round number and status glyph only. */
 export const RAIL_COMPACT_WIDTH = 13;
-// The rail takes its column off the agents budget, so it may only appear at a
-// width where the agents pane and the transcript both keep their floors beside
-// it: rail + STACKED_WIDTH (the agents fallback) + TRANSCRIPT_MIN. Below that the
-// rail would push the transcript under its minimum, so it collapses instead.
-/** At or above this terminal width the rail shows full rows. */
-const RAIL_WIDE_MIN = RAIL_FULL_WIDTH + STACKED_WIDTH + TRANSCRIPT_MIN;
-/** Below this terminal width the rail is hidden and the round view is agents + transcript. */
-const RAIL_MIN = RAIL_COMPACT_WIDTH + STACKED_WIDTH + TRANSCRIPT_MIN;
+// The rail's column comes off whatever else the round view is drawing. With the
+// graph pane on, that is the agents pane and the transcript, and the rail may
+// only appear where both keep their floors beside it. With the graph off there
+// is no agents pane to budget for, so the rail needs only the transcript floor
+// and survives to much narrower terminals.
+/** Columns the round view owes the agents pane, 0 while the graph is off. */
+function agentsBudget(): number {
+  return agentGraphEnabled() ? STACKED_WIDTH : 0;
+}
 /** Border top and bottom; the title rides the top border. */
 const RAIL_VCHROME = 2;
+/** Indent, glyph and a space before an agent row's kind. */
+const AGENT_INDENT = '  ';
 
 const STATUS_GLYPH: Record<RoundState['status'], string> = {
   active: '⟳',
@@ -65,11 +93,13 @@ function statusGlyph(round: RoundState, state: SessionState): string {
  *
  * Wide terminals get the full rail; between the two thresholds it falls back to
  * a compact number-and-glyph column; narrower than that it disappears so the
- * agents graph and transcript keep their width budget.
+ * transcript keeps its floor, along with the agents pane when that is on.
  */
 export function roundRailWidth(terminalWidth: number): number {
-  if (terminalWidth >= RAIL_WIDE_MIN) return RAIL_FULL_WIDTH;
-  if (terminalWidth >= RAIL_MIN) return RAIL_COMPACT_WIDTH;
+  const full = agentGraphEnabled() ? RAIL_ROUNDS_ONLY_WIDTH : RAIL_FULL_WIDTH;
+  const budget = agentsBudget() + TRANSCRIPT_MIN;
+  if (terminalWidth >= full + budget) return full;
+  if (terminalWidth >= RAIL_COMPACT_WIDTH + budget) return RAIL_COMPACT_WIDTH;
   return 0;
 }
 
@@ -108,28 +138,47 @@ export function railWindow(
   rounds: RoundState[],
   selected: number | null,
   availableRows: number,
-  rowHeight = 1,
+  rowsFor: (round: RoundState) => number = () => 1,
 ): RailWindow {
   if (rounds.length === 0 || availableRows <= 0) {
     return {rounds: [], hiddenBefore: 0, hiddenAfter: rounds.length};
   }
-  const rows = Math.max(1, Math.floor(availableRows / rowHeight));
-  const capacity = rounds.length <= rows ? rows : Math.max(1, rows - 2);
+  const total = rounds.reduce((sum, round) => sum + rowsFor(round), 0);
+  // Two rows go to the overflow indicators, and only when the run does not fit.
+  const budget = total <= availableRows ? availableRows : Math.max(1, availableRows - 2);
   const index = Math.max(
     0,
     rounds.findIndex(round => round.number === selected),
   );
   let first = index;
   let last = index;
+  // The selection is always in the window even when it alone overruns the rail;
+  // the caller clamps what it draws, so a rail too short for one expanded round
+  // shows the top of it rather than nothing.
+  let used = rowsFor(rounds[index] as RoundState);
   // Grow outward from the selection, preferring the side that still has rounds,
-  // so a selection near either end still fills the rail.
-  while (last - first + 1 < capacity) {
+  // so a selection near either end still fills the rail. Rounds are no longer a
+  // uniform row tall (an expanded one carries its agents), so growth is measured
+  // in rows and tries the other side when the preferred one does not fit.
+  for (;;) {
+    const sides: boolean[] = [];
     const canBefore = first > 0;
     const canAfter = last < rounds.length - 1;
     if (!canBefore && !canAfter) break;
-    const takeAfter = canAfter && (!canBefore || last - index <= index - first);
-    if (takeAfter) last += 1;
-    else first -= 1;
+    const preferAfter = canAfter && (!canBefore || last - index <= index - first);
+    sides.push(preferAfter);
+    if (canBefore && canAfter) sides.push(!preferAfter);
+    const grew = sides.some(takeAfter => {
+      const next = rounds[takeAfter ? last + 1 : first - 1];
+      if (next === undefined) return false;
+      const cost = rowsFor(next);
+      if (used + cost > budget) return false;
+      used += cost;
+      if (takeAfter) last += 1;
+      else first -= 1;
+      return true;
+    });
+    if (!grew) break;
   }
   return {
     rounds: rounds.slice(first, last + 1),
@@ -151,12 +200,12 @@ export class RoundRailView {
   #renderedWidth = 0;
   #renderedRows = 0;
   #elapsedTimer: ReturnType<typeof setInterval> | null = null;
-  #runningRound: {
-    round: RoundState;
-    state: SessionState;
-    text: TextRenderable;
-    compact: boolean;
-  } | null = null;
+  /**
+   * Rows carrying a running clock, each with how to recompute its own label.
+   * One list rather than a single round: an expanded round's active agent ticks
+   * too, and two mechanisms for one clock is one more than the rail needs.
+   */
+  #ticking: Array<{text: TextRenderable; content: () => string}> = [];
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -228,21 +277,35 @@ export class RoundRailView {
       this.#syncElapsedTimer();
       return;
     }
-    const view = railWindow(rounds, selected, available);
+    // An expanded round lists the agents that ran in it directly under it: the
+    // last rung of the run > hypothesis > round > agents hierarchy the rail
+    // already draws, rather than a second pane to the right of it.
+    const agentsOf = (round: RoundState): AgentPhase[] =>
+      state.expandedRounds.includes(round.number)
+        ? phasesForRound(state.core.phases, round.number)
+        : [];
+    const view = railWindow(rounds, selected, available, round => 1 + agentsOf(round).length);
+    // The budget is rows, not rounds, because a round is no longer one row tall.
     // Rounds carry the selection, so they are placed first and never exceed the
     // rows on hand; an overflow indicator is drawn only while a row is still free
-    // for it. A one or two row rail therefore never emits more children than it
-    // can show, and a rail with no spare row shows no indicator rather than one
-    // that would overflow.
-    const drawn = view.rounds.slice(0, available);
+    // for it. A short rail therefore never emits more children than it can show,
+    // and a rail with no spare row shows no indicator rather than one that would
+    // overflow.
+    const drawn: TextRenderable[] = [];
+    for (const round of view.rounds) {
+      if (drawn.length >= available) break;
+      drawn.push(this.#renderRound(round, {state, selected, runningRound, compact}));
+      for (const phase of agentsOf(round)) {
+        if (drawn.length >= available) break;
+        drawn.push(this.#renderAgent(phase, state, compact));
+      }
+    }
     let spare = available - drawn.length;
     const showBefore = view.hiddenBefore > 0 && spare > 0;
     if (showBefore) spare -= 1;
     const showAfter = view.hiddenAfter > 0 && spare > 0;
     if (showBefore) this.output.add(this.#indicator(`↑ ${view.hiddenBefore}`));
-    for (const round of drawn) {
-      this.output.add(this.#renderRound(round, {state, selected, runningRound, compact}));
-    }
+    for (const row of drawn) this.output.add(row);
     if (showAfter) this.output.add(this.#indicator(`↓ ${view.hiddenAfter}`));
     this.#syncElapsedTimer();
   }
@@ -256,7 +319,7 @@ export class RoundRailView {
   }
 
   #clear(): void {
-    this.#runningRound = null;
+    this.#ticking = [];
     this.#stopElapsedTimer();
     for (const child of [...this.output.getChildren()]) {
       this.output.remove(child);
@@ -286,9 +349,51 @@ export class RoundRailView {
       },
     });
     if (isRunning && hasActiveAgentTiming(round)) {
-      this.#runningRound = {round, state, text, compact};
+      this.#ticking.push({
+        // The width is read at tick time, not captured: a resize between ticks
+        // changes which label this row should be showing.
+        content: () =>
+          this.#roundLabel(
+            round,
+            state,
+            round.number === visibleRoundNumber(state),
+            this.#renderedWidth <= RAIL_COMPACT_WIDTH,
+          ),
+        text,
+      });
     }
     return text;
+  }
+
+  /**
+   * One agent of an expanded round. Selection reuses the transcript's existing
+   * agent filter rather than a second one: clicking a row filters the transcript
+   * to that agent and clicking it again clears the filter, which is what the
+   * graph's nodes did. Focus stays on the rail, because with the graph off the
+   * rail is where the operator is.
+   */
+  #renderAgent(phase: AgentPhase, state: SessionState, compact: boolean): TextRenderable {
+    const selected = state.selectedAgentKind === phase.kind;
+    const label = (): string => agentLabel(phase, this.#innerWidth(), compact, new Date());
+    const text = new TextRenderable(this.renderer, {
+      content: label(),
+      fg: selected ? this.#theme.accent : statusColor(this.#theme, phase.status),
+      ...(selected ? {bg: this.#theme.selectedSurface} : {}),
+      width: '100%',
+      onMouseUp: () => {
+        this.controller.selectAgent(phase.kind);
+        this.controller.focusRound('rounds');
+      },
+    });
+    // Only a running agent has a clock to advance; a finished one's duration is
+    // already final.
+    if (phase.status === 'active') this.#ticking.push({content: label, text});
+    return text;
+  }
+
+  /** Columns a row has after the rail's border and padding. */
+  #innerWidth(): number {
+    return Math.max(1, this.#renderedWidth - 4);
   }
 
   /**
@@ -328,16 +433,9 @@ export class RoundRailView {
   }
 
   #syncElapsedTimer(): void {
-    if (this.#runningRound === null || this.#elapsedTimer !== null) return;
+    if (this.#ticking.length === 0 || this.#elapsedTimer !== null) return;
     this.#elapsedTimer = setInterval(() => {
-      if (this.#runningRound === null) return;
-      const {round, state, text, compact} = this.#runningRound;
-      text.content = this.#roundLabel(
-        round,
-        state,
-        round.number === visibleRoundNumber(state),
-        compact,
-      );
+      for (const row of this.#ticking) row.text.content = row.content();
     }, 1000);
   }
 
@@ -364,6 +462,40 @@ function roundMetric(round: RoundState, state: SessionState, now: Date): string 
   }
   const end = round.finishedAt ? new Date(round.finishedAt) : now;
   return elapsedLabel(roundAgentElapsedMs(round, end));
+}
+
+/**
+ * An agent as a rail row: status glyph, kind, then the status word and the time
+ * the agent ran, right aligned. The glyph carries status without colour and uses
+ * the same vocabulary the graph's nodes did, so an operator who learned it there
+ * reads it here. The word is dropped before the time when the rail is too narrow
+ * for both, because the glyph already says what the word says.
+ */
+function agentLabel(phase: AgentPhase, inner: number, compact: boolean, now: Date): string {
+  const head = `${AGENT_INDENT}${STATUS_MARKER[phase.status]} ${phase.kind}`;
+  if (compact) return truncateToWidth(head, inner);
+  const timing = agentElapsed(phase, now);
+  const headWidth = displayWidth(head);
+  for (const tail of [[phase.status, timing].filter(part => part.length > 0).join(' '), timing]) {
+    if (tail.length === 0) continue;
+    const gap = inner - headWidth - displayWidth(tail);
+    if (gap >= 1) return `${head}${' '.repeat(gap)}${tail}`;
+  }
+  return truncateToWidth(head, inner);
+}
+
+/**
+ * How long an agent has been running, or ran for. Read off the phase's own
+ * stamps rather than the round's, so a round with several agents reports each
+ * one separately. A phase with no start stamp, or stamps that do not parse,
+ * reports nothing rather than a wrong number.
+ */
+function agentElapsed(phase: AgentPhase, now: Date): string {
+  if (phase.startedAt === undefined) return '';
+  const start = new Date(phase.startedAt).getTime();
+  const end = phase.finishedAt === undefined ? now.getTime() : new Date(phase.finishedAt).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return '';
+  return elapsedLabel(end - start);
 }
 
 function latestActiveRoundNumber(rounds: RoundState[]): number | null {

@@ -1,4 +1,4 @@
-import {afterEach, describe, expect, it} from 'bun:test';
+import {afterAll, afterEach, beforeAll, describe, expect, it} from 'bun:test';
 import {
   BoxRenderable,
   CliRenderEvents,
@@ -64,6 +64,7 @@ import {
   setTheme,
   switchChatThread,
   togglePaneZoom,
+  toggleRoundAgents,
 } from '../session-model.js';
 import {TRANSCRIPT_MIN} from './agent-map.js';
 import {createOpenTuiApp, type OpenTuiApp} from './app.js';
@@ -84,6 +85,18 @@ import {
   THEME_NAMES,
   type ThemeName,
 } from './theme.js';
+
+// These tests cover the agent graph pane, which is now opt-in; the rail
+// listing that replaced it is covered in round-rail.test.ts. Restored after
+// the file so a whole-suite run does not leak the flag into those tests.
+const priorGraphFlag = process.env['VIBESYS_AGENT_GRAPH'];
+beforeAll(() => {
+  process.env['VIBESYS_AGENT_GRAPH'] = '1';
+});
+afterAll(() => {
+  if (priorGraphFlag === undefined) delete process.env['VIBESYS_AGENT_GRAPH'];
+  else process.env['VIBESYS_AGENT_GRAPH'] = priorGraphFlag;
+});
 
 const cleanup: Array<() => void> = [];
 
@@ -6330,6 +6343,9 @@ class FakeController implements SessionController {
   }
   toggleTodos(): void {
     this.publish({...this.state, todosExpanded: !this.state.todosExpanded});
+  }
+  toggleRoundAgents(roundNumber: number): void {
+    this.publish(toggleRoundAgents(this.state, roundNumber));
   }
 
   /** Rows the fake server returns for query.experiments. */

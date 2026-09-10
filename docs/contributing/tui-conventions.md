@@ -87,6 +87,19 @@ Zoom is a separate question from focus. `visiblePaneIds` is the set the content
 row can be given to, and the todo list is deliberately not in it: it is as tall
 as its own contents, so `F4` over it leaves the layout alone.
 
+### Enter opens the selected row one level deeper
+
+`Enter` drills into whatever the focused surface has selected. The hypothesis
+view already used it that way (it opens the selected round), and the rounds rail
+now uses it for the rung below that: it opens the selected round's agents under
+it, and closes them again. `Esc` is the inverse and stays the inverse.
+
+This is the rule the rail's agent list follows rather than a new binding. `Enter`
+was free at rail focus because the round view's existing handler is guarded to
+`roundFocus === 'transcript'`. Like `[`, `]` and the arrows, it is gated on an
+empty command input: a key that is also a character belongs to a typed command
+whenever there is one.
+
 ### Esc goes back one level
 
 `Esc` cancels a modal, closes an overlay, leaves a drill-down, or returns pane

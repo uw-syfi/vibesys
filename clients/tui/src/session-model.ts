@@ -52,6 +52,12 @@ export interface SessionState {
    * one of them at a time.
    */
   roundFocus: RoundFocus;
+  /**
+   * Rounds whose agents are listed under them in the rail. A round expands in
+   * place rather than replacing the rail, so several can be open at once and
+   * comparing two rounds' agents costs no navigation.
+   */
+  expandedRounds: readonly number[];
   overlay: OverlayPanel | null;
   chatOpen: boolean;
   /** The thread the chat surfaces show and the composer submits to. */
@@ -301,6 +307,7 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     selectedEntryId: null,
     selectedTodoIndex: null,
     roundFocus: 'transcript',
+    expandedRounds: [],
     overlay: null,
     chatOpen: false,
     activeChatThreadId: DEFAULT_CHAT_THREAD_ID,
@@ -1932,6 +1939,19 @@ export function visibleConversation(state: SessionState): ConversationEntry[] {
 
 export function visiblePhases(state: SessionState): AgentPhase[] {
   return phasesForRound(state.core.phases, visibleRoundNumber(state));
+}
+
+/**
+ * Opens or closes the agent list under one round in the rail. The rail is the
+ * run > hypothesis > round > agents hierarchy's last rung, so this is a
+ * drill-down in place, and it keeps `selectedRound` alone: expanding a round
+ * says "show me what ran here", not "take me there".
+ */
+export function toggleRoundAgents(state: SessionState, roundNumber: number): SessionState {
+  const expanded = state.expandedRounds.includes(roundNumber)
+    ? state.expandedRounds.filter(number => number !== roundNumber)
+    : [...state.expandedRounds, roundNumber];
+  return {...state, expandedRounds: expanded};
 }
 
 export function toggleTodos(state: SessionState): SessionState {

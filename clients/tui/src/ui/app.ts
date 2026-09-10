@@ -15,7 +15,7 @@ import {
   visibleRoundNumber,
 } from '../session-model.js';
 import {ActivityBarView} from './activity-bar.js';
-import {AgentMapView} from './agent-map.js';
+import {AgentMapView, agentGraphEnabled} from './agent-map.js';
 import {fillLayer} from './box-fill.js';
 import {createChatDraft} from './chat-composer.js';
 import {ChatOverlayView} from './chat-overlay.js';
@@ -49,8 +49,17 @@ export interface OpenTuiApp {
 /** Which of the client's editors currently holds the cursor. */
 type FocusTarget = 'command' | 'chat' | 'modal';
 
-const KEY_HELP = `←→: rounds/agents/transcript · ↑↓: within · [/]: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
-const SCOPED_KEY_HELP = `←→: rounds/agents/transcript · ↑↓: within · [/]: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
+/**
+ * The round view's movement keys. With the graph pane off there is no agents
+ * pane to step into, so the arrows name two panes and Enter names the rung that
+ * replaced the third: a binding a person has to already know is a binding they
+ * do not have.
+ */
+const ROUND_KEYS = agentGraphEnabled()
+  ? '←→: rounds/agents/transcript · ↑↓: within'
+  : '←→: rounds/transcript · ↑↓: within · Enter: agents';
+const KEY_HELP = `${ROUND_KEYS} · [/]: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
+const SCOPED_KEY_HELP = `${ROUND_KEYS} · [/]: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
 const LOG_KEY_HELP = `↑↓ or scroll: select · Enter/click: open hypothesis · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
 const LOG_CHAT_KEY_HELP = `↑↓: select · Enter/click: hypothesis · Ctrl+W: chat · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
 const HYPOTHESIS_KEY_HELP =
@@ -423,7 +432,12 @@ export function createOpenTuiApp(
     help.content = transientStatus ?? renderedKeyHelp;
     // The rounds rail and agent map are per-round detail. They belong to a
     // hypothesis trajectory, not to the list of claims.
-    const showAgents = !showLog && (zoomedPane === null ? !showSplit : zoomedPane === 'agents');
+    // The agents pane only exists while the graph is opted into. Off, the rail
+    // lists a round's agents instead and the transcript takes the width back.
+    const showAgents =
+      agentGraphEnabled() &&
+      !showLog &&
+      (zoomedPane === null ? !showSplit : zoomedPane === 'agents');
     const showTranscript = !showLog && (zoomedPane === null || zoomedPane === 'transcript');
     // The rail takes a fixed column off the left of the round view. The agent
     // map is sized against what is left so the transcript keeps its floor beside
@@ -466,10 +480,15 @@ export function createOpenTuiApp(
       // todos belong to an agent, so running them under the transcript would
       // attach them to the wrong thing.
       conversation.setEmptyContent(emptyTranscriptMessage(state));
-      const agentWidth = agentMap.output.width;
+      // The todo box tracks the left column's width. That is the agents pane
+      // while the graph is on, and the rail once it is off: with no agents pane
+      // the box would otherwise take the width of a pane nobody can see.
+      const leftWidth = showAgents ? agentMap.output.width : railWidth;
       todoStrip.render(
         state,
-        typeof agentWidth === 'number' ? todoStripWidth(agentWidth, renderer.terminalWidth) : null,
+        typeof leftWidth === 'number' && leftWidth > 0
+          ? todoStripWidth(leftWidth, renderer.terminalWidth)
+          : null,
       );
       if (railWidth > 0) roundRail.render(state, railWidth, mainRows);
       conversation.render(state);

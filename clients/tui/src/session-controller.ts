@@ -85,6 +85,7 @@ import {
   showLive,
   switchChatThread,
   togglePaneZoom,
+  toggleRoundAgents,
   toggleTodos,
   updateChatConversation,
 } from './session-model.js';
@@ -125,6 +126,7 @@ export interface SessionController {
   clearAgentSelection(): void;
   focusRound(focus: RoundFocus): void;
   selectNextTodo(delta: number): void;
+  toggleRoundAgents(roundNumber: number): void;
   toggleTodos(): void;
   /** Expands the latest prompt in view; the view owns what "latest" means. */
   togglePrompt(): void;
@@ -424,6 +426,10 @@ export class SocketSessionController implements SessionController {
 
   togglePrompt(): void {
     this.#promptToggle?.();
+  }
+
+  toggleRoundAgents(roundNumber: number): void {
+    this.#setState(toggleRoundAgents(this.#state, roundNumber));
   }
 
   toggleTodos(): void {

@@ -6,7 +6,9 @@ import {
   experimentLogVisible,
   type RoundFocus,
   todoListFocused,
+  visibleRoundNumber,
 } from '../session-model.js';
+import {agentGraphEnabled} from './agent-map.js';
 import type {ClipboardCopyResult, SelectionClipboard} from './clipboard.js';
 import {roundRailVisible} from './round-rail.js';
 
@@ -277,8 +279,13 @@ export function bindKeybindings(
       // the arrows step across that order and clamp at the ends. The rail joins
       // the order only when it is on screen; narrower than that the view is just
       // agents and transcript, as before.
+      // `agents` is only a step in the order while the graph pane is drawn.
+      // With it off the rail lists the agents instead, so stepping into a pane
+      // nobody can see would strand the arrow keys on nothing.
       const order: RoundFocus[] = roundRailVisible(controller.state, renderer.terminalWidth)
-        ? ['rounds', 'agents', 'transcript']
+        ? agentGraphEnabled()
+          ? ['rounds', 'agents', 'transcript']
+          : ['rounds', 'transcript']
         : ['agents', 'transcript'];
       const current = order.indexOf(controller.state.roundFocus);
       const base = current === -1 ? order.indexOf('agents') : current;
@@ -307,6 +314,22 @@ export function bindKeybindings(
           else controller.selectPreviousAgent();
         }
       }
+      key.preventDefault();
+      return;
+    }
+    // Enter drills into the selected row. The hypothesis view already gives it
+    // that meaning one rung up (it opens the selected round), and the rail's
+    // agents are the next rung down, so the same key opens them and closes them
+    // again. Gated on an empty input like `[`, `]` and the arrows: Enter belongs
+    // to a typed command whenever there is one.
+    if (
+      (key.name === 'return' || key.name === 'enter') &&
+      controller.state.roundFocus === 'rounds' &&
+      roundRailVisible(controller.state, renderer.terminalWidth) &&
+      actions.inputIsEmpty()
+    ) {
+      const round = visibleRoundNumber(controller.state);
+      if (round !== null) controller.toggleRoundAgents(round);
       key.preventDefault();
       return;
     }
