@@ -7,8 +7,14 @@ import time
 from typing import TYPE_CHECKING
 
 import pytest
-from agentshim import CallbackCommandStreamSink, CommandRequest, CommandResult
-from agentshim.testing import FakeExecutor, FakeRun
+from agentshim import (
+    CallbackCommandStreamSink,
+    CliAgent,
+    CommandRequest,
+    CommandResult,
+    TurnRequest,
+)
+from agentshim.testing import FakeExecutor, FakeRun, scripted_turn
 
 from vibesys.agents.docker_executor import (
     CodexRolloutWatchdogExecutor,
@@ -335,10 +341,16 @@ class TestCodexRolloutWatchdog:
         executor.check_binary("/usr/local/bin/codex", {}, timeout=5)
         assert inner.checked == ["/usr/local/bin/codex"]
 
-    def test_replays_a_stable_completed_rollout_and_reports_success(
+    def test_replays_a_stable_completed_rollout_as_a_finished_turn(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """The replay has to read back as a real Codex turn, not as JSON that looks right.
+
+        The synthesized frames exist to reach agentshim's own Codex parser, so
+        they are asserted through it: a session built on the watchdog reports
+        the recovered message as the turn's answer.
+        """
         completion = _CodexRolloutCompletion(
             fingerprint="2026-08-03T10:21:04.655Z",
             message='{"hypothesis_outcome":"inconclusive"}',
@@ -360,29 +372,16 @@ class TestCodexRolloutWatchdog:
             "_read_codex_rollout_completion",
             lambda _container, _thread: completion,
         )
+        agent = CliAgent("codex", executor=executor)
+        # A resumed turn is the case the watchdog exists for.
+        session = agent.start_session(session_id=THREAD_ID)
 
-        stdout: list[str] = []
-        result = executor.run(
-            _request(argv=["codex", "exec", "resume", THREAD_ID, "-", "--json"], timeout=7200.0),
-            _sink(stdout),
-        )
+        result = session.turn(TurnRequest(prompt="do it", timeout=7200.0))
 
-        assert [json.loads(line) for line in stdout] == [
-            {
-                "type": "item.completed",
-                "item": {
-                    "id": "vibesys-codex-rollout-watchdog",
-                    "type": "agent_message",
-                    "text": completion.message,
-                },
-            },
-            {"type": "turn.completed"},
-        ]
-        assert result.returncode == 0
-        assert result.stdout == "".join(stdout)
+        assert result.text == completion.message
+        assert result.exit_code == 0
         assert any(
-            cmd[:4] == ["docker", "exec", "container-123", "python3"] and THREAD_ID in cmd
-            for cmd in docker_calls
+            cmd[:4] == ["docker", "exec", "container-123", "python3"] for cmd in docker_calls
         )
         assert len(logs) == 1
         assert "rollout file" in logs[0]
@@ -392,9 +391,8 @@ class TestCodexRolloutWatchdog:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         completion = _CodexRolloutCompletion(fingerprint="ts", message="done")
-        inner = _StalledExecutor(
-            stdout=[json.dumps({"type": "thread.started", "thread_id": THREAD_ID}) + "\n"]
-        )
+        # The provider's real stream format, from the library that owns it.
+        inner = _StalledExecutor(stdout=list(scripted_turn("codex", session_id=THREAD_ID).stdout))
         executor = _impatient(CodexRolloutWatchdogExecutor(inner, lambda: "container-123"))
         seen_threads: list[str] = []
 
@@ -514,6 +512,145 @@ class TestCodexRolloutWatchdog:
 
         assert result.returncode == 0
         assert "done" in result.stdout
+
+
+def _rollout_line(payload_type: str, timestamp: str, **payload: object) -> str:
+    """One ``event_msg`` line the way a Codex rollout file writes it."""
+    return json.dumps(
+        {
+            "type": "event_msg",
+            "timestamp": timestamp,
+            "payload": {"type": payload_type, **payload},
+        }
+    )
+
+
+class _FakeDockerQueries:
+    """Answer the watchdog's ``docker exec find``/``tail`` probes from memory."""
+
+    def __init__(
+        self,
+        *,
+        rollout: list[str] | None,
+        path: str = "/root/.codex/sessions/r.jsonl",
+    ) -> None:
+        """Serve *rollout* as the file at *path*, or no file at all when None."""
+        self.rollout = rollout
+        self.path = path
+        self.commands: list[list[str]] = []
+
+    def __call__(self, cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        self.commands.append(cmd)
+        if "find" in cmd:
+            if self.rollout is None:
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            return subprocess.CompletedProcess(cmd, 0, f"{self.path}\n", "")
+        if "tail" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "\n".join(self.rollout or []), "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+
+class TestCodexRolloutReading:
+    """What counts as stable terminal evidence in a resumed Codex rollout."""
+
+    def _read(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        queries: _FakeDockerQueries,
+    ) -> _CodexRolloutCompletion | None:
+        executor = CodexRolloutWatchdogExecutor(FakeExecutor(FakeRun()), lambda: "container-123")
+        monkeypatch.setattr("vibesys.agents.docker_executor.subprocess.run", queries)
+        return executor._read_codex_rollout_completion("container-123", THREAD_ID)  # noqa: SLF001
+
+    def test_no_rollout_file_is_no_evidence(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        queries = _FakeDockerQueries(rollout=None)
+
+        assert self._read(monkeypatch, queries) is None
+        assert not any("tail" in cmd for cmd in queries.commands)
+
+    def test_a_rollout_still_working_is_no_evidence(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The last lifecycle event is ``task_started``: the turn is still running."""
+        queries = _FakeDockerQueries(
+            rollout=[
+                _rollout_line("task_started", "2026-08-03T10:00:00.000Z"),
+                _rollout_line("agent_message", "2026-08-03T10:00:01.000Z", message="earlier"),
+                _rollout_line("task_complete", "2026-08-03T10:00:02.000Z"),
+                _rollout_line("task_started", "2026-08-03T10:00:03.000Z"),
+            ]
+        )
+
+        assert self._read(monkeypatch, queries) is None
+
+    def test_a_completed_rollout_reports_its_last_message(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        queries = _FakeDockerQueries(
+            rollout=[
+                _rollout_line("task_started", "2026-08-03T10:00:00.000Z"),
+                _rollout_line("agent_message", "2026-08-03T10:00:01.000Z", message="first"),
+                _rollout_line("agent_message", "2026-08-03T10:00:02.000Z", message="final"),
+                _rollout_line("task_complete", "2026-08-03T10:00:03.000Z"),
+                # Written after the turn finished, so it is not this turn's answer.
+                _rollout_line("agent_message", "2026-08-03T10:00:04.000Z", message="later"),
+            ]
+        )
+
+        completion = self._read(monkeypatch, queries)
+
+        assert completion == _CodexRolloutCompletion(
+            fingerprint="2026-08-03T10:00:03.000Z",
+            message="final",
+        )
+
+    def test_a_completion_with_no_message_is_no_evidence(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        queries = _FakeDockerQueries(
+            rollout=[
+                _rollout_line("task_started", "2026-08-03T10:00:00.000Z"),
+                _rollout_line("task_complete", "2026-08-03T10:00:03.000Z"),
+            ]
+        )
+
+        assert self._read(monkeypatch, queries) is None
+
+    def test_a_new_completion_changes_the_fingerprint(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The fingerprint is what makes the watchdog wait for a stable reading.
+
+        A second turn completing in the same rollout must not be mistaken for
+        the same terminal state held across two polls.
+        """
+        first = _FakeDockerQueries(
+            rollout=[
+                _rollout_line("task_started", "2026-08-03T10:00:00.000Z"),
+                _rollout_line("agent_message", "2026-08-03T10:00:01.000Z", message="one"),
+                _rollout_line("task_complete", "2026-08-03T10:00:02.000Z"),
+            ]
+        )
+        second = _FakeDockerQueries(
+            rollout=[
+                *(first.rollout or []),
+                _rollout_line("task_started", "2026-08-03T10:00:03.000Z"),
+                _rollout_line("agent_message", "2026-08-03T10:00:04.000Z", message="two"),
+                _rollout_line("task_complete", "2026-08-03T10:00:05.000Z"),
+            ]
+        )
+
+        before = self._read(monkeypatch, first)
+        after = self._read(monkeypatch, second)
+
+        assert before is not None
+        assert after is not None
+        assert before.fingerprint != after.fingerprint
+        assert after.message == "two"
 
 
 class TestCodexArgvRecognition:

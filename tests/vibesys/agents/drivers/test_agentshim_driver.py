@@ -690,21 +690,68 @@ def test_a_container_turn_repairs_workspace_ownership_afterwards(
     assert repairs == [("container-1", os.getuid(), os.getgid())]
 
 
-def test_a_container_codex_run_is_watched_for_a_stalled_resume(
+def _watchdog_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    """Record the argv of every command a container session sends to the watchdog.
+
+    The watchdog wraps the ``docker exec`` transport rather than replacing it,
+    so what it sees is the command agentshim built, before the transform. An
+    empty list means the session never had one.
+    """
+    watched: list[tuple[str, ...]] = []
+    real = docker_executor.CodexRolloutWatchdogExecutor
+
+    class _Recording(real):  # type: ignore[misc, valid-type]
+        def run(
+            self,
+            request: agentshim.CommandRequest,
+            sink: agentshim.CommandStreamSink,
+        ) -> agentshim.CommandResult:
+            watched.append(tuple(request.argv))
+            return super().run(request, sink)
+
+    monkeypatch.setattr(docker_executor, "CodexRolloutWatchdogExecutor", _Recording)
+    return watched
+
+
+def test_a_container_codex_session_runs_its_turns_through_the_watchdog(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """A resumed containerized ``codex exec --json`` can finish without exiting."""
+    """A resumed containerized ``codex exec --json`` can finish without exiting.
+
+    The watchdog has to be in the path the session's turns actually take, not
+    merely constructible from the driver.
+    """
+    watched = _watchdog_spy(monkeypatch)
     driver, _fake, _repairs = _container_driver(
         monkeypatch, "codex", scripted_turn("codex", text="ok")
     )
     session = driver.create_session(_container_spec(tmp_path, "codex"))
 
-    assert isinstance(
-        driver._container_executor(_container_spec(tmp_path, "codex")),  # noqa: SLF001
-        docker_executor.CodexRolloutWatchdogExecutor,
+    session.run_turn(AgentTurnRequest(message="Do it"))
+
+    assert watched, "the codex session's turn did not go through the watchdog"
+    assert watched[-1][0].endswith("codex")
+
+
+@pytest.mark.parametrize("provider", [name for name in SCRIPTED_PROVIDERS if name != "codex"])
+def test_a_container_session_for_another_provider_gets_no_watchdog(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """The watchdog compensates for one provider's behaviour, not for containers."""
+    watched = _watchdog_spy(monkeypatch)
+    driver, fake, _repairs = _container_driver(
+        monkeypatch, provider, scripted_turn(provider, text="ok")
     )
-    session.close()
+    session = driver.create_session(_container_spec(tmp_path, provider))
+
+    session.run_turn(AgentTurnRequest(message="Do it"))
+
+    assert watched == []
+    # The plain `docker exec` transport is still what carried the turn.
+    assert list(fake.requests[-1].argv)[:3] == ["docker", "exec", "-i"]
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
@@ -1038,6 +1085,34 @@ def test_a_failed_resume_retries_once_from_a_fresh_conversation(
     assert result.disposition is SessionDisposition.RESET_REQUIRED
     assert "session-1" in fake.requests[1].argv
     assert "session-1" not in fake.requests[2].argv
+    # The first turn, the resumed attempt, and one retry. Retrying more than
+    # once would spend an agent turn on a conversation that is already gone.
+    assert len(fake.requests) == 3
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_second_failure_after_a_resume_retry_propagates(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """The retry runs from a fresh conversation, so its failure is the agent's."""
+    del sandbox_builds
+    attempts: list[int] = []
+
+    def run(_request: agentshim.CommandRequest) -> FakeRun:
+        attempts.append(len(attempts))
+        if not attempts[:-1]:
+            return scripted_turn(provider, text="ok", session_id="session-1")
+        return FakeRun(returncode=1, stderr=[RESUME_FAILURE_STDERR[provider]])
+
+    session, fake = _session(tmp_path, provider, run)
+    session.run_turn(AgentTurnRequest(message="one"))
+
+    with pytest.raises(agentshim.CliExitError):
+        session.run_turn(AgentTurnRequest(message="two"))
+
+    assert len(fake.requests) == 3
 
 
 def test_a_resumed_turn_that_fails_otherwise_drops_the_conversation(
