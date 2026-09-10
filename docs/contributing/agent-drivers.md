@@ -18,7 +18,7 @@ The `omnigent` package is a base dependency (pinned exactly in
 
 ## Where agentshim lives
 
-agentshim is a separate repository, <https://github.com/vic-lsh/agentshim>,
+agentshim is a separate repository, [vic-lsh/agentshim](https://github.com/vic-lsh/agentshim),
 published to PyPI as `agentshim`. VibeSys depends on it like any other package
 and pins the version in `pyproject.toml`.
 
