@@ -953,10 +953,10 @@ class TestUsageMetadataExtraction:
 class TestUpdateUsagePublicHook:
     """Tests for the CLI-backend ``update_usage`` hook.
 
-    ``AgentLogger.on_usage`` routes per-turn usage dicts from ``vibesys._agent_cli``
-    into this method so the agent prefix stays in sync with the underlying CLI
-    tool's token counts — mirroring how the deepagents path updates
-    ``_input_tokens`` from ``on_llm_end``.
+    ``AgentLogger.on_usage`` routes a driver's per-turn usage dict into this
+    method so the agent prefix stays in sync with the underlying CLI tool's
+    token counts — mirroring how the deepagents path updates ``_input_tokens``
+    from ``on_llm_end``.
     """
 
     def test_update_usage_sets_input_tokens(self):  # noqa: ANN201  # tracked: #288

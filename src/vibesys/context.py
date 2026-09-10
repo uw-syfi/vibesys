@@ -908,8 +908,8 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                 run_state.local(RunStateNamespace.AGENT).slot("sessions.json", AgentSessionState),
                 log=logger.lprint,
             )
-            # Build the backend-agnostic agent client. Loops invoke this instead
-            # of calling create_deep_agent / vibesys._agent_cli directly. The cli
+            # Build the backend-agnostic agent client. Loops invoke this
+            # instead of calling an agent driver directly. The cli
             # backend is rejected if --docker is set; build_agent_client raises
             # SystemExit with a clear message in that case.
             agent_client = build_agent_client(
