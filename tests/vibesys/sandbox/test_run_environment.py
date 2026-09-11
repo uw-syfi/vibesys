@@ -978,13 +978,18 @@ def test_isolated_environment_enforces_project_path_policy(tmp_path, environment
     assert hidden_mounts["/workspace/agent.toml"].is_relative_to(tmp_path / "logs")
 
 
-def test_cli_container_env_and_setup_agree_on_the_container_environment(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cli_container_env_and_setup_agree_on_the_container_environment(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
     """``_cli_provider_env_and_auth_files`` (Modal/SkyPilot) agrees with
     ``_cli_container_env`` (the plain Docker path) on the container
     environment, and additionally returns the staged auth copy pairs a
     prebuilt-image container needs instead of a shell install recipe.
     """
     backend = FakeBackend()
+    home = tmp_path / "synthetic-home"
+    auth_file = home / ".codex" / "auth.json"
+    auth_file.parent.mkdir(parents=True)
+    auth_file.write_text('{"synthetic": true}\n')
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
     request = _request(tmp_path, backend, agent_backend="cli", cli_provider="codex")
 
     resolved = _cli_container_env(request)
