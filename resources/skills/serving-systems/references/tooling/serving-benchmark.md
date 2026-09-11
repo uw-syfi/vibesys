@@ -136,7 +136,7 @@ Scope: any backend and engine with prefix caching enabled (backend-independent);
 
 ### Scheduled pacing decouples offered load from server speed
 
-The closed-loop pitfall below shows a decode speedup mechanically raising offered load under pure closed-loop pacing. The fix — send turn k at the later of a fixed schedule derived from a reference server speed (`REF_TTFT_MS`, `REF_TPOT_MS`) or the previous turn's completion plus think time — was measured against closed-loop pacing on the same held server at the reference speed, then again after two accepted kernel changes raised the server's actual speed:
+The closed-loop pitfall below shows a decode speedup mechanically raising offered load under pure closed-loop pacing. The fix, sending turn k at the later of a fixed schedule derived from a reference server speed (`REF_TTFT_MS`, `REF_TPOT_MS`) or the previous turn's completion plus think time , was measured against closed-loop pacing on the same held server at the reference speed, then again after two accepted kernel changes raised the server's actual speed:
 
 | Server speed | schedule_bound_fraction (share of sends the schedule, not the server, paced) | scheduled vs. closed |
 |:--|:--|:--|
