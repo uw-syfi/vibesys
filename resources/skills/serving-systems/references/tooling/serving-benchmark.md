@@ -157,7 +157,21 @@ Cause: the benchmark client holds a per-session admission-concurrency semaphore 
 
 Fix: derive each session's scheduled start time from a simulated admission queue at the reference speed, rather than assuming immediate admission; or make the schedule's first-turn time admission-aware directly. Comparisons made without this fix carry residual load coupling between sides running at different speeds, a faster side's own turns arrive faster, inflating its own tail, which is exactly the effect scheduled pacing was built to remove.
 
-Scope: any engine, backend-independent (property of the benchmark client's session-admission and scheduling logic, not the server under test). Status: verified (mechanism plus measured). Stamp: sglang-v0.5.18 fork, benchmark_version 2, 2026-09-11, job 632584.
+Fixed in benchmark_version 3: the schedule derives each session's start time from a simulated admission queue at the reference speed. Measured on a four-side matrix at different server speeds (job 632958): `schedule_bound_fraction` reached 0.99 to 1.00 on every side fast enough to keep up with the schedule, and `offered_turn_rate_per_s` landed within about 3 percent across all four sides regardless of server speed, closing the coupling this pitfall describes.
+
+Scope: any engine, backend-independent (property of the benchmark client's session-admission and scheduling logic, not the server under test). Status: fixed, verified in benchmark_version 3 (mechanism plus measured at two protocol versions). Stamp: sglang-v0.5.18 fork, benchmark_version 2 (bug, job 632584) / benchmark_version 3 (fix, job 632958), 2026-09-11.
+
+### Concurrency cap is a workload parameter of the open-loop schedule
+
+The admission-queue simulation above assumes a fixed concurrency cap (16 slots in benchmark_version 3). benchmark_version 4 makes the cap a configurable CLI flag (`--concurrency`, default unlimited, matching production offered load) instead of a hardcoded value; version 3 and version 4 results are comparable only when `--concurrency` matches (version 3's fixed cap corresponds to `--concurrency 16`). Per-token latency under an open-loop schedule is load-dependent: a server fast enough to keep up with the schedule runs smaller batches than one held at the concurrency cap, so its own TPOT reflects that lower batch size, not kernel speed alone. Compare TPOT only between runs at the same offered load and the same concurrency cap.
+
+Scope: any engine, backend-independent. Status: verified (protocol change; 31 unit tests). Stamp: sglang-v0.5.18 fork, benchmark_version 4, 2026-09-11.
+
+### Throughput stops differentiating once pacing is open-loop and schedule-bound
+
+Once the schedule binds (`schedule_bound_fraction` near 1.0), throughput converges to the rate the schedule offers, not to the server's own capacity: on a four-side matrix at fixed pacing, throughput varied under 2 percent across sides whose TPOT differed by 5x. Throughput is not a useful differentiator between configurations measured this way; use TPOT and TTFT percentiles instead.
+
+Scope: any engine, backend-independent. Status: verified (measured). Stamp: sglang-v0.5.18 fork, benchmark_version 3, 2026-09-11, job 632958.
 
 ### Metric of record: pool per-turn quantiles across reps, not per-rep percentiles
 

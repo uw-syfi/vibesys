@@ -1,10 +1,10 @@
 # ROCm (AMD Instinct) optimization floor
 
-Scope: backend `rocm`. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-08-25 to 2026-09-10.
+Scope: backend `rocm`. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-08-25 to 2026-09-11.
 
 CDNA shares the accelerator model with CUDA (dynamic shapes, per-kernel launch cost, and on discrete parts a separate device memory), so the *shape* of the floor matches NVIDIA's even though the libraries differ. MI300A is the exception on memory: host and device share one pool, see [`unified-memory.md`](unified-memory.md). Where a technique is identical apart from the library name, this file says so rather than restating it.
 
-**Verified on:** MI300A, `sglang-v0.5.18-rocm700-mi30x` image, 2026-08-25 to 2026-09-10, Qwen3.5-397B-A17B-MXFP4 at TP=4. The launch recipe and pitfalls index below are scoped to gfx942 (MI300A); confirm against your ROCm and library versions before extending to gfx950.
+**Verified on:** MI300A, `sglang-v0.5.18-rocm700-mi30x` image, 2026-08-25 to 2026-09-11, Qwen3.5-397B-A17B-MXFP4 at TP=4. The launch recipe and pitfalls index below are scoped to gfx942 (MI300A); confirm against your ROCm and library versions before extending to gfx950.
 
 ## 1. Continuous batching
 
@@ -52,8 +52,10 @@ Environment:
 - `ROCM_QUICK_REDUCE_QUANTIZATION=INT8`: **candidate**, not ablated against alternatives or against being unset.
 - `AITER_JIT_DIR=<persistent warm dir>`: must survive across launches. See [`aiter.md`](aiter.md) (JIT cache).
 - `SGLANG_HEALTH_CHECK_TIMEOUT=1800`: see [`aiter.md`](aiter.md) (pitfalls: lazy variant build).
-- `SGLANG_MXFP4_MOE_HIP=1`: opt-in, replaces the Triton MXFP4 MoE fallback with a from-scratch fused HIP kernel; cuts TPOT about 43 percent alone. See [`aiter.md`](aiter.md).
-- `SGLANG_SKINNY_GEMM=1`: opt-in, custom skinny bf16 GEMM for the dense projections at decode M; stacks with the line above for a further ~42 percent TPOT cut. See [`aiter.md`](aiter.md).
+- `SGLANG_MXFP4_MOE_HIP=1`: on by default in the fork's platform config, replaces the Triton MXFP4 MoE fallback with a from-scratch fused HIP kernel. See [`aiter.md`](aiter.md).
+- `SGLANG_SKINNY_GEMM=1`: on by default in the fork's platform config, custom skinny bf16 GEMM for the dense projections at decode M; stacks with the line above. See [`aiter.md`](aiter.md).
+
+Together with mixed chunked prefill, these two flags cut median TPOT about 80 percent and pooled p95 TTFT turn-2+ about 44 percent versus all three off, under the same admission-aware open-loop schedule (benchmark_version 3, job 632958). See [`../../models/qwen3-5.md`](../../models/qwen3-5.md) for the four-side matrix.
 
 argv:
 
@@ -78,6 +80,7 @@ One line per known pitfall; detail lives at the link.
 - MoE weight loading crawls at tens of MB/s with CPU and disk idle. [`weight-loading.md#stock-per-tensor-moe-materialization-is-the-pathology-not-io`](weight-loading.md#stock-per-tensor-moe-materialization-is-the-pathology-not-io)
 - Sharded checkpoint load hangs for minutes with no progress on a network filesystem. [`weight-loading.md#shardedstateloader-avoid-mmap-over-a-network-filesystem`](weight-loading.md#shardedstateloader-avoid-mmap-over-a-network-filesystem)
 - A Triton dequant/GEMM kernel profiles at 4-5 percent of HBM bandwidth and retuning its config doesn't help. [`aiter.md#dequant-triton-kernels-measure-at-4-5-percent-of-hbm-bandwidth-not-bandwidth-bound`](aiter.md#dequant-triton-kernels-measure-at-4-5-percent-of-hbm-bandwidth-not-bandwidth-bound)
+- A weight-streaming kernel sits far below HBM bandwidth but MemUnitStalled is near zero and VALU busy is under 50 percent. [`aiter.md#fused-mxfp4-moe-kernel-sits-well-below-hbm-bandwidth-but-is-not-memory-bound`](aiter.md#fused-mxfp4-moe-kernel-sits-well-below-hbm-bandwidth-but-is-not-memory-bound)
 - Log fills with "not found tuned config ... will use default config" for dense GEMMs. [`aiter.md#aiters-tuned-gemm-table-misses-every-dense-projection-on-mi300a`](aiter.md#aiters-tuned-gemm-table-misses-every-dense-projection-on-mi300a)
 - A burst of large, never-repeated prefill shapes looks like the cause of multi-second server stalls but isn't (about two orders of magnitude too small). [`aiter.md#cold-dense-gemm-shape-resolution-is-milliseconds-not-the-cause-of-multi-second-stalls`](aiter.md#cold-dense-gemm-shape-resolution-is-milliseconds-not-the-cause-of-multi-second-stalls)
 - Custom HIP extensions rebuild from source on every fresh boot despite a persistent build-cache directory. [`boot-costs.md#the-hip-extension-loader-keys-staleness-on-path-and-mtime-not-content`](boot-costs.md#the-hip-extension-loader-keys-staleness-on-path-and-mtime-not-content)

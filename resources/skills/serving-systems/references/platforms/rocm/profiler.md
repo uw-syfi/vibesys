@@ -35,6 +35,12 @@ Facts that help identify what a trace event is, on the `sglang-v0.5.18-rocm700` 
 
 Scope: rocm, `sglang-v0.5.18-rocm700-mi30x` with aiter bundled. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11.
 
+## Counter names on this image
+
+`rocprofv3 --list-counters` is the source of truth for what a given ROCm/rocprofv3 build actually exposes; don't assume a name from documentation or another image. On this image, `MemUnitBusy` and `TCC_EA_RDREQ` are not listed under those names: `MemUnitStalled` (the stall-side complement) and the per-XCC `TCC_EA0_RDREQ` are present instead, and the derived `FETCH_SIZE` metric is built on `TCC_EA0_RDREQ`. Counters must be split across multiple `--pmc` passes; run `--list-counters` before setting up passes rather than guessing names from a counter list written for another build.
+
+Scope: rocm, `sglang-v0.5.18-rocm700-mi30x` image, rocprofv3 1.0.0, ROCm 7.0.0. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job 632991.
+
 ## Pitfalls
 
 ### rocprof-compute fails its own dependency check on this image; rocprofv3 works
