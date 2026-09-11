@@ -56,6 +56,7 @@ No experiment is interpretable until the protocol can detect the smallest change
 - **Comparison protocol.** Whatever the noise floor dictates. The default that survives most clusters: candidate and baseline on the same node in the same allocation, back to back, three benchmark repetitions each against one held server, compare medians of the percentile. Reboot only when the change requires it.
 - **Detectable delta.** State it: "this protocol resolves a 10 percent change". If the target improvement is below the detectable delta, fix the protocol, not the code.
 - **Time per sample.** Server boot dominates; reduce it before iterating (staged checkouts, pre-sharded weights, warm kernel caches). Every minute of boot is paid on every sample of every experiment.
+- **Load-model coupling.** Before the first candidate, check whether the load model couples offered load to the quantity being optimized (a closed-loop client couples offered load to decode speed) — otherwise a real improvement in one metric can read as a regression in another.
 
 ## 2. Compute the bound
 
