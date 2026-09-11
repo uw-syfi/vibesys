@@ -44,7 +44,9 @@ The aiter build bundled with the `sglang-v0.5.18-rocm700-mi30x` image.
 
 Net: no AITER MXFP4 MoE path on gfx942. `AITER_FLYDSL_FORCE=1` in the launch recipe (see [`floor.md`](floor.md)) has no effect on gfx942 for this reason.
 
-Scope: gfx942, gfx950. Status: verified (gfx942 rows; gfx950 rows are the kernel's stated target, not independently exercised in this campaign). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-08-25 to 2026-09-10.
+The gate is unconditional at the source level: every MXFP4-weight kernel in this aiter build (commit `d9e5ef7ce0`) is behind an `is_fp4_avail` check scoped to `gfx950`/`gfx1250`. On `gfx942` the Quark MXFP4 checkpoint scheme (`quark_w4a4_mxfp4_moe.py`) therefore always takes the sglang Triton fallback; `SGLANG_MXFP4_MOE_TRITON_FALLBACK` defaults to `1` and does not need to be set explicitly on this platform. The aiter a4w4 path, if forced, aborts with the `fused_dynamic_mx_quant_moe_sort_hip: not support output type: fp4x2` error above rather than silently degrading.
+
+Scope: gfx942, gfx950. Status: verified (gfx942 rows and the `is_fp4_avail` gate, read from aiter source and reproduced twice; gfx950/gfx1250 rows are the kernel's stated target, not independently exercised in this campaign). Stamp: `sglang-v0.5.18-rocm700-mi30x`, aiter `d9e5ef7ce0`, 2026-08-25 to 2026-09-11.
 
 ### gfx942 MXFP4 MoE workaround: Triton w4a16 fallback
 
@@ -52,9 +54,32 @@ No AITER MXFP4 MoE path exists on gfx942 (table above), so the fork carries a Tr
 
 - Untuned for gfx942.
 - Validated: server boots, CUDA-graph capture completes over 52 batch sizes, greedy and history probes pass, ~28 tok/s single stream.
-- **Candidate:** the ~106 ms decode-step (TPOT) time observed in production serving is bottlenecked by these MoE grouped GEMMs. Not profiled; a roofline for 17B active params at 4 bits over 4 devices is under 10 ms. Would verify with a kernel-level profile (`rocprof-compute`) isolating MoE GEMM time in the decode step.
 
-Scope: rocm, gfx942, `sglang-v0.5.18-rocm700-mi30x` with aiter bundled. Status: verified (fallback mechanism and correctness); candidate (decode-step bottleneck attribution). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-05 to 2026-09-10, uw-syfi/sglang commit b0e13701b9.
+Decode-step decomposition (torch profiler, 16 decode steps at batch size 15), reproduced in two separate jobs:
+
+| Component | Share of decode-step GPU time |
+|:--|:--|
+| MoE (Triton `fused_moe_kernel_gptq_awq` + routing) | 61 to 64 percent |
+| Dense GEMMs (hipBLASLt default Tensile kernels) | 30 to 31 percent |
+| All-reduce | ~2 percent |
+| Attention, Gated DeltaNet, other | ~3 percent |
+
+The MoE kernel is the largest single term but not the whole story: the untuned dense-GEMM fallback path (see the tuned-GEMM pitfall below) is close behind it. GPU idle time during the step was under 1 percent, so this is a compute/kernel-selection problem, not a scheduling gap.
+
+Scope: rocm, gfx942, `sglang-v0.5.18-rocm700-mi30x` with aiter bundled. Status: verified (reproduced in 2 jobs). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, jobs 631857 and 631900.
+
+### aiter's CK fused MoE kernels on gfx942 (not MXFP4, but faster)
+
+aiter's Composable Kernel fused-MoE kernels are not gated to gfx950 the way the MXFP4 path is (see the capability table above); they build and run on gfx942, just at a different weight precision than the production MXFP4 checkpoint. One device, E=512, top-10, K=4096, per-rank N=256 (the production shape):
+
+| Kernel | ms/layer at M=16 | ms/layer at M=1024 | Achieved bandwidth |
+|:--|:--|:--|:--|
+| CK fp8 a8w8 (activation quant included) | 0.48 | 1.06 | 950 to 1600 GB/s |
+| CK bf16 a16w16 | 0.54 | 1.52 | 950 to 1600 GB/s |
+
+Both are several times faster than the production MXFP4 Triton kernel at the same shapes. The catch is memory, not speed: fp8 experts held resident would need about 97 GB per device (388 GB across the 4-device node) against roughly 430 GB free, so a full resident fp8 swap does not fit. See [`models/qwen3-5.md`](../../models/qwen3-5.md) for the resident/dequant hybrid design this motivates.
+
+Scope: rocm, gfx942, aiter `d9e5ef7ce0`. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, jobs 631892 and 631902.
 
 ## JIT cache
 
@@ -130,6 +155,57 @@ Fix:     set SGLANG_HEALTH_CHECK_TIMEOUT=1800; treat the first request
          after boot as warmup, not as a measurement.
 Scope:   rocm, gfx942, sglang-v0.5.18-rocm700-mi30x with aiter bundled.
 Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job 623402.
+```
+
+### Dequant Triton kernels measure at 4-5 percent of HBM bandwidth (not bandwidth-bound)
+
+```
+Symptom: a Triton MXFP4/int4 dequant-and-GEMM kernel (observed in three:
+         sglang's fused_moe_kernel_gptq_awq, aiter's Triton int4 MoE, and
+         a streaming dequant kernel) profiles at 4-5 percent of peak HBM
+         bandwidth, and tuning the launch config (block/tile sizes) does
+         not recover more than 3 percent.
+Cause:   counters show these kernels are VALU-heavy with about 7 wait
+         cycles per VALU instruction; duration tracks the K-loop length,
+         not bytes moved. They are latency-bound on in-kernel dequant
+         arithmetic, not bandwidth-bound, so bandwidth-oriented tiling
+         changes don't move the needle.
+Fix:     no tiling fix exists for this kernel shape. Treat MXFP4/int4
+         Triton dequant-in-kernel kernels on gfx942 as VALU-latency-bound
+         by default; a real speedup needs a different kernel or a
+         different weight format (e.g. a native-precision kernel, see the
+         CK fused-MoE numbers above), not a retuned Triton config.
+Scope:   rocm, gfx942, triton 3.4.0, sglang-v0.5.18-rocm700.
+Status:  verified as a pattern (3 kernels, reproduced across 2 jobs);
+         candidate on the precise microarchitectural root cause (VALU
+         latency is the confirmed symptom, not yet isolated to a specific
+         instruction mix). sglang-v0.5.18-rocm700-mi30x, 2026-09-11, jobs
+         631877 and 631890.
+```
+
+### aiter's tuned-GEMM table misses every dense projection on MI300A
+
+```
+Symptom: dense projection GEMMs fall back to hipBLASLt default (Tensile)
+         kernels; log carries lines like "[aiter] not found tuned config
+         ... will use default config" for every dense shape in the model
+         (thousands of times per run); the default-config kernels reach
+         only 3 to 10 percent of peak at small M (skinny decode shapes).
+Cause:   aiter's tuned-GEMM lookup is keyed on (gfx target, cu_num,
+         padded_M, N, K, ...). The shipped Qwen3.5 config overlay was
+         tuned on gfx950 at 256 CUs; MI300A is gfx942 at 228 CUs (see
+         hardware.md), so no overlay row ever matches and every dense
+         projection silently takes the untuned path.
+Fix:     re-tune locally for this (gfx, cu_num) with aiter's own tuner
+         (set AITER_CONFIG_GEMM_BF16 to point at the regenerated config;
+         the tuner needs --batch 1 to cover the decode shape). Tuning
+         helps but does not fully close the gap: even a tuned kernel
+         reaches only 3 to 10 percent of peak at M=16 for the skinniest
+         shapes, so treat this as a partial mitigation, not a fix.
+Scope:   rocm, gfx942, MI300A (228 CU), aiter d9e5ef7ce0.
+Status:  verified (mechanism read from the lookup key, plus measured
+         per-shape throughput). sglang-v0.5.18-rocm700-mi30x, 2026-09-11,
+         job 631888.
 ```
 
 ## Out of scope: kernel implementation

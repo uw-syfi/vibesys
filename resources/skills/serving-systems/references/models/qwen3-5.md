@@ -61,7 +61,17 @@ Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05.
 
 Status: verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05.
 
-Candidate: the MoE grouped GEMMs dominate the decode step. Unprofiled; a roofline for 17B active parameters at 4 bits over 4 devices is under 10 ms, well below the measured step time. What would verify it: a kernel-level profile attributing decode-step time to the MoE GEMMs versus the mixer and collectives. The fallback kernel this was measured with is a platform-specific implementation detail; see [`platforms/`](../platforms/) for the selected backend's kernel notes, not repeated here.
+Decode-step time is dominated by the MoE expert FFN, not by the mixer or the collectives: MoE work accounts for roughly three-fifths of decode-step device time, with most of the remainder in the model's other dense (non-expert) GEMMs; collective and mixer time is small by comparison. This was confirmed by a kernel-level profile, reproduced twice. The specific kernel names and per-component percentages are implementation details of the selected backend's MoE and GEMM kernel choice; see [`platforms/`](../platforms/) for the selected backend's kernel notes, not repeated here.
+
+Status: verified (reproduced twice). sglang-v0.5.18-rocm700-mi30x, 2026-09-11.
+
+### Candidate: resident-fp8 / MXFP4-dequant hybrid MoE weights
+
+The full expert set does not fit resident on one 4x MI300A node at a faster-than-MXFP4 precision (fp8 resident experts measured at about 388 GB of the ~430 GB free on this node; see [`platforms/`](../platforms/) for the kernel benchmark this is based on). A hybrid design — keep MXFP4 weights resident, gather-dequant only the experts a batch actually touches into a faster-precision scratch buffer per layer — is under test as a way to get faster-than-MXFP4 compute without the memory cost of full resident conversion. A first (Triton dequant) implementation of the gather-dequant step was slower than the MXFP4 baseline it was meant to replace, so the mechanism is not yet net-positive.
+
+What would verify it: a gather-dequant implementation whose per-layer overhead is smaller than the compute time it saves versus running MXFP4 directly, measured end-to-end against the MXFP4 baseline at production batch sizes.
+
+Scope: any model with a routed-MoE expert set too large to hold resident at a fast precision on the target node; backend-independent in shape, though the specific kernels are platform work. Status: candidate. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11.
 
 ## See also
 

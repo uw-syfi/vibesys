@@ -2,15 +2,17 @@
 
 Hardware spec reference. For the ROCm optimization floor see [`floor.md`](floor.md); for kernel-library guidance see [`aiter.md`](aiter.md).
 
-## Per-SKU reference: gfx target, memory model, FP4
+## Per-SKU reference: gfx target, CUs, memory model, FP4
 
-| SKU | gfx target | CDNA generation | Memory per device | Memory model | FP4 tensor support | Notes |
-|:--|:--|:--|:--|:--|:--|:--|
-| MI300A | gfx942 | CDNA3 | 128 GB HBM3 per socket, ~5.3 TB/s | Unified (APU): host and device share one HBM pool | No | 4-socket node shows ~501 to 513 GB total visible (observed). Page cache competes with resident weights and KV/Mamba allocation; see [`unified-memory.md`](unified-memory.md). |
-| MI300X | gfx942 | CDNA3 | 192 GB HBM3 | Discrete | No | Same ISA as MI300A; the unified-memory findings in this tree do not apply (discrete host/device memory, no page-cache contention). |
-| MI350X / MI355X | gfx950 | CDNA4 | 288 GB HBM3e (public spec) | Discrete | Yes, native MXFP4 compute | AITER's CK a4w4 2-stage GEMM and MXFP4 MoE quant+sort target this generation; gfx942 lacks this path, see [`aiter.md`](aiter.md). |
+| SKU | gfx target | CDNA generation | Compute units | Memory per device | Memory model | FP4 tensor support | Notes |
+|:--|:--|:--|:--|:--|:--|:--|:--|
+| MI300A | gfx942 | CDNA3 | 228 | 128 GB HBM3 per socket, ~5.3 TB/s | Unified (APU): host and device share one HBM pool | No | 4-socket node shows ~501 to 513 GB total visible (observed). Page cache competes with resident weights and KV/Mamba allocation; see [`unified-memory.md`](unified-memory.md). |
+| MI300X | gfx942 | CDNA3 | 304 | 192 GB HBM3 | Discrete | No | Same ISA as MI300A; the unified-memory findings in this tree do not apply (discrete host/device memory, no page-cache contention). |
+| MI350X / MI355X | gfx950 | CDNA4 | 256 | 288 GB HBM3e (public spec) | Discrete | Yes, native MXFP4 compute | AITER's CK a4w4 2-stage GEMM and MXFP4 MoE quant+sort target this generation; gfx942 lacks this path, see [`aiter.md`](aiter.md). |
 
-Scope: SKU-level, gfx942 and gfx950. Status: verified (gfx target, CDNA generation, and MI300X/MI350X capacity are public spec; MI300A capacity-per-socket and the 5.3 TB/s figure are public spec; the ~501 to 513 GB node total is on-node observation). Stamp: public AMD spec (MI300 series, MI350 series) plus `sglang-v0.5.18-rocm700-mi30x`, 2026-08-25 to 2026-09-10 for the MI300A node-total observation.
+Compute-unit count matters beyond raw throughput: aiter's tuned-GEMM lookup table is keyed in part on `cu_num`, so a config tuned on one SKU's CU count does not match another's even at the same `gfx` target (see the tuned-GEMM pitfall in [`aiter.md`](aiter.md)).
+
+Scope: SKU-level, gfx942 and gfx950. Status: verified (gfx target, CDNA generation, CU counts, and MI300X/MI350X capacity are public spec; MI300A capacity-per-socket and the 5.3 TB/s figure are public spec; the ~501 to 513 GB node total is on-node observation). Stamp: public AMD spec (MI300 series, MI350 series) plus `sglang-v0.5.18-rocm700-mi30x`, 2026-08-25 to 2026-09-11 for the MI300A node-total observation and the CU-count mismatch consequence.
 
 ## Unified memory on MI300A
 

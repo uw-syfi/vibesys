@@ -77,7 +77,8 @@ one. Backend values are exact `ComputeBackend` names.
 | AWQ INT4 | ✓ | ✓ | ✓ | Ampere+ |
 | GPTQ INT4 | ✓ | ✓ | ✓ | Ampere+ |
 | Marlin (AWQ/GPTQ kernel) | ✓ | ✓ | via CUTLASS | Ampere+ |
-| MXFP4 | ✓ (mxfp4.py) | ✓ (mxfp4.py) | ✓ | native: gfx950 (CDNA4), `cuda` Blackwell; weight-only via a dequant-in-kernel fallback on gfx942 (CDNA3) |
+| MXFP4, native tensor path | ✓ (mxfp4.py) | ✓ (mxfp4.py) | ✓ | gfx950 (CDNA4), `cuda` Blackwell |
+| MXFP4 on gfx942 (`rocm`, MI300A/MI300X) | ✓ (mxfp4.py) | ✓ (mxfp4.py) | — | **N/A** native tensor path; weight-only via a dequant-in-kernel fallback |
 | NVFP4 | ✓ (modelopt) | ✓ (modelopt_quant) | ✓ (fp4_utils) | Blackwell |
 | GGUF | ✓ | ✓ | — | CPU or GPU |
 | bitsandbytes (nf4 / int8) | ✓ | ✓ | — | wide |
@@ -93,7 +94,7 @@ one. Backend values are exact `ComputeBackend` names.
 | `trainium` | BF16 default; FP8 on Trn2 | Quantization is secondary here — the decisive decode win is the device-resident KV cache, not precision. |
 | `cpu` | INT8 / INT4 weight-only, GGUF (Q4_K_M, Q5_K_S) | Largest single win on CPU: decode is bandwidth-bound and the arithmetic units are narrow. |
 
-Status: verified (MXFP4 gfx942/gfx950 split, observed and explained by mechanism read in aiter source). Scope: `rocm`, gfx942 vs gfx950. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job 623402.
+Status: verified (MXFP4 gfx942/gfx950 split, observed and explained by mechanism read in aiter source; the gate was reconfirmed at the source level, `is_fp4_avail` scoped to gfx950/gfx1250, in aiter `d9e5ef7ce0`). Scope: `rocm`, gfx942 vs gfx950. sglang-v0.5.18-rocm700-mi30x, 2026-09-05 to 2026-09-11, job 623402, aiter d9e5ef7ce0.
 
 ## Engine pointers
 
