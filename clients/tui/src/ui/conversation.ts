@@ -1,10 +1,13 @@
 import {
   BoxRenderable,
   type CliRenderer,
+  fg,
   MarkdownRenderable,
+  StyledText,
   type SyntaxStyle,
   // The terminal mouse event, not the DOM global of the same name.
   type MouseEvent as TerminalMouseEvent,
+  type TextChunk,
   TextRenderable,
 } from '@opentui/core';
 import {hasRunEnded} from '@vibesys/core-state';
@@ -15,6 +18,7 @@ import {promptPreview, toolCallPreview, toolResultPreview} from './previews.js';
 import {
   conversationRole,
   createMarkdownBlockOptions,
+  type EntryPalette,
   entryPalette,
   type MarkdownBlockOptions,
 } from './styles.js';
@@ -485,7 +489,10 @@ export class ConversationView {
         heading.add(
           new TextRenderable(this.renderer, {
             content: runId,
-            fg: this.#theme.textSubtle,
+            // Same expression as the role text on the left: the run id is
+            // part of the same heading, not a subordinate detail, so it
+            // keeps the card's colour instead of fading to textSubtle.
+            fg: selected ? this.#theme.textStrong : palette.label,
             height: 1,
           }),
         );
@@ -513,7 +520,7 @@ export class ConversationView {
       const content = prompt ? prompt.content : (output?.content ?? entry.content);
       card.add(
         new TextRenderable(this.renderer, {
-          content,
+          content: styleSourceTags(content, palette),
           fg: palette.content,
           width: '100%',
           // A command line, a stderr trace, or a banner runs past the card;
@@ -624,6 +631,38 @@ export class ConversationView {
       }
     }
   }
+}
+
+/** A bracketed source tag at the start of a line: `[git-tracking]`, `[framework-validation]`. */
+const SOURCE_TAG = /^\[[A-Za-z0-9][\w-]*\]/;
+
+/**
+ * Colors a leading bracketed source tag in the card's label color; the rest
+ * of that line, and any line without one, stays in the content color.
+ * `SOURCE_TAG` is anchored to the start of the line, so a bracket elsewhere in
+ * a line (`see [x] here`) is left alone.
+ *
+ * Returns `content` unchanged when no line carries a tag, so an untagged
+ * entry keeps rendering as the single content-colored string it always has.
+ * Exported so the line-splitting and anchoring are tested directly, the way
+ * previews.ts exports `unwrapShellCommand` for the same reason.
+ */
+export function styleSourceTags(content: string, palette: EntryPalette): StyledText | string {
+  const lines = content.split('\n');
+  if (!lines.some(line => SOURCE_TAG.test(line))) return content;
+  const chunks: TextChunk[] = [];
+  lines.forEach((line, index) => {
+    const tag = SOURCE_TAG.exec(line);
+    if (tag !== null) {
+      chunks.push(fg(palette.label)(tag[0]));
+      const rest = line.slice(tag[0].length);
+      if (rest !== '') chunks.push(fg(palette.content)(rest));
+    } else if (line !== '') {
+      chunks.push(fg(palette.content)(line));
+    }
+    if (index < lines.length - 1) chunks.push(fg(palette.content)('\n'));
+  });
+  return new StyledText(chunks);
 }
 
 /**

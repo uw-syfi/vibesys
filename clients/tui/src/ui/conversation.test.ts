@@ -1,9 +1,9 @@
 import {afterEach, describe, expect, it} from 'bun:test';
-import {BoxRenderable, type Renderable} from '@opentui/core';
+import {BoxRenderable, type Renderable, rgbToHex, TextRenderable} from '@opentui/core';
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
 import type {SessionController} from '../session-controller.js';
 import {type ConversationEntry, initialSessionState} from '../session-model.js';
-import {ConversationView} from './conversation.js';
+import {ConversationView, styleSourceTags} from './conversation.js';
 import {createMarkdownStyle} from './styles.js';
 import {
   CONVERSATION_ROLES,
@@ -12,6 +12,7 @@ import {
   listThemes,
   resolveTheme,
   SUBTLE_TEXT_MIN_CONTRAST,
+  type Theme,
 } from './theme.js';
 
 const cleanup: Array<() => void> = [];
@@ -28,8 +29,7 @@ interface Mounted {
   draw(entries: ConversationEntry[], selectedId?: string | null): Promise<void>;
 }
 
-async function mount(): Promise<Mounted> {
-  const theme = resolveTheme(null);
+async function mount(theme: Theme = resolveTheme(null)): Promise<Mounted> {
   const testRenderer = await createTestRenderer({width: 80, height: 40});
   // The list is swapped per draw rather than fixed at construction, because
   // the incremental paths below need one view to see several lists.
@@ -60,8 +60,9 @@ async function mount(): Promise<Mounted> {
 async function renderEntries(
   entries: ConversationEntry[],
   selectedId: string | null = null,
+  theme?: Theme,
 ): Promise<Mounted> {
-  const mounted = await mount();
+  const mounted = await mount(theme);
   await mounted.draw(entries, selectedId);
   return mounted;
 }
@@ -427,5 +428,132 @@ describe('role and selection stay distinguishable across every theme (#565)', ()
         SUBTLE_TEXT_MIN_CONTRAST,
       );
     }
+  });
+});
+
+/**
+ * #647 review: a reviewer asked that the run id keep the card's colour
+ * instead of fading to `textSubtle`, and that a bracketed source tag
+ * (`[git-tracking]`, `[framework-validation]`) stand out from the rest of its
+ * line. `styleSourceTags` is exported and tested directly for the same reason
+ * `unwrapShellCommand` is in previews.ts: the line-splitting and anchoring is
+ * the whole of the behaviour, and a full render obscures which case failed.
+ */
+describe('styleSourceTags (#647)', () => {
+  const palette = resolveTheme(null).conversation.analysis;
+
+  function styledChunks(content: string): {text: string; fg: string | undefined}[] {
+    const styled = styleSourceTags(content, palette);
+    if (typeof styled === 'string') throw new Error('expected a styled result, got a plain string');
+    return styled.chunks.map(chunk => ({
+      text: chunk.text,
+      fg: chunk.fg === undefined ? undefined : rgbToHex(chunk.fg).toLowerCase(),
+    }));
+  }
+
+  it('colors a leading tag in the label color and the rest of the line in the content color', () => {
+    expect(styledChunks('[git-tracking] trusted input baseline: 4cf7a6767b6f')).toEqual([
+      {text: '[git-tracking]', fg: palette.label.toLowerCase()},
+      {text: ' trusted input baseline: 4cf7a6767b6f', fg: palette.content.toLowerCase()},
+    ]);
+  });
+
+  it('returns untagged content unchanged, including empty content', () => {
+    expect(styleSourceTags('plain line', palette)).toBe('plain line');
+    expect(styleSourceTags('', palette)).toBe('');
+  });
+
+  it('leaves a bracket that is not at the start of the line untouched', () => {
+    expect(styleSourceTags('see [x] here', palette)).toBe('see [x] here');
+  });
+
+  it('colors a line that is only a tag, with no trailing content chunk', () => {
+    expect(styledChunks('[git-tracking]')).toEqual([
+      {text: '[git-tracking]', fg: palette.label.toLowerCase()},
+    ]);
+  });
+
+  it('colors each tagged line independently across multi-line content', () => {
+    const content = '[git-tracking] one\nplain\n[framework-validation] two';
+    expect(styledChunks(content)).toEqual([
+      {text: '[git-tracking]', fg: palette.label.toLowerCase()},
+      {text: ' one', fg: palette.content.toLowerCase()},
+      {text: '\n', fg: palette.content.toLowerCase()},
+      {text: 'plain', fg: palette.content.toLowerCase()},
+      {text: '\n', fg: palette.content.toLowerCase()},
+      {text: '[framework-validation]', fg: palette.label.toLowerCase()},
+      {text: ' two', fg: palette.content.toLowerCase()},
+    ]);
+  });
+});
+
+/**
+ * The two colour changes wired into `#renderEntry`: the run id and the
+ * plain-text content `TextRenderable` (~480-491 and ~513-517). These render
+ * through the real OpenTUI test renderer, per
+ * docs/contributing/coding-best-practices.md, rather than asserting on the
+ * helper alone, so a future refactor that stops passing the styled result to
+ * either `TextRenderable` still fails here.
+ */
+describe('transcript source tags and run ids take the card label color (#647)', () => {
+  it('colors the run id exactly like the role, selected or not, in every theme', async () => {
+    for (const theme of listThemes()) {
+      for (const selectedId of [null, 'a'] as const) {
+        const {view} = await renderEntries([from(judge, 'a', 'one line')], selectedId, theme);
+        try {
+          const heading = view.output.findDescendantById('event-a-heading');
+          if (!(heading instanceof BoxRenderable)) throw new Error('heading missing');
+          const [role, runId] = heading.getChildren();
+          if (!(role instanceof TextRenderable) || !(runId instanceof TextRenderable)) {
+            throw new Error('heading did not render a role and a run id');
+          }
+          expect(rgbToHex(runId.fg).toLowerCase()).toBe(rgbToHex(role.fg).toLowerCase());
+          // Pinned against textSubtle directly: a coincidental match on the
+          // line above would not by itself prove textSubtle is gone.
+          expect(rgbToHex(runId.fg).toLowerCase()).not.toBe(theme.textSubtle.toLowerCase());
+        } finally {
+          // 16 renderers (8 themes × 2 selection states) accumulate console
+          // listeners if left for the shared `afterEach`; destroy each as
+          // soon as it is checked instead.
+          cleanup.pop()?.();
+        }
+      }
+    }
+  });
+
+  it('colors the bracketed tag on a real diagnostic line (bad-cpp-round1.jsonl) in the label color', async () => {
+    // Shape of fixture line 4: a diagnostic entry whose content is exactly
+    // one `[git-tracking]`-tagged line, trailing newline included, the way
+    // `agent_output_chunk` delivers it.
+    const entries: ConversationEntry[] = [
+      {
+        id: 'd1',
+        kind: 'diagnostic',
+        label: 'launcher',
+        content: '[git-tracking] trusted input baseline: 4cf7a6767b6f\n',
+      },
+    ];
+    const {view} = await renderEntries(entries);
+    const card = cardOf(view, 'd1');
+    const text = card.getChildren().find(child => child instanceof TextRenderable);
+    if (!(text instanceof TextRenderable)) throw new Error('content text missing');
+    const palette = resolveTheme(null).conversation.analysis;
+    const [tag, rest] = text.content.chunks;
+    expect(tag?.text).toBe('[git-tracking]');
+    expect(rest?.text).toBe(' trusted input baseline: 4cf7a6767b6f');
+    if (tag?.fg === undefined || rest?.fg === undefined) throw new Error('chunk missing a colour');
+    expect(rgbToHex(tag.fg).toLowerCase()).toBe(palette.label.toLowerCase());
+    expect(rgbToHex(rest.fg).toLowerCase()).toBe(palette.content.toLowerCase());
+  });
+
+  it('leaves an untagged line as a single content-colored chunk', async () => {
+    const {view} = await renderEntries([from(judge, 'a', 'plain content')]);
+    const card = cardOf(view, 'a');
+    const text = card.getChildren().find(child => child instanceof TextRenderable);
+    if (!(text instanceof TextRenderable)) throw new Error('content text missing');
+    const palette = resolveTheme(null).conversation.analysis;
+    expect(text.content.chunks).toHaveLength(1);
+    expect(text.content.chunks[0]?.text).toBe('plain content');
+    expect(rgbToHex(text.fg).toLowerCase()).toBe(palette.content.toLowerCase());
   });
 });
