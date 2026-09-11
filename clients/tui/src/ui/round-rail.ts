@@ -1,16 +1,11 @@
 import {BoxRenderable, type CliRenderer, TextRenderable} from '@opentui/core';
-import {hasActiveAgentTiming, type RoundState, roundAgentElapsedMs} from '@vibesys/core-state';
+import {hasActiveAgentTiming, type RoundState} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
-import {
-  experimentLogVisible,
-  hypothesisRoundFor,
-  stripRounds,
-  visibleRoundNumber,
-} from '../session-model.js';
+import {experimentLogVisible, stripRounds, visibleRoundNumber} from '../session-model.js';
 import {STACKED_WIDTH, TRANSCRIPT_MIN} from './agent-map.js';
-import {elapsedLabel} from './previews.js';
 import {splitFits} from './right-pane.js';
+import {latestActiveRoundNumber, OUTCOME_GLYPH, roundMetric, roundOutcome} from './round-tabs.js';
 import type {Theme} from './theme.js';
 
 /** Rail width when it shows the full per-round detail. */
@@ -28,37 +23,12 @@ const RAIL_MIN = RAIL_COMPACT_WIDTH + STACKED_WIDTH + TRANSCRIPT_MIN;
 /** Border top and bottom; the title rides the top border. */
 const RAIL_VCHROME = 2;
 
-const STATUS_GLYPH: Record<RoundState['status'], string> = {
-  active: '⟳',
-  completed: '✓',
-  failed: '✗',
-  planned: '·',
-};
 const STATUS_WORD: Record<RoundState['status'], string> = {
   active: 'run',
   completed: 'done',
   failed: 'fail',
   planned: 'plan',
 };
-
-/**
- * A completed round's own status says it ran to the end, not what the judge
- * decided about it, so a round the judge failed would otherwise wear the same
- * solid check as one it passed. It trades the check for a cross instead, on
- * the same reasoning the profile-skipped ring already follows: how the round
- * was judged outranks how it measured, which outranks that it finished. The
- * cross is also the only part of the label compact width keeps, so a narrow
- * rail still carries the verdict. `pass` matches what the check already
- * implies, and `deferred` or an unjudged round has no claim to contradict it,
- * so only `fail` takes the cross.
- */
-function statusGlyph(round: RoundState, state: SessionState): string {
-  if (round.status === 'completed') {
-    if (hypothesisRoundFor(state, round.number)?.judge_verdict === 'fail') return '✗';
-    if (round.profileSkipped === true) return '○';
-  }
-  return STATUS_GLYPH[round.status];
-}
 
 /**
  * The rail width for a terminal width, or 0 when the rail should collapse.
@@ -319,7 +289,9 @@ export class RoundRailView {
     compact: boolean,
   ): string {
     const marker = isSelected ? '▸' : ' ';
-    const glyph = statusGlyph(round, state);
+    // The glyph is the only part compact width keeps, so a narrow rail still
+    // carries a failed verdict.
+    const glyph = OUTCOME_GLYPH[roundOutcome(round, state)];
     if (compact) return `${marker}r${round.number}${glyph}`;
     const metric = roundMetric(round, state, new Date());
     const parts = [`${marker}r${round.number}`, glyph, STATUS_WORD[round.status]];
@@ -346,26 +318,4 @@ export class RoundRailView {
     clearInterval(this.#elapsedTimer);
     this.#elapsedTimer = null;
   }
-}
-
-/**
- * The per-round metric shown after the status word: the live elapsed time while
- * a round runs, its measured delta once resolved (the value the experiments
- * table reports, read from the same experiment-log record so the two cannot
- * disagree), or its wall duration when no delta was measured. Planned rounds
- * have nothing to measure.
- */
-function roundMetric(round: RoundState, state: SessionState, now: Date): string {
-  if (round.status === 'planned') return '';
-  if (round.status === 'active') return elapsedLabel(roundAgentElapsedMs(round, now));
-  const delta = hypothesisRoundFor(state, round.number)?.perf_delta_pct;
-  if (typeof delta === 'number') {
-    return `${delta > 0 ? '+' : ''}${delta.toFixed(Math.abs(delta) >= 10 ? 0 : 1)}%`;
-  }
-  const end = round.finishedAt ? new Date(round.finishedAt) : now;
-  return elapsedLabel(roundAgentElapsedMs(round, end));
-}
-
-function latestActiveRoundNumber(rounds: RoundState[]): number | null {
-  return [...rounds].reverse().find(round => round.status === 'active')?.number ?? null;
 }
