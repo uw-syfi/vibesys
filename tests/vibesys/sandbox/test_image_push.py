@@ -30,6 +30,10 @@ _IMAGE_ID = "sha256:" + "c" * 64
 _SHORT_ID = "c" * 12
 _TAG = f"{DEFAULT_AGENT_IMAGE_REGISTRY}:{_SHORT_ID}"
 _DIGEST = f"{DEFAULT_AGENT_IMAGE_REGISTRY}@sha256:" + "d" * 64
+# What `docker inspect --format {{json .RepoDigests}}` prints for an image
+# that was built under a local tag and then pushed: the build tag's own
+# digest comes first, the registry's second.
+_REPO_DIGESTS = f'["vibesys-agent-build@sha256:{"c" * 64}", "{_DIGEST}"]'
 
 
 class _FakeRegistryRunner:
@@ -41,7 +45,7 @@ class _FakeRegistryRunner:
         tag_returncode: int = 0,
         push_returncode: int = 0,
         push_stderr: str = "",
-        inspect_stdout: str = _DIGEST,
+        inspect_stdout: str = _REPO_DIGESTS,
         inspect_returncode: int = 0,
         manifest_returncode: int = 0,
         unverifiable_references: frozenset[str] = frozenset(),
@@ -94,7 +98,7 @@ class _FakeRegistryRunner:
             return subprocess.CompletedProcess(normalized, 0, stdout, "")
         if normalized[1] == "inspect":
             # The post-push digest resolution: `docker inspect --format
-            # {{index .RepoDigests 0}} <tag>`.
+            # {{json .RepoDigests}} <tag>`.
             return subprocess.CompletedProcess(
                 normalized, self.inspect_returncode, self.inspect_stdout, ""
             )
@@ -114,7 +118,7 @@ class TestPushAgentImage:
             "docker",
             "inspect",
             "--format",
-            "{{index .RepoDigests 0}}",
+            "{{json .RepoDigests}}",
             _TAG,
         )
 
@@ -127,7 +131,7 @@ class TestPushAgentImage:
         runner = _FakeRegistryRunner()
         repository = "ghcr.io/example/other-agent"
         digest = f"{repository}@sha256:" + "e" * 64
-        runner.inspect_stdout = digest
+        runner.inspect_stdout = f'["{digest}"]'
 
         reference = push_agent_image(_IMAGE_ID, repository=repository, command_runner=runner)
 
@@ -171,10 +175,16 @@ class TestPushAgentImage:
         with pytest.raises(ImagePushError, match="no repo digest"):
             push_agent_image(_IMAGE_ID, command_runner=runner)
 
-    def test_unexpected_repo_digest_raises(self) -> None:
-        runner = _FakeRegistryRunner(inspect_stdout="some-other-repo@sha256:" + "f" * 64)
-        with pytest.raises(ImagePushError, match="unexpected repo digest"):
+    def test_repo_digest_for_another_repository_is_not_accepted(self) -> None:
+        runner = _FakeRegistryRunner(inspect_stdout='["some-other-repo@sha256:' + "f" * 64 + '"]')
+        with pytest.raises(ImagePushError, match=r"no repo digest .* under"):
             push_agent_image(_IMAGE_ID, command_runner=runner)
+
+    def test_picks_the_target_repository_digest_not_the_first_entry(self) -> None:
+        # Under the containerd image store the local build tag's digest is
+        # listed before the registry's; the first entry is the wrong one.
+        runner = _FakeRegistryRunner(inspect_stdout=_REPO_DIGESTS)
+        assert push_agent_image(_IMAGE_ID, command_runner=runner) == _DIGEST
 
     def test_missing_docker_binary_raises(self) -> None:
         runner = _FakeRegistryRunner(raise_on={"tag": FileNotFoundError()})

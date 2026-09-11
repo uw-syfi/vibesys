@@ -388,20 +388,25 @@ def push_agent_image(
 
     inspect_result = _run_registry_command(
         runner,
-        ("docker", "inspect", "--format", "{{index .RepoDigests 0}}", tag),
+        ("docker", "inspect", "--format", "{{json .RepoDigests}}", tag),
         cwd=cwd,
         timeout=timeout,
         action="inspecting",
     )
-    digest_reference = inspect_result.stdout.strip()
-    if inspect_result.returncode != 0 or not digest_reference:
+    if inspect_result.returncode != 0 or not inspect_result.stdout.strip():
         detail = (inspect_result.stderr or inspect_result.stdout or "no output").strip()
         raise ImagePushError(  # noqa: TRY003
             f"Pushed {tag} but Docker returned no repo digest for it: {detail[:_DIAGNOSTIC_LIMIT]}"
         )
-    if not digest_reference.startswith(f"{repository}@sha256:"):
+    # An image carries one repo digest per repository it has been pushed to
+    # or pulled from, and the build tag's own digest can come first under the
+    # containerd image store, so pick the entry for *repository* rather than
+    # the first one.
+    digest_reference = _repo_digest_for(inspect_result.stdout, repository)
+    if digest_reference is None:
         raise ImagePushError(  # noqa: TRY003
-            f"Docker returned an unexpected repo digest for {tag}: {digest_reference!r}"
+            f"Docker returned no repo digest for {tag} under {repository}: "
+            f"{inspect_result.stdout.strip()[:_DIAGNOSTIC_LIMIT]!r}"
         )
     return digest_reference
 
@@ -497,13 +502,21 @@ def _cached_repo_digest(
         return None
     if result.returncode != 0:
         return None
+    return _repo_digest_for(result.stdout, repository)
+
+
+def _repo_digest_for(repo_digests_json: str, repository: str) -> str | None:
+    """Pick the ``repository@sha256:...`` entry out of a ``RepoDigests`` JSON list.
+
+    Absent, malformed, or non-list output resolves to ``None``.
+    """
     try:
-        digests = json.loads(result.stdout.strip() or "null")
+        digests = json.loads(repo_digests_json.strip() or "null")
     except json.JSONDecodeError:
         return None
     if not isinstance(digests, list):
         return None
-    prefix = f"{repository}@"
+    prefix = f"{repository}@sha256:"
     return next(
         (entry for entry in digests if isinstance(entry, str) and entry.startswith(prefix)),
         None,
