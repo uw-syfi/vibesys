@@ -79,6 +79,14 @@ The custom skinny GEMM kernel alone (without mixed chunked prefill) was found at
 
 Status: verified (four-side benchmark_version 3 matrix, 5 reps per side pooled); skinny-GEMM-alone reversal is a benchmark_version 2 finding, not yet rerun under v3. Stamp: sglang-v0.5.18 fork (`moe/mxfp4-fused` + `gemm/skinny` + `bench/admission-schedule`), benchmark_version 3, 2026-09-11, job 632958.
 
+### Load dependence
+
+At unlimited concurrency (48 sessions, benchmark_version 4, the 16-slot admission cap lifted, job 632990), the accepted configuration holds the schedule (`schedule_bound_fraction` 1.00): it paces 1.17 turns per second with pooled p95 TTFT turn-2+ 535 ms and mean TPOT 61 ms at 218 tok/s. The all-off baseline cannot hold the schedule at this load (`schedule_bound_fraction` 0, every rep): it degenerates to a closed-loop capacity measurement, 175 ms TPOT, 168 tok/s, pooled p95 TTFT turn-2+ 922 ms. The same accepted configuration at a 16-session cap on the same node holds pooled p95 TTFT turn-2+ at 338 ms and TPOT at 21.4 ms.
+
+TPOT and p95 TTFT are both functions of offered load and the concurrency cap, not of kernel speed alone: compare rows only across sides measured at equal load and cap. See [`../tooling/serving-benchmark.md`](../tooling/serving-benchmark.md).
+
+Status: verified. Stamp: sglang-v0.5.18 fork, benchmark_version 4, 2026-09-11, job 632990.
+
 Decode-step time is dominated by the MoE expert FFN, not by the mixer or the collectives: MoE work accounts for roughly three-fifths of decode-step device time, with most of the remainder in the model's other dense (non-expert) GEMMs; collective and mixer time is small by comparison. This was confirmed by a kernel-level profile, reproduced twice. The specific kernel names and per-component percentages are implementation details of the selected backend's MoE and GEMM kernel choice; see [`platforms/`](../platforms/) for the selected backend's kernel notes, not repeated here. With the fused HIP MoE kernel in place, MoE is still the largest decode-step term, but a counter-level profile shows it is latency-bound on the decode ALU dependency chain (LUT lookup, exponent add, bf16 cast, feed into MFMA), not bandwidth-bound; see [`platforms/`](../platforms/) for the counters that separate the two.
 
 Status: verified (three-fifths-of-decode-time finding reproduced twice; fused-kernel latency-bound finding verified once). sglang-v0.5.18-rocm700-mi30x, 2026-09-11.
