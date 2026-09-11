@@ -8,7 +8,8 @@ from unittest.mock import patch
 import pytest
 
 from vs_sandbox import BeforeReadyContext, SandboxLifecycleError, SandboxLifecycleHooks
-from vs_sandbox.docker_sandbox import DockerSandbox, _first_component_below
+from vs_sandbox.docker_sandbox import AGENT_HOME, DockerSandbox, _first_component_below
+from vs_sandbox.host_resources import HostResource, HostResourceAccess
 
 
 class _RecordingHooks(SandboxLifecycleHooks):
@@ -1299,3 +1300,347 @@ class TestAuthCopyOwnership:
             _first_component_below("/home/agent", "/home/agent/.config/opencode/opencode.json")
             == "/home/agent/.config"
         )
+
+
+class TestResources:
+    """Constructing from a ``HostResource`` list, as ``WorkspaceSandbox`` does."""
+
+    @patch("subprocess.run")
+    def test_read_only_resource_mounts_ro(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            resources=(
+                HostResource(tmp_path / "toolchain", HostResourceAccess.READ_ONLY, "toolchain"),
+            ),
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc\n", stderr=""
+        )
+        sandbox.start()
+        cmd_str = " ".join(mock_run.call_args_list[0][0][0])
+        assert f"{tmp_path / 'toolchain'}:{tmp_path / 'toolchain'}:ro" in cmd_str
+
+    @patch("subprocess.run")
+    def test_read_write_resource_mounts_without_ro_suffix(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            resources=(HostResource(tmp_path / "state", HostResourceAccess.READ_WRITE, "state"),),
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc\n", stderr=""
+        )
+        sandbox.start()
+        cmd = mock_run.call_args_list[0][0][0]
+        cmd_str = " ".join(cmd)
+        mount = f"{tmp_path / 'state'}:{tmp_path / 'state'}"
+        assert mount in cmd_str
+        assert f"{mount}:ro" not in cmd_str
+
+    @patch("subprocess.run")
+    def test_agent_path_becomes_the_mount_destination(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        resource_path = tmp_path / "toolchain"
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            resources=(
+                HostResource(
+                    resource_path,
+                    HostResourceAccess.READ_ONLY,
+                    "toolchain",
+                    agent_path="/opt/vibesys-toolchain",
+                ),
+            ),
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc\n", stderr=""
+        )
+        sandbox.start()
+        cmd_str = " ".join(mock_run.call_args_list[0][0][0])
+        assert f"{resource_path}:/opt/vibesys-toolchain:ro" in cmd_str
+
+    @patch("subprocess.run")
+    def test_unlisted_path_is_never_mounted(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            resources=(HostResource(tmp_path / "listed", HostResourceAccess.READ_ONLY, "listed"),),
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc\n", stderr=""
+        )
+        sandbox.start()
+        cmd_str = " ".join(mock_run.call_args_list[0][0][0])
+        assert str(tmp_path / "unlisted") not in cmd_str
+
+    @patch("subprocess.run")
+    def test_resources_combine_with_explicit_bind_mounts(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        """Existing callers that pass bind_mounts directly keep working unchanged."""
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            bind_mounts=[(str(tmp_path / "explicit"), "/explicit", True)],
+            resources=(
+                HostResource(tmp_path / "declared", HostResourceAccess.READ_ONLY, "declared"),
+            ),
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc\n", stderr=""
+        )
+        sandbox.start()
+        cmd_str = " ".join(mock_run.call_args_list[0][0][0])
+        assert f"{tmp_path / 'explicit'}:/explicit:ro" in cmd_str
+        assert f"{tmp_path / 'declared'}:{tmp_path / 'declared'}:ro" in cmd_str
+
+    def test_no_resources_by_default(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
+        assert sandbox._bind_mounts == []  # noqa: SLF001  # tracked: #288
+
+
+class TestAgentPath:
+    """``agent_path`` maps a host path to what the agent sees inside the container."""
+
+    def test_workspace_path_maps_under_the_container_root(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        workspace = tmp_path / "workspace"
+        sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
+
+        assert sandbox.agent_path(workspace) == "/workspace"
+        assert sandbox.agent_path(workspace / "sub" / "file.py") == "/workspace/sub/file.py"
+
+    def test_unset_agent_path_resource_maps_to_its_own_host_path(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        resource_path = tmp_path / "toolchain"
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            resources=(HostResource(resource_path, HostResourceAccess.READ_ONLY, "toolchain"),),
+        )
+
+        assert sandbox.agent_path(resource_path / "bin" / "rustc") == str(
+            resource_path / "bin" / "rustc"
+        )
+
+    def test_declared_agent_path_remaps_a_nested_path(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        resource_path = tmp_path / "toolchain"
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            resources=(
+                HostResource(
+                    resource_path,
+                    HostResourceAccess.READ_ONLY,
+                    "toolchain",
+                    agent_path="/opt/vibesys-toolchain",
+                ),
+            ),
+        )
+
+        assert (
+            sandbox.agent_path(resource_path / "bin" / "rustc")
+            == "/opt/vibesys-toolchain/bin/rustc"
+        )
+
+    def test_longest_prefix_wins_for_a_resource_nested_in_the_workspace(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        workspace = tmp_path / "workspace"
+        nested_resource = workspace / "vendor"
+        sandbox = DockerSandbox(
+            host_workspace=str(workspace),
+            image="img",
+            resources=(
+                HostResource(
+                    nested_resource,
+                    HostResourceAccess.READ_ONLY,
+                    "vendor",
+                    agent_path="/opt/vibesys-vendor",
+                ),
+            ),
+        )
+
+        assert sandbox.agent_path(nested_resource / "lib.so") == "/opt/vibesys-vendor/lib.so"
+        assert sandbox.agent_path(workspace / "src" / "main.py") == "/workspace/src/main.py"
+
+    def test_unrelated_path_is_identity(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
+
+        assert sandbox.agent_path("/etc/passwd") == "/etc/passwd"
+
+    def test_normalizes_like_the_host_default(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
+
+        assert sandbox.agent_path("/foo//bar/") == "/foo/bar"
+        assert sandbox.agent_path(Path("/foo/./bar")) == "/foo/bar"
+
+
+class TestWrap:
+    """``wrap`` builds the ``docker exec`` prefix a driver's command executor needs."""
+
+    @patch("subprocess.run")
+    def test_wrap_before_start_raises(self, mock_run, tmp_path):  # noqa: ANN001, ANN201, ARG002  # tracked: #288
+        sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
+        with pytest.raises(RuntimeError, match="not started"):
+            sandbox.wrap(["echo", "hi"], str(tmp_path / "workspace"))
+
+    @patch("subprocess.run")
+    def test_wrap_shape(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        workspace = tmp_path / "workspace"
+        sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+
+        argv = sandbox.wrap(["echo", "hi"], workspace)
+
+        assert argv == ["docker", "exec", "-i", "-w", "/workspace", "abc123", "echo", "hi"]
+
+    @patch("subprocess.run")
+    def test_wrap_defaults_cwd_to_the_workspace_root(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        """Omitting cwd matches the base ``WorkspaceSandbox.wrap(argv)`` shape."""
+        workspace = tmp_path / "workspace"
+        sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+
+        argv = sandbox.wrap(["echo", "hi"])
+
+        assert argv == ["docker", "exec", "-i", "-w", "/workspace", "abc123", "echo", "hi"]
+
+    @patch("subprocess.run")
+    def test_wrap_uses_agent_path_of_cwd(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        workspace = tmp_path / "workspace"
+        sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+
+        argv = sandbox.wrap(["ls"], workspace / "sub")
+
+        assert argv[4] == "/workspace/sub"
+
+    @patch("subprocess.run")
+    def test_wrap_forwards_extra_env_as_dash_e_flags(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        workspace = tmp_path / "workspace"
+        sandbox = DockerSandbox(
+            host_workspace=str(workspace),
+            image="img",
+            env={"FOO": "bar"},
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+
+        argv = sandbox.wrap(["echo", "hi"], workspace)
+
+        assert "-e" in argv
+        assert "FOO=bar" in argv
+        assert argv.index("-e") + 1 == argv.index("FOO=bar")
+
+    @patch("subprocess.run")
+    def test_wrap_runs_as_the_image_default_user(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        """No ``-u`` flag: the container already runs as the remapped agent user."""
+        workspace = tmp_path / "workspace"
+        sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+
+        argv = sandbox.wrap(["echo", "hi"], workspace)
+
+        assert "-u" not in argv
+
+
+class TestEnv:
+    """``env`` reports HOME, the image's own PATH, and any extra env."""
+
+    @patch("subprocess.run")
+    def test_env_before_start_raises(self, mock_run, tmp_path):  # noqa: ANN001, ANN201, ARG002  # tracked: #288
+        sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
+        with pytest.raises(RuntimeError, match="not started"):
+            _ = sandbox.env
+
+    @patch("subprocess.run")
+    def test_env_reads_path_from_the_running_container(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"), image="img", agent_uid=1000, agent_gid=1000
+        )
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
+            # Id query: already matches (agent_uid, agent_gid), so the remap
+            # step is skipped and the very next call is the PATH read below.
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
+            subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="/usr/local/bin:/usr/bin:/bin\n", stderr=""
+            ),
+        ]
+        sandbox.start()
+
+        env = sandbox.env
+
+        assert env["HOME"] == AGENT_HOME
+        assert env["PATH"] == "/usr/local/bin:/usr/bin:/bin"
+        exec_cmd = mock_run.call_args_list[2][0][0]
+        assert exec_cmd == ["docker", "exec", "abc123", "sh", "-c", "echo $PATH"]
+
+    @patch("subprocess.run")
+    def test_env_caches_path_across_calls(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"), image="img", agent_uid=1000, agent_gid=1000
+        )
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="/usr/bin:/bin\n", stderr=""),
+        ]
+        sandbox.start()
+
+        first = sandbox.env
+        second = sandbox.env
+
+        assert first["PATH"] == second["PATH"] == "/usr/bin:/bin"
+        # Only one PATH-reading exec call across both reads.
+        path_reads = [c for c in mock_run.call_args_list if "echo $PATH" in " ".join(c[0][0])]
+        assert len(path_reads) == 1
+
+    @patch("subprocess.run")
+    def test_extra_env_overrides_home_and_path(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="img",
+            env={"HOME": "/custom/home", "EXTRA": "1"},
+            agent_uid=1000,
+            agent_gid=1000,
+        )
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="/usr/bin\n", stderr=""),
+        ]
+        sandbox.start()
+
+        env = sandbox.env
+
+        assert env["HOME"] == "/custom/home"
+        assert env["EXTRA"] == "1"
+        assert env["PATH"] == "/usr/bin"
+
+    @patch("subprocess.run")
+    def test_env_raises_when_path_cannot_be_read(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"), image="img", agent_uid=1000, agent_gid=1000
+        )
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
+            subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="", stderr="no such container"
+            ),
+        ]
+        sandbox.start()
+
+        with pytest.raises(RuntimeError, match="could not read PATH"):
+            _ = sandbox.env

@@ -24,10 +24,15 @@ from deepagents.backends.protocol import (
 )
 from deepagents.backends.sandbox import BaseSandbox
 
+from vs_sandbox.host_resources import HostResourceAccess
+from vs_sandbox.host_sandbox import WorkspaceSandbox
 from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
     from types import FrameType
+
+    from vs_sandbox.host_resources import HostResource
 
 # Global registry of live containers for cleanup on exit / SIGINT.
 _live_containers: dict[str, str] = {}  # container_id -> container_name
@@ -141,7 +146,52 @@ def _first_component_below(home: str, destination: str) -> str:
     return str(Path(home) / relative.parts[0])
 
 
-class DockerSandbox(BaseSandbox):
+def _bind_mounts_for_resources(
+    resources: Sequence[HostResource],
+) -> list[tuple[str, str, bool]]:
+    """Lower a host resource list to the ``(host, container, readonly)`` mounts.
+
+    A resource's ``agent_path`` becomes the container-side mount destination;
+    an unset ``agent_path`` mounts at the same path the host uses, mirroring
+    what the host confinement backends do for a resource they cannot remap.
+    An unlisted path is simply never in this list, so it is never mounted.
+    """
+    return [
+        (
+            str(resource.path),
+            resource.agent_path if resource.agent_path is not None else str(resource.path),
+            resource.access is HostResourceAccess.READ_ONLY,
+        )
+        for resource in resources
+    ]
+
+
+def _agent_path_map(
+    host_workspace: str,
+    container_root: str,
+    resources: Sequence[HostResource],
+) -> tuple[tuple[str, str], ...]:
+    """Build the ``(host prefix, container prefix)`` table :meth:`DockerSandbox.agent_path` uses.
+
+    Includes the workspace's fixed mapping to *container_root* plus one entry
+    per resource (its own host path unless ``agent_path`` overrides it).
+    Sorted by host-prefix length, longest first, so a resource nested inside
+    another mapped path — or inside the workspace — wins over its ancestor.
+    """
+    entries = [
+        (str(Path(host_workspace)), container_root),
+        *(
+            (
+                str(resource.path),
+                resource.agent_path if resource.agent_path is not None else str(resource.path),
+            )
+            for resource in resources
+        ),
+    ]
+    return tuple(sorted(entries, key=lambda pair: len(pair[0]), reverse=True))
+
+
+class DockerSandbox(BaseSandbox, WorkspaceSandbox):
     """Sandbox that runs all agent operations inside a Docker container.
 
     Model weights and other host directories are bind-mounted, eliminating
@@ -159,9 +209,40 @@ class DockerSandbox(BaseSandbox):
     bind-mounted workspace writes come back owned by the host user, and any
     staged provider credentials are copied into the agent's HOME. Every other
     command, including the agent's own, runs as the image's default user.
+
+    Also a :class:`~vs_sandbox.host_sandbox.WorkspaceSandbox`: the container
+    is Docker's own confinement boundary, enforcing the same
+    :class:`~vs_sandbox.host_resources.HostResource` list the host backends
+    consume, lowered to bind mounts instead of a mount namespace. ``resources``
+    is the resource-list construction path; ``bind_mounts`` keeps working
+    unchanged for callers that build their own mount tuples directly, and the
+    two combine when both are given. :meth:`agent_path` and :attr:`env`
+    override the host-only defaults :class:`WorkspaceSandbox` provides, and
+    :meth:`wrap` yields a ``docker exec`` prefix rather than a namespace tool.
+
+    ``WorkspaceSandbox`` is a frozen dataclass; this class predates it and
+    owns a great deal of mutable state (``self._container_id`` and friends)
+    through its own conventional ``__init__``, never calling the generated
+    dataclass ``__init__``. A frozen dataclass's generated ``__setattr__``
+    only rejects assignment to its own field names (or to any name at all on
+    an instance of the dataclass's exact type); an ordinary attribute name
+    assigned on a *subclass* instance still goes through unimpeded. None of
+    ``WorkspaceSandbox``'s dataclass field names (``workspace``,
+    ``read_paths``, ``write_paths``, ``project_path_policy``, ``build_env``)
+    are used as attribute names here, so this class's own mutable state never
+    collides with that restriction. It does opt out of the generated
+    ``__eq__``/``__hash__`` (both would otherwise read those same unset
+    fields off ``self`` and raise), reverting to identity comparison.
     """
 
     _CONTAINER_ROOT = "/workspace"
+
+    __eq__ = object.__eq__
+    __hash__ = object.__hash__
+
+    def __repr__(self) -> str:
+        """Return a debug repr that never touches the unset dataclass fields."""
+        return f"DockerSandbox(image={self._image!r}, container_id={self._container_id!r})"
 
     def __init__(  # noqa: D417, PLR0913  # tracked: #288
         self,
@@ -178,6 +259,7 @@ class DockerSandbox(BaseSandbox):
         max_output_bytes: int = 100_000,
         env: dict[str, str] | None = None,
         bind_mounts: list[tuple[str, str, bool]] | None = None,
+        resources: Sequence[HostResource] = (),
         passthrough_paths: list[str] | None = None,
         log_path: str | Path | None = None,
         agent_uid: int | None = None,
@@ -219,6 +301,14 @@ class DockerSandbox(BaseSandbox):
             max_output_bytes: Maximum output bytes before truncation.
             env: Environment variables to set in the container.
             bind_mounts: List of (host_path, container_path, readonly) tuples.
+            resources: Host resources to enforce, lowered to bind mounts:
+                read-only resources mount ``:ro``, read-write ones mount
+                writable, and a path with no resource is never mounted. A
+                resource's ``agent_path`` becomes the container-side mount
+                destination; unset, it mounts at its own host path. Combines
+                with *bind_mounts* rather than replacing it, so existing
+                callers that build mount tuples directly keep working
+                unchanged. Also the source :meth:`agent_path` consults.
             passthrough_paths: Container paths outside /workspace that should
                 not be rewritten by virtual-path translation (e.g. ``["/model"]``).
             log_path: File path to log docker commands to. If None, no logging.
@@ -251,7 +341,14 @@ class DockerSandbox(BaseSandbox):
         self._start_timeout = start_timeout
         self._max_output_bytes = max_output_bytes
         self._env = env or {}
-        self._bind_mounts = bind_mounts or []
+        self._resources: tuple[HostResource, ...] = tuple(resources)
+        self._bind_mounts = list(bind_mounts or []) + _bind_mounts_for_resources(self._resources)
+        self._agent_path_map: tuple[tuple[str, str], ...] = _agent_path_map(
+            host_workspace, self._CONTAINER_ROOT, self._resources
+        )
+        #: The container's own PATH, read once via :attr:`env` and cached for
+        #: the sandbox's lifetime; ``None`` until first read.
+        self._cached_container_path: str | None = None
         self._container_id: str | None = None
         self._logger = self._setup_logger(log_path)
         self._agent_uid = agent_uid if agent_uid is not None else os.getuid()
@@ -712,6 +809,87 @@ class DockerSandbox(BaseSandbox):
         if self._container_id:
             return self._container_name
         return "vibesys-not-started"
+
+    def agent_path(self, host_path: Path | str) -> str:
+        """Return the container path the agent sees for *host_path*.
+
+        Consults the resource list this sandbox was built from — each
+        resource's ``agent_path``, or its own host path when unset — plus the
+        workspace's fixed mapping to ``/workspace``, matched by longest
+        host-path prefix so a path nested inside a mapped resource maps too.
+        Falls back to identity, normalised the same way the host backends'
+        default implementation does, when nothing matches: a container-only
+        path (already under ``/workspace`` or another mount) passed back in
+        is unaffected.
+        """
+        normalized = str(Path(host_path))
+        for host_prefix, container_prefix in self._agent_path_map:
+            if normalized == host_prefix:
+                return container_prefix
+            if normalized.startswith(host_prefix + "/"):
+                return container_prefix + normalized[len(host_prefix) :]
+        return normalized
+
+    @property
+    def env(self) -> Mapping[str, str]:
+        """Return the environment the container's agent user runs with.
+
+        ``HOME`` is the image's fixed agent home. ``PATH`` is read once from
+        the running container and cached for this sandbox's lifetime: the
+        agent layer prepends toolchain directories onto whatever PATH the
+        base image already set, so no constant is portable across the base
+        images different backends choose. ``extra_env`` (the *env* this
+        sandbox was constructed with) is applied last, so a caller's override
+        wins over either.
+        """
+        if self._container_id is None:
+            raise RuntimeError("Container not started — call start() first")  # noqa: TRY003  # tracked: #288
+        if self._cached_container_path is None:
+            self._cached_container_path = self._read_container_path(self._container_id)
+        return {"HOME": AGENT_HOME, "PATH": self._cached_container_path, **self._env}
+
+    def _read_container_path(self, container_id: str) -> str:
+        """Read the running container's PATH via a one-shot ``docker exec``."""
+        cmd = ["docker", "exec", container_id, "sh", "-c", "echo $PATH"]
+        self._log_cmd(cmd)
+        result = subprocess.run(  # noqa: S603  # tracked: #288
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_ROOT_SETUP_TIMEOUT_S,
+        )
+        self._log_cmd(cmd, result)
+        path = result.stdout.strip()
+        if result.returncode != 0 or not path:
+            raise RuntimeError(  # noqa: TRY003  # tracked: #288
+                f"could not read PATH from container {container_id} "
+                f"(exit {result.returncode}): {result.stderr.strip()}"
+            )
+        return path
+
+    def wrap(self, argv: list[str], cwd: Path | str | None = None) -> list[str]:
+        """Return *argv* wrapped as a ``docker exec`` call into this container.
+
+        ``-w`` is the agent path of *cwd*: unlike a host backend, whose
+        ``wrap`` fixes the working directory to its own workspace internally,
+        one Docker container serves every turn regardless of working
+        directory, so the caller supplies *cwd* per call. Omitting *cwd*
+        (matching the base ``WorkspaceSandbox.wrap(argv)`` signature) defaults
+        to the workspace root, the same directory every other backend's
+        ``wrap`` fixes unconditionally. Extra environment entries this sandbox
+        was constructed with are forwarded as ``-e`` flags. The container
+        already runs as the image's non-root default user (remapped to the
+        host uid/gid at :meth:`start`), so no ``-u`` is emitted; this differs
+        from :meth:`execute`, which always runs bash in ``/workspace`` for the
+        framework's own filesystem operations rather than an agent turn's
+        working directory.
+        """
+        if self._container_id is None:
+            raise RuntimeError("Container not started — call start() first")  # noqa: TRY003  # tracked: #288
+        workdir = self.agent_path(cwd) if cwd is not None else self._CONTAINER_ROOT
+        env_flags = [flag for key, value in self._env.items() for flag in ("-e", f"{key}={value}")]
+        return ["docker", "exec", "-i", "-w", workdir, *env_flags, self._container_id, *argv]
 
     def execute(
         self,

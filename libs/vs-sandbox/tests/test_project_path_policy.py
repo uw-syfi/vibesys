@@ -475,3 +475,52 @@ class TestWorkspaceSandboxEnv:
 
         assert isinstance(sandbox, host_sandbox.HostSandbox)
         assert sandbox.env == env
+
+
+class TestBuildSelectsDocker:
+    """``docker=`` short-circuits ``build()`` past every host backend."""
+
+    def test_docker_sandbox_is_returned_unchanged(self, tmp_path: Path) -> None:
+        workspace = _workspace(tmp_path)
+        # Any WorkspaceSandbox stands in for a real DockerSandbox here: the
+        # point under test is that build() returns it untouched, not that it
+        # is specifically a Docker one.
+        docker_sandbox = host_sandbox.HostSandbox(workspace=workspace, bwrap_path="/usr/bin/bwrap")
+
+        result = host_sandbox.build(workspace, env={}, docker=docker_sandbox)
+
+        assert result is docker_sandbox
+
+    def test_docker_short_circuits_before_resource_validation(self, tmp_path: Path) -> None:
+        """A mismatched ``agent_path`` would normally raise before dispatch;
+        selecting Docker skips that host-only check entirely."""
+        workspace = _workspace(tmp_path)
+        resource = HostResource(
+            tmp_path / "toolchain",
+            purpose="test toolchain",
+            agent_path="/opt/vibesys-toolchain",
+        )
+        # Any WorkspaceSandbox stands in for a real DockerSandbox here: the
+        # point under test is that build() returns it untouched, not that it
+        # is specifically a Docker one.
+        docker_sandbox = host_sandbox.HostSandbox(workspace=workspace, bwrap_path="/usr/bin/bwrap")
+
+        result = host_sandbox.build(workspace, env={}, resources=(resource,), docker=docker_sandbox)
+
+        assert result is docker_sandbox
+
+    def test_host_dispatch_runs_unchanged_when_docker_is_not_given(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        workspace = _workspace(tmp_path)
+        monkeypatch.setattr(host_sandbox.sys, "platform", "linux")
+        monkeypatch.setattr(
+            host_sandbox.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/bwrap"
+        )
+        monkeypatch.setattr(host_sandbox, "_bwrap_confines", lambda _path: True)
+
+        sandbox = host_sandbox.build(workspace, env={}, require_enforcement=True)
+
+        assert isinstance(sandbox, host_sandbox.HostSandbox)

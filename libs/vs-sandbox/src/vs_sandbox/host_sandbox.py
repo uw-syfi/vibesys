@@ -599,6 +599,7 @@ def build(  # noqa: PLR0913
     log: Callable[[str], None] | None = None,
     project_path_policy: ProjectPathPolicy | None = None,
     require_enforcement: bool = False,
+    docker: WorkspaceSandbox | None = None,
 ) -> WorkspaceSandbox | None:
     """Build a host confinement policy for *workspace*, or ``None`` if not enforced.
 
@@ -610,7 +611,18 @@ def build(  # noqa: PLR0913
     *break* a run that used to work, it only ever adds a boundary. Set
     ``require_enforcement`` to fail closed with :class:`SandboxUnavailableError`
     instead. Omitting both new policy arguments preserves the legacy behavior.
+
+    Pass *docker* — an already constructed
+    :class:`~vs_sandbox.docker_sandbox.DockerSandbox` — to select container
+    confinement outright instead of a host backend. Every other argument is
+    then ignored and the host dispatch below never runs. This module never
+    imports :mod:`vs_sandbox.docker_sandbox` itself, at module load or here,
+    so a host-only caller never pays for Docker's heavier dependencies: the
+    caller builds the Docker sandbox and hands it in like any other
+    :class:`WorkspaceSandbox`.
     """
+    if docker is not None:
+        return docker
 
     def _log(msg: str) -> None:
         if log is not None:
