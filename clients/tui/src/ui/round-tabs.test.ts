@@ -433,6 +433,20 @@ describe('RoundTabsView', () => {
     expect(rows).toBe(1);
   });
 
+  test('draws again after `hide`, even for the state and width it last drew', async () => {
+    // A resize can take a split off screen and bring the tabs back with the
+    // state unchanged, so `hide` must not leave a memo that skips that draw.
+    const state = ladderState();
+    const bar = await renderBar(state, 58);
+    bar.view.hide();
+    const hidden = bar.view.output.visible;
+    const rows = bar.view.render(state, 58);
+    const shown = bar.view.output.visible;
+    close(bar);
+
+    expect({hidden, rows, shown}).toEqual({hidden: false, rows: 1, shown: true});
+  });
+
   test('selects the round whose tab is clicked', async () => {
     const calls: unknown[][] = [];
     const bar = await renderBar(ladderState(), 58, {
@@ -448,10 +462,8 @@ describe('RoundTabsView', () => {
     await bar.setup.mockMouse.click(column, 0);
     close(bar);
 
-    expect(calls).toEqual([
-      ['focusRound', 'rounds'],
-      ['selectRound', 3],
-    ]);
+    // The bar is not a pane, so a click moves no focus: it only picks the round.
+    expect(calls).toEqual([['selectRound', 3]]);
   });
 
   test('re-lays the bar out as the live timer ticks', async () => {

@@ -36,7 +36,7 @@ import {
 import {bindKeybindings} from './keybindings.js';
 import {OverlayView} from './overlay.js';
 import {RightPaneView, rightPaneWidth, splitFits} from './right-pane.js';
-import {RoundRailView, roundRailVisible, roundRailWidth} from './round-rail.js';
+import {RoundTabsView} from './round-tabs.js';
 import {createMarkdownStyle} from './styles.js';
 import {resolveTheme, type ThemeName} from './theme.js';
 import {ThemePickerView} from './theme-picker.js';
@@ -49,8 +49,8 @@ export interface OpenTuiApp {
 /** Which of the client's editors currently holds the cursor. */
 type FocusTarget = 'command' | 'chat' | 'modal';
 
-const KEY_HELP = `←→: rounds/agents/transcript · ↑↓: within · [/]: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
-const SCOPED_KEY_HELP = `←→: rounds/agents/transcript · ↑↓: within · [/]: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
+const KEY_HELP = `←→: agents/transcript · ↑↓: within · [/] or click: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
+const SCOPED_KEY_HELP = `←→: agents/transcript · ↑↓: within · [/] or click: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
 const LOG_KEY_HELP = `↑↓ or scroll: select · Enter/click: open hypothesis · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
 const LOG_CHAT_KEY_HELP = `↑↓: select · Enter/click: hypothesis · Ctrl+W: chat · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
 const HYPOTHESIS_KEY_HELP =
@@ -222,7 +222,7 @@ export function createOpenTuiApp(
   let renderedKeyHelp = KEY_HELP;
   let transientStatus: string | null = null;
   let markdownStyle = createMarkdownStyle(theme);
-  const roundRail = new RoundRailView(renderer, controller, theme);
+  const roundTabs = new RoundTabsView(renderer, controller, theme);
   const todoStrip = new TodoStripView(renderer, controller, theme);
   const errorBanner = new ErrorBannerView(renderer, theme, () => controller.dismissErrorBanner());
   const agentMap = new AgentMapView(renderer, controller, theme);
@@ -303,9 +303,7 @@ export function createOpenTuiApp(
   // so both panes end on the same line and each keeps its own input inside its
   // own frame.
   main.add(chatPane.output);
-  // The rounds rail is the left edge of the round view; the agents graph and
-  // transcript follow to its right, so drilling deeper reads left to right.
-  main.add(roundRail.output);
+  // Drilling deeper into a round reads left to right: agents, then transcript.
   main.add(agentMap.output);
   main.add(transcriptFrame);
   // The log lives in the main pane rather than floating over it: it is the
@@ -319,6 +317,9 @@ export function createOpenTuiApp(
   hostCommandSurface(commandHost);
   root.add(headerFrame);
   root.add(errorBanner.output);
+  // The round tabs head both panes of the round view, outside every border:
+  // the selected tab's fill inside a rounded frame would be #642.
+  workspace.add(roundTabs.output);
   workspace.add(main);
   workspace.add(todoStrip.output);
   // The key-help line stays the width of the screen and under every pane. Inside
@@ -343,7 +344,7 @@ export function createOpenTuiApp(
     headerFill.backgroundColor = headerBackground(theme);
     transcriptFrame.borderColor = theme.border;
     help.fg = theme.textSubtle;
-    roundRail.applyTheme(theme);
+    roundTabs.applyTheme(theme);
     todoStrip.applyTheme(theme);
     errorBanner.applyTheme(theme);
     agentMap.applyTheme(theme);
@@ -421,30 +422,29 @@ export function createOpenTuiApp(
           ? KEY_HELP
           : SCOPED_KEY_HELP;
     help.content = transientStatus ?? renderedKeyHelp;
-    // The rounds rail and agent map are per-round detail. They belong to a
+    // The round tabs and agent map are per-round detail. They belong to a
     // hypothesis trajectory, not to the list of claims.
     const showAgents = !showLog && (zoomedPane === null ? !showSplit : zoomedPane === 'agents');
     const showTranscript = !showLog && (zoomedPane === null || zoomedPane === 'transcript');
-    // The rail takes a fixed column off the left of the round view. The agent
-    // map is sized against what is left so the transcript keeps its floor beside
-    // the rail rather than being squeezed by it.
+    // The tabs head the whole round view, so they give way wherever it is not
+    // on screen whole: a zoomed pane, or a split that takes the row's right side.
+    const showTabs = !showLog && zoomedPane === null && !showSplit;
     const errorHeight = state.errorBanner === null ? 0 : errorBanner.output.height;
-    const railWidth = roundRailVisible(state, renderer.terminalWidth)
-      ? roundRailWidth(renderer.terminalWidth)
-      : 0;
     agentMap.output.visible = showAgents;
     transcriptFrame.visible = showTranscript;
-    roundRail.output.visible = railWidth > 0;
     todoStrip.output.visible = !showLog && zoomedPane === null;
+    // Hidden through the view rather than the box, so its live timer stops too
+    // instead of redrawing the bar back onto the screen a second later.
+    if (!showTabs) roundTabs.hide();
     if (!showLog) {
-      // The row budget the main area draws from, shared by the rail and the
-      // agents pane because they are columns of the same row. It comes from the
-      // strip height the state implies, not from `todoStrip.output.height`: the
+      const tabRows = showTabs ? roundTabs.render(state, renderer.terminalWidth) : 0;
+      // The row budget the agents pane draws from, between the tab row above
+      // the main row and the todo strip below it. The strip's share comes from
+      // the height the state implies, not from `todoStrip.output.height`: the
       // box height reflects the last committed layout, so reading it back in the
-      // same paint that expanded or collapsed the strip bills the panes the
-      // previous frame's height and leaves them a row long or short (clipping
-      // the selected late round, the overflow indicator, or a graph node) until
-      // the next paint.
+      // same paint that expanded or collapsed the strip bills the pane the
+      // previous frame's height and leaves it a row long or short (clipping a
+      // graph node or its overflow count) until the next paint.
       //
       // The command box is a column inside one of those panes now rather than a
       // band under them, so it takes no rows off this budget.
@@ -453,13 +453,13 @@ export function createOpenTuiApp(
         renderer.terminalHeight -
           headerFrame.height -
           errorHeight -
+          tabRows -
           todoStripHeight(state) -
           help.height,
       );
       agentMap.render(
         state,
         zoomedPane === 'agents' ? renderer.terminalWidth : undefined,
-        railWidth,
         mainRows,
       );
       // The todo box sits under the agent pane and stops where it stops: the
@@ -471,7 +471,6 @@ export function createOpenTuiApp(
         state,
         typeof agentWidth === 'number' ? todoStripWidth(agentWidth, renderer.terminalWidth) : null,
       );
-      if (railWidth > 0) roundRail.render(state, railWidth, mainRows);
       conversation.render(state);
     }
     // The agent map is the first thing to give up room: it is a summary the
@@ -486,8 +485,8 @@ export function createOpenTuiApp(
     // hidden renderable still reports a row of its own, so each is asked
     // whether it is on screen before its rows are counted.
     const rowsOn = (pane: BoxRenderable): number => (pane.visible ? pane.height : 0);
-    // The rounds rail is a column inside the main row, not a strip above it, so
-    // only the header and the banner take rows off the top.
+    // The round tabs give way to a split, so only the header and the banner
+    // take rows off the top.
     const above = headerFrame.height + rowsOn(errorBanner.output);
     const belowRows = rowsOn(todoStrip.output) + help.height;
     // Match the chat to the left pane's rectangle so it sits beside the
@@ -615,7 +614,7 @@ export function createOpenTuiApp(
       unbindKeys();
       commandInput.destroy();
       conversationActivityBar.destroy();
-      roundRail.destroy();
+      roundTabs.destroy();
       agentMap.destroy();
       experimentLog.destroy();
       chat.destroy();

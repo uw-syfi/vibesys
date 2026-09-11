@@ -35,7 +35,7 @@ export function todoStripWidth(agentPaneWidth: number, terminalWidth: number): n
  * The rows the strip is about to occupy for a state, derived from the state
  * rather than read back from the laid-out box. `output.height` reflects the last
  * committed layout, so it lags one paint behind a render that just changed it;
- * a sibling sized in the same paint (the rounds rail) needs the height the strip
+ * a sibling sized in the same paint (the agents pane) needs the height the strip
  * is taking now, not the one it took last frame. `render` sets the box from this
  * function, so the two cannot disagree: no visible todos means no strip, a
  * collapsed strip is one summary row, and an expanded strip is its capped items

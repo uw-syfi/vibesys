@@ -69,7 +69,7 @@ Arrow keys move the selection, and the wheel and trackpad scroll the table
 independently of it. Clicking a hypothesis, or pressing Enter on an empty input,
 opens its summary. The summary gives the full wrapped hypothesis text first,
 then brief decision metadata and its rounds. Arrow keys select a round; clicking
-it or pressing Enter opens the ordinary transcript, rounds rail, and agent map.
+it or pressing Enter opens the ordinary round view: round tabs, agent map, and transcript.
 Escape returns from a round to its hypothesis, then from the hypothesis to the
 index. The input keeps Enter whenever something is typed, so a command entered
 from the log runs on its first Enter. `/open-round` and `/open-round --N` remain
@@ -77,7 +77,7 @@ explicit shortcuts directly to the selected or numbered round.
 
 The agent strip is headed `Round N flow · 45s` for the round on screen. That
 elapsed time is agent-active: wall clock minus the gaps where no agent was
-running, the same measure the rounds rail reports beside `r2`. It ticks once a
+running, the same measure the round's tab reports beside `r2`. It ticks once a
 second while an agent is running and holds its final value once the round
 finishes. `Run flow` heads the strip when no round is selected, and a round
 with no recorded agent time is headed `Round N flow` alone.
@@ -205,8 +205,8 @@ over the view as before, carrying the same input at the foot of the modal. It
 is one conversation either way: the transcript survives docking, undocking, and
 the pane closing.
 
-Inside a hypothesis the footer shows keyboard navigation. `←` and `→` step
-focus across the rounds rail, the agents graph, and the transcript, `↑` and `↓`
+Inside a hypothesis the footer shows keyboard navigation. `←` and `→` move
+focus between the agents graph and the transcript, `↑` and `↓`
 move within whichever holds it, `[` and `]` select rounds from anywhere, Tab and
 Shift+Tab select agents, Page Up/Page Down scroll the transcript, and F2 (or
 Ctrl+T) expands the todo box, which then takes the arrow keys, and the focus
@@ -221,23 +221,26 @@ anywhere. Drag to select rendered text, then press Ctrl+C to copy it through
 OSC52; Ctrl+C exits when there is no nonempty selection. If the terminal does
 not support OSC52, VibeSys keeps the selection and shows a status explaining
 that the terminal's native copy command is the fallback. Rounds and agents can
-also be clicked: a round row in the rail selects its round, an agent node filters
+also be clicked: a round's tab selects it, an agent node filters
 the transcript to that agent, and
 clicking the selected node clears the filter.
 
-The rounds rail runs down the left of the round view, one round per row, and
-covers the whole run including rounds it has not reached yet. It is a window onto
-the part that fits: the selected round is always in view, and `↑ n` and `↓ n` say
-how many rounds sit past each edge. Each row carries the round's status word and
-glyph and a metric, the live agent-active time while it runs, the measured delta
-once it resolves, or its duration when no delta was recorded. A completed round
+The rounds are tabs in one row across the top of the round view, covering the
+whole run including rounds it has not reached yet. `[` and `]` or a click switch
+between them; the tabs are not a pane and take no arrow keys. The row is a window
+onto the part that fits: the selected round and the live one are always in view,
+and `‹ n` and `n ›` say how many rounds sit past each edge. Each tab carries the
+round's number, an outcome glyph, and a metric: the live agent-active time while
+it runs, the measured delta once it resolves, or its duration when no delta was
+recorded; a failed or skipped round names that outcome instead. A completed round
 where no fresh profile ran shows a hollow `○` in place of the solid check and
 dims like a planned round; such a round records no perf reading, so it never
-carries a delta or a point in the perf chart. A wide terminal
-gets the full rows; between 85 and 100 columns the rail falls back to a
-number-and-glyph column, and narrower than that it collapses so the agents graph
-and transcript keep their width. The fallback threshold is the width at which the
-rail's column still leaves the agents pane and the transcript their floors.
+carries a delta or a point in the perf chart. As the terminal narrows the tabs
+shed metrics and padding before they give up the selected or live round. Below
+the tabs, the agents graph takes 40% of the width, never less than it needs to
+name every agent in full (selected included) and never more than its stages can
+use, and the transcript takes the rest. Where that and the transcript's floor do
+not both fit, the agents stack in a narrow list instead, names still in full.
 
 The launcher retains terminal results until the operator exits. If the backend
 fails to start, its log tail is printed before the temporary session directory

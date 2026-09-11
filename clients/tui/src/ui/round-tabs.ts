@@ -256,6 +256,13 @@ export class RoundTabsView {
     return this.output.visible ? 1 : 0;
   }
 
+  /** Takes the bar off screen, timer included, until the next `render` draws it afresh. */
+  hide(): void {
+    this.#stopElapsedTimer();
+    this.#renderedState = null;
+    this.output.visible = false;
+  }
+
   destroy(): void {
     this.#stopElapsedTimer();
   }
@@ -331,10 +338,8 @@ export class RoundTabsView {
       wrapMode: 'none',
       marginLeft: afterAnother ? GAP : 0,
       ...(selected ? {bg: this.#theme.selectedSurface} : {}),
-      onMouseUp: () => {
-        this.controller.focusRound('rounds');
-        this.controller.selectRound(tab.number);
-      },
+      // The bar is not a pane and takes no keys, so a click moves no focus.
+      onMouseUp: () => this.controller.selectRound(tab.number),
     });
   }
 

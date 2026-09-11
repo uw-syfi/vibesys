@@ -4,11 +4,9 @@ import {
   chatPaneFocused,
   chatPaneVisible,
   experimentLogVisible,
-  type RoundFocus,
   todoListFocused,
 } from '../session-model.js';
 import type {ClipboardCopyResult, SelectionClipboard} from './clipboard.js';
-import {roundRailVisible} from './round-rail.js';
 
 export interface KeybindingActions {
   completeInput(): boolean;
@@ -273,33 +271,15 @@ export function bindKeybindings(
     // Like Enter above, pane focus and round navigation yield to a typed
     // command: cursor keys and brackets belong to a non-empty input.
     if ((key.name === 'left' || key.name === 'right') && actions.inputIsEmpty()) {
-      // Left to right, the round view drills rounds -> agents -> transcript, so
-      // the arrows step across that order and clamp at the ends. The rail joins
-      // the order only when it is on screen; narrower than that the view is just
-      // agents and transcript, as before.
-      const order: RoundFocus[] = roundRailVisible(controller.state, renderer.terminalWidth)
-        ? ['rounds', 'agents', 'transcript']
-        : ['agents', 'transcript'];
-      const current = order.indexOf(controller.state.roundFocus);
-      const base = current === -1 ? order.indexOf('agents') : current;
-      const next = Math.min(order.length - 1, Math.max(0, base + (key.name === 'left' ? -1 : 1)));
-      controller.focusRound(order[next] as RoundFocus);
+      // The round view is two panes, agents then transcript, so each arrow names
+      // its side and holds there at the edge. The round tabs are not a pane.
+      controller.focusRound(key.name === 'left' ? 'agents' : 'transcript');
       key.preventDefault();
       return;
     }
     if (key.name === 'up' || key.name === 'down') {
       if (!actions.navigateSuggestions(key.name === 'up' ? -1 : 1)) {
-        // A resize can hide the rail while focus still reads `rounds`; stepping it
-        // then would move an invisible selection. Only drive the rail while it is
-        // on screen, otherwise `rounds` coerces to the agents pane (the side
-        // `focusedPane` already reports it as) so the keys stay on a live surface.
-        const railFocused =
-          controller.state.roundFocus === 'rounds' &&
-          roundRailVisible(controller.state, renderer.terminalWidth);
-        if (railFocused) {
-          if (key.name === 'down') controller.selectNextRound();
-          else controller.selectPreviousRound();
-        } else if (controller.state.roundFocus === 'transcript') {
+        if (controller.state.roundFocus === 'transcript') {
           controller.selectNextEntry(key.name === 'down' ? 1 : -1);
           actions.revealSelectedEntry();
         } else {

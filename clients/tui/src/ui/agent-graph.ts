@@ -28,9 +28,9 @@ const ROW_GAP = 2;
  * arrow off the border.
  */
 const GUTTER = 5;
-/** Narrower than this and a kind is unreadable even truncated. */
+/** The narrowest node, whatever its name: its status and runtime rows need the room. */
 const NODE_WIDTH_MIN = 14;
-/** Wider adds padding, not information. */
+/** An even split wider than this adds padding, not information; a longer name still gets its width. */
 const NODE_WIDTH_MAX = 18;
 
 export interface GraphNode {
@@ -60,20 +60,27 @@ export interface AgentGraph {
 
 /** Border on both sides plus one column of padding on both sides. */
 const PANE_CHROME = 4;
+/** A node's border, left and right, which its label cannot use. */
+const NODE_BORDER = 2;
 
 /**
- * Pane widths that can draw `stageCount` stages: `min` is the narrowest the
- * graph stays readable at, `max` the point past which extra columns add
- * padding rather than information. Callers compare `min` against the room they
- * have before choosing the graph over the stacked list.
+ * Pane widths that can draw these phases. `min` is the narrowest that holds
+ * every stage column at its widest label (`labelWidth`, none by default), so a
+ * graph at least that wide names every agent in full; `max` is the point past
+ * which extra columns add padding rather than information. Callers compare
+ * `min` against the room they have before choosing the graph over the stacked
+ * list.
  */
-export function graphPaneBounds(stageCount: number): {min: number; max: number} {
-  const stages = Math.max(1, stageCount);
-  const gutters = (stages - 1) * GUTTER;
-  return {
-    min: stages * NODE_WIDTH_MIN + gutters + PANE_CHROME,
-    max: stages * NODE_WIDTH_MAX + gutters + PANE_CHROME,
-  };
+export function graphPaneBounds(
+  phases: AgentPhase[],
+  labelWidth: (phase: AgentPhase) => number = () => 0,
+): {min: number; max: number} {
+  const wants = columnWants(phases, labelWidth);
+  const stages = Math.max(1, wants.length);
+  const chrome = (stages - 1) * GUTTER + PANE_CHROME;
+  const labels = wants.reduce((sum, want) => sum + want, 0);
+  const min = Math.max(stages * NODE_WIDTH_MIN, labels) + chrome;
+  return {min, max: Math.max(min, stages * NODE_WIDTH_MAX + chrome)};
 }
 
 /** Agent kinds in the order the round first mentions them. */
@@ -81,6 +88,16 @@ export function stageKinds(phases: AgentPhase[]): string[] {
   const kinds: string[] = [];
   for (const phase of phases) if (!kinds.includes(phase.kind)) kinds.push(phase.kind);
   return kinds;
+}
+
+/** Each stage column's node width: its widest label inside the border, never under the floor. */
+function columnWants(phases: AgentPhase[], labelWidth: (phase: AgentPhase) => number): number[] {
+  return stageKinds(phases).map(kind =>
+    Math.max(
+      NODE_WIDTH_MIN,
+      ...phases.filter(phase => phase.kind === kind).map(phase => labelWidth(phase) + NODE_BORDER),
+    ),
+  );
 }
 
 export interface GraphWindow {
@@ -123,11 +140,26 @@ function fitColumns(phases: AgentPhase[], rows: number): GraphWindow {
   return {phases: phases.filter(phase => !dropped.has(phase)), hidden: dropped.size};
 }
 
-export function layoutAgentGraph(phases: AgentPhase[], availableWidth: number): AgentGraph {
+/**
+ * `labelWidth` is the columns a phase's label needs inside its node; each
+ * column asks for its widest. Without it every column asks for nothing and the
+ * room is split evenly.
+ */
+export function layoutAgentGraph(
+  phases: AgentPhase[],
+  availableWidth: number,
+  labelWidth: (phase: AgentPhase) => number = () => 0,
+): AgentGraph {
   const kinds = stageKinds(phases);
   const columns = kinds.map(kind => phases.filter(phase => phase.kind === kind));
-  const nodeWidth = fitNodeWidth(kinds.length, availableWidth);
-  const pitch = nodeWidth + GUTTER;
+  const widths = fitNodeWidths(columnWants(phases, labelWidth), availableWidth);
+  // Each column starts a gutter past the right edge of the one before it.
+  let right = 0;
+  const lefts = widths.map(width => {
+    const left = right;
+    right += width + GUTTER;
+    return left;
+  });
   const tallest = Math.max(...columns.map(column => columnHeight(column.length)), 0);
 
   const nodes: GraphNode[] = [];
@@ -138,15 +170,19 @@ export function layoutAgentGraph(phases: AgentPhase[], availableWidth: number): 
     for (const [row, phase] of column.entries()) {
       nodes.push({
         phase,
-        x: index * pitch,
+        x: lefts[index] as number,
         y: top + row * (NODE_HEIGHT + ROW_GAP),
-        width: nodeWidth,
+        width: widths[index] as number,
       });
     }
   }
 
-  const cells = routeEdges(columns, nodes, nodeWidth, pitch);
-  const width = kinds.length === 0 ? 0 : (kinds.length - 1) * pitch + nodeWidth;
+  const cells = routeEdges(
+    columns,
+    nodes,
+    lefts.map((left, index) => left + (widths[index] as number)),
+  );
+  const width = kinds.length === 0 ? 0 : right - GUTTER;
   return {nodes, cells, width, height: tallest};
 }
 
@@ -154,11 +190,26 @@ function columnHeight(count: number): number {
   return count === 0 ? 0 : count * NODE_HEIGHT + (count - 1) * ROW_GAP;
 }
 
-function fitNodeWidth(stageCount: number, availableWidth: number): number {
-  if (stageCount <= 0) return NODE_WIDTH_MIN;
-  const room = availableWidth - (stageCount - 1) * GUTTER;
-  const fitted = Math.floor(room / stageCount);
-  return Math.max(NODE_WIDTH_MIN, Math.min(NODE_WIDTH_MAX, fitted));
+/**
+ * Node widths for columns that ask for `wants` each (`columnWants`). Even while
+ * that holds every label, because equal slots read as one pipeline. Past that
+ * each column gets what it asks for, a name longer than an even split allows
+ * included. Only a pane under `graphPaneBounds().min` runs short, and there
+ * the widest give way first, never below the floor.
+ */
+function fitNodeWidths(wants: number[], availableWidth: number): number[] {
+  if (wants.length === 0) return [];
+  const room = availableWidth - (wants.length - 1) * GUTTER;
+  const even = Math.max(NODE_WIDTH_MIN, Math.min(NODE_WIDTH_MAX, Math.floor(room / wants.length)));
+  if (wants.every(want => want <= even)) return wants.map(() => even);
+  const widths = [...wants];
+  // ponytail: one column per step, O(overflow x stages); both are single digits.
+  for (let over = widths.reduce((sum, width) => sum + width, 0) - room; over > 0; over -= 1) {
+    const widest = Math.max(...widths);
+    if (widest <= NODE_WIDTH_MIN) break;
+    widths[widths.indexOf(widest)] = widest - 1;
+  }
+  return widths;
 }
 
 const UP = 1;
@@ -191,12 +242,8 @@ const JUNCTION: Record<number, string> = {
 
 const TONE_RANK: Record<EdgeTone, number> = {idle: 0, done: 1, live: 2, failed: 3};
 
-function routeEdges(
-  columns: AgentPhase[][],
-  nodes: GraphNode[],
-  nodeWidth: number,
-  pitch: number,
-): GraphCell[] {
+/** `rights` is each column's first cell past its nodes' right border. */
+function routeEdges(columns: AgentPhase[][], nodes: GraphNode[], rights: number[]): GraphCell[] {
   const cellAt = new Map<string, {mask: number; tone: EdgeTone; glyph: string}>();
   const nodeOf = (phase: AgentPhase): GraphNode =>
     nodes[nodes.findIndex(node => node.phase === phase)] as GraphNode;
@@ -204,7 +251,7 @@ function routeEdges(
   for (const [index, column] of columns.entries()) {
     const next = columns[index + 1];
     if (next === undefined) continue;
-    const x1 = index * pitch + nodeWidth;
+    const x1 = rights[index] as number;
     const x2 = x1 + GUTTER - 1;
     const lanes = laneOrder(x1 + 1, x2 - 1);
     const taken: Array<Array<[number, number]>> = lanes.map(() => []);
