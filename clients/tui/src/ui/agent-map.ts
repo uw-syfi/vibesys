@@ -288,7 +288,7 @@ export class AgentMapView {
     // out past the bottom border and simply never seen.
     const fitted = graphWindow(phases, graphRows);
     if (fitted.hidden > 0) {
-      this.output.add(
+      this.#content.add(
         new TextRenderable(this.renderer, {
           // The oldest attempts are the ones dropped, so the count points up at
           // them the way the rounds rail points at the rounds above its window.

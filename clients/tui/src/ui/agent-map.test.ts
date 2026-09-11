@@ -140,4 +140,34 @@ describe('agent graph row budget', () => {
     expect(nodes).toBe(1);
     expect(frame).not.toContain('↑');
   });
+
+  test('redrawing a stacked round does not stack extra hidden-count rows', async () => {
+    const testRenderer: TestRendererSetup = await createTestRenderer({width: 120, height: ROWS});
+    const view = new AgentMapView(
+      testRenderer.renderer,
+      {} as unknown as SessionController,
+      resolveTheme(null),
+    );
+    testRenderer.renderer.root.add(view.output);
+    cleanup.push(() => {
+      view.destroy();
+      view.output.destroyRecursively();
+      testRenderer.renderer.destroy();
+    });
+
+    const childCounts: number[] = [];
+    let frame = '';
+    for (let round = 0; round < 3; round += 1) {
+      // A fresh state object each time, so the render-skip guard (`state ===
+      // this.#renderedState`) does not short-circuit the redraw: each pass is a
+      // real repaint, the way a running round's own state updates would be.
+      view.render(stackedState(6), 120, 0, ROWS);
+      await testRenderer.renderOnce();
+      frame = testRenderer.captureCharFrame();
+      childCounts.push(view.output.getChildren().length);
+    }
+
+    expect(frame.match(/↑ 4/g) ?? []).toHaveLength(1);
+    expect(new Set(childCounts).size).toBe(1);
+  });
 });
