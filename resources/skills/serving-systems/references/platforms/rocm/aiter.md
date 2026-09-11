@@ -283,7 +283,7 @@ Fix:     rule this mechanism out before chasing it further; the actual
          Do not try to fix stalls by rounding M to a bucket: M=1021 and
          M=1024 both pay the same cold cost, and M=1277 pays more than
          M=1280, because hipBLASLt/rocBLAS keys its algorithm-search
-         cache on exact M, not a bucket — a nearby unaligned M does not
+         cache on exact M, not a bucket, a nearby unaligned M does not
          reuse a bucketed neighbor's warmed selection.
 Scope:   gfx942, aiter d9e5ef7ce0, hipBLASLt in rocm 7.0.
 Status:  verified (measured, reproduced in two jobs). sglang-v0.5.18-rocm700-mi30x, 2026-09-11, jobs 632902, 632911.
