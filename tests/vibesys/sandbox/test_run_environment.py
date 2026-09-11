@@ -29,7 +29,7 @@ from vibesys.sandbox.run_environment import (
     RunEnvironmentRequest,
     RunEnvironmentSpec,
     _cli_container_env,
-    _cli_container_setup,
+    _cli_provider_env_and_auth_files,
     _docker_agent_toolchains,
     _docker_evaluator_tool_mounts,
     _evaluator_container_setup,
@@ -226,11 +226,34 @@ def fake_agent_image(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     return calls
 
 
+_PUSHED_DIGEST = "ghcr.io/uw-syfi/vibesys-agent@sha256:" + "b" * 64
+
+
+@pytest.fixture(autouse=True)
+def fake_ensure_pushed(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Stub the registry push behind ``ensure_pushed`` for Modal/SkyPilot tests.
+
+    A real push hits the network and a logged-in Docker daemon; letting it
+    run would make these unit tests flaky integration tests. Returns the
+    image IDs it was asked to push, and always reports the same
+    ``repository@sha256:...``-shaped reference, so a test can assert a
+    Modal or SkyPilot sandbox is started from *that* digest.
+    """
+    calls: list[str] = []
+
+    def fake_ensure_pushed(image_id: str, **_kwargs: Any) -> str:  # noqa: ANN401  # tracked: #288
+        calls.append(image_id)
+        return _PUSHED_DIGEST
+
+    monkeypatch.setattr("vibesys.sandbox.images.ensure_pushed", fake_ensure_pushed)
+    return calls
+
+
 @pytest.fixture(autouse=True)
 def _synthetic_cli_auth(monkeypatch):  # noqa: ANN001, ANN202
     """Pin a deterministic host auth source for container CLI setup.
 
-    ``_cli_container_setup`` fails loud when a provider has neither a staged
+    ``_cli_container_env`` fails loud when a provider has neither a staged
     host file nor an auth environment variable, so these tests must not depend
     on whichever CLI the developer running them happens to be logged into.
     """
@@ -645,7 +668,11 @@ def test_isolated_environments_install_and_translate_evaluator_tools(
         # Rust in the running container.
         assert "extra_init_commands" not in backend.calls[0][1]
     else:
-        init_commands = backend.calls[0][1]["extra_init_commands"]
+        # The local editor container starts from a prebuilt agent image and
+        # installs nothing at start; the evaluator's own toolchain setup
+        # (checked below) travels as an argument to the remote evaluator
+        # helper script, not as a container init command.
+        assert "extra_init_commands" not in backend.calls[0][1]
         arguments = shlex.split(rendered)
         separator = arguments.index("--")
         assert arguments[separator + 1].startswith(".vibesys-evaluator-tools/request-factory/")
@@ -665,7 +692,6 @@ def test_isolated_environments_install_and_translate_evaluator_tools(
         assert arguments[arguments.index("--evaluator-package-root") + 1] == (
             "/opt/vibesys-evaluator-package"
         )
-        assert not any("static.rust-lang.org/rustup/dist" in item for item in init_commands)
 
 
 def test_docker_evaluator_tools_use_ephemeral_builder_and_read_only_final_mounts(
@@ -951,23 +977,22 @@ def test_isolated_environment_enforces_project_path_policy(tmp_path, environment
 
 
 def test_cli_container_env_and_setup_agree_on_the_container_environment(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    """``_cli_container_setup`` (Modal/SkyPilot) still gets what it used to.
-
-    ``_cli_container_env`` was factored out of ``_cli_container_setup`` so the
-    plain Docker path can reuse the auth-presence check and env passthrough
-    without the shell-command half; this pins that the full function's
-    environment output is unchanged by the split.
+    """``_cli_provider_env_and_auth_files`` (Modal/SkyPilot) agrees with
+    ``_cli_container_env`` (the plain Docker path) on the container
+    environment, and additionally returns the staged auth copy pairs a
+    prebuilt-image container needs instead of a shell install recipe.
     """
     backend = FakeBackend()
     request = _request(tmp_path, backend, agent_backend="cli", cli_provider="codex")
 
     resolved = _cli_container_env(request)
-    _commands, setup_env = _cli_container_setup(request)
+    env, auth_files = _cli_provider_env_and_auth_files(request)
 
     assert resolved is not None
-    provider, env = resolved
+    provider, resolved_env = resolved
     assert provider == "codex"
-    assert env == setup_env
+    assert env == resolved_env
+    assert auth_files == [("/opt/vibesys-auth/0", "/home/agent/.codex/auth.json")]
 
 
 def test_cli_container_env_is_none_for_a_non_cli_agent_backend(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
@@ -1140,7 +1165,11 @@ def test_environment_session_context_manager_closes(tmp_path):  # noqa: ANN001, 
     backend.sandbox.stop.assert_called_once()
 
 
-def test_modal_environment_uses_local_docker_for_editing(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_uses_local_docker_for_editing(
+    tmp_path,  # noqa: ANN001  # tracked: #288
+    fake_agent_image: list[dict[str, Any]],
+    fake_ensure_pushed: list[str],
+) -> None:
     """Post-refactor (April 2026): Modal mode runs the agent in a local
     Docker container; only GPU-bound work the implementer dispatches via
     `modal run` actually touches Modal."""
@@ -1152,6 +1181,11 @@ def test_modal_environment_uses_local_docker_for_editing(tmp_path):  # noqa: ANN
     # The sandbox is local Docker, not a Modal Sandbox.
     assert backend.calls[0][0] is SandboxKind.DOCKER
     assert backend.calls[0][1]["attach_accelerator"] is False
+    # The container starts from the same kind of agent image the plain
+    # Docker path builds, pushed to and pulled back from a registry.
+    assert fake_agent_image[-1]["base_image"] == backend.image
+    assert fake_ensure_pushed == ["sha256:" + "a" * 64]
+    assert backend.calls[0][1]["container_image"] == _PUSHED_DIGEST
     assert session.view.cli_sandboxed is True
     assert session.view.profile_execution == "remote"
     assert session.view.deployment_namespace is not None
@@ -1235,18 +1269,18 @@ def test_modal_environment_wraps_custom_deployment_entrypoint(tmp_path) -> None:
     assert session.view.paths.benchmark_command == f"{prefix} trusted-benchmark"
 
 
-def test_modal_environment_installs_modal_sdk_in_docker(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    """The local Docker container needs the Modal Python SDK installed so
-    the implementer-authored `modal run` calls work."""
+def test_modal_environment_installs_nothing_at_container_start(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    """The local Docker container starts from a prebuilt, pushed agent image
+    and installs nothing at start, including the Modal Python SDK an earlier
+    revision `pip install`ed here: that install ran through
+    `extra_init_commands`, which `DockerSandbox` has ignored since the
+    agent-image work landed (#675), so it was already dead code."""
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
     env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
-    commands = backend.calls[0][1]["extra_init_commands"]
-    assert any("pip install" in c and "modal" in c for c in commands), (
-        f"expected `pip install modal` in init commands, got: {commands}"
-    )
+    assert "extra_init_commands" not in backend.calls[0][1]
     assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/workspace/.cache/uv"
 
 
@@ -1474,7 +1508,10 @@ def test_unknown_environment_name_raises():  # noqa: ANN201  # tracked: #288
 
 
 def test_skypilot_environment_uses_cpu_editor_and_narrow_bridge(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_agent_image: list[dict[str, Any]],
+    fake_ensure_pushed: list[str],
 ) -> None:
     profiles = tmp_path / "clusters.toml"
     profiles.write_text(
@@ -1528,6 +1565,14 @@ remote_artifact_root = "/remote/vibesys"
     kind, kwargs = backend.calls[0]
     assert kind is SandboxKind.DOCKER
     assert kwargs["attach_accelerator"] is False
+    # The local editor container starts from the same kind of pushed agent
+    # image the plain Docker path builds, and installs nothing at start; this
+    # is unrelated to the accelerator job's own `image_id`, which stays the
+    # operator-declared `remote_runtime_image` from the cluster profile.
+    assert fake_agent_image[-1]["base_image"] == backend.image
+    assert fake_ensure_pushed == ["sha256:" + "a" * 64]
+    assert kwargs["container_image"] == _PUSHED_DIGEST
+    assert "extra_init_commands" not in kwargs
     mounts = kwargs["bind_mounts"]
     assert any(target == "/opt/vibesys-skypilot/bridge.sock" for _, target, _ in mounts)
     assert any(target == "/opt/vibesys-skypilot-evaluator.py" for _, target, _ in mounts)

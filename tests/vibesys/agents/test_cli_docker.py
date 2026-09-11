@@ -32,21 +32,12 @@ _FAKE_PROFILES = {
             ".claude/settings.local.json",
             ".claude.json",
         ),
-        container_install=(
-            "apt-get update && apt-get install -y --no-install-recommends curl ca-certificates",
-            "curl -fsSL https://claude.ai/install.sh | bash",
-            "ln -sf /root/.local/bin/claude /usr/local/bin/claude",
-        ),
     ),
     "codex": fake_profiles.profile(
         "codex",
         state_dirs=(".codex", ".config/codex"),
         auth_env_vars=("OPENAI_API_KEY", "OPENAI_BASE_URL"),
         auth_files=(".codex/auth.json", ".codex/config.toml"),
-        container_install=(
-            "curl -fsSL https://nodejs.org/install | bash",
-            "npm install -g @openai/codex",
-        ),
     ),
     "gemini": fake_profiles.profile(
         "gemini",
@@ -58,7 +49,6 @@ _FAKE_PROFILES = {
             ".gemini/settings.json",
             ".gemini/.env",
         ),
-        container_install=("npm install -g @google/gemini-cli",),
     ),
     "opencode": fake_profiles.profile(
         "opencode",
@@ -72,7 +62,6 @@ _FAKE_PROFILES = {
             ".config/opencode/config.jsonc",
             ".config/opencode/.env",
         ),
-        container_install=("curl -fsSL https://opencode.ai/install | bash",),
     ),
 }
 
@@ -144,7 +133,7 @@ class TestAuthPaths:
 class TestAuthImport:
     """Staged state is mounted read-only and copied into writable storage."""
 
-    def test_mounts_and_copies_each_existing_leaf_into_writable_storage(
+    def test_mounts_and_names_each_existing_leaf_for_writable_import(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -171,11 +160,8 @@ class TestAuthImport:
             (str(codex_home / "config.toml"), "/opt/vibesys-auth/1", True),
             (str(tmp_path / ".claude.json"), "/opt/vibesys-auth/2", True),
         ]
-        assert cli_docker.auth_copy_commands("fixture") == [
-            "mkdir -p /home/agent/.codex && cp -a /opt/vibesys-auth/0 /home/agent/.codex/auth.json",
-            "mkdir -p /home/agent/.codex && cp -a /opt/vibesys-auth/1 /home/agent/.codex/config.toml",
-            "mkdir -p /home/agent && cp -a /opt/vibesys-auth/2 /home/agent/.claude.json",
-        ]
+        # `auth_copy_paths` hands these straight to `DockerSandbox(auth_files=...)`,
+        # which copies each pair in as a start-time step; no shell recipe.
         assert cli_docker.auth_copy_paths("fixture") == [
             ("/opt/vibesys-auth/0", "/home/agent/.codex/auth.json"),
             ("/opt/vibesys-auth/1", "/home/agent/.codex/config.toml"),
@@ -206,9 +192,6 @@ class TestAuthImport:
         # auth.json must not renumber the staging path of config.toml.
         assert cli_docker.auth_bind_mounts("fixture") == [
             (str(codex_home / "config.toml"), "/opt/vibesys-auth/1", True),
-        ]
-        assert cli_docker.auth_copy_commands("fixture") == [
-            "mkdir -p /home/agent/.codex && cp -a /opt/vibesys-auth/1 /home/agent/.codex/config.toml",
         ]
         assert cli_docker.auth_copy_paths("fixture") == [
             ("/opt/vibesys-auth/1", "/home/agent/.codex/config.toml"),
@@ -260,143 +243,13 @@ class TestAuthEnvVars:
             cli_docker.auth_env_passthrough("unregistered-provider")
 
 
-class TestDockerInitCommands:
-    """The provider recipe from the profile, plus VibeSys's own toolchain."""
-
-    def test_runs_the_profile_recipe_before_the_common_tooling(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        fake_profiles.install(
-            monkeypatch,
-            {
-                "fixture": fake_profiles.profile(
-                    "fixture",
-                    container_install=("install-the-cli", "link-the-binary"),
-                ),
-                "bare": fake_profiles.profile("bare"),
-            },
-        )
-
-        commands = cli_docker.docker_init_commands("fixture")
-
-        assert commands[:2] == ["install-the-cli", "link-the-binary"]
-        # The tail is the same for every provider: it is VibeSys's own
-        # toolchain, not anything the profile asked for.
-        assert commands[2:] == cli_docker.docker_init_commands("bare")
-
-    @pytest.mark.parametrize("provider", _SHIPPED)
-    def test_installs_only_mcp_v1(self, provider: str, fake_profiles_installed: None) -> None:
-        del fake_profiles_installed
-        commands = cli_docker.docker_init_commands(provider)
-
-        assert any("command -v pip3" in command for command in commands)
-        assert (
-            "PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip install --quiet 'mcp>=1.0,<2'" in commands
-        )
-
-    @pytest.mark.parametrize("provider", _SHIPPED)
-    def test_installs_the_pinned_rust_toolchain(
-        self,
-        provider: str,
-        fake_profiles_installed: None,
-    ) -> None:
-        del fake_profiles_installed
-        commands = cli_docker.docker_init_commands(provider)
-        rust_install = next(command for command in commands if "rustup-init.sh" in command)
-
-        assert "command -v cargo" in rust_install
-        assert f"--default-toolchain {cli_docker.RUST_DOCKER_TOOLCHAIN_VERSION}" in rust_install
-        assert "--profile minimal" in rust_install
-        assert "--component rustfmt --component clippy" in rust_install
-        assert "ln -sf /root/.cargo/bin/* /usr/local/bin/" in rust_install
-        assert cli_docker.RUST_DOCKER_TOOLCHAIN_VERSION == "1.92.0"
-
-    def test_hardens_the_single_shot_apt_bootstrap_the_claude_profile_ships(self) -> None:
-        recipe = agentshim.get_provider("claude").profile.container_install
-        assert any("apt-get" in step for step in recipe), recipe
-
-        commands = cli_docker.docker_init_commands("claude")
-
-        # Ubuntu mirrors reachable from our hosts fail a single-shot
-        # `apt-get update` often enough to break container start, so every
-        # apt-get that survives into the recipe retries. When the library
-        # rewords its bootstrap step the override stops matching and this
-        # fails, instead of silently reverting the hardening.
-        apt_steps = [step for step in commands if "apt-get" in step]
-        assert apt_steps
-        assert all("apt retry $i" in step for step in apt_steps)
-
-    def test_runs_a_shared_step_once_when_the_recipe_already_has_it(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        fake_profiles.install(
-            monkeypatch,
-            {
-                "fixture": fake_profiles.profile(
-                    "fixture",
-                    container_install=(
-                        "apt-get update && apt-get install -y --no-install-recommends "
-                        "curl ca-certificates",
-                        "install-the-cli",
-                    ),
-                )
-            },
-        )
-
-        commands = cli_docker.docker_init_commands("fixture")
-
-        assert len(commands) == len(set(commands))
-        assert commands[1] == "install-the-cli"
-
-    def test_pins_an_unpinned_codex_cli_install(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        fake_profiles.install(
-            monkeypatch,
-            {
-                "codex": fake_profiles.profile(
-                    "codex",
-                    container_install=("npm install -g @openai/codex",),
-                )
-            },
-        )
-
-        commands = cli_docker.docker_init_commands("codex")
-
-        assert commands[0] == (
-            f"npm install -g --include=optional @openai/codex@{cli_docker.CODEX_DOCKER_CLI_VERSION}"
-        )
-        assert cli_docker.CODEX_DOCKER_CLI_VERSION == "0.144.4"
-
-    def test_leaves_a_codex_version_the_profile_already_pinned(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        fake_profiles.install(
-            monkeypatch,
-            {
-                "codex": fake_profiles.profile(
-                    "codex",
-                    container_install=("npm install -g @openai/codex@9.9.9",),
-                )
-            },
-        )
-
-        assert cli_docker.docker_init_commands("codex")[0] == ("npm install -g @openai/codex@9.9.9")
-
-    def test_rejects_a_provider_agentshim_does_not_register(self) -> None:
-        with pytest.raises(ValueError, match="unregistered-provider"):
-            cli_docker.docker_init_commands("unregistered-provider")
-
-
 class TestShippedProfileAssumptions:
     """The real agentshim profiles, run through the tables above.
 
     Nothing here is monkeypatched: these pin that what the four shipped
     providers actually declare still satisfies what VibeSys derives from it, so
-    a library release that renames a state directory, adds a model-selection
-    variable, or rewrites an install recipe fails here rather than at container
-    start.
+    a library release that renames a state directory or adds a
+    model-selection variable fails here rather than at container start.
     """
 
     @pytest.mark.parametrize("provider", _SHIPPED)
@@ -427,46 +280,6 @@ class TestShippedProfileAssumptions:
         # VibeSys owns per-role model selection, so no shipped profile may hand
         # the container a host override of it (see `auth_env_vars`).
         assert [name for name in forwarded if name.endswith("_MODEL")] == []
-
-    @pytest.mark.parametrize("provider", _SHIPPED)
-    def test_recipe_ends_with_the_common_tooling_it_does_not_already_run(
-        self,
-        provider: str,
-    ) -> None:
-        common = cli_docker._COMMON_DOCKER_TOOLING_INSTALL  # noqa: SLF001
-        commands = cli_docker.docker_init_commands(provider)
-        split = len(commands)
-        while split and commands[split - 1] in common:
-            split -= 1
-        head, tail = commands[:split], commands[split:]
-
-        # The trailing common steps keep their order and gain nothing, and the
-        # ones missing from the tail are exactly the ones the profile recipe
-        # already runs.
-        assert tail == [step for step in common if step in tail]
-        assert all(step in head for step in common if step not in tail)
-        assert len(commands) == len(set(commands))
-
-    @pytest.mark.parametrize("provider", _SHIPPED)
-    def test_every_npm_step_runs_after_node_is_on_the_path(self, provider: str) -> None:
-        commands = cli_docker.docker_init_commands(provider)
-
-        # The node bootstrap is inside the recipe, ahead of the common tooling,
-        # so a profile that drops its `command -v node` guard would run npm on
-        # an image without node.
-        for index, command in enumerate(commands):
-            if "npm " not in command:
-                continue
-            assert any("command -v node" in earlier for earlier in commands[: index + 1]), command
-
-    def test_codex_installs_the_verified_cli_version(self) -> None:
-        commands = cli_docker.docker_init_commands("codex")
-
-        # Either the profile pins this version or `_pin_codex_cli` supplies it;
-        # a profile that starts pinning a different one fails here instead of
-        # silently changing the editor mid-campaign.
-        pin = f"@openai/codex@{cli_docker.CODEX_DOCKER_CLI_VERSION}"
-        assert any(pin in command for command in commands), commands
 
 
 def test_docker_provider_env_covers_every_provider_vibesys_ships() -> None:

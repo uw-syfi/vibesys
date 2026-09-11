@@ -185,6 +185,44 @@ base and task Dockerfile already is. Because setup happens once, at build
 time, an agent cannot `apt-get install` mid-round: a missing system package
 is a Dockerfile gap, not something a running turn can patch around.
 
+### Registry: GHCR by digest
+
+A local `--docker` run never contacts a registry: it runs the image
+`agent_image` just built straight from the local Docker image store. Modal
+and SkyPilot runs do, because neither backend's Docker daemon can be assumed
+to already have the image locally, so their local editor container is
+started from a pushed, pulled-back reference instead of the bare local image
+ID.
+
+`vibesys.sandbox.images` carries the push and verification side of this:
+
+- `push_agent_image(image_id)` tags the image as
+  `ghcr.io/uw-syfi/vibesys-agent:<short id>` (a name derived from the image's
+  own content address, not a moving tag), pushes it, and resolves the
+  `ghcr.io/uw-syfi/vibesys-agent@sha256:...` manifest digest Docker recorded
+  for that push. Remote backends reference this digest, never a tag.
+- `agent_image_is_pushed(reference)` asks the registry whether a digest is
+  live, via `docker manifest inspect`, without pulling any layers.
+- `ensure_pushed(image_id)` is what Modal and SkyPilot actually call: it
+  checks Docker's own record of where this exact image was already pushed
+  before pushing again, so a repeated launch against an unchanged agent
+  image after the first is a no-op past that first push. It raises
+  `ImagePushError`, naming the digest, when a push fails or the registry
+  does not confirm the result: the run refuses to start rather than pull an
+  unverified reference.
+
+GHCR because the repository is on GitHub and it is cloud-neutral for
+SkyPilot's arbitrary infra targets. Pushing requires the Docker daemon to
+already be logged in (`docker login ghcr.io` with a token carrying
+`write:packages`; CI supplies this as `GITHUB_TOKEN`); `vibesys.sandbox.images`
+performs no login of its own and never logs a credential value, only image
+references and exit codes.
+
+SkyPilot's own accelerator job is unrelated to this: the `image_id` it runs
+on comes from the operator's cluster profile
+(`SkyPilotProfile.remote_runtime_image`), chosen for the accuracy/benchmark
+command's own runtime needs, not for running agent CLIs.
+
 ## Container execution
 
 `--docker` runs the provider CLI inside the role's editor container. The

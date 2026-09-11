@@ -565,7 +565,19 @@ class SkyPilotEnvironment(DockerEnvironment):
         )
 
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
-        """Open the bridge and CPU-only local editor container."""
+        """Open the bridge and CPU-only local editor container.
+
+        The editor container starts from the same agent image the plain
+        Docker path builds, pushed to and pulled back from a registry the
+        same way :class:`ModalEnvironment` does (see its ``open`` docstring
+        for why: this backend's Docker daemon cannot be assumed to already
+        have the image locally). It is unrelated to the ``image_id`` the
+        actual accelerator job later runs on: that image is an
+        operator-declared field of the cluster profile
+        (``SkyPilotProfile.remote_runtime_image``), chosen for the
+        accuracy/benchmark command's own runtime needs (CUDA/ROCm, etc.), not
+        for running agent CLIs, and this change leaves it untouched.
+        """
         if self.config.resources is None:
             raise ValueError("SkyPilot requires portable run resources")  # noqa: TRY003
         if request.state_namespace is None:
@@ -599,8 +611,23 @@ class SkyPilotEnvironment(DockerEnvironment):
         )
         try:
             bridge.start()
+
+            from vibesys.sandbox.images import (  # noqa: PLC0415  # tracked: #288
+                agent_image,
+                ensure_pushed,
+            )
+
+            tools = _evaluator_tools(request)
+            container_image = agent_image(
+                _docker_backend_image(request),
+                toolchains=_docker_agent_toolchains(request, tools),
+            )
+            container_image = _ensure_pushed_for_remote_backend(
+                container_image, ensure_pushed=ensure_pushed, backend_label="SkyPilot"
+            )
+
             bind_mounts, docker_symlinks, passthrough = _container_mount_plan(request)
-            extra_init_commands, cli_provider_env = _cli_container_setup(request)
+            cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
             cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
             helper_source = Path(__file__).with_name("skypilot_evaluator.py")
             helper_path = "/opt/vibesys-skypilot-evaluator.py"
@@ -636,8 +663,9 @@ class SkyPilotEnvironment(DockerEnvironment):
                 bind_mounts=_dedupe_mounts(bind_mounts),
                 passthrough_paths=passthrough,
                 extra_env=cli_provider_env,
-                extra_init_commands=extra_init_commands,
+                auth_files=auth_files,
                 lifecycle_hooks=_symlink_lifecycle_hooks(docker_symlinks),
+                container_image=container_image,
                 attach_accelerator=False,
             )
             _start_sandbox(sandbox)
@@ -708,16 +736,30 @@ class ModalEnvironment(_NoopWorkspaceRecovery):  # noqa: D101  # tracked: #288
         Architecture (refactor April 2026): the agent (codex CLI) runs inside
         a *local* Docker container that does file editing only. GPU-bound
         execution dispatches to Modal via the candidate's declared ``modal run``
-        entrypoint; we install the Modal
-        Python SDK and mount the host's ``~/.modal.toml`` into the container
+        entrypoint; we mount the host's ``~/.modal.toml`` into the container
         so those calls authenticate.
 
         We retain the host-side Modal Volume bootstrap (model + optional
         draft) so the implementer's ``modal.Volume.from_name(...)`` calls
-        resolve.  The previous "long-lived Modal sandbox running codex
-        inside" architecture is gone — it caused HOME-leak auth bugs,
+        resolve. The previous "long-lived Modal sandbox running codex inside"
+        architecture is gone: it caused HOME-leak auth bugs,
         codex-vs-model-weight memory contention, and per-run sandbox
         cold-start overhead that this design eliminates.
+
+        The container starts from the same agent image the plain Docker path
+        builds (:func:`~vibesys.sandbox.images.agent_image`), pushed to and
+        pulled back from a registry (:func:`~vibesys.sandbox.images.ensure_pushed`),
+        since this backend's Docker daemon is not guaranteed to already have
+        it locally the way the local ``--docker`` path's is. Nothing installs
+        anything at container start any more, including the Modal Python SDK
+        an earlier revision ``pip install``ed here: that install already ran
+        through ``extra_init_commands``, which ``DockerSandbox`` (the sandbox
+        class every ``SandboxKind.DOCKER`` construction here actually builds)
+        has ignored ever since the agent-image work landed, so removing it is
+        deleting dead code, not taking away a behavior that ran. A candidate
+        whose declared ``modal run`` entrypoint needs the ``modal`` package
+        still needs something to install it; see the accompanying report for
+        the gap this surfaces.
         """
         # Host-side: ensure Modal Volumes exist for the model + optional
         # draft.  These run before the Docker container starts and are
@@ -725,8 +767,22 @@ class ModalEnvironment(_NoopWorkspaceRecovery):  # noqa: D101  # tracked: #288
         self._ensure_model_volume(request)
         self._ensure_draft_volume(request)
 
+        from vibesys.sandbox.images import (  # noqa: PLC0415  # tracked: #288
+            agent_image,
+            ensure_pushed,
+        )
+
+        tools = _evaluator_tools(request)
+        container_image = agent_image(
+            _docker_backend_image(request),
+            toolchains=_docker_agent_toolchains(request, tools),
+        )
+        container_image = _ensure_pushed_for_remote_backend(
+            container_image, ensure_pushed=ensure_pushed, backend_label="Modal"
+        )
+
         bind_mounts, docker_symlinks, passthrough = _container_mount_plan(request)
-        extra_init_commands, cli_provider_env = _cli_container_setup(request)
+        cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
         cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
@@ -761,11 +817,6 @@ class ModalEnvironment(_NoopWorkspaceRecovery):  # noqa: D101  # tracked: #288
         if modal_config_dir.is_dir():
             bind_mounts.append((str(modal_config_dir), "/root/.modal", True))
 
-        # Install the Modal Python SDK alongside the agent's other packages.
-        # Pinned to a recent release; the wire protocol is forward-compatible
-        # with the host's Modal CLI as long as both are within ~one major.
-        extra_init_commands.insert(0, "pip install --quiet 'modal>=0.66'")
-
         bind_mounts = _dedupe_mounts(bind_mounts)
         lifecycle_hooks = _symlink_lifecycle_hooks(docker_symlinks)
 
@@ -776,8 +827,9 @@ class ModalEnvironment(_NoopWorkspaceRecovery):  # noqa: D101  # tracked: #288
             bind_mounts=bind_mounts,
             passthrough_paths=passthrough,
             extra_env=cli_provider_env,
-            extra_init_commands=extra_init_commands,
+            auth_files=auth_files,
             lifecycle_hooks=lifecycle_hooks,
+            container_image=container_image,
             attach_accelerator=False,
         )
         log: Callable[[str], None] = request.log or (lambda _: None)
@@ -1545,12 +1597,15 @@ def _container_project_policy_mounts(
 def _cli_container_env(request: RunEnvironmentRequest) -> tuple[str, dict[str, str]] | None:
     """Return ``(provider, container env)`` when a CLI provider needs a container.
 
-    Factored out of :func:`_cli_container_setup` so the plain Docker path —
-    which starts from a prebuilt agent image and installs nothing at start —
-    can still get the auth-presence check and the auth env passthrough
-    without the shell-command half of that function. Modal and SkyPilot keep
-    calling :func:`_cli_container_setup` in full until their own image work
-    (#676, #679) lands.
+    Every containerized environment (Docker, Modal, SkyPilot) now starts from
+    a prebuilt agent image and installs nothing at container start, so this
+    is the whole of what a CLI provider needs from the run request: the
+    auth-presence check and the auth env passthrough. What used to be the
+    shell-command half of this (:func:`vibesys.agents.cli_docker
+    .docker_init_commands`, run through ``extra_init_commands``) is gone; see
+    :func:`_cli_provider_env_and_auth_files` for the staged-file counterpart
+    Modal and SkyPilot pass through ``auth_files`` instead, matching the
+    plain Docker path.
 
     Returns ``None`` when the run is not a containerized CLI agent (a
     different agent backend, or no CLI provider selected).
@@ -1591,20 +1646,50 @@ def _cli_container_env(request: RunEnvironmentRequest) -> tuple[str, dict[str, s
     return provider, env
 
 
-def _cli_container_setup(
+def _cli_provider_env_and_auth_files(
     request: RunEnvironmentRequest,
-) -> tuple[list[str], dict[str, str]]:
-    resolved = _cli_container_env(request)
-    if resolved is None:
-        return [], {}
-    provider, env = resolved
-    from vibesys.agents.cli_docker import (  # noqa: PLC0415  # tracked: #288
-        auth_copy_commands,
-        docker_init_commands,
-    )
+) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """Return the container env and staged auth copies for a CLI provider, if any.
 
-    commands = [*auth_copy_commands(provider), *docker_init_commands(provider)]
-    return commands, env
+    The shared counterpart to :meth:`DockerEnvironment.open`'s own inline
+    version of this: every environment that starts a container from the
+    prebuilt agent image copies auth the same way (via
+    :func:`vibesys.agents.cli_docker.auth_copy_paths`, handed to the sandbox
+    as ``auth_files`` so it copies them in at start), rather than running
+    shell commands built from a provider's install recipe.
+    """
+    resolved_cli = _cli_container_env(request)
+    if resolved_cli is None:
+        return {}, []
+    provider, cli_provider_env = resolved_cli
+    from vibesys.agents.cli_docker import auth_copy_paths  # noqa: PLC0415  # tracked: #288
+
+    return cli_provider_env, auth_copy_paths(provider)
+
+
+def _ensure_pushed_for_remote_backend(
+    image_id: str,
+    *,
+    ensure_pushed: Callable[[str], str],
+    backend_label: str,
+) -> str:
+    """Push and verify *image_id*, naming it and *backend_label* on failure.
+
+    ``ensure_pushed`` (:func:`vibesys.sandbox.images.ensure_pushed`) already
+    raises :class:`~vibesys.sandbox.images.ImagePushError` naming the image
+    and what went wrong; this only adds which run environment could not
+    start because of it, so the operator does not have to guess whether a
+    Modal or a SkyPilot launch is the one that failed to reach the registry.
+    """
+    from vibesys.sandbox.images import ImagePushError  # noqa: PLC0415  # tracked: #288
+
+    try:
+        return ensure_pushed(image_id)
+    except ImagePushError as exc:
+        raise ImagePushError(  # noqa: TRY003
+            f"could not push or verify the agent image {image_id} in the "
+            f"registry for a {backend_label} run: {exc}"
+        ) from exc
 
 
 def _evaluator_container_setup(

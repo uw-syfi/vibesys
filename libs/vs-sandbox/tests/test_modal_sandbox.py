@@ -246,26 +246,17 @@ class TestStart:
         finally:
             sb.stop()
 
-    def test_init_failure_skips_hooks_and_cleans_up(self, tmp_path, mock_modal):  # noqa: ANN001, ANN201
-        from vs_sandbox.modal_sandbox import ModalSandbox, _live_sandboxes  # noqa: PLC0415
+    def test_extra_init_commands_are_accepted_but_never_run(self, tmp_path, mock_modal):  # noqa: ANN001, ANN201
+        """The sandbox now starts from a prebuilt agent image; nothing installs at start."""
+        from vs_sandbox.modal_sandbox import ModalSandbox  # noqa: PLC0415
 
-        invocations: list[object] = []
-        mock_modal["proc"].wait.side_effect = [0, 17]
-        sb = ModalSandbox(
+        with ModalSandbox(
             host_workspace=str(tmp_path),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
             extra_init_commands=["install-required-tool"],
-            lifecycle_hooks=[_RecordingHooks(invocations)],
-        )
-
-        with pytest.raises(RuntimeError, match="Modal sandbox init command failed"):
-            sb.start()
-
-        assert invocations == []
-        assert sb._sandbox is None  # noqa: SLF001
-        assert not _live_sandboxes
-        mock_modal["sandbox"].terminate.assert_called_once()
-        mock_modal["objects"].delete.assert_called_once()
+        ):
+            commands = [call.args for call in mock_modal["sandbox"].exec.call_args_list]
+            assert not any("install-required-tool" in " ".join(args) for args in commands)
 
     def test_lifecycle_failure_cleans_up_sandbox_and_volume(self, tmp_path, mock_modal):  # noqa: ANN001, ANN201
         from vs_sandbox.modal_sandbox import ModalSandbox, _live_sandboxes  # noqa: PLC0415
@@ -362,6 +353,84 @@ class TestStart:
         assert (snapshot / "state_5.sqlite").exists()
         assert (snapshot / "state_5.sqlite-wal").exists()
         assert not (snapshot / "sessions").exists()
+
+
+class TestAuthFiles:
+    """``auth_files`` uploads staged host credentials into the sandbox's HOME."""
+
+    def test_uploads_single_file(self, tmp_path, mock_modal):  # noqa: ANN001, ANN201
+        from vs_sandbox.modal_sandbox import ModalSandbox  # noqa: PLC0415
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        token = tmp_path / "token.json"
+        token.write_text('{"key": "secret"}')
+
+        with ModalSandbox(
+            host_workspace=str(ws),
+            image="nvcr.io/nvidia/pytorch:25.04-py3",
+            auth_files=[(str(token), "/home/agent/token.json")],
+        ):
+            fs = mock_modal["sandbox"].filesystem
+            fs.write_bytes.assert_any_call(b'{"key": "secret"}', "/home/agent/token.json")
+
+    def test_uploads_directory_recursively(self, tmp_path, mock_modal):  # noqa: ANN001, ANN201
+        from vs_sandbox.modal_sandbox import ModalSandbox  # noqa: PLC0415
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        auth_dir = tmp_path / "codex"
+        auth_dir.mkdir()
+        (auth_dir / "auth.json").write_text("root-file")
+        (auth_dir / "nested").mkdir()
+        (auth_dir / "nested" / "config.toml").write_text("nested-file")
+
+        with ModalSandbox(
+            host_workspace=str(ws),
+            image="nvcr.io/nvidia/pytorch:25.04-py3",
+            auth_files=[(str(auth_dir), "/home/agent/.codex")],
+        ):
+            fs = mock_modal["sandbox"].filesystem
+            fs.write_bytes.assert_any_call(b"root-file", "/home/agent/.codex/auth.json")
+            fs.write_bytes.assert_any_call(b"nested-file", "/home/agent/.codex/nested/config.toml")
+
+    def test_missing_source_is_skipped(self, tmp_path, mock_modal):  # noqa: ANN001, ANN201
+        from vs_sandbox.modal_sandbox import ModalSandbox  # noqa: PLC0415
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+
+        with ModalSandbox(
+            host_workspace=str(ws),
+            image="nvcr.io/nvidia/pytorch:25.04-py3",
+            auth_files=[(str(tmp_path / "does-not-exist"), "/home/agent/x")],
+        ):
+            mock_modal["sandbox"].filesystem.write_bytes.assert_not_called()
+
+    def test_no_auth_files_writes_nothing(self, sandbox, mock_modal):  # noqa: ANN001, ANN201
+        sandbox.start()
+        mock_modal["sandbox"].filesystem.write_bytes.assert_not_called()
+
+    def test_restart_restages_auth_files(self, tmp_path, mock_modal):  # noqa: ANN001, ANN201
+        """A restart gets a fresh container, so credentials must be restaged."""
+        from vs_sandbox.modal_sandbox import ModalSandbox  # noqa: PLC0415
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        token = tmp_path / "token.json"
+        token.write_text("secret")
+
+        with ModalSandbox(
+            host_workspace=str(ws),
+            image="nvcr.io/nvidia/pytorch:25.04-py3",
+            auth_files=[(str(token), "/home/agent/token.json")],
+        ) as sb:
+            assert sb._restart_sandbox()  # noqa: SLF001
+            fs = mock_modal["sandbox"].filesystem
+            assert (
+                fs.write_bytes.call_args_list.count(((b"secret", "/home/agent/token.json"), {}))
+                == 2
+            )
 
 
 class TestExecute:
@@ -558,7 +627,7 @@ class TestSandboxFallbackRestart:
         resp = sandbox.execute("echo hi")
         assert resp.exit_code == 0
         assert "after-restart-ok" in resp.output
-        # 1 failing call (sandbox-dead) + init commands on restart + 1 successful call
+        # 1 failing call (sandbox-dead) + 1 successful call after restart.
         assert call["n"] >= 2
 
     def test_restart_attempts_capped_by_max(self, sandbox, mock_modal, monkeypatch):  # noqa: ANN001, ANN201, ARG002  # tracked: #288

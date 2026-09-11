@@ -20,6 +20,7 @@ from __future__ import annotations
 import atexit
 import logging
 import os
+import shlex
 import shutil
 import signal
 import socket
@@ -199,6 +200,7 @@ class ModalSandbox(BaseSandbox):
         app_name: str = "vibesys",
         enable_fallback_restart: bool = True,  # noqa: FBT001, FBT002  # tracked: #288
         max_restart_attempts: int = 2,
+        auth_files: list[tuple[str, str]] | None = None,
     ) -> None:
         """Initialize the Modal sandbox configuration.
 
@@ -236,14 +238,33 @@ class ModalSandbox(BaseSandbox):
                 entries mounted read-write. Used for persistent CLI auth
                 state such as Codex ChatGPT login inside Modal.
             log_path: Optional file for Modal API call logging.
-            extra_init_commands: Additional bash one-liners run inside the
-                sandbox after the default ``pip install uv``.  Failures
-                raise ``RuntimeError``.
+            extra_init_commands: Unused. The sandbox now starts from a
+                prebuilt agent image (shipped CLIs, toolchains, and ``uv``
+                already installed; see :mod:`vibesys.sandbox.images`), so
+                nothing runs a per-launch install list at start, mirroring
+                :class:`~vs_sandbox.docker_sandbox.DockerSandbox`. Accepted
+                and ignored rather than removed: ``ComputeBackendImpl
+                .make_sandbox`` still offers this parameter to other sandbox
+                kinds, and this class's callers pass it through unconditionally.
             lifecycle_hooks: Trusted extensions invoked in order after
                 built-in initialization and before the sandbox becomes ready.
                 They run again after every container recreation.
             app_name: Modal App name to attach the sandbox to.  Created if
                 missing.
+            auth_files: ``(host_path, destination_path)`` pairs copied into
+                the sandbox's writable ``/home/agent`` at start, analogous to
+                ``DockerSandbox.auth_files``. Docker stages credentials
+                through a read-only bind mount and copies from that staged
+                *container* path; Modal has no equivalent arbitrary host
+                bind mount, so each pair's first element is instead a real
+                path on the host running VibeSys, and its bytes are uploaded
+                directly into the sandbox's writable filesystem through the
+                Sandbox filesystem API. The agent image's default user
+                already owns its own HOME, so, unlike Docker (which copies
+                as root and then chowns), no root elevation is needed or
+                attempted; Modal's ``Sandbox.exec`` has no way to run a
+                command as a different user than the image's default in the
+                first place.
         """
         self._host_workspace = Path(host_workspace)
         self._image_tag = image
@@ -264,6 +285,7 @@ class ModalSandbox(BaseSandbox):
         self._enable_fallback_restart = enable_fallback_restart
         self._max_restart_attempts = max_restart_attempts
         self._restart_attempts = 0
+        self._auth_files: list[tuple[str, str]] = list(auth_files or [])
 
         self._sandbox: modal.Sandbox | None = None
         self._sandbox_id: str | None = None
@@ -341,19 +363,22 @@ class ModalSandbox(BaseSandbox):
             self._delete_workspace_volume()
             raise
 
-    def _create_container(self) -> None:  # noqa: C901  # tracked: #288
-        """Create (or recreate) the Modal sandbox container on top of the
-        already-populated workspace volume. Shared by ``start`` and
-        ``_restart_sandbox``.
-        """  # noqa: D205  # tracked: #288
+    def _create_container(self) -> None:
+        """Create (or recreate) the Modal sandbox container.
+
+        Runs on top of the already-populated workspace volume; shared by
+        ``start`` and ``_restart_sandbox``.
+
+        The sandbox starts from a prebuilt agent image
+        (:mod:`vibesys.sandbox.images`) that already ships every CLI,
+        toolchain, and an empty, agent-owned ``/workspace``, unlike the
+        stock ``nvcr.io`` PyTorch base this class used to run directly, whose
+        prepopulated ``/workspace`` used to require clearing before the
+        volume could mount there. Nothing installs anything at start,
+        mirroring :class:`~vs_sandbox.docker_sandbox.DockerSandbox`.
+        """
         app = modal.App.lookup(self._app_name, create_if_missing=True)
-        # Clear the image's /workspace dir so our Volume can mount there —
-        # the nvcr.io pytorch image ships with a populated /workspace that
-        # triggers init_failure when a Volume is mounted on top.
-        image = modal.Image.from_registry(
-            self._image_tag,
-            add_python=None,
-        ).run_commands(f"rm -rf {self._CONTAINER_ROOT} && mkdir {self._CONTAINER_ROOT}")
+        image = modal.Image.from_registry(self._image_tag, add_python=None)
 
         # _workspace_volume is created by start() before _create_container().
         workspace_volume = self._workspace_volume
@@ -399,50 +424,53 @@ class ModalSandbox(BaseSandbox):
         _live_sandboxes[self._sandbox_id] = self
         self._log(f"sandbox created id={self._sandbox_id}")
 
-        # Install uv (non-fatal; mirrors DockerSandbox).
-        try:
-            proc = self._sandbox.exec(
-                "bash",
-                "-c",
-                "pip install uv",
-                workdir=self._CONTAINER_ROOT,
-                timeout=180,
-            )
-            proc.wait()
-        except Exception as exc:  # noqa: BLE001  # tracked: #288
-            self._log(f"pip install uv failed: {exc}")
-
-        # Run required init commands — fatal on failure.
-        for cmd in self._extra_init_commands:
-            self._log(f"init command: {cmd}")
-            proc = self._sandbox.exec(
-                "bash",
-                "-c",
-                cmd,
-                workdir=self._CONTAINER_ROOT,
-                timeout=600,
-            )
-            code = proc.wait()
-            if code != 0:
-                try:
-                    err = proc.stderr.read() if proc.stderr else ""
-                except Exception:  # noqa: BLE001  # tracked: #288
-                    err = ""
-                raise RuntimeError(  # noqa: TRY003  # tracked: #288
-                    f"Modal sandbox init command failed (exit {code}):\n"
-                    f"  command: {cmd}\n"
-                    f"  stderr: {err[:500]}"
-                )
-            if "codex login status" in cmd:
-                try:
-                    out = proc.stdout.read() if proc.stdout else ""
-                except Exception:  # noqa: BLE001  # tracked: #288
-                    out = ""
-                if out:
-                    self._log(f"init command stdout: {out.strip()[:500]}")
-            self._log(f"init command completed: {cmd}")
-
+        self._copy_auth_files()
         self._lifecycle.before_ready(self)
+
+    def _copy_auth_files(self) -> None:
+        """Upload staged host credentials into the sandbox's writable HOME.
+
+        Runs on every container creation, mirroring
+        ``DockerSandbox._copy_auth_files``: a restart gets a fresh container
+        with a clean ``/home/agent``, so credentials copied before the crash
+        do not survive it and must be restaged.
+        """
+        if not self._auth_files:
+            return
+        sandbox = self._require_sandbox()
+        for host_path, destination in self._auth_files:
+            source = Path(host_path)
+            if not source.exists():
+                continue
+            if source.is_dir():
+                self._upload_auth_directory(sandbox, source, destination)
+            else:
+                self._upload_auth_file(sandbox, source, destination)
+            self._log(f"copied auth file {host_path} -> {destination}")
+
+    def _mkdir(self, sandbox: modal.Sandbox, path: str) -> None:
+        sandbox.exec(
+            "bash",
+            "-c",
+            f"mkdir -p {shlex.quote(path)}",
+            workdir=self._CONTAINER_ROOT,
+        ).wait()
+
+    def _upload_auth_file(self, sandbox: modal.Sandbox, source: Path, destination: str) -> None:
+        self._mkdir(sandbox, str(PurePosixPath(destination).parent))
+        sandbox.filesystem.write_bytes(source.read_bytes(), destination)
+
+    def _upload_auth_directory(
+        self, sandbox: modal.Sandbox, source: Path, destination: str
+    ) -> None:
+        self._mkdir(sandbox, destination)
+        for path in source.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(source)
+            remote = str(PurePosixPath(destination, *rel.parts))
+            self._mkdir(sandbox, str(PurePosixPath(remote).parent))
+            sandbox.filesystem.write_bytes(path.read_bytes(), remote)
 
     def _restart_sandbox(self) -> bool:
         """Terminate the (likely dead) sandbox container and recreate it.

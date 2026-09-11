@@ -122,18 +122,17 @@ CLI_VERSIONS: dict[str, str] = {
 the time each was pinned, except Codex).
 
 Codex draws from :data:`CODEX_DOCKER_CLI_VERSION` instead of repeating its own
-literal, so the pin used by ``cli_docker`` (today's per-run container install)
-and the one used by ``agent_image`` (the prebuilt image) cannot disagree while
-both exist.
+literal: that constant is this module's own single source for the pin, used
+both here and (formerly) by ``cli_docker``'s now-removed per-run container
+install for Modal and SkyPilot.
 """
 
 RUST_TOOLCHAIN_VERSION = "1.92.0"
 """Rust toolchain pin for an agent image's optional ``rust`` toolchain layer.
 
-Mirrors ``cli_docker.RUST_DOCKER_TOOLCHAIN_VERSION``, the equivalent pin for
-today's per-run container install; the two are independent constants because
-that module's per-run install path and this image's build-time install path
-are deleted and added on different schedules.
+``cli_docker`` no longer has a per-run install path or its own Rust pin
+(#676): every containerized CLI environment builds from this prebuilt image
+now, so this is the only Rust toolchain version an editor container carries.
 """
 
 GO_TOOLCHAIN_VERSION = "1.23.12"
