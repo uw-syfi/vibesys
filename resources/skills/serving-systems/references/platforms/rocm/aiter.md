@@ -111,6 +111,14 @@ Env var: `SGLANG_MXFP4_MOE_HIP=1` selects this kernel over the Triton fallback a
 
 Scope: rocm, gfx942, sglang-v0.5.18 fork (`moe/mxfp4-fused`, PR #19). Status: verified (reproduced across the single-tile microbenchmark, the grouped-kernel checkpoint-weight validation, and the end-to-end benchmark). Stamp: `sglang-v0.5.18-rocm700-mi30x`, rocm 7.0, 2026-09-11, jobs 632237, 632241/2, 632253, 632489.
 
+### Stage1 dispatch by sorted-block count closes a scaffold-vs-templated gap at low M
+
+Stage1 (gate_up) of the fused kernel above dispatches per launch by sorted-block count: the scaffold loop wins at every point below 1024 sorted blocks, and the templated 8-wave loop wins at or above (a lighter templated variant, tried as an alternative, did not beat the scaffold loop below that point either). Shipped rule: scaffold below 1024 blocks, templated at or above.
+
+Stage1 time, old dispatch to new: M=16 0.4022 to 0.3042 ms, M=32 0.6497 to 0.5209 ms, M=48 0.8817 to 0.6997 ms, M=64 1.0292 to 0.8341 ms, M=256 1.4314 to 1.2867 ms, M=1024 unchanged (already on the templated side of the threshold). Total per layer: M=16 minus 18 percent (0.5412 to 0.4414 ms), M=64 minus 14 percent, M=256 minus 8 percent. Same kernels, dispatch decision only, so correctness is unchanged: rel L2 2.3 to 2.5e-3 against an fp32 reference at every M tested, and CUDA-graph replay is bit-exact.
+
+Scope: rocm, gfx942, sglang-v0.5.18 fork (`moe/stage1-small-m`, PR #40). Status: verified (measured on real layer-30 rank-0 weights across the production M range; 11 unit tests pass). Stamp: `sglang-v0.5.18-rocm700-mi30x`, rocm 7.0, 2026-09-11, job 632917.
+
 ### Custom skinny bf16 GEMM closes most of the tuned-GEMM gap at decode M
 
 The tuned-GEMM pitfall below shows aiter's own tuner reaching only 3 to 10 percent of peak at M=16 on the model's six dense-projection shapes, because 256-wide hipBLASLt tiles leave most of MI300A's 228 CUs idle at these skinny M values. A HIP kernel purpose-built for this M range, using one workgroup per slice of `w`'s rows, 16-byte loads, fp32 accumulation, wave-shuffle (`__shfl_xor`) reduction, and split-K for the small-N shapes, reaches up to 1018 GB/s (about 19 percent of the 5.3 TB/s peak) on the same shapes, 1.8x to 8.7x faster per call than hipBLASLt's default kernel at M=15/16 across all six shapes (best-config sweep; the kernel's own default-heuristic config under-picks the row-tile width and lands up to 1.4x below the sweep best on 5 of 6 shapes). aiter's own `wvSpltK` kernel only covers M=1 to 4, so it is not a competing option at decode M=15/16.
@@ -248,6 +256,39 @@ Status:  verified (mechanism read from the lookup key, plus measured
          job 631888.
 ```
 
+### Cold dense-GEMM shape resolution is milliseconds, not the cause of multi-second stalls
+
+```
+Symptom: a burst of large, never-repeated prefill M values (session
+         admission burst, unchunked prefill) coincides with multi-second
+         server-side stalls, and the untuned tuned_gemm fallback (see the
+         pitfall above) is a plausible suspect, since every fresh
+         (M, N, K) shape is logged as "not found tuned config ... using
+         torch solution".
+Cause:   measured directly (six dense-projection shapes, 24 fresh M each
+         from 301 to 2779, one device): a genuinely fresh shape costs 0.3
+         to 7.7 ms for its first tuned_gemm.tgemm.mm call (a one-time 260
+         to 290 ms outlier on the process's very first HIP launch only,
+         not a per-shape cost, reproduced in two independent jobs).
+         aiter's fallback for an unmatched shape is a direct, unmodified
+         call into plain F.linear (`aiter/tuned_gemm.py`
+         `solMap["torch"]`); aiter's own table lookup costs 85 us and
+         forcing it to a no-op changes nothing. A 12-fresh-M x 6-GEMM
+         admission burst sums to about 0.4 s total, roughly two orders of
+         magnitude too small to be a single 5-10 s stall.
+Fix:     rule this mechanism out before chasing it further; the actual
+         cause of multi-second stalls on this stack is still open (see
+         `tooling/serving-benchmark.md` and
+         `algorithms/chunked-prefill.md` for the structural mitigation).
+         Do not try to fix stalls by rounding M to a bucket: M=1021 and
+         M=1024 both pay the same cold cost, and M=1277 pays more than
+         M=1280, because hipBLASLt/rocBLAS keys its algorithm-search
+         cache on exact M, not a bucket — a nearby unaligned M does not
+         reuse a bucketed neighbor's warmed selection.
+Scope:   gfx942, aiter d9e5ef7ce0, hipBLASLt in rocm 7.0.
+Status:  verified (measured, reproduced in two jobs). sglang-v0.5.18-rocm700-mi30x, 2026-09-11, jobs 632902, 632911.
+```
+
 ## Out of scope: kernel implementation
 
 Writing new CDNA kernels (HIP, CK templates) is outside this collection. This file covers consuming existing libraries.
@@ -258,4 +299,5 @@ Writing new CDNA kernels (HIP, CK templates) is outside this collection. This fi
 - [`hardware.md`](hardware.md): CDNA3/CDNA4 precision support and GFX IDs
 - [`unified-memory.md`](unified-memory.md): the mem_fraction_static x0.85 multiplier this library applies, and its consequence for save-time memory math
 - [`weight-loading.md`](weight-loading.md): checkpoint materialization, independent of which attention/MoE kernel is selected
+- [`boot-costs.md`](boot-costs.md): one-time process-lifetime costs (Gated DeltaNet autotune, this fork's custom HIP extension builds) to absorb in warmup, not measurement
 - [`frameworks/triton.md`](../../frameworks/triton.md): the portable fallback

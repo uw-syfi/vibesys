@@ -79,6 +79,8 @@ One line per known pitfall; detail lives at the link.
 - Sharded checkpoint load hangs for minutes with no progress on a network filesystem. [`weight-loading.md#shardedstateloader-avoid-mmap-over-a-network-filesystem`](weight-loading.md#shardedstateloader-avoid-mmap-over-a-network-filesystem)
 - A Triton dequant/GEMM kernel profiles at 4-5 percent of HBM bandwidth and retuning its config doesn't help. [`aiter.md#dequant-triton-kernels-measure-at-4-5-percent-of-hbm-bandwidth-not-bandwidth-bound`](aiter.md#dequant-triton-kernels-measure-at-4-5-percent-of-hbm-bandwidth-not-bandwidth-bound)
 - Log fills with "not found tuned config ... will use default config" for dense GEMMs. [`aiter.md#aiters-tuned-gemm-table-misses-every-dense-projection-on-mi300a`](aiter.md#aiters-tuned-gemm-table-misses-every-dense-projection-on-mi300a)
+- A burst of large, never-repeated prefill shapes looks like the cause of multi-second server stalls but isn't (about two orders of magnitude too small). [`aiter.md#cold-dense-gemm-shape-resolution-is-milliseconds-not-the-cause-of-multi-second-stalls`](aiter.md#cold-dense-gemm-shape-resolution-is-milliseconds-not-the-cause-of-multi-second-stalls)
+- Custom HIP extensions rebuild from source on every fresh boot despite a persistent build-cache directory. [`boot-costs.md#the-hip-extension-loader-keys-staleness-on-path-and-mtime-not-content`](boot-costs.md#the-hip-extension-loader-keys-staleness-on-path-and-mtime-not-content)
 - `rocprof-compute` exits during its own startup dependency check. [`profiler.md#rocprof-compute-fails-its-own-dependency-check-on-this-image-rocprofv3-works`](profiler.md#rocprof-compute-fails-its-own-dependency-check-on-this-image-rocprofv3-works)
 
 ## Where ROCm differs from CUDA
@@ -96,4 +98,5 @@ One line per known pitfall; detail lives at the link.
 - [`aiter.md`](aiter.md): AITER / Composable Kernel, capability by gfx target, JIT cache
 - [`unified-memory.md`](unified-memory.md): MI300A load-path recipe, KV-pool pin, mem-fraction math
 - [`weight-loading.md`](weight-loading.md): MoE weight materialization, sharded-artifact fast path
+- [`boot-costs.md`](boot-costs.md): one-time boot/warmup costs and the HIP extension cache staleness pitfall
 - [`profiler.md`](profiler.md): rocprofv3 / rocprof-compute

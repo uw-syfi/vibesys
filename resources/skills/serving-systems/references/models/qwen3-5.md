@@ -54,15 +54,26 @@ Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05.
 
 ## Measured
 
-| Metric | Accepted config | Pre-kernel baseline | Scope |
+| Metric | Pre-kernel baseline | Accepted config: fused MoE + skinny GEMM + mixed chunked prefill | Scope |
 |:--|:--|:--|:--|
-| Decode step (TPOT) | 35.6 ms | 106.8 ms | 4x MI300A, TP=4, 16 concurrent multi-turn sessions, scheduled pacing |
-| p95 TTFT, turn 2+ | 459 ms | 785 ms | same |
-| Throughput | 181 tok/s | 108 tok/s | same |
+| Mean TPOT | 106.8 ms | 35.3 ms | 4x MI300A, TP=4, 48 concurrent multi-turn sessions, scheduled pacing (benchmark_version 2) |
+| p95 TTFT, turn 2+ | 785 ms (n=3, per-rep median) | 493 ms (n=5, pooled per-turn) | same |
+| Throughput | 108 tok/s | 182 tok/s | same |
 
-Accepted config: fused MXFP4 HIP MoE kernel plus custom skinny bf16 GEMM kernel (`SGLANG_MXFP4_MOE_HIP=1`, `SGLANG_SKINNY_GEMM=1`); see [`platforms/`](../platforms/) for the backend-specific kernels. Baseline: Triton MXFP4 MoE fallback kernel with hipBLASLt default dense GEMMs, both kernel flags off.
+Accepted config: `SGLANG_MXFP4_MOE_HIP=1`, `SGLANG_SKINNY_GEMM=1`, plus mixed chunked prefill (`--enable-mixed-chunk --chunked-prefill-size 1024`); see [`platforms/`](../platforms/) for the backend-specific kernels and [`../algorithms/chunked-prefill.md`](../algorithms/chunked-prefill.md) for the chunked-prefill contract. Baseline: Triton MXFP4 MoE fallback kernel with hipBLASLt default dense GEMMs, all three off/unset.
 
-Status: verified. sglang-v0.5.18 fork (`moe/mxfp4-fused` + `gemm/skinny`), 2026-09-11, job 632503 (accepted config, median of 3 reps) and job 632483 (baseline, median of 3 reps).
+Pooled per-turn TTFT quantiles across 5 reps (job 632584; see [`../tooling/serving-benchmark.md`](../tooling/serving-benchmark.md) for why pooled quantiles, not per-rep percentiles, are the metric of record here), p50 / p90 / p95 / p99:
+
+| Config | p50 | p90 | p95 | p99 | Mean TPOT | Throughput |
+|:--|:--|:--|:--|:--|:--|:--|
+| Fused MoE HIP kernel only | 268 ms | 391 ms | 417 ms | 490 ms | 61.6 ms | 145 tok/s |
+| Fused + skinny GEMM + mixed chunked prefill | 242 ms | 408 ms | 493 ms | 1035 ms | 35.3 ms | 182 tok/s |
+
+The custom skinny GEMM kernel alone (without mixed chunked prefill) was found at n=5 to raise p95 TTFT turn-2+ about 38 percent versus fused-only rather than leave it unchanged (an earlier n=3 result had shown the opposite ranking, which does not reproduce). Mixed chunked prefill on top of skinny GEMM reverses that regression, landing close to (about 12 percent above) fused-only's p95 while keeping the full TPOT win.
+
+Caveat: `schedule_bound_fraction` was 0.35 to 0.39 in both rows of the pooled table, so offered load remained partly coupled to server speed even under scheduled pacing (see the admission-queue-mismatch pitfall in [`../tooling/serving-benchmark.md`](../tooling/serving-benchmark.md)); a benchmark_version 3 re-measurement with an admission-aware schedule is pending, and the pooled numbers above should be treated as provisional until it lands.
+
+Status: verified (5-rep pooled numbers; mechanism plus measured for the skinny-GEMM-alone reversal); pre-kernel baseline row still n=3 and not re-run at n=5. Stamp: sglang-v0.5.18 fork (`moe/mxfp4-fused` + `gemm/skinny`), benchmark_version 2, 2026-09-11, job 632584 (fused-only and accepted config, 5 reps pooled) and job 632503 (pre-kernel baseline row, median of 3 reps).
 
 Decode-step time is dominated by the MoE expert FFN, not by the mixer or the collectives: MoE work accounts for roughly three-fifths of decode-step device time, with most of the remainder in the model's other dense (non-expert) GEMMs; collective and mixer time is small by comparison. This was confirmed by a kernel-level profile, reproduced twice. The specific kernel names and per-component percentages are implementation details of the selected backend's MoE and GEMM kernel choice; see [`platforms/`](../platforms/) for the selected backend's kernel notes, not repeated here.
 
