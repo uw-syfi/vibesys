@@ -289,6 +289,33 @@ Scope:   gfx942, aiter d9e5ef7ce0, hipBLASLt in rocm 7.0.
 Status:  verified (measured, reproduced in two jobs). sglang-v0.5.18-rocm700-mi30x, 2026-09-11, jobs 632902, 632911.
 ```
 
+### Fused MXFP4 MoE kernel sits well below HBM bandwidth but is not memory-bound
+
+```
+Symptom: the from-scratch fused w4a16 MoE kernel (SGLANG_MXFP4_MOE_HIP=1)
+         profiles at 13 to 27 percent of HBM peak bandwidth at decode
+         M=16, well below memory-bound territory, but MemUnitStalled is
+         near zero (0.04 to 0.15 percent) and VALUBusy is under 50
+         percent (33.5 to 42.1 percent) on both of its stages.
+Cause:   not bandwidth-bound and not occupancy-bound: MemUnitStalled near
+         zero rules out a stalled memory pipeline, and VALUBusy under 50
+         percent together with an elevated SQ_WAIT_INST_ANY/SQ_INSTS_VALU
+         ratio (7.78 stage1, 2.07 stage2) point to a dependency-chain
+         stall inside the decode-then-MFMA path (LUT lookup, ldexpf
+         exponent add, bf16 cast, feed into MFMA); too few resident
+         wavefronts (61.3 / 75.6 percent of each kernel's own VGPR- or
+         LDS-bound occupancy ceiling, from MeanOccupancyPerCU versus the
+         theoretical ceiling) hide only part of that latency.
+Fix:     shorten the decode dependency chain first (e.g. integer-domain
+         decode instead of a float ldexpf), then raise occupancy (cut
+         VGPR/LDS footprint to raise the ceiling); deepening prefetch
+         does not help here, since the memory unit is not stalled.
+Scope:   rocm, gfx942, this kernel (mxfp4_fused_moe stage1/stage2) at
+         decode M=16.
+Status:  verified once. sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job
+         632991.
+```
+
 ## Out of scope: kernel implementation
 
 Writing new CDNA kernels (HIP, CK templates) is outside this collection. This file covers consuming existing libraries.
