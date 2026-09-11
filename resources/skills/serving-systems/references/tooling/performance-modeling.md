@@ -159,6 +159,28 @@ traffic grows with live context. Prefill and decode therefore need separate
 models. Mixed prefill/decode scheduling needs a weighted or trace-derived model,
 not a single generic tokens-per-step estimate.
 
+### MoE grouped GEMM at small batch: the padding floor, not the FLOP roofline
+
+A grouped GEMM implementation tiles each expert's rows to a fixed `BLOCK_M`.
+At small per-request batch, an MoE layer routes only a few real tokens to most
+experts, so most tiles hold close to one real token padded out to a full
+`BLOCK_M` block. The FLOP roofline above assumes the tile's rows are useful
+work; here almost all of them are not, so the FLOP-based ceiling understates
+the real floor by roughly `BLOCK_M / real_tokens_per_block`. The bound that
+matters in this regime is the weight-byte floor per layer (bytes of expert
+weight a rank must read, divided by usable HBM bandwidth), not the FLOP
+roofline, because the tiles are padding-bound rather than compute-bound.
+
+The tell that you are in this regime: reducing the kernel's ALU work (a
+cheaper decode, fewer instructions per element) does not move the measured
+time. If cutting compute does not move the needle, the kernel is bound by the
+padded tile shape and the bytes it reads, not by the arithmetic inside it; the
+next step is a byte-floor comparison, not further ALU reduction.
+
+Scope: MoE grouped GEMM, any backend, small per-request batch with expert
+routing (for example top-k routing at decode). Status: verified. Stamp:
+sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job 633024.
+
 ## Connect device and service ceilings
 
 For a decode step producing `B_useful` request tokens:

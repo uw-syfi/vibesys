@@ -41,6 +41,16 @@ Scope: rocm, `sglang-v0.5.18-rocm700-mi30x` with aiter bundled. Status: verified
 
 Scope: rocm, `sglang-v0.5.18-rocm700-mi30x` image, rocprofv3 1.0.0, ROCm 7.0.0. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job 632991.
 
+## In-kernel phase timing
+
+When counters show a kernel is neither bandwidth-bound (`MemUnitStalled` near zero) nor ALU-bound (`VALUBusy` under 50 percent), the counter altitude cannot tell you what the kernel is waiting on: it can only rule those two out. To find the actual limiter, instrument the kernel itself.
+
+Method: insert a `clock64()`-style timestamp read at each phase boundary inside the kernel body (for example: activation gather, main K loop, reduction, epilogue), write each timestamp to a small per-block scratch buffer, run the real production shapes on one device, then read back the per-phase medians across blocks. This distinguishes a latency-bound phase (time tracks a dependency chain, not issued instruction count) from an ALU-bound one from inside a single kernel launch, which counter-altitude profiling cannot do once both `MemUnitStalled` and `VALUBusy` sit in the ambiguous middle.
+
+Pitfall: **"`MemUnitStalled` near zero" does not rule out memory latency as the limiter.** It only rules out bandwidth saturation (the memory pipeline backing up). A kernel can be latency-bound on scattered, low-reuse loads while `MemUnitStalled` reads near zero, because the memory unit is issuing requests without a backlog; it is underfed, not saturated. Phase timing, not the stall counter, is what separates "waiting on scattered gathers" from "compute-bound."
+
+Scope: rocm, gfx942, `sglang-v0.5.18-rocm700-mi30x`. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job 633024.
+
 ## Pitfalls
 
 ### rocprof-compute fails its own dependency check on this image; rocprofv3 works
