@@ -118,6 +118,18 @@ Protocol that resolves this to about 10 percent residual noise: run the candidat
 
 Status: verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05 to 2026-09-10.
 
+### Repeated reps against one held server are not independent samples
+
+Running the three reps above back-to-back against the *same* server process, with a fixed conversation seed, does not give three independent TTFT samples: reps 2 and 3 hit the prefix-cache entries reps before them installed, even though each rep intends to replay the workload "fresh." Measured p95 TTFT for turn-2+ across three consecutive reps: 899.9 / 772.9 / 598.4 ms, monotonically decreasing (39 percent spread); turn-1 TTFT 412 / 341 / 317 ms, same pattern.
+
+Cause: prefix caching (radix cache) is a property of the server process, not the rep; a fixed seed means every rep replays the same conversations, so rep *N* inherits cache state rep *N-1* installed. See [`../algorithms/radix-prefix-caching.md`](../algorithms/radix-prefix-caching.md) for the mechanism.
+
+Fix: flush the cache (e.g. `POST /flush_cache` while idle) before each measured rep. Rep 1 without a flush is the number comparable to a fresh-server evaluation; treat reps taken without an intervening flush as one contaminated sample, not independent repetitions.
+
+TPOT is not affected by this: it stays within about 3 percent across the same three reps (108.0 / 106.6 / 104.7 ms), because it isn't sensitive to prefix-hit position the way TTFT is. Prefer TPOT over TTFT when a held-server protocol can't flush between reps.
+
+Scope: any backend and engine with prefix caching enabled (backend-independent); observed on `sglang-v0.5.18-rocm700-mi30x` (aiter attention backend). Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-10, job 631854.
+
 ## Reading a benchmark report (skeptically)
 
 Checklist before trusting someone's numbers:

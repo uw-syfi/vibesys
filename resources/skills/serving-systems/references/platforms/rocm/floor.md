@@ -75,6 +75,9 @@ One line per known pitfall; detail lives at the link.
 - KV pool auto-sizes to a different token count across otherwise-identical boots. [`unified-memory.md#kv-pool-size-drifts-across-boots`](unified-memory.md#kv-pool-size-drifts-across-boots)
 - MoE weight loading crawls at tens of MB/s with CPU and disk idle. [`weight-loading.md#stock-per-tensor-moe-materialization-is-the-pathology-not-io`](weight-loading.md#stock-per-tensor-moe-materialization-is-the-pathology-not-io)
 - Sharded checkpoint load hangs for minutes with no progress on a network filesystem. [`weight-loading.md#shardedstateloader-avoid-mmap-over-a-network-filesystem`](weight-loading.md#shardedstateloader-avoid-mmap-over-a-network-filesystem)
+- A Triton dequant/GEMM kernel profiles at 4-5 percent of HBM bandwidth and retuning its config doesn't help. [`aiter.md#dequant-triton-kernels-measure-at-4-5-percent-of-hbm-bandwidth-not-bandwidth-bound`](aiter.md#dequant-triton-kernels-measure-at-4-5-percent-of-hbm-bandwidth-not-bandwidth-bound)
+- Log fills with "not found tuned config ... will use default config" for dense GEMMs. [`aiter.md#aiters-tuned-gemm-table-misses-every-dense-projection-on-mi300a`](aiter.md#aiters-tuned-gemm-table-misses-every-dense-projection-on-mi300a)
+- `rocprof-compute` exits during its own startup dependency check. [`profiler.md#rocprof-compute-fails-its-own-dependency-check-on-this-image-rocprofv3-works`](profiler.md#rocprof-compute-fails-its-own-dependency-check-on-this-image-rocprofv3-works)
 
 ## Where ROCm differs from CUDA
 

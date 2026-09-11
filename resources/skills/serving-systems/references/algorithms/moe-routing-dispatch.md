@@ -70,7 +70,7 @@ Expert popularity is skewed in practice. Static assignment + skewed traffic = GP
 | MXFP4 fused MoE, AITER path | SGLang | `moe_runner/` | aiter fused MXFP4 grouped GEMM | `rocm` gfx950 |
 | MXFP4 fused MoE, gfx942 | SGLang | `moe_runner/` | **N/A**: no AITER MXFP4 MoE kernel in the aiter build bundled with sglang-v0.5.18-rocm700; falls back to a Triton w4a16 kernel with in-kernel dequant | `rocm` gfx942 (MI300A, MI300X) |
 
-Status: verified (gfx942 row, observed and explained by mechanism read in source), candidate on the gfx950 row (public target, not exercised in this campaign). sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job 623402.
+Status: verified (gfx942 row, observed and explained by mechanism read in source and reconfirmed at the source level, `is_fp4_avail` scoped to gfx950/gfx1250, in aiter d9e5ef7ce0), candidate on the gfx950 row (public target, not exercised in this campaign). sglang-v0.5.18-rocm700-mi30x, 2026-09-05 to 2026-09-11, job 623402, aiter d9e5ef7ce0.
 
 ## Engine pointers
 

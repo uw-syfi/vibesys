@@ -167,6 +167,29 @@ rg "class.*QuantScheme|get_quant_method|apply_weights" \
    $SERVE_REPOS/sglang/python/sglang/srt/layers/quantization/
 ```
 
+## Pitfalls
+
+### `profile_by_stage` cannot isolate a stage rarer than the ones around it
+
+```
+Symptom: capturing a turn-2+ prefill (EXTEND) trace with
+         profile_by_stage=true never exports; a later POST /stop_profile
+         returns 500 "Profiling is not in progress".
+Cause:   the DECODE stage (far more frequent in a decode-heavy multi-turn
+         workload) finishes and clears the tokenizer-manager's profiling
+         flag before the rarer EXTEND stage this run wanted to capture
+         ever runs.
+Fix:     use profile_by_stage=false and time the profiling window
+         manually so it brackets a request known to trigger the target
+         stage (e.g. a fresh turn's prefill), instead of relying on
+         stage-keyed auto-stop.
+Scope:   sglang v0.5.18 fork, before PR #9 / #11 (PR #9 fixed a separate
+         export bug in the same feature; this stage-isolation defect is
+         still open as of PR #11).
+Status:  verified (mechanism read from the profiling-flag lifecycle in
+         source). sglang-v0.5.18-rocm700-mi30x, 2026-09-11.
+```
+
 ## See also
 
 - `engines/vllm/`, `engines/trtllm/`
