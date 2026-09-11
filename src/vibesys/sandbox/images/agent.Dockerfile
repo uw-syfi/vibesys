@@ -19,6 +19,10 @@ ARG OPENCODE_VERSION
 ARG TOOLCHAINS=""
 ARG RUST_VERSION
 ARG GO_VERSION
+# Space-separated extra pip requirements an execution environment needs in
+# the editor container (the Modal environment adds the `modal` client so a
+# candidate's `modal run` works). Empty installs nothing extra.
+ARG PIP_EXTRAS=""
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -74,7 +78,7 @@ RUN npm install -g --include=optional \
 # Debian 12+ marks the system Python as externally managed (PEP 668); this
 # image has no other consumer of that protection.
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
-RUN pip install --no-cache-dir uv 'mcp>=1.0,<2'
+RUN pip install --no-cache-dir uv 'mcp>=1.0,<2' ${PIP_EXTRAS}
 
 # Harmless when the corresponding toolchain is absent, so these are set
 # unconditionally rather than only inside the TOOLCHAINS branches below.

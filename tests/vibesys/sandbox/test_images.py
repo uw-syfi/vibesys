@@ -119,6 +119,8 @@ def test_agent_image_base_only_argv(monkeypatch: pytest.MonkeyPatch) -> None:
         "RUST_VERSION=1.90.0",
         "--build-arg",
         "GO_VERSION=1.22.0",
+        "--build-arg",
+        "PIP_EXTRAS=",
         str(_AGENT_IMAGE_DIR),
     )
     assert cwd == _AGENT_IMAGE_DIR
@@ -197,6 +199,8 @@ def test_agent_image_chains_task_image_as_base(
         "RUST_VERSION=1.90.0",
         "--build-arg",
         "GO_VERSION=1.22.0",
+        "--build-arg",
+        "PIP_EXTRAS=",
         str(_AGENT_IMAGE_DIR),
     )
     assert agent_cwd == _AGENT_IMAGE_DIR
@@ -271,3 +275,18 @@ def test_agent_dockerfile_has_one_arg_per_cli_version() -> None:
     declared_args = set(re.findall(r"(?m)^ARG\s+([A-Z0-9_]+)", text))
     expected_args = {f"{provider.upper()}_VERSION" for provider in provider_policy.CLI_VERSIONS}
     assert expected_args <= declared_args
+
+
+def test_pip_extras_are_rendered_sorted_and_deduplicated(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_uuid(monkeypatch)
+    _patch_versions(monkeypatch)
+    runner = _FakeRunner()
+
+    agent_image(
+        "python:3.12-bookworm",
+        pip_extras=("modal>=0.66", "b", "modal>=0.66"),
+        command_runner=runner,
+    )
+
+    build_argv, _cwd, _timeout = runner.calls[0]
+    assert "PIP_EXTRAS=b modal>=0.66" in build_argv

@@ -480,6 +480,11 @@ class DockerEnvironment:  # noqa: D101  # tracked: #288
         return CandidateRuntime(view.prompt_notes, view.deployment_namespace)
 
 
+#: The Modal client a candidate's ``modal run`` needs inside the editor
+#: container; baked into that environment's agent image.
+_MODAL_EDITOR_PIP_EXTRAS: tuple[str, ...] = ("modal>=0.66",)
+
+
 @dataclass(frozen=True)
 class ModalEnvironmentConfig:  # noqa: D101  # tracked: #288
     image: str | None = None
@@ -776,6 +781,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):  # noqa: D101  # tracked: #288
         container_image = agent_image(
             _docker_backend_image(request),
             toolchains=_docker_agent_toolchains(request, tools),
+            pip_extras=_MODAL_EDITOR_PIP_EXTRAS,
         )
         container_image = _ensure_pushed_for_remote_backend(
             container_image, ensure_pushed=ensure_pushed, backend_label="Modal"

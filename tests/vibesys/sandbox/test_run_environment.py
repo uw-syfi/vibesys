@@ -212,12 +212,14 @@ def fake_agent_image(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         base_image: str,
         *,
         toolchains: Any = (),  # noqa: ANN401  # tracked: #288
+        pip_extras: Any = (),  # noqa: ANN401  # tracked: #288
         **_kwargs: Any,  # noqa: ANN401  # tracked: #288
     ) -> str:
         calls.append(
             {
                 "base_image": base_image,
                 "toolchains": frozenset(toolchains),
+                "pip_extras": frozenset(pip_extras),
             }
         )
         return "sha256:" + "a" * 64

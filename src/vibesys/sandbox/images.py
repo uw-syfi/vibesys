@@ -164,15 +164,19 @@ def build_task_image(
     return _build_and_inspect(target, extra_build_args, runner=runner, timeout=timeout)
 
 
-def agent_image(
+def agent_image(  # noqa: PLR0913  # tracked: #288
     base_image: str,
     *,
     task_dockerfile: Path | None = None,
     toolchains: Collection[str] = (),
+    pip_extras: Collection[str] = (),
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
 ) -> str:
     """Build the agent layer on top of a task image, and return its image ID.
+
+    ``pip_extras`` are extra pip requirements an execution environment needs
+    inside the editor container (sorted and deduplicated like ``toolchains``).
 
     When ``task_dockerfile`` is given, the task image is built first (via
     :func:`build_task_image`, with ``base_image`` passed through so the task
@@ -210,6 +214,7 @@ def agent_image(
     build_args += ["--build-arg", f"TOOLCHAINS={' '.join(sorted(set(toolchains)))}"]
     build_args += ["--build-arg", f"RUST_VERSION={provider_policy.RUST_TOOLCHAIN_VERSION}"]
     build_args += ["--build-arg", f"GO_VERSION={provider_policy.GO_TOOLCHAIN_VERSION}"]
+    build_args += ["--build-arg", f"PIP_EXTRAS={' '.join(sorted(set(pip_extras)))}"]
 
     target = _BuildTarget(
         dockerfile=_AGENT_DOCKERFILE,
