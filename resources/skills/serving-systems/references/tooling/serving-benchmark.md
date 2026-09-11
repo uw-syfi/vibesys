@@ -134,6 +134,21 @@ TPOT is not affected by contamination the way TTFT is: even unflushed, it stayed
 
 Scope: any backend and engine with prefix caching enabled (backend-independent); observed on `sglang-v0.5.18-rocm700-mi30x` (aiter attention backend), fix verified on a hybrid (attention + SSM) MoE model. Status: verified (mechanism plus measured). Stamp: sglang-v0.5.18 fork, 2026-09-11, job 632232 (fix measured, 39 percent to 8-18 percent spread); baseline and mechanism from `sglang-v0.5.18-rocm700-mi30x`, 2026-09-10, job 631854.
 
+### Scheduled pacing decouples offered load from server speed
+
+The closed-loop pitfall below shows a decode speedup mechanically raising offered load under pure closed-loop pacing. The fix — send turn k at the later of a fixed schedule derived from a reference server speed (`REF_TTFT_MS`, `REF_TPOT_MS`) or the previous turn's completion plus think time — was measured against closed-loop pacing on the same held server at the reference speed, then again after two accepted kernel changes raised the server's actual speed:
+
+| Server speed | schedule_bound_fraction (share of sends the schedule, not the server, paced) | scheduled vs. closed |
+|:--|:--|:--|
+| At the reference speed (TPOT about 107 ms against `REF_TPOT_MS=110`) | 13.5 percent (pooled across 3 reps) | equal: scheduled and closed land within noise of each other, as expected when there is nothing to decouple yet |
+| At 1.7x reference throughput (fused MoE + skinny GEMM kernels, TPOT about 36 ms) | 35 to 39 percent | scheduled and closed diverge: TTFT keeps tracking a growing offered rate under scheduled pacing instead of collapsing to the closed-loop coupling this design exists to prevent |
+
+This is the design working as intended: it agrees with closed-loop pacing when nothing has changed, and an increasing share of sends become schedule-bound as the server gets faster, which is what stops a decode speedup from being misread as a pure throughput win with no latency cost. `--pacing closed` reproduces the pre-fix behavior for comparison.
+
+Caveat: p95 TTFT over one rep's roughly 200 turns is noisy regardless of pacing mode (25.7 percent spread across 3 reps under scheduled pacing at the reference speed, 11.2 percent under closed, both 3-rep samples). Use pooled per-turn distributions across reps rather than a single rep's percentile, and prefer TPOT (per-rep spread under 1 percent) when its delta already resolves the comparison.
+
+Scope: any engine, backend-independent (the schedule and the per-rep noise are properties of the benchmark client, not the server under test). Status: verified (mechanism plus measured at two server speeds). Stamp: sglang-v0.5.18 fork, benchmark_version 2, 2026-09-11, jobs 632483 (reference speed, schedule_bound_fraction 13.5 percent pooled) and 632503 (1.7x throughput, schedule_bound_fraction 35 to 39 percent).
+
 ## Reading a benchmark report (skeptically)
 
 Checklist before trusting someone's numbers:

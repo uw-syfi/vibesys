@@ -81,6 +81,46 @@ Both are several times faster than the production MXFP4 Triton kernel at the sam
 
 Scope: rocm, gfx942, aiter `d9e5ef7ce0`. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, jobs 631892 and 631902.
 
+### No shipped kernel consumes MXFP4 weights directly on gfx942
+
+Beyond the AITER MXFP4 gate in the capability table above, every other shipped kernel path was checked and also does not consume MXFP4 weights on gfx942:
+
+| Library / path | Finding | Evidence |
+|:--|:--|:--|
+| CK MX-GEMM grouped-GEMM (`device_moe_mx_gemm_bpreshuffle.hpp`) | Block pipeline requires gfx950's native scaled-MFMA; a hardware gap in the pipeline, not a missing build flag | `blockwise_gemm_mx_pipeline_xdlops_base.hpp:88-96` |
+| aiter's CK codegen | Every generated instance whose B dtype contains `FP4` is wrapped in `#ifndef __gfx942__` | `ck_gemm_moe_2stages_codegen/gen_instances.py:945-948` |
+| aiter Triton MXFP4 (`tl.dot_scaled`) | Gated to `gfx950`/`gfx1250` via `is_fp4_avail()`; no gfx942 codepath compiles at all | `arch_info.py:19-20`, `moe_op_gemm_a16w4.py:305-306,335-336` |
+| aiter FlyDSL a16w4 software decode | Portable code exists (`_unpack_b_mxfp4_bf16_sw`), but costs about 18 VALU per element on gfx942 versus about 0.5 on gfx950's hardware convert instruction; its test suite hard-skips off gfx950 | `mfma_preshuffle_pipeline.py:1221-1223`; `test_flydsl_moe_a16wfp4.py:60-63` |
+| aiter CK-Tile `a16w4_mxfp4_swiglu` | ImportError (undefined symbol) even after rebuilding into a writable JIT cache; the swiglu instantiation never appears in `build.ninja` although its `.cuh` source exists, a build-manifest gap, not an architecture gate | aiter `d9e5ef7ce0` |
+
+Scope: gfx942, aiter `d9e5ef7ce0`, CK `f33252ce`. Status: verified (mechanism read from source at every row; the CK-Tile row also reproduced live). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11.
+
+### From-scratch HIP fused w4a16 MoE kernel: bypasses the gap above
+
+A HIP kernel that decodes e2m1 (MXFP4) nibbles via a 16-entry LUT plus an exponent add directly into `v_mfma_f32_16x16x16_bf16` B fragments works on gfx942, with no separate dequant pass and no CK weight-preshuffle step:
+
+- Decode: nibble extract (shift+mask) then LUT lookup then `ldexpf` exponent-field add then cast to bf16, about 5 to 6 VALU per element. The MFMA operand mapping (lane `l` holds block `l/16`, row/col `l%16`) is verified against `ck/tensor_operation/gpu/warp/xdlops_gemm.hpp:471-490,2740-2825`.
+- Each lane owns one contiguous 256-wide K run (rather than re-reading the same 32 bytes per MFMA window), so one 16-byte `buffer_load_dwordx4` per lane covers 32 K-values plus their e8m0 scale block.
+- Decode is not the marginal cost: the fused kernel is at wall-clock parity with a pre-decoded-bf16 version of the same loop (0.88 to 1.63x across shapes) while moving 3.77x fewer bytes.
+- Templating `K` and `NWAVES` as compile-time (not runtime) kernel parameters keeps the load-prefetch ring in registers; a runtime-`K` version spilled 48 to 176 bytes per lane to scratch. Best configs: WIDE 4 column tiles sharing one A walk, 8 waves for K=4096 (gate_up), 2 waves for K=256 (down).
+- Measured per layer (one device, E=512, top-10, K=4096, per-rank N=256, the production shape), M=16, at the decode-step touched-expert count E=138 and the prefill-like expert count E=512 (M still 16): 0.39 ms (E=138) and 1.54 ms (E=512), versus production's Triton kernel at 1.45 ms and 5.2 ms. Decode is fully fused into the MFMA feed, with no separate memory pass.
+- Integrated into the fork's grouped MoE kernel and validated against real layer-30 checkpoint weights across production M values: 0.554 ms/layer at M=16 up to 3.545 ms/layer at M=1024, versus production's 1.468 to 5.212 ms (1.47x to 2.65x faster). Correctness: rel L2 about 2e-3 against an fp32 reference at every M tested (production sits at about 4e-3).
+- Under the real multi-turn benchmark this kernel alone (`SGLANG_MXFP4_MOE_HIP=1`) cut mean TPOT from 106.82 ms to 61.00 ms (-42.9 percent) and p95 TTFT turn-2+ from 784.7 ms to 537.5 ms (-31.5 percent); see [`models/qwen3-5.md`](../../models/qwen3-5.md) and [`tooling/serving-benchmark.md`](../../tooling/serving-benchmark.md).
+
+Env var: `SGLANG_MXFP4_MOE_HIP=1` selects this kernel over the Triton fallback above; see [`floor.md`](floor.md).
+
+Scope: rocm, gfx942, sglang-v0.5.18 fork (`moe/mxfp4-fused`, PR #19). Status: verified (reproduced across the single-tile microbenchmark, the grouped-kernel checkpoint-weight validation, and the end-to-end benchmark). Stamp: `sglang-v0.5.18-rocm700-mi30x`, rocm 7.0, 2026-09-11, jobs 632237, 632241/2, 632253, 632489.
+
+### Custom skinny bf16 GEMM closes most of the tuned-GEMM gap at decode M
+
+The tuned-GEMM pitfall below shows aiter's own tuner reaching only 3 to 10 percent of peak at M=16 on the model's six dense-projection shapes, because 256-wide hipBLASLt tiles leave most of MI300A's 228 CUs idle at these skinny M values. A HIP kernel purpose-built for this M range, using one workgroup per slice of `w`'s rows, 16-byte loads, fp32 accumulation, wave-shuffle (`__shfl_xor`) reduction, and split-K for the small-N shapes, reaches up to 1018 GB/s (about 19 percent of the 5.3 TB/s peak) on the same shapes, 1.8x to 8.7x faster per call than hipBLASLt's default kernel at M=15/16 across all six shapes (best-config sweep; the kernel's own default-heuristic config under-picks the row-tile width and lands up to 1.4x below the sweep best on 5 of 6 shapes). aiter's own `wvSpltK` kernel only covers M=1 to 4, so it is not a competing option at decode M=15/16.
+
+Under the real multi-turn benchmark, stacking this kernel (`SGLANG_SKINNY_GEMM=1`) on top of the fused MoE kernel above cut mean TPOT a further 25.4 ms (61.0 to 35.6 ms, -41.6 percent) and p95 TTFT turn-2+ a further 78.7 ms (537.5 to 458.8 ms, -14.6 percent), for a combined 66.6 percent TPOT cut and 41.5 percent p95 TTFT cut against the pre-both-kernels baseline.
+
+Env var: `SGLANG_SKINNY_GEMM=1`, routed for M <= 16; see [`floor.md`](floor.md).
+
+Scope: rocm, gfx942, MI300A (228 CU), rocm 7.0. Status: verified (single-kernel microbenchmark reproduced across the M=16 sweep and the M=1 comparison; end-to-end effect reproduced in the three-side paired benchmark). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, jobs 632226, 632230/632233, 632238, 632503.
+
 ## JIT cache
 
 AITER JIT-builds kernels into `AITER_JIT_DIR` (default: inside the aiter package directory, which in a squashfs or otherwise read-only container image is ephemeral or read-only). Set it to a persistent, pre-warmed directory before the first launch.

@@ -54,24 +54,27 @@ Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05.
 
 ## Measured
 
-| Metric | Value | Scope |
-|:--|:--|:--|
-| Decode step (TPOT) | ~106 ms | 4x MI300A, TP=4, Triton MXFP4 MoE fallback kernel, 16 concurrent multi-turn sessions |
-| p95 TTFT, turn 2+ | 662 to 704 ms (five samples) | same |
+| Metric | Accepted config | Pre-kernel baseline | Scope |
+|:--|:--|:--|:--|
+| Decode step (TPOT) | 35.6 ms | 106.8 ms | 4x MI300A, TP=4, 16 concurrent multi-turn sessions, scheduled pacing |
+| p95 TTFT, turn 2+ | 459 ms | 785 ms | same |
+| Throughput | 181 tok/s | 108 tok/s | same |
 
-Status: verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05.
+Accepted config: fused MXFP4 HIP MoE kernel plus custom skinny bf16 GEMM kernel (`SGLANG_MXFP4_MOE_HIP=1`, `SGLANG_SKINNY_GEMM=1`); see [`platforms/`](../platforms/) for the backend-specific kernels. Baseline: Triton MXFP4 MoE fallback kernel with hipBLASLt default dense GEMMs, both kernel flags off.
+
+Status: verified. sglang-v0.5.18 fork (`moe/mxfp4-fused` + `gemm/skinny`), 2026-09-11, job 632503 (accepted config, median of 3 reps) and job 632483 (baseline, median of 3 reps).
 
 Decode-step time is dominated by the MoE expert FFN, not by the mixer or the collectives: MoE work accounts for roughly three-fifths of decode-step device time, with most of the remainder in the model's other dense (non-expert) GEMMs; collective and mixer time is small by comparison. This was confirmed by a kernel-level profile, reproduced twice. The specific kernel names and per-component percentages are implementation details of the selected backend's MoE and GEMM kernel choice; see [`platforms/`](../platforms/) for the selected backend's kernel notes, not repeated here.
 
 Status: verified (reproduced twice). sglang-v0.5.18-rocm700-mi30x, 2026-09-11.
 
-### Candidate: resident-fp8 / MXFP4-dequant hybrid MoE weights
+### Outcome: resident-fp8 / MXFP4-dequant hybrid MoE weights (superseded)
 
-The full expert set does not fit resident on one 4x MI300A node at a faster-than-MXFP4 precision (fp8 resident experts measured at about 388 GB of the ~430 GB free on one 4x MI300A node; see [`platforms/`](../platforms/) for the kernel benchmark this is based on). A hybrid design (keep MXFP4 weights resident, gather-dequant only the experts a batch actually touches into a faster-precision scratch buffer per layer) is under test as a way to get faster-than-MXFP4 compute without the memory cost of full resident conversion. A first (Triton dequant) implementation of the gather-dequant step was slower than the MXFP4 baseline it was meant to replace, so the mechanism is not yet net-positive.
+The gather-dequant hybrid design (keep MXFP4 weights resident, gather-dequant only the experts a batch actually touches into a faster-precision scratch buffer per layer) was carried through to a real end-to-end test under the campaign's numerics policy: only changes that compute the same numbers as production (bf16-rounding-level differences) are admissible, since the 13-probe accuracy gate cannot itself catch a numerics-changing regression. The bf16 target passed that bar (rel L2 0.23 percent vs. production's 0.40 percent) but was a marginal, mixed result end to end: p95 TTFT turn-2+ improved 4.85 percent (649.0 to 617.6 ms) while TPOT regressed 1.58 percent (107.3 to 109.0 ms), because the dequant-into-CK's-preshuffled-layout write traffic largely canceled the CK kernel's own speed advantage. The fp8 target failed the pre-benchmark accuracy gate (6 of 13 probes, garbage output on history and arithmetic probes) because per-token activation quantization changes the computed numbers, which the exact-only policy excludes regardless of speed.
 
-What would verify it: a gather-dequant implementation whose per-layer overhead is smaller than the compute time it saves versus running MXFP4 directly, measured end-to-end against the MXFP4 baseline at production batch sizes.
+Both hybrid targets are superseded by the from-scratch fused HIP MoE kernel (see the Measured table above and [`platforms/`](../platforms/) for the kernel), which computes exact bf16-rounding-level numbers and wins outright rather than trading TTFT against TPOT.
 
-Scope: any model with a routed-MoE expert set too large to hold resident at a fast precision on the target node; backend-independent in shape, though the specific kernels are platform work. Status: candidate. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11.
+Scope: rocm, gfx942, aiter d9e5ef7ce0. Status: refuted as a serving candidate (bf16: exact but not a net win; fp8: excluded by the exact-only numerics policy). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job 632232.
 
 ## See also
 
