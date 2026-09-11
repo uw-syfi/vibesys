@@ -126,6 +126,8 @@ Run independent hypotheses in parallel across nodes. Never test two changes in o
 
 Run the accuracy gate with every benchmark, never only at the end. Optimizations that drop context, change numerics, or skip work look like wins on the latency metric. A change that fails the gate is a bug regardless of its speedup.
 
+Classify every candidate before testing it: does it compute the same numbers (a faster kernel on the same weights and math, differing only at rounding), or different numbers (a lower-precision activation or weight format, a re-quantized checkpoint)? A task's gate is usually a handful of probes that catch a broken kernel but not a slightly worse model, so it is sufficient only for same-numbers changes. For different-numbers changes, either exclude them by policy up front or add an agreement test against the current path on real inputs (next-token top-1 agreement and mean KL over a few thousand tokens) with thresholds set before the experiment. State the policy in the campaign notes before the first candidate so it is not decided after seeing a speedup.
+
 ## 8. Keep the ledger
 
 The ledger lives in the task repository next to the harness, at `.vibesys/tasks/<task>/LEDGER.md`, as a markdown table with one row per experiment and this fixed column set, because the curation skill consumes it mechanically:
