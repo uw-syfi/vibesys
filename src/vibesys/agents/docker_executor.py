@@ -1,19 +1,16 @@
-"""Run agentshim CLI commands inside an already-running VibeSys Docker sandbox.
+"""Compensate for one Codex container behavior that agentshim does not model.
 
-Two pieces live here:
+A resumed ``codex exec ... --json`` run inside a container regularly finishes
+its work and writes the terminal events to its rollout file, then never
+exits, so the ``docker exec`` in front of it blocks until the turn budget
+expires. :class:`CodexRolloutWatchdogExecutor` reads the rollout, replays the
+completion into the stream, and stops the process. This stays in VibeSys
+until Codex resume inside containers is verified fixed upstream; it does not
+belong in agentshim, which models what a provider is documented to do.
 
-* :class:`DockerCommandExecutor` -- a ``docker exec`` transport built on the
-  library's ``TransformingExecutor``. It carries no provider knowledge: it
-  rewrites argv, forwards the environment entries its caller nominated, and
-  lets agentshim own everything else.
-* :class:`CodexRolloutWatchdogExecutor` -- provider-behaviour compensation, not
-  transport. A resumed ``codex exec ... --json`` run inside a container
-  regularly finishes its work and writes the terminal events to its rollout
-  file, then never exits, so the ``docker exec`` in front of it blocks until
-  the turn budget expires. The watchdog reads the rollout, replays the
-  completion into the stream, and stops the process. This stays in VibeSys
-  until Codex resume inside containers is verified fixed upstream; it does not
-  belong in agentshim, which models what a provider is documented to do.
+The transport itself -- rewriting a command into ``docker exec`` -- is not
+here: :func:`vibesys.agents.drivers.agentshim.confine_to_sandbox` wraps every
+executor, host or container, through the sandbox's own ``wrap``.
 """
 
 from __future__ import annotations
@@ -28,101 +25,14 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from agentshim import (
-    CommandRequest,
-    CommandResult,
-    HostCommandExecutor,
-    TransformingExecutor,
-)
-
-from vs_sandbox import AGENT_HOME
+from agentshim import CommandResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from agentshim import CommandExecutor, CommandHandle, CommandStreamSink
-
-#: Where a container turn runs when the request does not name a directory.
-DEFAULT_CONTAINER_WORKDIR = "/workspace"
+    from agentshim import CommandExecutor, CommandHandle, CommandRequest, CommandStreamSink
 
 _DOCKER_QUERY_TIMEOUT_S = 5
-
-
-def _binary_in_container(name: str, env: Mapping[str, str]) -> str:
-    """Resolve the provider binary inside the container, not on the host.
-
-    The host running VibeSys usually has no copy of the CLI, so the bare name
-    is the right ``argv[0]``: the container's ``PATH`` resolves it.
-    """
-    del env
-    return name
-
-
-class DockerCommandExecutor(TransformingExecutor):
-    """Prefix every agentshim command with ``docker exec`` into one container.
-
-    ``container_id_resolver`` is read once per request rather than captured at
-    construction, so a sandbox that replaces its container (a GPU reselect, for
-    instance) needs no new executor.
-
-    The health check goes through the same transform, so ``<binary> --help`` is
-    checked inside the container where the binary actually exists.
-    """
-
-    def __init__(
-        self,
-        container_id_resolver: Callable[[], str],
-        *,
-        workdir: str = DEFAULT_CONTAINER_WORKDIR,
-        forward_env: Sequence[str] = (),
-        inner: CommandExecutor | None = None,
-    ) -> None:
-        """Wrap *inner* (the local host by default) in ``docker exec``.
-
-        *forward_env* names the environment variables that cross into the
-        container; their values are read from each request, so a per-turn
-        override still takes effect. Everything else stays outside.
-        """
-        self._container_id_resolver = container_id_resolver
-        self._workdir = workdir
-        self._forward_env = tuple(forward_env)
-        super().__init__(
-            inner if inner is not None else HostCommandExecutor(),
-            self._to_docker_exec,
-            find_binary=_binary_in_container,
-        )
-
-    def _forwarded_env(self, env: Mapping[str, str]) -> dict[str, str]:
-        """Return the request environment entries that belong in the container.
-
-        A container starts from its image's environment, not the host's. The
-        environment agentshim assembles for a turn describes the *host*
-        (``PATH``, ``HOME``, interpreter and toolchain locations, whatever a
-        login shell exports), so forwarding entries by inspection would point
-        the container CLI at directories that do not exist inside it and could
-        smuggle host settings such as a model override past the container's own
-        configuration. The caller that knows which variables are meant for the
-        container names them instead.
-        """
-        return {key: env[key] for key in self._forward_env if key in env}
-
-    def _to_docker_exec(self, request: CommandRequest) -> CommandRequest:
-        """Rewrite one request into the equivalent ``docker exec`` invocation."""
-        argv: list[str] = ["docker", "exec", "-i", "-w", request.cwd or self._workdir]
-        for key, value in self._forwarded_env(request.env).items():
-            argv += ["-e", f"{key}={value}"]
-        argv.append(self._container_id_resolver())
-        argv.extend(request.argv)
-        return CommandRequest(
-            argv=argv,
-            stdin=request.stdin,
-            cwd=None,
-            # The transformed command is `docker` itself, running on the host:
-            # it needs the host environment (PATH, DOCKER_HOST, certificates)
-            # to reach the daemon at all.
-            env=os.environ,
-            timeout=request.timeout,
-        )
 
 
 @dataclass(frozen=True)
@@ -133,9 +43,9 @@ class _CodexRolloutCompletion:
     message: str
 
 
-# The container-side process argv is exactly the request.argv the host built
-# (``DockerCommandExecutor`` only prepends ``docker exec ... <container>``), so
-# this script's match criteria are written to agree with the host-side
+# The container-side process argv is exactly the request.argv the sandbox's
+# own ``wrap`` prepended ``docker exec ... <container>`` to, so this script's
+# match criteria are written to agree with the host-side
 # ``_is_codex_json_command``/``_codex_resume_thread_id`` predicate: the binary
 # basename is ``codex``, ``exec`` and ``--json`` are both present, and the
 # thread ID sits immediately after ``resume``. That precision is required here
@@ -294,6 +204,7 @@ class CodexRolloutWatchdogExecutor:
         inner: CommandExecutor,
         container_id_resolver: Callable[[], str],
         *,
+        rollout_sessions_root: str,
         log: Callable[[str], None] = _discard,
         tick_seconds: float = 5.0,
         rollout_poll_seconds: float = 15.0,
@@ -306,6 +217,11 @@ class CodexRolloutWatchdogExecutor:
             inner: The transport a Codex JSON command ultimately runs through.
             container_id_resolver: Names the container to poll, read each time
                 a Codex run needs it.
+            rollout_sessions_root: Where a resumed thread's rollout file lives
+                inside the container. The caller derives this from the
+                sandbox's own ``HOME`` and the Codex provider's state
+                directory, so nothing here hardcodes a home directory that a
+                different base image could relocate.
             log: Sink for the watchdog's own progress lines; dropped by
                 default.
             tick_seconds: Seconds between liveness checks while a Codex JSON
@@ -318,6 +234,7 @@ class CodexRolloutWatchdogExecutor:
         """
         self._inner = inner
         self._container_id_resolver = container_id_resolver
+        self._rollout_sessions_root = rollout_sessions_root
         self._log = log
         self._codex_rollout_paths: dict[str, str] = {}
         self.tick_seconds = tick_seconds
@@ -504,7 +421,7 @@ class CodexRolloutWatchdogExecutor:
                 "exec",
                 container_id,
                 "find",
-                f"{AGENT_HOME}/.codex/sessions",
+                self._rollout_sessions_root,
                 "-type",
                 "f",
                 "-name",

@@ -2,9 +2,16 @@
 
 VibeSys consumes the ``agentshim`` library only through its public API. The
 library owns provider knowledge (argv, stream parsing, MCP config files,
-schema dialects, resume flags); this module owns VibeSys policy: host
+schema dialects, resume flags); this module owns VibeSys policy: sandbox
 confinement, structured-output fallback, conversation budgets, and the
 translation between library events and :mod:`vibesys.agents.contracts`.
+
+One path runs every session, host or container: build (or look up) a
+:class:`~vs_sandbox.WorkspaceSandbox`, wrap a plain ``HostCommandExecutor`` to
+confine it, and hand the library the sandbox's own environment. Every path the
+agent is told about -- the schema directory, an MCP server's command -- goes
+through :meth:`~vs_sandbox.WorkspaceSandbox.agent_path`, so nothing here names
+a backend.
 """
 
 from __future__ import annotations
@@ -34,7 +41,7 @@ from vibesys.agents.contracts import (
     SessionDisposition,
 )
 from vibesys.agents.host_resource_declarations import declare_agent_host_resources
-from vibesys.agents.provider_policy import SHIPPED_PROVIDERS, is_codex
+from vibesys.agents.provider_policy import CODEX_PROVIDER, SHIPPED_PROVIDERS, is_codex
 from vibesys.run.events import CommandResultPayload
 from vs_sandbox import build_host_sandbox
 
@@ -91,35 +98,72 @@ def _ignore_log(_message: str) -> None:
 
 
 class ExecutorFactory(Protocol):
-    """Builds the command executor a host session runs its CLI through."""
+    """Builds the unconfined command executor :func:`confine_to_sandbox` wraps."""
 
-    def __call__(self, sandbox: WorkspaceSandbox | None, /) -> agentshim.CommandExecutor:
-        """Return an executor confined by *sandbox*, or unconfined when it is ``None``."""
+    def __call__(self) -> agentshim.CommandExecutor:
+        """Return a fresh, unconfined executor for one session."""
+        ...
+
+
+class _ConfinableSandbox(Protocol):
+    """The shape :func:`confine_to_sandbox` needs, real or a test double alike.
+
+    Both ``vs_sandbox.WorkspaceSandbox`` (a host confinement policy) and
+    ``vs_sandbox.DockerSandbox`` satisfy this structurally, and so does any
+    lightweight double a test builds for either: nothing here requires the
+    concrete class.
+    """
+
+    def wrap(self, argv: list[str], cwd: Path | str | None = None, /) -> list[str]:
+        """Return *argv* rewritten to run confined to one workspace."""
+        ...
+
+    def agent_path(self, path: Path | str, /) -> str:
+        """Return the path the confined process sees for *path*."""
+        ...
+
+    @property
+    def env(self) -> Mapping[str, str]:
+        """Return the environment variables the confined process runs with."""
         ...
 
 
 def confine_to_sandbox(
     executor: agentshim.CommandExecutor,
-    sandbox: WorkspaceSandbox,
+    sandbox: _ConfinableSandbox,
+    *,
+    find_binary: Callable[[str, Mapping[str, str]], str] | None = None,
 ) -> agentshim.CommandExecutor:
-    """Return *executor* with every workspace command wrapped by *sandbox*.
+    """Return *executor* with every command rewritten through *sandbox*.
 
-    A command without a working directory is left alone: that is the binary
-    health check and, in container mode, the agent itself, both of which run
-    outside the confined workspace (bwrap re-establishes the working directory
-    inside the namespace via ``--chdir``, so a wrapped command needs one).
+    This is the one chokepoint through which the provider CLI launches, for a
+    host confinement policy and an already-running Docker sandbox alike:
+    *sandbox* supplies the ``wrap`` call, so the caller never branches on which
+    kind of sandbox it was given. Every ``wrap`` implementation accepts the
+    request's ``cwd``; a host sandbox confines to exactly one workspace
+    already and ignores it, while a Docker sandbox serves every turn from one
+    container regardless of working directory and maps the argument to ``-w``.
+
+    *find_binary*, when given, replaces the default host-side lookup
+    (``shutil.which`` against the request's own environment). A Docker
+    sandbox's ``env`` carries the *container's* ``PATH``, which resolves to
+    nothing on this host, so its caller passes an override that trusts the
+    bare name to the far side of ``docker exec`` instead.
     """
 
     def transform(request: agentshim.CommandRequest) -> agentshim.CommandRequest:
-        if request.cwd is None:
-            return request
-        return replace(request, argv=sandbox.wrap(list(request.argv)))
+        return replace(request, argv=sandbox.wrap(list(request.argv), request.cwd))
 
-    return agentshim.TransformingExecutor(executor, transform)
+    return agentshim.TransformingExecutor(executor, transform, find_binary=find_binary)
 
 
 def build_host_executor(sandbox: WorkspaceSandbox | None) -> agentshim.CommandExecutor:
-    """Default :class:`ExecutorFactory`: run on this host, confined when possible."""
+    """Run on this host, confined to *sandbox* when one is given.
+
+    A thin convenience over :func:`confine_to_sandbox` for callers (notably
+    the host-confinement test suite) that want the driver's own default
+    executor policy without going through :class:`AgentShimDriver` itself.
+    """
     host = agentshim.HostCommandExecutor()
     return host if sandbox is None else confine_to_sandbox(host, sandbox)
 
@@ -138,22 +182,53 @@ def _resolve_binary_path(binary: str, env: Mapping[str, str]) -> str | None:
         return None
 
 
-def _as_mcp_server(spec: MCPServerSpec, *, in_container: bool) -> agentshim.StdioMcpServer:
+def _bare_binary_name(name: str, env: Mapping[str, str]) -> str:
+    """Trust *name* to resolve on the far side of ``docker exec``.
+
+    A host-side lookup against a container's own ``PATH`` would search
+    directories that only exist inside the image; the container's shell
+    resolves its own binaries once the wrapped command actually runs there.
+    """
+    del env
+    return name
+
+
+def _agent_path(sandbox: _ConfinableSandbox | None, path: Path | str) -> str:
+    """Map *path* through *sandbox*, or return it unchanged with no sandbox."""
+    return sandbox.agent_path(path) if sandbox is not None else str(Path(path))
+
+
+def _as_mcp_server(
+    spec: MCPServerSpec,
+    sandbox: _ConfinableSandbox | None,
+    *,
+    pin_interpreter: bool,
+) -> agentshim.StdioMcpServer:
     """Translate one VibeSys MCP spec into the library's stdio spec.
 
     A host agent inherits a login shell's PATH, where a bare ``python`` may be
-    an interpreter without the MCP dependencies, so host runs are pinned to
-    the interpreter running VibeSys. A container image resolves its own.
+    an interpreter without the MCP dependencies, so *pin_interpreter* (true
+    only on the host) substitutes the interpreter running VibeSys itself. A
+    container image resolves its own, so nothing is substituted there. Every
+    absolute path in the command or args -- including that pinned interpreter
+    -- is then mapped through ``sandbox.agent_path`` so a file the sandbox
+    presents at a different location (a bind-mounted workspace, say) still
+    resolves; a relative argument such as a flag or a workspace-relative path
+    is left untouched.
     """
-    command = spec.command
-    if not in_container and command in _PYTHON_MCP_COMMANDS:
-        command = sys.executable
+    command = (
+        sys.executable if pin_interpreter and spec.command in _PYTHON_MCP_COMMANDS else spec.command
+    )
     return agentshim.StdioMcpServer(
         name=spec.name,
-        command=command,
-        args=tuple(spec.args),
+        command=_agent_path_if_absolute(command, sandbox),
+        args=tuple(_agent_path_if_absolute(arg, sandbox) for arg in spec.args),
         env=dict(spec.env),
     )
+
+
+def _agent_path_if_absolute(value: str, sandbox: _ConfinableSandbox | None) -> str:
+    return _agent_path(sandbox, value) if value.startswith("/") else value
 
 
 def _usage_from(
@@ -281,8 +356,7 @@ class AgentShimSession:
         profile: agentshim.ProviderProfile,
         timeout: int | None,
         event_handler: _AgentShimEventHandler,
-        turn_env: Mapping[str, str] | None,
-        in_container: bool,
+        sandbox: _ConfinableSandbox | None,
         log: Callable[[str], None],
     ) -> None:
         """Bind one library session to the VibeSys policy that drives it."""
@@ -291,11 +365,11 @@ class AgentShimSession:
         self._profile = profile
         self._timeout = timeout
         self._event_handler = event_handler
-        self._turn_env = dict(turn_env) if turn_env else None
-        self._in_container = in_container
+        self._sandbox = sandbox
         self._log = log
         self._mcp_servers = tuple(
-            _as_mcp_server(server, in_container=self._in_container) for server in spec.mcp_servers
+            _as_mcp_server(server, sandbox, pin_interpreter=not spec.policy.containerized)
+            for server in spec.mcp_servers
         )
         self._turn_count = 0
         # Set when the provider conversation was dropped and restarted while
@@ -363,15 +437,7 @@ class AgentShimSession:
         return self._session.adopt(session_id)
 
     def _build_request(self, request: AgentTurnRequest) -> agentshim.TurnRequest:
-        """Translate one VibeSys turn into the library's request.
-
-        A config-file provider writes its MCP config into the workspace, and
-        agentshim derives that directory from the turn's ``cwd``. A container
-        turn names none, so it points ``mcp_workspace`` at the host workspace
-        that is bind-mounted into the container: the file the library writes on
-        the host is the one the CLI reads at ``/workspace``. A host turn already
-        runs in the workspace, so it leaves the field unset.
-        """
+        """Translate one VibeSys turn into the library's request."""
         schema, schema_hint = self._output_schema(request.output_schema)
         timeout = self._timeout
         if request.timeout is not None:
@@ -383,9 +449,7 @@ class AgentShimSession:
             reasoning_effort=(
                 self._spec.reasoning_effort if self._profile.supports_reasoning_effort else None
             ),
-            env=self._turn_env,
             mcp_servers=self._mcp_servers,
-            mcp_workspace=self._spec.workspace if self._in_container else None,
         )
 
     def _output_schema(
@@ -428,9 +492,7 @@ class AgentShimSession:
             agentshim.OutputSchema(
                 schema=agentshim.normalize(schema, dialect),
                 host_dir=host_dir,
-                # The container resolves the schema path against its own
-                # workspace mount, which is not the host path it was written to.
-                cli_dir=_SCHEMA_DIR.as_posix() if self._in_container else str(host_dir),
+                cli_dir=_agent_path(self._sandbox, host_dir),
             ),
             "",
         )
@@ -498,9 +560,9 @@ class AgentShimSession:
             #
             # Only the provider name goes in ``cmd``. ``str(TimeoutExpired)``
             # renders the whole command, and the argv the library timed out on
-            # is the transformed one: in container mode that is a
-            # ``docker exec -e KEY=VALUE ...`` line carrying every forwarded
-            # environment value, which callers log verbatim.
+            # is the transformed one: a containerized turn's is a
+            # ``docker exec -e KEY=VALUE ...`` line carrying every environment
+            # value the sandbox was built with, which callers log verbatim.
             raise subprocess.TimeoutExpired(
                 cmd=[self._profile.binary], timeout=exc.timeout
             ) from exc
@@ -555,9 +617,7 @@ def _without_stale_pwd(env: Mapping[str, str]) -> dict[str, str]:
 
     A subprocess cwd does not rewrite ``$PWD``, and bun-based CLIs (opencode)
     trust ``$PWD`` over the real cwd for workspace config discovery, so a
-    stale value makes them miss ``<workspace>/opencode.json``. Applied to the
-    session environment on the host and to the overlay forwarded into a
-    container, so the cwd wins in both.
+    stale value makes them miss ``<workspace>/opencode.json``.
     """
     return {key: value for key, value in env.items() if key != "PWD"}
 
@@ -575,7 +635,13 @@ class AgentShimDriver:
         executor_factory: ExecutorFactory | None = None,
         check_timeout: float | None = None,
     ) -> None:
-        """Configure one provider; ``executor_factory`` replaces host execution.
+        """Configure one provider; ``executor_factory`` replaces the base executor.
+
+        ``docker_sandboxes`` maps a session's role to an already-started
+        :class:`~vs_sandbox.DockerSandbox` (built and started by the run
+        environment, not by this driver). Its presence is what selects
+        container execution: every session this driver creates then looks up
+        its sandbox there instead of building a host one.
 
         ``check_timeout`` bounds the one-off ``<binary> --help`` health check
         each session runs before its first turn. It defaults to the execution
@@ -590,7 +656,7 @@ class AgentShimDriver:
         self._timeout = timeout
         self._docker_sandboxes = docker_sandboxes
         self._log = log or _ignore_log
-        self._executor_factory: ExecutorFactory = executor_factory or build_host_executor
+        self._executor_factory: ExecutorFactory = executor_factory or agentshim.HostCommandExecutor
         self._check_timeout = (
             check_timeout
             if check_timeout is not None
@@ -616,7 +682,14 @@ class AgentShimDriver:
         )
 
     def create_session(self, spec: AgentSessionSpec) -> AgentSession:
-        """Create one configured AgentShim conversation."""
+        """Create one configured AgentShim conversation.
+
+        Every session takes the same route: look up or build the sandbox for
+        this role, confine a fresh executor to it, and hand the library the
+        sandbox's own environment. A container session additionally runs
+        through the Codex rollout watchdog, which no-ops for every other
+        provider and every non-``exec --json`` command.
+        """
         if self._closed:
             raise RuntimeError("agent driver is closed")  # noqa: TRY003  # tracked: #288
         if spec.provider != self._provider:
@@ -632,20 +705,22 @@ class AgentShimDriver:
 
         provider = agentshim.get_provider(spec.provider)
         event_handler = _AgentShimEventHandler()
-        overlay = dict(spec.environment)
-        turn_env: Mapping[str, str] | None = None
-        executor: agentshim.CommandExecutor
-        if in_container:
-            executor = self._container_executor(spec, forward_env=tuple(overlay))
-            # The container's own environment is built by the image and the
-            # exec invocation; the session overlay is forwarded per turn so it
-            # reaches the CLI inside the container instead of the docker client.
-            env = _without_stale_pwd(agentshim.interactive_env())
-            turn_env = _without_stale_pwd(overlay)
-        else:
-            env = _without_stale_pwd({**agentshim.interactive_env(), **overlay})
-            executor = self._executor_factory(self._host_sandbox(spec, env))
+        sandbox, find_binary = self._sandbox_for(spec)
 
+        executor: agentshim.CommandExecutor = self._executor_factory()
+        if sandbox is not None:
+            executor = confine_to_sandbox(executor, sandbox, find_binary=find_binary)
+        if in_container:
+            from vibesys.agents.docker_executor import CodexRolloutWatchdogExecutor  # noqa: PLC0415
+
+            executor = CodexRolloutWatchdogExecutor(
+                executor,
+                self._container_id_resolver(spec),
+                rollout_sessions_root=_codex_rollout_sessions_root(sandbox),
+                log=self._log,
+            )
+
+        env = sandbox.env if sandbox is not None else self._unconfined_host_env(spec)
         agent = agentshim.CliAgent(
             provider,
             model=spec.model,
@@ -656,22 +731,43 @@ class AgentShimDriver:
             log=self._log,
         )
         session = AgentShimSession(
-            # A container command names its own working directory, so the
-            # session leaves cwd unset there and the executor supplies it.
-            session=agent.start_session(
-                cwd=None if in_container else str(spec.workspace),
-                timeout=self._timeout,
-            ),
+            session=agent.start_session(cwd=str(spec.workspace), timeout=self._timeout),
             spec=spec,
             profile=agent.profile,
             timeout=self._timeout,
             event_handler=event_handler,
-            turn_env=turn_env,
-            in_container=in_container,
+            sandbox=sandbox,
             log=self._log,
         )
         self._sessions.add(session)
         return session
+
+    def _sandbox_for(
+        self,
+        spec: AgentSessionSpec,
+    ) -> tuple[Any, Callable[[str, Mapping[str, str]], str] | None]:
+        """Return the sandbox this session confines to, and its binary lookup.
+
+        A container session's sandbox already exists, started by the run
+        environment; a host session's is built fresh from the declared
+        resources (and may come back ``None`` where confinement is
+        unavailable or disabled). A container's binary lookup trusts the bare
+        name to ``docker exec``'s own ``PATH`` instead of searching this host,
+        which the container's environment does not describe.
+        """
+        if self._docker_sandboxes is not None:
+            return self._docker_sandbox_for(spec), _bare_binary_name
+        env = self._unconfined_host_env(spec)
+        return self._host_sandbox(spec, env), None
+
+    def _unconfined_host_env(self, spec: AgentSessionSpec) -> dict[str, str]:
+        """Return the host session environment before any sandbox is applied.
+
+        Used both to build the host sandbox (whose own ``env`` then reflects
+        it) and as the session environment when confinement came back
+        unavailable.
+        """
+        return _without_stale_pwd({**agentshim.interactive_env(), **dict(spec.environment)})
 
     def _host_sandbox(
         self,
@@ -694,6 +790,15 @@ class AgentShimDriver:
             require_enforcement=spec.policy.require_enforcement,
         )
 
+    def _docker_sandbox_for(self, spec: AgentSessionSpec) -> Any:  # noqa: ANN401  # tracked: #288
+        assert self._docker_sandboxes is not None  # noqa: S101  # tracked: #288
+        sandbox = self._docker_sandboxes.get(spec.role)
+        if sandbox is None:
+            raise ValueError(  # noqa: TRY003  # tracked: #288
+                f"no AgentShim Docker sandbox configured for role {spec.role!r}"
+            )
+        return sandbox
+
     def _container_id_resolver(self, spec: AgentSessionSpec) -> Callable[[], str]:
         """Return the sandbox's current container ID, read at every call.
 
@@ -701,44 +806,11 @@ class AgentShimDriver:
         replaces the container and nothing should then have to rebuild the
         executor or the cleanup hook.
         """
-        assert self._docker_sandboxes is not None  # noqa: S101  # tracked: #288
-        sandbox = self._docker_sandboxes.get(spec.role)
-        if sandbox is None:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"no AgentShim Docker sandbox configured for role {spec.role!r}"
-            )
-        return lambda: str(sandbox.container_id)
 
-    def _container_executor(
-        self,
-        spec: AgentSessionSpec,
-        *,
-        forward_env: tuple[str, ...] = (),
-    ) -> agentshim.CommandExecutor:
-        """Build the ``docker exec`` transport this session's turns run through.
+        def resolve() -> str:
+            return str(self._docker_sandbox_for(spec).container_id)
 
-        *forward_env* names the session-overlay variables that cross into the
-        container. Their values arrive per turn through ``TurnRequest.env``,
-        which is why the transport is told the names rather than the values.
-        """
-        resolve = self._container_id_resolver(spec)
-        # Imported here because the Docker executor is only reachable in
-        # container mode and pulls in the docker command plumbing with it.
-        from vibesys.agents.docker_executor import (  # noqa: PLC0415
-            CodexRolloutWatchdogExecutor,
-            DockerCommandExecutor,
-        )
-
-        executor: agentshim.CommandExecutor = DockerCommandExecutor(
-            resolve, forward_env=forward_env
-        )
-        if is_codex(self._provider):
-            # A resumed containerized `codex exec --json` regularly finishes
-            # its work and then never exits; the watchdog recovers the answer
-            # from the rollout file and stops the process. Provider-behaviour
-            # compensation, so it wraps the transport rather than replacing it.
-            executor = CodexRolloutWatchdogExecutor(executor, resolve, log=self._log)
-        return executor
+        return resolve
 
     def close(self) -> None:
         """Close every session created by this driver, idempotently."""
@@ -748,3 +820,16 @@ class AgentShimDriver:
         for session in self._sessions:
             session.close()
         self._sessions.clear()
+
+
+def _codex_rollout_sessions_root(sandbox: _ConfinableSandbox | None) -> str:
+    """Return the sessions directory a resumed Codex thread writes its rollout to.
+
+    Derived from the sandbox's own ``HOME`` and the Codex provider's state
+    directory convention, never a hardcoded ``/root`` or ``/home/agent``: the
+    watchdog only ever polls a container sandbox, but the value is computed
+    generically so nothing here has to know that in advance.
+    """
+    home = "" if sandbox is None else sandbox.env.get("HOME", "")
+    state_dir = agentshim.get_provider(CODEX_PROVIDER).profile.state_dirs[0]
+    return f"{home}/{state_dir}/sessions"

@@ -18,7 +18,6 @@ from agentshim.testing import FakeExecutor, FakeRun, scripted_turn
 from vibesys.agents.docker_executor import (
     _CODEX_RESUME_TERMINATION_SCRIPT,
     CodexRolloutWatchdogExecutor,
-    DockerCommandExecutor,
     _codex_resume_argv_matches,
     _codex_resume_thread_id,
     _codex_started_thread_id,
@@ -26,6 +25,8 @@ from vibesys.agents.docker_executor import (
     _discard,
     _scan_codex_rollout_completion,
 )
+
+_ROLLOUT_SESSIONS_ROOT = "/home/agent/.codex/sessions"
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -56,142 +57,6 @@ def _request(**overrides: object) -> CommandRequest:
     }
     fields.update(overrides)
     return CommandRequest(**fields)  # type: ignore[arg-type]
-
-
-class TestDockerCommandExecutor:
-    """The docker exec transport: argv shape, environment, and binary lookup."""
-
-    def test_wraps_argv_in_docker_exec_with_the_request_working_directory(self) -> None:
-        inner = FakeExecutor(FakeRun(stdout=["out\n"], stderr=["err\n"]))
-        executor = DockerCommandExecutor(lambda: "container-123", inner=inner)
-        stdout: list[str] = []
-        stderr: list[str] = []
-
-        result = executor.run(
-            _request(argv=["codex", "exec", "-"], cwd="/workspace/candidate"),
-            _sink(stdout, stderr),
-        )
-
-        assert inner.requests[0].argv == [
-            "docker",
-            "exec",
-            "-i",
-            "-w",
-            "/workspace/candidate",
-            "container-123",
-            "codex",
-            "exec",
-            "-",
-        ]
-        assert inner.requests[0].cwd is None
-        assert inner.requests[0].timeout == 17.0
-        assert stdout == ["out\n"]
-        assert stderr == ["err\n"]
-        assert result.returncode == 0
-
-    def test_falls_back_to_the_configured_workdir_when_the_request_has_no_cwd(self) -> None:
-        inner = FakeExecutor(FakeRun())
-        DockerCommandExecutor(lambda: "container-123", inner=inner).run(_request(), _sink())
-
-        assert inner.requests[0].argv[:6] == [
-            "docker",
-            "exec",
-            "-i",
-            "-w",
-            "/workspace",
-            "container-123",
-        ]
-
-    def test_forwards_only_the_nominated_environment_entries(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """The host environment describes the host, not the container.
-
-        ``PATH`` and the rest of the turn environment name directories that do
-        not exist inside the image, so only the variables the caller nominated
-        cross the boundary.
-        """
-        monkeypatch.setenv("PATH", "/host/bin")
-        inner = FakeExecutor(FakeRun())
-
-        DockerCommandExecutor(
-            lambda: "container-123",
-            forward_env=("ANTHROPIC_AUTH_TOKEN", "VIBESYS_ROUND", "ABSENT"),
-            inner=inner,
-        ).run(
-            _request(
-                env={
-                    "PATH": "/host/bin",
-                    "SHARED": "same",
-                    "ANTHROPIC_AUTH_TOKEN": "token",
-                    "VIBESYS_ROUND": "3",
-                }
-            ),
-            _sink(),
-        )
-
-        argv = inner.requests[0].argv
-        forwarded = [argv[index + 1] for index, part in enumerate(argv) if part == "-e"]
-        # A nominated variable the turn does not carry is simply absent; it is
-        # not forwarded as an empty value that would shadow the image's own.
-        assert forwarded == ["ANTHROPIC_AUTH_TOKEN=token", "VIBESYS_ROUND=3"]
-        # The docker CLI itself still runs with the host environment.
-        assert inner.requests[0].env["PATH"] == "/host/bin"
-
-    def test_forwards_nothing_when_the_caller_nominated_nothing(self) -> None:
-        inner = FakeExecutor(FakeRun())
-
-        DockerCommandExecutor(lambda: "container-123", inner=inner).run(
-            _request(env={"PATH": "/host/bin", "VIBESYS_ROUND": "3"}),
-            _sink(),
-        )
-
-        assert "-e" not in inner.requests[0].argv
-
-    def test_passes_stdin_through_untouched(self) -> None:
-        inner = FakeExecutor(FakeRun())
-        DockerCommandExecutor(lambda: "container-123", inner=inner).run(
-            _request(stdin="a long prompt"),
-            _sink(),
-        )
-
-        assert inner.requests[0].stdin == "a long prompt"
-
-    def test_reads_the_container_id_once_per_request(self) -> None:
-        containers = iter(["container-a", "container-b"])
-        inner = FakeExecutor(FakeRun())
-        executor = DockerCommandExecutor(lambda: next(containers), inner=inner)
-
-        executor.run(_request(), _sink())
-        executor.run(_request(), _sink())
-
-        assert [request.argv[5] for request in inner.requests] == [
-            "container-a",
-            "container-b",
-        ]
-
-    def test_finds_the_binary_by_name_because_it_lives_in_the_container(self) -> None:
-        executor = DockerCommandExecutor(lambda: "container-123", inner=FakeExecutor(FakeRun()))
-
-        assert executor.find_binary("codex", {"PATH": "/host/bin"}) == "codex"
-
-    def test_checks_the_binary_inside_the_container(self) -> None:
-        inner = FakeExecutor(FakeRun())
-        executor = DockerCommandExecutor(lambda: "container-123", inner=inner)
-
-        executor.check_binary("claude", {}, timeout=5)
-
-        assert inner.requests[0].argv == [
-            "docker",
-            "exec",
-            "-i",
-            "-w",
-            "/workspace",
-            "container-123",
-            "claude",
-            "--help",
-        ]
 
 
 class _BlockingHandle:
@@ -251,6 +116,7 @@ def _impatient(
     return CodexRolloutWatchdogExecutor(
         inner,
         container_id_resolver,
+        rollout_sessions_root=_ROLLOUT_SESSIONS_ROOT,
         log=log,
         tick_seconds=0.001,
         rollout_poll_seconds=0.0,
@@ -266,7 +132,9 @@ class TestCodexRolloutWatchdog:
         inner = FakeExecutor(FakeRun(stdout=["hello\n"], returncode=3))
         stdout: list[str] = []
 
-        result = CodexRolloutWatchdogExecutor(inner, lambda: "container-123").run(
+        result = CodexRolloutWatchdogExecutor(
+            inner, lambda: "container-123", rollout_sessions_root=_ROLLOUT_SESSIONS_ROOT
+        ).run(
             _request(argv=["claude", "-p", "--verbose"]),
             _sink(stdout),
         )
@@ -277,7 +145,9 @@ class TestCodexRolloutWatchdog:
     def test_leaves_the_exit_code_alone_when_it_never_intervenes(self) -> None:
         inner = FakeExecutor(FakeRun(stdout=["{}\n"], returncode=7))
 
-        result = CodexRolloutWatchdogExecutor(inner, lambda: "container-123").run(
+        result = CodexRolloutWatchdogExecutor(
+            inner, lambda: "container-123", rollout_sessions_root=_ROLLOUT_SESSIONS_ROOT
+        ).run(
             _request(argv=["codex", "exec", "resume", THREAD_ID, "-", "--json"]),
             _sink(),
         )
@@ -292,7 +162,11 @@ class TestCodexRolloutWatchdog:
         is the one test that constructs the executor with no overrides at all
         and pins what production actually runs with.
         """
-        executor = CodexRolloutWatchdogExecutor(FakeExecutor(FakeRun()), lambda: "container-123")
+        executor = CodexRolloutWatchdogExecutor(
+            FakeExecutor(FakeRun()),
+            lambda: "container-123",
+            rollout_sessions_root=_ROLLOUT_SESSIONS_ROOT,
+        )
 
         assert executor.tick_seconds == 5.0
         assert executor.rollout_poll_seconds == 15.0
@@ -301,7 +175,9 @@ class TestCodexRolloutWatchdog:
 
     def test_delegates_binary_lookup_and_the_health_check(self) -> None:
         inner = FakeExecutor(FakeRun())
-        executor = CodexRolloutWatchdogExecutor(inner, lambda: "container-123")
+        executor = CodexRolloutWatchdogExecutor(
+            inner, lambda: "container-123", rollout_sessions_root=_ROLLOUT_SESSIONS_ROOT
+        )
 
         assert executor.find_binary("codex", {}) == "/usr/local/bin/codex"
         executor.check_binary("/usr/local/bin/codex", {}, timeout=5)
@@ -518,7 +394,11 @@ class TestCodexRolloutReading:
         monkeypatch: pytest.MonkeyPatch,
         queries: _FakeDockerQueries,
     ) -> _CodexRolloutCompletion | None:
-        executor = CodexRolloutWatchdogExecutor(FakeExecutor(FakeRun()), lambda: "container-123")
+        executor = CodexRolloutWatchdogExecutor(
+            FakeExecutor(FakeRun()),
+            lambda: "container-123",
+            rollout_sessions_root=_ROLLOUT_SESSIONS_ROOT,
+        )
         monkeypatch.setattr("vibesys.agents.docker_executor.subprocess.run", queries)
         return executor._read_codex_rollout_completion("container-123", THREAD_ID)  # noqa: SLF001
 

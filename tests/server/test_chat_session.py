@@ -173,7 +173,7 @@ def _chat_driver(
     fake = FakeExecutor(runs)
     driver = agentshim_driver.AgentShimDriver(
         provider=provider,
-        executor_factory=lambda _sandbox: fake,
+        executor_factory=lambda: fake,
     )
     return AgentClient(driver, provider=provider), fake
 

@@ -193,8 +193,14 @@ class WorkspaceSandbox(ABC):
     build_env: Mapping[str, str] | None = None
 
     @abstractmethod
-    def wrap(self, argv: list[str]) -> list[str]:
-        """Return *argv* rewritten to run confined to :attr:`workspace`."""
+    def wrap(self, argv: list[str], cwd: Path | str | None = None) -> list[str]:
+        """Return *argv* rewritten to run confined to :attr:`workspace`.
+
+        *cwd* is accepted for parity with a container sandbox, whose single
+        instance serves every workspace's turns and so needs telling which
+        one a given command belongs to. A host sandbox confines to exactly
+        one workspace already (:attr:`workspace`) and ignores the argument.
+        """
 
     def agent_path(self, host_path: Path | str) -> str:
         """Return the path the confined process sees for *host_path*.
@@ -234,8 +240,13 @@ class HostSandbox(WorkspaceSandbox):
     system_read_roots: tuple[str, ...] = _SYSTEM_READ_ROOTS
     gpu_device_nodes: tuple[Path, ...] = field(default_factory=tuple)
 
-    def wrap(self, argv: list[str]) -> list[str]:
-        """Return *argv* wrapped so it runs inside the confinement namespace."""
+    def wrap(self, argv: list[str], cwd: Path | str | None = None) -> list[str]:
+        """Return *argv* wrapped so it runs inside the confinement namespace.
+
+        *cwd* is part of the shared ``wrap`` signature but unused: this
+        backend always confines to :attr:`workspace`.
+        """
+        del cwd
         ws = str(self.workspace.resolve())
         project_paths = self.project_path_policy.resolve(self.workspace)
         cmd: list[str] = [
@@ -411,8 +422,13 @@ class LandlockSandbox(WorkspaceSandbox):
             chdir=workspace,
         )
 
-    def wrap(self, argv: list[str]) -> list[str]:
-        """Return *argv* wrapped so it runs under this Landlock ruleset."""
+    def wrap(self, argv: list[str], cwd: Path | str | None = None) -> list[str]:
+        """Return *argv* wrapped so it runs under this Landlock ruleset.
+
+        *cwd* is part of the shared ``wrap`` signature but unused: this
+        backend always confines to :attr:`workspace`.
+        """
+        del cwd
         return [
             sys.executable,
             "-m",
@@ -538,8 +554,13 @@ class SeatbeltSandbox(WorkspaceSandbox):
 
         return "\n".join(lines) + "\n"
 
-    def wrap(self, argv: list[str]) -> list[str]:
-        """Return *argv* wrapped so it runs inside the Seatbelt profile."""
+    def wrap(self, argv: list[str], cwd: Path | str | None = None) -> list[str]:
+        """Return *argv* wrapped so it runs inside the Seatbelt profile.
+
+        *cwd* is part of the shared ``wrap`` signature but unused: this
+        backend always confines to :attr:`workspace`.
+        """
+        del cwd
         # ``-p`` takes the profile inline, keeping ``wrap`` pure (no temp files).
         # ``sandbox-exec`` runs the command from the caller's cwd, which the CLI
         # runner already sets to the workspace.

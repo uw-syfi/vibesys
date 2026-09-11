@@ -225,35 +225,56 @@ command's own runtime needs, not for running agent CLIs.
 
 ## Container execution
 
-`--docker` runs the provider CLI inside the role's editor container. The
-driver keeps a `DockerCommandExecutor` that rewrites every agentshim command
-into `docker exec -i -w <workdir> [-e ...] <container> <argv>`, so the library
-still builds argv, parses the stream, and owns the session.
+`--docker` runs the provider CLI inside the role's editor container, through
+the same path a host session runs. `create_session` looks up or builds a
+`vs_sandbox.WorkspaceSandbox`, wraps a plain `agentshim.HostCommandExecutor()`
+through `confine_to_sandbox`, and hands `CliAgent` the sandbox's own
+environment; nothing in it branches on which backend it has. A container
+session's sandbox is not built by the driver: it is the run environment's
+already-started `vs_sandbox.DockerSandbox`, looked up by role from the
+`docker_sandboxes` dict the driver was configured with. `sandbox.wrap` and
+`sandbox.agent_path` are the only two operations the driver calls to adapt
+everything else to a container.
 
+- `confine_to_sandbox` calls `sandbox.wrap(argv, cwd)` when the sandbox's
+  `wrap` accepts a `cwd` argument (only `DockerSandbox` does, because one
+  container serves every turn regardless of working directory, so the caller
+  supplies it per call; a host sandbox's `wrap(argv)` fixes its own workspace
+  and ignores the argument). The session's own `cwd`, passed to
+  `agent.start_session`, is always the real host workspace path, for a host
+  and a container session alike. `DockerSandbox.wrap` maps that host path to
+  the container's bind mount and emits `docker exec -i -w <container path>
+  ... <argv>`.
+- A container session's binary lookup is overridden to trust the bare
+  provider binary name to `docker exec`'s own PATH: a host-side lookup
+  against the container's PATH string would search host directories the CLI
+  does not live in.
 - The container ID is read from the sandbox on every command, so a GPU
   reselect that replaces the container needs no new executor.
-- A container turn names no working directory of its own. `-w` carries it, and
-  the executor's default is `/workspace`.
-- `AgentSessionSpec.environment` reaches the CLI through `TurnRequest.env`,
-  which the executor turns into `-e` flags. Which variables cross is declared
-  by the driver, not inferred: a container starts from its image's
-  environment, and the environment agentshim assembles for a turn describes
-  the host. Forwarding by inspection would point the container CLI at host
-  paths and could carry a host `ANTHROPIC_MODEL` past the container's own
-  configuration.
 - The CLI runs as the image's `agent` user, remapped at container start to
   the host user's uid and gid, so files it writes to the bind-mounted
   workspace are owned by the host user. Nothing repairs ownership afterwards,
   and git needs no `safe.directory` entry inside the container.
-- The binary health check (`<binary> --help`) runs inside the container, once
-  per session, before the first turn. See the section below for what a failure
-  costs.
-- Codex gets a `CodexRolloutWatchdogExecutor` in front of the transport. A
-  resumed `codex exec --json` inside a container regularly finishes its work,
-  writes the terminal events to its rollout file, and never exits; the
-  watchdog reads the rollout, replays the completion into the stream, and
-  stops the process. It is provider-behaviour compensation and stays in
-  VibeSys until the behaviour is verified fixed upstream.
+- The binary health check (`<binary> --help`) runs through the same
+  `confine_to_sandbox` wrapping, inside the container, once per session,
+  before the first turn. See the section below for what a failure costs.
+- `AgentSessionSpec.environment` is a real per-session overlay on a host
+  session, folded into the environment the host sandbox is built from. It
+  reaches nothing on a container session today: a container session's
+  environment is `sandbox.env`, and no current caller populates `environment`
+  for a containerized session (the run context's `gpu_env()`, the only source
+  `AgentClient.invoke` draws it from, returns an empty mapping whenever
+  `capabilities.container_execution` is true).
+- Every container session runs through a `CodexRolloutWatchdogExecutor`,
+  regardless of provider; it no-ops for any command that is not a resumed
+  `codex exec --json` run. A resumed one inside a container regularly
+  finishes its work, writes the terminal events to its rollout file, and
+  never exits; the watchdog reads the rollout, replays the completion into
+  the stream, and stops the process. It derives the rollout-sessions
+  directory it polls from the sandbox's own `env["HOME"]` and the Codex
+  provider profile's state directory, instead of a hardcoded `/home/agent` or
+  `/root`. It is provider-behaviour compensation and stays in VibeSys until
+  the behaviour is verified fixed upstream.
 
 ### A failed health check ends the run
 
@@ -275,19 +296,26 @@ agent timeout) rather than letting it escape as an unclassified error. That
 would give the operator a diagnostic naming the container and the provider
 instead of a bare `CliCheckError`.
 
-### Session MCP servers in a container
+### Session MCP servers and paths
 
 A provider that discovers MCP servers from a config file (`claude`, `gemini`,
 `opencode`) needs a directory to write it into, and agentshim derives that
-directory from the turn's working directory. A container turn has none, so it
-names the host workspace in `TurnRequest.mcp_workspace` instead: the library
-writes the config there for the turn and removes it afterwards, and the CLI
-reads it through the bind mount at `/workspace`. Codex passes its servers as
-`--config` flags and touches no workspace file either way.
+directory from the session's `cwd`. That `cwd` is always the host workspace
+path now, in both modes, so the config lands on the host without the driver
+naming a separate location, and a container CLI reads it back through the
+bind mount at `/workspace`. Codex passes its servers as `--config` flags and
+touches no workspace file either way.
 
-The MCP command is left as the caller wrote it in container mode. Only a host
-turn rewrites a bare `python` to the interpreter running VibeSys, because the
-container image resolves its own.
+Every absolute path in an MCP server's command or args, and the
+response-schema directory `OutputSchema.cli_dir`, is mapped through
+`sandbox.agent_path`: identity on the host, the container mount path under
+Docker. A host session additionally substitutes the interpreter running
+VibeSys for a bare `python` or `python3` command, because a host agent
+inherits a login shell's PATH, where that name may resolve to an interpreter
+without the MCP dependencies. A container session leaves the command as
+written, because the image resolves its own. That distinction is one keyword
+argument (`pin_interpreter`) on `_as_mcp_server`, not a container/host branch
+elsewhere in the driver.
 
 ## Usage records
 
@@ -355,11 +383,10 @@ stays an implementation detail.
 
 ## Sandboxing
 
-The agentshim driver applies its `vs_sandbox` host sandbox as an executor
-transform: `confine_to_sandbox` wraps every command that names a working
-directory, which is the single chokepoint through which the provider CLI is
-launched. A command without a working directory (the binary health check, and
-a container-executed turn) is left alone. The
+The agentshim driver applies its `vs_sandbox` sandbox as an executor
+transform: `confine_to_sandbox` rewrites every command's argv through
+`sandbox.wrap`, unconditionally, the single chokepoint through which the
+provider CLI is launched on the host or in a container alike. The
 Omnigent driver builds an `OSEnvSpec` that grants workspace write access and
 narrow read access to the active Rust toolchain. It selects bubblewrap on Linux
 or Seatbelt on macOS and never permits an unconfined fallback.

@@ -29,6 +29,11 @@ declarations nor a container install recipe for, so it is not offered here.
 DEFAULT_CLI_PROVIDER = "codex"
 """The CLI provider selected when neither a flag nor config names one."""
 
+CODEX_PROVIDER = "codex"
+"""The provider name naming Codex itself, for call sites that need the name
+(to look up its ``agentshim`` profile, say) rather than a yes/no answer to
+:func:`is_codex`."""
+
 
 def is_codex(provider: str | None) -> bool:
     """Whether *provider* is Codex (``None``, an unset provider, is not).
@@ -41,7 +46,7 @@ def is_codex(provider: str | None) -> bool:
     driver branches on a documented VibeSys decision instead of repeating the
     provider's literal name at each call site.
     """
-    return provider == "codex"
+    return provider == CODEX_PROVIDER
 
 
 # --- Docker container environment -------------------------------------------
@@ -50,7 +55,13 @@ _COMMON_DOCKER_ENV: dict[str, str] = {"PYTHONPATH": "/opt/vibesys"}
 """Every shipped provider's container CLI needs this so it can spawn
 ``python -m vs_issue_board.mcp`` against the bind-mounted project root (added
 in ``DockerSandbox.start`` for all four CLI providers). Without it the MCP
-server module would not be importable inside the container."""
+server module would not be importable inside the container.
+
+This is the whole of ``DOCKER_PROVIDER_ENV``'s per-provider contribution: the
+rest of a containerized run's extra environment (``UV_CACHE_DIR``, and
+``VIBESYS_GIT_HISTORY`` when the run carries git history) is set once, for
+every provider alike, by ``run_environment`` rather than duplicated per
+provider here."""
 
 # Claude Code used to refuse ``--dangerously-skip-permissions`` when running
 # as root unless ``IS_SANDBOX=1`` was set, back when VibeSys ran every

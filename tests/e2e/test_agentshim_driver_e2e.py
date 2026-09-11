@@ -19,6 +19,7 @@ import os
 import shutil
 import subprocess
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -35,7 +36,6 @@ from vibesys.agents.contracts import (
     MCPServerSpec,
     SessionDisposition,
 )
-from vibesys.agents.docker_executor import DockerCommandExecutor
 from vibesys.agents.drivers import agentshim as agentshim_driver
 from vibesys.agents.drivers.agentshim import AgentShimDriver
 from vs_sandbox import HostResource, HostResourceAccess
@@ -355,7 +355,7 @@ def test_upstream_codex_resume_exit_bug_probe_on_the_host(workspace: Path) -> No
     exists because a resumed ``codex exec resume <id> --json`` finishes its
     turn but never exits *inside a container*. This drives the identical
     resumed-turn shape through plain ``agentshim.CliAgent`` on the host --
-    no container, no ``DockerCommandExecutor``, no watchdog -- to check
+    no container, no ``docker exec`` transform, no watchdog -- to check
     whether the same failure to exit also shows up there.
 
     A PASS here is expected: the bug as documented is container-specific, so
@@ -397,8 +397,8 @@ def test_watchdog_retire_signal_resumed_codex_turn_exits_on_its_own_in_a_contain
     ``codex exec --json`` run inside a container finishes its turn but never
     exits, so the ``docker exec`` fronting it blocks until the turn budget is
     spent. This drives that exact shape -- a resumed turn inside a real
-    container, through the plain ``DockerCommandExecutor`` transport, with no
-    watchdog in front of it.
+    container, through a plain ``docker exec`` transform, with no watchdog in
+    front of it.
 
     A PASS means the upstream bug is fixed and the watchdog can be deleted.
     It is expected to FAIL (the second turn hangs until ``timeout`` kills it)
@@ -406,7 +406,19 @@ def test_watchdog_retire_signal_resumed_codex_turn_exits_on_its_own_in_a_contain
     """
     container_id = _codex_container_id()
     assert container_id
-    executor = DockerCommandExecutor(lambda: container_id)
+
+    def _docker_exec(request: agentshim.CommandRequest) -> agentshim.CommandRequest:
+        return replace(
+            request,
+            argv=["docker", "exec", "-i", "-w", "/workspace", container_id, *request.argv],
+            cwd=None,
+        )
+
+    executor = agentshim.TransformingExecutor(
+        agentshim.HostCommandExecutor(),
+        _docker_exec,
+        find_binary=lambda name, env: name,  # noqa: ARG005
+    )
     agent = agentshim.CliAgent("codex", executor=executor)
     first = agent.start_session().turn(
         agentshim.TurnRequest(

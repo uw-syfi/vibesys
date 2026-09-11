@@ -522,11 +522,14 @@ def test_sandbox_exposes_codex_auth_but_not_sibling_worktrees(tmp_path):  # noqa
     assert result.returncode == 0, result.stderr
 
 
-def test_the_executor_transform_wraps_only_a_workspace_command(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    """Container executors run without a cwd; confinement must not engage there.
+def test_the_executor_transform_wraps_every_command(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    """Confinement applies to every command, cwd or none.
 
-    The driver applies the host sandbox as an executor transform, so this is
-    the chokepoint that decides whether a command is confined at all.
+    A command with no cwd is the binary health check; it is wrapped too so a
+    binary that only exists inside a container sandbox's confinement (this
+    same transform, given a ``DockerSandbox``) is still checkable there.
+    ``HostSandbox.wrap`` takes no ``cwd`` of its own, so the request's is
+    irrelevant to it either way; it always confines to its own workspace.
     """
     sandbox = hostsandbox.HostSandbox(bwrap_path="/usr/bin/bwrap", workspace=tmp_path)
     recorder = FakeExecutor([FakeRun()])
@@ -542,10 +545,10 @@ def test_the_executor_transform_wraps_only_a_workspace_command(tmp_path):  # noq
     executor.run(request, agentshim.NullSink())
     executor.run(replace(request, cwd=str(tmp_path)), agentshim.NullSink())
 
-    unconfined, confined = recorder.requests
-    assert list(unconfined.argv) == ["stub-agent", "--json"]
-    assert confined.argv[0] == "/usr/bin/bwrap"
-    assert list(confined.argv[confined.argv.index("--") + 1 :]) == ["stub-agent", "--json"]
+    no_cwd, with_cwd = recorder.requests
+    for confined in (no_cwd, with_cwd):
+        assert confined.argv[0] == "/usr/bin/bwrap"
+        assert list(confined.argv[confined.argv.index("--") + 1 :]) == ["stub-agent", "--json"]
 
 
 def _seatbelt_works() -> bool:

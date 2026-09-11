@@ -71,6 +71,13 @@ _RECORDED_ENVIRONMENT_NAMES: tuple[_RunEnvironmentName, ...] = (
     "skypilot",
 )
 _ENVIRONMENTS_TEMPLATE_DIR = PROMPTS_DIR / "environments"
+_RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
+"""Where the effective objective is bind-mounted in every isolated environment.
+
+Named once so the mount (:func:`_container_mount_plan`) and every
+environment's :class:`AgentPaths` agree on the same string instead of
+repeating the literal at each of Docker's, Modal's, and SkyPilot's own
+``AgentPaths`` construction."""
 _SANDBOX_EVALUATOR_TOOLS_ROOT = Path("/opt/vibesys-evaluator-tools")
 _REMOTE_EVALUATOR_TOOLS_ROOT = Path(".vibesys-evaluator-tools")
 _REMOTE_EVALUATOR_TOOLCHAINS_ROOT = Path(".vibesys-evaluator-toolchains")
@@ -388,6 +395,15 @@ class DockerEnvironment:  # noqa: D101  # tracked: #288
 
             auth_files = auth_copy_paths(provider)
         cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
+        # The agent image's baked toolchain root is read-only (agent.Dockerfile
+        # chmods /opt/cargo a+rX, deliberately: an agent cannot apt/cargo
+        # install mid-round). A Cargo invocation that needs a crate the image
+        # did not prebuild -- an evaluator's own trusted-runner build, most
+        # commonly -- still has to create its registry cache somewhere, so
+        # CARGO_HOME is redirected onto the writable, bind-mounted workspace.
+        # This is unrelated to which crates a candidate build needs: one with
+        # no external dependencies never touches the registry at all.
+        cli_provider_env.setdefault("CARGO_HOME", "/workspace/.cache/cargo")
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
         bind_mounts = _dedupe_mounts(bind_mounts)
@@ -685,7 +701,7 @@ class SkyPilotEnvironment(DockerEnvironment):
             view=RunEnvironmentView(
                 paths=AgentPaths(
                     objective=(
-                        "/opt/vibesys-runtime/objective.md"
+                        _RUNTIME_OBJECTIVE_CONTAINER_PATH
                         if request.objective is not None
                         else "OBJECTIVE.md"
                     ),
@@ -866,7 +882,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):  # noqa: D101  # tracked: #288
             view=RunEnvironmentView(
                 paths=AgentPaths(
                     objective=(
-                        "/opt/vibesys-runtime/objective.md"
+                        _RUNTIME_OBJECTIVE_CONTAINER_PATH
                         if request.objective is not None
                         else "OBJECTIVE.md"
                     ),
@@ -1197,7 +1213,7 @@ def _isolated_paths(
 ) -> AgentPaths:
     return AgentPaths(
         objective=(
-            "/opt/vibesys-runtime/objective.md" if request.objective is not None else "OBJECTIVE.md"
+            _RUNTIME_OBJECTIVE_CONTAINER_PATH if request.objective is not None else "OBJECTIVE.md"
         ),
         accuracy_command=_environment_command(
             request,
@@ -1504,7 +1520,7 @@ def _container_mount_plan(  # noqa: C901  # tracked: #288
     passthrough_paths: list[str] = []
     objective_document = _materialize_effective_objective(request)
     if objective_document is not None:
-        bind_mounts.append((str(objective_document), "/opt/vibesys-runtime/objective.md", True))
+        bind_mounts.append((str(objective_document), _RUNTIME_OBJECTIVE_CONTAINER_PATH, True))
         passthrough_paths.append("/opt/vibesys-runtime")
     if request.git_history_root is not None:
         bind_mounts.append((str(request.git_history_root), "/opt/vibesys-history", True))
