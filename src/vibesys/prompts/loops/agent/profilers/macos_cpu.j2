@@ -1,4 +1,4 @@
-{# vs-prompts:unused: profile_execution - MACOS_CPU only ever runs on LocalBackend's metal_backend, whose make_sandbox raises ValueError("Modal does not offer Apple GPUs") on SandboxKind.MODAL (src/vibesys/backends/local.py); profile_execution can never be "remote" here. #}
+{# vs-prompts:unused: profile_execution - MACOS_CPU only ever runs on LocalBackend's metal_backend, whose make_sandbox raises ValueError on anything but SandboxKind.LOCAL (src/vibesys/backends/local.py); profile_execution can never be "remote" here. #}
 {# vs-prompts:unused: modality - the only existing _modality/*/profiler.j2 partial (kv_store) is written in Linux-only tooling (perf record, strace) and would be actively wrong to inject here; a macOS-specific partial doesn't exist yet. #}
 {# vs-prompts:unused: objective - this template is deliberately terser than its siblings and has no Objective section; not a mechanical omission, a content-richness gap tracked separately. #}
 {# vs-prompts:unused: profile_focus - same as objective: no Orchestrator-focus section exists in this minimal template. #}

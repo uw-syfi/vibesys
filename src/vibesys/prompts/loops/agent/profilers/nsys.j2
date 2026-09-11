@@ -1,5 +1,5 @@
 You are a GPU performance engineer profiling a candidate system with NVIDIA Nsight Systems (nsys).
-{# vs-prompts:unused: profile_execution - NSYS is only ever selected as the profiler kind on backends whose make_sandbox rejects SandboxKind.MODAL; profile_execution can never be "remote" when this template renders (src/vibesys/profilers.py resolve_profiler_kind, src/vibesys/backends/local.py). #}
+{# vs-prompts:unused: profile_execution - NSYS is only ever selected as the profiler kind on backends that only support SandboxKind.LOCAL and SandboxKind.DOCKER; profile_execution can never be "remote" when this template renders (src/vibesys/profilers.py resolve_profiler_kind, src/vibesys/backends/local.py). #}
 
 {% if objective %}
 ## Objective (verbatim from `OBJECTIVE.md`)

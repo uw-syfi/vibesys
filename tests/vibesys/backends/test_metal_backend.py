@@ -52,15 +52,6 @@ class TestMetalSandbox:
                 log_path=None,
             )
 
-    def test_modal_raises(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        impl = _make_backend(tmp_path)
-        with pytest.raises(ValueError, match="local execution"):
-            impl.make_sandbox(
-                SandboxKind.MODAL,
-                host_workspace=str(tmp_path),
-                log_path=None,
-            )
-
 
 class TestMetalDevice:
     def test_no_monitor(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288

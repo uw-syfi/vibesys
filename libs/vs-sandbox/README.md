@@ -1,6 +1,7 @@
 # vs-sandbox
 
-Reusable host, Docker, and Modal sandbox backends for agent workspaces.
+Reusable host and Docker sandbox backends for agent workspaces, plus Modal
+model-weight volume provisioning.
 
 This is an internal import package shipped by the `vibesys` distribution. It
 is not published as a separate Python distribution.
@@ -32,9 +33,6 @@ Applications wire these into their own run-environment policy.
   an otherwise writable project. It supports read-only paths and hidden paths,
   validates containment and overlap, and can require the host backend to fail
   closed when confinement is unavailable.
-- `ModalSandbox` mirrors `DockerSandbox` semantics on remote Modal GPUs,
-  backing the workspace with an ephemeral Modal Volume that is synced at
-  start and stop.
 - `SandboxLifecycleHooks` lets trusted application code prepare an
   execution-capable sandbox in `before_ready`. Hooks run in registration
   order before startup completes, and rerun whenever a backend

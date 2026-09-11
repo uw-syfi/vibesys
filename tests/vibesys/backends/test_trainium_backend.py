@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 
-import pytest
 from deepagents.backends import LocalShellBackend
 
 from entrypoints.headless import _add_common_args
@@ -85,15 +84,6 @@ class TestTrainiumSandbox:
 
         assert isinstance(sb, DockerSandbox)
         assert resource in sb._resources  # noqa: SLF001  # tracked: #288
-
-    def test_modal_raises(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        impl = _make_backend(tmp_path)
-        with pytest.raises(ValueError, match="does not support Modal"):
-            impl.make_sandbox(
-                SandboxKind.MODAL,
-                host_workspace=str(tmp_path),
-                log_path=None,
-            )
 
 
 class TestTrainiumDevice:

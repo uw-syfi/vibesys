@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 
 from vibesys.backends.base import (
     ContentionMonitor,
-    ModalOptions,
     SandboxKind,
     make_local_shell_sandbox,
 )
@@ -79,7 +78,6 @@ class CudaBackend:
         extra_env: dict[str, str] | None = None,
         extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
-        modal_options: ModalOptions | None = None,
         attach_accelerator: bool = True,
         ephemeral: bool = False,
         container_image: str | None = None,
@@ -89,16 +87,19 @@ class CudaBackend:
         """Construct a sandbox configured for CUDA execution."""
         # Deferred: the sandbox classes subclass deepagents' BaseSandbox, which
         # pulls langchain + anthropic. Registration must stay import-cheap.
-        from vs_sandbox import DockerSandbox, ModalSandbox  # noqa: PLC0415  # tracked: #288
+        from vs_sandbox import DockerSandbox  # noqa: PLC0415  # tracked: #288
 
         bind_mounts = bind_mounts or []
         passthrough_paths = passthrough_paths or []
         extra_env = extra_env or {}
-        extra_init_commands = extra_init_commands or []
+        # Accepted for ComputeBackendImpl protocol parity but unused: neither
+        # the LOCAL sandbox nor the agent-image-based DOCKER sandbox runs
+        # per-launch install commands.
+        del extra_init_commands
         lifecycle_hooks = lifecycle_hooks or []
 
-        # Pick a GPU lazily on first sandbox creation (modal manages its own).
-        if attach_accelerator and kind is not SandboxKind.MODAL and self.selected_device is None:
+        # Pick a GPU lazily on first sandbox creation.
+        if attach_accelerator and self.selected_device is None:
             self.selected_device = self._pick_device()
 
         env = self._build_env(
@@ -125,26 +126,6 @@ class CudaBackend:
                 log_path=log_path,
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
-            )
-        elif kind is SandboxKind.MODAL:
-            if modal_options is None:
-                raise ValueError("modal_options is required for SandboxKind.MODAL")  # noqa: TRY003  # tracked: #288
-            sandbox = ModalSandbox(
-                host_workspace=host_workspace,
-                image=self.image,
-                gpu=modal_options.gpu,
-                sandbox_timeout=modal_options.sandbox_timeout,
-                idle_timeout=modal_options.idle_timeout,
-                bind_mounts=bind_mounts,
-                passthrough_paths=passthrough_paths,
-                env=env,
-                model_volume_name=modal_options.model_volume_name,
-                extra_readonly_volumes=modal_options.extra_readonly_volumes,
-                extra_writable_volumes=modal_options.extra_writable_volumes,
-                log_path=log_path,
-                extra_init_commands=extra_init_commands,
-                lifecycle_hooks=lifecycle_hooks,
-                app_name=modal_options.app_name,
             )
         else:
             raise ValueError(f"Unknown sandbox kind: {kind!r}")  # noqa: TRY003  # tracked: #288
@@ -209,7 +190,6 @@ class CudaBackend:
                     env = {}
                     sb._env = env  # noqa: SLF001  # tracked: #288
                 env["CUDA_VISIBLE_DEVICES"] = str(new_gpu.index)
-            # SandboxKind.MODAL: remote GPU, nothing to restart.
 
         # Restart the contention monitor on the new device.
         if self._monitor is not None:
@@ -249,16 +229,13 @@ class CudaBackend:
         """Build env vars to set inside the sandbox.
 
         Composition order (last write wins):
-          1. PyTorch wheel index — skipped for modal (remote driver is
-             independent of host).
+          1. PyTorch wheel index, matched to the host's CUDA driver.
           2. ``CUDA_VISIBLE_DEVICES`` — the physical index for local sandboxes,
              but ``"0"`` for docker (where ``--gpus device=N`` already exposes
              the chosen GPU as device 0 inside the container).
           3. Caller's extras.
         """
-        env: dict[str, str] = {}
-        if kind is not SandboxKind.MODAL:
-            env.update(self._pytorch_index_env())
+        env: dict[str, str] = self._pytorch_index_env()
         if attach_accelerator and self.selected_device is not None:
             if kind is SandboxKind.DOCKER:
                 env["CUDA_VISIBLE_DEVICES"] = "0"

@@ -1,5 +1,5 @@
 You are the native Linux CPU profiler. Use the `{{ profiler_mcp_name }}` MCP tools
-{# vs-prompts:unused: profile_execution - LINUX_CPU only ever runs on LocalBackend's cpu_backend, whose make_sandbox raises ValueError("Modal CPU execution is not wired up") on SandboxKind.MODAL (src/vibesys/backends/local.py); profile_execution can never be "remote" here. #}
+{# vs-prompts:unused: profile_execution - LINUX_CPU only ever runs on LocalBackend's cpu_backend, which only supports SandboxKind.LOCAL and SandboxKind.DOCKER (src/vibesys/backends/local.py); profile_execution can never be "remote" here. #}
 to inspect capabilities, then profile a separate diagnostic invocation of the
 benchmark command with Linux `perf`.
 

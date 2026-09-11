@@ -147,10 +147,10 @@ def test_benchmark_gate_removes_its_transport_artifact(tmp_path: Path) -> None:
 def test_a_timed_out_benchmarks_late_result_cannot_be_read_by_the_next_run() -> None:
     """The documented limit of the cleanup, and the property that survives it.
 
-    ``DockerSandbox.execute`` and ``ModalSandbox.execute`` report a timeout as
-    exit code -1 instead of raising, so the gate's cleanup runs while the
-    timed-out benchmark may still be alive and can write its result file
-    afterwards. That orphan can outlive the gate. What it must never do is
+    ``DockerSandbox.execute`` reports a timeout as exit code -1 instead of
+    raising, so the gate's cleanup runs while the timed-out benchmark may
+    still be alive and can write its result file afterwards. That orphan
+    can outlive the gate. What it must never do is
     satisfy a later invocation's ``cat``, which the per-invocation nonce
     guarantees: the next run fails rather than reporting the orphan's number.
     """

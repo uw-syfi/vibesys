@@ -24,7 +24,6 @@ from vibesys.backends.base import (
     ComputeBackendImpl,
     ContentionMonitor,
     Device,
-    ModalOptions,
     SandboxKind,
 )
 from vibesys.constants import ComputeBackend
@@ -88,7 +87,6 @@ __all__ = [
     "ComputeBackendImpl",
     "ContentionMonitor",
     "Device",
-    "ModalOptions",
     "SandboxKind",
     "get",
     "register",

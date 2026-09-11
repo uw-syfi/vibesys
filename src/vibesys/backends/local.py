@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING
 
 from vibesys.backends.base import (
     ContentionMonitor,
-    ModalOptions,
     SandboxKind,
     make_local_shell_sandbox,
 )
@@ -76,7 +75,6 @@ class LocalBackend:
         extra_env: dict[str, str] | None = None,
         extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
-        modal_options: ModalOptions | None = None,  # noqa: ARG002  # tracked: #288
         attach_accelerator: bool = True,
         ephemeral: bool = False,
         container_image: str | None = None,
@@ -125,7 +123,7 @@ class LocalBackend:
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
             )
-        if kind in (SandboxKind.DOCKER, SandboxKind.MODAL):
+        if kind is SandboxKind.DOCKER:
             raise ValueError(  # noqa: TRY003  # tracked: #288
                 f"{self.name.value} backend only supports local execution; "
                 f"SandboxKind.{kind.name} is unavailable ({self._unavailable_reason})."

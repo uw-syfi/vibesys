@@ -28,29 +28,29 @@ class ComputeBackend(StrEnum):
 
     - ``CUDA`` is fully supported: NVIDIA container, nvidia-smi GPU
       selection, nsys profiler, FlashInfer-style optimizations.
-    - ``METAL`` (Apple Silicon) is local-only — Docker/Modal sandboxes
-      can't reach Apple GPUs, so ``LocalBackend.make_sandbox`` raises on
-      anything other than ``SandboxKind.LOCAL``. The serving-domain templates
-      remain CUDA-flavoured (FlashInfer, CUDA graphs, nsys), so use a target
-      whose prompts and tools support Metal.
+    - ``METAL`` (Apple Silicon) is local-only — Docker can't reach Apple
+      GPUs (nor can a remote GPU provider), so ``LocalBackend.make_sandbox``
+      raises on anything other than ``SandboxKind.LOCAL``. The serving-domain
+      templates remain CUDA-flavoured (FlashInfer, CUDA graphs, nsys), so use
+      a target whose prompts and tools support Metal.
     - ``TRAINIUM`` (AWS Trn1/Trn2) targets NeuronCores via an AWS Neuron
       DLC container. The host's ``/dev/neuron*`` devices are passed
       through to the container (``--device``, *not* ``--gpus``);
-      profiling uses ``neuron-explorer`` instead of nsys. Modal offers
-      no Trainium, so ``TrainiumBackend.make_sandbox`` raises on
-      ``SandboxKind.MODAL``.
+      profiling uses ``neuron-explorer`` instead of nsys.
+      ``TrainiumBackend.make_sandbox`` supports only ``SandboxKind.LOCAL``
+      and ``SandboxKind.DOCKER``.
     - ``ROCM`` (AMD Instinct) targets CDNA GPUs via a ROCm PyTorch
       container.  The host's ``/dev/kfd`` and ``/dev/dri/*`` nodes are
       passed through (``--device`` + ``--group-add``, *not* ``--gpus``);
       profiling reuses ``torch`` since ``torch.profiler`` works on ROCm.
-      Modal offers no AMD GPUs, so ``RocmBackend.make_sandbox`` raises on
-      ``SandboxKind.MODAL``.  **Experimental**: wired end to end but not
+      ``RocmBackend.make_sandbox`` supports only ``SandboxKind.LOCAL`` and
+      ``SandboxKind.DOCKER``.  **Experimental**: wired end to end but not
       yet exercised against MI300-class hardware, and serving-domain prompts
       may require target-specific adaptation.
     - ``CPU`` has no GPU at all: device selection and the hardware monitor are
-      no-ops. It supports local execution and CPU-only Docker containers, but
-      not Modal. It targets CPU-bound workloads (KV stores, networking servers)
-      where the win is in the code, not the kernels.
+      no-ops. It supports local execution and CPU-only Docker containers. It
+      targets CPU-bound workloads (KV stores, networking servers) where the
+      win is in the code, not the kernels.
     """
 
     CUDA = "cuda"

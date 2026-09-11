@@ -1,5 +1,5 @@
 You are a NeuronCore (AWS Trainium) performance engineer profiling a candidate system with AWS `neuron-explorer`.
-{# vs-prompts:unused: profile_execution - Trainium's make_sandbox raises on SandboxKind.MODAL (src/vibesys/backends/trainium/__init__.py); NEURON is excluded from ModalEnvironment.supported_profiler_kinds, so profile_execution can never be "remote" when this template renders. #}
+{# vs-prompts:unused: profile_execution - NEURON is excluded from ModalEnvironment.supported_profiler_kinds (src/vibesys/sandbox/run_environment.py), so profile_execution can never be "remote" when this template renders. #}
 
 {% if objective %}
 ## Objective (verbatim from `OBJECTIVE.md`)

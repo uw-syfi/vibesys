@@ -29,7 +29,6 @@ from typing import TYPE_CHECKING
 
 from vibesys.backends.base import (
     ContentionMonitor,
-    ModalOptions,
     SandboxKind,
     make_local_shell_sandbox,
 )
@@ -120,7 +119,6 @@ class TrainiumBackend:
         extra_env: dict[str, str] | None = None,
         extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
-        modal_options: ModalOptions | None = None,  # noqa: ARG002  # tracked: #288
         attach_accelerator: bool = True,
         ephemeral: bool = False,
         container_image: str | None = None,
@@ -135,17 +133,10 @@ class TrainiumBackend:
         passthrough_paths = list(passthrough_paths or [])
         extra_env = dict(extra_env or {})
         lifecycle_hooks = lifecycle_hooks or []
-        # Accepted for ComputeBackendImpl protocol parity but unused: Trainium
-        # rejects Modal outright, and the agent-image-based DOCKER sandbox
-        # runs no per-launch install commands.
+        # Accepted for ComputeBackendImpl protocol parity but unused: neither
+        # the LOCAL sandbox nor the agent-image-based DOCKER sandbox runs
+        # per-launch install commands.
         del ephemeral, extra_init_commands
-
-        if kind is SandboxKind.MODAL:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                "trainium backend does not support Modal — Modal offers no "
-                "Trainium hardware. Use --docker (NeuronCores via "
-                "/dev/neuron*) or local execution."
-            )
 
         env = self._build_env(extra_env)
 

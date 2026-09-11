@@ -23,8 +23,9 @@ carry over. What differs is plumbing:
    :class:`~vibesys.backends.local.LocalBackend`'s ``metal`` and ``cpu``
    bindings; serving-domain prompts may also need target-specific adaptation.
 
-Modal offers no AMD GPUs, so ``make_sandbox`` raises on
-``SandboxKind.MODAL`` (parity with the Trainium backend).
+There is no remote-GPU sandbox path: ``make_sandbox`` supports only
+``SandboxKind.LOCAL`` and ``SandboxKind.DOCKER`` (parity with the Trainium
+backend).
 """
 
 from __future__ import annotations
@@ -38,7 +39,6 @@ from typing import TYPE_CHECKING
 
 from vibesys.backends.base import (
     ContentionMonitor,
-    ModalOptions,
     SandboxKind,
     make_local_shell_sandbox,
 )
@@ -160,7 +160,6 @@ class RocmBackend:
         extra_env: dict[str, str] | None = None,
         extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
-        modal_options: ModalOptions | None = None,  # noqa: ARG002  # tracked: #288
         attach_accelerator: bool = True,
         ephemeral: bool = False,
         container_image: str | None = None,
@@ -175,17 +174,10 @@ class RocmBackend:
         passthrough_paths = list(passthrough_paths or [])
         extra_env = dict(extra_env or {})
         lifecycle_hooks = lifecycle_hooks or []
-        # Accepted for ComputeBackendImpl protocol parity but unused: ROCm
-        # rejects Modal outright, and the agent-image-based DOCKER sandbox
-        # runs no per-launch install commands.
+        # Accepted for ComputeBackendImpl protocol parity but unused: neither
+        # the LOCAL sandbox nor the agent-image-based DOCKER sandbox runs
+        # per-launch install commands.
         del ephemeral, extra_init_commands
-
-        if kind is SandboxKind.MODAL:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                "rocm backend does not support Modal — Modal offers no AMD "
-                "GPUs. Use --docker (Instinct GPUs via /dev/kfd) or local "
-                "execution."
-            )
 
         env = self._build_env(extra_env)
 

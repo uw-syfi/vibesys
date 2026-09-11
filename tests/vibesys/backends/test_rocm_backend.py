@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 
-import pytest
 from deepagents.backends import LocalShellBackend
 
 from entrypoints.headless import _add_common_args
@@ -106,16 +105,6 @@ class TestRocmSandbox:
         )
         assert isinstance(sb, DockerSandbox)
         assert sb._group_add == ["video", "render"]  # noqa: SLF001  # tracked: #288
-
-    def test_modal_raises(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        """Modal has no AMD GPUs — fail loudly rather than silently on CPU."""
-        impl = _make_backend(tmp_path)
-        with pytest.raises(ValueError, match="does not support Modal"):
-            impl.make_sandbox(
-                SandboxKind.MODAL,
-                host_workspace=str(tmp_path),
-                log_path=None,
-            )
 
     def test_torch_wheel_index_targets_rocm(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
         """Without this, `uv add torch` in the agent's fresh venv resolves the

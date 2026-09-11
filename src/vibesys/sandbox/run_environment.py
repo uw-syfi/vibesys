@@ -15,8 +15,11 @@ model-weight handling, prompt-visible paths, sandbox startup, and cleanup.  It
 does not execute agent commands directly.
 
 ``ComputeBackendImpl.make_sandbox`` is the compute-platform factory.  It knows
-how to construct a local/Docker/Modal sandbox for CUDA, Metal, or another
-compute backend.
+how to construct a local or Docker sandbox for CUDA, Metal, or another
+compute backend.  The Modal and SkyPilot run environments both request a
+Docker sandbox for the local agent editor container; GPU-bound work
+dispatches separately, through the candidate's own ``modal run`` entrypoint
+or a SkyPilot job.
 
 The concrete sandbox classes are still the command-execution abstraction.  They
 run shell commands, read/write files, translate virtual paths, and manage the

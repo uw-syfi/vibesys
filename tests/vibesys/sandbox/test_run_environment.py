@@ -1941,3 +1941,117 @@ def test_modal_environment_prompt_notes_cover_seeded_checkouts(tmp_path):  # noq
     unseeded_notes = _modal_runtime_document(unseeded_dir)
     assert "add_local_dir('vllm'" not in unseeded_notes
     assert "seeded starting-point" not in unseeded_notes.lower()
+
+
+def test_docker_modal_and_skypilot_build_the_same_kind_of_sandbox_from_one_resource_list(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Docker, Modal, and SkyPilot all put the agent in a ``SandboxKind.DOCKER``
+    editor container built from the same resource list (#679): only GPU-bound
+    work dispatches remotely (the candidate's own ``modal run`` entrypoint, or
+    a SkyPilot job), the agent itself never runs in a ``ModalSandbox`` or any
+    other remote sandbox kind.
+    """
+    home = tmp_path / "synthetic-home"
+    auth_file = home / ".codex" / "auth.json"
+    auth_file.parent.mkdir(parents=True)
+    auth_file.write_text('{"synthetic": true}\n')
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+
+    package = resolve_evaluator_package(
+        EvaluatorPackageRequirement(name="vibesys-evaluator-queue", version="0.1.0")
+    )
+
+    def _open(env_name: str, env: Any, backend: FakeBackend, **overrides: Any) -> None:  # noqa: ANN401  # tracked: #288
+        root = tmp_path / env_name
+        root.mkdir()
+        env.open(
+            _request(
+                root,
+                backend,
+                objective="Optimize the service.\n",
+                evaluator_package_root=package.root,
+                agent_backend="cli",
+                cli_provider="codex",
+                **overrides,
+            )
+        )
+
+    docker_backend = FakeBackend()
+    _open("docker", build_run_environment(RunEnvironmentSpec("docker")), docker_backend)
+
+    modal_backend = FakeBackend()
+    _open("modal", build_run_environment(RunEnvironmentSpec("modal")), modal_backend)
+
+    profiles = tmp_path / "clusters.toml"
+    profiles.write_text(
+        """schema_version = 1
+[profiles.gpu]
+runner = "skypilot"
+infra = "slurm/example/gpu"
+accelerator_backend = "rocm"
+accelerator_type = "MI300A"
+accelerators_per_node = 4
+remote_artifact_root = "/remote/vibesys"
+"""
+    )
+
+    class _FakeBridge:
+        def __init__(self, **kwargs: Any) -> None:  # noqa: ANN401  # tracked: #288
+            self.socket_path = kwargs["socket_path"]
+
+        def start(self) -> None:
+            self.socket_path.write_text("socket")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("vibesys.sandbox.run_environment.SkyPilotBridge", _FakeBridge)
+    skypilot_backend = FakeBackend()
+    skypilot_env = build_run_environment(
+        make_run_environment_spec(
+            use_skypilot=True,
+            cluster_profile="gpu",
+            cluster_profiles_file=profiles,
+            resources=RunResourceRequest(
+                nodes=1, accelerators_per_node=4, accelerator_backend="rocm"
+            ),
+        )
+    )
+    _open("skypilot", skypilot_env, skypilot_backend, state_namespace=MagicMock())
+
+    backends = {"docker": docker_backend, "modal": modal_backend, "skypilot": skypilot_backend}
+
+    # (a) One sandbox kind across all three environments.
+    for env_name, backend in backends.items():
+        assert backend.calls[0][0] is SandboxKind.DOCKER, env_name
+
+    # (b) The common mount set declared by `_container_mount_plan` — the
+    # objective doc, the evaluator package, and the CLI auth/framework
+    # mounts — carries identical access and agent_path everywhere.
+    resources_by_env = {
+        env_name: {r.agent_path: r for r in backend.calls[0][1]["resources"]}
+        for env_name, backend in backends.items()
+    }
+    common_agent_paths = {
+        "/opt/vibesys-runtime/objective.md",
+        "/opt/vibesys-evaluator-package",
+        "/opt/vibesys",
+        "/opt/vibesys-auth/0",
+    }
+    for agent_path in common_agent_paths:
+        by_env = {env_name: mounts[agent_path] for env_name, mounts in resources_by_env.items()}
+        accesses = {resource.access for resource in by_env.values()}
+        assert accesses == {HostResourceAccess.READ_ONLY}, (agent_path, by_env)
+
+    # (c) Nothing outside the workspace-related mounts each plan legitimately
+    # marks writable (SkyPilot's caller-state bridge) is READ_WRITE.
+    legitimately_writable = {
+        "/opt/vibesys-skypilot/bridge.sock",
+        "/opt/vibesys-skypilot/caller-state",
+    }
+    for env_name, mounts in resources_by_env.items():
+        for agent_path, resource in mounts.items():
+            if resource.access is HostResourceAccess.READ_WRITE:
+                assert agent_path in legitimately_writable, (env_name, agent_path)
