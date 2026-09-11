@@ -67,7 +67,7 @@ Status: verified (reproduced twice). sglang-v0.5.18-rocm700-mi30x, 2026-09-11.
 
 ### Candidate: resident-fp8 / MXFP4-dequant hybrid MoE weights
 
-The full expert set does not fit resident on one 4x MI300A node at a faster-than-MXFP4 precision (fp8 resident experts measured at about 388 GB of the ~430 GB free on this node; see [`platforms/`](../platforms/) for the kernel benchmark this is based on). A hybrid design — keep MXFP4 weights resident, gather-dequant only the experts a batch actually touches into a faster-precision scratch buffer per layer — is under test as a way to get faster-than-MXFP4 compute without the memory cost of full resident conversion. A first (Triton dequant) implementation of the gather-dequant step was slower than the MXFP4 baseline it was meant to replace, so the mechanism is not yet net-positive.
+The full expert set does not fit resident on one 4x MI300A node at a faster-than-MXFP4 precision (fp8 resident experts measured at about 388 GB of the ~430 GB free on one 4x MI300A node; see [`platforms/`](../platforms/) for the kernel benchmark this is based on). A hybrid design (keep MXFP4 weights resident, gather-dequant only the experts a batch actually touches into a faster-precision scratch buffer per layer) is under test as a way to get faster-than-MXFP4 compute without the memory cost of full resident conversion. A first (Triton dequant) implementation of the gather-dequant step was slower than the MXFP4 baseline it was meant to replace, so the mechanism is not yet net-positive.
 
 What would verify it: a gather-dequant implementation whose per-layer overhead is smaller than the compute time it saves versus running MXFP4 directly, measured end-to-end against the MXFP4 baseline at production batch sizes.
 
