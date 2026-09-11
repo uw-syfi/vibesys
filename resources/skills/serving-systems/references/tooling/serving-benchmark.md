@@ -33,6 +33,8 @@ Report percentiles (p50, p95, p99), not means. Means hide tail behavior that mat
 
 **Multi-turn / chat workloads**: model session arrivals open-loop and turns within a session closed-loop (a session sends turn k+1 only after turn k completes, plus think time); that combination is the faithful model of chat traffic. Pure closed loop with fixed concurrency is a throughput stress test, not a latency instrument: nothing paces the aggregate turn-arrival rate independently of server speed, so a decode-only speedup shortens each session's think-time-to-next-turn cycle and mechanically raises offered load. See the closed-loop pitfall below for a measured case where this flipped a latency verdict.
 
+A side whose `schedule_bound_fraction` is near 0 has degenerated to closed loop regardless of the pacing mode requested: it is no longer following the fixed schedule, so it measures its own capacity ceiling instead of latency at the offered load. Its deltas against a schedule-bound side (`schedule_bound_fraction` near 1) understate the real gap, because the schedule-bound side's own offered rate is higher. See "Concurrency cap is a workload parameter" below for a measured case (baseline_c48 at `schedule_bound_fraction` 0 versus defaults_c48 at 1.00, offered rates 0.90 vs 1.17 turns/s).
+
 ## Warmup and steady state
 
 First N requests are slower due to:
@@ -119,6 +121,10 @@ On a multi-node job scheduler allocation, p95 TTFT for an equivalent server and 
 Protocol that resolves this to about 10 percent residual noise: run the candidate and the baseline on the same node in the same allocation, three repetitions each against one held server process, and compare the median of p95 across repetitions rather than a single run.
 
 Status: verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05 to 2026-09-10.
+
+The cross-node gap can be larger than the same-node figures above: the identical configuration and workload, run on two nodes of the same SKU, gave median TPOT within 2 percent (21.36 vs 21.74 ms) but pooled p95 TTFT turn-2+ 26 percent apart (338 vs 455 ms). Treat this as confirmation that p95 TTFT comparisons must be paired on one node; TPOT is robust across nodes of the same SKU, tail latency is not.
+
+Status: verified. Stamp: sglang-v0.5.18 fork, benchmark_version 4, 2026-09-11, job 632990 (cross-node link to job 632958).
 
 ### Repeated reps against one held server are not independent samples
 

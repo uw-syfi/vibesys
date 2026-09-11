@@ -306,14 +306,30 @@ Cause:   not bandwidth-bound and not occupancy-bound: MemUnitStalled near
          wavefronts (61.3 / 75.6 percent of each kernel's own VGPR- or
          LDS-bound occupancy ceiling, from MeanOccupancyPerCU versus the
          theoretical ceiling) hide only part of that latency.
-Fix:     shorten the decode dependency chain first (e.g. integer-domain
-         decode instead of a float ldexpf), then raise occupancy (cut
-         VGPR/LDS footprint to raise the ceiling); deepening prefetch
-         does not help here, since the memory unit is not stalled.
+Fix:     neither of the two candidate fixes below panned out; the serial
+         term inside the block is still unidentified. Two refutations,
+         both measured:
+         (a) a persistent grid (fixed 228 x BLOCKS_PER_CU blocks pulling
+             tile work from an atomic counter, instead of one block per
+             tile relaunched every call) does not remove launch or tail
+             idle: bit-identical output, but +2.8 percent at M=16 and
+             only 3.5 percent faster at M=256. Launch shape and tail idle
+             are not the term.
+         (b) the compiled LUT + ldexpf + cast decode is already lean, not
+             the ALU-chain bottleneck it looked like: an integer bf16
+             bit-pattern decode (skip the float ldexpf, add the exponent
+             directly to the bf16 bit pattern) removed only about 4
+             percent of VALU instructions and regressed the gate_up tile
+             7 to 8 percent in context. "Shorten the decode" is refuted.
+         Next step: in-block phase timing to isolate the actual serial
+         term. Raising occupancy (cut VGPR/LDS footprint) is untried.
 Scope:   rocm, gfx942, this kernel (mxfp4_fused_moe stage1/stage2) at
          decode M=16.
-Status:  verified once. sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job
-         632991.
+Status:  verified (profile once; both candidate fixes refuted by
+         measurement). sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job
+         632991 (profile); refutations jobs 633019 (persistent grid,
+         concluding job 633006/633013's sweep) and 633021 (integer
+         decode, concluding job 633018's sweep).
 ```
 
 ## Out of scope: kernel implementation
