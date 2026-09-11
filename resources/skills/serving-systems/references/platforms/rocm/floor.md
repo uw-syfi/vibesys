@@ -52,6 +52,8 @@ Environment:
 - `ROCM_QUICK_REDUCE_QUANTIZATION=INT8`: **candidate**, not ablated against alternatives or against being unset.
 - `AITER_JIT_DIR=<persistent warm dir>`: must survive across launches. See [`aiter.md`](aiter.md) (JIT cache).
 - `SGLANG_HEALTH_CHECK_TIMEOUT=1800`: see [`aiter.md`](aiter.md) (pitfalls: lazy variant build).
+- `SGLANG_MXFP4_MOE_HIP=1`: opt-in, replaces the Triton MXFP4 MoE fallback with a from-scratch fused HIP kernel; cuts TPOT about 43 percent alone. See [`aiter.md`](aiter.md).
+- `SGLANG_SKINNY_GEMM=1`: opt-in, custom skinny bf16 GEMM for the dense projections at decode M; stacks with the line above for a further ~42 percent TPOT cut. See [`aiter.md`](aiter.md).
 
 argv:
 
