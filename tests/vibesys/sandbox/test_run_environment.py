@@ -28,8 +28,12 @@ from vibesys.profilers import ProfilerKind
 from vibesys.sandbox.run_environment import (
     RunEnvironmentRequest,
     RunEnvironmentSpec,
+    _cli_container_env,
+    _cli_container_setup,
+    _docker_agent_toolchains,
     _docker_evaluator_tool_mounts,
     _evaluator_container_setup,
+    _evaluator_tools,
     _EvaluatorToolBuildRequiredError,
     _resolve_docker_image_id,
     _SkyPilotRunEnvironmentSession,
@@ -193,6 +197,36 @@ _CLI_PROFILES = {
 
 
 @pytest.fixture(autouse=True)
+def fake_agent_image(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Stub the real Docker build behind ``agent_image`` for every Docker-path test.
+
+    ``DockerEnvironment.open()`` always resolves an agent image before
+    starting the container now; letting it shell out to a real ``docker
+    build`` would make these unit tests into (slow, Docker-dependent)
+    integration tests. Returns the recorded calls so a test can assert on the
+    base image and toolchains it was asked to build.
+    """
+    calls: list[dict[str, Any]] = []
+
+    def fake_agent_image(
+        base_image: str,
+        *,
+        toolchains: Any = (),  # noqa: ANN401  # tracked: #288
+        **_kwargs: Any,  # noqa: ANN401  # tracked: #288
+    ) -> str:
+        calls.append(
+            {
+                "base_image": base_image,
+                "toolchains": frozenset(toolchains),
+            }
+        )
+        return "sha256:" + "a" * 64
+
+    monkeypatch.setattr("vibesys.sandbox.images.agent_image", fake_agent_image)
+    return calls
+
+
+@pytest.fixture(autouse=True)
 def _synthetic_cli_auth(monkeypatch):  # noqa: ANN001, ANN202
     """Pin a deterministic host auth source for container CLI setup.
 
@@ -338,7 +372,10 @@ def test_local_environment_materializes_effective_objective_outside_workspace(tm
     assert not objective_path.is_relative_to(tmp_path / "workspace")
 
 
-def test_docker_environment_opens_one_started_sandbox_with_agent_paths(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_docker_environment_opens_one_started_sandbox_with_agent_paths(
+    tmp_path: Path,
+    fake_agent_image: list[dict[str, Any]],
+) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
 
@@ -359,6 +396,11 @@ def test_docker_environment_opens_one_started_sandbox_with_agent_paths(tmp_path)
     assert session.view.paths.benchmark_command == "uv run python benchmark/benchmark.py"
     assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/workspace/.cache/uv"
     assert backend.calls[0][1]["lifecycle_hooks"] == []
+    # The container always starts from a resolved agent image, built from the
+    # backend's own base image, even when the run needs no evaluator tools.
+    assert backend.calls[0][1]["container_image"] == "sha256:" + "a" * 64
+    assert fake_agent_image[-1]["base_image"] == backend.image
+    assert fake_agent_image[-1]["toolchains"] == frozenset()
     backend.sandbox.start.assert_called_once()
 
     session.close()
@@ -388,7 +430,10 @@ def test_symlink_lifecycle_hooks_reject_failed_setup() -> None:
     sandbox.save_symlink_commands.assert_not_called()
 
 
-def test_isolated_environment_mounts_and_translates_evaluator_package(tmp_path: Path) -> None:
+def test_isolated_environment_mounts_and_translates_evaluator_package(
+    tmp_path: Path,
+    fake_agent_image: list[dict[str, Any]],
+) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
     package = resolve_evaluator_package(
@@ -426,11 +471,10 @@ def test_isolated_environment_mounts_and_translates_evaluator_package(tmp_path: 
         "/opt/vibesys-evaluator-package",
         True,
     ) in backend.calls[0][1]["bind_mounts"]
-    init_commands = backend.calls[0][1]["extra_init_commands"]
-    assert any("go1.23.12" in item for item in init_commands)
-    assert any("static.rust-lang.org/rustup/dist" in item for item in init_commands)
-    assert any("--no-modify-path" in item for item in init_commands)
-    assert any("cargo --version" in item for item in init_commands)
+    # The evaluator package's declared toolchains (go, rust) are baked into
+    # the agent image at build time now, not installed per-run.
+    assert "extra_init_commands" not in backend.calls[0][1]
+    assert fake_agent_image[-1]["toolchains"] == frozenset({"go", "rust"})
 
 
 def test_rootless_rust_setup_replaces_broken_rustup_cargo_shim(tmp_path: Path) -> None:
@@ -572,8 +616,8 @@ def test_isolated_environments_install_and_translate_evaluator_tools(
             lambda _request, _tools, **_kwargs: [(str(built_root), str(container_root), True)],
         )
         monkeypatch.setattr(
-            "vibesys.sandbox.run_environment._resolve_docker_image_id",
-            lambda _image: "sha256:pinned",
+            "vibesys.sandbox.images.agent_image",
+            lambda *_args, **_kwargs: "sha256:pinned",
         )
 
     session = env.open(
@@ -589,7 +633,6 @@ def test_isolated_environments_install_and_translate_evaluator_tools(
     rendered = session.view.paths.benchmark_command or ""
     assert "${TOOL:" not in rendered
     assert "evaluator-tools" in rendered
-    init_commands = backend.calls[0][1]["extra_init_commands"]
     if environment_name == "docker":
         assert "/opt/vibesys-evaluator-tools" in rendered
         assert backend.calls[0][1]["container_image"] == "sha256:pinned"
@@ -598,8 +641,11 @@ def test_isolated_environments_install_and_translate_evaluator_tools(
             for hook in backend.calls[0][1]["lifecycle_hooks"]
         )
         assert (str(built_root), str(container_root), True) in backend.calls[0][1]["bind_mounts"]
-        assert not any("static.rust-lang.org/rustup/dist" in item for item in init_commands)
+        # Cargo-git tools are prebuilt and mounted read-only; nothing installs
+        # Rust in the running container.
+        assert "extra_init_commands" not in backend.calls[0][1]
     else:
+        init_commands = backend.calls[0][1]["extra_init_commands"]
         arguments = shlex.split(rendered)
         separator = arguments.index("--")
         assert arguments[separator + 1].startswith(".vibesys-evaluator-tools/request-factory/")
@@ -816,7 +862,10 @@ def test_environment_rejects_semantic_tokens_in_top_level_executable_source(
         )
 
 
-def test_microservice_package_does_not_install_rust(tmp_path: Path) -> None:
+def test_microservice_package_does_not_install_rust(
+    tmp_path: Path,
+    fake_agent_image: list[dict[str, Any]],
+) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
     package = resolve_evaluator_package(
@@ -836,9 +885,7 @@ def test_microservice_package_does_not_install_rust(tmp_path: Path) -> None:
         )
     )
 
-    init_commands = backend.calls[0][1]["extra_init_commands"]
-    assert any("go1.23.12" in item for item in init_commands)
-    assert not any("static.rust-lang.org/rustup/dist" in item for item in init_commands)
+    assert fake_agent_image[-1]["toolchains"] == frozenset({"go"})
 
 
 def test_docker_environment_mounts_effective_objective_read_only(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
@@ -903,6 +950,47 @@ def test_isolated_environment_enforces_project_path_policy(tmp_path, environment
     assert hidden_mounts["/workspace/agent.toml"].is_relative_to(tmp_path / "logs")
 
 
+def test_cli_container_env_and_setup_agree_on_the_container_environment(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    """``_cli_container_setup`` (Modal/SkyPilot) still gets what it used to.
+
+    ``_cli_container_env`` was factored out of ``_cli_container_setup`` so the
+    plain Docker path can reuse the auth-presence check and env passthrough
+    without the shell-command half; this pins that the full function's
+    environment output is unchanged by the split.
+    """
+    backend = FakeBackend()
+    request = _request(tmp_path, backend, agent_backend="cli", cli_provider="codex")
+
+    resolved = _cli_container_env(request)
+    _commands, setup_env = _cli_container_setup(request)
+
+    assert resolved is not None
+    provider, env = resolved
+    assert provider == "codex"
+    assert env == setup_env
+
+
+def test_cli_container_env_is_none_for_a_non_cli_agent_backend(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    backend = FakeBackend()
+    request = _request(tmp_path, backend, agent_backend="deepagents", cli_provider="codex")
+
+    assert _cli_container_env(request) is None
+
+
+def test_docker_agent_toolchains_adds_rust_only_when_tools_are_needed(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    backend = FakeBackend()
+    package = resolve_evaluator_package(
+        EvaluatorPackageRequirement(
+            name="vibesys-evaluator-request-factory",
+            version="0.1.0",
+        )
+    )
+    request = _request(tmp_path, backend, evaluator_package_root=package.root)
+
+    assert "rust" in _docker_agent_toolchains(request, _evaluator_tools(request))
+    assert _docker_agent_toolchains(_request(tmp_path, backend), {}) == frozenset()
+
+
 def test_docker_environment_copies_cli_auth_from_readonly_staging(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
@@ -916,9 +1004,10 @@ def test_docker_environment_copies_cli_auth_from_readonly_staging(tmp_path, monk
 
     kwargs = backend.calls[0][1]
     assert (str(auth_file), "/opt/vibesys-auth/0", True) in kwargs["bind_mounts"]
-    assert kwargs["extra_init_commands"][0] == (
-        "mkdir -p /root/.codex && cp -a /opt/vibesys-auth/0 /root/.codex/auth.json"
-    )
+    # The plain Docker path copies staged auth files into the agent HOME as a
+    # start-time DockerSandbox step, not via extra_init_commands.
+    assert "extra_init_commands" not in kwargs
+    assert kwargs["auth_files"] == [("/opt/vibesys-auth/0", "/home/agent/.codex/auth.json")]
 
 
 def test_docker_environment_forwards_host_cli_auth_environment(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
@@ -936,7 +1025,9 @@ def test_docker_environment_forwards_host_cli_auth_environment(tmp_path, monkeyp
     # VibeSys owns per-role model selection, so a host export must not reach
     # the container and override it.
     assert "ANTHROPIC_MODEL" not in container_env
-    assert container_env["IS_SANDBOX"] == "1"
+    # The agent image runs the CLI as the non-root "agent" user, so Claude's
+    # root-only IS_SANDBOX=1 escape hatch is no longer needed or forwarded.
+    assert "IS_SANDBOX" not in container_env
     assert container_env["PYTHONPATH"] == "/opt/vibesys"
 
 

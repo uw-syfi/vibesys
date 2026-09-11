@@ -82,6 +82,7 @@ class CudaBackend:
         attach_accelerator: bool = True,
         ephemeral: bool = False,
         container_image: str | None = None,
+        auth_files: list[tuple[str, str]] | None = None,
     ) -> SandboxBackendProtocol:
         """Construct a sandbox configured for CUDA execution."""
         # Deferred: the sandbox classes subclass deepagents' BaseSandbox, which
@@ -119,7 +120,7 @@ class CudaBackend:
                 passthrough_paths=passthrough_paths,
                 env=env,
                 log_path=log_path,
-                extra_init_commands=extra_init_commands,
+                auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
             )
         elif kind is SandboxKind.MODAL:

@@ -10,7 +10,6 @@ translation between library events and :mod:`vibesys.agents.contracts`.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from dataclasses import replace
@@ -271,19 +270,6 @@ class _AgentShimEventHandler:
             observer.on_event(translated)
 
 
-class _ContainerCleanup(Protocol):
-    """The container-side cleanup a container session owns.
-
-    The driver binds this to
-    :func:`vibesys.agents.docker_executor.repair_workspace_ownership` for the
-    session's container; the session only knows there is one to run.
-    """
-
-    def __call__(self) -> None:
-        """Return bind-mounted workspace files to the host user."""
-        ...
-
-
 class AgentShimSession:
     """One configured AgentShim conversation."""
 
@@ -296,7 +282,7 @@ class AgentShimSession:
         timeout: int | None,
         event_handler: _AgentShimEventHandler,
         turn_env: Mapping[str, str] | None,
-        container_cleanup: _ContainerCleanup | None,
+        in_container: bool,
         log: Callable[[str], None],
     ) -> None:
         """Bind one library session to the VibeSys policy that drives it."""
@@ -306,7 +292,7 @@ class AgentShimSession:
         self._timeout = timeout
         self._event_handler = event_handler
         self._turn_env = dict(turn_env) if turn_env else None
-        self._container_cleanup = container_cleanup
+        self._in_container = in_container
         self._log = log
         self._mcp_servers = tuple(
             _as_mcp_server(server, in_container=self._in_container) for server in spec.mcp_servers
@@ -316,15 +302,6 @@ class AgentShimSession:
         # serving the current turn, so the turn's result can report it.
         self._restarted = False
         self._closed = False
-
-    @property
-    def _in_container(self) -> bool:
-        """Whether this session's CLI runs inside a container.
-
-        The container-side cleanup hook is the one thing only a container
-        session owns, so its presence is what the mode is read from.
-        """
-        return self._container_cleanup is not None
 
     def run_turn(
         self,
@@ -338,28 +315,12 @@ class AgentShimSession:
         self._event_handler.observer = observer
         self._event_handler.structured = request.output_schema is not None
         self._restarted = False
-        turn_error: BaseException | None = None
         try:
             result = self._turn_with_restart(self._build_request(request))
             self._turn_count += 1
-        except BaseException as exc:
-            turn_error = exc
-            raise
         finally:
-            cleanup_error: Exception | None = None
-            try:
-                self._repair_workspace_ownership()
-            except Exception as exc:  # noqa: BLE001  # tracked: #288
-                cleanup_error = exc
-                if turn_error is not None:
-                    self._log(
-                        "workspace ownership repair failed while preserving the original "
-                        f"agent error: {exc}"
-                    )
             self._event_handler.observer = None
             self._event_handler.structured = False
-            if turn_error is None and cleanup_error is not None:
-                raise cleanup_error
 
         # Read the conversation ID before the thread-budget check, which may
         # drop it: the caller still deserves to know which conversation ran.
@@ -567,25 +528,6 @@ class AgentShimSession:
         self._turn_count = 0
         return True
 
-    def _repair_workspace_ownership(self) -> None:
-        """Return the container's writes to the host user, on every exit path.
-
-        Raises:
-            RuntimeError: if the repair failed, including when it timed out.
-                The repair runs from the turn's ``finally``, and it shells out
-                with its own budget, so a ``subprocess.TimeoutExpired`` from it
-                would reach the loop as the agent having timed out. That is a
-                different failure with a different response, so the timeout is
-                re-raised under a type the loop reads as a plain error.
-        """
-        if self._container_cleanup is None:
-            return
-        try:
-            self._container_cleanup()
-        except subprocess.TimeoutExpired as exc:
-            message = str(exc)
-            raise RuntimeError(message) from exc
-
 
 def _result_text(result: agentshim.TurnResult) -> str:
     """Return the turn's answer, preferring the schema-conformant payload.
@@ -691,12 +633,10 @@ class AgentShimDriver:
         provider = agentshim.get_provider(spec.provider)
         event_handler = _AgentShimEventHandler()
         overlay = dict(spec.environment)
-        container_cleanup: _ContainerCleanup | None = None
         turn_env: Mapping[str, str] | None = None
         executor: agentshim.CommandExecutor
         if in_container:
             executor = self._container_executor(spec, forward_env=tuple(overlay))
-            container_cleanup = self._container_cleanup(spec)
             # The container's own environment is built by the image and the
             # exec invocation; the session overlay is forwarded per turn so it
             # reaches the CLI inside the container instead of the docker client.
@@ -727,7 +667,7 @@ class AgentShimDriver:
             timeout=self._timeout,
             event_handler=event_handler,
             turn_env=turn_env,
-            container_cleanup=container_cleanup,
+            in_container=in_container,
             log=self._log,
         )
         self._sessions.add(session)
@@ -799,16 +739,6 @@ class AgentShimDriver:
             # compensation, so it wraps the transport rather than replacing it.
             executor = CodexRolloutWatchdogExecutor(executor, resolve, log=self._log)
         return executor
-
-    def _container_cleanup(self, spec: AgentSessionSpec) -> _ContainerCleanup:
-        """Bind the module-level ownership repair to this session's container."""
-        resolve = self._container_id_resolver(spec)
-        from vibesys.agents.docker_executor import repair_workspace_ownership  # noqa: PLC0415
-
-        def repair() -> None:
-            repair_workspace_ownership(resolve(), uid=os.getuid(), gid=os.getgid())
-
-        return repair
 
     def close(self) -> None:
         """Close every session created by this driver, idempotently."""

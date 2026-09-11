@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from vs_sandbox.project_paths import ProjectPathPolicy, ProjectPathPolicyError
 
 if TYPE_CHECKING:
-    from vs_sandbox.docker_sandbox import DockerSandbox
+    from vs_sandbox.docker_sandbox import AGENT_HOME, DockerSandbox
     from vs_sandbox.host_resources import (
         HostResource,
         HostResourceAccess,
@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from vs_sandbox.modal_sandbox import ModalSandbox
 
 __all__ = [
+    "AGENT_HOME",
     "BeforeReadyContext",
     "DockerSandbox",
     "HostResource",
@@ -66,10 +67,10 @@ __all__ = [
 
 
 def __getattr__(name: str) -> Any:  # noqa: ANN401, PLR0911  # tracked: #288
-    if name == "DockerSandbox":
-        from vs_sandbox.docker_sandbox import DockerSandbox  # noqa: PLC0415  # tracked: #288
+    if name in {"AGENT_HOME", "DockerSandbox"}:
+        from vs_sandbox import docker_sandbox  # noqa: PLC0415  # tracked: #288
 
-        return DockerSandbox
+        return getattr(docker_sandbox, name)
     if name in {
         "HostResource",
         "HostResourceAccess",

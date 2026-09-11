@@ -123,6 +123,7 @@ class TrainiumBackend:
         attach_accelerator: bool = True,
         ephemeral: bool = False,
         container_image: str | None = None,
+        auth_files: list[tuple[str, str]] | None = None,
     ) -> SandboxBackendProtocol:
         # Deferred: the sandbox classes subclass deepagents' BaseSandbox, which
         # pulls langchain + anthropic. Registration must stay import-cheap.
@@ -131,9 +132,11 @@ class TrainiumBackend:
         bind_mounts = list(bind_mounts or [])
         passthrough_paths = list(passthrough_paths or [])
         extra_env = dict(extra_env or {})
-        extra_init_commands = list(extra_init_commands or [])
         lifecycle_hooks = lifecycle_hooks or []
-        del ephemeral
+        # Accepted for ComputeBackendImpl protocol parity but unused: Trainium
+        # rejects Modal outright, and the agent-image-based DOCKER sandbox
+        # runs no per-launch install commands.
+        del ephemeral, extra_init_commands
 
         if kind is SandboxKind.MODAL:
             raise ValueError(  # noqa: TRY003  # tracked: #288
@@ -202,7 +205,7 @@ class TrainiumBackend:
                 passthrough_paths=passthrough_paths,
                 env=env,
                 log_path=log_path,
-                extra_init_commands=extra_init_commands,
+                auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
             )
 

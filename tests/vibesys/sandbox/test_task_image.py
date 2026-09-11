@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from vibesys.sandbox.task_image import (
+from vibesys.sandbox.images import (
     SubprocessDockerBuildRunner,
     TaskImageBuildError,
     build_task_image,
@@ -60,7 +60,7 @@ def test_build_uses_task_context_and_returns_runnable_image_id(
 ) -> None:
     task_root = _task(tmp_path)
     runner = FakeDockerBuildRunner()
-    monkeypatch.setattr("vibesys.sandbox.task_image.uuid.uuid4", lambda: MagicMock(hex="build-id"))
+    monkeypatch.setattr("vibesys.sandbox.images.uuid.uuid4", lambda: MagicMock(hex="build-id"))
 
     assert (
         build_task_image(task_root / "Dockerfile", command_runner=runner, timeout=42) == _IMAGE_ID
@@ -93,9 +93,35 @@ def test_build_uses_task_context_and_returns_runnable_image_id(
     )
 
 
+def test_build_passes_base_image_as_build_arg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task_root = _task(tmp_path)
+    runner = FakeDockerBuildRunner()
+    monkeypatch.setattr("vibesys.sandbox.images.uuid.uuid4", lambda: MagicMock(hex="build-id"))
+
+    build_task_image(
+        task_root / "Dockerfile", base_image="python:3.12-bookworm", command_runner=runner
+    )
+
+    build_argv, _cwd, _timeout = runner.calls[0]
+    assert build_argv == (
+        "docker",
+        "build",
+        "--provenance=false",
+        "--tag",
+        "vibesys-task-build:build-id",
+        "--file",
+        str(task_root / "Dockerfile"),
+        "--build-arg",
+        "BASE_IMAGE=python:3.12-bookworm",
+        str(task_root),
+    )
+
+
 def test_subprocess_runner_uses_no_shell(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     run = MagicMock(return_value=subprocess.CompletedProcess(("docker",), 0, "", ""))
-    monkeypatch.setattr("vibesys.sandbox.task_image.subprocess.run", run)
+    monkeypatch.setattr("vibesys.sandbox.images.subprocess.run", run)
 
     SubprocessDockerBuildRunner().run(("docker", "build", "."), cwd=tmp_path, timeout=5)
 

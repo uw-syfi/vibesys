@@ -100,7 +100,7 @@ class TestAuthPaths:
 
         for provider in _SHIPPED:
             expected = [
-                (auth_file, f"/root/{auth_file}")
+                (auth_file, f"/home/agent/{auth_file}")
                 for auth_file in _FAKE_PROFILES[provider].auth_files
             ]
             staged = [
@@ -172,9 +172,14 @@ class TestAuthImport:
             (str(tmp_path / ".claude.json"), "/opt/vibesys-auth/2", True),
         ]
         assert cli_docker.auth_copy_commands("fixture") == [
-            "mkdir -p /root/.codex && cp -a /opt/vibesys-auth/0 /root/.codex/auth.json",
-            "mkdir -p /root/.codex && cp -a /opt/vibesys-auth/1 /root/.codex/config.toml",
-            "mkdir -p /root && cp -a /opt/vibesys-auth/2 /root/.claude.json",
+            "mkdir -p /home/agent/.codex && cp -a /opt/vibesys-auth/0 /home/agent/.codex/auth.json",
+            "mkdir -p /home/agent/.codex && cp -a /opt/vibesys-auth/1 /home/agent/.codex/config.toml",
+            "mkdir -p /home/agent && cp -a /opt/vibesys-auth/2 /home/agent/.claude.json",
+        ]
+        assert cli_docker.auth_copy_paths("fixture") == [
+            ("/opt/vibesys-auth/0", "/home/agent/.codex/auth.json"),
+            ("/opt/vibesys-auth/1", "/home/agent/.codex/config.toml"),
+            ("/opt/vibesys-auth/2", "/home/agent/.claude.json"),
         ]
 
     def test_keeps_staging_indexes_stable_when_a_host_file_is_absent(
@@ -203,7 +208,10 @@ class TestAuthImport:
             (str(codex_home / "config.toml"), "/opt/vibesys-auth/1", True),
         ]
         assert cli_docker.auth_copy_commands("fixture") == [
-            "mkdir -p /root/.codex && cp -a /opt/vibesys-auth/1 /root/.codex/config.toml",
+            "mkdir -p /home/agent/.codex && cp -a /opt/vibesys-auth/1 /home/agent/.codex/config.toml",
+        ]
+        assert cli_docker.auth_copy_paths("fixture") == [
+            ("/opt/vibesys-auth/1", "/home/agent/.codex/config.toml"),
         ]
 
 
@@ -398,7 +406,7 @@ class TestShippedProfileAssumptions:
 
         assert [
             (spec.host_path, spec.container_path) for spec in cli_docker.auth_paths(provider)
-        ] == [(home / auth_file, f"/root/{auth_file}") for auth_file in profile.auth_files]
+        ] == [(home / auth_file, f"/home/agent/{auth_file}") for auth_file in profile.auth_files]
         # A provider that declares no auth files starts its container CLI
         # logged out.
         assert profile.auth_files
@@ -463,7 +471,10 @@ class TestShippedProfileAssumptions:
 
 def test_docker_provider_env_covers_every_provider_vibesys_ships() -> None:
     assert set(cli_docker.DOCKER_PROVIDER_ENV) == set(_SHIPPED)
-    assert cli_docker.DOCKER_PROVIDER_ENV["claude"]["IS_SANDBOX"] == "1"
+    # The agent image runs the CLI as the non-root ``agent`` user, so Claude's
+    # root-only IS_SANDBOX=1 escape hatch (a profile.container_env entry) is no
+    # longer folded in.
+    assert "IS_SANDBOX" not in cli_docker.DOCKER_PROVIDER_ENV["claude"]
     assert all(
         env["PYTHONPATH"] == "/opt/vibesys" for env in cli_docker.DOCKER_PROVIDER_ENV.values()
     )

@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import signal
 import subprocess
 import tempfile
@@ -43,6 +44,13 @@ _SECRET_ENV_NAME_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _REDACTED_VALUE = "<redacted>"
+
+#: HOME of the non-root ``agent`` user baked into the agent image. The image
+#: creates this user with a real HOME; nothing here creates it.
+AGENT_HOME = "/home/agent"
+
+_AGENT_USER = "agent"
+_ROOT_SETUP_TIMEOUT_S = 60
 
 
 def _is_secret_env_name(name: str) -> bool:
@@ -133,6 +141,14 @@ class DockerSandbox(BaseSandbox):
     the workspace root — matching ``LocalShellBackend(virtual_mode=True)``
     behaviour.  All filesystem methods translate these to container paths
     (``/workspace/foo``) before delegating to ``BaseSandbox``.
+
+    The container starts from a prebuilt agent image (shipped CLIs, toolchains,
+    and a non-root ``agent`` user with a real HOME already baked in), so no
+    install runs at start. Only two things still happen at start, both as
+    root: the image's ``agent`` user is remapped to the host uid/gid so
+    bind-mounted workspace writes come back owned by the host user, and any
+    staged provider credentials are copied into the agent's HOME. Every other
+    command, including the agent's own, runs as the image's default user.
     """
 
     _CONTAINER_ROOT = "/workspace"
@@ -154,7 +170,9 @@ class DockerSandbox(BaseSandbox):
         bind_mounts: list[tuple[str, str, bool]] | None = None,
         passthrough_paths: list[str] | None = None,
         log_path: str | Path | None = None,
-        extra_init_commands: list[str] | None = None,
+        agent_uid: int | None = None,
+        agent_gid: int | None = None,
+        auth_files: list[tuple[str, str]] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
     ) -> None:
         """Initialize Docker sandbox configuration.
@@ -194,11 +212,19 @@ class DockerSandbox(BaseSandbox):
             passthrough_paths: Container paths outside /workspace that should
                 not be rewritten by virtual-path translation (e.g. ``["/model"]``).
             log_path: File path to log docker commands to. If None, no logging.
-            extra_init_commands: Additional bash commands to run inside the
-                container after the default ``pip install uv`` step.  Unlike
-                ``uv``, failures here **raise RuntimeError** — use this for
-                commands that must succeed (e.g. installing a CLI binary the
-                loop depends on).
+            agent_uid: Host uid the image's ``agent`` user is remapped to at
+                start, so files the agent writes to the bind-mounted
+                workspace are owned by the host user. Defaults to this
+                process's uid. The remap is skipped when the image's
+                ``agent`` user already has this uid.
+            agent_gid: Host gid the image's ``agent`` group is remapped to,
+                analogous to *agent_uid*. Defaults to this process's gid.
+            auth_files: ``(staged_path, destination_path)`` pairs copied into
+                the container as root at start, then chowned to ``agent``.
+                *staged_path* is a read-only staging location already reached
+                through *bind_mounts* (conventionally under
+                ``/opt/vibesys-auth``); *destination_path* is where the CLI
+                expects to find it, conventionally under :data:`AGENT_HOME`.
             lifecycle_hooks: Trusted extensions invoked in order after
                 built-in initialization and before the sandbox becomes ready.
                 They run again after every container recreation.
@@ -218,7 +244,9 @@ class DockerSandbox(BaseSandbox):
         self._bind_mounts = bind_mounts or []
         self._container_id: str | None = None
         self._logger = self._setup_logger(log_path)
-        self._extra_init_commands: list[str] = list(extra_init_commands or [])
+        self._agent_uid = agent_uid if agent_uid is not None else os.getuid()
+        self._agent_gid = agent_gid if agent_gid is not None else os.getgid()
+        self._auth_files: list[tuple[str, str]] = list(auth_files or [])
         self._lifecycle = SandboxLifecycle(lifecycle_hooks)
 
         # Container paths outside /workspace that _vpath must not rewrite.
@@ -479,56 +507,99 @@ class DockerSandbox(BaseSandbox):
         }
         self._save_metadata()
 
-        # Install uv (with timeout to avoid hanging on network issues)
-        uv_cmd = ["docker", "exec", container_id, "bash", "-c", "pip install uv"]
+        self._remap_agent_user(container_id)
+        self._copy_auth_files(container_id)
+
+        self._lifecycle.before_ready(self)
+
+    def _run_as_root(self, container_id: str, script: str, *, what: str) -> None:
+        """Run *script* as root inside the container; raise on failure or timeout.
+
+        These steps (the uid/gid remap, the auth-file copy) are required: the
+        agent image ships no root fallback, so a failure here would otherwise
+        surface much later as a confusing permission error deep in a turn.
+        """
+        cmd = ["docker", "exec", "-u", "root", container_id, "bash", "-c", script]
+        self._log_cmd(cmd)
         try:
-            uv_result = subprocess.run(  # noqa: S603  # tracked: #288
-                uv_cmd,
+            result = subprocess.run(  # noqa: S603  # tracked: #288
+                cmd,
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=120,
+                timeout=_ROOT_SETUP_TIMEOUT_S,
             )
-            self._log_cmd(uv_cmd, uv_result)
-        except subprocess.TimeoutExpired:
-            self._log_cmd(uv_cmd, error="pip install uv timed out after 120s")
-            # Non-fatal: uv is optional, the agent can still use pip directly
+        except subprocess.TimeoutExpired as exc:
+            self._log_cmd(cmd, error=f"{what} timed out after {_ROOT_SETUP_TIMEOUT_S}s")
+            raise RuntimeError(  # noqa: TRY003  # tracked: #288
+                f"{what} timed out after {_ROOT_SETUP_TIMEOUT_S}s"
+            ) from exc
+        self._log_cmd(cmd, result)
+        if result.returncode != 0:
+            raise RuntimeError(  # noqa: TRY003  # tracked: #288
+                f"{what} failed (exit {result.returncode}):\n"
+                f"  stdout: {result.stdout.strip()[:500]}\n"
+                f"  stderr: {result.stderr.strip()[:500]}"
+            )
 
-        # Run any additional init commands (e.g. installing a CLI binary).
-        # Unlike uv, these are required — a failure raises RuntimeError.
-        for init_cmd_str in self._extra_init_commands:
-            init_cmd = [
+    def _current_agent_ids(self, container_id: str) -> tuple[int, int] | None:
+        """Return the image's ``agent`` user's current (uid, gid), if resolvable."""
+        result = subprocess.run(  # noqa: S603  # tracked: #288
+            [  # noqa: S607  # tracked: #288
                 "docker",
                 "exec",
                 container_id,
-                "bash",
+                "sh",
                 "-c",
-                init_cmd_str,
-            ]
-            self._log_cmd(init_cmd)
-            try:
-                init_result = subprocess.run(  # noqa: S603  # tracked: #288
-                    init_cmd,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=600,
-                )
-                self._log_cmd(init_cmd, init_result)
-                if init_result.returncode != 0:
-                    raise RuntimeError(  # noqa: TRY003  # tracked: #288
-                        f"Container init command failed (exit {init_result.returncode}):\n"
-                        f"  command: {init_cmd_str}\n"
-                        f"  stdout: {init_result.stdout.strip()[:500]}\n"
-                        f"  stderr: {init_result.stderr.strip()[:500]}"
-                    )
-            except subprocess.TimeoutExpired as exc:
-                self._log_cmd(init_cmd, error=f"init command timed out after 600s: {init_cmd_str}")
-                raise RuntimeError(  # noqa: TRY003  # tracked: #288
-                    f"Container init command timed out after 600s: {init_cmd_str}"
-                ) from exc
+                f"id -u {_AGENT_USER} && id -g {_AGENT_USER}",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_ROOT_SETUP_TIMEOUT_S,
+        )
+        if result.returncode != 0:
+            return None
+        lines = result.stdout.split()
+        if len(lines) != 2:  # noqa: PLR2004  # tracked: #288
+            return None
+        try:
+            return int(lines[0]), int(lines[1])
+        except ValueError:
+            return None
 
-        self._lifecycle.before_ready(self)
+    def _remap_agent_user(self, container_id: str) -> None:
+        """Remap the image's ``agent`` user to the configured host uid/gid.
+
+        Skipped when the image's ``agent`` user already carries these ids, so
+        a host user that happens to already be uid/gid 1000 (the image's
+        baked-in default) pays no extra ``docker exec``.
+        """
+        current = self._current_agent_ids(container_id)
+        if current == (self._agent_uid, self._agent_gid):
+            return
+        script = (
+            f"usermod -o -u {self._agent_uid} {_AGENT_USER} && "
+            f"groupmod -o -g {self._agent_gid} {_AGENT_USER} && "
+            f"chown -R {_AGENT_USER}:{_AGENT_USER} {AGENT_HOME}"
+        )
+        self._run_as_root(container_id, script, what="agent user id remap")
+
+    def _copy_auth_files(self, container_id: str) -> None:
+        """Copy staged provider credentials into the agent's writable HOME.
+
+        Copying from the read-only staging mount into the agent's own
+        writable layer, rather than mounting the destination itself, keeps
+        session/history writes inside the disposable container.
+        """
+        for source, destination in self._auth_files:
+            parent = str(Path(destination).parent)
+            script = (
+                f"mkdir -p {shlex.quote(parent)} && "
+                f"cp -a {shlex.quote(source)} {shlex.quote(destination)} && "
+                f"chown -R {_AGENT_USER}:{_AGENT_USER} {shlex.quote(destination)}"
+            )
+            self._run_as_root(container_id, script, what=f"auth file copy to {destination}")
 
     def _discard_started_container(self) -> None:
         """Best-effort rollback for a container whose startup did not finish."""

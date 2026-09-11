@@ -6,7 +6,6 @@ import threading
 import time
 from typing import TYPE_CHECKING, cast
 
-import pytest
 from agentshim import (
     CallbackCommandStreamSink,
     CliAgent,
@@ -26,12 +25,12 @@ from vibesys.agents.docker_executor import (
     _CodexRolloutCompletion,
     _discard,
     _scan_codex_rollout_completion,
-    repair_workspace_ownership,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    import pytest
     from agentshim import CommandExecutor, CommandStreamSink
 
 THREAD_ID = "019fc654-87f2-7702-8bf2-05b6f4f006dc"
@@ -193,67 +192,6 @@ class TestDockerCommandExecutor:
             "claude",
             "--help",
         ]
-
-
-class TestRepairWorkspaceOwnership:
-    """Root-owned replacements in the bind mount must go back to the host user."""
-
-    def test_runs_the_chown_sweep_inside_the_container(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        calls: list[tuple[list[str], dict[str, object]]] = []
-
-        def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-            calls.append((cmd, kwargs))
-            return subprocess.CompletedProcess(cmd, 0, "", "")
-
-        monkeypatch.setattr("vibesys.agents.docker_executor.subprocess.run", fake_run)
-
-        repair_workspace_ownership("container-123", uid=123, gid=456)
-
-        assert calls == [
-            (
-                [
-                    "docker",
-                    "exec",
-                    "container-123",
-                    "find",
-                    "/workspace",
-                    "-xdev",
-                    "-user",
-                    "0",
-                    "-writable",
-                    "-exec",
-                    "chown",
-                    "123:456",
-                    "{}",
-                    "+",
-                ],
-                {
-                    "capture_output": True,
-                    "text": True,
-                    "timeout": 120,
-                    "check": False,
-                },
-            )
-        ]
-
-    def test_reports_the_command_diagnostic_when_the_sweep_fails(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setattr(
-            "vibesys.agents.docker_executor.subprocess.run",
-            lambda cmd, **_kwargs: subprocess.CompletedProcess(cmd, 1, "", "chown: no such user"),
-        )
-
-        with pytest.raises(RuntimeError) as excinfo:
-            repair_workspace_ownership("container-123", uid=1, gid=2)
-
-        assert str(excinfo.value) == (
-            "failed to restore writable Docker workspace ownership: chown: no such user"
-        )
 
 
 class _BlockingHandle:
@@ -554,7 +492,7 @@ class _FakeDockerQueries:
         self,
         *,
         rollout: list[str] | None,
-        path: str = "/root/.codex/sessions/r.jsonl",
+        path: str = "/home/agent/.codex/sessions/r.jsonl",
     ) -> None:
         """Serve *rollout* as the file at *path*, or no file at all when None."""
         self.rollout = rollout
@@ -589,6 +527,18 @@ class TestCodexRolloutReading:
 
         assert self._read(monkeypatch, queries) is None
         assert not any("tail" in cmd for cmd in queries.commands)
+
+    def test_locates_the_rollout_under_the_agent_home(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex runs as the non-root ``agent`` user, so ``CODEX_HOME`` is its own."""
+        queries = _FakeDockerQueries(rollout=None)
+
+        self._read(monkeypatch, queries)
+
+        find_command = next(cmd for cmd in queries.commands if "find" in cmd)
+        assert "/home/agent/.codex/sessions" in find_command
+        assert "/root/.codex/sessions" not in find_command
 
     def test_a_rollout_still_working_is_no_evidence(
         self,

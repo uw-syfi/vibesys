@@ -73,11 +73,33 @@ class TestCpuSandbox:
             host_workspace=str(tmp_path),
             log_path=None,
             extra_env={"FOO": "bar"},
+            container_image="sha256:" + "a" * 64,
         )
         assert isinstance(sb, DockerSandbox)
         assert sb._gpus is None  # noqa: SLF001  # tracked: #288
-        assert sb._image == impl.image  # noqa: SLF001  # tracked: #288
+        assert sb._image == "sha256:" + "a" * 64  # noqa: SLF001  # tracked: #288
         assert sb._env["FOO"] == "bar"  # noqa: SLF001  # tracked: #288
+
+    def test_docker_falls_back_to_the_backend_image_without_a_resolved_container_image(  # noqa: ANN201  # tracked: #288
+        self,
+        tmp_path,  # noqa: ANN001  # tracked: #288
+    ):
+        """A caller that builds its own Docker sandbox without one still works.
+
+        ``DockerEnvironment.open()`` (the plain ``--docker`` path) always
+        resolves an agent image and passes it as ``container_image``, so in
+        practice this fallback is dead there; it still matters for Modal and
+        SkyPilot's CPU-only local editor container, which builds no agent
+        image and never passes ``container_image``.
+        """
+        impl = _make_backend(tmp_path)
+        sb = impl.make_sandbox(
+            SandboxKind.DOCKER,
+            host_workspace=str(tmp_path),
+            log_path=None,
+        )
+        assert isinstance(sb, DockerSandbox)
+        assert sb._image == impl.image  # noqa: SLF001  # tracked: #288
 
     def test_modal_raises(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
         impl = _make_backend(tmp_path)

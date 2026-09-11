@@ -42,6 +42,7 @@ jobs:
       python: ${{ steps.filter.outputs.python }}
       tui: ${{ steps.filter.outputs.tui }}
       examples: ${{ steps.filter.outputs.examples }}
+      agent_image: ${{ steps.filter.outputs.agent_image }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -89,6 +90,13 @@ jobs:
               - 'scripts/example_repositories.py'
               - 'tests/vibesys/test_microservice_inputs.py'
               - 'tests/vibesys/test_input_sources.py'
+              - '.github/workflows/test.yml'
+            # The agent image build: its Dockerfile, the module that builds
+            # it, and the version pins it takes as build args.
+            agent_image:
+              - 'src/vibesys/sandbox/images/**'
+              - 'src/vibesys/sandbox/images.py'
+              - 'src/vibesys/agents/provider_policy.py'
               - '.github/workflows/test.yml'
 
   # One environment setup for every cheap Python check. Issue #89 split these
@@ -432,6 +440,35 @@ jobs:
           go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml" --telemetry-command-json '["go","run","./cmd/otelcapture","--input-json","/tmp/vibesys-hotel-traces.otlp.ndjson","--settle-seconds","5"]' --telemetry-output /tmp/vibesys-hotel-telemetry.json --telemetry-timeout 60 --validate-only
           go run ./cmd/servicebench --mode accuracy --workload "$GITHUB_WORKSPACE/examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml" --validate-only
 
+  # Builds the CPU agent image for real and runs every shipped CLI inside it
+  # as the non-root `agent` user (issue #675). ubuntu-latest ships Docker, so
+  # no separate engine setup is needed. Filtered narrowly: only a change that
+  # can actually change the image's contents pays for this job's build time.
+  agent-image:
+    needs: changes
+    if: needs.changes.outputs.agent_image == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Build the CPU agent image and run every shipped CLI in it
+        env:
+          VIBESYS_E2E_DOCKER: "1"
+        run: uv run pytest tests/e2e/test_agent_image_e2e.py -v -s --no-cov
+
   # Deliberately unfiltered: several tests read clients/ directly (packaging,
   # theme, and distribution tests), so a TypeScript-only change still needs
   # this job.
@@ -582,6 +619,7 @@ jobs:
       - tui
       - queue-native
       - validate-examples
+      - agent-image
       - test
       - sandbox-linux
       - sandbox-macos

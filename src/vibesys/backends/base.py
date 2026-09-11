@@ -68,14 +68,19 @@ class ComputeBackendImpl(Protocol):
         bind_mounts: list[tuple[str, str, bool]],
         passthrough_paths: list[str],
         extra_env: dict[str, str],
-        extra_init_commands: list[str],
+        extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
         modal_options: ModalOptions | None = None,
         attach_accelerator: bool = True,
         ephemeral: bool = False,
         container_image: str | None = None,
+        auth_files: list[tuple[str, str]] | None = None,
     ) -> SandboxBackendProtocol:
         """Construct (do not start) a sandbox configured for this backend.
+
+        ``extra_init_commands`` is ignored by a Docker sandbox, which starts
+        from a prebuilt agent image and installs nothing at start; Modal
+        still runs these per-launch until its own image work lands.
 
         ``lifecycle_hooks`` are invoked before the sandbox becomes ready,
         during both initial creation and replacement.
@@ -89,6 +94,10 @@ class ComputeBackendImpl(Protocol):
 
         ``container_image`` pins a Docker sandbox to a resolved image ID. It is
         ignored by non-Docker sandboxes.
+
+        ``auth_files`` names ``(staged source, agent-home destination)`` pairs
+        a Docker sandbox copies in as root at start, then chowns to the agent
+        user. Ignored by non-Docker sandboxes.
         """
         ...
 

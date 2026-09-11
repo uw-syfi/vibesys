@@ -1,13 +1,11 @@
 """Run agentshim CLI commands inside an already-running VibeSys Docker sandbox.
 
-Three pieces live here:
+Two pieces live here:
 
 * :class:`DockerCommandExecutor` -- a ``docker exec`` transport built on the
   library's ``TransformingExecutor``. It carries no provider knowledge: it
   rewrites argv, forwards the environment entries its caller nominated, and
   lets agentshim own everything else.
-* :func:`repair_workspace_ownership` -- returns bind-mounted workspace files to
-  the host user after a container turn.
 * :class:`CodexRolloutWatchdogExecutor` -- provider-behaviour compensation, not
   transport. A resumed ``codex exec ... --json`` run inside a container
   regularly finishes its work and writes the terminal events to its rollout
@@ -37,6 +35,8 @@ from agentshim import (
     TransformingExecutor,
 )
 
+from vs_sandbox import AGENT_HOME
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
@@ -45,7 +45,6 @@ if TYPE_CHECKING:
 #: Where a container turn runs when the request does not name a directory.
 DEFAULT_CONTAINER_WORKDIR = "/workspace"
 
-_OWNERSHIP_REPAIR_TIMEOUT_S = 120
 _DOCKER_QUERY_TIMEOUT_S = 5
 
 
@@ -123,47 +122,6 @@ class DockerCommandExecutor(TransformingExecutor):
             # to reach the daemon at all.
             env=os.environ,
             timeout=request.timeout,
-        )
-
-
-def repair_workspace_ownership(container_id: str, *, uid: int, gid: int) -> None:
-    """Return bind-mounted workspace files to the host user.
-
-    CLI agents run as root in the editor container. Some editors replace files
-    atomically, which leaves the replacement owned by root and can make the
-    host-side checkpoint code unable to read it. Repair ownership before
-    control returns to the framework rather than waiting until a later resume.
-
-    Raises:
-        RuntimeError: if the in-container ``chown`` sweep failed.
-    """
-    result = subprocess.run(  # noqa: S603  # tracked: #288
-        [  # noqa: S607  # tracked: #288
-            "docker",
-            "exec",
-            container_id,
-            "find",
-            "/workspace",
-            "-xdev",
-            "-user",
-            "0",
-            "-writable",
-            "-exec",
-            "chown",
-            f"{uid}:{gid}",
-            "{}",
-            "+",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=_OWNERSHIP_REPAIR_TIMEOUT_S,
-        check=False,
-    )
-    if result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip()
-        raise RuntimeError(
-            "failed to restore writable Docker workspace ownership"
-            + (f": {detail}" if detail else "")
         )
 
 
@@ -546,7 +504,7 @@ class CodexRolloutWatchdogExecutor:
                 "exec",
                 container_id,
                 "find",
-                "/root/.codex/sessions",
+                f"{AGENT_HOME}/.codex/sessions",
                 "-type",
                 "f",
                 "-name",

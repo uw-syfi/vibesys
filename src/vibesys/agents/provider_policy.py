@@ -52,19 +52,14 @@ _COMMON_DOCKER_ENV: dict[str, str] = {"PYTHONPATH": "/opt/vibesys"}
 in ``DockerSandbox.start`` for all four CLI providers). Without it the MCP
 server module would not be importable inside the container."""
 
-# Claude Code refuses ``--dangerously-skip-permissions`` when running as root
-# unless ``IS_SANDBOX=1`` is set, and VibeSys runs every container provider as
-# root (the default) to avoid uv/pip permission errors when the agent installs
-# packages. agentshim 0.6.1 declares this on ``ProviderProfile.container_env``
-# for every provider that needs container-only environment beyond auth
-# (Claude Code today), so VibeSys folds each shipped profile's answer into the
-# common table rather than pinning Claude's requirement by hand.
+# Claude Code used to refuse ``--dangerously-skip-permissions`` when running
+# as root unless ``IS_SANDBOX=1`` was set, back when VibeSys ran every
+# container provider as root. The agent image now runs the CLI as the non-root
+# ``agent`` user, so that requirement no longer applies and
+# ``ProviderProfile.container_env`` (agentshim 0.6.1's home for exactly this
+# kind of root-only escape hatch) is deliberately not merged in here.
 DOCKER_PROVIDER_ENV: dict[str, dict[str, str]] = {
-    provider: {
-        **_COMMON_DOCKER_ENV,
-        **provider_profiles.provider_profile(provider).container_env,
-    }
-    for provider in SHIPPED_PROVIDERS
+    provider: dict(_COMMON_DOCKER_ENV) for provider in SHIPPED_PROVIDERS
 }
 """Per-provider environment variables to set inside the container.
 
@@ -103,3 +98,47 @@ def cli_skill_dirs() -> tuple[str, ...]:
             seen.setdefault(skill_dir, None)
     seen.setdefault(_CURSOR_SKILL_DIR, None)
     return tuple(seen)
+
+
+# --- Agent image ------------------------------------------------------------
+#
+# Versions baked into ``vibesys/sandbox/images/agent.Dockerfile`` as build
+# args (see ``vibesys.sandbox.images.agent_image``). Pinned rather than left
+# to float so the container CLI matches the feature set VibeSys prompts were
+# validated against, and so a rebuild with unchanged pins resolves to the same
+# image from Docker's layer cache.
+
+NODE_VERSION = "24.21.0"
+"""Current Node.js LTS ("Krypton"), matching what the shipped CLIs are
+verified against upstream."""
+
+CLI_VERSIONS: dict[str, str] = {
+    "claude": "2.1.268",
+    "codex": CODEX_DOCKER_CLI_VERSION,
+    "gemini": "0.59.0",
+    "opencode": "1.18.30",
+}
+"""Container CLI version per shipped provider (``npm view <pkg> version`` at
+the time each was pinned, except Codex).
+
+Codex draws from :data:`CODEX_DOCKER_CLI_VERSION` instead of repeating its own
+literal, so the pin used by ``cli_docker`` (today's per-run container install)
+and the one used by ``agent_image`` (the prebuilt image) cannot disagree while
+both exist.
+"""
+
+RUST_TOOLCHAIN_VERSION = "1.92.0"
+"""Rust toolchain pin for an agent image's optional ``rust`` toolchain layer.
+
+Mirrors ``cli_docker.RUST_DOCKER_TOOLCHAIN_VERSION``, the equivalent pin for
+today's per-run container install; the two are independent constants because
+that module's per-run install path and this image's build-time install path
+are deleted and added on different schedules.
+"""
+
+GO_TOOLCHAIN_VERSION = "1.23.12"
+"""Go toolchain pin for an agent image's optional ``go`` toolchain layer.
+
+Mirrors the Go pin ``run_environment``'s evaluator setup already downloads at
+run time.
+"""

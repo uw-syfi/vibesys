@@ -365,18 +365,28 @@ class DockerEnvironment:  # noqa: D101  # tracked: #288
         return cls(DockerEnvironmentConfig(image=str(image) if image else None))
 
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:  # noqa: D102  # tracked: #288
+        from vibesys.sandbox.images import agent_image  # noqa: PLC0415  # tracked: #288
+
         tools = _evaluator_tools(request)
-        container_image = (
-            _resolve_docker_image_id(_docker_backend_image(request)) if tools else None
+        # The task image, when a task has a Dockerfile, is built by the
+        # headless entrypoint and arrives here as the backend image; only the
+        # agent layer is applied on top of it.
+        container_image = agent_image(
+            _docker_backend_image(request),
+            toolchains=_docker_agent_toolchains(request, tools),
         )
         bind_mounts, docker_symlinks, passthrough = _container_mount_plan(request)
         bind_mounts.extend(
             _docker_evaluator_tool_mounts(request, tools, container_image=container_image)
         )
-        extra_init_commands, cli_provider_env = _cli_container_setup(request)
-        extra_init_commands.extend(
-            _evaluator_container_setup(request, include_declared_tools=False)
-        )
+        resolved_cli = _cli_container_env(request)
+        cli_provider_env: dict[str, str] = {}
+        auth_files: list[tuple[str, str]] = []
+        if resolved_cli is not None:
+            provider, cli_provider_env = resolved_cli
+            from vibesys.agents.cli_docker import auth_copy_paths  # noqa: PLC0415  # tracked: #288
+
+            auth_files = auth_copy_paths(provider)
         cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
@@ -390,13 +400,12 @@ class DockerEnvironment:  # noqa: D101  # tracked: #288
             bind_mounts=bind_mounts,
             passthrough_paths=passthrough,
             extra_env=cli_provider_env,
-            extra_init_commands=extra_init_commands,
+            auth_files=auth_files,
             lifecycle_hooks=lifecycle_hooks,
             container_image=container_image,
         )
         log: Callable[[str], None] = request.log or (lambda _: None)
-        label = getattr(request.backend, "image", self.config.image or "<backend-default>")
-        log(f"[docker] starting container with image {label}")
+        log(f"[docker] starting container with image {container_image}")
         # DOCKER-kind sandboxes always manage a container lifetime.
         _start_sandbox(sandbox)
 
@@ -1533,25 +1542,37 @@ def _container_project_policy_mounts(
     return mounts
 
 
-def _cli_container_setup(
-    request: RunEnvironmentRequest,
-) -> tuple[list[str], dict[str, str]]:
+def _cli_container_env(request: RunEnvironmentRequest) -> tuple[str, dict[str, str]] | None:
+    """Return ``(provider, container env)`` when a CLI provider needs a container.
+
+    Factored out of :func:`_cli_container_setup` so the plain Docker path —
+    which starts from a prebuilt agent image and installs nothing at start —
+    can still get the auth-presence check and the auth env passthrough
+    without the shell-command half of that function. Modal and SkyPilot keep
+    calling :func:`_cli_container_setup` in full until their own image work
+    (#676, #679) lands.
+
+    Returns ``None`` when the run is not a containerized CLI agent (a
+    different agent backend, or no CLI provider selected).
+
+    Raises:
+        ValueError: if *request.cli_provider* has neither a staged auth file
+            nor a usable auth environment variable on this host.
+    """
     effective_agent = request.agent_backend or DEFAULT_AGENT_BACKEND
     if effective_agent != "cli" or not request.cli_provider:
-        return [], {}
+        return None
     from vibesys.agents.cli_docker import (  # noqa: PLC0415  # tracked: #288
         DOCKER_PROVIDER_ENV,
-        auth_copy_commands,
         auth_env_passthrough,
         auth_env_vars,
         auth_paths,
-        docker_init_commands,
     )
 
     provider = request.cli_provider
-    auth_commands = auth_copy_commands(provider)
     auth_env = auth_env_passthrough(provider)
-    if not auth_commands and not auth_env:
+    staged_auth = [spec for spec in auth_paths(provider) if spec.host_path.exists()]
+    if not staged_auth and not auth_env:
         checked_files = (
             ", ".join(str(spec.host_path) for spec in auth_paths(provider)) or "<none registered>"
         )
@@ -1567,7 +1588,22 @@ def _cli_container_setup(
     # Container processes inherit only what ``docker run -e`` sets; the editor
     # container has no other view of the host environment.
     env.update(auth_env)
-    commands = [*auth_commands, *docker_init_commands(provider)]
+    return provider, env
+
+
+def _cli_container_setup(
+    request: RunEnvironmentRequest,
+) -> tuple[list[str], dict[str, str]]:
+    resolved = _cli_container_env(request)
+    if resolved is None:
+        return [], {}
+    provider, env = resolved
+    from vibesys.agents.cli_docker import (  # noqa: PLC0415  # tracked: #288
+        auth_copy_commands,
+        docker_init_commands,
+    )
+
+    commands = [*auth_copy_commands(provider), *docker_init_commands(provider)]
     return commands, env
 
 
@@ -1790,9 +1826,15 @@ def _docker_evaluator_tools_root(
 
 
 def _docker_backend_image(request: RunEnvironmentRequest) -> str:
+    """Return the compute backend's base image, the ``agent_image`` build input.
+
+    Used both to build the agent image every Docker run starts from and, when
+    the run also needs cargo-git evaluator tools, to key their host-side
+    build cache.
+    """
     image = getattr(request.backend, "image", None)
     if not isinstance(image, str) or not image:
-        raise EvaluatorToolError("Docker evaluator tools require a configured backend image")  # noqa: TRY003
+        raise EvaluatorToolError("Docker execution requires a configured backend image")  # noqa: TRY003
     return image
 
 
@@ -1871,6 +1913,27 @@ def _evaluator_tools(request: RunEnvironmentRequest) -> dict[str, CargoGitToolSp
     if request.evaluator_package_root is None:
         return {}
     return load_evaluator_package(request.evaluator_package_root).metadata.tools
+
+
+def _docker_agent_toolchains(
+    request: RunEnvironmentRequest,
+    tools: Mapping[str, CargoGitToolSpec],
+) -> frozenset[str]:
+    """Return the toolchains the agent image should bake in for this run.
+
+    Mirrors what :func:`_evaluator_container_setup` installs per-run today:
+    the evaluator package's declared toolchains, plus ``"rust"`` when the run
+    also needs cargo-git evaluator tools. *tools* is the caller's own
+    :func:`_evaluator_tools` result, passed in rather than recomputed.
+    """
+    toolchains: set[str] = set()
+    if request.evaluator_package_root is not None:
+        toolchains |= set(
+            load_evaluator_package(request.evaluator_package_root).metadata.toolchains
+        )
+    if tools:
+        toolchains.add("rust")
+    return frozenset(toolchains)
 
 
 def _required_evaluator_tools_root(request: RunEnvironmentRequest) -> Path:

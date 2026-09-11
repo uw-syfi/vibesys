@@ -143,6 +143,48 @@ caller that shortened its prompt has to ask again in full. The
 experiment chat is the caller that does this today
 (`src/server/chat/session.py`).
 
+## Images
+
+A `--docker` run starts from two images, built by `vibesys.sandbox.images`:
+
+- The **task image**, built from the task's own `Dockerfile` when it has one
+  (`build_task_image`), or the backend's base image otherwise. It installs
+  only what the task needs to build and test candidate code, and serves the
+  evaluator as well as the agent.
+- The **agent image**, built on top of the task image from
+  `src/vibesys/sandbox/images/agent.Dockerfile` (`agent_image`). It installs
+  Node, all four shipped CLIs (`claude`, `codex`, `gemini`, `opencode`),
+  ripgrep, `uv`, and Python's `mcp` package, then creates a non-root `agent`
+  user and ends with `USER agent`. The provider a session runs is a run-time
+  choice, so every shipped CLI lands in this one layer rather than one image
+  per provider.
+
+The agent layer sits on top so that a CLI version bump rebuilds only that top
+layer, and a task image stays pure enough to serve the evaluator on its own.
+Docker's layer cache is what makes a repeat build of either image cheap;
+`vibesys.sandbox.images` builds an image once per launch and resolves its
+immutable manifest ID rather than keeping a manifest of its own.
+
+CLI and toolchain versions are not in the Dockerfile: they are build args
+supplied from `vibesys.agents.provider_policy` (`NODE_VERSION`,
+`CLI_VERSIONS`, `RUST_TOOLCHAIN_VERSION`, `GO_TOOLCHAIN_VERSION`), so a
+version bump is a one-line change in one module instead of an edit to the
+Dockerfile itself.
+
+A task Dockerfile that needs the backend's base image declares `ARG
+BASE_IMAGE` and `FROM ${BASE_IMAGE}`; `agent_image` always passes
+`--build-arg BASE_IMAGE=<resolved base>` when building a task image, so this
+is opt-in from the task Dockerfile's side. A task Dockerfile with its own
+`FROM` line (the Verus task under
+`examples/data-structures/repositories/queue-rs/.vibesys/tasks/verus-mpmc-open/`
+is one) ignores the unused build arg and keeps its own base.
+
+The agent layer installs with `apt-get`, so every task Dockerfile and every
+backend base image must be Debian- or Ubuntu-derived; every current backend
+base and task Dockerfile already is. Because setup happens once, at build
+time, an agent cannot `apt-get install` mid-round: a missing system package
+is a Dockerfile gap, not something a running turn can patch around.
+
 ## Container execution
 
 `--docker` runs the provider CLI inside the role's editor container. The
@@ -161,9 +203,10 @@ still builds argv, parses the stream, and owns the session.
   the host. Forwarding by inspection would point the container CLI at host
   paths and could carry a host `ANTHROPIC_MODEL` past the container's own
   configuration.
-- After every container turn the driver repairs workspace ownership. CLI
-  agents run as root in the editor container, and an atomic file replacement
-  leaves the replacement owned by root on a bind-mounted workspace.
+- The CLI runs as the image's `agent` user, remapped at container start to
+  the host user's uid and gid, so files it writes to the bind-mounted
+  workspace are owned by the host user. Nothing repairs ownership afterwards,
+  and git needs no `safe.directory` entry inside the container.
 - The binary health check (`<binary> --help`) runs inside the container, once
   per session, before the first turn. See the section below for what a failure
   costs.

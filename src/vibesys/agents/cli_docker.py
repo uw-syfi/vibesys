@@ -8,6 +8,16 @@ repository needs, and the overrides VibeSys applies to a library recipe. The
 container environment table and the Codex CLI version pin are provider
 decisions and live in :mod:`vibesys.agents.provider_policy`; this module
 imports them.
+
+The plain Docker path (``vibesys.sandbox.run_environment.DockerEnvironment``)
+now starts from a prebuilt agent image with every shipped CLI, toolchain, and
+the non-root ``agent`` user already installed, so it needs none of the
+shell-recipe machinery below: it copies auth files itself at container start
+(see :func:`auth_copy_paths`) instead of running :func:`auth_copy_commands`
+through ``extra_init_commands``. ``docker_init_commands`` and its supporting
+override tables stay here for Modal and SkyPilot, which still install
+per-run through ``extra_init_commands`` until their own image work
+(#676, #679) lands; delete them once those land.
 """
 
 from __future__ import annotations
@@ -23,6 +33,7 @@ from vibesys.agents.provider_policy import (
     CODEX_DOCKER_CLI_VERSION,
     DOCKER_PROVIDER_ENV,
 )
+from vs_sandbox import AGENT_HOME
 
 # Re-exported for existing importers (``vibesys.agents.factory``,
 # ``vibesys.sandbox.run_environment``, and this module's own tests reach them
@@ -176,15 +187,15 @@ def auth_paths(provider: str) -> list[DockerAuthPath]:
     straight from ``ProviderProfile.auth_files`` (agentshim 0.6.1+): each
     entry is either a state directory's leaf file or a state entry that is
     itself a single file, and is staged at the same relative path under
-    ``/root``. A state directory the profile does not list a leaf for
-    contributes nothing.
+    the agent image's HOME. A state directory the profile does not list a
+    leaf for contributes nothing.
 
     Raises:
         ValueError: if agentshim does not register *provider*.
     """
     home = Path.home()
     return [
-        DockerAuthPath(home / auth_file, f"/root/{auth_file}")
+        DockerAuthPath(home / auth_file, f"{AGENT_HOME}/{auth_file}")
         for auth_file in provider_profiles.provider_profile(provider).auth_files
     ]
 
@@ -241,6 +252,23 @@ def auth_bind_mounts(provider: str) -> list[tuple[str, str, bool]]:
     return out
 
 
+def auth_copy_paths(provider: str) -> list[tuple[str, str]]:
+    """Return ``(staged source, agent-home destination)`` pairs to copy at start.
+
+    Used by the plain Docker path, which hands these straight to
+    ``DockerSandbox(auth_files=...)`` to copy as a start-time step rather than
+    running shell commands through ``extra_init_commands`` (see
+    :func:`auth_copy_commands` for the Modal/SkyPilot form of the same list).
+    Indexing matches :func:`auth_bind_mounts`: entry *i*'s staging mount is
+    ``/opt/vibesys-auth/{i}``.
+    """
+    return [
+        (f"/opt/vibesys-auth/{index}", spec.container_path)
+        for index, spec in enumerate(auth_paths(provider))
+        if spec.host_path.exists()
+    ]
+
+
 def auth_copy_commands(provider: str) -> list[str]:
     """Return commands that copy staged provider state into writable storage.
 
@@ -248,6 +276,9 @@ def auth_copy_commands(provider: str) -> list[str]:
     them read-only at their final locations can break otherwise valid CLI runs.
     Copying from read-only staging keeps those writes inside the disposable
     container layer.
+
+    Used by Modal and SkyPilot's ``extra_init_commands`` path; the plain
+    Docker path uses :func:`auth_copy_paths` instead (see module docstring).
     """
     commands: list[str] = []
     for index, spec in enumerate(auth_paths(provider)):

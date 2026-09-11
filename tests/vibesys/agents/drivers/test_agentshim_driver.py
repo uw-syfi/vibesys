@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
-import os
 import subprocess
 import threading
 import time
@@ -538,7 +537,7 @@ def _container_driver(
     provider: str,
     runs: FakeRun | Sequence[FakeRun] | Callable[[agentshim.CommandRequest], FakeRun],
     **options: Any,  # noqa: ANN401
-) -> tuple[subject.AgentShimDriver, FakeExecutor, list[tuple[str, int, int]]]:
+) -> tuple[subject.AgentShimDriver, FakeExecutor]:
     """Build a container-mode driver whose ``docker`` client is the fake.
 
     The Docker executor rewrites each request into a ``docker exec`` command
@@ -546,20 +545,14 @@ def _container_driver(
     lets the argv the container would have received be asserted directly.
     """
     fake = FakeExecutor(runs)
-    repairs: list[tuple[str, int, int]] = []
 
     monkeypatch.setattr(docker_executor, "HostCommandExecutor", lambda: fake)
-    monkeypatch.setattr(
-        docker_executor,
-        "repair_workspace_ownership",
-        lambda container_id, *, uid, gid: repairs.append((container_id, uid, gid)),
-    )
     driver = subject.AgentShimDriver(
         provider=provider,
         docker_sandboxes={"implementer": SimpleNamespace(container_id="container-1")},
         **options,
     )
-    return driver, fake, repairs
+    return driver, fake
 
 
 def _container_spec(tmp_path: Path, provider: str, **changes: Any) -> AgentSessionSpec:  # noqa: ANN401
@@ -583,9 +576,7 @@ def test_a_container_turn_carries_the_session_environment_and_workdir(
     to be handed to ``docker exec`` as ``-e`` flags; and the container turn
     names no ``cwd`` of its own, so the executor supplies ``-w``.
     """
-    driver, fake, _repairs = _container_driver(
-        monkeypatch, provider, scripted_turn(provider, text="ok")
-    )
+    driver, fake = _container_driver(monkeypatch, provider, scripted_turn(provider, text="ok"))
     session = driver.create_session(_container_spec(tmp_path, provider))
 
     session.run_turn(AgentTurnRequest(message="Do it"))
@@ -622,9 +613,7 @@ def test_a_container_turn_carries_no_host_device_pin(
     variable off the host environment.
     """
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3")
-    driver, fake, _repairs = _container_driver(
-        monkeypatch, provider, scripted_turn(provider, text="ok")
-    )
+    driver, fake = _container_driver(monkeypatch, provider, scripted_turn(provider, text="ok"))
     session = driver.create_session(_container_spec(tmp_path, provider, environment=()))
 
     session.run_turn(AgentTurnRequest(message="Do it"))
@@ -646,9 +635,7 @@ def test_a_container_binary_check_gets_the_container_budget(
     A failed health check ends the run before the first turn, so the budget
     has to survive a daemon that is busy rather than dead.
     """
-    driver, fake, _repairs = _container_driver(
-        monkeypatch, provider, scripted_turn(provider, text="ok")
-    )
+    driver, fake = _container_driver(monkeypatch, provider, scripted_turn(provider, text="ok"))
 
     driver.create_session(_container_spec(tmp_path, provider))
 
@@ -663,30 +650,13 @@ def test_the_binary_check_budget_is_a_driver_option(
     tmp_path: Path,
     provider: str,
 ) -> None:
-    driver, fake, _repairs = _container_driver(
+    driver, fake = _container_driver(
         monkeypatch, provider, scripted_turn(provider, text="ok"), check_timeout=5
     )
 
     driver.create_session(_container_spec(tmp_path, provider))
 
     assert fake.requests[0].timeout == 5
-
-
-@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
-def test_a_container_turn_repairs_workspace_ownership_afterwards(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    provider: str,
-) -> None:
-    """CLI agents run as root in the container; the host user gets its files back."""
-    driver, _fake, repairs = _container_driver(
-        monkeypatch, provider, scripted_turn(provider, text="ok")
-    )
-    session = driver.create_session(_container_spec(tmp_path, provider))
-
-    session.run_turn(AgentTurnRequest(message="Do it"))
-
-    assert repairs == [("container-1", os.getuid(), os.getgid())]
 
 
 def _watchdog_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
@@ -712,36 +682,6 @@ def _watchdog_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
     return watched
 
 
-@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
-def test_a_stuck_ownership_repair_is_not_reported_as_an_agent_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    provider: str,
-) -> None:
-    """The repair shells out with its own budget, from the turn's ``finally``.
-
-    Loops fail closed on ``subprocess.TimeoutExpired`` and read it as the agent
-    having run out of time, which is a different failure with a different
-    response, so the repair's own timeout must not wear that type.
-    """
-    driver, _fake, _repairs = _container_driver(
-        monkeypatch, provider, scripted_turn(provider, text="ok")
-    )
-
-    def stuck(container_id: str, *, uid: int, gid: int) -> None:
-        del container_id, uid, gid
-        raise subprocess.TimeoutExpired(cmd=["docker", "exec", "c", "find"], timeout=120)
-
-    monkeypatch.setattr(docker_executor, "repair_workspace_ownership", stuck)
-    session = driver.create_session(_container_spec(tmp_path, provider))
-
-    with pytest.raises(RuntimeError) as raised:
-        session.run_turn(AgentTurnRequest(message="Do it"))
-
-    assert not isinstance(raised.value, subprocess.TimeoutExpired)
-    assert "120 seconds" in str(raised.value)
-
-
 def test_a_container_codex_session_runs_its_turns_through_the_watchdog(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -752,9 +692,7 @@ def test_a_container_codex_session_runs_its_turns_through_the_watchdog(
     merely constructible from the driver.
     """
     watched = _watchdog_spy(monkeypatch)
-    driver, _fake, _repairs = _container_driver(
-        monkeypatch, "codex", scripted_turn("codex", text="ok")
-    )
+    driver, _fake = _container_driver(monkeypatch, "codex", scripted_turn("codex", text="ok"))
     session = driver.create_session(_container_spec(tmp_path, "codex"))
 
     session.run_turn(AgentTurnRequest(message="Do it"))
@@ -771,9 +709,7 @@ def test_a_container_session_for_another_provider_gets_no_watchdog(
 ) -> None:
     """The watchdog compensates for one provider's behaviour, not for containers."""
     watched = _watchdog_spy(monkeypatch)
-    driver, fake, _repairs = _container_driver(
-        monkeypatch, provider, scripted_turn(provider, text="ok")
-    )
+    driver, fake = _container_driver(monkeypatch, provider, scripted_turn(provider, text="ok"))
     session = driver.create_session(_container_spec(tmp_path, provider))
 
     session.run_turn(AgentTurnRequest(message="Do it"))
@@ -809,7 +745,7 @@ def test_container_session_mcp_servers_are_installed_on_the_host_workspace(
         installed.append(installed_mcp_servers(provider, request, tmp_path))
         return scripted_turn(provider, text="ok")
 
-    driver, _fake, _repairs = _container_driver(monkeypatch, provider, run)
+    driver, _fake = _container_driver(monkeypatch, provider, run)
     session = driver.create_session(_container_spec(tmp_path, provider, mcp_servers=(server,)))
 
     session.run_turn(AgentTurnRequest(message="review"))
@@ -1228,7 +1164,7 @@ def test_a_container_timeout_reports_no_forwarded_environment_value(
         # included; only the turn itself is the one that hangs.
         return FakeRun() if "--help" in request.argv else FakeRun(timeout=True)
 
-    driver, _fake, _repairs = _container_driver(monkeypatch, provider, run)
+    driver, _fake = _container_driver(monkeypatch, provider, run)
     session = driver.create_session(
         _container_spec(
             tmp_path,
@@ -1472,9 +1408,7 @@ def test_a_container_turn_does_not_forward_the_inherited_pwd(
     tmp_path: Path,
     provider: str,
 ) -> None:
-    driver, fake, _repairs = _container_driver(
-        monkeypatch, provider, scripted_turn(provider, text="ok")
-    )
+    driver, fake = _container_driver(monkeypatch, provider, scripted_turn(provider, text="ok"))
     session = driver.create_session(
         _container_spec(tmp_path, provider, environment=(("PWD", "/somewhere/stale"), ("GPU", "1")))
     )

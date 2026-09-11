@@ -188,21 +188,17 @@ class TestStart:
         assert "/workspace/accuracy_checker:ro" in cmd_str
 
     @patch("subprocess.run")
-    def test_start_installs_uv(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_no_install_step_runs_at_start(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+        """The agent image ships every tool baked in; start() installs nothing."""
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123\n", stderr=""
         )
 
         sandbox.start()
 
-        # Second call should install uv
-        assert len(mock_run.call_args_list) == 2
-        uv_call = mock_run.call_args_list[1]
-        cmd = uv_call[0][0]
-        assert "docker" in cmd[0]
-        assert "exec" in cmd
-        cmd_str = " ".join(cmd)
-        assert "pip install uv" in cmd_str
+        cmd_strs = [" ".join(c[0][0]) for c in mock_run.call_args_list]
+        assert not any("pip install" in cmd for cmd in cmd_strs)
+        assert not any("apt-get" in cmd for cmd in cmd_strs)
 
     @patch("subprocess.run")
     def test_init_failure_stops_and_removes_created_container(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
@@ -212,21 +208,23 @@ class TestStart:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
-            extra_init_commands=["install-required-tool"],
+            agent_uid=1234,
+            agent_gid=5678,
             lifecycle_hooks=[_RecordingHooks(invocations)],
         )
         mock_run.side_effect = [
             subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            # Current agent user ids, mismatched, so a remap is attempted.
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
             subprocess.CompletedProcess(
-                args=[], returncode=17, stdout="partial output", stderr="install failed"
+                args=[], returncode=17, stdout="partial output", stderr="usermod failed"
             ),
             subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
             subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
         ]
 
         try:
-            with pytest.raises(RuntimeError, match="Container init command failed"):
+            with pytest.raises(RuntimeError, match="agent user id remap failed"):
                 sandbox.start()
 
             assert sandbox._container_id is None  # noqa: SLF001  # tracked: #288
@@ -236,6 +234,113 @@ class TestStart:
             assert mock_run.call_args_list[-1][0][0] == ["docker", "rm", "-f", "abc123"]
         finally:
             _live_containers.pop("abc123", None)
+
+
+class TestAgentUserRemap:
+    @patch("subprocess.run")
+    def test_remaps_agent_user_when_ids_differ(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="test-image",
+            agent_uid=4242,
+            agent_gid=4343,
+        )
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
+            # Image default agent user is 1000:1000.
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+        ]
+
+        sandbox.start()
+
+        remap_call = mock_run.call_args_list[2]
+        cmd = remap_call[0][0]
+        assert cmd[:4] == ["docker", "exec", "-u", "root"]
+        cmd_str = " ".join(cmd)
+        assert "usermod -o -u 4242 agent" in cmd_str
+        assert "groupmod -o -g 4343 agent" in cmd_str
+        assert "chown -R agent:agent /home/agent" in cmd_str
+
+    @patch("subprocess.run")
+    def test_skips_remap_when_ids_already_match(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="test-image",
+            agent_uid=1000,
+            agent_gid=1000,
+        )
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
+        ]
+
+        sandbox.start()
+
+        # Only the id query follows `docker run`; no usermod/groupmod exec.
+        assert mock_run.call_count == 2
+        assert not any("usermod" in " ".join(c[0][0]) for c in mock_run.call_args_list)
+
+    @patch("subprocess.run")
+    def test_remap_runs_as_root_but_agent_commands_do_not(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="test-image",
+            agent_uid=4242,
+            agent_gid=4343,
+        )
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+        ]
+        sandbox.start()
+        mock_run.reset_mock()
+        mock_run.side_effect = None
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="hi\n", stderr=""
+        )
+
+        sandbox.execute("echo hi")
+
+        exec_cmd = mock_run.call_args[0][0]
+        assert "-u" not in exec_cmd
+
+
+class TestAuthFileCopy:
+    @patch("subprocess.run")
+    def test_copies_staged_files_into_agent_home_and_chowns_them(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="test-image",
+            agent_uid=1000,
+            agent_gid=1000,
+            auth_files=[("/opt/vibesys-auth/0", "/home/agent/.claude.json")],
+        )
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="abc123\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="1000\n1000\n", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+        ]
+
+        sandbox.start()
+
+        copy_call = mock_run.call_args_list[2]
+        cmd = copy_call[0][0]
+        assert cmd[:4] == ["docker", "exec", "-u", "root"]
+        cmd_str = " ".join(cmd)
+        assert "cp -a /opt/vibesys-auth/0 /home/agent/.claude.json" in cmd_str
+        assert "chown -R agent:agent /home/agent/.claude.json" in cmd_str
+
+    @patch("subprocess.run")
+    def test_no_auth_files_by_default(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+
+        sandbox.start()
+
+        assert not any("cp -a" in " ".join(c[0][0]) for c in mock_run.call_args_list)
 
 
 class TestExecute:
