@@ -297,39 +297,61 @@ Symptom: the from-scratch fused w4a16 MoE kernel (SGLANG_MXFP4_MOE_HIP=1)
          M=16, well below memory-bound territory, but MemUnitStalled is
          near zero (0.04 to 0.15 percent) and VALUBusy is under 50
          percent (33.5 to 42.1 percent) on both of its stages.
-Cause:   not bandwidth-bound and not occupancy-bound: MemUnitStalled near
-         zero rules out a stalled memory pipeline, and VALUBusy under 50
-         percent together with an elevated SQ_WAIT_INST_ANY/SQ_INSTS_VALU
-         ratio (7.78 stage1, 2.07 stage2) point to a dependency-chain
-         stall inside the decode-then-MFMA path (LUT lookup, ldexpf
-         exponent add, bf16 cast, feed into MFMA); too few resident
-         wavefronts (61.3 / 75.6 percent of each kernel's own VGPR- or
-         LDS-bound occupancy ceiling, from MeanOccupancyPerCU versus the
-         theoretical ceiling) hide only part of that latency.
-Fix:     neither of the two candidate fixes below panned out; the serial
-         term inside the block is still unidentified. Two refutations,
-         both measured:
-         (a) a persistent grid (fixed 228 x BLOCKS_PER_CU blocks pulling
-             tile work from an atomic counter, instead of one block per
-             tile relaunched every call) does not remove launch or tail
-             idle: bit-identical output, but +2.8 percent at M=16 and
-             only 3.5 percent faster at M=256. Launch shape and tail idle
-             are not the term.
-         (b) the compiled LUT + ldexpf + cast decode is already lean, not
-             the ALU-chain bottleneck it looked like: an integer bf16
-             bit-pattern decode (skip the float ldexpf, add the exponent
-             directly to the bf16 bit pattern) removed only about 4
-             percent of VALU instructions and regressed the gate_up tile
-             7 to 8 percent in context. "Shorten the decode" is refuted.
-         Next step: in-block phase timing to isolate the actual serial
-         term. Raising occupancy (cut VGPR/LDS footprint) is untried.
+Cause:   in-block phase timing (decode M=16, per 16-row expert block):
+         activation gather 2.4 us, gate K walk 64.9 us, reduce 0.3 us, up
+         K walk 23.1 us, epilogue 0.2 us, 100 us total. The K loop is
+         latency-bound on the per-K-step scattered 16-row activation
+         gather, not on ALU work: a cold walk over a block's activation
+         rows costs 2.8x a warm walk over the same data (gate vs up walk,
+         identical loop structure), while the MFMA instructions issue at
+         their native rate. The compiled decode (LUT lookup, exponent
+         add, bf16 cast) is already lean: an integer bit-pattern decode
+         removed only about 4 percent of VALU work and was slower
+         overall in context, and it is exact only for block exponents in
+         [-125, 125], while the real checkpoint has exponent -126 in
+         about 3 percent of scale blocks. The earlier "decode ALU chain"
+         cause is refuted; MemUnitStalled near zero here is consistent
+         with a latency-bound, underfed memory unit, not with the
+         absence of a memory-side limiter (see profiler.md).
+Fix:     no fix closes the gap yet. Five refuted, one open candidate:
+         - persistent grid with an atomic tile queue: bit-identical
+           output, +2.8 percent at M=16, -3.5 percent at M=256. Launch
+           shape and tail idle are not the term.
+         - register prefetch ring of activation fragments: spills to
+           scratch at prefetch depth 2 and depth 4, about 2x slower.
+         - LDS-staged activation block: cuts the gate walk about 3x
+           (block 106 to 34 us, gate walk 70 to 17 us, bit-identical),
+           but the 36 KB LDS footprint drops resident workgroups per CU
+           from 6 to 1, so per-layer time is +23 percent.
+         - smaller LDS rings (4, 8, 16 KB) to keep more workgroups
+           resident: occupancy is restored, but the extra refill round
+           trips cost more than they save; the best ring is still 35
+           percent slower than the unstaged kernel.
+         - K-split accumulators: 32 to 38 percent slower, VGPR-bound (84
+           VGPRs per split).
+         - skinny GEMV stage 1 (no MFMA, one workgroup per block, for
+           blocks with 4 or fewer real tokens): 1.64x slower at M=16; the
+           activation block held in LDS caps occupancy at 1 to 2 waves
+           per SIMD.
+         Candidate, not verified: skinny GEMV stage 2 for the down
+         projection, on blocks with 4 or fewer real tokens, is 1.20x
+         faster at M=16 and 1.29x faster at M=64 in a microbenchmark
+         (relative L2 2.35e-5 against the existing kernel, fp32
+         reassociation level); end-to-end acceptance is still pending.
+         Why the padding matters: at decode M=16 with top-10 routing,
+         each 16-row block carries about 1.2 real tokens, so about 94
+         percent of the MFMA rows are padding, and the kernel sits about
+         3x above its bandwidth floor (0.07 ms per layer for the 233 MB
+         of expert weights a rank reads per layer).
 Scope:   rocm, gfx942, this kernel (mxfp4_fused_moe stage1/stage2) at
          decode M=16.
-Status:  verified (profile once; both candidate fixes refuted by
-         measurement). sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job
-         632991 (profile); refutations jobs 633019 (persistent grid,
-         concluding job 633006/633013's sweep) and 633021 (integer
-         decode, concluding job 633018's sweep).
+Status:  verified (phase timing), refuted fixes listed, 2026-09-11.
+         sglang-v0.5.18-rocm700-mi30x, job 633024 (phase timing); jobs
+         633006, 633013, 633019 (persistent grid, refuted); jobs 633018,
+         633021 (integer decode, refuted); job 633174 (register
+         prefetch and LDS-staged block, refuted); job 633180 (LDS rings,
+         refuted); jobs 633173, 633179, 633182 (skinny GEMV: stage 1
+         refuted, stage 2 candidate, not yet accepted end to end).
 ```
 
 ## Out of scope: kernel implementation
