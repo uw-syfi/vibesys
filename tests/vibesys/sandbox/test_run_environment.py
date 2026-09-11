@@ -1410,6 +1410,28 @@ def test_modal_environment_installs_nothing_at_container_start(tmp_path):  # noq
     assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/workspace/.cache/uv"
 
 
+def test_modal_environment_mounts_modal_auth_under_the_agent_home(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+    """The Modal SDK inside the editor container reads its token from the
+    HOME of the ``agent`` user the image runs as, so the host's
+    ``~/.modal.toml`` must land there, not under ``/root``. The first real
+    Modal round after #675 failed its accuracy gate with "Token missing"
+    because the mount still targeted root's HOME."""
+    backend = FakeBackend()
+    env = build_run_environment(RunEnvironmentSpec("modal"))
+    home = tmp_path / "synthetic-home"
+    home.mkdir()
+    (home / ".modal.toml").write_text("[profile]\ntoken_id = 'synthetic'\n")
+    (home / ".modal").mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+
+    env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
+
+    mounts = _as_mount_tuples(backend.calls[0][1]["resources"])
+    assert (str(home / ".modal.toml"), "/home/agent/.modal.toml", True) in mounts
+    assert (str(home / ".modal"), "/home/agent/.modal", True) in mounts
+    assert not any(container.startswith("/root/") for _host, container, _ro in mounts)
+
+
 def test_modal_environment_prompt_references_runtime_document(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     """Prompts name the runtime manual instead of embedding it in every role."""
     backend = FakeBackend()
