@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
+from collections.abc import Callable, Sequence  # noqa: TC003  # tracked: #288
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     # Annotation only; deepagents pulls langchain + anthropic (~seconds).
     from deepagents.backends.protocol import SandboxBackendProtocol
 
+    from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
 # Default container image for the cuda backend.  Carries CUDA toolkit + PyTorch.
@@ -83,6 +84,7 @@ class CudaBackend:
         ephemeral: bool = False,
         container_image: str | None = None,
         auth_files: list[tuple[str, str]] | None = None,
+        resources: Sequence[HostResource] = (),
     ) -> SandboxBackendProtocol:
         """Construct a sandbox configured for CUDA execution."""
         # Deferred: the sandbox classes subclass deepagents' BaseSandbox, which
@@ -117,6 +119,7 @@ class CudaBackend:
                 image=container_image or self.image,
                 gpus=self._docker_gpu_spec() if attach_accelerator else None,
                 bind_mounts=bind_mounts,
+                resources=resources,
                 passthrough_paths=passthrough_paths,
                 env=env,
                 log_path=log_path,

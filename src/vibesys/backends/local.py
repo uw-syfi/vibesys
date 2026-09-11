@@ -15,7 +15,7 @@ run inside Docker because it needs no accelerator passthrough. Per-platform
 
 from __future__ import annotations
 
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
+from collections.abc import Callable, Sequence  # noqa: TC003  # tracked: #288
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     # Annotation only; deepagents pulls langchain + anthropic (~seconds).
     from deepagents.backends.protocol import SandboxBackendProtocol
 
+    from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
 _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
@@ -80,6 +81,7 @@ class LocalBackend:
         ephemeral: bool = False,
         container_image: str | None = None,
         auth_files: list[tuple[str, str]] | None = None,
+        resources: Sequence[HostResource] = (),
     ) -> SandboxBackendProtocol:
         # Deferred: the sandbox classes subclass deepagents' BaseSandbox, which
         # pulls langchain + anthropic. Registration must stay import-cheap.
@@ -116,6 +118,7 @@ class LocalBackend:
                 image=container_image or self.image,
                 gpus=None,
                 bind_mounts=bind_mounts,
+                resources=resources,
                 passthrough_paths=passthrough_paths,
                 env=extra_env,
                 log_path=log_path,

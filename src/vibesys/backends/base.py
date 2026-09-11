@@ -24,9 +24,12 @@ from vibesys.profilers import ProfilerKind  # noqa: TC001  # tracked: #288
 from vs_sandbox.lifecycle import SandboxLifecycle
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence  # tracked: #288
+
     # Annotation only; deepagents pulls langchain + anthropic (~seconds).
     from deepagents.backends.protocol import SandboxBackendProtocol
 
+    from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
 
@@ -75,6 +78,7 @@ class ComputeBackendImpl(Protocol):
         ephemeral: bool = False,
         container_image: str | None = None,
         auth_files: list[tuple[str, str]] | None = None,
+        resources: Sequence[HostResource] = (),
     ) -> SandboxBackendProtocol:
         """Construct (do not start) a sandbox configured for this backend.
 
@@ -98,6 +102,14 @@ class ComputeBackendImpl(Protocol):
         ``auth_files`` names ``(staged source, agent-home destination)`` pairs
         a Docker sandbox copies in as root at start, then chowns to the agent
         user. Ignored by non-Docker sandboxes.
+
+        ``resources`` is the caller's :class:`~vs_sandbox.host_resources.HostResource`
+        list for this sandbox, forwarded to ``DockerSandbox(resources=...)``
+        unchanged: a Docker sandbox lowers it to bind mounts and consults it
+        for :meth:`agent_path`. ``bind_mounts`` keeps working for a caller that
+        still builds its own mount tuples directly; the two combine rather
+        than one replacing the other. Ignored by non-Docker sandboxes, whose
+        accelerator device and model-volume mounts stay backend-specific.
         """
         ...
 

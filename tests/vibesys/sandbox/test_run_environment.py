@@ -30,6 +30,7 @@ from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     _cli_container_env,
     _cli_provider_env_and_auth_files,
+    _container_mount_plan,
     _docker_agent_toolchains,
     _docker_evaluator_tool_mounts,
     _evaluator_container_setup,
@@ -43,9 +44,17 @@ from vibesys.sandbox.run_environment import (
     run_environment_record,
 )
 from vs_project import Project, RunEnvironmentRecord, RunResourceRequest
-from vs_sandbox import BeforeReadyContext, ProjectPathPolicy, SandboxLifecycle
+from vs_sandbox import (
+    BeforeReadyContext,
+    HostResource,
+    HostResourceAccess,
+    ProjectPathPolicy,
+    SandboxLifecycle,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from deepagents.backends.protocol import SandboxBackendProtocol
 
     from vibesys.backends.base import ContentionMonitor
@@ -55,6 +64,52 @@ if TYPE_CHECKING:
 # how the run environment expands and quotes nested shell argv, not any
 # particular candidate repository.
 NESTED_SHELL_PROJECT = Path(__file__).parent / "fixtures" / "nested_shell_project"
+
+
+def _as_mount_tuples(resources: Sequence[HostResource]) -> list[tuple[str, str, bool]]:
+    """Invert ``_resource_for_mount`` for assertions written against the old shape.
+
+    Lets tests keep comparing against plain ``(host, container, readonly)``
+    tuples after ``_container_mount_plan`` moved from raw bind mounts to a
+    ``HostResource`` list.
+    """
+    return [
+        (
+            str(resource.path),
+            resource.agent_path if resource.agent_path is not None else str(resource.path),
+            resource.access is HostResourceAccess.READ_ONLY,
+        )
+        for resource in resources
+    ]
+
+
+def _fake_agent_path(
+    host_workspace: str, resources: Sequence[HostResource]
+) -> Callable[[Path | str], str]:
+    """Build a lookup mirroring ``DockerSandbox.agent_path`` from the same inputs.
+
+    Longest host-prefix wins, exactly like the real sandbox, so a test can
+    assert on ``AgentPaths`` without starting a real container.
+    """
+    entries = [
+        (str(Path(host_workspace)), "/workspace"),
+        *(
+            (str(resource.path), resource.agent_path or str(resource.path))
+            for resource in resources
+        ),
+    ]
+    entries.sort(key=lambda pair: len(pair[0]), reverse=True)
+
+    def lookup(host_path: Path | str) -> str:
+        normalized = str(Path(host_path))
+        for host_prefix, container_prefix in entries:
+            if normalized == host_prefix:
+                return container_prefix
+            if normalized.startswith(host_prefix + "/"):
+                return container_prefix + normalized[len(host_prefix) :]
+        return normalized
+
+    return lookup
 
 
 class FakeBackend:
@@ -70,6 +125,13 @@ class FakeBackend:
 
     def make_sandbox(self, kind: SandboxKind, **kwargs: Any) -> SandboxBackendProtocol:  # noqa: ANN401  # tracked: #288
         self.calls.append((kind, kwargs))
+        if kind is SandboxKind.DOCKER:
+            # A real DockerSandbox derives agent_path from (host_workspace,
+            # resources); give the mock the same behavior so AgentPaths
+            # assertions exercise the real lookup instead of a bare Mock.
+            self.sandbox.agent_path.side_effect = _fake_agent_path(
+                kwargs.get("host_workspace", ""), kwargs.get("resources", ())
+            )
         return self.sandbox
 
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:  # noqa: ARG002  # tracked: #288
@@ -495,7 +557,7 @@ def test_isolated_environment_mounts_and_translates_evaluator_package(
         str(package.root),
         "/opt/vibesys-evaluator-package",
         True,
-    ) in backend.calls[0][1]["bind_mounts"]
+    ) in _as_mount_tuples(backend.calls[0][1]["resources"])
     # The evaluator package's declared toolchains (go, rust) are baked into
     # the agent image at build time now, not installed per-run.
     assert "extra_init_commands" not in backend.calls[0][1]
@@ -665,7 +727,9 @@ def test_isolated_environments_install_and_translate_evaluator_tools(
             isinstance(hook, EvaluatorToolLifecycleHooks)
             for hook in backend.calls[0][1]["lifecycle_hooks"]
         )
-        assert (str(built_root), str(container_root), True) in backend.calls[0][1]["bind_mounts"]
+        assert (str(built_root), str(container_root), True) in _as_mount_tuples(
+            backend.calls[0][1]["resources"]
+        )
         # Cargo-git tools are prebuilt and mounted read-only; nothing installs
         # Rust in the running container.
         assert "extra_init_commands" not in backend.calls[0][1]
@@ -929,9 +993,62 @@ def test_docker_environment_mounts_effective_objective_read_only(tmp_path):  # n
         str(host_path),
         "/opt/vibesys-runtime/objective.md",
         True,
-    ) in backend.calls[0][1]["bind_mounts"]
+    ) in _as_mount_tuples(backend.calls[0][1]["resources"])
     assert "/opt/vibesys-runtime" in backend.calls[0][1]["passthrough_paths"]
     assert session.view.paths.objective == "/opt/vibesys-runtime/objective.md"
+
+
+def test_local_environment_objective_defaults_to_the_bare_workspace_relative_name(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    """The host answer for an unset objective is identity: no lookup, no rewrite."""
+    backend = FakeBackend()
+    env = build_run_environment(RunEnvironmentSpec("local"))
+
+    session = env.open(_request(tmp_path, backend))
+
+    assert session.view.paths.objective == "OBJECTIVE.md"
+
+
+def test_container_mount_plan_declares_named_resources_with_agent_paths(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    """``_container_mount_plan`` returns ``HostResource`` entries, not bind-mount
+    tuples, with ``access`` and ``agent_path`` set for every named mount."""
+    backend = FakeBackend()
+    history = tmp_path / "experiment-history"
+    history.mkdir()
+    package_root = tmp_path / "evaluator-package"
+    package_root.mkdir()
+    request = _request(
+        tmp_path,
+        backend,
+        objective="Optimize the service.\n",
+        git_history_root=history,
+        evaluator_package_root=package_root,
+        agent_backend="cli",
+        cli_provider="codex",
+    )
+
+    resources, _symlinks, passthrough = _container_mount_plan(request)
+
+    assert all(isinstance(resource, HostResource) for resource in resources)
+    by_agent_path = {resource.agent_path: resource for resource in resources}
+
+    objective_resource = by_agent_path["/opt/vibesys-runtime/objective.md"]
+    assert objective_resource.access is HostResourceAccess.READ_ONLY
+    assert objective_resource.path == tmp_path / "logs" / "effective-objective.md"
+
+    history_resource = by_agent_path["/opt/vibesys-history"]
+    assert history_resource.access is HostResourceAccess.READ_ONLY
+    assert history_resource.path == history
+
+    package_resource = by_agent_path["/opt/vibesys-evaluator-package"]
+    assert package_resource.access is HostResourceAccess.READ_ONLY
+    assert package_resource.path == package_root
+
+    framework_resource = by_agent_path["/opt/vibesys"]
+    assert framework_resource.access is HostResourceAccess.READ_ONLY
+    assert framework_resource.path == request.framework_root
+
+    assert "/opt/vibesys-runtime" in passthrough
+    assert "/opt/vibesys-history" in passthrough
 
 
 @pytest.mark.parametrize("environment_name", ["docker", "modal"])
@@ -959,7 +1076,7 @@ def test_isolated_environment_enforces_project_path_policy(tmp_path, environment
         )
     )
 
-    mounts = backend.calls[0][1]["bind_mounts"]
+    mounts = _as_mount_tuples(backend.calls[0][1]["resources"])
     assert (str(project / ".git"), "/workspace/.git", True) in mounts
     assert (str(project / ".state"), "/workspace/.state", True) in mounts
     assert (
@@ -1035,7 +1152,7 @@ def test_docker_environment_copies_cli_auth_from_readonly_staging(tmp_path, monk
     env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     kwargs = backend.calls[0][1]
-    assert (str(auth_file), "/opt/vibesys-auth/0", True) in kwargs["bind_mounts"]
+    assert (str(auth_file), "/opt/vibesys-auth/0", True) in _as_mount_tuples(kwargs["resources"])
     # The plain Docker path copies staged auth files into the agent HOME as a
     # start-time DockerSandbox step, not via extra_init_commands.
     assert "extra_init_commands" not in kwargs
@@ -1101,7 +1218,7 @@ def test_docker_environment_exposes_framework_git_history_read_only(tmp_path):  
     )
 
     kwargs = backend.calls[0][1]
-    assert (str(history), "/opt/vibesys-history", True) in kwargs["bind_mounts"]
+    assert (str(history), "/opt/vibesys-history", True) in _as_mount_tuples(kwargs["resources"])
     assert "/opt/vibesys-history" in kwargs["passthrough_paths"]
     assert kwargs["extra_env"]["VIBESYS_GIT_HISTORY"] == "/opt/vibesys-history"
     assert "/opt/vibesys-history" in session.view.prompt_notes
@@ -1123,7 +1240,7 @@ def test_docker_environment_uses_environment_bind_mounts(tmp_path):  # noqa: ANN
     )
 
     kwargs = backend.calls[0][1]
-    assert (str(model_dir), "/model", True) in kwargs["bind_mounts"]
+    assert (str(model_dir), "/model", True) in _as_mount_tuples(kwargs["resources"])
     assert "/model" in kwargs["passthrough_paths"]
 
 
@@ -1143,7 +1260,9 @@ def test_docker_environment_mounts_selected_profiler_support(tmp_path):  # noqa:
     )
 
     kwargs = backend.calls[0][1]
-    assert (str(support), "/workspace/fixture_profiler", True) in kwargs["bind_mounts"]
+    assert (str(support), "/workspace/fixture_profiler", True) in _as_mount_tuples(
+        kwargs["resources"]
+    )
     assert session.view.paths.profiler_support == "fixture_profiler"
 
 
@@ -1155,8 +1274,8 @@ def test_docker_environment_does_not_infer_model_mount_from_reference_dir(tmp_pa
 
     env.open(_request(tmp_path, backend, ref_dir=ref_dir))
 
-    bind_mounts = backend.calls[0][1]["bind_mounts"]
-    assert all(container_path != "/model" for _, container_path, _ in bind_mounts)
+    mounts = _as_mount_tuples(backend.calls[0][1]["resources"])
+    assert all(container_path != "/model" for _, container_path, _ in mounts)
 
 
 def test_environment_session_context_manager_closes(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
@@ -1243,7 +1362,7 @@ def test_modal_environment_wraps_service_evaluators_with_remote_dispatch(tmp_pat
     assert session.view.framework_setup_timeout_seconds == 1200
     assert any(
         container_path == helper and read_only
-        for _, container_path, read_only in backend.calls[0][1]["bind_mounts"]
+        for _, container_path, read_only in _as_mount_tuples(backend.calls[0][1]["resources"])
     )
 
 
@@ -1312,7 +1431,7 @@ def test_modal_environment_prompt_references_runtime_document(tmp_path):  # noqa
     assert "GPU" in runtime
     assert any(
         container_path == "/opt/vibesys-runtime/environment.md" and read_only
-        for _, container_path, read_only in backend.calls[0][1]["bind_mounts"]
+        for _, container_path, read_only in _as_mount_tuples(backend.calls[0][1]["resources"])
     )
     assert "/opt/vibesys-runtime" in backend.calls[0][1]["passthrough_paths"]
     # Tell the agent where to look up volume names rather than baking them in.
@@ -1360,7 +1479,7 @@ def test_modal_environment_mounts_effective_objective_read_only(tmp_path):  # no
         str(host_path),
         "/opt/vibesys-runtime/objective.md",
         True,
-    ) in backend.calls[0][1]["bind_mounts"]
+    ) in _as_mount_tuples(backend.calls[0][1]["resources"])
     assert session.view.paths.objective == "/opt/vibesys-runtime/objective.md"
 
 
@@ -1408,7 +1527,7 @@ def test_modal_environment_documents_history_and_exact_measurement_source(tmp_pa
     kwargs = backend.calls[0][1]
     notes = _modal_runtime_document(tmp_path)
 
-    assert (str(history), "/opt/vibesys-history", True) in kwargs["bind_mounts"]
+    assert (str(history), "/opt/vibesys-history", True) in _as_mount_tuples(kwargs["resources"])
     assert kwargs["extra_env"]["VIBESYS_GIT_HISTORY"] == "/opt/vibesys-history"
     assert "git -c safe.directory=/opt/vibesys-history" in notes
     assert "ls-tree -r --name-only <commit>" in notes
@@ -1580,7 +1699,7 @@ remote_artifact_root = "/remote/vibesys"
     assert fake_ensure_pushed == ["sha256:" + "a" * 64]
     assert kwargs["container_image"] == _PUSHED_DIGEST
     assert "extra_init_commands" not in kwargs
-    mounts = kwargs["bind_mounts"]
+    mounts = _as_mount_tuples(kwargs["resources"])
     assert any(target == "/opt/vibesys-skypilot/bridge.sock" for _, target, _ in mounts)
     assert any(target == "/opt/vibesys-skypilot-evaluator.py" for _, target, _ in mounts)
     assert all(".ssh" not in source and ".sky" not in source for source, _, _ in mounts)

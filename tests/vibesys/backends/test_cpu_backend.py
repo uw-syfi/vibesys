@@ -13,7 +13,13 @@ from vibesys.backends import SandboxKind
 from vibesys.backends.local import LocalBackend
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
-from vs_sandbox import BeforeReadyContext, DockerSandbox, SandboxLifecycleHooks
+from vs_sandbox import (
+    BeforeReadyContext,
+    DockerSandbox,
+    HostResource,
+    HostResourceAccess,
+    SandboxLifecycleHooks,
+)
 
 
 class _RecordingHooks(SandboxLifecycleHooks):
@@ -79,6 +85,21 @@ class TestCpuSandbox:
         assert sb._gpus is None  # noqa: SLF001  # tracked: #288
         assert sb._image == "sha256:" + "a" * 64  # noqa: SLF001  # tracked: #288
         assert sb._env["FOO"] == "bar"  # noqa: SLF001  # tracked: #288
+
+    def test_docker_forwards_resources_to_the_sandbox(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        impl = _make_backend(tmp_path)
+        resource = HostResource(tmp_path / "history", HostResourceAccess.READ_ONLY, "history")
+
+        sb = impl.make_sandbox(
+            SandboxKind.DOCKER,
+            host_workspace=str(tmp_path),
+            log_path=None,
+            container_image="sha256:" + "a" * 64,
+            resources=[resource],
+        )
+
+        assert isinstance(sb, DockerSandbox)
+        assert resource in sb._resources  # noqa: SLF001  # tracked: #288
 
     def test_docker_falls_back_to_the_backend_image_without_a_resolved_container_image(  # noqa: ANN201  # tracked: #288
         self,
