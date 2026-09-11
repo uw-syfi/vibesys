@@ -169,13 +169,15 @@ export class AgentMapView {
     // when the state is unchanged. A zoom hands the pane the whole terminal,
     // and one narrower than the graph needs stacks the agents rather than cut a
     // name.
-    const width =
+    // Null either way means the stacked list: the pane is drawn at `paneWidth`
+    // whatever that decides.
+    const graphWidth =
       widthOverride === undefined
         ? agentPaneWidth(this.renderer.terminalWidth, phases)
         : widthOverride >= graphPaneBounds(phases, selectedLabelWidth).min
           ? widthOverride
           : null;
-    const paneWidth = widthOverride ?? width ?? STACKED_WIDTH;
+    const paneWidth = widthOverride ?? graphWidth ?? STACKED_WIDTH;
     if (
       state === this.#renderedState &&
       paneWidth === this.#renderedWidth &&
@@ -250,12 +252,12 @@ export class AgentMapView {
     // Elapsed time only advances while an agent is running, so the heading
     // ticks for exactly as long as one is.
     if (round !== null && hasActiveAgentTiming(round)) this.#runningRound = {round, text: heading};
-    if (width === null) this.#renderStacked(phases, state.selectedAgentKind);
+    if (graphWidth === null) this.#renderStacked(phases, state.selectedAgentKind);
     else {
       this.#renderGraph(
         phases,
         state.selectedAgentKind,
-        width,
+        graphWidth,
         Math.max(0, rows - PANE_VCHROME - HEADING_ROWS),
       );
     }

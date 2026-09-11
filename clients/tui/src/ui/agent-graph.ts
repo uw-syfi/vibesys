@@ -79,6 +79,8 @@ export function graphPaneBounds(
   const stages = Math.max(1, wants.length);
   const chrome = (stages - 1) * GUTTER + PANE_CHROME;
   const labels = wants.reduce((sum, want) => sum + want, 0);
+  // Every column already asks for at least the floor, so the first arm only
+  // decides the no-phases case, where there are no asks to sum.
   const min = Math.max(stages * NODE_WIDTH_MIN, labels) + chrome;
   return {min, max: Math.max(min, stages * NODE_WIDTH_MAX + chrome)};
 }

@@ -10,7 +10,7 @@ import {contrastRatio, listThemes, resolveTheme, type Theme} from './theme.js';
 
 const secondsAgo = (seconds: number): string => new Date(Date.now() - seconds * 1000).toISOString();
 const done = (number: number): RoundState => ({number, status: 'completed'});
-/** An active round whose agent started `seconds` ago. Half seconds keep the label off a tick. */
+/** An active round whose agent started `seconds` ago, with slack before the next tick. */
 const live = (number: number, seconds: number): RoundState => ({
   number,
   status: 'active',
@@ -272,6 +272,18 @@ describe('roundTab', () => {
     });
   });
 
+  test('pads a live timer to the widest label its minute can reach', () => {
+    // `9s` keeps the width of `59s` and `1m 9s` that of `1m 59s`, so a ticking
+    // tab changes width when the minute turns and not twice a minute.
+    const seconds = live(1, 9.5);
+    const minutes = live(2, 69.5);
+    const state = runState([seconds, minutes], {selected: 1});
+    expect([roundTab(seconds, state, new Date()), roundTab(minutes, state, new Date())]).toEqual([
+      {number: 1, outcome: 'live', metric: '9s '},
+      {number: 2, outcome: 'live', metric: '1m 9s '},
+    ]);
+  });
+
   test('counts a live round up from its agent start, and leaves a planned one bare', () => {
     const running = live(1, 42.5);
     const planned: RoundState = {number: 2, status: 'planned'};
@@ -306,8 +318,8 @@ describe('RoundTabsView', () => {
       expect(fgOf(cells, part)).toEqual([theme.textSubtle]);
     }
     expect(fgOf(cells, 'r6')).toEqual([theme.textMuted]);
-    expect(fgOf(cells, '⟳')).toEqual([theme.warning]);
-    expect(fgOf(cells, '42s')).toEqual([theme.warning]);
+    expect(fgOf(cells, '⟳')).toEqual([theme.accent]);
+    expect(fgOf(cells, '42s')).toEqual([theme.accent]);
     // Only the selected slot has a fill; everything else is the canvas.
     // From the gap after the selected slot through r4, and the margin before r1.
     const unselected = [...cells.slice(0, 3), ...cellsOf(cells, '   r3 ✗ fail     r4')];
@@ -339,7 +351,7 @@ describe('RoundTabsView', () => {
     // r2 carries the selection, r6 the live state, each unmistakably.
     expect(cellsOf(cells, 'r2')[0]?.bg).toBe(theme.selectedSurface);
     expect(cellsOf(cells, 'r6 ⟳ 42s').map(cell => cell.bg)).not.toContain(theme.selectedSurface);
-    expect(fgOf(cells, '⟳ 42s')).toEqual([theme.warning]);
+    expect(fgOf(cells, '⟳ 42s')).toEqual([theme.accent]);
   });
 
   test('keeps the live colours on a selected live round', async () => {
@@ -350,8 +362,8 @@ describe('RoundTabsView', () => {
     const slot = cellsOf(cells, '▎ r6 ⟳ 42s  ');
     expect(new Set(slot.map(cell => cell.bg))).toEqual(new Set([theme.selectedSurface]));
     expect(cellsOf(cells, 'r6')[0]).toMatchObject({fg: theme.textStrong, bold: true});
-    expect(cellsOf(cells, '⟳')[0]).toMatchObject({fg: theme.warning, bold: true});
-    expect(fgOf(cells, '42s')).toEqual([theme.warning]);
+    expect(cellsOf(cells, '⟳')[0]).toMatchObject({fg: theme.accent, bold: true});
+    expect(fgOf(cells, '42s')).toEqual([theme.accent]);
     // r2 is back to an ordinary done tab.
     expect(fgOf(cells, '+1.5%')).toEqual([theme.textMuted]);
     expect(cellsOf(cells, 'r2')[0]?.bg).toBe(theme.canvas);
@@ -423,6 +435,14 @@ describe('RoundTabsView', () => {
     ]);
   });
 
+  test('draws a run of one round as a single tab, with no markers', async () => {
+    const bar = await renderBar(runState([done(1)], {selected: 1, records: [measured(1, 12)]}), 40);
+    const single = {rows: bar.rows, text: rowText(bar.cells)};
+    close(bar);
+
+    expect(single).toEqual({rows: 1, text: ' ▎ r1 ✓ +12%'});
+  });
+
   test('takes no row before the run has any rounds', async () => {
     const bar = await renderBar(runState([], {selected: null}), 40);
     const empty = {rows: bar.rows, text: rowText(bar.cells)};
@@ -466,8 +486,9 @@ describe('RoundTabsView', () => {
     expect(calls).toEqual([['selectRound', 3]]);
   });
 
-  test('re-lays the bar out as the live timer ticks', async () => {
-    const state = runState([live(1, 9.5)], {selected: 2, maxRounds: 2});
+  test('re-lays the bar out as the live timer ticks, without moving its neighbours', async () => {
+    // A full second of slack, so the first render cannot land after the tick.
+    const state = runState([live(1, 9.0)], {selected: 2, maxRounds: 2});
     const bar = await renderBar(state, 40);
     const before = rowText(bar.cells);
     // The timer ticks on a real one-second interval; wait past one tick.
@@ -476,9 +497,11 @@ describe('RoundTabsView', () => {
     const after = rowText(rowCells(bar.setup));
     close(bar);
 
-    expect(before).toBe('   r1 ⟳ 9s   ▎ r2 ·');
-    // 9s -> 10s widens r1's slot, so the selected slot moves one column right.
+    // The label changes, and its slot does not: `9s` is padded to the width of
+    // `59s`, so the tab beside it keeps its column.
+    expect(before).toBe('   r1 ⟳ 9s    ▎ r2 ·');
     expect(after).toBe('   r1 ⟳ 10s   ▎ r2 ·');
+    expect(after.indexOf('▎')).toBe(before.indexOf('▎'));
   });
 
   test('repaints in a new theme on the next render', async () => {

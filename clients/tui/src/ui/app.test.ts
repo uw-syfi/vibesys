@@ -1102,8 +1102,8 @@ describe('OpenTUI presentation', () => {
       if (!content || !heading || !canvas) throw new Error('agent graph was missing');
       const nodes = canvas.getChildren().filter(child => child instanceof BoxRenderable);
       expect(nodes.length).toBeGreaterThan(0);
-      // Every node sits under the heading and inside the pane's content, clear
-      // of the overflow count and the border below it.
+      // Every node sits under the heading and inside the pane's content, so it
+      // shares no row with the overflow count or the pane's border.
       for (const node of nodes) {
         expect({height, top: node.y > heading.y}).toEqual({height, top: true});
         expect({height, bottom: node.y + node.height <= content.y + content.height}).toEqual({

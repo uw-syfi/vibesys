@@ -26,9 +26,9 @@ import {ensureContrast, type Theme} from './theme.js';
  * what the check already implies, and `deferred` or an unjudged round has no
  * claim to contradict it, so only `fail` takes the cross.
  */
-export type RoundOutcome = 'done' | 'fail' | 'skipped' | 'live' | 'planned';
+type RoundOutcome = 'done' | 'fail' | 'skipped' | 'live' | 'planned';
 
-export const OUTCOME_GLYPH: Record<RoundOutcome, string> = {
+const OUTCOME_GLYPH: Record<RoundOutcome, string> = {
   done: '✓',
   fail: '✗',
   skipped: '○',
@@ -36,7 +36,7 @@ export const OUTCOME_GLYPH: Record<RoundOutcome, string> = {
   planned: '·',
 };
 
-export function roundOutcome(round: RoundState, state: SessionState): RoundOutcome {
+function roundOutcome(round: RoundState, state: SessionState): RoundOutcome {
   switch (round.status) {
     case 'active':
       return 'live';
@@ -56,9 +56,9 @@ export function roundOutcome(round: RoundState, state: SessionState): RoundOutco
  * record so the two cannot disagree), or its wall duration when no delta was
  * measured. Planned rounds have nothing to measure.
  */
-export function roundMetric(round: RoundState, state: SessionState, now: Date): string {
+function roundMetric(round: RoundState, state: SessionState, now: Date): string {
   if (round.status === 'planned') return '';
-  if (round.status === 'active') return elapsedLabel(roundAgentElapsedMs(round, now));
+  if (round.status === 'active') return steadyElapsedLabel(roundAgentElapsedMs(round, now));
   const delta = hypothesisRoundFor(state, round.number)?.perf_delta_pct;
   if (typeof delta === 'number') {
     return `${delta > 0 ? '+' : ''}${delta.toFixed(Math.abs(delta) >= 10 ? 0 : 1)}%`;
@@ -67,12 +67,27 @@ export function roundMetric(round: RoundState, state: SessionState, now: Date): 
   return elapsedLabel(roundAgentElapsedMs(round, end));
 }
 
-export function latestActiveRoundNumber(rounds: RoundState[]): number | null {
+/**
+ * The elapsed label padded to the widest its minute can reach, so a live tab
+ * keeps one width until the minute turns.
+ *
+ * The bar redraws every second, and `9s` -> `10s` or `1m 9s` -> `1m 10s` would
+ * otherwise widen the slot and slide every tab to its right twice a minute, or
+ * cross a ladder boundary and drop the other tabs' metrics for part of it.
+ * tui-conventions.md reserves space for variable-width numbers. The pad is
+ * trailing, so it falls in the gap between slots rather than under the glyph.
+ */
+function steadyElapsedLabel(elapsedMs: number): string {
+  const lastOfMinute = Math.floor(Math.max(0, elapsedMs) / 60_000) * 60_000 + 59_000;
+  return elapsedLabel(elapsedMs).padEnd(displayWidth(elapsedLabel(lastOfMinute)));
+}
+
+function latestActiveRoundNumber(rounds: RoundState[]): number | null {
   return [...rounds].reverse().find(round => round.status === 'active')?.number ?? null;
 }
 
 /** What one tab says about its round, before a narrow width trims it. */
-export interface RoundTab {
+interface RoundTab {
   number: number;
   outcome: RoundOutcome;
   metric: string;
@@ -97,7 +112,7 @@ const beforeMarker = (hidden: number): string => `‹ ${hidden}`;
 const afterMarker = (hidden: number): string => `${hidden} ›`;
 
 /** The slots `first..last` of a `TabWindow`, both inclusive. */
-export interface TabWindow {
+interface TabWindow {
   first: number;
   last: number;
 }
@@ -121,8 +136,10 @@ export function tabWindow(
   const fits = (first: number, last: number): boolean => {
     let used = GAP * (last - first);
     for (let index = first; index <= last; index += 1) used += widths[index] ?? 0;
-    if (first > 0) used += beforeMarker(first).length + MARKER_GAP;
-    if (last < count - 1) used += MARKER_GAP + afterMarker(count - 1 - last).length;
+    // Measured the way `#marker` sizes the cell it draws, so the reserve and
+    // the drawn width cannot disagree.
+    if (first > 0) used += displayWidth(beforeMarker(first)) + MARKER_GAP;
+    if (last < count - 1) used += MARKER_GAP + displayWidth(afterMarker(count - 1 - last));
     return used <= width - EDGE;
   };
   if (fits(0, count - 1)) return {first: 0, last: count - 1};
@@ -178,7 +195,10 @@ function tabColors(
     case 'fail':
       return {number, glyph: theme.error, metric: theme.error};
     case 'live':
-      return {number, glyph: theme.warning, metric: theme.warning};
+      // Accent, not warning: `agent-map.ts` paints cancelled and interrupted
+      // agents in warning and live edges in accent, so amber here would name
+      // the wrong state. Selection stays the fill, the `▎` and the bold number.
+      return {number, glyph: theme.accent, metric: theme.accent};
     case 'skipped':
     case 'planned':
       return {number, glyph: theme.textSubtle, metric: theme.textSubtle};
@@ -324,8 +344,9 @@ export class RoundTabsView {
 
     const liveRound = rounds.find(round => round.number === liveNumber);
     if (liveRound !== undefined && hasActiveAgentTiming(liveRound)) {
-      // Label widths change at 9s -> 10s and 59s -> 1m 0s, so a tick re-runs the
-      // whole layout rather than rewriting one label.
+      // The label changes every second, and its width only when the minute
+      // turns (`steadyElapsedLabel`), so a tick re-runs the whole layout rather
+      // than rewriting one label.
       this.#elapsedTimer = setTimeout(() => this.#draw(state, width), 1000);
     }
   }
