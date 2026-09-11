@@ -43,6 +43,7 @@ jobs:
       tui: ${{ steps.filter.outputs.tui }}
       examples: ${{ steps.filter.outputs.examples }}
       agent_image: ${{ steps.filter.outputs.agent_image }}
+      evaluators: ${{ steps.filter.outputs.evaluators }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -51,12 +52,25 @@ jobs:
         id: filter
         with:
           filters: |
-            # Ruff and ty never read clients/, so a change confined to the
-            # TypeScript workspace cannot change their verdict. Everything else
-            # (including this workflow) does.
+            # What `python-checks` actually reads: `ruff`/`lint-imports`'s
+            # source roots (`[tool.ruff] src` in pyproject.toml), the dirs
+            # `check_format.sh` also formats, and dependency/lint config.
+            # Deliberately coarse rather than chasing every edge case (e.g.
+            # `check_doc_links.py` also covers Markdown under `clients/`): the
+            # job is cheap, so an occasional unnecessary run costs less than
+            # the upkeep of a fully precise filter.
             python:
-              - '**'
-              - '!clients/**'
+              - 'src/**'
+              - 'tests/**'
+              - 'libs/**'
+              - 'sdk/**'
+              - 'scripts/**'
+              - 'examples/**'
+              - 'resources/**'
+              - '*.py'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - '.github/workflows/test.yml'
             # Mirrors the rebuild watch set the repository launcher uses in
             # src/entrypoints/launcher.py: the TUI is affected by the TypeScript
             # workspace itself and by the Python modules that feed the
@@ -97,6 +111,17 @@ jobs:
               - 'src/vibesys/sandbox/images/**'
               - 'src/vibesys/sandbox/images.py'
               - 'src/vibesys/agents/provider_policy.py'
+              - '.github/workflows/test.yml'
+            # What `queue-native` builds and tests: the queue evaluator and its
+            # native runner, the queue and priority-queue reference
+            # candidates, the evaluator SDK, and the microservice evaluator.
+            evaluators:
+              - 'resources/evaluators/queue/**'
+              - 'resources/evaluators/microservice/**'
+              - 'examples/data-structures/repositories/queue-rs/**'
+              - 'examples/evaluators/priority-queue/**'
+              - 'examples/starters/priority-queue-rs/**'
+              - 'sdk/vs-evaluator/vseval/**'
               - '.github/workflows/test.yml'
 
   # One environment setup for every cheap Python check. Issue #89 split these
@@ -264,6 +289,8 @@ jobs:
           bun "$deploy_dir/dist/self-test.js"
 
   queue-native:
+    needs: changes
+    if: needs.changes.outputs.evaluators == 'true'
     runs-on: ubuntu-latest
 
     steps:
