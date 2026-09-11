@@ -131,6 +131,16 @@ def _sigint_handler(signum: int, frame: FrameType | None) -> None:
 signal.signal(signal.SIGINT, _sigint_handler)
 
 
+def _first_component_below(home: str, destination: str) -> str:
+    """Return the first path component of *destination* under *home*.
+
+    ``/home/agent/.codex/auth.json`` gives ``/home/agent/.codex``; a file
+    directly under HOME gives itself.
+    """
+    relative = Path(destination).relative_to(home)
+    return str(Path(home) / relative.parts[0])
+
+
 class DockerSandbox(BaseSandbox):
     """Sandbox that runs all agent operations inside a Docker container.
 
@@ -592,12 +602,16 @@ class DockerSandbox(BaseSandbox):
         writable layer, rather than mounting the destination itself, keeps
         session/history writes inside the disposable container.
         """
+        # Every directory created on the way to the destination must belong to
+        # the agent too: a CLI writes sessions and caches next to its auth
+        # file, and a root-owned ``~/.codex`` would refuse them. The trailing
+        # chown covers the whole path below HOME, not just the copied file.
         for source, destination in self._auth_files:
-            parent = str(Path(destination).parent)
+            top = _first_component_below(AGENT_HOME, destination)
             script = (
-                f"mkdir -p {shlex.quote(parent)} && "
+                f"mkdir -p {shlex.quote(str(Path(destination).parent))} && "
                 f"cp -a {shlex.quote(source)} {shlex.quote(destination)} && "
-                f"chown -R {_AGENT_USER}:{_AGENT_USER} {shlex.quote(destination)}"
+                f"chown -R {_AGENT_USER}:{_AGENT_USER} {shlex.quote(top)}"
             )
             self._run_as_root(container_id, script, what=f"auth file copy to {destination}")
 

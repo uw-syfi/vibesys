@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from vs_sandbox import BeforeReadyContext, SandboxLifecycleError, SandboxLifecycleHooks
-from vs_sandbox.docker_sandbox import DockerSandbox
+from vs_sandbox.docker_sandbox import DockerSandbox, _first_component_below
 
 
 class _RecordingHooks(SandboxLifecycleHooks):
@@ -1285,3 +1285,17 @@ class TestAutoRemove:
         )
         sandbox.start()
         assert "--rm" not in mock_run.call_args_list[0][0][0]
+
+
+class TestAuthCopyOwnership:
+    def test_a_nested_auth_file_chowns_its_top_directory(self) -> None:
+        assert _first_component_below("/home/agent", "/home/agent/.codex/auth.json") == (
+            "/home/agent/.codex"
+        )
+        assert _first_component_below("/home/agent", "/home/agent/.claude.json") == (
+            "/home/agent/.claude.json"
+        )
+        assert (
+            _first_component_below("/home/agent", "/home/agent/.config/opencode/opencode.json")
+            == "/home/agent/.config"
+        )
