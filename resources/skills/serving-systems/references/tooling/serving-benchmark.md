@@ -31,6 +31,8 @@ Report percentiles (p50, p95, p99), not means. Means hide tail behavior that mat
 
 **Use open-loop for latency SLOs; use closed-loop for throughput ceiling.** Most benchmarks default to closed-loop because it's easier — know which you're running.
 
+**Multi-turn / chat workloads**: model session arrivals open-loop and turns within a session closed-loop (a session sends turn k+1 only after turn k completes, plus think time) — that combination is the faithful model of chat traffic. Pure closed loop with fixed concurrency is a throughput stress test, not a latency instrument: nothing paces the aggregate turn-arrival rate independently of server speed, so a decode-only speedup shortens each session's think-time-to-next-turn cycle and mechanically raises offered load. See the closed-loop pitfall below for a measured case where this flipped a latency verdict.
+
 ## Warmup and steady state
 
 First N requests are slower due to:
@@ -156,6 +158,7 @@ If the report misses these, the numbers are suggestive, not authoritative.
 - **Expressing throughput in requests/sec instead of tokens/sec.** Different OSL distributions give different req/s for the same tok/s; always report both.
 - **Comparing under-saturated vs saturated.** At low concurrency, server throughput is bounded by request arrivals, not server capacity. Sweep concurrency until saturation.
 - **First request after boot.** It can trigger lazy kernel compilation and contaminates turn-1 TTFT by an order of magnitude; discard it as warmup, separate from the steady-state warmup window above. Scope: any backend with JIT/lazy kernel builds. Status: verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job 623402.
+- **A decode-only speedup regresses p95 TTFT in a closed-loop multi-turn benchmark.** Symptom: a change that only speeds up decode (TPOT down 20 percent, throughput up 22 percent, correctness gates pass) raises p95 TTFT for turn 2+ by 17 percent. Cause: a closed-loop client (each session sends its next turn as soon as the previous answer completes, plus think time) turns a decode speedup into higher offered load, because nothing paces the aggregate turn-arrival rate independently of how fast the server answers: prefill arrivals rose 21.6 percent, co-batched prefills roughly doubled (2.0 to 3.8 percent), and a new turn more often waits behind another session's in-flight prefill. The metric moved because offered load shifted, not because the server got slower. Fix: pace turns on a fixed schedule derived from a reference server speed (send turn k at the later of the scheduled time and the previous completion plus think time), so offered load is independent of the server under test; report throughput next to latency; keep per-turn records so tail attribution is possible. Scope: any engine, backend-independent. Status: verified (mechanism plus measured). Stamp: sglang-v0.5.18 fork, 2026-09-11, job 632238.
 
 ## See also
 
