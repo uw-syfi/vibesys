@@ -149,6 +149,24 @@ Caveat: p95 TTFT over one rep's roughly 200 turns is noisy regardless of pacing 
 
 Scope: any engine, backend-independent (the schedule and the per-rep noise are properties of the benchmark client, not the server under test). Status: verified (mechanism plus measured at two server speeds). Stamp: sglang-v0.5.18 fork, benchmark_version 2, 2026-09-11, jobs 632483 (reference speed, schedule_bound_fraction 13.5 percent pooled) and 632503 (1.7x throughput, schedule_bound_fraction 35 to 39 percent).
 
+### Residual load coupling under fixed-schedule pacing: admission delay is not modeled
+
+Even under the fixed-schedule pacing above, `schedule_bound_fraction` stayed at only 0.35 to 0.39 on a server 1.5 to 1.8x faster than the reference speed the schedule was derived from, well short of the near-1.0 the design intends once the server is faster than the reference. Most turns were still tracking server completion time instead of the schedule, the same failure mode scheduled pacing exists to remove.
+
+Cause: the benchmark client holds a per-session admission-concurrency semaphore (one slot per session, held for the session's whole life), but the fixed schedule sets each session's first-turn send time (`T[s][0]`) as if admission were immediate. With more sessions than slots, the excess sessions actually start 46 to 176 s late; because the schedule assumes no admission wait, their turn-2+ sends fall permanently behind schedule and become completion-bound (tracking server speed) for the rest of the session — 58 to 65 percent of turn-2+ sends in a 166-send rep, in the measured case.
+
+Fix: derive each session's scheduled start time from a simulated admission queue at the reference speed, rather than assuming immediate admission; or make the schedule's first-turn time admission-aware directly. Comparisons made without this fix carry residual load coupling between sides running at different speeds — a faster side's own turns arrive faster, inflating its own tail, which is exactly the effect scheduled pacing was built to remove.
+
+Scope: any engine, backend-independent (property of the benchmark client's session-admission and scheduling logic, not the server under test). Status: verified (mechanism plus measured). Stamp: sglang-v0.5.18 fork, benchmark_version 2, 2026-09-11, job 632584.
+
+### Metric of record: pool per-turn quantiles across reps, not per-rep percentiles
+
+A single rep's server-side stall (a few seconds, affecting a handful of concurrent turns) can dominate that rep's own p95 TTFT while leaving every other rep in the same sample unaffected: one measured case had one rep's p95 at 6944 ms against four reps in the 530 to 627 ms range for the identical configuration. The median of five per-rep p95 values absorbs that stall into "one high rep" and can still read as acceptable; pooling every rep's turn-2+ TTFT into one distribution and taking percentiles across the pool exposes the same event as a heavy p95/p99 tail instead of diluting it.
+
+Use pooled per-turn quantiles (computed across all reps' turns together) as the gating statistic, and report per-rep spread alongside so a single-rep event is visible as a flagged outlier rather than averaged into "high variance."
+
+Scope: any engine, backend-independent. Status: verified (measured). Stamp: sglang-v0.5.18 fork, benchmark_version 2, 2026-09-11, job 632584.
+
 ## Reading a benchmark report (skeptically)
 
 Checklist before trusting someone's numbers:
