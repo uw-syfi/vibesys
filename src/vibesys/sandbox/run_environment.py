@@ -64,7 +64,6 @@ from vibesys.skypilot.config import load_cluster_profiles, resolve_profile
 from vibesys.skypilot.runner import SkyPilotJobRunner, stable_cluster_name
 from vs_project import RunEnvironmentRecord, RunResourceRequest
 from vs_sandbox import (
-    AGENT_HOME,
     BeforeReadyContext,
     HostResource,
     HostResourceAccess,
@@ -869,7 +868,10 @@ class ModalEnvironment(_NoopWorkspaceRecovery):  # noqa: D101  # tracked: #288
         # Mount host Modal auth so `modal run` inside the container
         # authenticates as the host user. The Modal SDK reads them from the
         # HOME of the user the container runs as, the agent image's
-        # non-root ``agent`` user, not root.
+        # non-root ``agent`` user, not root. Deferred: the Docker sandbox
+        # module imports the agent stack, which this module must not load.
+        from vs_sandbox import AGENT_HOME  # noqa: PLC0415  # tracked: #288
+
         modal_auth = Path.home() / ".modal.toml"
         if modal_auth.exists():
             resources.append(
