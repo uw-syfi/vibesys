@@ -167,6 +167,17 @@ rg "class.*QuantScheme|get_quant_method|apply_weights" \
    $SERVE_REPOS/sglang/python/sglang/srt/layers/quantization/
 ```
 
+## Request admission timing
+
+A per-request-joined decomposition of turn-2+ TTFT (client timestamp joined to the scheduler's own `ReqTimeStats`/`request.finished` markers by request id) isolates where time goes between a request reaching the tokenizer manager and it landing in the scheduler's `waiting_queue`, and separates that from actual admission delay:
+
+- `wait_queue_entry_time` (set in `managers/scheduler.py` when a request is pulled off the inbound ZMQ queue and appended to `waiting_queue`) only advances when the scheduler's own inbound-socket poll runs, and that poll is gated behind whatever other per-iteration work the current iteration is doing (batch selection, forward, sampling, detokenize dispatch). Under load this receipt-to-queue-arrival term averaged about half an iteration and reached a whole iteration at p95 (55 ms p50 / 204 ms p95 at 48 uncapped sessions, 22 ms p50 / 126 ms p95 at a 16-session cap), while tokenize-plus-ZMQ-dispatch alone measured flat at 9-10 ms p50 both concurrencies: nearly all of this term's size and its concurrency-scaling is the poll cadence, not the client or the transport.
+- `PrefillAdder`'s own admission-rejection counters (`NO_TOKEN` vs `OTHER`) distinguish an admission-budget rejection from any other reason a candidate prefill batch does not admit a request. Over 16830 iterations (964 PREFILL, 15866 DECODE) on a 48-session multi-turn workload, `NO_TOKEN` rejections were zero: `schedule_conservativeness` is not a lever on an admission-budget problem when there isn't one, and queue wait itself measured near zero (0.6 ms p50 / 1.1 ms p95) in the same run.
+
+See [`../tooling/performance-modeling.md`](../tooling/performance-modeling.md) for the general bucket-decomposition method this uses, and [`../models/qwen3-5.md`](../models/qwen3-5.md) for the full bucket table.
+
+Scope: sglang, any backend (scheduler behavior, not platform-specific). Status: verified (measured via a request-id join, residual near logging precision; mechanism read from the recv-loop/`PrefillAdder` gating in `managers/scheduler.py`). Stamp: sglang fork at `b6f3d5d6c8`, 2026-09-12, job 633804.
+
 ## Pitfalls
 
 ### `profile_by_stage` cannot isolate a stage rarer than the ones around it

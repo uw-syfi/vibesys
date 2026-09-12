@@ -43,6 +43,45 @@ with torch.inference_mode():
     logits = model(input_ids)
 ```
 
+## TunableOp: persistent GEMM autotuning
+
+`PYTORCH_TUNABLEOP_ENABLED=1` turns on PyTorch's opt-in per-shape GEMM autotuner, independent of `torch.compile`: `PYTORCH_TUNABLEOP_TUNING=1` (the default once enabled) explores kernel choices for each new shape it sees and appends the winner to a results CSV; `PYTORCH_TUNABLEOP_TUNING=0` replays only what that CSV already holds, tuning nothing new. `F.linear` and `torch.matmul(x, w.T)` dispatch to the same underlying GEMM call, so they share one TunableOp cache key: a table built by exercising one call site covers the other.
+
+### TunableOp's results filename substitutes the device ordinal, and rewrites at exit regardless of tuning state
+
+```
+Symptom: a multi-device process launched with PYTORCH_TUNABLEOP_ENABLED=1
+         and one PYTORCH_TUNABLEOP_FILENAME path only tunes on one
+         device; the other devices either log a could-not-open error for
+         the results file, or run untuned from an empty file with no
+         error at all.
+Cause:   PyTorch substitutes the device ordinal into the filename before
+         opening it: into a %d placeholder if the filename contains one,
+         otherwise inserted just before the file extension. Every process
+         in the job reads and writes its own per-ordinal file, never the
+         literal path passed in. Separately, PyTorch rewrites the results
+         file at process exit unconditionally, whether TUNING was 1 or 0
+         and whether anything was loaded or tuned that run (empty if
+         nothing was); no env var suppresses this rewrite.
+Fix:     write one results file per device ordinal ahead of time
+         (<name>0.<ext> through <name><n-1>.<ext>), or pass a literal %d
+         placeholder in the filename and let PyTorch fill it in. Gate any
+         multi-device launch on every rank logging a successful
+         results-file load with no could-not-open line, since a missing
+         file fails silently into "untuned," not into an error. Make the
+         files read-only if the run must not risk the at-exit rewrite
+         erasing them.
+Scope:   PyTorch TunableOp on any multi-device process; engine- and
+         backend-agnostic (the substitution and the unconditional
+         at-exit rewrite are PyTorch's own).
+Status:  verified (reproduced across two multi-rank jobs with the wrong
+         file layout; substitution rule and unconditional at-exit rewrite
+         read from PyTorch's TunableOp source). Stamp: torch 2.9.0a0,
+         2026-09-12, jobs 633800 and 633801 (observed on an
+         sglang-v0.5.18-rocm700-mi30x server; the mechanism itself is
+         PyTorch-internal, not sglang- or rocm-specific).
+```
+
 ## torch.compile for serving
 
 Two compile modes relevant to serving:
