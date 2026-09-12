@@ -6535,3 +6535,147 @@ class FakeController implements SessionController {
     for (const listener of this.#listeners) listener(this.state);
   }
 }
+
+describe('round focus on hidden panes', () => {
+  // Key routing consulted `roundFocus` while the border consulted
+  // `focusedPane`, so with the agents pane off screen Left could move the keys
+  // and an auto-selected agent filter onto a pane that was not there,
+  // silently narrowing the transcript.
+  function twoAgentRound(): SessionState {
+    const base = initialSessionState();
+    return {
+      ...base,
+      selectedRound: 1,
+      core: {
+        ...base.core,
+        rounds: [{number: 1, status: 'active' as const}],
+        phases: [
+          {
+            kind: 'implementer',
+            status: 'completed' as const,
+            roundNumber: 1,
+            roundLabel: 'round-1-impl',
+          },
+          {kind: 'judge', status: 'active' as const, roundNumber: 1, roundLabel: 'round-1-judge'},
+        ],
+        transcript: [
+          {
+            id: 'e1',
+            kind: 'assistant' as const,
+            label: 'implementer',
+            content: 'edited the kernel',
+            agentKind: 'implementer',
+            roundNumber: 1,
+          },
+          {
+            id: 'e2',
+            kind: 'assistant' as const,
+            label: 'implementer',
+            content: 'guarded the tail tile',
+            agentKind: 'implementer',
+            roundNumber: 1,
+          },
+          {
+            id: 'e3',
+            kind: 'assistant' as const,
+            label: 'judge',
+            content: 'checking the diff',
+            agentKind: 'judge',
+            roundNumber: 1,
+          },
+        ],
+      },
+    };
+  }
+
+  it('keeps Left from filtering the zoomed transcript through the hidden agents pane', async () => {
+    const testRenderer = await createTestRenderer({width: 150, height: 26});
+    const controller = new FakeController(twoAgentRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('edited the kernel'));
+
+    testRenderer.mockInput.pressKey('F4');
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.zoomedPane).toBe('transcript');
+
+    // Left names the agents pane, but the zoom took it off screen: the keys
+    // hold on the transcript and no invisible agent filter appears.
+    testRenderer.mockInput.pressKey('ARROW_LEFT');
+    const frame = await frameAfter(testRenderer);
+    expect(controller.state.roundFocus).toBe('transcript');
+    expect(controller.state.selectedAgentKind).toBeNull();
+    expect(frame).toContain('edited the kernel');
+    expect(frame).toContain('checking the diff');
+
+    // Up still moves the transcript cursor, not an invisible agent selection.
+    testRenderer.mockInput.pressKey('ARROW_UP');
+    await frameAfter(testRenderer);
+    expect(controller.state.selectedEntryId).not.toBeNull();
+    expect(controller.state.selectedAgentKind).toBeNull();
+  });
+
+  it('still reaches the agents pane with Left while it is on screen', async () => {
+    const testRenderer = await createTestRenderer({width: 150, height: 26});
+    const controller = new FakeController(twoAgentRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('edited the kernel'));
+
+    testRenderer.mockInput.pressKey('ARROW_LEFT');
+    const frame = await frameAfter(testRenderer);
+    expect(controller.state.roundFocus).toBe('agents');
+    // Arriving auto-selects the active agent, with the pane there to show it.
+    expect(controller.state.selectedAgentKind).toBe('judge');
+    expect(frame).toContain('▸ Agents');
+
+    // Zoomed onto the agents pane, Right has no visible transcript to move
+    // to: the keys stay on the one pane that is on screen.
+    testRenderer.mockInput.pressKey('F4');
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.zoomedPane).toBe('agents');
+    testRenderer.mockInput.pressKey('ARROW_RIGHT');
+    await frameAfter(testRenderer);
+    expect(controller.state.roundFocus).toBe('agents');
+
+    // Unzoomed, the same key moves them again.
+    testRenderer.mockInput.pressKey('F4');
+    testRenderer.mockInput.pressKey('ARROW_RIGHT');
+    await frameAfter(testRenderer);
+    expect(controller.state.roundFocus).toBe('transcript');
+  });
+
+  it('repairs focus and filter parked on the agents pane when a zoom hides it', async () => {
+    const testRenderer = await createTestRenderer({width: 150, height: 26});
+    const controller = new FakeController(twoAgentRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('edited the kernel'));
+
+    // The agents pane holds the keys and an agent filters the transcript.
+    testRenderer.mockInput.pressKey('ARROW_LEFT');
+    await frameAfter(testRenderer);
+    expect(controller.state.roundFocus).toBe('agents');
+    expect(controller.state.selectedAgentKind).toBe('judge');
+
+    // A zoom leaves only the transcript on screen while the agents pane held
+    // the keys. Normalization moves the keys to the visible pane and turns
+    // the filter off with its cue: the transcript shows every agent again and
+    // wears the focus border.
+    controller.publish({
+      ...controller.state,
+      layout: {...controller.state.layout, zoomedPane: 'transcript'},
+    });
+    const frame = await frameAfter(testRenderer);
+    expect(controller.state.roundFocus).toBe('transcript');
+    expect(controller.state.selectedAgentKind).toBeNull();
+    expect(frame).toContain('▸ Transcript');
+    expect(frame).toContain('edited the kernel');
+    expect(frame).toContain('checking the diff');
+
+    // The keys followed: Up moves the transcript cursor.
+    testRenderer.mockInput.pressKey('ARROW_UP');
+    await frameAfter(testRenderer);
+    expect(controller.state.selectedEntryId).not.toBeNull();
+  });
+});

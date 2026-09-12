@@ -1271,8 +1271,34 @@ export function normalizeFocus(state: SessionState): SessionState {
     visiblePaneIds({...state, layout: {...state.layout, focus}}).includes(state.layout.zoomedPane)
       ? state.layout.zoomedPane
       : null;
-  if (focus === state.layout.focus && zoomedPane === state.layout.zoomedPane) return state;
-  return {...state, layout: {...state.layout, focus, zoomedPane}};
+  const next =
+    focus === state.layout.focus && zoomedPane === state.layout.zoomedPane
+      ? state
+      : {...state, layout: {...state.layout, focus, zoomedPane}};
+  return normalizeRoundFocus(next);
+}
+
+/**
+ * The round view's focus obeys the same rule as the columns above: it has to
+ * name a pane that is on screen. Beside a visualization a stored 'agents'
+ * focus is a parked value that `focusedPane` and the key routing both ignore
+ * and closing the pane restores, so it stays. A zoom has no restore point, so
+ * focus stranded behind one is repaired: the keys move to the pane the zoom
+ * kept, and an agent filter whose only cue the zoom removed turns off rather
+ * than silently narrowing the transcript.
+ */
+function normalizeRoundFocus(state: SessionState): SessionState {
+  if (experimentLogVisible(state) || state.layout.right !== null) return state;
+  if (
+    !roundPaneVisible(state, 'agents') &&
+    (state.roundFocus === 'agents' || state.selectedAgentKind !== null)
+  ) {
+    return {...state, roundFocus: 'transcript', selectedAgentKind: null};
+  }
+  if (!roundPaneVisible(state, 'transcript') && state.roundFocus === 'transcript') {
+    return {...state, roundFocus: 'agents'};
+  }
+  return state;
 }
 
 /** Escape from a round view: close whatever is layered over it, all of it. */
@@ -1307,6 +1333,23 @@ export function focusPane(state: SessionState, focus: PaneFocus): SessionState {
 export function todoListFocused(state: SessionState): boolean {
   if (experimentLogVisible(state) || !state.todosExpanded) return false;
   return visibleTodos(state).length > 0;
+}
+
+/**
+ * True while the named round pane is on screen, mirroring the render path: a
+ * zoom on the other pane hides it, and a visualization takes the agents pane's
+ * place (in a terminal too narrow to split, the visualization's fallback modal
+ * covers the pane and takes the keys, so it is unavailable either way). Round
+ * focus only moves to a pane this returns true for, so the keys and the agent
+ * filter can never land on a pane the operator cannot see.
+ */
+export function roundPaneVisible(state: SessionState, pane: RoundFocus): boolean {
+  if (experimentLogVisible(state)) return false;
+  const zoomed = state.layout.zoomedPane;
+  if (pane === 'agents') {
+    return state.layout.right === null && (zoomed === null || zoomed === 'agents');
+  }
+  return zoomed === null || zoomed === 'transcript';
 }
 
 /**
@@ -1701,6 +1744,11 @@ export function selectNextEntry(state: SessionState, delta: number, id?: string)
  */
 export function focusRound(state: SessionState, focus: RoundFocus): SessionState {
   if (state.roundFocus === focus) return state;
+  // The move happens only between panes that are on screen. Focus landing on
+  // a hidden pane would route the keys, and the auto-selected filter below,
+  // into a surface with no visible cue. The round view has no third pane to
+  // skip to, so at a hidden neighbour the keys stay where they are.
+  if (!roundPaneVisible(state, focus)) return state;
   // Arriving at the graph with nothing picked out puts the cursor on the agent
   // whose turns are on screen, so Tab starts from where the operator is looking.
   if (focus === 'agents' && state.selectedAgentKind === null) {
