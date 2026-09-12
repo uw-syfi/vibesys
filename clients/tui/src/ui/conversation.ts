@@ -1,5 +1,6 @@
 import {
   BoxRenderable,
+  bold,
   type CliRenderer,
   fg,
   MarkdownRenderable,
@@ -14,16 +15,14 @@ import {hasRunEnded} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import type {ConversationEntry, SessionState} from '../session-model.js';
 import {visibleConversation} from '../session-model.js';
-import {fillLayer} from './box-fill.js';
 import {promptPreview, toolCallPreview, toolResultPreview} from './previews.js';
 import {
-  conversationRole,
   createMarkdownBlockOptions,
   type EntryPalette,
   entryPalette,
   type MarkdownBlockOptions,
 } from './styles.js';
-import {ensureContrast, SUBTLE_TEXT_MIN_CONTRAST, type Theme} from './theme.js';
+import {ensureContrast, RUN_DIVIDER_MIN_CONTRAST, type Theme} from './theme.js';
 
 export interface ConversationViewOptions {
   selectConversation?: (state: SessionState) => ConversationEntry[];
@@ -375,7 +374,6 @@ export class ConversationView {
   #renderEntry(entry: ConversationEntry, previous: ConversationEntry | undefined): BoxRenderable {
     const palette = entryPalette(entry, this.#theme);
     const selected = this.#selectedId === entry.id;
-    const bare = isBareEntry(entry);
     // The first rendered entry always draws its chrome, whatever sits above it
     // in the model: the window and the scrollback both start mid-run, and the
     // topmost row on screen is the one that most has to say who is speaking.
@@ -426,15 +424,17 @@ export class ConversationView {
         : {
             border: borderSides,
             borderStyle: 'single' as const,
-            // The resting colour is held to the same 3:1 floor `textSubtle`
-            // uses for punctuation and rules: `roleAccents` in theme.ts is not
-            // run through `ensureContrast` the way the label and content
-            // derived from it are, and five of the 64 role/theme combinations
-            // sit under 3:1. A four-sided border could lean on its own area to
-            // stay noticeable at a marginal contrast; a one-row rule cannot.
+            // Neutral, not the role accent. The rule separates one run from
+            // the next; who is speaking is already said by the heading word and
+            // its colour, and a third channel pointed at the same fact is what
+            // made the transcript read as oversaturated. `border` is the token
+            // every other resting frame in the UI draws in (`paneBorderColor`),
+            // lifted to `RUN_DIVIDER_MIN_CONTRAST`: a four-sided border can lean
+            // on its own area to stay noticeable at a marginal contrast, and a
+            // one-row rule that has just given up its accent cannot.
             borderColor: selected
               ? this.#theme.borderFocus
-              : ensureContrast(palette.border, this.#theme.canvas, SUBTLE_TEXT_MIN_CONTRAST),
+              : ensureContrast(this.#theme.border, this.#theme.canvas, RUN_DIVIDER_MIN_CONTRAST),
           }),
       ...(this.#showsSelection
         ? {
@@ -457,12 +457,6 @@ export class ConversationView {
             }
           : {}),
     });
-    // A bare entry draws no frame, so its role tint is what marks it as one
-    // agent's line. It goes on a layer inside the card rather than on the card
-    // itself: an opener draws a rule, and a `backgroundColor` on a bordered box
-    // paints the border row with it (tui-conventions.md, "a fill lives on an
-    // inner box").
-    if (bare) fillLayer(card, `event-${entry.id}-fill`, palette.background);
     if (opensRun) {
       const heading = new BoxRenderable(this.renderer, {
         id: `event-${entry.id}-heading`,
@@ -519,7 +513,7 @@ export class ConversationView {
       const content = prompt ? prompt.content : (output?.content ?? entry.content);
       card.add(
         new TextRenderable(this.renderer, {
-          content: styleSourceTags(content, palette),
+          content: styleTranscriptText(content, palette, this.#theme),
           fg: palette.content,
           width: '100%',
           // A command line, a stderr trace, or a banner runs past the card;
@@ -636,48 +630,74 @@ export class ConversationView {
 const SOURCE_TAG = /^\[[A-Za-z0-9][\w-]*\]/;
 
 /**
- * Colors a leading bracketed source tag in the card's label color; the rest
- * of that line, and any line without one, stays in the content color.
- * `SOURCE_TAG` is anchored to the start of the line, so a bracket elsewhere in
- * a line (`see [x] here`) is left alone.
- *
- * Returns `content` unchanged when no line carries a tag, so an untagged
- * entry keeps rendering as the single content-colored string it always has.
- * Exported so the line-splitting and anchoring are tested directly, the way
- * previews.ts exports `unwrapShellCommand` for the same reason.
+ * The verdict a gate prints: `[framework-validation] PASS`,
+ * `[framework-benchmark] FAIL: ...`. Whole words, so `PASSED` and a path
+ * component spelled `fail` are left alone.
  */
-export function styleSourceTags(content: string, palette: EntryPalette): StyledText | string {
-  const lines = content.split('\n');
-  if (!lines.some(line => SOURCE_TAG.test(line))) return content;
-  const chunks: TextChunk[] = [];
-  lines.forEach((line, index) => {
-    const tag = SOURCE_TAG.exec(line);
-    if (tag !== null) {
-      chunks.push(fg(palette.label)(tag[0]));
-      const rest = line.slice(tag[0].length);
-      if (rest !== '') chunks.push(fg(palette.content)(rest));
-    } else if (line !== '') {
-      chunks.push(fg(palette.content)(line));
-    }
-    if (index < lines.length - 1) chunks.push(fg(palette.content)('\n'));
-  });
-  return new StyledText(chunks);
+const VERDICT = /\bPASS\b|\bFAIL\b/g;
+
+/**
+ * Emphasizes the two words in `text` a reader is actually scanning for, and
+ * draws everything around them in the entry's content color.
+ *
+ * `PASS` and `FAIL` are the outcome of a run, and after the transcript stopped
+ * spending colour on role they are close to the only saturated thing left on
+ * the line. The word is the non-colour channel: green and red alone say nothing
+ * to the ~8% of men with red-green CVD, and the two high-contrast themes barely
+ * have a palette to say it with.
+ */
+function pushBody(chunks: TextChunk[], text: string, palette: EntryPalette, theme: Theme): boolean {
+  let cursor = 0;
+  let emphasized = false;
+  for (const match of text.matchAll(VERDICT)) {
+    if (match.index > cursor) chunks.push(fg(palette.content)(text.slice(cursor, match.index)));
+    const role = match[0] === 'PASS' ? theme.conversation.success : theme.conversation.failure;
+    chunks.push(bold(fg(role.label)(match[0])));
+    cursor = match.index + match[0].length;
+    emphasized = true;
+  }
+  if (cursor < text.length) chunks.push(fg(palette.content)(text.slice(cursor)));
+  return emphasized;
 }
 
 /**
- * Whether an entry is drawn as bare lines instead of a bordered card.
+ * Colors the parts of a transcript line that are not the line's own prose.
  *
- * Provider lifecycle chatter and driver banners arrive on the diagnostic and
- * subprocess channels a line at a time, and a rounded card turns each of those
- * lines into five rows of chrome around three words. They read better as a
- * muted run of text between the cards that carry real turns. A failure is the
- * exception: whether the backend marked it or the driver's own error marker
- * did, it keeps the card so it still stops the eye.
+ * A leading bracketed source tag recedes into the theme's muted text, and any
+ * `PASS` or `FAIL` is lifted into its verdict colour and bolded. Everything
+ * else stays in the entry's content color. `SOURCE_TAG` is anchored to the
+ * start of the line, so a bracket elsewhere in a line (`see [x] here`) is left
+ * alone.
+ *
+ * The tags used to take the card's label colour, which put a saturated
+ * 24-column prefix on nearly every subprocess line. A marker that appears on
+ * almost every row marks nothing, so it is drawn as what it is: a frequent,
+ * low-information prefix that should recede.
+ *
+ * Returns `content` unchanged when no line carries a tag or a verdict, so an
+ * ordinary entry keeps rendering as the single content-colored string it always
+ * has. Exported so the line-splitting and anchoring are tested directly, the
+ * way previews.ts exports `unwrapShellCommand` for the same reason.
  */
-function isBareEntry(entry: ConversationEntry): boolean {
-  if (entry.kind === 'status') return true;
-  if (entry.kind !== 'diagnostic' && entry.kind !== 'subprocess') return false;
-  return conversationRole(entry) !== 'failure';
+export function styleTranscriptText(
+  content: string,
+  palette: EntryPalette,
+  theme: Theme,
+): StyledText | string {
+  const lines = content.split('\n');
+  const chunks: TextChunk[] = [];
+  let styled = false;
+  lines.forEach((line, index) => {
+    const tag = SOURCE_TAG.exec(line);
+    if (tag !== null) {
+      chunks.push(fg(theme.textMuted)(tag[0]));
+      styled = true;
+    }
+    const rest = tag === null ? line : line.slice(tag[0].length);
+    if (pushBody(chunks, rest, palette, theme)) styled = true;
+    if (index < lines.length - 1) chunks.push(fg(palette.content)('\n'));
+  });
+  return styled ? new StyledText(chunks) : content;
 }
 
 /**
