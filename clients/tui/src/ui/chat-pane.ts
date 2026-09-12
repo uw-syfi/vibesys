@@ -22,8 +22,13 @@ import type {Theme} from './theme.js';
  * Columns the chat needs before a question and its answer read as prose rather
  * than as a column of fragments.
  */
-const CHAT_PANE_MIN = 25;
-const CHAT_PANE_MAX = 52;
+export const CHAT_PANE_MIN = 25;
+/**
+ * Ceiling for automatic sizing. An explicit `<`/`>` override is allowed past
+ * it (`clampChatWidthOverride`): asking for a specific width past what
+ * automatic sizing would ever choose on its own is the point of overriding.
+ */
+export const CHAT_PANE_MAX = 52;
 
 /** Stands in until the first render names the active thread. */
 const CHAT_PANE_TITLE = 'Experiment chat';
@@ -52,6 +57,41 @@ export function chatPaneWidth(terminalWidth: number, rightPaneWidth = 0): number
   const surplus = available - LOG_CLAIM_PANEL_WIDTH;
   const wanted = Math.max(CHAT_PANE_MIN, Math.min(CHAT_PANE_MAX, surplus));
   return Math.min(wanted, available - LOG_COMPACT_PANEL_WIDTH);
+}
+
+/**
+ * Clamps a requested `<`/`>` override to what the terminal can actually draw:
+ * never narrower than `CHAT_PANE_MIN`, and never so wide the table drops under
+ * `LOG_COMPACT_PANEL_WIDTH`.
+ *
+ * Deliberately asymmetric with automatic sizing, the mirror of how
+ * `agent-map.ts#clampGraphWidthOverride` lets an override go below
+ * `agentPaneFloor`: automatic sizing (`chatPaneWidth`) caps at `CHAT_PANE_MAX`
+ * because that is already comfortable for a question and its answer, but an
+ * explicit ask is allowed past it, since asking for more than automatic
+ * sizing would ever choose is the point of overriding.
+ */
+export function clampChatWidthOverride(
+  requested: number,
+  terminalWidth: number,
+  rightPaneWidth: number,
+): number {
+  const low = CHAT_PANE_MIN;
+  const high = Math.max(low, terminalWidth - rightPaneWidth - LOG_COMPACT_PANEL_WIDTH);
+  return Math.min(high, Math.max(low, requested));
+}
+
+/**
+ * The docked chat's width honoring an explicit `<`/`>` override, or automatic
+ * sizing (`chatPaneWidth`) when there is none.
+ */
+export function chatPaneWidthWithOverride(
+  terminalWidth: number,
+  rightPaneWidth: number,
+  override: number | null,
+): number {
+  if (override === null) return chatPaneWidth(terminalWidth, rightPaneWidth);
+  return clampChatWidthOverride(override, terminalWidth, rightPaneWidth);
 }
 
 /**

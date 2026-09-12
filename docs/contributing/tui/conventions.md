@@ -100,21 +100,26 @@ the one movement rule the current bindings already keep.
 
 ### A resize moves columns, and only columns
 
-`<` and `>` change the Agents pane's width by whole columns
-(`GRAPH_WIDTH_STEP`), the way a window resize does in vim and LazyVim. Not a
-ratio: a share of the terminal that a floor then rounds away is a key press
-that did nothing, and the width the operator sees is what they are aiming at.
+`<` and `>` change a pane's width by whole columns (`PANE_WIDTH_STEP`), the way
+a window resize does in vim and LazyVim. Two panes share the mechanism: the
+round view's Agents pane, and the home page's docked chat pane, which the
+experiment log absorbs the remainder from rather than holding a width of its
+own. Not a ratio: a share of the terminal that a floor then rounds away is a
+key press that did nothing, and the width the operator sees is what they are
+aiming at.
 
 An explicit width is sticky, so `=` gives it back, the way `<C-w>=` does in vim.
 Without it one press would cost the pane its automatic sizing for the life of
-the process: it would stop following the terminal, stop widening as agent names
-get longer, and keep cutting names automatic sizing promises never to cut. A
-resize pair with no way home is a trap, not a feature. `=` shares the guards
-that decide whether the keys belong to the Agents pane at all (an empty command
-input, no zoom, the pane on screen), but alone among the three it is not also
-gated on the pane being resizable: it is the way out, and a terminal or a round
-where `<` and `>` do nothing is exactly where an override left over from a wider
-terminal has to be clearable.
+the process: the Agents pane would stop following the terminal, stop widening
+as agent names get longer, and keep cutting names automatic sizing promises
+never to cut; the chat pane would stop following the terminal and the log
+beside it would stop reclaiming the columns automatic sizing would have given
+it back. A resize pair with no way home is a trap, not a feature. `=` shares
+the guards that decide whether the keys belong to a pane at all (an empty
+command input, no zoom, the pane on screen), but alone among the three it is
+not also gated on the pane being resizable: it is the way out, and a terminal
+or a round where `<` and `>` do nothing is exactly where an override left over
+from a wider terminal has to be clearable.
 
 A resize key also never swaps a pane's contents for a different presentation.
 The Agents pane's stacked list is an automatic fallback for a terminal too
@@ -123,7 +128,9 @@ cannot draw a node with in-degree above one, so reaching it by pressing `<`
 would lose edges the operator was resizing in order to see. `<` stops at
 `agentGraphMinWidth`, the narrowest pane an override may ask for, and `>` stops
 at `agentPaneCeiling`, past which the extra columns are padding rather than
-name.
+name. The chat pane has no fallback presentation to protect: `chatPaneVisible`
+already decides whether it is docked at all, so wherever `<`/`>`/`=` apply to
+it, it is already the chat pane and never becomes something else.
 
 The stacked list is therefore a floor `<` cannot cross in either direction. From
 it `>` opens the narrowest graph, because asking for the graph is the only thing
@@ -131,28 +138,42 @@ it `>` opens the narrowest graph, because asking for the graph is the only thing
 goes, and the gap up to `agentGraphMinWidth` is not a step a shrink key may take
 (26 columns at three stages, 7 at two, none at all at one).
 
-That last case generalizes, and the general rule is the one the code keeps: a
-press that would not change the rendered width stores nothing. A round with no
-phases yet, a round of one short-named stage, and a terminal wide enough that
-automatic sizing already sits at the ceiling each leave `<` or `>` with nowhere
-to go, and a press that stored an override anyway would arm one the operator
-cannot see and pin every later round in the session to it. A terminal too narrow
-for any graph is the same rule reached through the terminal instead of the
-round.
+That last case generalizes, and the general rule is the one the code keeps for
+every resizable pane: a press that would not change the rendered width stores
+nothing. A round with no phases yet, a round of one short-named stage, and a
+terminal wide enough that automatic sizing already sits at the ceiling each
+leave the Agents pane's `<` or `>` with nowhere to go, and a press that stored
+an override anyway would arm one the operator cannot see and pin every later
+round in the session to it. A terminal too narrow for any graph is the same
+rule reached through the terminal instead of the round, and a terminal too
+narrow for the chat to dock at all (`chatDockFits` false) is the same rule
+again: `chatPaneVisible` is already false there, so the keys are not claimed in
+the first place, and nothing is stored either way.
 
 Storing nothing means storing nothing, not storing the bound the press ran into,
 so an explicit width outlives a narrowing. A pane set to 64 columns on a wide
 terminal renders at whatever a narrower one allows, and a dead press there
 leaves the stored 64 alone, so widening back restores 64 rather than the
-narrowed width. That also keeps a dead press on one round from overwriting the
-width the operator chose on a round of a different shape.
+narrowed width. That also keeps a dead press on one round, or on one terminal
+size, from overwriting a width chosen under a different shape.
 
-Automatic sizing keeps its own rule, that no agent name is ever cut. Truncation
-is what an explicit override buys, and it buys only that: `agentGraphMinWidth`
-keeps the same `STACKED_WIDTH` floor `agentPaneFloor` does, so an override
-narrows the agent names and never the round heading or the empty-round
-placeholder. An operator who asks for a narrower pane than the names need has
-said which of the two they want.
+Automatic sizing keeps its own rule for the Agents pane, that no agent name is
+ever cut. Truncation is what an explicit override buys, and it buys only that:
+`agentGraphMinWidth` keeps the same `STACKED_WIDTH` floor `agentPaneFloor`
+does, so an override narrows the agent names and never the round heading or the
+empty-round placeholder. An operator who asks for a narrower pane than the
+names need has said which of the two they want.
+
+The chat pane's override keeps the mirror image of that promise instead.
+Automatic sizing (`chatPaneWidth`) never grows past `CHAT_PANE_MAX`, wide enough
+for a question and its answer to read as prose; an explicit override
+(`clampChatWidthOverride`) is allowed past it, the same way an Agents override
+is allowed under `agentPaneFloor` into truncation automatic sizing would never
+choose on its own. Asking for a width automatic sizing would never pick is the
+point of overriding it. The floor either way is `CHAT_PANE_MIN`, and the
+override still keeps the experiment log at `LOG_COMPACT_PANEL_WIDTH`: the extra
+columns a wide override asks for come out of the chat's own ceiling, never out
+of the log's floor.
 
 ### Nothing moves that does not have to
 
