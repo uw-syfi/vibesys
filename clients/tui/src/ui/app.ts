@@ -15,7 +15,7 @@ import {
   visibleRoundNumber,
 } from '../session-model.js';
 import {ActivityBarView} from './activity-bar.js';
-import {AgentMapView} from './agent-map.js';
+import {AgentMapView, agentsPaneVisible} from './agent-map.js';
 import {fillLayer} from './box-fill.js';
 import {createChatDraft} from './chat-composer.js';
 import {ChatOverlayView} from './chat-overlay.js';
@@ -49,8 +49,13 @@ export interface OpenTuiApp {
 /** Which of the client's editors currently holds the cursor. */
 type FocusTarget = 'command' | 'chat' | 'modal';
 
-const KEY_HELP = `←→: agents/transcript · ↑↓: within · [/] or click: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
-const SCOPED_KEY_HELP = `←→: agents/transcript · ↑↓: within · [/] or click: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
+// `help` is one row and clips rather than wraps, so a hint added here costs the
+// hints behind it on a narrow terminal, which is exactly where the resize keys
+// matter most. All three ride one token, and the round tabs gave up `or click`
+// to pay for it: a tab is the most clickable-looking thing on the screen, while
+// `<>=` is advertised nowhere else.
+const KEY_HELP = `←→: agents/transcript · ↑↓: within · [/]: round · <>=: width · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
+const SCOPED_KEY_HELP = `←→: agents/transcript · ↑↓: within · [/]: round · <>=: width · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
 const LOG_KEY_HELP = `↑↓ or scroll: select · Enter/click: open hypothesis · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
 const LOG_CHAT_KEY_HELP = `↑↓: select · Enter/click: hypothesis · Ctrl+W: chat · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
 const HYPOTHESIS_KEY_HELP =
@@ -423,8 +428,10 @@ export function createOpenTuiApp(
           : SCOPED_KEY_HELP;
     help.content = transientStatus ?? renderedKeyHelp;
     // The round tabs and agent map are per-round detail. They belong to a
-    // hypothesis trajectory, not to the list of claims.
-    const showAgents = !showLog && (zoomedPane === null ? !showSplit : zoomedPane === 'agents');
+    // hypothesis trajectory, not to the list of claims. `agentsPaneVisible` is
+    // this same decision, shared with the `<`/`>` resize keys so a layout
+    // change cannot leave the render and the keybinding guard disagreeing.
+    const showAgents = agentsPaneVisible(state, renderer.terminalWidth);
     const showTranscript = !showLog && (zoomedPane === null || zoomedPane === 'transcript');
     // The tabs head the whole round view, so they give way wherever it is not
     // on screen whole: a zoomed pane, or a split that takes the row's right side.
@@ -583,6 +590,7 @@ export function createOpenTuiApp(
     selectNextRound: () => controller.selectNextRound(),
     selectPreviousRound: () => controller.selectPreviousRound(),
     toggleTodos: () => controller.toggleTodos(),
+    setGraphWidthOverride: width => controller.setGraphWidthOverride(width),
     scrollRightPane: delta => rightPane.scrollBy(delta),
     scrollChatPane: delta => chatPane.scrollBy(delta),
     scrollExperimentDetail: delta => experimentLog.scrollBy(delta),

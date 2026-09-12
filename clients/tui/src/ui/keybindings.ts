@@ -5,7 +5,17 @@ import {
   chatPaneVisible,
   experimentLogVisible,
   todoListFocused,
+  visiblePhases,
 } from '../session-model.js';
+import {
+  agentGraphMinWidth,
+  agentPaneWidthWithOverride,
+  agentsPaneVisible,
+  clampGraphWidthOverride,
+  GRAPH_WIDTH_STEP,
+  graphFits,
+  STACKED_WIDTH,
+} from './agent-map.js';
 import type {ClipboardCopyResult, SelectionClipboard} from './clipboard.js';
 
 export interface KeybindingActions {
@@ -28,6 +38,8 @@ export interface KeybindingActions {
   selectNextRound(): void;
   selectPreviousRound(): void;
   toggleTodos(): void;
+  /** `<`/`>`: the Agents pane's explicit column width, already clamped; `=`: null. */
+  setGraphWidthOverride(width: number | null): void;
   scrollRightPane(delta: number): void;
   scrollChatPane(delta: number): void;
   scrollExperimentDetail(delta: number): void;
@@ -326,6 +338,77 @@ export function bindKeybindings(
     if (key.name === '[' && actions.inputIsEmpty()) {
       actions.selectPreviousRound();
       viewport.scrollTo(viewport.scrollHeight);
+      key.preventDefault();
+      return;
+    }
+    // Resizes the Agents pane by columns, the way a vim/LazyVim window resize
+    // does: `<` shrinks and `>` grows by `GRAPH_WIDTH_STEP` each press, and `=`
+    // drops the override so the pane follows the terminal again, which is
+    // vim's `<C-w>=`. An override is otherwise sticky for the life of the
+    // process, so without `=` a single press would cost the pane its automatic
+    // sizing, its no-truncation guarantee, and its growth as agent names get
+    // longer, with no way back.
+    //
+    // The keys belong to the Agents pane, so they are claimed wherever it holds
+    // the content row (`agentsPaneVisible` is the same test `app.ts` renders
+    // `showAgents` from) and left alone everywhere else, rather than typing a
+    // stray character into the command input. While the pane is zoomed they are
+    // claimed by nobody: a zoomed pane takes the whole terminal and ignores
+    // `graphWidthOverride`, so the key must not mutate a number that would
+    // change nothing on screen.
+    if (
+      (key.name === '>' || key.name === '<' || key.name === '=') &&
+      actions.inputIsEmpty() &&
+      controller.state.layout.zoomedPane === null &&
+      agentsPaneVisible(controller.state, renderer.terminalWidth)
+    ) {
+      const phases = visiblePhases(controller.state);
+      const terminalWidth = renderer.terminalWidth;
+      if (key.name === '=') actions.setGraphWidthOverride(null);
+      // A terminal too narrow for even the narrowest graph is the stacked list
+      // whatever the override says, so a press there would store a width this
+      // terminal never drew and then surprise the operator with it on the next
+      // resize. Nothing is stored instead.
+      else if (graphFits(terminalWidth, phases)) {
+        const current = agentPaneWidthWithOverride(
+          terminalWidth,
+          phases,
+          controller.state.graphWidthOverride,
+        );
+        // `null` is the stacked list, which is both what the pane is drawn at
+        // and the narrowest it goes. The gap up to a graph is 26 columns at
+        // three stages, 7 at two, and none at one, so it is never a step.
+        const width = current ?? STACKED_WIDTH;
+        const step = key.name === '>' ? GRAPH_WIDTH_STEP : -GRAPH_WIDTH_STEP;
+        // From the stacked list, `>` is the operator asking for the graph that
+        // automatic sizing declined to draw, at the only width it has.
+        const next =
+          current === null
+            ? step > 0
+              ? agentGraphMinWidth(phases)
+              : width
+            : clampGraphWidthOverride(current + step, terminalWidth, phases);
+        // A press that moves nothing stores nothing, so trying the keys can
+        // never arm an override the operator cannot see. That is the whole rule
+        // and it covers more than a shrink key at its floor: a round with no
+        // phases yet and a round of one short-named stage both have a clamp
+        // band one width wide, and a terminal wide enough that automatic sizing
+        // already sits at the ceiling has nowhere for `>` to go. Each of those
+        // would otherwise convert automatic sizing into a sticky override at
+        // the identical width, and pin every later round in the session to it.
+        //
+        // This compares widths, and it stands for "nothing changes on screen"
+        // only because `agentGraphMinWidth(phases) > STACKED_WIDTH` wherever the
+        // stacked fallback can appear at all. The two come apart in one
+        // transition, list to graph at an unchanged width, which needs the two
+        // to be equal while the list is showing: one stage whose kind name runs
+        // past 20 characters. The role vocabulary is closed and its longest name
+        // is 12 (`src/vibesys/loops/roles.py`), so that state is unreachable.
+        // Adding a long role, lowering `NODE_WIDTH_MIN`, or raising
+        // `STACKED_WIDTH` is what would make this a presentation test that has
+        // to be written as one.
+        if (next !== width) actions.setGraphWidthOverride(next);
+      }
       key.preventDefault();
       return;
     }

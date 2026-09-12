@@ -79,6 +79,7 @@ import {
   setChatThreadPending,
   setDesignLog,
   setExperiments,
+  setGraphWidthOverride,
   setPaneContent,
   setTheme,
   showDetail,
@@ -126,6 +127,8 @@ export interface SessionController {
   focusRound(focus: RoundFocus): void;
   selectNextTodo(delta: number): void;
   toggleTodos(): void;
+  /** `<`/`>`: the Agents pane's explicit column width, already clamped; `=`: null. */
+  setGraphWidthOverride(width: number | null): void;
   /** Expands the latest prompt in view; the view owns what "latest" means. */
   togglePrompt(): void;
   onTogglePrompt(handler: () => void): void;
@@ -428,6 +431,10 @@ export class SocketSessionController implements SessionController {
 
   toggleTodos(): void {
     this.#setState(toggleTodos(this.#state));
+  }
+
+  setGraphWidthOverride(width: number | null): void {
+    this.#setState(setGraphWidthOverride(this.#state, width));
   }
 
   setTheme(themeName: ThemeName): void {
