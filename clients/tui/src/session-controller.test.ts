@@ -34,9 +34,14 @@ describe('session controller', () => {
 
     expect(transport.requests).toEqual([]);
     expect(controller.state.chatConversation).toEqual([]);
-    expect(controller.state.errorBanner?.message).toContain('Commands start with /');
+    // Ordinary text is a routing mistake, not a malformed command: it lands on
+    // the command input's own hint row rather than raising the shared banner
+    // (#564/#635's reasoning, applied to a wrong command instead of an empty
+    // one).
+    expect(controller.state.inputError).toContain('Commands start with /');
+    expect(controller.state.errorBanner).toBeNull();
 
-    controller.dismissErrorBanner();
+    controller.clearInputError();
     await controller.submitChat('what is happening?');
 
     expect(transport.requests).toEqual([{type: 'query.chat', text: 'what is happening?'}]);
@@ -668,20 +673,20 @@ describe('session controller', () => {
     const controller = new SocketSessionController(transport);
 
     await controller.submitCommand('/history');
-    expect(controller.state.errorBanner?.scope).toBe('input');
-    expect(controller.state.errorBanner?.message).toContain('Unknown command: /history');
+    expect(controller.state.errorBanner).toBeNull();
+    expect(controller.state.inputError).toContain('Unknown command: /history');
 
     await controller.submitCommand('/history rounds');
-    expect(controller.state.errorBanner?.message).toContain('Unknown command: /history rounds');
+    expect(controller.state.inputError).toContain('Unknown command: /history rounds');
 
     await controller.submitCommand('/experiments');
-    expect(controller.state.errorBanner?.message).toContain('Unknown command: /experiments');
+    expect(controller.state.inputError).toContain('Unknown command: /experiments');
 
-    controller.dismissErrorBanner();
-    expect(controller.state.errorBanner).toBeNull();
+    controller.clearInputError();
+    expect(controller.state.inputError).toBeNull();
 
     await controller.submitCommand('/history');
-    expect(controller.state.errorBanner?.message).toContain('Unknown command: /history');
+    expect(controller.state.inputError).toContain('Unknown command: /history');
 
     expect(transport.requests).toEqual([]);
   });
@@ -1550,7 +1555,10 @@ describe('session controller', () => {
     const before = transport.requests.length;
     await controller.submitChat('/clear definitely-not');
 
-    expect(controller.state.errorBanner?.message).toBe('Usage: /clear');
+    // A usage error is `scope: 'input'` regardless of which surface typed it,
+    // so it lands on the command input's hint rather than the banner.
+    expect(controller.state.inputError).toBe('Usage: /clear');
+    expect(controller.state.errorBanner).toBeNull();
     // The phrase started no thread and sent no request.
     expect(transport.requests.length).toBe(before);
     expect(controller.state.chatMenu).toBeNull();
@@ -1562,7 +1570,8 @@ describe('session controller', () => {
 
     await controller.submitCommand('/pause typo');
 
-    expect(controller.state.errorBanner).toMatchObject({scope: 'input', message: 'Usage: /pause'});
+    expect(controller.state.inputError).toBe('Usage: /pause');
+    expect(controller.state.errorBanner).toBeNull();
     expect(transport.requests).toEqual([]);
   });
 
@@ -1572,8 +1581,8 @@ describe('session controller', () => {
 
     await controller.submitCommand('/theme monokai');
 
-    expect(controller.state.errorBanner).toMatchObject({scope: 'input'});
-    expect(controller.state.errorBanner?.message).toContain('Unknown theme: monokai');
+    expect(controller.state.errorBanner).toBeNull();
+    expect(controller.state.inputError).toContain('Unknown theme: monokai');
     expect(controller.state.themeName).toBe('dark');
     expect(transport.requests).toEqual([]);
   });

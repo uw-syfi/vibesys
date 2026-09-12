@@ -89,6 +89,13 @@ export interface SessionState {
   themePicker: ThemePicker | null;
   /** Root-level error state, independent of the active transcript or log view. */
   errorBanner: ErrorBannerState | null;
+  /**
+   * A `scope: 'input'` message, shown on the command input's hint row rather
+   * than the banner. Unlike `errorBanner`, this never carries a backend
+   * `detail`/`hint`: it names a typo in what the operator just typed, so it is
+   * a short client-side string rather than a diagnostic.
+   */
+  inputError: string | null;
 }
 
 export type ErrorSeverity = 'recoverable' | 'fatal';
@@ -323,6 +330,7 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     chatDockFits: true,
     themePicker: null,
     errorBanner: null,
+    inputError: null,
   };
 }
 
@@ -1746,15 +1754,34 @@ export function dismissErrorBanner(state: SessionState): SessionState {
 }
 
 /**
+ * Clears a standing input-validation message. Called on the next keystroke
+ * and on Esc (#564/#635's reasoning applied to a wrong command rather than an
+ * empty one): the message names a typo in text the operator is already
+ * retyping, so it is stale the moment they start fixing it.
+ */
+export function clearInputError(state: SessionState): SessionState {
+  if (state.inputError === null) return state;
+  return {...state, inputError: null};
+}
+
+/**
  * Records an error independently of any particular view. A terminal event
  * commonly repeats an invocation failure, so equivalent reports promote the
  * current banner instead of burying its cause beneath a duplicate.
+ *
+ * `scope: 'input'` is routed off the banner entirely: it is client-side
+ * validation of what the operator just typed, never a backend diagnostic with
+ * `detail`/`hint`, so it belongs on the command input's own hint row instead
+ * of the shared error surface (see `command-input.ts`).
  */
 export function reportError(
   state: SessionState,
   message: string,
   report: ErrorReport,
 ): SessionState {
+  if (report.scope === 'input') {
+    return {...state, inputError: message};
+  }
   const diagnostic = report.diagnostic ?? null;
   const scope = diagnostic?.scope ?? report.scope;
   const severity = diagnosticSeverity(diagnostic?.severity) ?? report.severity ?? 'recoverable';

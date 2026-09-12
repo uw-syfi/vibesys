@@ -26,6 +26,7 @@ import {
   chatPaneVisible,
   clearAgentSelection,
   clearEntrySelection,
+  clearInputError,
   closeChatMenu,
   closeOverlays,
   closePane,
@@ -136,6 +137,7 @@ export interface SessionController {
   closePane(): void;
   closeOverlays(): void;
   dismissErrorBanner(): void;
+  clearInputError(): void;
   cyclePaneFocus(): void;
   focusPane(focus: PaneFocus): void;
   togglePaneZoom(): void;
@@ -598,6 +600,10 @@ export class SocketSessionController implements SessionController {
 
   dismissErrorBanner(): void {
     this.#setState(dismissErrorBanner(this.#state));
+  }
+
+  clearInputError(): void {
+    this.#setState(clearInputError(this.#state));
   }
 
   cyclePaneFocus(): void {
