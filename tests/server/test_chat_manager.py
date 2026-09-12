@@ -14,7 +14,7 @@ from server.api.protocol import (
     ChatThreadInfo,
     Response,
 )
-from server.chat.manager import ChatThreadFactory, ChatThreadHandle
+from server.chat.manager import ChatAnswer, ChatThreadFactory, ChatThreadHandle
 from server.chat.options import ChatRunSettings
 from server.events import ChatData, ChatThreadCreatedData, EventType, RunEvent, make_event
 
@@ -34,7 +34,9 @@ def _factory(
                 model=model or "gpt-default",
                 created_at=datetime.now(UTC),
             ),
-            handler=lambda question: f"{answer}: {question}",
+            handler=lambda question: ChatAnswer(
+                text=f"{answer}: {question}", invocation_id=f"exec-{thread_id}"
+            ),
         )
 
     return factory
@@ -48,7 +50,9 @@ def _events(path: Path) -> list[dict]:
 
 def test_created_thread_routes_chat_and_stamps_events(tmp_path):  # noqa: ANN001, ANN201
     parts = build_server_parts(tmp_path)
-    parts.chat.install_default_handler(lambda question: f"default: {question}")
+    parts.chat.install_default_handler(
+        lambda question: ChatAnswer(text=f"default: {question}", invocation_id="exec-default")
+    )
     calls: list[tuple[str, str | None, str | None, str | None]] = []
     parts.chat.set_thread_factory(_factory(calls, "omnigent-claude"))
 
@@ -68,6 +72,41 @@ def test_created_thread_routes_chat_and_stamps_events(tmp_path):  # noqa: ANN001
     chats = [event for event in _events(tmp_path) if event["type"] == "chat"]
     assert [event["chat_thread_id"] for event in chats] == [spec.thread_id, None]
     assert chats[0]["agent_kind"] == "chat"
+
+
+def test_chat_records_carry_the_answering_invocation_id(tmp_path):  # noqa: ANN001, ANN201
+    parts = build_server_parts(tmp_path)
+    parts.chat.install_default_handler(
+        lambda question: ChatAnswer(text=f"default: {question}", invocation_id="exec-default")
+    )
+    parts.chat.set_thread_factory(_factory([], "threaded"))
+    spec = parts.chat.create_thread()
+
+    parts.chat.chat("what changed?")
+    parts.chat.chat("and here?", thread_id=spec.thread_id)
+
+    chats = [event for event in _events(tmp_path) if event["type"] == "chat"]
+    # Both routes stamp the terminal record with the invocation that produced
+    # the answer, so clients fold it over exactly that streamed turn.
+    assert [event["data"]["invocation_id"] for event in chats] == [
+        "exec-default",
+        f"exec-{spec.thread_id}",
+    ]
+
+
+def test_fallback_answers_take_fresh_invocation_identities(tmp_path):  # noqa: ANN001, ANN201
+    parts = build_server_parts(tmp_path)
+
+    parts.chat.chat("what happened?")
+    parts.chat.chat("still there?")
+
+    chats = [event for event in _events(tmp_path) if event["type"] == "chat"]
+    ids = [event["data"]["invocation_id"] for event in chats]
+    # The read-only fallback never ran an agent, so each answer takes a fresh
+    # identity: it must not claim a streamed turn some earlier invocation
+    # opened and abandoned.
+    assert all(ids)
+    assert len(set(ids)) == len(ids) == 2
 
 
 def test_unknown_thread_returns_clear_answer_without_event(tmp_path):  # noqa: ANN001, ANN201

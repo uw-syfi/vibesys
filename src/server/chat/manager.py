@@ -29,10 +29,24 @@ _CHAT_THREAD_TITLE_MAX_CHARS = 40
 
 
 @dataclass(frozen=True)
+class ChatAnswer:
+    """One answered chat turn and the invocation identity that produced it.
+
+    ``invocation_id`` matches the id the turn's streamed chunks carried, which
+    is what lets clients fold the terminal answer over exactly that turn. An
+    answer produced without an agent invocation (the read-only fallback) takes
+    a fresh identity so it can never claim another turn's streamed output.
+    """
+
+    text: str
+    invocation_id: str
+
+
+@dataclass(frozen=True)
 class TerminalChatResource:
     """Chat handler and resources retained while the terminal client is open."""
 
-    handler: Callable[[str], str]
+    handler: Callable[[str], ChatAnswer]
     close: Callable[[], None]
 
 
@@ -41,7 +55,7 @@ class ChatThreadHandle:
     """Resolved thread settings and its answering handler."""
 
     spec: ChatThreadCreatedData
-    handler: Callable[[str], str]
+    handler: Callable[[str], ChatAnswer]
 
 
 ChatThreadFactory = Callable[[str, str | None, str | None, str | None], ChatThreadHandle]
@@ -62,9 +76,9 @@ class ChatManager:
         self._journal = journal
         self._run_status = run_status
         self._fallback_answer: Callable[[str], str] | None = None
-        self._default_handler: Callable[[str], str] | None = None
+        self._default_handler: Callable[[str], ChatAnswer] | None = None
         self._thread_factory: ChatThreadFactory | None = None
-        self._thread_handlers: dict[str, Callable[[str], str]] = {}
+        self._thread_handlers: dict[str, Callable[[str], ChatAnswer]] = {}
         self._thread_specs: dict[str, ChatThreadCreatedData] = {}
         self._run_settings: ChatRunSettings | None = None
         self._active_default_calls = 0
@@ -123,10 +137,13 @@ class ChatManager:
                     if self._fallback_answer
                     else "No recorded summary is available."
                 )
-                answer = (
-                    "The experiment chat agent is not available for this run"
-                    f" ({self._unavailable_reason()}), so this is a read-only"
-                    " summary from the recorded events rather than an answer.\n\n" + fallback
+                answer = ChatAnswer(
+                    text=(
+                        "The experiment chat agent is not available for this run"
+                        f" ({self._unavailable_reason()}), so this is a read-only"
+                        " summary from the recorded events rather than an answer.\n\n" + fallback
+                    ),
+                    invocation_id=uuid.uuid4().hex,
                 )
             else:
                 answer = handler(text)
@@ -136,9 +153,9 @@ class ChatManager:
                 status=EventStatus.ANSWERED,
                 agent_kind="chat",
                 round_label="experiment-chat",
-                data=ChatData(answer=answer),
+                data=ChatData(answer=answer.text, invocation_id=answer.invocation_id),
             )
-            return answer
+            return answer.text
         finally:
             if handler is not None:
                 self._release_default_call()
@@ -200,7 +217,7 @@ class ChatManager:
         with self._condition:
             return self._run_settings
 
-    def install_default_handler(self, handler: Callable[[str], str] | None) -> None:
+    def install_default_handler(self, handler: Callable[[str], ChatAnswer] | None) -> None:
         """Install or remove the handler for the default chat route."""
         with self._condition:
             self._default_handler = handler
@@ -276,15 +293,19 @@ class ChatManager:
                 agent_kind="chat",
                 round_label="experiment-chat",
                 chat_thread_id=thread_id,
-                data=ChatData(answer=answer, thread_title=thread_title),
+                data=ChatData(
+                    answer=answer.text,
+                    thread_title=thread_title,
+                    invocation_id=answer.invocation_id,
+                ),
             )
-            return answer
+            return answer.text
         finally:
             with self._condition:
                 self._active_thread_calls -= 1
                 self._condition.notify_all()
 
-    def _resolve_thread_handler(self, thread_id: str) -> Callable[[str], str] | str:
+    def _resolve_thread_handler(self, thread_id: str) -> Callable[[str], ChatAnswer] | str:
         with self._condition:
             handler = self._thread_handlers.get(thread_id)
             spec = self._thread_specs.get(thread_id)

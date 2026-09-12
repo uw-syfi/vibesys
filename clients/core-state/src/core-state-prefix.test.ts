@@ -347,6 +347,29 @@ describe('prefix merges across the chunk boundary', () => {
     ]);
   });
 
+  it('keeps an abandoned streamed turn distinct from the tail answer after it', () => {
+    const events = [
+      threadCreatedEvent(1, 'thread-a'),
+      // exec-a streamed and then failed before recording a terminal answer.
+      chatChunkEvent(2, 'thread-a', 'abandoned ', 'exec-a'),
+      chatChunkEvent(3, 'thread-a', 'stream', 'exec-a'),
+      chatChunkEvent(4, 'thread-a', 'complete answer', 'exec-b'),
+      chatEvent(5, 'thread-a', 'complete answer', undefined, 'exec-b'),
+    ];
+
+    // The abandoned turn's chunks fall below the floor while the answered
+    // turn lands in the tail. A full replay keeps two entries, so the
+    // backfilled merge must not fold the tail's answer over the abandoned
+    // turn it never owned.
+    const merged = foldAsPrefix(events, 3);
+
+    expect(merged).toEqual(reduceEventBatch(initialCoreState(), events));
+    expect(merged.chatTranscripts['thread-a']?.map(entry => entry.content)).toEqual([
+      'abandoned stream',
+      'complete answer',
+    ]);
+  });
+
   it('keeps a round started in the chunk and finished in the tail', () => {
     const events = [chunkEvent(1, 'work'), roundFinishedEvent(2)];
 
@@ -839,16 +862,40 @@ function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds 
           },
         });
       }
-      emit({
-        ...chatContext,
-        type: 'chat',
-        status: 'answered',
-        data: {
-          kind: 'chat',
-          answer: words(rng, 5, 30),
-          ...(rng.float() < 0.5 ? {thread_title: words(rng, 2, 4)} : {}),
-        },
-      });
+      // Most turns stream their answer before the terminal record. A streamed
+      // turn is sometimes abandoned (its invocation failed before recording an
+      // answer), and an unstreamed answer is sometimes a legacy id-less record
+      // from before answers carried their invocation.
+      const invocationId = `chat-${events.length}`;
+      const streamed = rng.float() < 0.6;
+      if (streamed) {
+        for (let chunk = rng.int(1, 3); chunk > 0; chunk -= 1) {
+          emit({
+            ...chatContext,
+            type: 'agent_output_chunk',
+            invocation_id: invocationId,
+            data: {
+              kind: 'agent_output_chunk',
+              channel: 'assistant',
+              content: `${words(rng, 2, 6)} `,
+            },
+          });
+        }
+      }
+      const abandoned = streamed && rng.float() < 0.25;
+      if (!abandoned) {
+        emit({
+          ...chatContext,
+          type: 'chat',
+          status: 'answered',
+          data: {
+            kind: 'chat',
+            answer: words(rng, 5, 30),
+            ...(rng.float() < 0.5 ? {thread_title: words(rng, 2, 4)} : {}),
+            ...(streamed || rng.float() < 0.5 ? {invocation_id: invocationId} : {}),
+          },
+        });
+      }
     }
   }
 
@@ -991,24 +1038,40 @@ function threadCreatedEvent(sequence: number, threadId: string): RunEvent {
   };
 }
 
-function chatEvent(sequence: number, threadId: string, answer: string, title?: string): RunEvent {
+function chatEvent(
+  sequence: number,
+  threadId: string,
+  answer: string,
+  title?: string,
+  invocationId?: string,
+): RunEvent {
   return {
     ...baseEvent(sequence, 'chat'),
     agent_kind: 'chat',
     round_label: 'experiment-chat',
     chat_thread_id: threadId,
     status: 'answered',
-    data: {kind: 'chat', answer, ...(title === undefined ? {} : {thread_title: title})},
+    data: {
+      kind: 'chat',
+      answer,
+      ...(title === undefined ? {} : {thread_title: title}),
+      ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
+    },
   };
 }
 
-function chatChunkEvent(sequence: number, threadId: string, content: string): RunEvent {
+function chatChunkEvent(
+  sequence: number,
+  threadId: string,
+  content: string,
+  invocationId?: string,
+): RunEvent {
   return {
     ...baseEvent(sequence, 'agent_output_chunk'),
     agent_kind: 'chat',
     round_label: 'experiment-chat',
     chat_thread_id: threadId,
-    invocation_id: `${threadId}-turn`,
+    invocation_id: invocationId ?? `${threadId}-turn`,
     data: {kind: 'agent_output_chunk', channel: 'assistant', content},
   };
 }

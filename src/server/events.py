@@ -89,6 +89,11 @@ class ChatData(EventPayload):  # noqa: D101  # tracked: #288
     # The authoritative thread title, set by the server on the turn that
     # titles a previously untitled thread so clients learn it from replay.
     thread_title: str | None = None
+    # Identity of the turn this answer closes: the same id the turn's streamed
+    # chunks carried, so clients fold the terminal answer over exactly that
+    # turn and never over an abandoned one. None on records written before the
+    # field existed, for which clients keep the last-open-turn heuristic.
+    invocation_id: str | None = None
 
 
 class ChatThreadCreatedData(EventPayload):

@@ -511,10 +511,12 @@ function mergeTranscriptPrefix(
     const entry = source === older ? older[left++] : newer[right++];
     if (entry === undefined) continue;
     // A terminal chat answer carries no turn id and, in replay, folds over its
-    // own still-open streamed turn through `foldChatAnswer`. When the turn's
-    // chunks sit below the history floor and the answer above it, the two
-    // arrive from opposite lists, so reconcile them here as replay would; a
-    // second entry would otherwise survive. Anything else takes the normal step.
+    // own still-open streamed turn through `foldChatAnswer` (which matches the
+    // answer's invocation id, so an abandoned turn's stream is never claimed).
+    // When the turn's chunks sit below the history floor and the answer above
+    // it, the two arrive from opposite lists, so reconcile them here as replay
+    // would; a second entry would otherwise survive. Anything else takes the
+    // normal step.
     if (
       entry.kind === 'assistant' &&
       entry.turnId === undefined &&
@@ -991,10 +993,19 @@ function appendChatTranscript(
  * dropped because the turn is over: neither a later chunk nor a later answer
  * may fold into it. Returns false when there is no open streamed turn, in
  * which case the answer appends as its own entry.
+ *
+ * An answer stamped with an invocation id owns exactly the turn that streamed
+ * under that id: a mismatch means the open turn was abandoned (its invocation
+ * failed before a terminal answer was recorded), so the answer appends and
+ * the abandoned turn stays as it streamed. Answers from journals written
+ * before the id existed carry none and keep the last-open-turn fold.
  */
 function foldChatAnswer(entries: TranscriptEntry[], incoming: TranscriptEntry): boolean {
   const last = entries.at(-1);
   if (last === undefined || last.kind !== 'assistant' || last.turnId === undefined) return false;
+  if (incoming.invocationId !== undefined && incoming.invocationId !== last.invocationId) {
+    return false;
+  }
   const {turnId: _closed, ...merged} = {...last, ...incoming, id: last.id};
   entries[entries.length - 1] = merged;
   return true;
@@ -1157,6 +1168,11 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
     };
   }
   if (data?.kind === 'chat') {
+    // The invocation id names the turn this answer closes: the same id the
+    // turn's streamed chunks carried. `foldChatAnswer` matches on it so the
+    // answer can never fold over a different turn's abandoned stream. Records
+    // written before the field existed carry none.
+    const invocationId = data.invocation_id ?? undefined;
     return {
       id,
       kind: 'assistant',
@@ -1164,6 +1180,7 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
       label: 'Answer',
       ...agentFields,
       ...roundFields,
+      ...(invocationId === undefined ? {} : {invocationId}),
     };
   }
   if (data?.kind === 'agent_output_chunk') {

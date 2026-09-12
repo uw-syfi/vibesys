@@ -421,6 +421,40 @@ describe('core state projection', () => {
     expect(state.chatTranscript[0]?.turnId).toBeUndefined();
   });
 
+  it('folds a stamped answer over the turn that streamed under the same invocation', () => {
+    let state = initialCoreState();
+    state = reduceEvent(state, chatStreamEvent(1, 'The queue ', 'exec-1'));
+    state = reduceEvent(state, chatStreamEvent(2, 'is lock-free.', 'exec-1'));
+    state = reduceEvent(state, chatAnswerEvent(3, 'The queue is lock-free.', undefined, 'exec-1'));
+
+    expect(state.chatTranscript).toHaveLength(1);
+    expect(state.chatTranscript[0]).toMatchObject({id: '1', content: 'The queue is lock-free.'});
+    expect(state.chatTranscript[0]?.turnId).toBeUndefined();
+  });
+
+  it('never folds an answer over a turn another invocation abandoned', () => {
+    const events = [
+      chatStreamEvent(1, 'partial ', 'exec-1'),
+      chatStreamEvent(2, 'answer', 'exec-1'),
+      // exec-1 failed before recording a terminal answer; the next question's
+      // answer arrives stamped with its own invocation.
+      chatAnswerEvent(3, 'later answer', undefined, 'exec-2'),
+    ];
+    const batched = reduceEventBatch(initialCoreState(), events);
+    let single = initialCoreState();
+    for (const item of events) single = reduceEvent(single, item);
+
+    // The abandoned turn keeps its partial stream; the unrelated answer
+    // appends instead of rewriting it in place.
+    for (const state of [batched, single]) {
+      expect(state.chatTranscript.map(entry => [entry.id, entry.content])).toEqual([
+        ['1', 'partial answer'],
+        ['3', 'later answer'],
+      ]);
+      expect(state.chatTranscript[0]?.turnId).toBe('exec-1');
+    }
+  });
+
   it('reconciles each chat turn separately and appends unstreamed answers', () => {
     const events = [
       chatStreamEvent(1, 'first ', 'exec-1'),
@@ -1014,13 +1048,22 @@ function baseEvent(sequence: number, type: RunEvent['type']): RunEvent {
   };
 }
 
-function chatAnswerEvent(sequence: number, answer: string, threadId?: string): RunEvent {
+function chatAnswerEvent(
+  sequence: number,
+  answer: string,
+  threadId?: string,
+  invocationId?: string,
+): RunEvent {
   return {
     ...baseEvent(sequence, 'chat'),
     agent_kind: 'chat',
     round_label: 'experiment-chat',
     ...(threadId === undefined ? {} : {chat_thread_id: threadId}),
-    data: {kind: 'chat', answer},
+    data: {
+      kind: 'chat',
+      answer,
+      ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
+    },
   };
 }
 

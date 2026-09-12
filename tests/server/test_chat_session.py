@@ -57,11 +57,13 @@ def _chat(
     client: Any,  # noqa: ANN401  # Any ChatAgentClient implementation.
     *,
     thread_id: str | None = None,
+    controller: MagicMock | None = None,
 ) -> ExperimentChatSession:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
-    controller = MagicMock()
-    controller.start_agent_execution.return_value = SimpleNamespace(execution_id="exec-1")
+    if controller is None:
+        controller = MagicMock()
+        controller.start_agent_execution.return_value = SimpleNamespace(execution_id="exec-1")
     return ExperimentChatSession(
         ExperimentChatDependencies(
             controller=controller,
@@ -129,7 +131,7 @@ def test_chat_reasks_when_the_turn_ran_in_a_different_conversation(tmp_path: Pat
         _CONTINUATION_PROMPT,
         _FULL_PROMPT,
     ]
-    assert answer == "It improved in round 2."
+    assert answer.text == "It improved in round 2."
 
 
 def test_chat_keeps_one_answer_when_the_conversation_retires_after_the_turn(
@@ -150,6 +152,54 @@ def test_chat_keeps_one_answer_when_the_conversation_retires_after_the_turn(
         _CONTINUATION_PROMPT,
         _FULL_PROMPT,
     ]
+
+
+def test_chat_answer_carries_the_invocation_that_produced_it(tmp_path: Path) -> None:
+    client = _FakeClient()
+    chat = _chat(tmp_path, client)
+
+    answer = chat.ask("what happened?")
+
+    # The answer's identity is the same id the turn's streamed chunks carried
+    # (the presentation scope's invocation_id), so clients can fold the
+    # terminal answer over exactly that turn.
+    assert answer.invocation_id == "exec-1"
+    assert client.calls[0]["invocation_id"] == "exec-1"
+
+
+def test_chat_reask_stamps_the_answer_with_the_second_invocation(tmp_path: Path) -> None:
+    client = _FakeClient()
+    client.continues = "session-1"
+    client.ran_in = "session-2"
+    controller = MagicMock()
+    controller.start_agent_execution.side_effect = [
+        SimpleNamespace(execution_id="exec-1"),
+        SimpleNamespace(execution_id="exec-2"),
+    ]
+    chat = _chat(tmp_path, client, controller=controller)
+
+    answer = chat.ask("what happened?")
+
+    # The re-ask is a second invocation; the returned answer came from it, so
+    # its identity (not the abandoned first invocation's) is stamped.
+    assert len(client.calls) == 2
+    assert answer.invocation_id == "exec-2"
+
+
+def test_chat_empty_answer_fallback_keeps_the_turn_identity(tmp_path: Path) -> None:
+    class _SilentClient(_FakeClient):
+        def invoke_text(self, **kwargs: Any) -> str:  # noqa: ANN401
+            super().invoke_text(**kwargs)
+            return "   "
+
+    chat = _chat(tmp_path, _SilentClient())
+
+    answer = chat.ask("what happened?")
+
+    # The turn still ran under exec-1, so the substitute text closes that
+    # streamed turn rather than dangling as an unowned answer.
+    assert answer.text.startswith("Chat agent did not return an answer.")
+    assert answer.invocation_id == "exec-1"
 
 
 def test_chat_never_reasks_a_cold_turn(tmp_path: Path) -> None:
@@ -237,7 +287,7 @@ def test_stale_claude_session_reasks_instead_of_failing_the_question(
     assert prompts[1].startswith(_CONTINUATION_PROMPT)
     assert prompts[2].startswith(_CONTINUATION_PROMPT)
     assert prompts[3].startswith(_FULL_PROMPT)
-    assert answer == "done"
+    assert answer.text == "done"
 
 
 def test_chat_normalizes_an_agent_failure(tmp_path: Path) -> None:

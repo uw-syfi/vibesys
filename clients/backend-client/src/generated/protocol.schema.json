@@ -405,6 +405,18 @@
           ],
           "default": null,
           "title": "Thread Title"
+        },
+        "invocation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Invocation Id"
         }
       },
       "required": [
