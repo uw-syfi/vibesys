@@ -16,7 +16,7 @@ Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, job 633793.
 2. Let the sweep run to completion; each new shape is benchmarked against every candidate algorithm and the winner appended to a results CSV.
 3. Copy the resulting per-rank CSVs (one file per device ordinal) into the serving image and make them read-only (see the pitfall below for why per-rank files, not one shared path).
 4. Serve with `PYTORCH_TUNABLEOP_ENABLED=1`, `PYTORCH_TUNABLEOP_TUNING=0` (replay only, tune nothing new), `PYTORCH_TUNABLEOP_FILENAME` pointed at the per-rank files (a literal `%d` placeholder, or rely on PyTorch's own before-the-extension insertion; see [`../../frameworks/pytorch.md`](../../frameworks/pytorch.md)).
-5. Gate the launch on every rank logging a successful table load with no could-not-open line (see the pitfall below).
+5. Gate the launch on every rank logging a successful table load with no could-not-open line (see the pitfall below). This log line only appears with `PYTORCH_TUNABLEOP_VERBOSE=1` also set; without it, the log is silent about the load outcome either way, so a gate written to wait for it can never pass. See [`../../frameworks/pytorch.md`](../../frameworks/pytorch.md) for the mechanism.
 6. The results-file validator header pins the exact PyTorch, ROCm, hipBLASLt, and GPU (gfx target) versions the table was tuned under, and is silently ignored on a mismatch (falls back to untuned, no error). Regenerate the table on any change to that stack.
 
 ## Per-device filename substitution voided the first acceptance attempt
@@ -114,5 +114,5 @@ Status: verified (measured on a real one-device sweep; not reproduced a second t
 
 - [`aiter.md`](aiter.md): the aiter tuned-GEMM gap this recovers, and the accepted-summary entry that links here
 - [`floor.md`](floor.md): the validated launch recipe's TunableOp environment block
-- [`../../frameworks/pytorch.md`](../../frameworks/pytorch.md): the portable TunableOp contract and filename-substitution rule
+- [`../../frameworks/pytorch.md`](../../frameworks/pytorch.md): the portable TunableOp contract, the filename-substitution rule, and the verbose-logging gate for confirming a table load
 - [`speculative-decoding.md`](speculative-decoding.md): the NEXTN k=3 + overlap-off base configuration this stacks on

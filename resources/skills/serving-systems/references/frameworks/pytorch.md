@@ -84,6 +84,42 @@ Status:  verified (reproduced across two multi-rank jobs with the wrong
          PyTorch-internal, not sglang- or rocm-specific).
 ```
 
+### The load-result log line needs PYTORCH_TUNABLEOP_VERBOSE=1; silence is not failure
+
+```
+Symptom: PYTORCH_TUNABLEOP_ENABLED=1, PYTORCH_TUNABLEOP_TUNING=0, and a
+         correctly per-ordinal-substituted results file are all in
+         place (see the pitfall above), but the log carries no line
+         confirming the table loaded (no "reading tuning results"
+         success line, and no could-not-open failure line either). A
+         launch gate written to wait for that success line before
+         proceeding never passes, even on a launch where the table did
+         load and the tuned kernels are in fact dispatching.
+Cause:   PyTorch logs a table load result (accepted, or rejected by the
+         results-file validator) only when PYTORCH_TUNABLEOP_VERBOSE=1
+         is also set. Neither PYTORCH_TUNABLEOP_ENABLED=1 nor
+         PYTORCH_TUNABLEOP_TUNING=0 implies it: under those two alone,
+         table loading and dispatch happen normally, but nothing about
+         the outcome is logged either way, so the log's silence carries
+         no information about whether the table loaded.
+Fix:     set PYTORCH_TUNABLEOP_VERBOSE=1 alongside the other two
+         TunableOp env vars whenever a launch gate, an acceptance test,
+         or a person needs to confirm from the log which table state
+         (loaded, rejected, or absent) is actually in effect. This only
+         adds a log line; it does not change tuning or dispatch
+         behavior, and the measured serving metrics are unaffected by
+         setting it.
+Scope:   PyTorch TunableOp, any backend and any launcher; engine- and
+         backend-agnostic.
+Status:  verified (reproduced: a launch missing this var produced zero
+         TunableOp load-result log lines across four ranks despite the
+         table loading correctly; setting it produced the expected
+         per-rank success line for all four ranks on the next launch,
+         with measured TPOT unchanged from the accepted baseline within
+         normal rep-to-rep spread). Stamp: torch 2.9.0a0, 2026-09-12,
+         job-verified.
+```
+
 ### Validated end to end on rocm
 
 The fix above (one read-only results file per device ordinal) was validated end-to-end on a real multi-device tensor-parallel server on rocm: a full-coverage TunableOp table over a model's dense projections and LM head cut median decode-step latency (TPOT) by up to about 40 percent at exact numerics, with the tuned shapes' own correctness unchanged from the untuned baseline. See [`platforms/`](../platforms/) for the per-backend numbers and recipe; the substitution rule and the win itself are both engine- and backend-agnostic, so expect a comparable result on any backend where TunableOp covers a serving-relevant GEMM shape.

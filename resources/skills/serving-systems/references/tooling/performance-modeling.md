@@ -193,6 +193,19 @@ routing (for example top-k routing at decode). Status: verified. Stamp:
 sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job 633024 (padding-floor tell);
 job 633546, 2026-09-12 (split-K counter-example).
 
+A four-point batch-size sweep (clean fixed-batch captures at each point, see
+`profiler.md`) confirms the shrinking-ratio trend directly instead of by
+extrapolation from one point: the measured-to-floor ratio for the
+padding-bound MoE bucket shrinks from about 3.1x at the smallest batch size
+to about 2.3x at the largest, while the whole-round wall-time ratio stays
+comparatively flat (about 3.0x throughout) once the round's compute-bound and
+near-linear-in-batch terms (dense GEMM, collectives) are folded in. This is
+the expected shape for a mechanism where fixed per-launch overhead on
+scattered gather/scatter dominates at small batch and recedes as bytes moved
+grow; it does not mean the floor gap closes on its own at realistic serving
+batch sizes, only that it narrows. Status: verified (four clean points).
+Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
+
 ## Connect device and service ceilings
 
 For a decode step producing `B_useful` request tokens:
