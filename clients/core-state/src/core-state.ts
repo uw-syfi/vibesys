@@ -105,6 +105,8 @@ export interface TranscriptEntry {
   invocationId?: string;
   startsTurn?: boolean;
   toolCall?: string;
+  /** A shell command split out of a legacy bracket-tagged diagnostic line; see `splitFrameworkValidationCommand`. */
+  command?: string;
   toolResponse?: string;
   toolName?: string;
   toolCallId?: string;
@@ -1169,10 +1171,11 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
   if (data?.kind === 'agent_output_chunk') {
     const kind = outputKind(data.channel);
     const invocationId = event.invocation_id ?? undefined;
+    const gate = kind === 'diagnostic' ? splitFrameworkValidationCommand(data.content) : null;
     return {
       id,
       kind,
-      content: data.content,
+      content: gate?.content ?? data.content,
       label: labelFor(event, data.channel),
       ...agentFields,
       ...roundFields,
@@ -1181,6 +1184,7 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
       ...(kind === 'tool' && data.content.trimStart().startsWith('→ ')
         ? {startsTurn: true, toolCall: data.content}
         : {}),
+      ...(gate?.command === undefined ? {} : {command: gate.command}),
     };
   }
   if (data?.kind === 'tool_call') {
@@ -1305,6 +1309,32 @@ function configurationFailureContent(data: {
   if (data.usage) sections.push(data.usage);
   sections.push(`Code: ${data.code} · Stage: ${data.stage}`);
   return sections.join('\n\n');
+}
+
+/**
+ * Legacy adapter: on `main` today there is no structured command on the wire.
+ * loop.py's `ctx.lprint(f"[framework-validation] running {recipe.name}:
+ * {recipe.command}")` puts the gate command in free text on the diagnostic
+ * channel, and this is the one place that text is folded into an entry, so
+ * split it here rather than let the TUI word-wrap a shell command as prose.
+ *
+ * Deliberately narrow: only the exact "[framework-validation] running
+ * <recipe>: " prefix qualifies, so ordinary diagnostic prose (a colon, the
+ * word "running", a bracket tag with a different shape, such as the sibling
+ * `[framework-validation] PASS` / `reused PASS: ...` lines) is never mistaken
+ * for a command. Once #692 / PR #697 land, `gate_started.command` is a typed
+ * field on the event and this function is deleted in favor of reading
+ * `data.command` directly.
+ */
+const FRAMEWORK_VALIDATION_RUN = /^\[framework-validation\] running [^:\n]+: ([\s\S]*)$/;
+
+function splitFrameworkValidationCommand(content: string): {content: string; command?: string} {
+  const match = FRAMEWORK_VALIDATION_RUN.exec(content);
+  if (match === null) return {content};
+  const raw = match[1] ?? '';
+  const command = raw.endsWith('\n') ? raw.slice(0, -1) : raw;
+  if (command === '') return {content};
+  return {content: content.slice(0, content.length - raw.length), command};
 }
 
 function outputKind(channel: string): TranscriptEntry['kind'] {
