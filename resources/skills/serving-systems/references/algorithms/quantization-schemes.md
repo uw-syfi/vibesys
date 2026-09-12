@@ -47,6 +47,14 @@ E4M3 is the standard for weights/activations; E5M2 sees more use for gradients /
 
 FP4 typically needs finer granularity (e.g., 16 or 32 per block) and post-training quantization with careful calibration.
 
+#### MX-format in-kernel decode
+
+For MX-family formats (one shared scale per block, a tiny per-element codebook), in-kernel decode should build the block's codebook once per block, folding the block scale into the table via the same rounding path a reference decode uses so numerics stay identical, then select each lane's entry with a hardware register byte-permute rather than indexing a runtime array or a constant-memory table; both of the latter can compile to a serialized per-lane lookup instead of a broadcast, even when the whole table is only a few bytes.
+
+| Format | Codebook size | Recommended decode primitive | Verified on |
+|:--|:--|:--|:--|
+| MXFP4 (e2m1) | 16 values (sign + 3-bit magnitude index) | per-block table rebuild + register byte-permute select | `rocm` (gfx942) |
+
 ### KV cache quant
 
 Orthogonal to weight/activation quant:
