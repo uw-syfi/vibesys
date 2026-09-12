@@ -5607,7 +5607,7 @@ describe('box fills', () => {
     expect(ids).toContain('experiment-log'); // a pane, the same way
     expect(ids).toContain('theme-picker'); // an overlay, built here, never opened
     expect(ids).toContain('event-card'); // a transcript card, now a top-edge rule
-    expect(ids).toContain('event-status'); // borderless, so it keeps its own fill
+    expect(ids).toContain('event-status'); // a bare entry, tinted on a layer inside
     expect(ids.some(id => id.startsWith('agent-implementer-'))).toBe(true);
 
     expect(offenders(root)).toEqual([]);
@@ -5627,7 +5627,9 @@ describe('box fills', () => {
     // 'event-card-fill' is deliberately absent: #565 removed the transcript
     // card's border and its fill together, so there is no longer a rounded
     // corner to keep a fill out of, and nothing left to move inwards.
-    for (const id of ['header-fill', 'experiment-log-fill']) {
+    // 'event-status-fill' is here because a bare entry now draws the run
+    // divider like any other opener, so its role tint moved inwards too.
+    for (const id of ['header-fill', 'experiment-log-fill', 'event-status-fill']) {
       expect([id, isPainted(root, id)]).toEqual([id, true]);
     }
   });

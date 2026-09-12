@@ -77,8 +77,9 @@ function cardOf(view: ConversationView, id: string): BoxRenderable {
  * An entry from a named agent in a named round: the pair a heading splits.
  *
  * 'analysis' because run collapsing is about entries drawn as cards. #620's
- * bare kinds ('status', and unflagged 'diagnostic'/'subprocess') keep their own
- * grammar and are covered separately below.
+ * bare kinds ('status', and unflagged 'diagnostic'/'subprocess') group into
+ * runs the same way and differ only in the frame they do not draw; they are
+ * covered separately below.
  */
 function from(
   who: {agentKind: string; roundLabel: string},
@@ -163,17 +164,13 @@ describe('conversation entry row cost (#565)', () => {
   });
 
   it('costs a divider and a heading per entry, not a margin row plus a four-sided card', async () => {
-    // Divider (1) + heading (1) + one content line (1) for an entry drawn as a
-    // card. A bordered card with its own margin row cost 5 rows for the same
-    // content.
-    //
-    // 'status' is the one kind that does not draw the divider, and that is not
-    // this change's doing: #620 demoted lifecycle chatter to bare lines, so a
-    // status entry draws no frame at all and costs a heading plus its content.
-    // Giving it the rule would undo that demotion, so the row cost is asserted
-    // per kind rather than as one number for all of them.
+    // Divider (1) + heading (1) + one content line (1) for a run opener. A
+    // bordered card with its own margin row cost 5 rows for the same content.
+    // #620's bare kinds pay the same three rows: the divider is the separator
+    // between runs, and the blank row a bare opener used to draw instead was
+    // the same separator spelled less legibly.
     const expected: Record<string, {height: number; border: boolean | 'top'[]}> = {
-      a: {height: 2, border: false},
+      a: {height: 3, border: ['top']},
       b: {height: 3, border: ['top']},
       c: {height: 3, border: ['top']},
     };
@@ -188,8 +185,7 @@ describe('conversation entry row cost (#565)', () => {
       expect([entry.id, card.border]).toEqual([entry.id, want.border]);
     }
     // No stray rows between cards either: the three entries cost exactly 9 rows
-    // end to end (2 + 3 + 3, plus the single margin row the bare status entry
-    // keeps from #620). The pre-#565 card cost 5 rows each, 15 total.
+    // end to end (3 + 3 + 3). The pre-#565 card cost 5 rows each, 15 total.
     expect(view.output.height).toBe(9);
     void testRenderer;
   });
@@ -258,11 +254,11 @@ describe('conversation entry row cost (#565)', () => {
     expect(view.output.height).toBe(3 + 1 + 3 + 3 + 3 + 1 + 3);
   });
 
-  it('collapses a run of #620 bare entries without giving one a divider', async () => {
+  it('collapses a run of #620 bare entries behind one divider', async () => {
     // Bare lifecycle lines are most of what run collapsing buys: a run of them
     // is one agent talking, and it restated the agent above every line. They
-    // lose the repeated heading like any other entry and never gain the
-    // divider, which is the half of the chrome #620's demotion is about.
+    // lose the repeated heading like any other entry, and the divider they do
+    // draw is on the opener alone.
     const entries: ConversationEntry[] = [
       {id: 'b1', kind: 'status', label: 'launcher', content: 'one'},
       {id: 'b2', kind: 'status', label: 'launcher', content: 'two'},
@@ -271,11 +267,11 @@ describe('conversation entry row cost (#565)', () => {
       from(judge, 'j2', 'five'),
     ];
     const {view} = await renderEntries(entries);
-    for (const id of ['b1', 'b2', 'b3']) expect([id, cardOf(view, id).border]).toEqual([id, false]);
-    // The opener keeps heading and content; the rest of the run is content
-    // alone, and #620's margin row goes with the heading rather than splitting
-    // the run with a blank line.
-    expect(cardOf(view, 'b1').height).toBe(2);
+    expect(cardOf(view, 'b1').border).toEqual(['top']);
+    for (const id of ['b2', 'b3']) expect([id, cardOf(view, id).border]).toEqual([id, false]);
+    // The opener keeps divider, heading and content; the rest of the run is
+    // content alone, so no blank row splits one speaker's block.
+    expect(cardOf(view, 'b1').height).toBe(3);
     expect(cardOf(view, 'b2').height).toBe(1);
     expect(cardOf(view, 'b3').height).toBe(1);
     expect(view.output.findDescendantById('event-b2-heading')).toBeUndefined();
@@ -285,8 +281,7 @@ describe('conversation entry row cost (#565)', () => {
     expect(cardOf(view, 'j1').border).toEqual(['top']);
     expect(cardOf(view, 'j1').height).toBe(3);
     expect(cardOf(view, 'j2').height).toBe(1);
-    // One margin row (b1) + 2 + 1 + 1 + 3 + 1.
-    expect(view.output.height).toBe(1 + 2 + 1 + 1 + 3 + 1);
+    expect(view.output.height).toBe(3 + 1 + 1 + 3 + 1);
   });
 
   it('shows the cursor on an entry inside a run without moving its content', async () => {
@@ -310,6 +305,52 @@ describe('conversation entry row cost (#565)', () => {
     const head = cardOf(await renderEntries(run, 'a').then(mounted => mounted.view), 'a');
     expect(head.border).toEqual(['top', 'left']);
     expect(head.getChildren()[0]?.x).toBe(cardOf(resting.view, 'a').getChildren()[0]?.x);
+  });
+});
+
+/**
+ * The rule is the separator between one run and the next, and #620's bare
+ * entries need separating like any other. Both cases below come from the tail
+ * of dev/fixtures/bad-cpp-round1.jsonl, where the judge's "Reached max_rounds"
+ * notice printed directly under the `round-1 · PASS` summary with nothing
+ * between them.
+ */
+describe('every run opener draws the divider', () => {
+  it('draws the rule on a bare entry that opens a run', async () => {
+    const entries: ConversationEntry[] = [
+      {id: 'summary', kind: 'result', label: 'round-1 · PASS', content: '1 attempt(s)'},
+      {
+        id: 'notice',
+        kind: 'diagnostic',
+        label: 'judge',
+        agentKind: 'judge',
+        roundLabel: 'round-1-retry-1-judge',
+        content: 'Reached max_rounds=1. Stopping.',
+      },
+    ];
+    const {testRenderer, view} = await renderEntries(entries);
+    // The notice is a different speaker from the summary above it, so it opens
+    // a run, and a run opener is separated from the run above whether or not
+    // #620 draws it as a bare line.
+    expect(cardOf(view, 'notice').border).toEqual(['top']);
+    // On screen, not just on the box: the rule sits above the notice's own
+    // heading. The summary's rule is drawn either way, so the row asserted is
+    // the second one, which is the row that was missing.
+    const rows = testRenderer.captureCharFrame().split('\n');
+    const notice = rows.findIndex(row => row.includes('Reached max_rounds'));
+    expect(rows[notice - 1]).toContain('judge');
+    expect(rows[notice - 2]?.trimEnd()).toMatch(/^─+$/);
+  });
+
+  it('keeps a bare entry inside a run frameless', async () => {
+    const entries: ConversationEntry[] = [
+      {id: 'b1', kind: 'diagnostic', label: 'launcher', content: 'one'},
+      {id: 'b2', kind: 'diagnostic', label: 'launcher', content: 'two'},
+    ];
+    const {view} = await renderEntries(entries);
+    expect(cardOf(view, 'b1').border).toEqual(['top']);
+    // `false`, not an empty side list (tui-conventions.md).
+    expect(cardOf(view, 'b2').border).toBe(false);
   });
 });
 
