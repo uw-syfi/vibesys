@@ -6156,6 +6156,139 @@ describe('modal scrim', () => {
   });
 });
 
+describe('single-key gating by the composer that owns the keyboard', () => {
+  /** A round view with two rounds, so `[` has somewhere to go. */
+  function twoRoundController(): FakeController {
+    return new FakeController({
+      ...initialSessionState(),
+      core: {
+        ...initialSessionState().core,
+        rounds: [
+          {number: 1, status: 'completed' as const},
+          {number: 2, status: 'active' as const},
+        ],
+        transcript: [
+          {
+            id: 'live',
+            kind: 'assistant',
+            label: 'Agent',
+            content: 'live output',
+            roundNumber: 2,
+          },
+        ],
+      },
+    });
+  }
+
+  it('keeps round navigation alive after a chat draft is closed unsent', async () => {
+    const testRenderer = await createTestRenderer({width: 120, height: 20});
+    const controller = twoRoundController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+
+    // Leave a half-typed question in the modal chat, then close it unsent.
+    controller.publish({...controller.state, chatOpen: true});
+    await testRenderer.waitForFrame(value => value.includes('Experiment chat'));
+    await testRenderer.mockInput.typeText('half a question');
+    testRenderer.mockInput.pressKey('ESCAPE');
+    await frameAfterEscape(testRenderer);
+    expect(controller.state.chatOpen).toBe(false);
+
+    // The keystroke cannot reach the closed composer, so the parked draft
+    // must not disable the round view's plain keys. The bracket right after
+    // a flushed ESC sits out the parser's escape-sequence timeout, which the
+    // escape helper's beat also covers.
+    testRenderer.mockInput.pressKey('[');
+    await frameAfterEscape(testRenderer);
+    expect(controller.state.selectedRound).toBe(1);
+
+    testRenderer.mockInput.pressKey('ARROW_LEFT');
+    await frameAfter(testRenderer);
+    expect(controller.state.roundFocus).toBe('agents');
+
+    // The draft was parked, not discarded: reopening the chat shows it.
+    controller.publish({...controller.state, chatOpen: true});
+    const reopened = await testRenderer.waitForFrame(value => value.includes('half a question'));
+    expect(reopened).toContain('Experiment chat');
+  });
+
+  it('opens a hypothesis on Enter while an unfocused docked draft is parked', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    await frameAfter(testRenderer);
+
+    // Draft in the docked chat, then move the keys back to the table.
+    testRenderer.mockInput.pressKey('w', {ctrl: true});
+    await frameAfter(testRenderer);
+    await testRenderer.mockInput.typeText('draft for later');
+    testRenderer.mockInput.pressKey('w', {ctrl: true});
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.focus).toBe('left');
+
+    // The command input is empty and owns the keyboard, so Enter belongs to
+    // the table even though a draft waits in the unfocused composer beside it.
+    testRenderer.mockInput.pressEnter();
+    await frameAfter(testRenderer);
+    expect(controller.state.hypothesisDetail).not.toBeNull();
+
+    // The draft was parked, not discarded by the drilldown.
+    controller.publish({...controller.state, chatOpen: true});
+    await testRenderer.waitForFrame(value => value.includes('draft for later'));
+  });
+
+  it('keeps navigation keys inside a focused composer holding text', async () => {
+    const testRenderer = await createTestRenderer({width: 120, height: 20});
+    const controller = twoRoundController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+
+    controller.publish({...controller.state, chatOpen: true});
+    await testRenderer.waitForFrame(value => value.includes('Experiment chat'));
+    await testRenderer.mockInput.typeText('inspect arr');
+    testRenderer.mockInput.pressKey('[');
+    await frameAfter(testRenderer);
+
+    // The bracket is a character of the question, not round navigation.
+    expect(controller.state.selectedRound).toBeNull();
+
+    await testRenderer.mockInput.typeText('0]');
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.chatSubmissions.length === 1);
+    expect(controller.chatSubmissions).toEqual(['inspect arr[0]']);
+  });
+
+  it('leaves brackets to a typed command while a chat draft is parked', async () => {
+    const testRenderer = await createTestRenderer({width: 120, height: 20});
+    const controller = twoRoundController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+
+    controller.publish({...controller.state, chatOpen: true});
+    await testRenderer.waitForFrame(value => value.includes('Experiment chat'));
+    await testRenderer.mockInput.typeText('parked draft');
+    testRenderer.mockInput.pressKey('ESCAPE');
+    await frameAfterEscape(testRenderer);
+
+    // Text in the command input still shadows navigation: the bracket is a
+    // character of the command, whatever the parked draft holds.
+    await testRenderer.mockInput.typeText('/steer fix arr');
+    testRenderer.mockInput.pressKey('[');
+    const typed = await frameAfter(testRenderer);
+    expect(typed).toContain('arr[');
+    expect(controller.state.selectedRound).toBeNull();
+
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.submissions.length === 1);
+    expect(controller.submissions).toEqual(['/steer fix arr[']);
+  });
+});
+
 /** The renderable behind a screen region, for asserting what a scrim covers. */
 function boxOf(testRenderer: TestRendererSetup, id: string): Renderable {
   const found = testRenderer.renderer.root.findDescendantById(id);

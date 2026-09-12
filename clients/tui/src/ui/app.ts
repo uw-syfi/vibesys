@@ -8,6 +8,7 @@ import {
 import {COMMAND_NAMES} from '../commands.js';
 import type {SessionController} from '../session-controller.js';
 import {
+  chatPaneFocused,
   experimentLogVisible,
   focusedPane,
   type SessionState,
@@ -565,11 +566,20 @@ export function createOpenTuiApp(
         : chatPane.navigateSuggestions(direction),
     completeChatInput: () =>
       controller.state.chatOpen ? chat.completeSuggestion() : chatPane.completeSuggestion(),
-    // Enter belongs to a pane only when nothing is typed anywhere. Asking which
-    // box has the cursor is not enough: a question waiting in the other box is
-    // still a question, and Enter must never discard it to open a hypothesis.
+    // Enter and the single-key bindings yield to typing, and typing happens
+    // in exactly one composer: the modal chat while it is open, the focused
+    // docked chat, otherwise the command box. Only that composer's text
+    // matters. A draft parked in a closed or unfocused chat surface cannot
+    // take the keystroke, and it survives whatever the binding does, so it
+    // must not disable navigation. The ladder mirrors the key router's own
+    // early returns, so any state it routes to a chat composer is exactly a
+    // state this gate consults that composer in.
     inputIsEmpty: () =>
-      commandInput.isEmpty() && chatPane.isComposerEmpty() && chat.isComposerEmpty(),
+      controller.state.chatOpen
+        ? chat.isComposerEmpty()
+        : chatPaneFocused(controller.state)
+          ? chatPane.isComposerEmpty()
+          : commandInput.isEmpty(),
     closeChat: () => controller.closeChat(),
     toggleLatestPrompt: () => conversation.toggleLatestPrompt(),
     toggleSelectedTool: () => conversation.toggleSelectedTool(),
