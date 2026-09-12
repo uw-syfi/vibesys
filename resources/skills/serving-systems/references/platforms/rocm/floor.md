@@ -82,6 +82,10 @@ Without a draft-only sharded artifact, adds 2.6 to 2.8x to boot time (about 800 
 
 Accepted on top of NEXTN k=3 with the overlap scheduler off (above): median TPOT 38.05 to 22.86 ms at 48 uncapped sessions (-39.9 percent) and 14.31 to 12.44 ms at a 16-session cap (-13.1 percent), pooled p95 TTFT turn2+ flat at both, exact numerics, accept_len unchanged. See [`aiter.md`](aiter.md#pytorch-tunableop-accepted-for-the-dense-projections-and-lm-head) and [`aiter-tunableop.md`](aiter-tunableop.md) for the tuning recipe, the per-device filename pitfall, and the mechanism.
 
+### Optional: permute-based MXFP4 MoE decode16 kernel rewrite
+
+Accepted on top of the TunableOp stack above: a source-level rewrite of the fused MXFP4 MoE kernel's `decode16` weight-unpack step (register byte-permute lookup, `v_perm_b32` / `__builtin_amdgcn_perm`, replacing a per-element memory gather). No new flag; the rewrite lives in the kernel source itself. Paired end to end against the accepted stack: pooled p95 TTFT turn2+ improved 13.2 percent at 48 uncapped sessions and 10.4 percent at a 16-session cap; median TPOT improved 12.4 percent and 4.5 percent respectively; bit-exact, accept_len unchanged, gates 13/13 on every rep. See [`aiter-mxfp4-moe.md`](aiter-mxfp4-moe.md#permute-based-fix-register-byte-permute-lookup-job-verified-accepted-as-the-default) for the design, the microbenchmark, and the end-to-end numbers, and the same file's JIT build-cache isolation pitfall before running a paired kernel A/B against it.
+
 Environment (serving):
 
 - `PYTORCH_TUNABLEOP_ENABLED=1`
