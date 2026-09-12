@@ -484,15 +484,17 @@ def _canonical_execution_events(
                 )
             )
             continue
-        if event.type in {EventType.PHASE_STARTED, EventType.PHASE_FINISHED} and isinstance(
-            event.data, PhaseData
+        if (
+            event.type in {EventType.PHASE_STARTED, EventType.PHASE_FINISHED}
+            and isinstance(event.data, PhaseData)
+            and event.execution_id is not None
+            and event.execution_id not in invocation_lifecycle_ids
+            and event.execution_id not in canonical_lifecycle_ids
         ):
-            if (
-                event.execution_id is not None
-                and event.execution_id not in invocation_lifecycle_ids
-                and event.execution_id not in canonical_lifecycle_ids
-                and event.type is EventType.PHASE_STARTED
-            ):
+            # The phase pair is this execution's only lifecycle record. The
+            # translated copy keeps the stored sequence, so it must replace the
+            # phase event: emitting both would duplicate one cursor position.
+            if event.type is EventType.PHASE_STARTED:
                 canonical.append(
                     event.model_copy(
                         update={
@@ -508,11 +510,7 @@ def _canonical_execution_events(
                         }
                     )
                 )
-            elif (
-                event.execution_id is not None
-                and event.execution_id not in invocation_lifecycle_ids
-                and event.execution_id not in canonical_lifecycle_ids
-            ):
+            else:
                 canonical.append(
                     event.model_copy(
                         update={
@@ -521,7 +519,6 @@ def _canonical_execution_events(
                         }
                     )
                 )
-            canonical.append(event)
             continue
         canonical.append(event)
     return canonical
