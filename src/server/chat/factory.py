@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -205,13 +206,18 @@ class ExperimentChatFactory:
         self._attachment = attachment
         self._build_agent = build_agent
         self._fallback = fallback
+        self._lock = threading.Lock()
+        self._closed = False
         self._sessions: list[ExperimentChatSession] = []
         self._default_retained = False
 
     def start(self) -> None:
         """Install the default session and per-thread factory on the manager."""
-        self._manager.set_run_settings(self._defaults)
-        self._manager.set_thread_factory(self._create_thread)
+        with self._lock:
+            if self._closed:
+                raise _factory_closed_error()
+            self._manager.set_run_settings(self._defaults)
+            self._manager.set_thread_factory(self._create_thread)
         default = self._build_session(
             None,
             AgentSelection(
@@ -220,20 +226,28 @@ class ExperimentChatFactory:
                 model=self._defaults.model,
             ),
         )
-        self._default_retained = self._manager.retain_terminal_resource(
-            TerminalChatResource(handler=default.ask, close=default.close)
-        )
-        if self._default_retained:
-            self._sessions.remove(default)
-        else:
-            self._manager.install_default_handler(default.ask)
+        with self._lock:
+            if self._closed:
+                raise _factory_closed_error()
+            self._default_retained = self._manager.retain_terminal_resource(
+                TerminalChatResource(handler=default.ask, close=default.close)
+            )
+            if self._default_retained:
+                self._sessions.remove(default)
+            else:
+                self._manager.install_default_handler(default.ask)
 
     def close(self) -> None:
         """Drain chat calls and close every factory-owned session."""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
         self._manager.clear_threads_and_drain()
         if not self._default_retained:
             self._manager.clear_default_handler_and_drain()
-        sessions, self._sessions = self._sessions, []
+        with self._lock:
+            sessions, self._sessions = self._sessions, []
         first_error: BaseException | None = None
         for session in sessions:
             try:
@@ -265,11 +279,15 @@ class ExperimentChatFactory:
                 created_at=datetime.now(UTC),
             ),
             handler=session.ask,
+            close=session.close,
         )
 
     def _build_session(
         self, thread_id: str | None, selection: AgentSelection
     ) -> ExperimentChatSession:
+        with self._lock:
+            if self._closed:
+                raise _factory_closed_error()
         shared_state_dir = self._project.state.local_namespace(
             self._run_id, "server"
         ).external_directory("chat")
@@ -291,34 +309,50 @@ class ExperimentChatFactory:
             log=resources.log,
             flush_logs=resources.flush_logs,
         )
-        session = ExperimentChatSession(
-            ExperimentChatDependencies(
-                controller=self._controller,
-                executions=self._executions,
-                agent_client=resources.client,
-                # One conversation per thread. The run's default chat has no
-                # thread ID of its own, so it names the identifier the threads
-                # cannot collide with.
-                session_key=AgentSessionKey(
-                    SessionScope.CHAT, DEFAULT_CHAT_THREAD if thread_id is None else thread_id
+        try:
+            session = ExperimentChatSession(
+                ExperimentChatDependencies(
+                    controller=self._controller,
+                    executions=self._executions,
+                    agent_client=resources.client,
+                    # One conversation per thread. The run's default chat has no
+                    # thread ID of its own, so it names the identifier the threads
+                    # cannot collide with.
+                    session_key=AgentSessionKey(
+                        SessionScope.CHAT,
+                        DEFAULT_CHAT_THREAD if thread_id is None else thread_id,
+                    ),
+                    workspace=self._workspace,
+                    state_dir=state_dir,
+                    agent_shared_state_dir=resources.agent_shared_state_dir,
+                    agent_state_dir=agent_state_dir,
+                    evidence=evidence,
+                    log=resources.log,
+                    environment=resources.environment,
+                    progress=resources.progress,
+                    driver=selection.driver,
+                    provider=selection.provider,
+                    model=selection.model,
+                    fallback=self._fallback,
                 ),
-                workspace=self._workspace,
-                state_dir=state_dir,
-                agent_shared_state_dir=resources.agent_shared_state_dir,
-                agent_state_dir=agent_state_dir,
-                evidence=evidence,
-                log=resources.log,
-                environment=resources.environment,
-                progress=resources.progress,
-                driver=selection.driver,
-                provider=selection.provider,
-                model=selection.model,
-                fallback=self._fallback,
-            ),
-            _CloseCallback(resources.close),
-        )
-        self._sessions.append(session)
-        return session
+                _CloseCallback(resources.close),
+            )
+        except BaseException as construction_error:
+            try:
+                resources.close()
+            except BaseException as cleanup_error:  # noqa: BLE001
+                construction_error.add_note(
+                    "Additional error while cleaning up chat-session construction: "
+                    f"{type(cleanup_error).__name__}: {cleanup_error}"
+                )
+            raise
+
+        with self._lock:
+            if not self._closed:
+                self._sessions.append(session)
+                return session
+        session.close()
+        raise _factory_closed_error()
 
 
 class _CloseCallback:
@@ -334,3 +368,7 @@ class _CloseCallback:
 
 def _noop() -> None:
     pass
+
+
+def _factory_closed_error() -> RuntimeError:
+    return RuntimeError("Experiment chat factory is closed")

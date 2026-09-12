@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from collections.abc import Callable
+from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 from server.events import (
     ChatData,
@@ -18,14 +20,16 @@ from server.events import (
 )
 
 if TYPE_CHECKING:
-    import threading
-
     from server.chat.options import ChatRunSettings
     from server.journal import EventJournal
     from server.run_lifecycle import RunStatus
 
 _CHAT_DRAIN_TIMEOUT_SECONDS = 5.0
 _CHAT_THREAD_TITLE_MAX_CHARS = 40
+
+
+def _noop_thread_close() -> None:
+    """Provide a compatibility close callback for stateless test handlers."""
 
 
 @dataclass(frozen=True)
@@ -42,9 +46,37 @@ class ChatThreadHandle:
 
     spec: ChatThreadCreatedData
     handler: Callable[[str], str]
+    close: Callable[[], None] = _noop_thread_close
 
 
 ChatThreadFactory = Callable[[str, str | None, str | None, str | None], ChatThreadHandle]
+
+
+@dataclass(frozen=True)
+class _ThreadRoute:
+    """One installed handler and the lock serializing its turns."""
+
+    handler: Callable[[str], str]
+    turn_lock: threading.Lock
+
+
+@dataclass(frozen=True)
+class _ThreadLease:
+    """A callable route whose turn lock and teardown lease are held."""
+
+    handler: Callable[[str], str]
+    turn_lock: threading.Lock
+
+    def __call__(self, text: str) -> str:
+        """Invoke the leased route."""
+        return self.handler(text)
+
+
+_ThreadRestoration: TypeAlias = Future[_ThreadRoute]
+
+
+class _ThreadsDrainingError(RuntimeError):
+    """Signal that a completed restoration cannot be published."""
 
 
 class ChatManager:
@@ -64,7 +96,8 @@ class ChatManager:
         self._fallback_answer: Callable[[str], str] | None = None
         self._default_handler: Callable[[str], str] | None = None
         self._thread_factory: ChatThreadFactory | None = None
-        self._thread_handlers: dict[str, Callable[[str], str]] = {}
+        self._thread_handlers: dict[str, _ThreadRoute] = {}
+        self._thread_restorations: dict[str, _ThreadRestoration] = {}
         self._thread_specs: dict[str, ChatThreadCreatedData] = {}
         self._run_settings: ChatRunSettings | None = None
         self._active_default_calls = 0
@@ -154,26 +187,38 @@ class ChatManager:
         """Create, register, and record a chat thread with resolved settings."""
         with self._condition:
             factory = self._thread_factory
+            if factory is not None:
+                self._active_thread_calls += 1
         if factory is None:
             raise RuntimeError(  # noqa: TRY003  # Report current run availability.
                 "Experiment chat threads are not available for this run "
                 f"({self._unavailable_reason()})"
             )
-        handle = factory(uuid.uuid4().hex, driver, provider, model)
-        spec = handle.spec
-        if title is not None and title.strip():
-            spec = spec.model_copy(update={"title": title.strip()})
-        with self._condition:
-            self._thread_specs[spec.thread_id] = spec
-            self._thread_handlers[spec.thread_id] = handle.handler
-        self._journal.record(
-            EventType.CHAT_THREAD_CREATED,
-            agent_kind="chat",
-            round_label="experiment-chat",
-            chat_thread_id=spec.thread_id,
-            data=spec,
-        )
-        return spec
+        try:
+            handle = factory(uuid.uuid4().hex, driver, provider, model)
+            spec = handle.spec
+            if title is not None and title.strip():
+                spec = spec.model_copy(update={"title": title.strip()})
+            with self._condition:
+                accepting = self._thread_factory is factory
+                if accepting:
+                    self._thread_specs[spec.thread_id] = spec
+                    self._thread_handlers[spec.thread_id] = _ThreadRoute(
+                        handle.handler, threading.Lock()
+                    )
+            if not accepting:
+                handle.close()
+                raise _ThreadsDrainingError(self._thread_unavailable_message())
+            self._journal.record(
+                EventType.CHAT_THREAD_CREATED,
+                agent_kind="chat",
+                round_label="experiment-chat",
+                chat_thread_id=spec.thread_id,
+                data=spec,
+            )
+            return spec
+        finally:
+            self._release_thread_call()
 
     def threads_locked(self) -> list[ChatThreadCreatedData]:
         """Return known thread metadata while the caller holds the condition."""
@@ -216,9 +261,7 @@ class ChatManager:
         with self._condition:
             self._thread_factory = None
             self._thread_handlers.clear()
-            self._wait_locked(
-                lambda: self._active_thread_calls > 0, timeout=_CHAT_DRAIN_TIMEOUT_SECONDS
-            )
+            self._wait_locked(lambda: self._active_thread_calls > 0, timeout=None)
 
     def enable_terminal_retention(self) -> None:
         """Request that the next default resource survive run teardown."""
@@ -261,11 +304,9 @@ class ChatManager:
             resource.close()
 
     def _thread_chat(self, text: str, thread_id: str) -> str:
-        handler = self._resolve_thread_handler(thread_id)
+        handler = self._acquire_thread_handler(thread_id)
         if isinstance(handler, str):
             return handler
-        with self._condition:
-            self._active_thread_calls += 1
         try:
             answer = handler(text)
             thread_title = self._title_thread_if_needed(thread_id, text)
@@ -280,36 +321,119 @@ class ChatManager:
             )
             return answer
         finally:
-            with self._condition:
-                self._active_thread_calls -= 1
-                self._condition.notify_all()
+            handler.turn_lock.release()
+            self._release_thread_call()
 
-    def _resolve_thread_handler(self, thread_id: str) -> Callable[[str], str] | str:
+    def _acquire_thread_handler(self, thread_id: str) -> _ThreadLease | str:
         with self._condition:
-            handler = self._thread_handlers.get(thread_id)
+            route = self._thread_handlers.get(thread_id)
             spec = self._thread_specs.get(thread_id)
             factory = self._thread_factory
-        if handler is not None:
-            return handler
-        if spec is None:
-            return (
-                f"Unknown experiment chat thread {thread_id!r}. Create one with "
-                "/new-chat, or omit the thread to use the default experiment chat."
-            )
-        if factory is None:
-            return (
-                f"Experiment chat thread {thread_id!r} cannot answer right now "
-                f"({self._unavailable_reason()})."
-            )
+            if route is not None:
+                self._active_thread_calls += 1
+            elif spec is None:
+                return (
+                    f"Unknown experiment chat thread {thread_id!r}. Create one with "
+                    "/new-chat, or omit the thread to use the default experiment chat."
+                )
+            elif factory is None:
+                return self._thread_unavailable_message(thread_id)
+            else:
+                restoration = self._thread_restorations.get(thread_id)
+                restore = restoration is None
+                if restoration is None:
+                    restoration = Future()
+                    self._thread_restorations[thread_id] = restoration
+                self._active_thread_calls += 1
+        if route is not None:
+            return self._lease_thread_route(route)
+        assert spec is not None  # noqa: S101  # Narrowed above.
+        assert factory is not None  # noqa: S101  # Narrowed above.
+        if restore:
+            self._restore_thread(thread_id, spec, factory, restoration)
         try:
-            handle = factory(thread_id, spec.driver, spec.provider, spec.model)
+            route = restoration.result()
+        except _ThreadsDrainingError:
+            self._release_thread_call()
+            return self._thread_unavailable_message(thread_id)
         except Exception as exc:  # noqa: BLE001
+            self._release_thread_call()
             return (
                 f"Could not restore experiment chat thread {thread_id!r}: "
                 f"{type(exc).__name__}: {exc}"
             )
+        except BaseException:
+            self._release_thread_call()
+            raise
+        return self._lease_thread_route(route)
+
+    def _lease_thread_route(self, route: _ThreadRoute) -> _ThreadLease:
+        try:
+            route.turn_lock.acquire()
+        except BaseException:
+            self._release_thread_call()
+            raise
+        return _ThreadLease(route.handler, route.turn_lock)
+
+    def _restore_thread(
+        self,
+        thread_id: str,
+        spec: ChatThreadCreatedData,
+        factory: ChatThreadFactory,
+        restoration: _ThreadRestoration,
+    ) -> None:
         with self._condition:
-            return self._thread_handlers.setdefault(thread_id, handle.handler)
+            assert self._thread_restorations.get(thread_id) is restoration  # noqa: S101
+        try:
+            handle = factory(thread_id, spec.driver, spec.provider, spec.model)
+        except BaseException as exc:  # noqa: BLE001  # Wake waiters on cancellation too.
+            self._finish_thread_restoration(thread_id, restoration, error=exc)
+            return
+
+        route = _ThreadRoute(handle.handler, threading.Lock())
+        with self._condition:
+            if self._thread_factory is factory:
+                self._thread_handlers[thread_id] = route
+                self._thread_restorations.pop(thread_id, None)
+                restoration.set_result(route)
+                self._condition.notify_all()
+                return
+
+        error = _ThreadsDrainingError(self._thread_unavailable_message(thread_id))
+        try:
+            handle.close()
+        except BaseException as cleanup_error:  # noqa: BLE001
+            error.add_note(
+                "Additional error while cleaning up chat-thread restoration: "
+                f"{type(cleanup_error).__name__}: {cleanup_error}"
+            )
+        self._finish_thread_restoration(thread_id, restoration, error=error)
+
+    def _finish_thread_restoration(
+        self,
+        thread_id: str,
+        restoration: _ThreadRestoration,
+        *,
+        error: BaseException,
+    ) -> None:
+        with self._condition:
+            if self._thread_restorations.get(thread_id) is restoration:
+                self._thread_restorations.pop(thread_id)
+            restoration.set_exception(error)
+            self._condition.notify_all()
+
+    def _release_thread_call(self) -> None:
+        with self._condition:
+            self._active_thread_calls -= 1
+            self._condition.notify_all()
+
+    def _thread_unavailable_message(self, thread_id: str | None = None) -> str:
+        subject = (
+            "Experiment chat threads"
+            if thread_id is None
+            else f"Experiment chat thread {thread_id!r}"
+        )
+        return f"{subject} cannot answer right now ({self._unavailable_reason()})."
 
     def _title_thread_if_needed(self, thread_id: str, question: str) -> str | None:
         with self._condition:
