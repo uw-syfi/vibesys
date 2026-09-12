@@ -1,9 +1,9 @@
 import {afterEach, describe, expect, it, setSystemTime} from 'bun:test';
-import {BoxRenderable, type Renderable} from '@opentui/core';
+import {BoxRenderable, type Renderable, TextareaRenderable} from '@opentui/core';
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
-import {createChatDraft, pendingComposerLabel} from './chat-composer.js';
+import {ChatComposerView, createChatDraft, pendingComposerLabel} from './chat-composer.js';
 import {ChatPaneView} from './chat-pane.js';
 import {paneTitle} from './focus.js';
 import {createMarkdownStyle} from './styles.js';
@@ -126,5 +126,131 @@ describe('composer spinner across a hidden surface', () => {
     dock.render(true, true);
 
     expect(dock.title()).toBe(paneTitle(pendingComposerLabel(0, 0), false));
+  });
+});
+
+/**
+ * The editor's height must count the rows the textarea actually wraps the
+ * draft into, not an estimate over code points: the textarea wraps over
+ * display cells (a CJK character is two) and breaks on word boundaries (a
+ * word that would straddle the edge moves whole to the next row). An
+ * undercounted box scrolls the draft's first rows out of a fixed-height
+ * textarea while MAX_EDITOR_ROWS still has room, which is the symptom
+ * issue #427 was about.
+ */
+describe('composer height against the word-wrapped draft', () => {
+  const cleanup: Array<() => void> = [];
+
+  afterEach(() => {
+    for (const destroy of cleanup.splice(0).reverse()) destroy();
+  });
+
+  interface SizedComposer {
+    setDraft: (value: string) => Promise<void>;
+    editorHeight: () => number;
+    frame: () => string;
+  }
+
+  /**
+   * A composer mounted alone on an `availableWidth`-column terminal: its box
+   * borders and padding leave the textarea four cells fewer, and `activate`
+   * names the same terminal width, so the height math and the textarea wrap
+   * against equal widths.
+   */
+  async function sizedComposer(availableWidth = 60): Promise<SizedComposer> {
+    const testRenderer: TestRendererSetup = await createTestRenderer({
+      width: availableWidth,
+      height: 12,
+    });
+    const view = new ChatComposerView(
+      testRenderer.renderer,
+      createChatDraft(),
+      () => {},
+      resolveTheme(null),
+      'sized',
+    );
+    testRenderer.renderer.root.add(view.output);
+    view.activate(availableWidth, true, false);
+    await testRenderer.renderOnce();
+    cleanup.push(() => {
+      view.destroy();
+      view.output.destroyRecursively();
+      testRenderer.renderer.destroy();
+    });
+    const editor = testRenderer.renderer.root.findDescendantById('sized-composer-editor');
+    if (!(editor instanceof TextareaRenderable)) throw new Error('composer editor was missing');
+    return {
+      setDraft: async value => {
+        editor.focus();
+        editor.setText(value);
+        // The cursor at the end, where typing leaves it: an undersized box
+        // then scrolls the head of the draft out rather than the tail.
+        editor.gotoBufferEnd();
+        // One frame to deliver the content change, one to lay out the height
+        // it set.
+        await testRenderer.renderOnce();
+        await testRenderer.renderOnce();
+      },
+      editorHeight: () => editor.height,
+      frame: () => testRenderer.captureCharFrame(),
+    };
+  }
+
+  it('keeps every row of a CJK draft on screen', async () => {
+    const composer = await sizedComposer();
+    // 30 cells per sentence: two per row would take 60, so each of the four
+    // sentences word-wraps onto its own 56-cell row. Counting code points
+    // instead (60 over 56) says two rows.
+    const sentence = '実験のまとめを教えてください。';
+    await composer.setDraft(sentence.repeat(4));
+
+    expect(composer.editorHeight()).toBe(4);
+    const rows = composer
+      .frame()
+      .split('\n')
+      .filter(row => row.includes(sentence));
+    expect(rows).toHaveLength(4);
+  });
+
+  it('counts rows the way word wrap breaks them, not by character fill', async () => {
+    const composer = await sizedComposer();
+    // Four 30-character words: two never share a 56-cell row, so word wrap
+    // takes four rows, while character fill (123 code points over 56) says
+    // three.
+    const words = ['a', 'b', 'c', 'd'].map(letter => letter.repeat(30));
+    await composer.setDraft(words.join(' '));
+
+    expect(composer.editorHeight()).toBe(4);
+    // The first word is still on screen: an undercounted box would have
+    // scrolled it out to keep the cursor's row visible.
+    expect(composer.frame()).toContain('a'.repeat(30));
+  });
+
+  it('leaves a short draft at a single row', async () => {
+    const composer = await sizedComposer();
+    await composer.setDraft('hi there');
+
+    expect(composer.editorHeight()).toBe(1);
+  });
+
+  it('still clamps a long draft at the row cap', async () => {
+    const composer = await sizedComposer();
+    await composer.setDraft('実験のまとめを教えてください。'.repeat(8));
+
+    expect(composer.editorHeight()).toBe(6);
+  });
+
+  it('never sizes the empty composer for its wrapping placeholder', async () => {
+    // Twenty columns leave the textarea 16, where the placeholder itself
+    // wraps to two rows. The empty editor still rests at one: the
+    // measurement reads the edit buffer's view, which shows the placeholder
+    // when the buffer is empty, and that row count must not become the box.
+    const composer = await sizedComposer(20);
+
+    expect(composer.editorHeight()).toBe(1);
+
+    await composer.setDraft('hi');
+    await composer.setDraft('');
+    expect(composer.editorHeight()).toBe(1);
   });
 });

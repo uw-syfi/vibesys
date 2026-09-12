@@ -20,6 +20,12 @@ const BOX_CHROME = 2;
 /** The box's own rows plus the hint row above it. */
 const COMPOSER_CHROME = BOX_CHROME + 1;
 const EDITOR_HORIZONTAL_CHROME = 4;
+/**
+ * Viewport height handed to `measureForDimensions`. The measured line count
+ * is not bounded by it; this is the same effectively-unbounded rectangle the
+ * library's own table layout measures with.
+ */
+const MEASURE_HEIGHT = 10_000;
 /** Rows the menu shows at once before it scrolls its selection into view. */
 const MAX_MENU_ROWS = 10;
 const MENU_CHROME = 2;
@@ -357,11 +363,37 @@ export class ChatComposerView {
     this.#menuList.fg = theme.textPrimary;
   }
 
+  /**
+   * Rows the draft occupies once the textarea word-wraps it at `width` cells.
+   *
+   * The count is measured by the editor's own edit buffer rather than
+   * estimated from the string: the textarea wraps over display cells and
+   * breaks on word boundaries, so a `ceil(codePoints / width)` estimate
+   * undercounts CJK text (two cells per character) and any draft whose word
+   * breaks leave rows short, and the box sized from the undercount scrolls
+   * wrapped rows out of view (issue #427). Measuring cannot drift from what
+   * the textarea draws, under this or any future wrap mode.
+   *
+   * The prospective width is passed explicitly, so the answer never depends
+   * on a layout pass having run: the height derived here decides the box,
+   * the box decides the layout, and the measurement reads neither back.
+   */
+  #wrappedRows(width: number): number {
+    // The empty editor shows the placeholder, which the measurement would
+    // count; the resting composer stays one row no matter how the placeholder
+    // would wrap.
+    if (this.draft.value.length === 0) return MIN_EDITOR_ROWS;
+    const measured = this.#editor.editorView.measureForDimensions(width, MEASURE_HEIGHT);
+    // Null only if the native view is gone; fall back to the smallest editor
+    // rather than guessing a wrap the buffer can no longer answer for.
+    return measured?.lineCount ?? MIN_EDITOR_ROWS;
+  }
+
   #resize(): void {
     const contentWidth = Math.max(1, this.#availableWidth - EDITOR_HORIZONTAL_CHROME);
     const rows = Math.min(
       MAX_EDITOR_ROWS,
-      Math.max(MIN_EDITOR_ROWS, wrappedRows(this.draft.value, contentWidth)),
+      Math.max(MIN_EDITOR_ROWS, this.#wrappedRows(contentWidth)),
     );
     this.#editor.height = rows;
     this.#box.height = rows + BOX_CHROME;
@@ -412,11 +444,4 @@ function menuRowText(
   // A cursor bar marks the free-text entry as somewhere to type, the same
   // affordance the wizard's model step used.
   return `${marker}   ${typed === '' ? row.label : typed}${selected ? '▏' : ''}`;
-}
-
-function wrappedRows(value: string, width: number): number {
-  if (value.length === 0) return 1;
-  return value
-    .split('\n')
-    .reduce((rows, line) => rows + Math.max(1, Math.ceil([...line].length / width)), 0);
 }
