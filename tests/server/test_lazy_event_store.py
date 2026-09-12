@@ -28,6 +28,8 @@ from server.events import (
     RoundFinishedData,
     RunEvent,
     RunStartedData,
+    _records_from_events,
+    _repair_legacy_sequences,
     make_event,
 )
 from server.journal import _canonical_execution_events
@@ -43,7 +45,8 @@ class _EagerEventStore(EventStore):
     """
 
     def _scan_unlocked(self):  # noqa: ANN202
-        return None
+        events, malformed_tail_offset = self._read_unlocked()
+        return _records_from_events(_repair_legacy_sequences(events)), malformed_tail_offset
 
 
 def _write_events(path: Path, events: list[RunEvent]) -> None:

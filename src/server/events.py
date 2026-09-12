@@ -14,6 +14,12 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError, model_validator
 
 from server.diagnostics import Diagnostic
+from server.event_index import (
+    EventIndexRecord,
+    load_event_index,
+    source_stat,
+    write_event_index,
+)
 from server.run_lifecycle import RunStatus
 
 if TYPE_CHECKING:
@@ -479,12 +485,7 @@ class EventStore:
         self._lock = threading.RLock()
         self._changed = threading.Condition(self._lock)
         self._parsed_records = 0
-        scanned = self._scan_unlocked()
-        if scanned is None:
-            events, self._malformed_tail_offset = self._read_unlocked()
-            self._records = _records_from_events(_repair_legacy_sequences(events))
-        else:
-            self._records, self._malformed_tail_offset = scanned
+        self._records, self._malformed_tail_offset = self._scan_unlocked()
         # A valid final record whose line was never terminated must gain its
         # newline before ``append`` writes anything after it.
         self._missing_tail_newline = self._malformed_tail_offset is None and _ends_without_newline(
@@ -661,36 +662,94 @@ class EventStore:
             event = event.model_copy(update={"sequence": record.header.sequence})
         record.event = event
 
-    def _scan_unlocked(self) -> tuple[list[_StoredRecord], int | None] | None:
-        """Index the log by byte range and header, or return None on any doubt.
+    def _scan_unlocked(self) -> tuple[list[_StoredRecord], int | None]:
+        """Index the log by byte range and header without a full-file allocation.
 
-        ``json.loads`` is a real parser, so the offsets and header fields it
-        yields are exact. Returning None sends construction to the fully eager
-        path, which is the only place a corrupt history is diagnosed.
+        An exact sidecar match restores the record index without parsing the
+        JSONL prefix. Otherwise this streams the source once and atomically
+        publishes a replacement cache. A record the cheap header scan cannot
+        classify is fully validated in place, so strict corruption detection
+        does not require retaining the other event payloads.
         """
         if not self.path.exists():
             return [], None
-        raw = self.path.read_bytes()
-        lines = raw.splitlines(keepends=True)
-        records: list[_StoredRecord] = []
+
+        cached = load_event_index(self.path)
+        if cached is not None:
+            try:
+                records: list[_StoredRecord] = []
+                while cached.records:
+                    records.append(_stored_record_from_index(cached.records.pop()))
+                records.reverse()
+            except ValueError:
+                records = []
+            else:
+                records, malformed_tail_offset, _safe_count, _safe_boundary = (
+                    self._scan_stream_unlocked(records, start=cached.boundary)
+                )
+                self._parse_eager_tail(records, malformed_tail_offset)
+                return records, malformed_tail_offset
+
+        initial_source = source_stat(self.path)
+        records, malformed_tail_offset, safe_count, safe_boundary = self._scan_stream_unlocked(
+            [], start=0
+        )
+        self._parse_eager_tail(records, malformed_tail_offset)
+        if initial_source is not None:
+            write_event_index(
+                self.path,
+                (_index_record_from_stored(records[index]) for index in range(safe_count)),
+                safe_count,
+                safe_boundary,
+                initial_source,
+            )
+        return records, malformed_tail_offset
+
+    def _scan_stream_unlocked(
+        self, records: list[_StoredRecord], *, start: int
+    ) -> tuple[list[_StoredRecord], int | None, int, int]:
+        """Extend ``records`` by streaming source lines beginning at ``start``."""
         malformed_tail_offset: int | None = None
-        offset = 0
-        last_sequence = 0
-        for index, line in enumerate(lines):
-            record_offset = offset
-            offset += len(line)
+        last_sequence = records[-1].header.sequence if records else 0
+        safe_count = len(records)
+        safe_boundary = start
+        for record_offset, line, is_final in _stream_lines(self.path, start=start):
             header_fields = _scan_header_fields(line)
             if header_fields is None:
                 # A final line holding complete JSON the header scan cannot
                 # classify must be judged by full validation, so it falls to
                 # the eager path; only a tail with no complete JSON prefix (a
                 # torn append) is set aside for repair.
-                if index != len(lines) - 1 or _starts_with_complete_json(line):
-                    return None
-                # Preserve access to earlier audit history if a process was
-                # interrupted during its final append.
-                malformed_tail_offset = record_offset
-                break
+                if is_final and not _starts_with_complete_json(line):
+                    # Preserve access to earlier audit history if a process was
+                    # interrupted during its final append.
+                    malformed_tail_offset = record_offset
+                    break
+                try:
+                    self._parsed_records += 1
+                    event = RunEvent.model_validate_json(line)
+                except ValidationError as error:
+                    if not is_final:
+                        raise
+                    raise _complete_invalid_tail_error(self.path, record_offset) from error
+                raw_sequence = event.sequence
+                sequence = raw_sequence if raw_sequence > last_sequence else last_sequence + 1
+                if sequence != raw_sequence:
+                    event = event.model_copy(update={"sequence": sequence})
+                last_sequence = sequence
+                records.append(
+                    _StoredRecord(
+                        header=_header_from_event(event, sequence),
+                        offset=record_offset,
+                        length=len(line),
+                        raw_sequence=raw_sequence,
+                        event=event,
+                    )
+                )
+                if line.endswith(b"\n"):
+                    safe_count = len(records)
+                    safe_boundary = record_offset + len(line)
+                continue
             raw_sequence, event_type, execution_id, chat_thread_id = header_fields
             sequence = raw_sequence if raw_sequence > last_sequence else last_sequence + 1
             last_sequence = sequence
@@ -707,11 +766,13 @@ class EventStore:
                     raw_sequence=raw_sequence,
                 )
             )
-        self._parse_eager_tail(raw, records, malformed_tail_offset)
-        return records, malformed_tail_offset
+            if line.endswith(b"\n"):
+                safe_count = len(records)
+                safe_boundary = record_offset + len(line)
+        return records, malformed_tail_offset, safe_count, safe_boundary
 
     def _parse_eager_tail(
-        self, raw: bytes, records: list[_StoredRecord], malformed_tail_offset: int | None
+        self, records: list[_StoredRecord], malformed_tail_offset: int | None
     ) -> None:
         """Validate the trailing window, raising on any record that fails.
 
@@ -719,11 +780,20 @@ class EventStore:
         never leave behind, so a validation failure on the final record is
         corruption to surface, not an interrupted write to set aside.
         """
-        for position in range(max(0, len(records) - _EAGER_TAIL_RECORDS), len(records)):
-            record = records[position]
+        start = max(0, len(records) - _EAGER_TAIL_RECORDS)
+        tail = records[start:]
+        if not tail:
+            return
+        with self.path.open("rb") as stream:
+            base = tail[0].offset
+            stream.seek(base)
+            raw = stream.read(tail[-1].offset + tail[-1].length - base)
+        for relative_position, record in enumerate(tail):
+            begin = record.offset - base
             try:
-                self._parse_record(record, raw[record.offset : record.offset + record.length])
+                self._parse_record(record, raw[begin : begin + record.length])
             except ValidationError as error:
+                position = start + relative_position
                 if position != len(records) - 1 or malformed_tail_offset is not None:
                     raise
                 raise _complete_invalid_tail_error(self.path, record.offset) from error
@@ -731,18 +801,14 @@ class EventStore:
     def _read_unlocked(self) -> tuple[list[RunEvent], int | None]:
         if not self.path.exists():
             return [], None
-        lines = self.path.read_bytes().splitlines(keepends=True)
         events: list[RunEvent] = []
-        offset = 0
-        for index, line in enumerate(lines):
-            record_offset = offset
-            offset += len(line)
+        for record_offset, line, is_final in _stream_lines(self.path, start=0):
             try:
                 self._parsed_records += 1
                 event = RunEvent.model_validate_json(line)
                 events.append(event)
             except ValidationError as error:
-                if index != len(lines) - 1:
+                if not is_final:
                     raise
                 if _starts_with_complete_json(line):
                     raise _complete_invalid_tail_error(self.path, record_offset) from error
@@ -750,6 +816,47 @@ class EventStore:
                 # interrupted during its final append.
                 return events, record_offset
         return events, None
+
+
+def _stream_lines(path: Path, *, start: int) -> Iterable[tuple[int, bytes, bool]]:
+    """Yield source lines with offsets and final-line identity using bounded memory."""
+    with path.open("rb") as stream:
+        stream.seek(start)
+        offset = start
+        line = stream.readline()
+        while line:
+            following = stream.readline()
+            yield offset, line, not following
+            offset += len(line)
+            line = following
+
+
+def _stored_record_from_index(record: EventIndexRecord) -> _StoredRecord:
+    """Restore a typed in-memory record from primitive validated cache fields."""
+    return _StoredRecord(
+        header=EventHeader(
+            sequence=record.sequence,
+            type=EventType(record.event_type),
+            execution_id=record.execution_id,
+            chat_thread_id=record.chat_thread_id,
+        ),
+        offset=record.offset,
+        length=record.length,
+        raw_sequence=record.raw_sequence,
+    )
+
+
+def _index_record_from_stored(record: _StoredRecord) -> EventIndexRecord:
+    """Project one scanned record into the sidecar's primitive representation."""
+    return EventIndexRecord(
+        offset=record.offset,
+        length=record.length,
+        raw_sequence=record.raw_sequence,
+        sequence=record.header.sequence,
+        event_type=record.header.type.value,
+        execution_id=record.header.execution_id,
+        chat_thread_id=record.header.chat_thread_id,
+    )
 
 
 def _scan_header_fields(line: bytes) -> tuple[int, EventType, str | None, str | None] | None:
