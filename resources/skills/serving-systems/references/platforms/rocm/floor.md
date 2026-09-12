@@ -85,6 +85,7 @@ One line per known pitfall; detail lives at the link.
 - A burst of large, never-repeated prefill shapes looks like the cause of multi-second server stalls but isn't (about two orders of magnitude too small). [`aiter.md#cold-dense-gemm-shape-resolution-is-milliseconds-not-the-cause-of-multi-second-stalls`](aiter.md#cold-dense-gemm-shape-resolution-is-milliseconds-not-the-cause-of-multi-second-stalls)
 - Custom HIP extensions rebuild from source on every fresh boot despite a persistent build-cache directory. [`boot-costs.md#the-hip-extension-loader-keys-staleness-on-path-and-mtime-not-content`](boot-costs.md#the-hip-extension-loader-keys-staleness-on-path-and-mtime-not-content)
 - `rocprof-compute` exits during its own startup dependency check. [`profiler.md#rocprof-compute-fails-its-own-dependency-check-on-this-image-rocprofv3-works`](profiler.md#rocprof-compute-fails-its-own-dependency-check-on-this-image-rocprofv3-works)
+- Server crashes at boot during decode graph capture with "operation not permitted when stream is capturing". [`aiter.md#a-host-sync-in-a-custom-kernels-dispatch-crashes-decode-graph-capture-at-boot`](aiter.md#a-host-sync-in-a-custom-kernels-dispatch-crashes-decode-graph-capture-at-boot)
 
 ## Where ROCm differs from CUDA
 
