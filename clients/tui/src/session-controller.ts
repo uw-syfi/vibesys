@@ -205,6 +205,8 @@ export class SocketSessionController implements SessionController {
   #experimentsRequestedAt: number | null = null;
   #experimentsLoadTraced = false;
   #paneFetch: Promise<void> | null = null;
+  /** The view to fetch once the in-flight pane query settles; see `#loadPane`. */
+  #paneRefreshWanted: PaneView | null = null;
   /** Single-flight guard for the supplemental design-log refresh. */
   #designFetch: Promise<void> | null = null;
   /** Single-flight guard for on-demand history backfill. */
@@ -624,11 +626,27 @@ export class SocketSessionController implements SessionController {
   /**
    * Re-runs the query behind whichever visualization is on screen. The pane
    * holds rendered text, so refreshing it is the same path as opening it.
+   *
+   * Single-flight with a remembered want. A request that lands mid-flight
+   * cannot ride the in-flight query: a different view's answer is discarded
+   * by the model's view guard, and a same-view answer may predate the change
+   * that prompted the refresh. The want is one view, latest wins, so a burst
+   * of requests during one flight collapses into a single follow-up fetch,
+   * like `#experimentRefreshPending`.
    */
   async #loadPane(view: PaneView): Promise<void> {
-    if (this.#paneFetch !== null) return this.#paneFetch;
+    if (this.#paneFetch !== null) {
+      this.#paneRefreshWanted = view;
+      return this.#paneFetch;
+    }
     const fetch = this.#requestPane(view).finally(() => {
       this.#paneFetch = null;
+      const wanted = this.#paneRefreshWanted;
+      this.#paneRefreshWanted = null;
+      // A pane closed while the query ran wants nothing anymore.
+      if (wanted !== null && this.#state.layout.right?.view === wanted) {
+        void this.#loadPane(wanted);
+      }
     });
     this.#paneFetch = fetch;
     return fetch;

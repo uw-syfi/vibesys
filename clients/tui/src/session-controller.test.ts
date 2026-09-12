@@ -1181,6 +1181,75 @@ describe('session controller', () => {
     expect(controller.state.layout.right).toBeNull();
   });
 
+  it('fetches the view opened while another view’s query is in flight', async () => {
+    const transport = new DeferredDesignTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.deferDesign = true;
+
+    const designOpen = controller.openPane('design');
+    const perfOpen = controller.openPane('perf');
+    // The perf pane is on screen and waiting; its query must not have been
+    // swallowed by the design query still in flight.
+    expect(controller.state.layout.right?.view).toBe('perf');
+    expect(controller.state.layout.right?.pending).toBe(true);
+    expect(transport.requests.filter(request => request.type === 'query.performance')).toHaveLength(
+      0,
+    );
+
+    transport.releaseDesign();
+    await Promise.all([designOpen, perfOpen]);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(transport.requests.filter(request => request.type === 'query.performance')).toHaveLength(
+      1,
+    );
+    expect(controller.state.layout.right?.view).toBe('perf');
+    expect(controller.state.layout.right?.pending).toBe(false);
+    expect(controller.state.layout.right?.content).toContain('Performance · total_ops_per_sec');
+  });
+
+  it('drops the superseded design answer rather than painting it over the perf pane', async () => {
+    const transport = new DeferredDesignTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.deferDesign = true;
+
+    const designOpen = controller.openPane('design');
+    const perfOpen = controller.openPane('perf');
+    transport.releaseDesign();
+    await Promise.all([designOpen, perfOpen]);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.layout.right?.view).toBe('perf');
+    expect(controller.state.layout.right?.content).toContain('Performance · total_ops_per_sec');
+    expect(controller.state.layout.right?.content).not.toContain('Design changes by round');
+  });
+
+  it('coalesces same-view refreshes during a fetch into one follow-up', async () => {
+    const transport = new DeferredDesignTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.deferDesign = true;
+
+    const designOpen = controller.openPane('design');
+    // Two rounds finish while the query is still running. The in-flight
+    // answer predates both, so one refetch follows, not one per event.
+    transport.emit(event(9, 'round_finished'));
+    transport.emit(event(10, 'round_finished'));
+    const before = designQueries(transport);
+
+    transport.releaseDesign();
+    await designOpen;
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    expect(designQueries(transport) - before).toBe(1);
+
+    transport.releaseDesign();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    expect(controller.state.layout.right?.pending).toBe(false);
+    expect(designQueries(transport) - before).toBe(1);
+  });
+
   it('closes the pane without disturbing the chat', async () => {
     const transport = new FakeTransport([], [], {
       question: 'why?',
@@ -2043,6 +2112,86 @@ class DeferredExperimentsTransport implements ServerTransport {
   }
 }
 
+/**
+ * A backend whose design query the test holds open, so a slow /design can
+ * overlap the next pane command the way the live git-backed query does.
+ * Everything else answers immediately, including the perf query.
+ */
+class DeferredDesignTransport implements ServerTransport {
+  readonly requests: RequestInput[] = [];
+  /** Holds `query.design` answers until the test releases them. */
+  deferDesign = false;
+  readonly #pendingDesign: Array<() => void> = [];
+  #message: ((message: ServerMessage) => void) | null = null;
+
+  request(input: RequestInput): Promise<ProtocolResponse> {
+    this.requests.push(input);
+    const base = {
+      protocol_version: 1 as const,
+      request_id: 'request',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: true as const,
+    };
+    if (input.type === 'query.snapshot') {
+      return Promise.resolve({...base, snapshot: {run_id: 'run', status: 'running', sequence: 0}});
+    }
+    if (input.type === 'query.experiments') {
+      return Promise.resolve({...base, experiments: [], experiments_ready: true});
+    }
+    if (input.type === 'query.performance') {
+      return Promise.resolve({
+        ...base,
+        performance: [
+          {
+            round: 1,
+            perf_metric: 1200,
+            perf_unit: 'total_ops_per_sec',
+            passed: true,
+            profile_skipped: false,
+          },
+          {
+            round: 2,
+            perf_metric: 2400,
+            perf_unit: 'total_ops_per_sec',
+            passed: true,
+            profile_skipped: false,
+          },
+        ],
+        events: [],
+      });
+    }
+    if (input.type === 'query.design') {
+      const response = {...base, design: [], design_ready: true};
+      if (!this.deferDesign) return Promise.resolve(response);
+      return new Promise(resolve => this.#pendingDesign.push(() => resolve(response)));
+    }
+    return Promise.resolve(base);
+  }
+
+  releaseDesign(): void {
+    const pending = this.#pendingDesign.shift();
+    if (!pending) throw new Error('No pending design request');
+    pending();
+  }
+
+  subscribe(
+    _afterSequence: number,
+    onMessage: (message: ServerMessage) => void,
+    _onDisconnect: (error: Error) => void,
+  ): Promise<EventSubscription> {
+    this.#message = onMessage;
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  emit(runEvent: RunEvent): void {
+    this.#message?.({type: 'event', event: runEvent});
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
 class DeferredChatTransport implements ServerTransport {
   readonly requests: RequestInput[] = [];
   readonly #pending: Array<(response: ProtocolResponse) => void> = [];
@@ -2283,6 +2432,10 @@ function roundFinished(sequence: number, round: number): RunEvent {
 
 function perfRequests(transport: FakeTransport): number {
   return transport.requests.filter(request => request.type === 'query.performance').length;
+}
+
+function designQueries(transport: DeferredDesignTransport): number {
+  return transport.requests.filter(request => request.type === 'query.design').length;
 }
 
 function entry(
