@@ -14,6 +14,7 @@ import {hasRunEnded} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import type {ConversationEntry, SessionState} from '../session-model.js';
 import {visibleConversation} from '../session-model.js';
+import {fillLayer} from './box-fill.js';
 import {promptPreview, toolCallPreview, toolResultPreview} from './previews.js';
 import {
   conversationRole,
@@ -386,19 +387,18 @@ export class ConversationView {
     // restated the agent and the round above every line.
     const opensRun = previous === undefined || !sameSpeaker(previous, entry);
     const borderSides: ('top' | 'left')[] = [];
-    // A carded entry gets a rule on its top edge instead of a four-sided
-    // border (#565): it separates one entry from the next at a fraction of the
-    // row cost, with no bottom border and no blank margin row to hold the gap
-    // open. It is drawn only where the speaker changes: consecutive entries
-    // from one agent are one block, and a divider inside that block separates
-    // nothing.
+    // An entry that opens a run gets a rule on its top edge instead of a
+    // four-sided border (#565): it separates one run from the next at a
+    // fraction of the row cost, with no bottom border and no blank margin row
+    // to hold the gap open. It is drawn only on the opener: consecutive
+    // entries from one speaker are one block, and a divider inside that block
+    // separates nothing.
     //
-    // A bare entry never draws it, opener or not. #620 demoted lifecycle
-    // chatter to frameless tinted lines, and handing one a rule would undo that
-    // demotion; only entries that were cards trade a border for a divider here.
-    // Losing the repeated heading is the density win, keeping the frame off is
-    // #620's, and the two compose.
-    if (opensRun && !bare) borderSides.push('top');
+    // #620's bare entries draw it too. The rule is the separator between runs,
+    // and a run of lifecycle lines needs separating from the run above it as
+    // much as a card does. #620's demotion is about the frame around an entry,
+    // which a bare entry still does not draw.
+    if (opensRun) borderSides.push('top');
     // The cursor. An entry inside a run has no heading to carry a "▸ " marker,
     // so selection moves out of the heading and onto a rule down the entry's
     // left edge, which every entry can draw and which costs no row. The column
@@ -418,13 +418,6 @@ export class ConversationView {
       // does), and a card padding on top of that was a second, inconsistent
       // inset.
       ...(selected ? {} : {paddingLeft: 1}),
-      // #620's margin row above a bare status entry is separation chrome, so
-      // it is drawn where the divider would be: once, on the run opener. Inside
-      // a run it would be a blank row splitting one speaker's block.
-      marginTop: bare && entry.kind === 'status' && opensRun ? 1 : 0,
-      // A bare entry draws no frame, so its role tint goes straight on the
-      // card rather than on a border.
-      ...(bare ? {backgroundColor: palette.background} : {}),
       // OpenTUI turns a border back on if `borderStyle` or `borderColor` is
       // passed beside `border: false`, so an entry that draws neither rule has
       // to omit both (tui-conventions.md).
@@ -464,6 +457,12 @@ export class ConversationView {
             }
           : {}),
     });
+    // A bare entry draws no frame, so its role tint is what marks it as one
+    // agent's line. It goes on a layer inside the card rather than on the card
+    // itself: an opener draws a rule, and a `backgroundColor` on a bordered box
+    // paints the border row with it (tui-conventions.md, "a fill lives on an
+    // inner box").
+    if (bare) fillLayer(card, `event-${entry.id}-fill`, palette.background);
     if (opensRun) {
       const heading = new BoxRenderable(this.renderer, {
         id: `event-${entry.id}-heading`,
