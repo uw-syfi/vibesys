@@ -51,7 +51,7 @@ The divergence is **variable accepted length**, which is a shape change per step
 | Backend | Strategy |
 |:--|:--|
 | `cuda` | Capture per `(batch bucket, k)` shape; pad up when accept is shorter |
-| `rocm` | As cuda |
+| `rocm` | As cuda. Validated end to end (NEXTN/MTP) for a checkpoint shipping its own co-trained draft head; see [`platforms/`](../platforms/) for the recipe, k-choice, and the checkpoint's draft-model load-path pitfalls |
 | `trainium` | Keep accepted length out of the graph shape entirely — verify at fixed width `k+1` and commit by masking. NxD's supported path is **fused speculation** (`fused_speculation`), which compiles drafter and target together and handles variable accept length internally; it is also a prerequisite for `async_mode` |
 | `metal` | No capture step; the variable shape is not a problem, and the cost model differs — evaluate whether spec decoding pays at all before building it |
 

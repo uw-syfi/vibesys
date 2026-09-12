@@ -70,9 +70,11 @@ Location: `$SERVE_REPOS/TensorRT-LLM/cpp/tensorrt_llm/kernels/helixKernels.cu`, 
 
 **DP-attention + EP-MoE** is the modern default for fine-grained MoE because attention is relatively cheap while MoE FFN is the expensive part — sharding only the experts minimizes collective volume.
 
-Whole-model TP is a validated alternative when EP has not been exercised on the target platform. TP=4 across four 128 GB devices is the validated configuration for a 212 GB resident, 512-expert MoE model: under TP each expert is sliced on its intermediate dim (not assigned whole to a rank), so a plain TP layout scales a fine-grained MoE using all-reduce instead of EP's all-to-all. Expert parallelism is candidate, untested on this platform; what would verify it is a paired comparison of EP's all-to-all dispatch against this TP layout at the same expert count and hardware.
+Whole-model TP is a validated alternative when EP has not been exercised on the target platform. TP=4 across four 128 GB devices is the validated configuration for a 212 GB resident, 512-expert MoE model: under TP each expert is sliced on its intermediate dim (not assigned whole to a rank), so a plain TP layout scales a fine-grained MoE using all-reduce instead of EP's all-to-all.
 
-Status: verified (TP=4 configuration, validated as a working configuration, not individually ablated against other TP degrees); candidate (EP row). Scope: `rocm`, MI300A, sglang-v0.5.18-rocm700-mi30x, 2026-09-10, job 631025.
+Expert parallelism: **blocked**, not refuted, on this platform. EP requires its own checkpoint layout (whole experts per rank, not a column shard of every expert), and the existing TP-sharded fast-path artifact does not provide it; booting EP from the original, unsharded checkpoint instead exhausted per-rank host memory during rank-scheduler initialization, reproduced on two independent nodes. Analytical prediction, not yet measured: roughly 6 to 14 percent TPOT improvement at batch 16 versus this TP layout. What would verify it is an EP-aware sharded artifact plus the same paired comparison against this TP layout at the same expert count and hardware; see [`platforms/`](../platforms/) for the load-path detail.
+
+Status: verified (TP=4 configuration, validated as a working configuration, not individually ablated against other TP degrees); blocked (EP row: boot-time OOM under the current load path, analytical prediction not yet measured). Scope: `rocm`, MI300A, sglang-v0.5.18-rocm700-mi30x, 2026-09-10, job 631025 (TP=4); 2026-09-12, job 633509 (EP boot failure).
 
 ## Collective primitives
 

@@ -68,6 +68,16 @@ argv:
 
 Flag set sourced from SGLang's `amd_gpu.mdx` docs and the Qwen3.5 deployment snippet's MI355X+MXFP4 branch. That source recipe's `--disable-radix-cache` is deliberately **not** applied here: it exists for FP4 kernels on MI355X (gfx950), and this workload is multi-turn and depends on prefix reuse, which radix caching provides.
 
+### Optional: NEXTN speculative decoding
+
+Accepted on top of the recipe above, for a per-token-latency win at the cost of a slower boot. See [`speculative-decoding.md`](speculative-decoding.md) for the full argv, the k=3 choice, and the results.
+
+- `--speculative-algorithm NEXTN --speculative-eagle-topk 1 --speculative-num-steps 3 --speculative-num-draft-tokens 4`: NEXTN using the checkpoint's own MTP head, k=3.
+- `--enable-linear-replayssm-spec`: fast per-slot mamba-state replay for the hybrid Gated-DeltaNet layers, valid because NEXTN is a linear (topk=1) draft chain.
+- `--speculative-draft-model-path <original checkpoint> --speculative-draft-load-format auto`: mandatory, not optional, on this checkpoint's load path; see [`speculative-decoding.md`](speculative-decoding.md) pitfalls.
+
+Adds 2.6 to 2.8x to boot time (about 800 to 900 s versus about 300 s): the draft head loads from the unsharded checkpoint and boot captures extra decode graphs for the draft path. A deployment-time cost only.
+
 ## Known pitfalls
 
 One line per known pitfall; detail lives at the link.
@@ -86,6 +96,8 @@ One line per known pitfall; detail lives at the link.
 - Custom HIP extensions rebuild from source on every fresh boot despite a persistent build-cache directory. [`boot-costs.md#the-hip-extension-loader-keys-staleness-on-path-and-mtime-not-content`](boot-costs.md#the-hip-extension-loader-keys-staleness-on-path-and-mtime-not-content)
 - `rocprof-compute` exits during its own startup dependency check. [`profiler.md#rocprof-compute-fails-its-own-dependency-check-on-this-image-rocprofv3-works`](profiler.md#rocprof-compute-fails-its-own-dependency-check-on-this-image-rocprofv3-works)
 - Server crashes at boot during decode graph capture with "operation not permitted when stream is capturing". [`aiter.md#a-host-sync-in-a-custom-kernels-dispatch-crashes-decode-graph-capture-at-boot`](aiter.md#a-host-sync-in-a-custom-kernels-dispatch-crashes-decode-graph-capture-at-boot)
+- Speculative decoding's draft model doesn't find MTP weights unless pointed explicitly at the original checkpoint, with an explicit draft load format too. [`speculative-decoding.md#the-draft-head-has-no-sharded-fast-path-artifact-point-the-draft-at-the-original-checkpoint`](speculative-decoding.md#the-draft-head-has-no-sharded-fast-path-artifact-point-the-draft-at-the-original-checkpoint)
+- Booting expert parallelism from the unsharded checkpoint OOM-kills a rank's scheduler during initialization. [`weight-loading.md#the-tp-sharded-loader-has-no-layout-check-ep-boots-from-the-unsharded-checkpoint-and-ooms`](weight-loading.md#the-tp-sharded-loader-has-no-layout-check-ep-boots-from-the-unsharded-checkpoint-and-ooms)
 
 ## Where ROCm differs from CUDA
 
@@ -104,3 +116,4 @@ One line per known pitfall; detail lives at the link.
 - [`weight-loading.md`](weight-loading.md): MoE weight materialization, sharded-artifact fast path
 - [`boot-costs.md`](boot-costs.md): one-time boot/warmup costs and the HIP extension cache staleness pitfall
 - [`profiler.md`](profiler.md): rocprofv3 / rocprof-compute
+- [`speculative-decoding.md`](speculative-decoding.md): NEXTN/MTP recipe, k-choice, and load-path pitfalls

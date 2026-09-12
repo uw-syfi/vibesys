@@ -37,6 +37,14 @@ Status: verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job 623402.
 
 Each Gated-DeltaNet layer carries a per-request conv state (kernel 4) and an SSM state; these live in a Mamba cache alongside the paged KV cache the 15 full-attention layers use. See [`ssm-hybrid.md`](ssm-hybrid.md) for the hybrid cache model and [`../algorithms/heterogeneous-kv-cache.md`](../algorithms/heterogeneous-kv-cache.md) for the allocator that must size both pools together.
 
+### Speculative decoding
+
+The checkpoint ships its own MTP draft head: `mtp.fc.weight` plus a full 512-expert MoE at `mtp.layers.0` (`mtp_num_hidden_layers` 1), matching a target layer's width and expert count. No separate draft model is needed. NEXTN (MTP) speculative decoding with this head, k=3 draft steps (4 verify tokens), `eagle-topk` 1, greedy verify, and the linear-replay SSM fast path for the hybrid Gated-DeltaNet layers is accepted at both an uncapped and a 16-session concurrency cap; see the Measured section below for the numbers and [`platforms/`](../platforms/) for the accepted launch flags and the checkpoint's load-path pitfalls (the draft head is absent from this model's TP-sharded fast-path artifact).
+
+Mechanism: decode-step time here is latency-bound on the MoE kernel's per-step activation gather, not on raw arithmetic (see "Decode-step time..." below), and that per-step cost grows only sublinearly with the number of rows verified together (about 26 ms at 16 rows, calibrated exponent ~0.31, so M rows cost roughly `26*(M/16)^0.31` ms; see [`../tooling/performance-modeling.md`](../tooling/performance-modeling.md) for the padding-floor mechanism behind this scaling). Verifying k+1 rows per session per step is therefore nearly free next to running k+1 separate decode steps, and every accepted draft token amortizes that one verify step over more emitted tokens. Speculative decoding lowers the per-token time floor; it does not change bandwidth efficiency or the measured-time-over-roofline ratio recorded elsewhere in this file.
+
+Status: verified (accepted at two concurrencies; mechanism explained by the calibrated sublinear-scaling exponent, itself flagged low-confidence in the source memo). Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633511 (uncapped), 633512 (16-session cap).
+
 ## Pitfalls
 
 ```
@@ -90,6 +98,21 @@ Status: verified. Stamp: sglang-v0.5.18 fork, benchmark_version 4, 2026-09-11, j
 Decode-step time is dominated by the MoE expert FFN, not by the mixer or the collectives: MoE work accounts for roughly three-fifths of decode-step device time, with most of the remainder in the model's other dense (non-expert) GEMMs; collective and mixer time is small by comparison. This was confirmed by a kernel-level profile, reproduced twice. The specific kernel names and per-component percentages are implementation details of the selected backend's MoE and GEMM kernel choice; see [`platforms/`](../platforms/) for the selected backend's kernel notes, not repeated here. With the fused HIP MoE kernel in place, MoE is still the largest decode-step term. A counter-level profile alone could not localize the limiter (neither bandwidth- nor ALU-bound by its counters); in-kernel phase timing then showed it is latency-bound on the per-step scattered activation gather inside mostly-padded 16-row expert blocks, with the MFMA instructions issuing at their native rate, not on the decode arithmetic that feeds them; see [`platforms/`](../platforms/) for the phase breakdown and the counters that separate the two.
 
 Status: verified (three-fifths-of-decode-time finding reproduced twice; fused-kernel latency-bound finding verified once). sglang-v0.5.18-rocm700-mi30x, 2026-09-11.
+
+### Speculative decoding (NEXTN, k=3), measured
+
+Paired against the accepted fused-kernel defaults (no speculative decoding), 5 reps per side pooled, gates 13/13 on every rep of every side:
+
+| Concurrency | TPOT (median) | pooled p95 TTFT turn2+ | accept length (median, of 4 draft tokens) |
+|:--|--:|--:|--:|
+| Uncapped, 48 sessions | 70.86 -> 38.27 ms (-46.0%) | 815.6 -> 759.0 ms (-6.9%) | 2.89 |
+| 16-session cap | 22.10 -> 13.49 ms (-39.0%) | 423.6 -> 451.8 ms (+6.7%) | 2.84 |
+
+The 16-session-cap p95 TTFT row uses the steady-state reference reps for the baseline side; see [`../tooling/serving-benchmark.md`](../tooling/serving-benchmark.md) for why one rep is excluded from that reference and reported separately rather than averaged in. k=3 was chosen over a k=2 probe by the lower-median-TPOT rule, both having cleared gates and a 10 percent p95 TTFT budget; see [`platforms/`](../platforms/) for the k=2/k=3 comparison.
+
+Boot cost: 2.6 to 2.8x longer than the non-speculative boot (about 800 to 900 s versus about 300 s), because the draft head loads from the unsharded checkpoint and boot captures extra decode graphs for the draft path. A deployment-time cost only; it does not affect the serving-time numbers above.
+
+Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633511 (uncapped), 633512 (16-session cap).
 
 ### Outcome: resident-fp8 / MXFP4-dequant hybrid MoE weights (superseded)
 

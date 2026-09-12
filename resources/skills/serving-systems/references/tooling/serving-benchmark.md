@@ -187,6 +187,14 @@ Use pooled per-turn quantiles (computed across all reps' turns together) as the 
 
 Scope: any engine, backend-independent. Status: verified (measured). Stamp: sglang-v0.5.18 fork, benchmark_version 2, 2026-09-11, job 632584.
 
+### An unexplained single-rep stall: report pooled quantiles with and without it, gate on the steady-state reps
+
+A reference side can show a one-rep server-side stall with no established cause: the client keeps sending on schedule throughout, the server produces zero scheduler log activity for the stall's duration, then drains a real backlog once it clears. One measured case: an 82 second scheduler blackout in one rep of five, that rep's own p95 TTFT turn2+ at 68.5 s and `schedule_bound_fraction` down to 0.687, against every other rep and the rest of the stalled rep matching steady state.
+
+Practice: report both pooled-quantile numbers, across all reps and across the steady-state reps only, and use the steady-state figure as the reference for any accept/reject rule. Do not drop the stalled rep from the record: a rep that still passes its own correctness gate despite a latency stall is real signal, not noise to discard, and averaging it into the accept/reject numbers would hide a real event rather than surface it.
+
+Scope: any engine, backend-independent. Status: verified (measured; root cause of the stall itself unresolved). Stamp: sglang-v0.5.18 fork, benchmark_version 4, 2026-09-12, job 633512.
+
 ## Reading a benchmark report (skeptically)
 
 Checklist before trusting someone's numbers:
