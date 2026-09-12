@@ -47,6 +47,10 @@ Rule: for TTFT-weighted multi-turn workloads with spec decode, turn the overlap 
 
 Status: accepted. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs 633754 (48 sessions uncapped) and 633755 (16-session cap), 5 reps per side each, gates 13/13 every rep.
 
+## Interaction: PyTorch TunableOp tuned dense GEMM
+
+Each draft step (`draft_decode`) reruns the same dense projections and the LM head as the verify step, at its own M (batch size, not batch size x draft tokens). A TunableOp table covering the CUDA-graph capture set's M values (see [`floor.md`](floor.md) and [`aiter-tunableop.md`](aiter-tunableop.md)) therefore speeds up all `k` draft steps as well as the verify step, not just the one call a naive estimate would count: this multiplication is most of why the measured end-to-end TPOT gain from tuning comes out well above a verify-only prediction.
+
 ## Pitfalls
 
 ### The draft head has no sharded fast-path artifact; point the draft at the original checkpoint

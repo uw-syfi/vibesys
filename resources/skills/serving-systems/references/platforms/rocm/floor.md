@@ -78,6 +78,18 @@ Accepted on top of the recipe above, for a per-token-latency win at the cost of 
 
 Without a draft-only sharded artifact, adds 2.6 to 2.8x to boot time (about 800 to 900 s versus about 300 s): the draft head loads from the unsharded checkpoint and boot captures extra decode graphs for the draft path. With the draft-only sharded artifact (see [`weight-loading.md`](weight-loading.md)), spec-decode boot is about 365 s (about 6 min) instead of about 866 s (about 14.5 min). A deployment-time cost only either way; use the sharded artifact when one has been produced for the checkpoint in use.
 
+### Optional: PyTorch TunableOp tuned dense GEMM
+
+Accepted on top of NEXTN k=3 with the overlap scheduler off (above): median TPOT 38.05 to 22.86 ms at 48 uncapped sessions (-39.9 percent) and 14.31 to 12.44 ms at a 16-session cap (-13.1 percent), pooled p95 TTFT turn2+ flat at both, exact numerics, accept_len unchanged. See [`aiter.md`](aiter.md#pytorch-tunableop-accepted-for-the-dense-projections-and-lm-head) and [`aiter-tunableop.md`](aiter-tunableop.md) for the tuning recipe, the per-device filename pitfall, and the mechanism.
+
+Environment (serving):
+
+- `PYTORCH_TUNABLEOP_ENABLED=1`
+- `PYTORCH_TUNABLEOP_TUNING=0`: replay only; tune nothing new at serving time.
+- `PYTORCH_TUNABLEOP_FILENAME=<path with %d>`: one read-only tuned table per device ordinal, built ahead of time. See [`aiter-tunableop.md`](aiter-tunableop.md) for the per-device substitution rule and why a single shared path voided the first acceptance attempt.
+
+Tuned-table step (one-time, before deployment): tune in a pure-torch process with `PYTORCH_TUNABLEOP_TUNING=1` over every M value the CUDA-graph capture set will dispatch, then copy the resulting per-rank CSVs into the serving image read-only. The table's validator header pins the exact PyTorch/ROCm/hipBLASLt/GPU stack and is silently ignored on a mismatch; regenerate on any change to that stack.
+
 ## Known pitfalls
 
 One line per known pitfall; detail lives at the link.
@@ -93,7 +105,7 @@ One line per known pitfall; detail lives at the link.
 - A weight-streaming kernel sits far below HBM bandwidth but MemUnitStalled is near zero and VALU busy is under 50 percent. [`aiter.md#fused-mxfp4-moe-kernel-sits-well-below-hbm-bandwidth-but-is-not-memory-bound`](aiter.md#fused-mxfp4-moe-kernel-sits-well-below-hbm-bandwidth-but-is-not-memory-bound)
 - The fused MXFP4 MoE kernel is still 56 to 96x its weight-bandwidth floor at prefill M (337-919 tokens), same issue-latency mechanism as at decode M; no alternative kernel beats it there either. [`aiter.md#prefill-m-microbenchmark-floor-gap-confirmed-at-higher-m-dispatch-threshold-refined`](aiter.md#prefill-m-microbenchmark-floor-gap-confirmed-at-higher-m-dispatch-threshold-refined)
 - Log fills with "not found tuned config ... will use default config" for dense GEMMs. [`aiter.md#aiters-tuned-gemm-table-misses-every-dense-projection-on-mi300a`](aiter.md#aiters-tuned-gemm-table-misses-every-dense-projection-on-mi300a)
-- A TunableOp-tuned dense-GEMM table only speeds up one TP rank; the others read nothing and the step waits for the slowest rank. [`aiter.md#pytorch-tunableop-full-coverage-tuning-and-its-per-device-filename-pitfall`](aiter.md#pytorch-tunableop-full-coverage-tuning-and-its-per-device-filename-pitfall)
+- A TunableOp-tuned dense-GEMM table only speeds up one TP rank; the others read nothing and the step waits for the slowest rank. [`aiter-tunableop.md#per-device-filename-substitution-voided-the-first-acceptance-attempt`](aiter-tunableop.md#per-device-filename-substitution-voided-the-first-acceptance-attempt)
 - A burst of large, never-repeated prefill shapes looks like the cause of multi-second server stalls but isn't (about two orders of magnitude too small). [`aiter.md#cold-dense-gemm-shape-resolution-is-milliseconds-not-the-cause-of-multi-second-stalls`](aiter.md#cold-dense-gemm-shape-resolution-is-milliseconds-not-the-cause-of-multi-second-stalls)
 - Custom HIP extensions rebuild from source on every fresh boot despite a persistent build-cache directory. [`boot-costs.md#the-hip-extension-loader-keys-staleness-on-path-and-mtime-not-content`](boot-costs.md#the-hip-extension-loader-keys-staleness-on-path-and-mtime-not-content)
 - `rocprof-compute` exits during its own startup dependency check. [`profiler.md#rocprof-compute-fails-its-own-dependency-check-on-this-image-rocprofv3-works`](profiler.md#rocprof-compute-fails-its-own-dependency-check-on-this-image-rocprofv3-works)

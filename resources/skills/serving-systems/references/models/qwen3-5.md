@@ -134,6 +134,19 @@ Accepted for TTFT-weighted multi-turn workloads; keep the overlap scheduler on f
 
 Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633754 (uncapped), 633755 (16-session cap).
 
+### PyTorch TunableOp tuned dense GEMM, on top of NEXTN k=3 + overlap off, measured
+
+Paired against the NEXTN k=3 + `--disable-overlap-schedule` configuration above (TunableOp off vs on, identical flags otherwise), 5 reps per side pooled, gates 13/13 on every rep of every side:
+
+| Concurrency | TPOT (median) | pooled p95 TTFT turn2+ | accept length (median, of 4) |
+|:--|--:|--:|--:|
+| Uncapped, 48 sessions | 38.05 -> 22.86 ms (-39.9%) | 499.0 -> 493.3 ms (-1.1%) | 2.845 vs 2.871 |
+| 16-session cap | 14.31 -> 12.44 ms (-13.1%) | 331.5 -> 334.4 ms (+0.9%) | 2.841 vs 2.848 |
+
+Accepted as the default on top of the base configuration above. p95 TTFT is unchanged at both concurrencies (well within each side's own rep-to-rep spread) because prefill runs eagerly outside CUDA-graph capture and almost never lands on one of the tuned exact-M shapes, so the tuned table cannot touch the term that dominates p95 TTFT either way. See [`platforms/`](../platforms/) for the tuning recipe, the per-device filename pitfall the first acceptance attempt hit, and the mechanism behind why the TPOT gain exceeds a single-forward prediction.
+
+Status: accepted. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633839 (uncapped), 633841 (16-session cap).
+
 ### Turn-2+ TTFT decomposition, overlap scheduler off, measured
 
 With the overlap scheduler off (previous section), a five-bucket, request-joined split of turn-2+ TTFT shows queue wait is near zero and rare (zero `NO_TOKEN` admission-budget rejections over 16830 iterations), and the single-request prefill+draft-extend forward is the dominant term, not the queue:

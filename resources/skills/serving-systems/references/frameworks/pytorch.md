@@ -82,6 +82,10 @@ Status:  verified (reproduced across two multi-rank jobs with the wrong
          PyTorch-internal, not sglang- or rocm-specific).
 ```
 
+### Validated end to end on rocm
+
+The fix above (one read-only results file per device ordinal) was validated end-to-end on a real multi-device tensor-parallel server on rocm: a full-coverage TunableOp table over a model's dense projections and LM head cut median decode-step latency (TPOT) by up to about 40 percent at exact numerics, with the tuned shapes' own correctness unchanged from the untuned baseline. See [`platforms/`](../platforms/) for the per-backend numbers and recipe; the substitution rule and the win itself are both engine- and backend-agnostic, so expect a comparable result on any backend where TunableOp covers a serving-relevant GEMM shape.
+
 ## torch.compile for serving
 
 Two compile modes relevant to serving:

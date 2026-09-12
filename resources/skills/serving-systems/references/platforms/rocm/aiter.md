@@ -284,31 +284,15 @@ Status:  verified (mechanism read from the lookup key, plus measured
          633740.
 ```
 
-### PyTorch TunableOp full-coverage tuning, and its per-device filename pitfall
+### PyTorch TunableOp: accepted for the dense projections and LM head
 
-A PyTorch TunableOp sweep over every M value the CUDA-graph capture set dispatches (36 M values across the target-verify, draft-decode, draft-extend, and gate-probe capture sets, times the model's six per-rank dense-projection shapes plus the LM head, which shares one cache key with the dense shapes) tunes all 252 cells, 0 misses. This is a different tuning path from the aiter tuned-GEMM gap above: TunableOp tunes at the `F.linear`/`torch.matmul` dispatch level and does not depend on aiter's own (gfx, cu_num)-keyed lookup table, so it recovers the gap that pitfall describes without an aiter-side config regeneration. Per-forward dense GEMM plus LM head time drops from about 23 ms to 2.6 to 6.2 ms across the sampled M values (1.32x to 18.65x per cell on GPU kernel time); max abs diff 9.77e-4 (one bf16 ULP) against the untuned baseline.
+A PyTorch TunableOp sweep over every M value the CUDA-graph capture set dispatches (36 M values across the target-verify, draft-decode, draft-extend, and gate-probe capture sets, times the model's six per-rank dense-projection shapes plus the LM head, which shares one cache key with the dense shapes) tunes all 252 cells, 0 misses, cutting per-forward dense GEMM plus LM head time from about 23 ms to 2.6-6.2 ms across the sampled M values, at bf16-rounding-level correctness.
 
-```
-Symptom: loading this table via PYTORCH_TUNABLEOP_ENABLED=1
-         PYTORCH_TUNABLEOP_TUNING=0 PYTORCH_TUNABLEOP_FILENAME=<one path>
-         on a TP=4 server only speeds up rank 0; the other ranks log a
-         could-not-open error or run untuned from an empty file, and the
-         TP step waits for the slowest rank, so p95 latency gets worse,
-         not better, than the untuned baseline.
-Cause:   PyTorch substitutes the device ordinal into the filename; see
-         [`../../frameworks/pytorch.md`](../../frameworks/pytorch.md) for
-         the substitution rule and the unconditional at-exit rewrite,
-         which apply here unchanged.
-Fix:     write one file per rank (<name>0.<ext> through <name>3.<ext>) up
-         front, make them read-only, and gate the launch on every rank
-         logging a successful load with no could-not-open line.
-Scope:   rocm, gfx942, sglang TP=4, this image's torch 2.9.0a0.
-Status:  verified (mechanism per pytorch.md; reproduced here with the
-         wrong file layout). sglang-v0.5.18-rocm700-mi30x, 2026-09-12,
-         jobs 633800, 633801.
-```
+This is **accepted** as the default on top of NEXTN k=3 speculative decoding with the overlap scheduler off: median TPOT -39.9 percent at 48 uncapped sessions (38.05 to 22.86 ms) and -13.1 percent at a 16-session cap (14.31 to 12.44 ms); pooled p95 TTFT turn2+ is flat at both (prefill batches almost never land on a tuned exact M); gates 13/13 every rep (20 reps); accept_len unchanged. See [`aiter-tunableop.md`](aiter-tunableop.md) for the full tuning recipe, the per-device filename pitfall that voided the first acceptance attempt, and the mechanism behind the measured TPOT/TTFT split.
 
-Scope: rocm, gfx942, MI300A, this image's stack (PyTorch 2.9.0, ROCm 7.0.0.0-38-9428210, hipBLASLt 100000-976b9c4a87), TP=4 per-rank shapes of this checkpoint. Status: candidate for the serving-level effect (the acceptance pair above voided on the filename pitfall before producing a valid result); the tuning-table measurement itself is verified. Do not claim acceptance. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, job 633793 (tuning), jobs 633800/633801 (voided acceptance attempt).
+Env vars: `PYTORCH_TUNABLEOP_ENABLED=1`, `PYTORCH_TUNABLEOP_TUNING=0`, one read-only tuned table per device ordinal; see [`floor.md`](floor.md).
+
+Scope: rocm, gfx942, MI300A, this image's stack (PyTorch 2.9.0a0, ROCm 7.0.0.0-38-9428210, hipBLASLt 100000-976b9c4a87), TP=4 per-rank shapes of this checkpoint and its MTP draft. Status: accepted. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, jobs 633793 (tuning), 633839 (48 sessions), 633841 (16-session cap).
 
 ### Cold dense-GEMM shape resolution is milliseconds, not the cause of multi-second stalls
 
@@ -476,6 +460,7 @@ Writing new CDNA kernels (HIP, CK templates) is outside this collection. This fi
 
 ## See also
 
+- [`aiter-tunableop.md`](aiter-tunableop.md): PyTorch TunableOp tuned dense GEMM, full recipe and accepted numbers
 - [`floor.md`](floor.md): where the fused kernel sits in the optimization floor, and the validated launch recipe
 - [`hardware.md`](hardware.md): CDNA3/CDNA4 precision support and GFX IDs
 - [`unified-memory.md`](unified-memory.md): the mem_fraction_static x0.85 multiplier this library applies, and its consequence for save-time memory math
