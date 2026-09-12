@@ -12,6 +12,7 @@ import {hasActiveAgentTiming, type RoundState, roundAgentElapsedMs} from '@vibes
 import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
 import {hypothesisRoundFor, stripRounds, visibleRoundNumber} from '../session-model.js';
+import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {elapsedLabel} from './previews.js';
 import {displayWidth} from './text-width.js';
 import {ensureContrast, type Theme} from './theme.js';
@@ -205,12 +206,30 @@ function tabColors(
   }
 }
 
-/** `  r6 ✓ +1%  `, or `▎ r6 ✓ +1%  ` when selected, trimmed to `level`. */
-function slot(tab: RoundTab, level: Level, selected: boolean, live: boolean, theme: Theme): Slot {
+/**
+ * `  r6 ✓ +1%  `, or `▎ r6 ✓ +1%  ` when selected, trimmed to `level`. A
+ * `live` tab draws the current spinner frame in the glyph cell instead of the
+ * static `⟳`, so `spinnerFrame` only ever matters for that outcome; every
+ * other outcome keeps its glyph exactly as it was.
+ */
+function slot(
+  tab: RoundTab,
+  level: Level,
+  selected: boolean,
+  live: boolean,
+  theme: Theme,
+  spinnerFrame = 0,
+): Slot {
   const pad = level >= 2 ? ' ' : '  ';
   const space = level >= 4 ? '' : ' ';
   const metric = tab.metric !== '' && (live || level < (selected ? 3 : 1));
   const colors = tabColors(tab.outcome, selected, theme);
+  const glyph =
+    tab.outcome === 'live'
+      ? (SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length] ??
+        SPINNER_FRAMES[0] ??
+        OUTCOME_GLYPH.live)
+      : OUTCOME_GLYPH[tab.outcome];
   // The theme holds its colours to the floor against the canvas only, so each
   // one is lifted again to read on the selection fill.
   const ink = (color: string, text: string, strong = false): TextChunk => {
@@ -223,7 +242,7 @@ function slot(tab: RoundTab, level: Level, selected: boolean, live: boolean, the
     colors.number,
     `r${tab.number}`,
     selected,
-  )}${space}${ink(colors.glyph, OUTCOME_GLYPH[tab.outcome], selected)}${
+  )}${space}${ink(colors.glyph, glyph, selected)}${
     metric ? ink(colors.metric, `${space}${tab.metric}`) : ''
   }${pad}`;
   const width = displayWidth(content.chunks.map(chunk => chunk.text).join(''));
@@ -243,6 +262,10 @@ export class RoundTabsView {
   #renderedState: SessionState | null = null;
   #renderedWidth = 0;
   #elapsedTimer: ReturnType<typeof setTimeout> | null = null;
+  #spinnerFrame = 0;
+  #spinnerTimer: ReturnType<typeof setInterval> | null = null;
+  /** The live tab's own text cell, refreshed in place on the spinner tick. */
+  #liveSlot: {tab: RoundTab; level: Level; selected: boolean; text: TextRenderable} | null = null;
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -279,16 +302,21 @@ export class RoundTabsView {
   /** Takes the bar off screen, timer included, until the next `render` draws it afresh. */
   hide(): void {
     this.#stopElapsedTimer();
+    this.#stopSpinnerTimer();
+    this.#liveSlot = null;
     this.#renderedState = null;
     this.output.visible = false;
   }
 
   destroy(): void {
     this.#stopElapsedTimer();
+    this.#stopSpinnerTimer();
   }
 
   #draw(state: SessionState, width: number): void {
     this.#stopElapsedTimer();
+    this.#stopSpinnerTimer();
+    this.#liveSlot = null;
     for (const child of [...this.output.getChildren()]) {
       this.output.remove(child);
       child.destroyRecursively();
@@ -310,9 +338,18 @@ export class RoundTabsView {
 
     let slots: Slot[] = [];
     let view: TabWindow | null = null;
+    let usedLevel: Level = LEVELS[0];
     for (const level of LEVELS) {
+      usedLevel = level;
       slots = tabs.map((tab, index) =>
-        slot(tab, level, tab.number === selectedNumber, index === live, this.#theme),
+        slot(
+          tab,
+          level,
+          tab.number === selectedNumber,
+          index === live,
+          this.#theme,
+          this.#spinnerFrame,
+        ),
       );
       view = tabWindow(
         slots.map(each => each.width),
@@ -336,7 +373,11 @@ export class RoundTabsView {
       this.output.add(this.#marker(beforeMarker(first), {marginRight: MARKER_GAP}));
     }
     slots.slice(first, last + 1).forEach((each, offset) => {
-      this.output.add(this.#slot(each, offset > 0));
+      const text = this.#slot(each, offset > 0);
+      this.output.add(text);
+      if (live !== null && each.tab.number === liveNumber) {
+        this.#liveSlot = {tab: each.tab, level: usedLevel, selected: each.selected, text};
+      }
     });
     if (view !== null && last < tabs.length - 1) {
       this.output.add(this.#marker(afterMarker(tabs.length - 1 - last), {marginLeft: MARKER_GAP}));
@@ -349,6 +390,7 @@ export class RoundTabsView {
       // than rewriting one label.
       this.#elapsedTimer = setTimeout(() => this.#draw(state, width), 1000);
     }
+    this.#syncSpinnerTimer();
   }
 
   #slot({tab, selected, content, width}: Slot, afterAnother: boolean): TextRenderable {
@@ -378,5 +420,32 @@ export class RoundTabsView {
     if (this.#elapsedTimer === null) return;
     clearTimeout(this.#elapsedTimer);
     this.#elapsedTimer = null;
+  }
+
+  /**
+   * Rewrites the live tab's own cell in place on each 120ms tick, the same
+   * idiom `agent-map.ts` uses for its elapsed label, so the spinner never
+   * re-lays out the whole row. Started only while a live tab is on screen,
+   * stopped the moment it scrolls out of the window or the round is no
+   * longer live.
+   */
+  #syncSpinnerTimer(): void {
+    if (this.#liveSlot === null) {
+      this.#stopSpinnerTimer();
+      return;
+    }
+    if (this.#spinnerTimer !== null) return;
+    this.#spinnerTimer = setInterval(() => {
+      this.#spinnerFrame = (this.#spinnerFrame + 1) % SPINNER_FRAMES.length;
+      if (this.#liveSlot === null) return;
+      const {tab, level, selected, text} = this.#liveSlot;
+      text.content = slot(tab, level, selected, true, this.#theme, this.#spinnerFrame).content;
+    }, SPINNER_INTERVAL_MS);
+  }
+
+  #stopSpinnerTimer(): void {
+    if (this.#spinnerTimer === null) return;
+    clearInterval(this.#spinnerTimer);
+    this.#spinnerTimer = null;
   }
 }

@@ -65,6 +65,7 @@ import {
   switchChatThread,
   togglePaneZoom,
 } from '../session-model.js';
+import {SPINNER_FRAMES} from './activity-bar.js';
 import {TRANSCRIPT_MIN} from './agent-map.js';
 import {createOpenTuiApp, type OpenTuiApp} from './app.js';
 import {MIN_DOCK_WIDTH} from './chat-pane.js';
@@ -133,7 +134,8 @@ describe('OpenTUI presentation', () => {
     // no rounds yet, so there is no tab row to draw.
     expect(frame).toContain('Run flow');
     expect(tabsVisible(testRenderer)).toBe(false);
-    expect(frame).toContain('● optimizer');
+    // Active draws the shared spinner's frame 0, not a static marker.
+    expect(frame).toContain(`${SPINNER_FRAMES[0]} optimizer`);
     expect(frame).toContain('Result');
     expect(frame).toContain('Command');
     expect(frame).toContain('Type /help for commands');
@@ -253,9 +255,12 @@ describe('OpenTUI presentation', () => {
     expect([agents.y, transcript.y]).toEqual([tabs.y + 1, tabs.y + 1]);
     expect(root.findDescendantById('round-rail')).toBeUndefined();
     // Each tab carries its number and outcome glyph; the running round, open
-    // by default, carries its time measured from its agent start.
-    expect(frameRows(frame)[tabs.y]).toMatch(/r1 ✓.*▎ r2 ⟳ 1m \d+s.*r3 ✗ fail/);
-    // A glyph, never a spinner that reads as motion frozen.
+    // by default, carries its time measured from its agent start, with the
+    // shared braille spinner animating in the glyph cell while it runs.
+    expect(frameRows(frame)[tabs.y]).toMatch(
+      new RegExp(`r1 ✓.*▎ r2 [${SPINNER_FRAMES.join('')}] 1m \\d+s.*r3 ✗ fail`),
+    );
+    // The shared braille spinner, never the quarter-circle glyphs.
     expect(frame).not.toMatch(/[◐◓◑◒]/);
   });
 
@@ -915,7 +920,8 @@ describe('OpenTUI presentation', () => {
     });
     expect(below).not.toContain('▶');
     expect(below).toContain('› ✓ orchestrator');
-    expect(below).toContain('● implementer');
+    // Active draws the shared spinner's frame 0, not a static marker.
+    expect(below).toContain(`${SPINNER_FRAMES[0]} implementer`);
     expect(below).toContain('○ judge');
 
     const at = await agentPaneText(105, threeStageRound());
@@ -1162,7 +1168,8 @@ describe('OpenTUI presentation', () => {
     // Entering the pane selects its active agent. Clicking that inner node
     // keeps Agents focused and clears the filter, preserving node semantics.
     lines = frame.split('\n');
-    row = lines.findIndex(line => line.includes('● judge'));
+    // Active draws the shared spinner's frame 0, not a static marker.
+    row = lines.findIndex(line => line.includes(`${SPINNER_FRAMES[0]} judge`));
     column = (lines[row]?.indexOf('judge') ?? 0) + 2;
     await testRenderer.mockMouse.click(column, row);
     frame = await frameAfter(testRenderer);
