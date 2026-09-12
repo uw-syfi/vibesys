@@ -35,6 +35,12 @@ Gates 13/13 on every rep at both concurrencies. Boot cost: 2.6 to 2.8x longer th
 
 Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633511 (uncapped), 633512 (16-session cap).
 
+## Candidate: disable the overlap scheduler for this recipe
+
+A probe at 48 sessions (3 reps per side) against the accepted NEXTN k=3 configuration found `--disable-overlap-schedule` cuts pooled p95 TTFT turn-2+ by 31 percent (749 to 517 ms) and p50 by about one scheduler iteration (97 ms), at +5.7 percent mean TPOT. See [`../../engines/sglang.md`](../../engines/sglang.md)'s overlap-scheduler pitfall for the mechanism (a long-step, TTFT-bound multi-turn workload pays the overlap scheduler's one-iteration publish lag on every first token). Not yet part of the validated recipe above.
+
+Status: candidate, acceptance pending (5-rep, two concurrencies). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633552.
+
 ## Pitfalls
 
 ### The draft head has no sharded fast-path artifact; point the draft at the original checkpoint

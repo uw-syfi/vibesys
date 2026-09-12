@@ -56,6 +56,78 @@ Status:  verified cause (log timing); fix pending validation.
          (boot-phase timing), 633511 (spec_k3_c48 boot).
 ```
 
+### A direct `Engine()` save script with `weight_loader_disable_mmap=True` OOM-kills a rank on the host side
+
+```
+Symptom: a rank's scheduler subprocess dies during initialization (exit
+         code -9) partway through "Multi-thread loading shards" while
+         saving a draft model's shard from a direct `Engine(...)`
+         construction, even though the identical draft checkpoint loads
+         without incident at the same `mem_fraction_static` under the
+         normal serving launch path.
+Cause:   the save script set `weight_loader_disable_mmap=True` in its
+         `Engine(...)` call. With mmap disabled,
+         `multi_thread_safetensors_weights_iterator` does
+         `open(path, "rb").read()` (a full private copy of the shard
+         bytes) then `safetensors.torch.load(bytes)` (a second,
+         separately deserialized tensor copy), both resident at once,
+         independently inside each of the 4 per-rank scheduler
+         subprocesses, with no cross-rank sharing of the unsharded
+         checkpoint. The serving launch path loads the same checkpoint
+         with the default `weight_loader_disable_mmap=False`, which
+         mmaps each shard read-only and lets the OS share backing pages
+         across all 4 ranks' mappings and evict clean pages under
+         pressure.
+Fix:     leave `weight_loader_disable_mmap` at its default (False) for
+         a save script, matching the serving launch's loader
+         configuration. Do not carry the flag over from the network-
+         filesystem mmap-hang pitfall below: that one is scoped to
+         `ShardedStateLoader` reading a sharded artifact over a network
+         filesystem, not to the HF safetensors loader used here, and
+         recommends the opposite setting for a different symptom. Do
+         not apply one pitfall's fix to the other's symptom.
+Scope:   rocm, MI300A (unified memory: host-side OOM), a direct
+         `Engine()` construction that loads a draft model from the raw
+         HF checkpoint while the target loads from an already-sharded
+         artifact.
+Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs
+         633543, 633650 (OOM at mem_fraction_static 0.85 and 0.72 with
+         the flag on); fix confirmed in job 633711 (flag off, save
+         completed).
+```
+
+### `save_sharded_model`'s RPC swallows a scheduler-side exception and reports success
+
+```
+Symptom: a `save_sharded_model` call returns success (`SAVE_EXIT=0`,
+         the calling script's own log ends cleanly) but the output
+         directory holds none of the expected
+         `model-rank-*-part-*.safetensors` files for one branch of the
+         save (here, the draft branch of a target+draft save).
+Cause:   the scheduler-side RPC handler raised inside
+         `save_sharded_model` (an `AttributeError` from assuming an
+         attribute chain the actual worker class doesn't have), and
+         `Scheduler.handle_rpc_request` caught the exception, logged
+         it, and returned `RpcReqOutput(success=False, ...)`; that
+         failure did not reliably propagate back through
+         `Engine.save_sharded_model`'s own `assert recv_req.success` to
+         the calling script, which observed a clean, successful return
+         despite the handler's own failure.
+Fix:     never trust a save call's own reported exit status alone.
+         After any `save_sharded_model` call, check the output
+         directory for the expected rank/part files and fail the job
+         if they are absent; log tensor and byte counts from inside the
+         RPC handler itself, before and after the write, so a future
+         silent failure shows up in the handler's own log rather than
+         only in a downstream postcondition check.
+Scope:   sglang, any backend (engine-level RPC defect, not platform-
+         specific); recorded here because the failure surfaced on this
+         platform's draft-model save path.
+Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633711
+         (draft branch silently wrote zero tensors); fix (postcondition
+         check plus in-handler logging) validated in job 633733.
+```
+
 ## Pre-sharded artifact: sharded_state save
 
 1. Call `Engine.save_sharded_model` under TP=4, producing 56 parts totaling 212 GB (4 GiB parts).

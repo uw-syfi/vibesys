@@ -60,6 +60,13 @@ Scope:   Qwen3.5-397B-A17B chat template; backend-independent.
 Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05.
 ```
 
+The same template also renders a past assistant turn differently from
+the turn currently being generated (an empty think block on the live
+generation prompt, stripped from history), which caps turn-2+ prefix
+reuse at "previous prompt only" regardless of any radix-cache tracking
+knob; see [`../algorithms/radix-prefix-caching.md`](../algorithms/radix-prefix-caching.md)'s
+chat-template pitfall for the mechanism and the check.
+
 ## Measured
 
 | Metric | Pre-kernel baseline (baseline_v1cfg) | Accepted config: fused MoE + skinny GEMM + mixed chunked prefill (defaults) | Scope |
