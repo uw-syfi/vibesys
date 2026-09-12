@@ -36,24 +36,25 @@ Cause:   `Qwen3_5ForCausalLMMTP.load_weights` (`qwen3_5_mtp.py`,
          `ThreadPoolExecutor`, `SGLANG_MOE_EXPERT_LOADER_WORKERS`); the
          fix was applied to the target class only, and the MTP draft
          class was never updated.
-Fix:     two options, neither validated end to end yet: (1) a
-         draft-only `sharded_state` artifact. The engine's
-         `save_sharded_model` only saves the target
-         (`weight_updater.py`, `weight_exporter.py`), so a
-         `draft_worker` branch mirroring `save_remote_model`'s existing
-         pattern must be added first; a fix along these lines is in
-         progress (PR pending), and validation of the resulting draft
-         artifact against a live boot is not yet complete. (2) apply
-         the same threaded per-expert loader used by the target class
-         to the MTP draft class.
+Fix:     (1) a draft-only `sharded_state` artifact, validated end to
+         end: the engine's `save_sharded_model` only saved the target
+         (`weight_updater.py`, `weight_exporter.py`), so fork uw-syfi/
+         sglang PR #55 added a `draft_worker` branch mirroring
+         `save_remote_model`'s existing pattern; see "Sharded draft
+         artifact" below for the recipe and numbers (draft load drops
+         from about 498 s to about 9.7 s). (2) apply the same threaded
+         per-expert loader used by the target class to the MTP draft
+         class directly; not attempted, since (1) already closes the
+         gap.
 Scope:   rocm, sglang-v0.5.18-rocm700-mi30x, Qwen3.5-397B-A17B-MXFP4
          NEXTN/MTP draft head (512-expert MoE at `mtp.layers.0`); the
          unthreaded loop is engine source, not platform-specific, but
          is recorded here because it is this platform's draft-boot
          cost.
-Status:  verified cause (log timing); fix pending validation.
+Status:  verified cause (log timing); fix (1) verified end to end.
          sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs 633510
-         (boot-phase timing), 633511 (spec_k3_c48 boot).
+         (boot-phase timing), 633511 (spec_k3_c48 boot), 633762/633763
+         (sharded draft artifact save + validation).
 ```
 
 ### A direct `Engine()` save script with `weight_loader_disable_mmap=True` OOM-kills a rank on the host side
@@ -93,7 +94,8 @@ Scope:   rocm, MI300A (unified memory: host-side OOM), a direct
 Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs
          633543, 633650 (OOM at mem_fraction_static 0.85 and 0.72 with
          the flag on); fix confirmed in job 633711 (flag off, save
-         completed).
+         completed), and again in job 633762 (draft-only sharded
+         artifact save, same default setting).
 ```
 
 ### Standalone engine script silently imports the container's stock engine instead of the staged checkout
@@ -136,8 +138,29 @@ Scope:   any container image that ships its own baked-in engine
          which call is involved. Not platform-specific; recorded here
          because it surfaced on this platform's draft-model save path.
 Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs
-         633711, 633733, 633762.
+         633711, 633733, 633762, 633763. Fix confirmed end to end: job
+         633762 (rerun with `PYTHONPATH` exported to the staged bundle)
+         produced the sharded draft artifact below, and its self-check
+         (`_check_sglang_is_the_staged_bundle()`) is what would have
+         caught the two prior failures in under a second instead of
+         after a full boot.
 ```
+
+## Sharded draft artifact: cuts the MTP draft's boot-time load
+
+The NEXTN/MTP draft head loads through `Qwen3_5ForCausalLMMTP`'s serial per-expert `load_weights` loop (see the pitfall above): about 498 s to materialize 512 experts across the draft's single MTP layer, plus a safetensors-index scan of the full 239 GB checkpoint, while in the same boot the target loads from its own TP-sharded artifact in about 60 s.
+
+`Engine.save_sharded_model`, extended to also save the draft runner (fork uw-syfi/sglang PR #55), produces a draft-only `sharded_state` artifact: 17 GB, 8 files at TP=4.
+
+1. Construct `Engine` with both target and draft loaded (draft via `--speculative-draft-model-path` pointed at the original checkpoint), then call `save_sharded_model(draft_path=<dest>, skip_target=True)` to write only the draft's shards.
+2. Copy `config.json` alongside the shard files; the artifact holds `mtp.*` tensors only, no target weights and no tokenizer or generation-config files.
+3. Boot with `--speculative-draft-model-path <draft-only sharded artifact>` and `--speculative-draft-load-format sharded_state` in place of the original-checkpoint path in [`speculative-decoding.md`](speculative-decoding.md).
+
+Effect: the draft's own load-weight phase drops from about 498 s to about 9.7 s; total boot from about 866 s to about 365 s. accept_len, TPOT, pooled p95 TTFT, and gate results are unchanged from the original-checkpoint draft path (same weights, only the load path differs).
+
+Producing this artifact hit the OOM (disable_mmap) and stock-engine-import (PYTHONPATH) pitfalls above; both fixes are confirmed by the jobs that produced and validated this artifact.
+
+Scope: rocm, sglang-v0.5.18-rocm700-mi30x, Qwen3.5-397B-A17B-MXFP4 NEXTN/MTP draft head, TP=4. Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs 633762 (save), 633763 (validation).
 
 ## Pre-sharded artifact: sharded_state save
 

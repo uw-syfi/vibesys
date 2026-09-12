@@ -227,11 +227,13 @@ Status:  verified (mechanism read in source; a paired boot confirmed
 ### The overlap scheduler's one-iteration publish lag can cost more than it saves once steps are long and TTFT-bound
 
 ```
-Symptom: `--disable-overlap-schedule`, measured against the same
-         configuration with the overlap scheduler on: pooled p95 TTFT
-         turn-2+ down 31 percent and p50 down about one scheduler
-         iteration (97 ms), at a small but real cost, mean TPOT up 5.7
-         percent.
+Symptom: `--disable-overlap-schedule`, measured against the same NEXTN
+         k=3 speculative-decode configuration with the overlap scheduler
+         on: pooled p95 TTFT turn-2+ down 24.1 percent at 48 sessions
+         uncapped (734 to 558 ms) and down 28.4 percent at a 16-session
+         cap (439 to 314 ms), at a small but real cost, median TPOT up
+         3.3 percent (37.2 to 38.5 ms) and 6.8 percent (13.2 to 14.1 ms)
+         respectively.
 Cause:   the overlap scheduler publishes a batch's first token one
          iteration after the batch that produced it, trading a
          published-result delay for keeping the device fed across
@@ -239,23 +241,27 @@ Cause:   the overlap scheduler publishes a batch's first token one
          post-processing. That trade is a net win when steps are short
          relative to the publish lag and the workload is
          throughput-bound. On a long-step configuration (here,
-         NEXTN k=3 speculative decoding) serving a TTFT-bound multi-turn
-         workload, every first token pays the one-iteration publish lag
-         in full, and the throughput headroom the overlap buys goes
-         underused.
+         NEXTN k=3 speculative decoding, about 110 ms per step) serving
+         a TTFT-bound multi-turn workload, every first token pays the
+         one-iteration publish lag in full, and the throughput headroom
+         the overlap buys goes underused; turning it off puts the CPU's
+         own per-step scheduling work back on the device's critical
+         path instead of hiding it underneath the GPU's step, which is
+         the small TPOT regression.
 Fix:     do not assume the overlap scheduler is free on every workload.
-         On a long-step, TTFT-bound multi-turn workload, measure
-         `--disable-overlap-schedule` against the default at the target
-         concurrency; accept the trade only if the p95 TTFT improvement
-         clears the run-to-run rep spread on both sides and the TPOT
-         regression is within budget.
+         Rule: TTFT-weighted multi-turn workloads with spec decode, turn
+         the overlap scheduler off; throughput-weighted workloads, keep
+         it on. accept_len is unchanged either way (2.85 vs 2.86 of 4),
+         confirming the flag changes only publish timing, not the
+         draft/verify path.
 Scope:   sglang, any backend (scheduler behavior, not platform-
          specific). Measured on a NEXTN (k=3) speculative-decoding
-         configuration; the publish-lag mechanism itself is general to
-         the overlap scheduler, not specific to speculative decoding.
-Status:  candidate, acceptance pending (3-rep probe at one concurrency;
-         needs a 5-rep run at two concurrencies before acceptance).
-         sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633552.
+         configuration at two concurrencies; the publish-lag mechanism
+         itself is general to the overlap scheduler, not specific to
+         speculative decoding.
+Status:  accepted. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs 633754
+         (48 sessions uncapped, 5 reps per side) and 633755 (16-session
+         cap, 5 reps per side), gates 13/13 every rep.
 ```
 
 A standalone script invoked outside the normal serving launch path (a
