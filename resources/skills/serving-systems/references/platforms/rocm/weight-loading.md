@@ -35,6 +35,41 @@ Instrumentation showed device copies at about 30 GB/s and reads at 0.4 to 0.56 G
 
 Scope: rocm, any network filesystem (site-independent). Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, jobs 631192, 631193.
 
+## The TP-sharded loader has no layout check; EP boots from the unsharded checkpoint and OOMs
+
+```
+Symptom: booting `--ep-size 4 --moe-a2a-backend none` OOM-kills a rank's
+         scheduler process during initialization (exit code -9),
+         reproduced independently on two nodes across a job requeue.
+Cause:   the TP-sharded fast-path artifact is TP-layout-specific: each
+         rank's shard holds a column slice of every expert at
+         `intermediate_size / moe_tp_size`, not whole experts, so it does
+         not match what an EP-configured MoE layer expects
+         (`num_local_experts` whole experts at the full intermediate
+         width). The sharded loader has no check of checkpoint layout
+         against `moe_ep_size`/`moe_tp_size`: fed the TP-sharded
+         artifact, it would silently narrow-copy the wrong weights
+         rather than error (a shape mismatch only logs a warning before
+         an unconditional copy into the destination tensor). The only
+         currently-safe path is therefore booting EP from the original,
+         unsharded checkpoint, and that load path exhausts per-rank host
+         memory under EP=4 before the server comes up.
+Fix:     no fix yet; blocked, not refuted. An EP-aware sharded artifact
+         (produced the same way as the TP=4 sharded artifact, but split
+         by whole experts rather than by intermediate-dim column) would
+         restore a fast, layout-correct load path and is the next step
+         before this configuration can be measured end to end. Until
+         then, do not launch EP from the unsharded checkpoint on a
+         memory-constrained host loader.
+Scope:   rocm, MI300A (unified memory, the same host-loader path this
+         file's stock-materialization and boot-time sections above
+         already document as fragile on this SKU). Analytical
+         prediction, not yet measured: roughly 6 to 14 percent TPOT
+         improvement at batch 16 versus the accepted TP=4 layout.
+Status:  blocked (boot-time OOM, reproduced on 2 nodes; not refuted).
+         sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633509.
+```
+
 ## Boot-time breakdown
 
 From the sharded artifact, single node, checkout staged in node-local tmpfs (see below):
