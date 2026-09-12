@@ -57,6 +57,37 @@ def test_bootstrap_events_join_durable_history(tmp_path):  # noqa: ANN001, ANN20
     ]
 
 
+def test_attach_renumbering_bootstrap_events_starts_a_new_sequence_space(tmp_path):  # noqa: ANN001, ANN201
+    durable = build_server_parts(tmp_path / "durable")
+    durable.journal.record(EventType.RUN_FINISHED, status=EventStatus.COMPLETED)
+
+    current = build_server_parts(tmp_path / "bootstrap")
+    bootstrap_store = current.journal.store_id_locked()
+    folded = current.journal.read()
+    current.attach(tmp_path / "durable")
+    attached = current.journal.read()[: len(folded)]
+
+    # The bootstrap events were re-appended onto the durable log's tail, so the
+    # sequences a subscriber already folded now name different events. That is
+    # a different sequence space and the identity has to say so.
+    assert current.journal.store_id_locked() != bootstrap_store
+    assert [event.sequence for event in attached] == [event.sequence for event in folded]
+    assert attached != folded
+
+
+def test_attach_into_an_empty_log_keeps_the_sequence_space(tmp_path):  # noqa: ANN001, ANN201
+    current = build_server_parts(tmp_path / "bootstrap")
+    bootstrap_store = current.journal.store_id_locked()
+    before = [(event.sequence, event.type) for event in current.journal.read()]
+
+    current.attach(tmp_path / "durable")
+
+    # Nothing was renumbered, so every folded sequence still names the same
+    # event and a subscriber has nothing to re-fold.
+    assert current.journal.store_id_locked() == bootstrap_store
+    assert [(event.sequence, event.type) for event in current.journal.read()] == before
+
+
 def test_invocation_and_terminal_failure_share_diagnostic_identity(tmp_path):  # noqa: ANN001, ANN201
     parts = build_server_parts(tmp_path)
     error = RuntimeError("token=super-secret agent process exited")

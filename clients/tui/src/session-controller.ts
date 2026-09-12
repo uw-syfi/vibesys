@@ -227,11 +227,21 @@ export class SocketSessionController implements SessionController {
   /**
    * Highest floor the stream itself has declared, which is not the same as the
    * floor in state: backfill lowers the latter and the stream never sees it.
-   * A later batch declaring more than this is a re-bootstrap; see
-   * `#raiseHistoryFloor`. Null until the first batch, whose floor is the
+   * A later batch declaring more than this is a re-bootstrap within one store,
+   * which is what the server does when a burst outruns the tail bound; see
+   * `#resetHistoryFloor`. Null until the first batch, whose floor is the
    * bootstrap's own and therefore raises nothing.
    */
   #declaredFloor: number | null = null;
+  /**
+   * The event store the folded sequences belong to, as the stream last named
+   * it. Sequences only mean anything within one store, and a run swaps in its
+   * durable log after the client subscribes, so a batch that names a different
+   * store supersedes the fold however the two logs compare in length. Null
+   * until the first batch, and empty against a server that does not report
+   * identity, which leaves `#declaredFloor` as the only signal.
+   */
+  #storeId: string | null = null;
   #streamProtocolError = false;
 
   constructor(
@@ -1036,10 +1046,14 @@ export class SocketSessionController implements SessionController {
         );
       } else {
         const declared = message.history_after_sequence ?? 0;
-        const rebootstrap = this.#declaredFloor !== null && declared > this.#declaredFloor;
+        const store = message.store_id ?? '';
+        const rebootstrap =
+          (this.#storeId !== null && store !== this.#storeId) ||
+          (this.#declaredFloor !== null && declared > this.#declaredFloor);
+        this.#storeId = store;
         this.#declaredFloor = declared;
         const floor = rebootstrap
-          ? this.#raiseHistoryFloor(declared)
+          ? this.#resetHistoryFloor(declared)
           : this.#lowerHistoryFloor(declared);
         const apply = rebootstrap ? applyEventRebootstrap : applyEventBatch;
         this.#setState(
@@ -1081,15 +1095,17 @@ export class SocketSessionController implements SessionController {
   }
 
   /**
-   * Adopts a floor the stream raised, which only a re-bootstrap does.
+   * Takes a re-bootstrapped stream's floor literally, up or down.
    *
    * The run's durable event log is attached after the client subscribes, so a
    * subscription that bootstrapped against the server's own short log is
-   * re-bootstrapped at a tail of the run log. Everything below that tail is
+   * re-bootstrapped against the run log. Everything below the new floor is
    * unread history, whatever the client held before, and the spine set
-   * described a log this one replaces.
+   * described a log this one replaces. Descending is not the backfill's
+   * descent either: a run log shorter than the tail is replayed whole and
+   * declares floor 0, which is the truth about the log now being streamed.
    */
-  #raiseHistoryFloor(floor: number): number {
+  #resetHistoryFloor(floor: number): number {
     this.#historyFloor = floor;
     this.#foldedBelowFloor.clear();
     return floor;

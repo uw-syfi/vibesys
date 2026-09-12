@@ -128,8 +128,10 @@ def test_subscription_reports_structured_stream_failure(
     parts = build_server_parts(tmp_path / "logs")
     socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"  # noqa: S108
 
-    def fail_replay(after_sequence: int, *, bootstrap_spine: bool = False):  # noqa: ANN202
-        del after_sequence, bootstrap_spine
+    def fail_replay(  # noqa: ANN202
+        after_sequence: int, *, store_id: str | None = None, bootstrap_spine: bool = False
+    ):
+        del after_sequence, store_id, bootstrap_spine
         raise RuntimeError("event store is unavailable")  # noqa: TRY003
 
     monkeypatch.setattr(parts.api, "subscription_checkpoint", fail_replay)

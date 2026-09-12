@@ -1833,6 +1833,88 @@ describe('a stream that re-bootstraps at a raised floor', () => {
   });
 });
 
+/**
+ * The same late attach, but the run log is shorter than the subscription's
+ * tail, so the re-bootstrap replays it whole and declares floor 0 like the
+ * batch before it. Nothing about the floors distinguishes the two logs; only
+ * the store they name does.
+ */
+describe('a stream that re-bootstraps into a log shorter than the tail', () => {
+  const runLog: RunEvent[] = [
+    {
+      ...event(1, 'run_started'),
+      data: {kind: 'run_started', outer_loop: 'agent', input: '.', max_rounds: 3},
+    },
+    event(2, 'agent_output_chunk', 'two\n'),
+    roundFinished(3, 1),
+    event(4, 'agent_output_chunk', 'four\n'),
+  ];
+  // What the client folded from the server's own log before the attach: the
+  // same sequence numbers, different events.
+  const preAttach = [
+    event(1, 'agent_output_chunk', 'server started\n'),
+    event(2, 'agent_output_chunk', 'server ready\n'),
+  ];
+
+  async function rebootstrapped(transport: HistoryTransport): Promise<SocketSessionController> {
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emitBatch(preAttach, 0, 'bootstrap-store');
+    transport.emitBatch(runLog, 0, 'run-store');
+    return controller;
+  }
+
+  it('reaches the state a full replay of the run log would have built', async () => {
+    const replayedTransport = new HistoryTransport(runLog);
+    const replayed = new SocketSessionController(replayedTransport);
+    await replayed.start();
+    replayedTransport.emitBatch(runLog, 0, 'run-store');
+
+    const controller = await rebootstrapped(new HistoryTransport(runLog));
+
+    expect(controller.state.core.transcript).toEqual(replayed.state.core.transcript);
+    expect(controller.state.core.rounds).toEqual(replayed.state.core.rounds);
+    expect(controller.state.core.sequence).toBe(replayed.state.core.sequence);
+  });
+
+  it('folds the run log prefix its stale cursor covered', async () => {
+    const controller = await rebootstrapped(new HistoryTransport(runLog));
+
+    // `run_started` is sequence 1 in the attached log and sequence 1 was
+    // already folded from the log it replaces, so the out-of-order guard drops
+    // it unless the batch is recognized as superseding what came before.
+    expect(controller.state.core.maxRounds).toBe(3);
+    expect(controller.state.core.outerLoop).toBe('agent');
+    expect(controller.state.core.rounds.map(round => round.number)).toEqual([1]);
+  });
+
+  it('declares a complete history, so nothing is left to backfill', async () => {
+    const transport = new HistoryTransport(runLog);
+
+    const controller = await rebootstrapped(transport);
+
+    expect(controller.state.core.historyAfterSequence).toBe(0);
+    await expect(controller.loadOlderHistory()).resolves.toBe(false);
+    expect(eventsQueries(transport)).toEqual([]);
+  });
+
+  it('extends rather than re-folds while the store stays the same', async () => {
+    const transport = new HistoryTransport(runLog);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitBatch(runLog.slice(0, 2), 0, 'run-store');
+    transport.emitBatch(runLog.slice(2), 0, 'run-store');
+
+    // A fresh run attaches its (empty) log without renumbering anything, so
+    // its stream keeps one identity and the client must not discard the
+    // events it already folded under it.
+    expect(controller.state.core.maxRounds).toBe(3);
+    expect(controller.state.core.rounds.map(round => round.number)).toEqual([1]);
+    expect(controller.state.core.transcript.map(item => item.content).join('')).toContain('two\n');
+  });
+});
+
 describe('stream reconnect', () => {
   /** Lets the zero-delay reconnect timer and its subscribe settle. */
   const settle = () => new Promise<void>(resolve => setTimeout(resolve, 1));
@@ -2242,11 +2324,14 @@ class HistoryTransport implements ServerTransport {
   }
 
   /** One bootstrap batch: the spine below the floor, then the tail. */
-  emitBatch(events: readonly RunEvent[], historyAfterSequence: number): void {
+  emitBatch(events: readonly RunEvent[], historyAfterSequence: number, storeId?: string): void {
     this.#message?.({
       type: 'event_batch',
       events: [...events],
       history_after_sequence: historyAfterSequence,
+      // Omitted rather than empty when a test does not care, so the default
+      // path stays what a server that reports no store identity sends.
+      ...(storeId === undefined ? {} : {store_id: storeId}),
     });
   }
 

@@ -92,7 +92,7 @@ def test_execution_identity_is_recorded_in_events_and_checkpoints(
     assert (started.data.driver, started.data.provider, started.data.model) == expected
     active = parts.api.snapshot().active_executions
     assert (active[0].driver, active[0].provider, active[0].model) == expected
-    _sequence, _events, checkpointed = parts.api.subscription_checkpoint(0)
+    checkpointed = parts.api.subscription_checkpoint(0).active_executions
     assert (checkpointed[0].driver, checkpointed[0].provider, checkpointed[0].model) == expected
 
 
@@ -173,18 +173,21 @@ def test_checkpoint_watermark_and_active_state_are_consistent(tmp_path):  # noqa
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("judge", "round-2", "review")
 
-    through_sequence, events, active = parts.api.subscription_checkpoint(0)
-    assert all(event.sequence <= through_sequence for event in events)
+    checkpoint = parts.api.subscription_checkpoint(0)
+    assert all(event.sequence <= checkpoint.through_sequence for event in checkpoint.events)
+    active = checkpoint.active_executions
     assert [item.execution_id for item in active] == [execution.execution_id]
     assert active[0].activity.summary == "Reviewing"
-    started = next(event for event in events if event.type is EventType.AGENT_EXECUTION_STARTED)
+    started = next(
+        event for event in checkpoint.events if event.type is EventType.AGENT_EXECUTION_STARTED
+    )
     assert isinstance(started.data, AgentExecutionStartedData)
     assert started.data.activity == active[0].activity
 
     parts.controller.after_agent("judge", "round-2", execution_id=execution.execution_id)
-    through_sequence, events, active = parts.api.subscription_checkpoint(through_sequence)
-    assert events[-1].sequence == through_sequence
-    assert active == []
+    checkpoint = parts.api.subscription_checkpoint(checkpoint.through_sequence)
+    assert checkpoint.events[-1].sequence == checkpoint.through_sequence
+    assert checkpoint.active_executions == []
 
 
 def test_attach_merges_bootstrap_and_durable_execution_history(tmp_path):  # noqa: ANN001, ANN201
@@ -213,8 +216,9 @@ def test_attach_merges_bootstrap_and_durable_execution_history(tmp_path):  # noq
         "current work", agent_kind="implementer", round_label="round-2-implementer"
     )
 
-    through_sequence, events, _active = parts.api.subscription_checkpoint(0)
-    assert [event.sequence for event in events] == list(range(1, through_sequence + 1))
+    checkpoint = parts.api.subscription_checkpoint(0)
+    events = checkpoint.events
+    assert [event.sequence for event in events] == list(range(1, checkpoint.through_sequence + 1))
     assert any(
         event.type is EventType.AGENT_EXECUTION_STARTED and event.execution_id == execution_id
         for event in events

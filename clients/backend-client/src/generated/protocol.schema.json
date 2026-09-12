@@ -1135,6 +1135,11 @@
           "title": "Active Executions",
           "type": "array"
         },
+        "store_id": {
+          "default": "",
+          "title": "Store Id",
+          "type": "string"
+        },
         "history_after_sequence": {
           "default": 0,
           "minimum": 0,

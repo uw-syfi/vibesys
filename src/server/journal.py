@@ -111,6 +111,14 @@ class EventJournal:
             self._index_stored_history(durable)
             pending = previous.read() if previous is not None else self._pending_events
             self._pending_events = []
+            # Migrating into an empty log re-appends the retired store's events
+            # in order, so every sequence keeps its meaning: the new store
+            # continues the same sequence space, and subscriptions that folded
+            # it are still correct. Carrying the identity over says so. A
+            # nonempty log renumbers those events onto its own tail instead,
+            # which is a different space and has to read as one.
+            if previous is not None and durable.last_sequence == 0:
+                durable.store_id = previous.store_id
             for event in pending:
                 self._apply_recorded(durable.append(event))
             self._store = durable
@@ -302,6 +310,13 @@ class EventJournal:
     def run_id_locked(self) -> str:
         """Return the durable run id while the shared lock is held."""
         return self._store.run_id if self._store else ""
+
+    def store_id_locked(self) -> str:
+        """Return the attached store's identity while the shared lock is held.
+
+        Empty before the first attach, when no sequence space exists yet.
+        """
+        return self._store.store_id if self._store else ""
 
     def checkpoint_locked(
         self, after_sequence: int, *, bootstrap_spine: bool = False

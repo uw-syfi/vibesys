@@ -98,7 +98,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 latest_sequence=bootstrap.through_sequence,
             )
         )
-        cursor, reported_floor = self._write_bootstrap(request, bootstrap)
+        cursor, reported_floor, store_id = self._write_bootstrap(request, bootstrap)
         while True:
             if not api.wait_for_change(cursor, timeout=_DISCONNECT_POLL_SECONDS):
                 if self._client_disconnected():
@@ -106,36 +106,48 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 time.sleep(0.05)
                 continue
             if request.tail is not None and api.latest_sequence - cursor > request.tail:
-                # The run's durable event store is attached after the client
-                # subscribes, so a subscription that bootstrapped against the
-                # near-empty server store now faces the whole history as if it
-                # were live output. Bootstrap again at a fresh tail rather than
-                # replay a window the tail bound was meant to exclude.
-                cursor, reported_floor = self._write_bootstrap(
-                    request, api.subscription_bootstrap(request.after_sequence, request.tail)
-                )
+                # More live output landed in one wait than the tail bound was
+                # willing to replay. Bootstrap again at a fresh tail rather
+                # than deliver a window the bound was meant to exclude.
+                cursor, reported_floor, store_id = self._rebootstrap(request)
                 continue
             # ``wait_for_change`` only tells us that the stream changed. Take
             # one watermark-consistent snapshot before writing so a resumed
             # run, or a burst of live output, reaches the client as one state
             # transition instead of thousands of repaint-triggering messages.
-            through_sequence, events, active_executions = api.subscription_checkpoint(cursor)
+            checkpoint = api.subscription_checkpoint(cursor, store_id=store_id)
+            if checkpoint.store_id != store_id:
+                # The run's durable event store was attached after this client
+                # subscribed. The cursor numbers the retired store, so nothing
+                # after it is a continuation of what the client folded, however
+                # the two logs compare in length. Bootstrap against the store
+                # that is live now; the client re-folds from the batch's id.
+                cursor, reported_floor, store_id = self._rebootstrap(request)
+                continue
             self._write_message(
                 EventBatchMessage(
-                    events=events,
-                    through_sequence=through_sequence,
-                    active_executions=active_executions,
+                    events=checkpoint.events,
+                    through_sequence=checkpoint.through_sequence,
+                    active_executions=checkpoint.active_executions,
                     history_after_sequence=reported_floor,
+                    store_id=store_id,
                 )
             )
-            cursor = through_sequence
+            cursor = checkpoint.through_sequence
+
+    def _rebootstrap(self, request: SubscribeRequest) -> tuple[int, int, str]:
+        """Restart this subscription's replay against the journal's live state."""
+        api = self.server.api
+        return self._write_bootstrap(
+            request, api.subscription_bootstrap(request.after_sequence, request.tail)
+        )
 
     def _write_bootstrap(
         self,
         request: SubscribeRequest,
         bootstrap: SubscriptionBootstrap,
-    ) -> tuple[int, int]:
-        """Send one tail-bounded replay batch; return the new cursor and floor.
+    ) -> tuple[int, int, str]:
+        """Send one tail-bounded replay batch; return the cursor, floor, and store.
 
         Without ``tail`` the reported floor stays 0: the client asked for
         everything from its own cursor onward, so nothing was withheld and old
@@ -148,9 +160,10 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 through_sequence=bootstrap.through_sequence,
                 active_executions=bootstrap.active_executions,
                 history_after_sequence=reported_floor,
+                store_id=bootstrap.store_id,
             )
         )
-        return bootstrap.through_sequence, reported_floor
+        return bootstrap.through_sequence, reported_floor, bootstrap.store_id
 
     def _write_stream_error(self, request_id: str, error: Exception) -> None:
         """Report a replay or stream failure without hiding a live connection."""

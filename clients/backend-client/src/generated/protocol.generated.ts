@@ -458,6 +458,7 @@ export type Type16 = "event_batch";
 export type Events1 = RunEvent[];
 export type ThroughSequence = number;
 export type ActiveExecutions1 = ActiveAgentExecution[];
+export type StoreId = string;
 export type HistoryAfterSequence = number;
 export type Type17 = "protocol_error";
 export type RequestId16 = string | null;
@@ -1106,6 +1107,7 @@ export interface EventBatchMessage {
   events: Events1;
   through_sequence?: ThroughSequence;
   active_executions?: ActiveExecutions1;
+  store_id?: StoreId;
   history_after_sequence?: HistoryAfterSequence;
 }
 export interface ProtocolErrorMessage {

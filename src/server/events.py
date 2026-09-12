@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import uuid
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -476,6 +477,13 @@ class EventStore:
     def __init__(self, path: Path, run_id: str):  # noqa: ANN204, D107  # tracked: #288
         self.path = path
         self.run_id = run_id
+        # Names this store's sequence space. Sequences are only comparable
+        # within one store, and a run replaces its store mid-flight when the
+        # durable log is attached, so a consumer holding folded state needs an
+        # identity to tell "the next events" from "a different log's events".
+        # Neither ``path`` nor ``run_id`` can serve: a retired store can be
+        # reopened at the same path, and ``run_id`` is reassigned in place.
+        self.store_id = uuid.uuid4().hex
         self._lock = threading.RLock()
         self._changed = threading.Condition(self._lock)
         self._parsed_records = 0
