@@ -83,11 +83,6 @@ were shipped wrong once:
   visualization is drawn through the overlay, and that overlay is then the
   performance pane, with its title and its marker.
 
-The round tabs are not a pane. They are one row across the top of the round
-view, `[` and `]` or a click switch the round from anywhere, and they take no
-arrow keys, so `←` and `→` move only between the agents graph and the
-transcript.
-
 Zoom is a separate question from focus. `visiblePaneIds` is the set the content
 row can be given to, and the todo list is deliberately not in it: it is as tall
 as its own contents, so `F4` over it leaves the layout alone.

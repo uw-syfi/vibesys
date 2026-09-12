@@ -4,6 +4,7 @@ import type {AgentPhase} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
 import {AgentMapView, agentPaneWidth, STACKED_WIDTH, TRANSCRIPT_MIN} from './agent-map.js';
+import {RAIL_COMPACT_WIDTH, roundRailWidth} from './round-rail.js';
 import {resolveTheme} from './theme.js';
 
 /** A round with one agent per kind, in order. */
@@ -15,21 +16,24 @@ const THREE = round('orchestrator', 'implementer', 'judge');
 const FOUR = round('orchestrator', 'implementer', 'judge', 'profiler');
 
 /**
- * The round view is agents -> transcript across the whole terminal, with the
- * rounds as a tab row above both. app.ts gives the agent pane
- * `agentPaneWidth(terminalWidth, phases)` and the transcript the remainder.
+ * The round view lays out rail -> agents -> transcript. app.ts sizes the agent
+ * pane against the room left of the rail (`terminalWidth - railWidth`), then the
+ * transcript fills the remainder. These tests pin the pane's own sizing against
+ * the room it is given, then reproduce that pipeline and pin the transcript
+ * floor across the rail breakpoints: at widths 72-84 the compact rail must not
+ * appear and squeeze the transcript below its minimum.
  */
 describe('agentPaneWidth', () => {
-  test('takes 40% of the terminal between its floor and its ceiling', () => {
-    expect(agentPaneWidth(160, THREE)).toBe(64);
-    expect(agentPaneWidth(210, FOUR)).toBe(84);
+  test('takes 55% of the room left of the rail between its floor and its ceiling', () => {
+    expect(agentPaneWidth(118, THREE)).toBe(65);
+    expect(agentPaneWidth(155, FOUR)).toBe(85);
   });
 
   test('is never narrower than every agent named in full, nor wider than the stages use', () => {
-    // 40% of 150 is 60, under the 63 columns that hold `› ✓ orchestrator`,
-    // `› ✓ implementer` and `› ✓ judge`; 40% of 250 is 100, past the 68 that
+    // 55% of 105 is 58, under the 63 columns that hold `› ✓ orchestrator`,
+    // `› ✓ implementer` and `› ✓ judge`; 55% of 250 is 138, past the 68 that
     // three stages can use.
-    expect(agentPaneWidth(150, THREE)).toBe(63);
+    expect(agentPaneWidth(105, THREE)).toBe(63);
     expect(agentPaneWidth(250, THREE)).toBe(68);
   });
 
@@ -37,19 +41,51 @@ describe('agentPaneWidth', () => {
     expect(agentPaneWidth(104, THREE)).toBeNull();
     expect(agentPaneWidth(105, THREE)).toBe(63);
   });
+});
 
-  test('holds the transcript floor at every width, for every round shape', () => {
-    const kinds = ['orchestrator', 'implementer', 'judge', 'profiler', 'mutator', 'perf_eval'];
+describe('agentPaneWidth transcript floor beside the rail', () => {
+  const KINDS = ['orchestrator', 'implementer', 'judge', 'profiler', 'mutator', 'perf_eval'];
+
+  /** The transcript width app.ts would give this terminal for a round shape. */
+  function transcriptWidth(terminalWidth: number, stageCount: number): number {
+    const railWidth = roundRailWidth(terminalWidth);
+    const available = terminalWidth - railWidth;
+    // app.ts turns a null pane width into the stacked fallback, exactly as the
+    // finding described; the floor has to hold through that fallback too.
+    const paneWidth =
+      agentPaneWidth(available, round(...KINDS.slice(0, stageCount))) ?? STACKED_WIDTH;
+    return available - paneWidth;
+  }
+
+  test('holds the transcript floor from the collapse width up, for every round shape', () => {
     // 72 = STACKED_WIDTH (30) + TRANSCRIPT_MIN (42): the narrowest width where
-    // both floors can coexist at all.
+    // both floors can coexist at all. Below it neither the rail nor the agents
+    // pane can keep the transcript readable, so the run view is not expected to.
     for (let terminalWidth = 72; terminalWidth <= 200; terminalWidth += 1) {
       for (const stageCount of [0, 1, 2, 3, 4, 6]) {
-        // app.ts turns a null pane width into the stacked fallback, so the
-        // floor has to hold through that fallback too.
-        const paneWidth =
-          agentPaneWidth(terminalWidth, round(...kinds.slice(0, stageCount))) ?? STACKED_WIDTH;
-        expect(terminalWidth - paneWidth).toBeGreaterThanOrEqual(TRANSCRIPT_MIN);
+        expect(transcriptWidth(terminalWidth, stageCount)).toBeGreaterThanOrEqual(TRANSCRIPT_MIN);
       }
+    }
+  });
+
+  test('keeps the exact widths the finding measured above the floor', () => {
+    // The reviewer saw transcript widths 29, 37, and 41 at these terminals while
+    // a 13-column rail was visible; the rail now collapses there instead.
+    for (const terminalWidth of [72, 80, 84]) {
+      expect(roundRailWidth(terminalWidth)).toBe(0);
+      for (const stageCount of [1, 2, 3, 4]) {
+        expect(transcriptWidth(terminalWidth, stageCount)).toBeGreaterThanOrEqual(TRANSCRIPT_MIN);
+      }
+    }
+  });
+
+  test('the compact rail only appears where both floors still fit beside it', () => {
+    for (let terminalWidth = 60; terminalWidth <= 140; terminalWidth += 1) {
+      if (roundRailWidth(terminalWidth) !== RAIL_COMPACT_WIDTH) continue;
+      // rail + agents floor + transcript floor never exceeds the terminal.
+      expect(terminalWidth - RAIL_COMPACT_WIDTH - STACKED_WIDTH).toBeGreaterThanOrEqual(
+        TRANSCRIPT_MIN,
+      );
     }
   });
 });
@@ -108,7 +144,7 @@ describe('agent graph row budget', () => {
       view.output.destroyRecursively();
       testRenderer.renderer.destroy();
     });
-    view.render({...stackedState(attempts), selectedAgentKind: selected}, width, ROWS);
+    view.render({...stackedState(attempts), selectedAgentKind: selected}, width, 0, ROWS);
     await testRenderer.renderOnce();
     const frame = testRenderer.captureCharFrame();
     // Every node draws its kind on its first row, so the markers count nodes.
@@ -161,7 +197,7 @@ describe('agent graph row budget', () => {
       // A fresh state object each time, so the render-skip guard (`state ===
       // this.#renderedState`) does not short-circuit the redraw: each pass is a
       // real repaint, the way a running round's own state updates would be.
-      view.render(stackedState(6), 120, ROWS);
+      view.render(stackedState(6), 120, 0, ROWS);
       await testRenderer.renderOnce();
       frame = testRenderer.captureCharFrame();
       childCounts.push(view.output.getChildren().length);

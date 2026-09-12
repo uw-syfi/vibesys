@@ -45,8 +45,8 @@ const PANE_VCHROME = 2;
 const HEADING_ROWS = 1;
 /** Columns the transcript needs to stay worth reading beside the graph. */
 export const TRANSCRIPT_MIN = 42;
-/** Share of the terminal the graph takes when there is room for it. */
-const GRAPH_SHARE = 0.4;
+/** Share of the room left of the rail the graph takes when there is room for it. */
+const GRAPH_SHARE = 0.55;
 
 function statusColor(theme: Theme, status: AgentPhase['status']): string {
   if (status === 'active') return theme.success;
@@ -85,20 +85,21 @@ function selectedLabelWidth(phase: AgentPhase): number {
 }
 
 /**
- * Width for the Agents pane, or null when the terminal cannot carry a graph
- * that names every agent in full beside a readable transcript; the stacked list
- * takes over then. Derived from the terminal rather than fixed, so a wide
- * terminal gives the graph room while the transcript keeps its floor.
+ * Width for the Agents pane, or null when `availableWidth` (the room left of
+ * the rounds rail) cannot carry a graph that names every agent in full beside
+ * a readable transcript; the stacked list takes over then. Derived from the
+ * terminal rather than fixed, so a wide terminal gives the graph room while
+ * the transcript keeps its floor.
  */
-export function agentPaneWidth(terminalWidth: number, phases: AgentPhase[]): number | null {
+export function agentPaneWidth(availableWidth: number, phases: AgentPhase[]): number | null {
   const bounds = graphPaneBounds(phases, selectedLabelWidth);
   // Never narrower than the pane used to be: a one-stage round needs less room
   // than the heading above it, and a wrapped heading reads worse than slack.
   const floor = Math.max(bounds.min, STACKED_WIDTH);
   const ceiling = Math.max(bounds.max, STACKED_WIDTH);
-  const room = terminalWidth - TRANSCRIPT_MIN;
+  const room = availableWidth - TRANSCRIPT_MIN;
   if (room < floor) return null;
-  const share = Math.round(terminalWidth * GRAPH_SHARE);
+  const share = Math.round(availableWidth * GRAPH_SHARE);
   return Math.min(ceiling, room, Math.max(floor, share));
 }
 
@@ -117,6 +118,7 @@ export class AgentMapView {
   #renderedState: SessionState | null = null;
   #renderedWidth = 0;
   #renderedRows = 0;
+  #renderedFocus = false;
   #elapsedTimer: ReturnType<typeof setInterval> | null = null;
   #runningRound: {round: RoundSummary; text: TextRenderable} | null = null;
 
@@ -158,12 +160,22 @@ export class AgentMapView {
   }
 
   /**
-   * `rows` is the pane's height including its border. A round whose stages
-   * stack taller than that is windowed rather than drawn off the bottom of the
-   * pane; callers that manage their own height (tests driving the view
-   * directly) can omit it and get the unclamped graph.
+   * `railWidth` is the column the rounds rail has taken, 0 when it is off
+   * screen. It sizes this pane against what is left, so the transcript keeps
+   * its floor beside a rail rather than being squeezed by it, and it says
+   * whether the rail is a surface the round keys can be on.
+   *
+   * `rows` is the pane's height including its border, the same budget the rail
+   * draws from. A round whose stages stack taller than that is windowed rather
+   * than drawn off the bottom of the pane; callers that manage their own height
+   * (tests driving the view directly) can omit it and get the unclamped graph.
    */
-  render(state: SessionState, widthOverride?: number, rows = Number.POSITIVE_INFINITY): void {
+  render(
+    state: SessionState,
+    widthOverride?: number,
+    railWidth = 0,
+    rows = Number.POSITIVE_INFINITY,
+  ): void {
     const phases = visiblePhases(state);
     // The pane's width follows the terminal, so a resize has to redraw even
     // when the state is unchanged. A zoom hands the pane the whole terminal,
@@ -173,15 +185,22 @@ export class AgentMapView {
     // whatever that decides.
     const graphWidth =
       widthOverride === undefined
-        ? agentPaneWidth(this.renderer.terminalWidth, phases)
+        ? agentPaneWidth(this.renderer.terminalWidth - railWidth, phases)
         : widthOverride >= graphPaneBounds(phases, selectedLabelWidth).min
           ? widthOverride
           : null;
     const paneWidth = widthOverride ?? graphWidth ?? STACKED_WIDTH;
+    // A stale `rounds` focus lands here once the rail goes off screen, so the
+    // border follows the keys rather than the raw field: `keybindings` drives
+    // this pane in exactly that case, and a round view with no focus border on
+    // any pane is a view that does not say where its arrows go.
+    const focused =
+      state.roundFocus === 'agents' || (state.roundFocus === 'rounds' && railWidth === 0);
     if (
       state === this.#renderedState &&
       paneWidth === this.#renderedWidth &&
-      rows === this.#renderedRows
+      rows === this.#renderedRows &&
+      focused === this.#renderedFocus
     ) {
       return;
     }
@@ -190,6 +209,7 @@ export class AgentMapView {
     this.#renderedState = state;
     this.#renderedWidth = paneWidth;
     this.#renderedRows = rows;
+    this.#renderedFocus = focused;
     this.output.width = paneWidth;
     // The pane that owns the arrow keys says so, the way every other focusable
     // surface in the client does. `focusedPane` is that single authority:
@@ -288,7 +308,7 @@ export class AgentMapView {
       this.#content.add(
         new TextRenderable(this.renderer, {
           // The oldest attempts are the ones dropped, so the count points up at
-          // them.
+          // them the way the rounds rail points at the rounds above its window.
           content: `↑ ${fitted.hidden}`,
           fg: this.#theme.textSubtle,
           width: '100%',
@@ -547,8 +567,8 @@ function truncate(text: string, width: number): string {
 
 /**
  * The agent-active elapsed time of the round on screen: wall clock minus the
- * gaps where no agent was running, which is what the round tabs report for the
- * live round.
+ * gaps where no agent was running, which is what the rounds rail reports for
+ * the running round.
  */
 function headingLabel(roundNumber: number | null, round: RoundSummary | null): string {
   if (roundNumber === null) return 'Run flow';

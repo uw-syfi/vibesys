@@ -119,7 +119,7 @@ export interface ErrorBannerState {
 }
 
 /** The agent graph on the left, or the transcript on the right. */
-export type RoundFocus = 'agents' | 'transcript';
+export type RoundFocus = 'rounds' | 'agents' | 'transcript';
 
 /**
  * The experiment log is open when this is non-null. Selection is held as a
@@ -1332,7 +1332,12 @@ export function focusedPane(state: SessionState): PaneId {
   if (state.layout.right !== null) {
     return state.layout.focus === 'right' ? 'performance' : 'transcript';
   }
-  return state.roundFocus;
+  // The rounds rail is a selector on the left of the round view, not one of the
+  // zoomable content panes, so it reports as the agents side for pane-level
+  // focus: no content pane lights its border, and F4 zooms the agents pane
+  // rather than a rail that has nothing to enlarge. The rail draws its own
+  // focus border from `roundFocus` directly.
+  return state.roundFocus === 'rounds' ? 'agents' : state.roundFocus;
 }
 
 /**
