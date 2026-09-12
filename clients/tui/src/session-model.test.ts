@@ -50,7 +50,7 @@ import {
   visiblePhases,
   visibleTodos,
 } from './session-model.js';
-import {runStateText, usageText} from './ui/header.js';
+import {headerSegments, runStateText, usageText} from './ui/header.js';
 
 describe('event batch projection', () => {
   it('keeps the existing banner while resumed history ends in a running session', () => {
@@ -1905,5 +1905,117 @@ describe('a long run', () => {
     const early = {...state, selectedRound: 150};
     const entries = visibleConversation(early);
     expect(entries.length === 0 || entries.length >= 30).toBe(true);
+  });
+});
+
+describe('scope follows round navigation', () => {
+  const hypothesisA = {
+    hypothesis_id: 'H-A',
+    identified: true,
+    title: 'Batch decode requests',
+    first_round: 1,
+    last_round: 2,
+    rounds: [
+      {round: 1, passed: true, reviewed: true},
+      {round: 2, passed: true, reviewed: true},
+    ],
+    kept: true,
+    active: false,
+  };
+  const hypothesisB = {
+    hypothesis_id: 'H-B',
+    identified: true,
+    title: 'Cache the tokenizer',
+    first_round: 3,
+    last_round: 3,
+    rounds: [{round: 3, passed: false, reviewed: true}],
+    kept: false,
+    active: true,
+  };
+
+  function runWith(entries: Parameters<typeof setExperiments>[1]): SessionState {
+    return setExperiments(
+      {
+        ...initialSessionState(),
+        core: {
+          ...initialSessionState().core,
+          rounds: [
+            {number: 1, status: 'completed' as const},
+            {number: 2, status: 'completed' as const},
+            {number: 3, status: 'active' as const},
+          ],
+        },
+      },
+      entries,
+    );
+  }
+
+  it('re-derives the scope when ] crosses into another hypothesis', () => {
+    const scoped = enterExperimentRound(runWith([hypothesisA, hypothesisB]), 2);
+    expect(scoped?.hypothesisScope?.id).toBe('H-A');
+
+    const crossed = selectNextRound(scoped as SessionState);
+
+    expect(crossed.selectedRound).toBe(3);
+    expect(crossed.hypothesisScope).toMatchObject({
+      id: 'H-B',
+      title: 'Cache the tokenizer',
+      rounds: [3],
+    });
+    // The header names the hypothesis that owns the round on screen.
+    const segments = headerSegments(crossed, false).map(segment => segment.text);
+    expect(segments).toContain('Cache the tokenizer');
+    expect(segments).not.toContain('Batch decode requests');
+    // Esc unwinds to the owner of the visible round, not to the entry point.
+    const unwound = leaveExperimentDrilldown(crossed);
+    expect(unwound.hypothesisDetail).toEqual({entryKey: 'H-B', selectedRound: 3});
+    expect(unwound.experimentLog?.selectedId).toBe('H-B');
+  });
+
+  it('scopes a round no hypothesis owns as the round itself', () => {
+    const scoped = enterExperimentRound(runWith([hypothesisA]), 2);
+
+    const crossed = selectNextRound(scoped as SessionState);
+
+    expect(crossed.selectedRound).toBe(3);
+    expect(crossed.hypothesisScope).toMatchObject({id: 'round-3', source: 'round'});
+    expect(crossed.hypothesisDetail).toBeNull();
+  });
+
+  it('keeps the scope object while navigating within one hypothesis', () => {
+    const scoped = enterExperimentRound(runWith([hypothesisA, hypothesisB]), 1) as SessionState;
+
+    const moved = selectNextRound(scoped);
+
+    expect(moved.selectedRound).toBe(2);
+    expect(moved.hypothesisScope).toBe(scoped.hypothesisScope);
+    // The Esc cursor still follows the round within the hypothesis.
+    expect(moved.hypothesisDetail).toEqual({entryKey: 'H-A', selectedRound: 2});
+  });
+
+  it('adds a continuation round to a live scope on refresh', () => {
+    const scoped = enterExperimentRound(runWith([hypothesisA, hypothesisB]), 3) as SessionState;
+    expect(scoped.hypothesisScope?.rounds).toEqual([3]);
+
+    const grown = setExperiments(scoped, [
+      hypothesisA,
+      {
+        ...hypothesisB,
+        last_round: 4,
+        rounds: [...hypothesisB.rounds, {round: 4, passed: true, reviewed: false}],
+      },
+    ]);
+
+    expect(grown.hypothesisScope).toMatchObject({id: 'H-B', rounds: [3, 4]});
+    expect(grown.selectedRound).toBe(3);
+  });
+
+  it('degrades a scope whose hypothesis vanished to the round on screen', () => {
+    const scoped = enterExperimentRound(runWith([hypothesisA, hypothesisB]), 3) as SessionState;
+
+    const refreshed = setExperiments(scoped, [hypothesisA]);
+
+    expect(refreshed.hypothesisScope).toMatchObject({id: 'round-3', source: 'round'});
+    expect(refreshed.hypothesisDetail).toBeNull();
   });
 });

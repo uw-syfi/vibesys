@@ -703,7 +703,7 @@ export function setExperiments(state: SessionState, entries: HypothesisEntry[]):
               ? currentDetail.selectedRound
               : (detailRounds.at(-1) ?? null),
         };
-  return {
+  const refreshed: SessionState = {
     ...state,
     hypothesisDetail,
     experimentLog: {
@@ -717,6 +717,12 @@ export function setExperiments(state: SessionState, entries: HypothesisEntry[]):
       error: null,
     },
   };
+  if (state.hypothesisScope === null) return refreshed;
+  // A live scope must describe the fresh payload: a continuation round joins
+  // its hypothesis's scope, and a scope whose hypothesis vanished degrades to
+  // the round on screen rather than keeping the stale title over it.
+  const anchor = visibleRoundNumber(state);
+  return anchor === null ? refreshed : {...refreshed, ...scopeStateForRound(refreshed, anchor)};
 }
 
 export function failExperiments(state: SessionState, error: string): SessionState {
@@ -913,6 +919,66 @@ export function leaveExperimentDrilldown(state: SessionState): SessionState {
 }
 
 /**
+ * The scope, its Esc target, and the log selection implied by one round.
+ *
+ * Round navigation deliberately covers the whole run, so the scope follows the
+ * selected round: whichever hypothesis owns the round on screen is the one the
+ * header, the agent map, and Esc must describe. A round no hypothesis claims
+ * is scoped as itself rather than left under another hypothesis's title.
+ * Derived in one place so drilldown entry, round navigation, and an
+ * experiments refresh cannot disagree about what is on screen.
+ */
+function scopeStateForRound(
+  state: SessionState,
+  roundNumber: number,
+): Pick<SessionState, 'hypothesisScope' | 'hypothesisDetail' | 'experimentLog'> {
+  const entries = state.experimentLog?.entries ?? [];
+  const entryIndex = entries.findIndex(candidate => scopeRounds(candidate).includes(roundNumber));
+  const entry = entries[entryIndex];
+  if (entry === undefined) {
+    return {
+      hypothesisScope: reuseScope(state.hypothesisScope, {
+        id: `round-${roundNumber}`,
+        label: `Round ${roundNumber}`,
+        title: `Round ${roundNumber}`,
+        rounds: [roundNumber],
+        source: 'round',
+      }),
+      hypothesisDetail: null,
+      experimentLog: state.experimentLog,
+    };
+  }
+  const entryKeyValue = entryKey(entry, entryIndex);
+  return {
+    hypothesisScope: reuseScope(state.hypothesisScope, {
+      id: entry.hypothesis_id,
+      label: hypothesisLabel(entry),
+      title: hypothesisTitle(entry),
+      rounds: scopeRounds(entry),
+      source: 'hypothesis',
+    }),
+    hypothesisDetail: {entryKey: entryKeyValue, selectedRound: roundNumber},
+    experimentLog:
+      state.experimentLog === null || state.experimentLog.selectedId === entryKeyValue
+        ? state.experimentLog
+        : {...state.experimentLog, selectedId: entryKeyValue},
+  };
+}
+
+/** Keeps the current scope object when the derived one says the same thing. */
+function reuseScope(current: HypothesisScope | null, derived: HypothesisScope): HypothesisScope {
+  return current !== null &&
+    current.id === derived.id &&
+    current.label === derived.label &&
+    current.title === derived.title &&
+    current.source === derived.source &&
+    current.rounds.length === derived.rounds.length &&
+    current.rounds.every((round, index) => round === derived.rounds[index])
+    ? current
+    : derived;
+}
+
+/**
  * Opens the hypothesis that owns a round number, landing on that round rather
  * than on the whole trajectory. Returns null when no hypothesis claims it, so
  * the caller can report the round rather than silently doing nothing.
@@ -922,30 +988,17 @@ export function enterExperimentRound(
   roundNumber: number,
 ): SessionState | null {
   const entries = state.experimentLog?.entries ?? [];
-  const entryIndex = entries.findIndex(candidate => scopeRounds(candidate).includes(roundNumber));
-  const entry = entries[entryIndex];
-  if (entry === undefined) return null;
-  const entryKeyValue = entryKey(entry, entryIndex);
-  const scoped: SessionState = {
+  if (!entries.some(candidate => scopeRounds(candidate).includes(roundNumber))) return null;
+  return {
     ...state,
     overlay: null,
     chatOpen: false,
     layout: {right: null, focus: 'left', zoomedPane: null},
-    hypothesisScope: {
-      id: entry.hypothesis_id,
-      label: hypothesisLabel(entry),
-      title: hypothesisTitle(entry),
-      rounds: scopeRounds(entry),
-      source: 'hypothesis',
-    },
+    ...scopeStateForRound(state, roundNumber),
     selectedRound: roundNumber,
     selectedAgentKind: null,
     selectedEntryId: null,
-    hypothesisDetail: {entryKey: entryKeyValue, selectedRound: roundNumber},
-    experimentLog:
-      state.experimentLog === null ? null : {...state.experimentLog, selectedId: entryKeyValue},
   };
-  return scoped;
 }
 
 /**
@@ -963,14 +1016,7 @@ export function enterUnownedExperimentRound(
     overlay: null,
     chatOpen: false,
     layout: {right: null, focus: 'left', zoomedPane: null},
-    hypothesisDetail: null,
-    hypothesisScope: {
-      id: `round-${roundNumber}`,
-      label: `Round ${roundNumber}`,
-      title: `Round ${roundNumber}`,
-      rounds: [roundNumber],
-      source: 'round',
-    },
+    ...scopeStateForRound(state, roundNumber),
     selectedRound: roundNumber,
     selectedAgentKind: null,
     selectedEntryId: null,
@@ -1609,13 +1655,7 @@ export function selectNextRound(state: SessionState): SessionState {
   const visible = visibleRoundNumber(state);
   const index = visible === null ? -1 : rounds.findIndex(round => round.number === visible);
   const next = rounds[(index + 1 + rounds.length) % rounds.length];
-  return {
-    ...state,
-    selectedRound: next?.number ?? null,
-    selectedAgentKind: null,
-    selectedEntryId: null,
-    overlay: null,
-  };
+  return withSelectedRound(state, next?.number ?? null);
 }
 
 export function selectPreviousRound(state: SessionState): SessionState {
@@ -1624,19 +1664,26 @@ export function selectPreviousRound(state: SessionState): SessionState {
   const visible = visibleRoundNumber(state);
   const index = visible === null ? 0 : rounds.findIndex(round => round.number === visible);
   const previous = rounds[(index - 1 + rounds.length) % rounds.length];
-  return {
-    ...state,
-    selectedRound: previous?.number ?? null,
-    selectedAgentKind: null,
-    selectedEntryId: null,
-    overlay: null,
-  };
+  return withSelectedRound(state, previous?.number ?? null);
 }
 
 export function selectRound(state: SessionState, roundNumber: number): SessionState {
   if (!stripRounds(state).some(round => round.number === roundNumber)) return state;
+  return withSelectedRound(state, roundNumber);
+}
+
+/**
+ * Lands round navigation on `roundNumber`. Round navigation covers the whole
+ * run, not just the open hypothesis's slice of it, so inside a scope the scope
+ * follows the round: crossing into a round another hypothesis owns re-derives
+ * the scope from that owner.
+ */
+function withSelectedRound(state: SessionState, roundNumber: number | null): SessionState {
   return {
     ...state,
+    ...(state.hypothesisScope !== null && roundNumber !== null
+      ? scopeStateForRound(state, roundNumber)
+      : {}),
     selectedRound: roundNumber,
     selectedAgentKind: null,
     selectedEntryId: null,
