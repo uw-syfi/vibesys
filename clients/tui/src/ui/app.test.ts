@@ -11,7 +11,7 @@ import {
 } from '@opentui/core';
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
 import type {ChatOptions, HypothesisEntry} from '@vibesys/backend-client';
-import type {CoreRunStatus} from '@vibesys/core-state';
+import {type CoreRunStatus, DEFAULT_CHAT_THREAD_ID} from '@vibesys/core-state';
 import {chatHelpText, parseCommand} from '../commands.js';
 import type {SessionController} from '../session-controller.js';
 import {
@@ -6017,6 +6017,201 @@ function clipboardReturning(
     },
   };
 }
+
+describe('chat scroll anchoring', () => {
+  /** A conversation long enough to overflow either chat surface's viewport. */
+  function longChat(prefix: string, count = 20): SessionState['chatConversation'] {
+    const entries: SessionState['chatConversation'] = [];
+    for (let index = 0; index < count; index += 1) {
+      entries.push({
+        id: `${prefix}-q${index}`,
+        kind: 'user',
+        label: 'You',
+        content: `${prefix} question ${index}`,
+      });
+      entries.push({
+        id: `${prefix}-a${index}`,
+        kind: 'assistant',
+        label: 'Answer',
+        content: `${prefix} answer ${index}`,
+      });
+    }
+    return entries;
+  }
+
+  function chatScroll(testRenderer: TestRendererSetup, id: string): ScrollBoxRenderable {
+    const scroll = testRenderer.renderer.root.findDescendantById(id);
+    if (!(scroll instanceof ScrollBoxRenderable)) throw new Error(`${id} was not scrollable`);
+    return scroll;
+  }
+
+  it('keeps a manual scroll-up across an unrelated state notification', async () => {
+    const testRenderer = await createTestRenderer({width: 80, height: 24});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      chatOpen: true,
+      chatConversation: longChat('m'),
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('m answer 19'));
+    const transcript = chatScroll(testRenderer, 'chat-transcript');
+    expect(transcript.scrollTop).toBeGreaterThan(0);
+
+    // The operator scrolls up to reread an earlier answer; the wheel lands on
+    // the same setter.
+    transcript.scrollTop = 0;
+    const scrolled = await frameAfter(testRenderer);
+    expect(scrolled).toContain('m question 0');
+    expect(transcript.scrollTop).toBe(0);
+
+    // Run events notify continuously during a live run and each notification
+    // re-renders every view. This one leaves the chat itself untouched (the
+    // conversation keeps its identity), so the viewport must not move.
+    controller.publish({...controller.state, eventStreamAvailable: false});
+    await testRenderer.waitForVisualIdle();
+    expect(transcript.scrollTop).toBe(0);
+    expect(await frameAfter(testRenderer)).toContain('m question 0');
+  });
+
+  it('keeps a manual scroll-up in the docked pane while an answer arrives', async () => {
+    const testRenderer = await createTestRenderer({width: 150, height: 22});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      chatDockFits: true,
+      chatConversation: longChat('d'),
+    });
+    controller.experiments = [logEntry('H-01', 1, 1, {claim: 'fuse the epilogue'})];
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    await testRenderer.waitForFrame(value => value.includes('d answer 19'));
+    const scroll = chatScroll(testRenderer, 'chat-pane-scroll');
+    expect(scroll.scrollTop).toBeGreaterThan(0);
+
+    scroll.scrollTop = 0;
+    await frameAfter(testRenderer);
+    expect(scroll.scrollTop).toBe(0);
+
+    // A streamed answer replaces the conversation array, so the identity gate
+    // above the pane's conversation render does not filter this one out.
+    controller.publish({
+      ...controller.state,
+      chatConversation: [
+        ...controller.state.chatConversation,
+        {id: 'd-late', kind: 'assistant', label: 'Answer', content: 'd late token'},
+      ],
+    });
+    await testRenderer.waitForVisualIdle();
+    expect(scroll.scrollTop).toBe(0);
+    expect(await frameAfter(testRenderer)).toContain('d question 0');
+  });
+
+  it('keeps tailing appended entries while the viewport is at the bottom', async () => {
+    const testRenderer = await createTestRenderer({width: 80, height: 24});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      chatOpen: true,
+      chatConversation: longChat('m'),
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('m answer 19'));
+    const transcript = chatScroll(testRenderer, 'chat-transcript');
+    const tailed = transcript.scrollTop;
+    expect(tailed).toBeGreaterThan(0);
+
+    controller.publish({
+      ...controller.state,
+      chatConversation: [
+        ...controller.state.chatConversation,
+        {id: 'm-late', kind: 'assistant', label: 'Answer', content: 'm a later answer'},
+      ],
+    });
+    const frame = await testRenderer.waitForFrame(value => value.includes('m a later answer'));
+    expect(frame).toContain('m a later answer');
+    expect(transcript.scrollTop).toBeGreaterThan(tailed);
+  });
+
+  it('opens the chat on the tail, including after a scrolled-up close', async () => {
+    const testRenderer = await createTestRenderer({width: 80, height: 24});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      chatConversation: longChat('m'),
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    controller.publish({...controller.state, chatOpen: true});
+    const opened = await testRenderer.waitForFrame(value => value.includes('m answer 19'));
+    expect(opened).not.toContain('m question 0');
+    const transcript = chatScroll(testRenderer, 'chat-transcript');
+    expect(transcript.scrollTop).toBeGreaterThan(0);
+
+    // Scrolled into history, closed, reopened: the reading position does not
+    // outlive the modal.
+    transcript.scrollTop = 0;
+    await frameAfter(testRenderer);
+    controller.publish({...controller.state, chatOpen: false});
+    await testRenderer.waitForVisualIdle();
+    controller.publish({...controller.state, chatOpen: true});
+    const reopened = await testRenderer.waitForFrame(value => value.includes('m answer 19'));
+    expect(reopened).not.toContain('m question 0');
+    expect(transcript.scrollTop).toBeGreaterThan(0);
+  });
+
+  it('jumps to the tail when the active thread switches', async () => {
+    const testRenderer = await createTestRenderer({width: 80, height: 24});
+    const one = longChat('one');
+    const two = longChat('two');
+    const controller = new FakeController({
+      ...initialSessionState(),
+      chatOpen: true,
+      chatConversation: one,
+      chatConversations: {[DEFAULT_CHAT_THREAD_ID]: one, 'thread-2': two},
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('one answer 19'));
+    const transcript = chatScroll(testRenderer, 'chat-transcript');
+    transcript.scrollTop = 0;
+    await frameAfter(testRenderer);
+    expect(transcript.scrollTop).toBe(0);
+
+    controller.publish(switchChatThread(controller.state, 'thread-2'));
+    const switched = await testRenderer.waitForFrame(value => value.includes('two answer 19'));
+    expect(switched).not.toContain('two question 0');
+    expect(transcript.scrollTop).toBeGreaterThan(0);
+  });
+
+  it('jumps to the tail when the operator submits a message', async () => {
+    const testRenderer = await createTestRenderer({width: 80, height: 24});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      chatOpen: true,
+      chatConversation: longChat('m'),
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('m answer 19'));
+    const transcript = chatScroll(testRenderer, 'chat-transcript');
+    transcript.scrollTop = 0;
+    await frameAfter(testRenderer);
+    expect(transcript.scrollTop).toBe(0);
+
+    // Writing from history: sending must land the operator on their own
+    // message and the incoming answer, not leave them where they were reading.
+    await testRenderer.mockInput.typeText('what changed?');
+    testRenderer.mockInput.pressEnter();
+    const answered = await testRenderer.waitForFrame(value =>
+      value.includes('Recorded diagnostic'),
+    );
+    expect(controller.chatSubmissions).toEqual(['what changed?']);
+    expect(answered).not.toContain('m question 0');
+    expect(transcript.scrollTop).toBeGreaterThan(0);
+  });
+});
 
 describe('modal scrim', () => {
   const helpOverlay = {kind: 'help' as const, content: 'Available commands'};
