@@ -78,8 +78,8 @@ import {
   ensureContrast,
   listThemes,
   mix,
+  RUN_DIVIDER_MIN_CONTRAST,
   resolveTheme,
-  SUBTLE_TEXT_MIN_CONTRAST,
   scrim,
   THEME_NAMES,
   type ThemeName,
@@ -2828,15 +2828,13 @@ describe('theming', () => {
     expect(spanColors(testRenderer, 'VibeSys')?.fg).toBe(light.accent);
     const body = spanColors(testRenderer, 'themed body text');
     expect(body?.fg).toBe(light.conversation.assistant.content);
-    // #565: the card carries its role on the divider rule, not a fill, so its
-    // body sits on the theme's canvas.
+    // #565 took the card's fill and the colour diet took the role tint behind a
+    // bare entry, so every entry's body sits on the theme's canvas.
     expect(body?.bg).toBe(light.canvas);
+    // The divider is a separator, not a role signal: it draws in the neutral
+    // resting border every other frame uses, lifted to the divider floor.
     expect(cardBorder(testRenderer, 'event-themed')).toBe(
-      ensureContrast(
-        light.conversation.assistant.border,
-        light.canvas,
-        SUBTLE_TEXT_MIN_CONTRAST,
-      ).toLowerCase(),
+      ensureContrast(light.border, light.canvas, RUN_DIVIDER_MIN_CONTRAST).toLowerCase(),
     );
     expect(spanColors(testRenderer, 'implementer')?.fg).toBe(light.conversation.assistant.label);
   });
@@ -5607,7 +5605,7 @@ describe('box fills', () => {
     expect(ids).toContain('experiment-log'); // a pane, the same way
     expect(ids).toContain('theme-picker'); // an overlay, built here, never opened
     expect(ids).toContain('event-card'); // a transcript card, now a top-edge rule
-    expect(ids).toContain('event-status'); // a bare entry, tinted on a layer inside
+    expect(ids).toContain('event-status'); // a bare entry, which now fills nothing
     expect(ids.some(id => id.startsWith('agent-implementer-'))).toBe(true);
 
     expect(offenders(root)).toEqual([]);
@@ -5627,9 +5625,9 @@ describe('box fills', () => {
     // 'event-card-fill' is deliberately absent: #565 removed the transcript
     // card's border and its fill together, so there is no longer a rounded
     // corner to keep a fill out of, and nothing left to move inwards.
-    // 'event-status-fill' is here because a bare entry now draws the run
-    // divider like any other opener, so its role tint moved inwards too.
-    for (const id of ['header-fill', 'experiment-log-fill', 'event-status-fill']) {
+    // 'event-status-fill' is absent for the same reason one step further on: an
+    // entry has no role tint left to paint, so no entry paints a fill at all.
+    for (const id of ['header-fill', 'experiment-log-fill']) {
       expect([id, isPainted(root, id)]).toEqual([id, true]);
     }
   });

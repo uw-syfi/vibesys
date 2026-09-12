@@ -69,20 +69,20 @@ describe('theme selection', () => {
     expect(dark.accent).toBe('#22d3ee');
     expect(dark.border).toBe('#475569');
     expect(dark.conversation.assistant).toEqual({
-      border: '#0891b2',
-      // The one knock-on. A card fill is `mix(canvas, roleAccent, cardTint)`,
-      // so it follows the canvas by construction and stays the same 14% step
-      // off it that it was; pinning the old `#0e283d` here would put a lighter
-      // rectangle back on the screen, which is the thing #574 removed.
-      background: '#03192d',
+      // The canvas. A role used to tint its own fill (`#03192d`, a 14% step off
+      // the canvas); dropping it is what leaves role carried by the heading
+      // word and its colour and nothing else. Both of those are unchanged,
+      // because they already cleared the floor against the tint and so came
+      // through `ensureContrast` untouched either way.
+      background: '#020617',
       label: '#5cb6cc',
       content: '#e2e8f0',
     });
     expect(dark.conversation.failure.label).toBe('#f28484');
     // A tool call is told apart by its text colour, not by a filled band: a
     // block of background behind text reads as a selection.
-    expect(dark.toolCall.background).toBe(dark.conversation.tool.background);
-    expect(dark.toolResult.background).toBe(dark.conversation.tool.background);
+    expect(dark.toolCall.background).toBe(dark.canvas);
+    expect(dark.toolResult.background).toBe(dark.canvas);
     expect(dark.toolCall.foreground).not.toBe(dark.toolResult.foreground);
     expect(dark.markdown.code).toBe('#a5f3fc');
     expect(dark.markdown.codeBackground).toBe('#1e293b');
@@ -150,10 +150,15 @@ describe('semantic roles', () => {
 
   it.each(
     themes.map(theme => [theme.name, theme] as const),
-  )('%s keeps every conversation card label and body readable on its own fill', (_name, theme: Theme) => {
+  )('%s keeps every conversation role readable on the canvas it now draws on', (_name, theme: Theme) => {
     const minimum = theme.name.startsWith('high-contrast') ? 7 : 4.5;
     for (const role of CONVERSATION_ROLES) {
       const {label, content, background} = theme.conversation[role];
+      // No role paints a fill any more, so this is the canvas, and the floor is
+      // remade against the cell the text actually lands on. A tint coming back
+      // moves the background out from under both checks below at once, which is
+      // why it is asserted here rather than assumed.
+      expect(background).toBe(theme.canvas);
       expect(contrastRatio(label, background)).toBeGreaterThanOrEqual(minimum);
       expect(contrastRatio(content, background)).toBeGreaterThanOrEqual(minimum);
     }
@@ -268,9 +273,9 @@ describe('semantic roles', () => {
       const light = resolveTheme(lightName);
       expect(dark.canvas).not.toBe(light.canvas);
       expect(dark.textPrimary).not.toBe(light.textPrimary);
-      expect(dark.conversation.assistant.background).not.toBe(
-        light.conversation.assistant.background,
-      );
+      // The label, not the background: every role draws on the canvas now, so
+      // comparing backgrounds would only restate the line above.
+      expect(dark.conversation.assistant.label).not.toBe(light.conversation.assistant.label);
     }
   });
 });

@@ -36,8 +36,20 @@ export const CONVERSATION_ROLES: readonly ConversationRole[] = [
   'failure',
 ];
 
+/**
+ * What a conversation role is drawn in.
+ *
+ * Two channels for one fact, which is the whole of it: the heading word says
+ * who is speaking and `label` colours it. `background` is the canvas for every
+ * role, so it is the cell a role's text lands on rather than a surface of its
+ * own; it is here because the bands below still need a background to name.
+ *
+ * A role tint and a role-coloured run divider used to sit beside those two, so
+ * one fact carried four signals at once. The tint was the loudest of them: a
+ * screen of entries read as a field of blocks. The divider is a separator, and
+ * separators are neutral.
+ */
 export interface ConversationRoleColors {
-  border: string;
   background: string;
   label: string;
   content: string;
@@ -285,7 +297,6 @@ interface ThemeSpec {
   error: string;
   roleAccents: Record<ConversationRole, string>;
   minContrast: number;
-  cardTint: number;
   overrides?: {
     conversation?: Partial<Record<ConversationRole, Partial<ConversationRoleColors>>>;
     toolCall?: Partial<BandColors>;
@@ -298,6 +309,20 @@ interface ThemeSpec {
 export const SUBTLE_TEXT_MIN_CONTRAST = 3;
 
 /**
+ * The floor the transcript's run divider is held to, above the subtle-text one.
+ * Subtle text is decoration a reader can skip; this rule is one cell tall and
+ * is the only thing left saying where one run ends and the next begins, so it
+ * has to survive at a glance.
+ *
+ * It used to draw in the speaking role's accent and borrowed that saturated
+ * colour's own contrast, 3.84 to 4.76 across the eight themes. Neutral at 3
+ * measured 3.03 to 3.31 and the grouping read visibly weaker. 4.5 puts the rule
+ * back in the band the per-role dividers occupied without giving it a colour
+ * channel back.
+ */
+export const RUN_DIVIDER_MIN_CONTRAST = 4.5;
+
+/**
  * How far a card's label is pulled toward the theme's strongest text before the
  * contrast floor is applied. The raw role accent reads as a border but is too
  * close to the card fill to head it: lifting it keeps the role's hue while
@@ -307,11 +332,12 @@ const LABEL_LIFT = 0.35;
 
 function buildConversationRole(spec: ThemeSpec, role: ConversationRole): ConversationRoleColors {
   const accent = spec.roleAccents[role];
-  // A low tint off the canvas: enough to group a card's lines together, not so
-  // much that a screen of cards becomes a field of blocks.
-  const background = mix(spec.canvas, accent, spec.cardTint);
+  // The canvas, not a tint off it. A tint low enough to keep text readable was
+  // not seen as grouping and a tint high enough to be seen bled a rectangle
+  // around every entry, which is the same argument `canvas` above makes against
+  // a second surface.
+  const background = spec.canvas;
   const derived: ConversationRoleColors = {
-    border: accent,
     background,
     label: ensureContrast(mix(accent, spec.textStrong, LABEL_LIFT), background, spec.minContrast),
     content: ensureContrast(spec.textPrimary, background, spec.minContrast),
@@ -324,14 +350,18 @@ function buildToolBands(
   conversation: Record<ConversationRole, ConversationRoleColors>,
 ): {toolCall: BandColors; toolResult: BandColors} {
   const tool = conversation.tool;
+  // The canvas, by way of the role the bands belong to: a band is told apart by
+  // its text colour, not by a fill behind it, and both foregrounds are held to
+  // the floor against the cell they actually land on.
+  const background = tool.background;
   return {
     toolCall: {
-      background: tool.background,
-      foreground: ensureContrast(spec.roleAccents.user, tool.background, spec.minContrast),
+      background,
+      foreground: ensureContrast(spec.roleAccents.user, background, spec.minContrast),
       ...spec.overrides?.toolCall,
     },
     toolResult: {
-      background: tool.background,
+      background,
       foreground: tool.content,
       ...spec.overrides?.toolResult,
     },
@@ -421,7 +451,6 @@ const DARK: ThemeSpec = {
   warning: '#facc15',
   error: '#f87171',
   minContrast: 4.5,
-  cardTint: 0.14,
   roleAccents: {
     assistant: '#0891b2',
     user: '#2563eb',
@@ -466,7 +495,6 @@ const LIGHT: ThemeSpec = {
   warning: '#b45309',
   error: '#b91c1c',
   minContrast: 4.5,
-  cardTint: 0.1,
   roleAccents: {
     assistant: '#0e7490',
     user: '#1d4ed8',
@@ -499,7 +527,6 @@ const SOLARIZED_DARK: ThemeSpec = {
   warning: '#b58900',
   error: '#dc322f',
   minContrast: 4.5,
-  cardTint: 0.16,
   roleAccents: {
     assistant: '#2aa198',
     user: '#268bd2',
@@ -532,7 +559,6 @@ const SOLARIZED_LIGHT: ThemeSpec = {
   warning: '#b58900',
   error: '#dc322f',
   minContrast: 4.5,
-  cardTint: 0.12,
   roleAccents: {
     assistant: '#2aa198',
     user: '#268bd2',
@@ -565,7 +591,6 @@ const CATPPUCCIN_MOCHA: ThemeSpec = {
   warning: '#f9e2af',
   error: '#f38ba8',
   minContrast: 4.5,
-  cardTint: 0.16,
   roleAccents: {
     assistant: '#94e2d5',
     user: '#89b4fa',
@@ -598,7 +623,6 @@ const CATPPUCCIN_LATTE: ThemeSpec = {
   warning: '#df8e1d',
   error: '#d20f39',
   minContrast: 4.5,
-  cardTint: 0.12,
   roleAccents: {
     assistant: '#179299',
     user: '#1e66f5',
@@ -631,7 +655,6 @@ const HIGH_CONTRAST_DARK: ThemeSpec = {
   warning: '#ffd700',
   error: '#ff8080',
   minContrast: 7,
-  cardTint: 0.1,
   roleAccents: {
     assistant: '#00ffff',
     user: '#7cc7ff',
@@ -668,7 +691,6 @@ const HIGH_CONTRAST_LIGHT: ThemeSpec = {
   warning: '#7a4b00',
   error: '#b00000',
   minContrast: 7,
-  cardTint: 0.08,
   roleAccents: {
     assistant: '#006466',
     user: '#0033cc',
