@@ -51,6 +51,8 @@ Pitfall: **"`MemUnitStalled` near zero" does not rule out memory latency as the 
 
 Scope: rocm, gfx942, `sglang-v0.5.18-rocm700-mi30x`. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job 633024.
 
+A related counter-altitude ambiguity: `VALUBusy` sitting well under 100 percent (for example 30 to 46 percent) does not by itself mean the kernel has ALU headroom to spare. It only rules out full ALU saturation; a kernel can still be instruction-issue-bound if its per-element instruction count is far above the minimal sequence the work needs, even while achieved HBM fetch rate is also well under peak. Descend to an ISA-level instruction audit (count real instructions per unit of useful work, separating genuine memory operations from ones a smarter code path could keep register-resident) rather than concluding "neither bandwidth- nor ALU-bound" means the kernel is already near-optimal. See [`aiter-mxfp4-moe.md`](aiter-mxfp4-moe.md) for a worked example where this distinguished an instruction-issue-bound decode step from the memory-bandwidth or occupancy fixes that were tried and failed first.
+
 ## Pitfalls
 
 ### rocprof-compute fails its own dependency check on this image; rocprofv3 works

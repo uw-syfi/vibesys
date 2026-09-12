@@ -16,14 +16,20 @@ Cause:   in-block phase timing (decode M=16, per 16-row expert block):
          rows costs 2.8x a warm walk over the same data (gate vs up walk,
          identical loop structure), while the MFMA instructions issue at
          their native rate. The compiled decode (LUT lookup, exponent
-         add, bf16 cast) is already lean: an integer bit-pattern decode
-         removed only about 4 percent of VALU work and was slower
-         overall in context, and it is exact only for block exponents in
-         [-125, 125], while the real checkpoint has exponent -126 in
-         about 3 percent of scale blocks. The earlier "decode ALU chain"
-         cause is refuted; MemUnitStalled near zero here is consistent
-         with a latency-bound, underfed memory unit, not with the
-         absence of a memory-side limiter (see profiler.md).
+         add, bf16 cast) was the cheaper of two variants measured here:
+         an integer bit-pattern decode removed only about 4 percent of
+         VALU work and was slower overall in context, and it is exact
+         only for block exponents in [-125, 125], while the real
+         checkpoint has exponent -126 in about 3 percent of scale
+         blocks. (A later ISA-level audit found the compiled decode is
+         not actually lean in absolute terms, a real per-element memory
+         load and a higher VALU count than assumed at this altitude; see
+         "MXFP4 weight decode" below. That finding does not change this
+         section's own conclusion about which term dominates wall time
+         at M=16.) The earlier "decode ALU chain" cause is refuted;
+         MemUnitStalled near zero here is consistent with a latency-bound,
+         underfed memory unit, not with the absence of a memory-side
+         limiter (see profiler.md).
 Fix:     no fix closes the gap yet. Seven refuted:
          - persistent grid with an atomic tile queue: bit-identical
            output, +2.8 percent at M=16, -3.5 percent at M=256. Launch
@@ -96,7 +102,61 @@ Status:  verified (phase timing), refuted fixes listed, 2026-09-11;
          633546 (split-K stage 1, refuted).
 ```
 
+## MXFP4 weight decode: a constant-memory lookup table compiles to a real per-element global load
+
+Follow-up to the decode-M=16 phase timing above, and to the K-split stage-1 refutation in the list of seven fixes: an ISA-level audit of the compiled decode step (the function that unpacks each MXFP4 weight nibble to bf16, used by every dispatched stage1/stage2 kernel variant, not only the scaffold path) found it carries real per-element instruction and memory cost that no earlier, counter-level measurement in this campaign had isolated.
+
+```
+Symptom: A memory-oriented rewrite of this kernel's K loop (register
+         prefetch, LDS staging, activation pre-gather, split-K, skinny
+         GEMV) consistently loses to the production kernel even when it
+         measurably improves the specific term it targets (for example,
+         LDS staging cut the gate K-walk about 3x on its own). Hardware
+         counters on the production kernels sit in an ambiguous middle:
+         VALU busy 30 to 46 percent, achieved HBM fetch rate 12 to 40
+         percent of peak, neither saturated, so neither a pure bandwidth
+         fix nor a pure latency-hiding fix (more bytes in flight) closes
+         the gap on its own.
+Cause:   the MXFP4 dequantization lookup table (16 entries, declared
+         `__constant__`) is indexed by a per-lane, per-element decoded
+         nibble, so the compiler cannot broadcast it into a register: it
+         compiles to one genuine `global_load_dword` per weight element
+         (plus a scheduling no-op tied to it), not a cached or
+         register-resident access, even though the whole table is only
+         two registers' worth of data. Measured at the instruction
+         level: 8.81 VALU instructions per weight element for the decode
+         step alone (1.5 to 1.8x an earlier design estimate of 5 to 6),
+         plus the 1.0 real memory load and 1.0 scheduling no-op per
+         element that no prior measurement in this campaign had
+         isolated, for roughly 11 to 12 total instructions per element
+         against a roughly 4 to 6 minimal unpack-scale-multiply-add
+         sequence. This is a general ROCm/HIP codegen pitfall, not
+         specific to this checkpoint or kernel: a `__constant__` table
+         indexed by a value that differs per SIMD lane cannot be
+         broadcast-loaded by the compiler no matter how small the table
+         is, and the resulting per-element global load plus its
+         dependent no-op can dominate an otherwise well-tuned loop's
+         instruction count without ever showing up as a bandwidth or
+         occupancy problem.
+Fix:     replace the memory-based lookup with a register-resident one
+         built from byte-select instructions (`v_perm_b32` on this ISA)
+         over compile-time immediate constants; all 16 MXFP4 levels are
+         exactly representable in bf16, so the general rounding step the
+         current code applies can also be skipped for this specific
+         value set. A register-resident prototype of this fix is in
+         progress; it is not yet measured end to end, so no speedup is
+         claimed here.
+Scope:   rocm, gfx942, this kernel's compiled decode step, and more
+         generally any HIP kernel that indexes a `__constant__` table by
+         a per-lane value inside a hot loop.
+Status:  candidate (ISA-level mechanism confirmed by direct inspection
+         of the compiled kernel and cross-checked against hardware
+         counters on two production dispatch shapes; the register-
+         resident fix itself is not yet measured). Stamp:
+         sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
+```
+
 ## See also
 
 - [`aiter.md`](aiter.md): the kernel this pitfall applies to, the prefill-M microbenchmark, and the dequant-to-bf16-scratch alternative refuted at prefill M
-- [`profiler.md`](profiler.md): the `rocprofv3` counters (`MemUnitStalled`, `VALUBusy`) used to classify this as latency-bound, not bandwidth-bound
+- [`profiler.md`](profiler.md): the `rocprofv3` counters (`MemUnitStalled`, `VALUBusy`) used to classify this as latency-bound, not bandwidth-bound, and the in-kernel phase timing method that first separated latency-bound from ALU-bound here

@@ -106,6 +106,25 @@ Decode-step time is dominated by the MoE expert FFN, not by the mixer or the col
 
 Status: verified (three-fifths-of-decode-time finding reproduced twice; fused-kernel latency-bound finding verified once). sglang-v0.5.18-rocm700-mi30x, 2026-09-11.
 
+### Decode round breakdown, driven fixed-batch sweep, measured
+
+A synthetic fixed-batch driver (see [`../tooling/profiler.md`](../tooling/profiler.md)) captured a clean per-round kernel breakdown at four session counts under speculative decoding, avoiding the open-loop benchmark's own capture-window problem. Routed MoE is the largest term at every size measured and its share grows with batch size, from about 65 percent at the smallest size to about two-thirds at the largest, consistent with the "roughly three-fifths" figure above and refining it with real batch-size-swept numbers instead of one operating point:
+
+| Block | Share of round, smallest batch | Share of round, largest batch |
+|:--|--:|--:|
+| Routed MoE (stage1+stage2) | 64.9% | 66.2% |
+| Dense GEMM | 10.0% | 10.3% |
+| Collectives | 5.2% | 7.7% |
+| CPU-only gap | 5.9% | 3.6% |
+| Attention | 1.4% | 2.1% |
+| Gated DeltaNet (mixer kernel only) | 0.5% | 0.4% |
+
+Against the campaign's HBM-bandwidth floor, routed MoE measures about 2.55x its floor at a mid-range batch size (a floor of roughly 14.8 ms) and the whole round measures about 3.09x an 18.3 ms floor at that same point; both ratios shrink as batch size grows. See [`../tooling/performance-modeling.md`](../tooling/performance-modeling.md) for the padding-floor mechanism this confirms across the sweep.
+
+Of the unattributed "other" bucket left over after the named blocks above, kernels belonging to the Gated-DeltaNet mixer (the per-token recurrent state update run by this model's 45 linear-attention layers) account for 57 percent of it at the mid-range batch size, more than five times the next-largest category (elementwise/copy kernels). Counting both the mixer's own dedicated kernel bucket and this share of "other", Gated-DeltaNet kernels together cost about 5 percent of the round. One kernel alone (the gating/delta-rule state update) is 28 percent of "other" by itself; the remainder of "other" is diffuse across more than 60 kernel names, none individually above roughly 0.5 ms per round. This is architecturally expected: GDN's per-token state update does not fuse into the grouped-GEMM or attention buckets the way dense or MoE compute does, so it shows up as its own family of small kernels rather than as bookkeeping overhead on top of something else.
+
+Status: verified (four clean batch-size points for the round breakdown and floor ratios; GDN share of "other" measured at one of the four). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
+
 ### Speculative decoding (NEXTN, k=3), measured
 
 Paired against the accepted fused-kernel defaults (no speculative decoding), 5 reps per side pooled, gates 13/13 on every rep of every side:
