@@ -19,6 +19,7 @@ import {fillLayer} from './box-fill.js';
 import {formatFileChange} from './design-log.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {elapsedLabel} from './previews.js';
+import {displayWidth, padToWidth, truncateToWidth} from './text-width.js';
 import type {Theme} from './theme.js';
 
 const MIN_BODY_WIDTH = 40;
@@ -597,17 +598,17 @@ export function resolveColumns(width: number): Columns {
 }
 
 export function headerRow(columns: Columns, direction: 'max' | 'min' | null = null): string {
-  const parts = [' Hypothesis'.padEnd(ID_WIDTH), 'Rounds'.padEnd(ROUNDS_WIDTH)];
-  if (columns.claim) parts.push('Implementation Details'.padEnd(columns.claimWidth));
+  const parts = [padToWidth(' Hypothesis', ID_WIDTH), padToWidth('Rounds', ROUNDS_WIDTH)];
+  if (columns.claim) parts.push(padToWidth('Implementation Details', columns.claimWidth));
   if (columns.measured) {
     // The glyph is the way improvement points, so a signed delta below reads
     // as good or bad without task knowledge. A glyph rather than color, which
     // the outcome column already spends; the drill-down spells out the word.
     const label = direction === null ? 'Measured' : `Measured ${direction === 'max' ? '↑' : '↓'}`;
-    parts.push(label.padEnd(MEASURED_WIDTH));
+    parts.push(padToWidth(label, MEASURED_WIDTH));
   }
-  parts.push('Outcome'.padEnd(OUTCOME_WIDTH));
-  if (columns.kept) parts.push('Kept'.padEnd(KEPT_WIDTH));
+  parts.push(padToWidth('Outcome', OUTCOME_WIDTH));
+  if (columns.kept) parts.push(padToWidth('Kept', KEPT_WIDTH));
   return parts.join(COLUMN_GAP);
 }
 
@@ -651,7 +652,10 @@ export function entryCells(
 ): EntryCells {
   const marker = entryLeadingMarker(entry, isSelected);
   const leading = [
-    fitColumn(`${marker}${truncate(entry.hypothesis_id, ID_WIDTH - marker.length)}`, ID_WIDTH),
+    fitColumn(
+      `${marker}${truncate(entry.hypothesis_id, ID_WIDTH - displayWidth(marker))}`,
+      ID_WIDTH,
+    ),
     fitColumn(formatRounds(entry), ROUNDS_WIDTH),
   ];
   if (columns.claim) {
@@ -678,8 +682,9 @@ export function entryCells(
   };
 }
 
+/** Exactly `width` cells: truncated if over, space-padded if under. */
 function fitColumn(value: string, width: number): string {
-  return truncate(value, width).padEnd(width);
+  return padToWidth(truncate(value, width), width);
 }
 
 export function entryRow(entry: HypothesisEntry, columns: Columns, isSelected = false): string {
@@ -896,9 +901,15 @@ function rowId(index: number): string {
   return `experiment-row-${index}`;
 }
 
+/**
+ * At most `width` cells, ellipsized. Measured in cells, not code units: a CJK
+ * value that fits its column by `String.length` can still be twice as wide on
+ * screen, and slicing by code units can land inside a wide character.
+ */
 function truncate(value: string, width: number): string {
   if (width <= 1) return '';
-  return value.length <= width ? value : `${value.slice(0, Math.max(1, width - 1))}…`;
+  if (displayWidth(value) <= width) return value;
+  return `${truncateToWidth(value, width - 1)}…`;
 }
 
 function trimNumber(value: number): string {

@@ -4,6 +4,7 @@ import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
 import {focusedPane, visibleTodos} from '../session-model.js';
 import {paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
+import {displayWidth, truncateToWidth} from './text-width.js';
 import type {Theme} from './theme.js';
 
 const STATUS_MARKER: Record<string, string> = {
@@ -79,9 +80,15 @@ export function todoItemLine(todo: TodoItem, maxWidth: number): string {
   return truncate(`${todoMarker(todo.status)} ${todo.content}`, maxWidth);
 }
 
+/**
+ * At most `width` cells, ellipsized. Measured in cells, not code units: a CJK
+ * todo that fits by `String.length` can still be twice as wide on screen, and
+ * slicing by code units can land inside a wide character.
+ */
 function truncate(line: string, maxWidth: number): string {
   const width = Math.max(8, maxWidth);
-  return line.length <= width ? line : `${line.slice(0, width - 1)}…`;
+  if (displayWidth(line) <= width) return line;
+  return `${truncateToWidth(line, width - 1)}…`;
 }
 
 /**

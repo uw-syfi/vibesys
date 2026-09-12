@@ -4,6 +4,7 @@ import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing'
 import type {TodoItem} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {displayWidth} from './text-width.js';
 import {resolveTheme} from './theme.js';
 import {TodoStripView, todoItemLine, todoSummaryLine} from './todo-strip.js';
 
@@ -43,6 +44,23 @@ describe('todo strip formatting', () => {
     const line = todoItemLine({content: 'x'.repeat(50), status: 'pending'}, 20);
     expect(line).toHaveLength(20);
     expect(line.endsWith('…')).toBe(true);
+  });
+
+  it('truncates a CJK label by display cells, not code units', () => {
+    // Nine ideographs are nine code units but eighteen cells: measured by
+    // `String.length` this line fits a 13-cell budget and overflows it on
+    // screen by seven cells.
+    const line = todoItemLine({content: '优化内核向量化路径', status: 'in_progress'}, 13);
+    expect(line).toBe('▶ 优化内核向…');
+    expect(displayWidth(line)).toBe(13);
+  });
+
+  it('drops a wide character that would straddle the budget instead of splitting it', () => {
+    const line = todoItemLine({content: '优化内核向量化路径', status: 'in_progress'}, 14);
+    // One cell short of the budget: the next ideograph needs two cells and
+    // only one is left, so it goes whole rather than as half a glyph.
+    expect(line).toBe('▶ 优化内核向…');
+    expect(displayWidth(line)).toBe(13);
   });
 });
 
@@ -137,6 +155,17 @@ describe('todo strip rendering', () => {
     expect(item.width).toBe(BOX_WIDTH - 6);
     expect(item.text).toHaveLength(item.width);
     expect(item.text.endsWith('…')).toBe(true);
+  });
+
+  it('fills the collapsed summary to the box edge in display cells for a CJK todo', async () => {
+    const cjkTodo: TodoItem = {content: '优'.repeat(200), status: 'in_progress'};
+    const {lines} = await renderStrip([cjkTodo], false, BOX_WIDTH);
+    const summary = onlyLine(lines);
+    expect(summary.width).toBe(BOX_WIDTH - 2);
+    // Cells, not code units: sliced by code units this line would occupy
+    // almost twice its slot and spill past the box edge.
+    expect(displayWidth(summary.text)).toBe(summary.width);
+    expect(summary.text.endsWith('…')).toBe(true);
   });
 
   it('survives a box narrower than its own chrome', async () => {
