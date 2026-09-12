@@ -258,6 +258,14 @@ Status:  candidate, acceptance pending (3-rep probe at one concurrency;
          sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633552.
 ```
 
+A standalone script invoked outside the normal serving launch path (a
+direct `Engine()` save or probe script, run by absolute path with no
+`PYTHONPATH` set) can silently resolve `import sglang` to a different
+install than the one it means to exercise, such as a container image's
+own baked-in copy shadowing a staged checkout. This is general to
+`sys.path` resolution, not backend-specific; see [platforms/](../platforms/)
+for a worked example and fix.
+
 ## See also
 
 - `engines/vllm/`, `engines/trtllm/`
