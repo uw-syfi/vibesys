@@ -39,6 +39,7 @@ import {
   moveHypothesisRoundSelection,
   moveThemeSelection,
   normalizeFocus,
+  openChat,
   openChatModelMenu,
   openChatResumeMenu,
   openExperimentLog,
@@ -6535,3 +6536,90 @@ class FakeController implements SessionController {
     for (const listener of this.#listeners) listener(this.state);
   }
 }
+
+describe('chat while a pane is zoomed', () => {
+  /** The landing view with the experiments pane zoomed over the whole row. */
+  async function zoomedLog(): Promise<{
+    testRenderer: TestRendererSetup;
+    controller: FakeController;
+  }> {
+    const testRenderer = await createTestRenderer({width: 200, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    await frameAfter(testRenderer);
+    testRenderer.mockInput.pressKey('F4');
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.zoomedPane).toBe('experiments');
+    return {testRenderer, controller};
+  }
+
+  it('opens the modal over the zoomed pane and takes the typing', async () => {
+    // Zoom gives the whole content row to one pane, so the docked chat is off
+    // screen. `chatDocked` used to ignore that and route /chat's focus to the
+    // hidden pane: no chat appeared, and keystrokes went where the operator
+    // could not see them.
+    const {testRenderer, controller} = await zoomedLog();
+    const zoomed = await frameAfter(testRenderer);
+    expect(zoomed).not.toContain('Experiment chat');
+
+    // What the real controller's /chat dispatch runs.
+    controller.publish(openChat(controller.state));
+    const opened = await frameAfter(testRenderer);
+    expect(controller.state.chatOpen).toBe(true);
+    expect(opened).toContain('Experiment chat');
+    expect(boxOf(testRenderer, 'chat-overlay').visible).toBe(true);
+
+    // The cursor landed on the visible composer: the question reaches the
+    // chat, not the command bar behind the modal.
+    await testRenderer.mockInput.typeText('why is r41 slow?');
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.chatSubmissions.length === 1);
+    expect(controller.chatSubmissions).toEqual(['why is r41 slow?']);
+    expect(controller.submissions).toEqual([]);
+  });
+
+  it('restores the zoomed pane and its keys when the modal closes', async () => {
+    const {testRenderer, controller} = await zoomedLog();
+    controller.publish(openChat(controller.state));
+    await frameAfter(testRenderer);
+    expect(controller.state.chatOpen).toBe(true);
+
+    testRenderer.mockInput.pressKey('ESCAPE');
+    const closed = await frameAfterEscape(testRenderer);
+    expect(controller.state.chatOpen).toBe(false);
+    // Escape closes only the modal: the zoom and the pane keys are exactly
+    // where /chat found them.
+    expect(controller.state.layout.zoomedPane).toBe('experiments');
+    expect(controller.state.layout.focus).toBe('left');
+    expect(closed).toContain('H-07');
+    expect(closed).not.toContain('Experiment chat');
+  });
+
+  it('carries the modal and its draft through a zoom exit into the dock', async () => {
+    const {testRenderer, controller} = await zoomedLog();
+    controller.publish(openChat(controller.state));
+    await frameAfter(testRenderer);
+    expect(controller.state.chatOpen).toBe(true);
+    await testRenderer.mockInput.typeText('draft for the dock');
+
+    // F4 stands down while the modal is open, but zoom can still end under
+    // it. The modal stays the one chat surface until it is dismissed rather
+    // than jumping into the dock mid-question.
+    controller.togglePaneZoom();
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.zoomedPane).toBeNull();
+    expect(controller.state.chatOpen).toBe(true);
+    expect(boxOf(testRenderer, 'chat-overlay').visible).toBe(true);
+    expect(boxOf(testRenderer, 'chat-pane').visible).toBe(false);
+
+    testRenderer.mockInput.pressKey('ESCAPE');
+    const docked = await frameAfterEscape(testRenderer);
+    expect(controller.state.chatOpen).toBe(false);
+    expect(boxOf(testRenderer, 'chat-pane').visible).toBe(true);
+    // One shared draft: the words typed into the modal are waiting in the
+    // docked composer rather than lost with the surface that closed.
+    expect(docked).toContain('draft for the dock');
+  });
+});

@@ -351,11 +351,14 @@ export function experimentLogVisible(state: SessionState): boolean {
  * The chat is docked on the landing view: it is part of that view rather than a
  * dialog over it, so a question never hides the table it is about. Inside a
  * hypothesis, and in a terminal too narrow for two columns, it stays the modal
- * it was.
+ * it was. Zoom hands the content row to one pane, so while any other pane is
+ * zoomed the dock is off screen and the chat is the modal again; otherwise
+ * ``/chat`` would put the keys on a composer the operator cannot see.
  */
 export function chatDocked(state: SessionState): boolean {
   return (
     state.chatDockFits &&
+    (state.layout.zoomedPane === null || state.layout.zoomedPane === 'chat') &&
     state.experimentLog !== null &&
     state.hypothesisDetail === null &&
     state.hypothesisScope === null
