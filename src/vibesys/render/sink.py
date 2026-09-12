@@ -20,7 +20,10 @@ from vibesys.run.events import (
     CoreEventData,
     CoreEventType,
     EventStatus,
+    FrameworkSource,
+    FrameworkWarningData,
     JsonResultPayload,
+    RunConfiguredData,
     TodoItemData,
     TodoUpdateData,
     ToolCallData,
@@ -177,6 +180,60 @@ class OutputSink:
             agent_kind=agent_kind,
             round_label=round_label,
             execution_id=invocation_id,
+        )
+
+    def framework_warning(  # tracked: #288
+        self,
+        summary: str,
+        *,
+        detail: str | None = None,
+        source: FrameworkSource = FrameworkSource.OTHER,
+        source_label: str | None = None,
+        round_label: str | None = None,
+    ) -> None:
+        """Publish one non-fatal framework fault as a typed event."""
+        self.emit(
+            CoreEventType.FRAMEWORK_WARNING,
+            data=FrameworkWarningData(
+                summary=summary,
+                detail=detail,
+                source=source,
+                source_label=source_label,
+            ),
+            round_label=round_label,
+        )
+
+    def run_configured(  # noqa: PLR0913  # tracked: #288
+        self,
+        *,
+        run_log_path: str,
+        project_root: str,
+        model: str | None = None,
+        objective: str | None = None,
+        search_policy: str | None = None,
+        benchmark_contract: bool = False,
+        pareto_objectives: str | None = None,
+    ) -> None:
+        """Publish the one-per-run resolved loop configuration event.
+
+        ``objective`` is reduced to its first non-empty line; the full text is
+        run state, not an event payload.
+        """
+        first_line = next(
+            (line for line in (objective or "").splitlines() if line.strip()),
+            None,
+        )
+        self.emit(
+            CoreEventType.RUN_CONFIGURED,
+            data=RunConfiguredData(
+                run_log_path=run_log_path,
+                project_root=project_root,
+                model=model,
+                objective=first_line,
+                search_policy=search_policy,
+                benchmark_contract=benchmark_contract,
+                pareto_objectives=pareto_objectives,
+            ),
         )
 
     def usage_update(  # noqa: D102, PLR0913  # tracked: #288

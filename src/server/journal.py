@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     import threading
 
 _MAX_EXCEPTION_CHAIN = 8
-_DIAGNOSTIC_FAILURE_EVENTS = frozenset(
+DIAGNOSTIC_FAILURE_EVENTS = frozenset(
     {
         EventType.CONFIGURATION_FAILED,
         EventType.INVOCATION_FINISHED,
@@ -48,6 +48,11 @@ _DIAGNOSTIC_FAILURE_EVENTS = frozenset(
         EventType.RUN_INTERRUPTED,
     }
 )
+"""Operational failure events that must carry a diagnostic when FAILED.
+
+Gate and judge outcomes are deliberately absent: a failed gate or judge
+verdict is an expected semantic result, not an operational fault.
+"""
 _NONTERMINAL_FAILURE_EVENTS = frozenset(
     {
         EventType.INVOCATION_FINISHED,
@@ -138,12 +143,7 @@ class EventJournal:
         **fields: Any,  # noqa: ANN401
     ) -> RunEvent:
         """Construct and append one server wire event."""
-        if (
-            event_type in _DIAGNOSTIC_FAILURE_EVENTS
-            and fields.get("status") in {EventStatus.FAILED, EventStatus.FAILED.value}
-            and fields.get("diagnostic") is None
-        ):
-            raise ValueError(f"Failed {event_type.value} events must include a diagnostic")  # noqa: TRY003
+        _require_failure_diagnostic(event_type, fields.get("status"), fields.get("diagnostic"))
         event = make_event(event_type, text, data=data, **fields)
         with self._condition:
             store = self._store
@@ -158,6 +158,7 @@ class EventJournal:
         Adapters use this path when projecting a timestamped core event. The
         durable store still owns its run identity and sequence assignment.
         """
+        _require_failure_diagnostic(event.type, event.status, event.diagnostic)
         with self._condition:
             store = self._store
             if store is None:
@@ -213,7 +214,7 @@ class EventJournal:
         **fields: Any,  # noqa: ANN401
     ) -> RunEvent:
         """Record an allowed failure event with stable diagnostics."""
-        if event_type not in _DIAGNOSTIC_FAILURE_EVENTS:
+        if event_type not in DIAGNOSTIC_FAILURE_EVENTS:
             raise ValueError(f"{event_type.value} is not an operational failure event")  # noqa: TRY003
         diagnostic = diagnostic or self.diagnostic_for(error, scope, operation=operation)
         if diagnostic.severity is not severity:
@@ -391,6 +392,24 @@ class EventJournal:
             if header.sequence <= floor and header.type in _BOOTSTRAP_SPINE_TYPES
         ]
         return store.read_sequences(sequences)
+
+
+def _require_failure_diagnostic(
+    event_type: EventType,
+    status: object,
+    diagnostic: Diagnostic | None,
+) -> None:
+    """Reject a FAILED operational event that carries no diagnostic.
+
+    Both write paths share this check: ``record`` for server-built events and
+    ``append`` for projected core events, so no producer can bypass it.
+    """
+    if (
+        event_type in DIAGNOSTIC_FAILURE_EVENTS
+        and status in {EventStatus.FAILED, EventStatus.FAILED.value}
+        and diagnostic is None
+    ):
+        raise ValueError(f"Failed {event_type.value} events must include a diagnostic")  # noqa: TRY003
 
 
 def _header_from_event(event: RunEvent) -> EventHeader:

@@ -11,6 +11,7 @@ import pytest
 
 from vibesys.repository import RepositoryVisibility
 from vibesys.run.experiment_repo import ExperimentRepository
+from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vs_github import GitHubCLI
 
@@ -35,7 +36,7 @@ def _git(root: Path, *args: str) -> str:
 
 def _project(root: Path, run_id: str = "publish-test") -> GitTracker:
     (root / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
-    tracker = GitTracker(root, run_id=run_id, log=lambda _message: None)
+    tracker = GitTracker(root, run_id=run_id, events=NullGitTrackerEvents())
     tracker.init(existing=False)
     return tracker
 

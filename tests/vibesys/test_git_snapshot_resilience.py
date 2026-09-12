@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vibesys.run import GitTracker
+from vibesys.run.git_events import NullGitTrackerEvents
 from vs_project import Project
 
 if TYPE_CHECKING:
@@ -19,7 +20,7 @@ def _tracker(project: Path, *, excluded_dirs: set[str] | None = None) -> GitTrac
     return GitTracker(
         project,
         run_id="test-run",
-        log=lambda _message: None,
+        events=NullGitTrackerEvents(),
         excluded_dirs=excluded_dirs or (),
     )
 

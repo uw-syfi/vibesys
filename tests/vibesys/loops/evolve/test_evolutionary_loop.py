@@ -54,7 +54,10 @@ from vibesys.loops.evolve.search_policy import (
 from vibesys.loops.evolve.state import EvolutionStateStore
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.profilers import ProfilerKind
+from vibesys.render.sink import output_sink
 from vibesys.run import EventJournal, GitTracker, LoopContext, RunState, RunStateNamespace
+from vibesys.run.events import FrameworkWarningData
+from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentSpec
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
 from vs_project import EvolveRunConfiguration, Project, RunEnvironmentRecord
@@ -934,7 +937,7 @@ def test_openevolve_policy_persists_multi_file_search_state(tmp_path, ref_file):
 
 
 def test_candidate_code_is_multi_file_but_excludes_framework_state(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    tracker = GitTracker(tmp_path, run_id="test-evolve", log=lambda _message: None)
+    tracker = GitTracker(tmp_path, run_id="test-evolve", events=NullGitTrackerEvents())
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "lib.rs").write_text("baseline\n")
     (tmp_path / "src" / "ffi.rs").write_text("baseline\n")
@@ -1361,34 +1364,39 @@ def test_run_generation_parallel_skips_parent_without_commit(tmp_path, monkeypat
 def test_evaluate_in_subcontext_skips_parent_without_commit():  # noqa: ANN201  # tracked: #288
     """A parent with no commit can't seed a worktree — folded into a failed
     outcome without ever building a sub-context."""
-    logs: list[str] = []
-    parent_ctx = _FakeLoopContext(log=logs.append)
+    parent_ctx = _FakeLoopContext(log=lambda _line: None)
     parentless = Individual(id=3, generation=1, parent_id=1, commit=None, passed=True, summary="x")
 
-    outcome = _evaluate_in_subcontext(
-        parent_ctx,
-        config=Config.model_validate({"model": {"name": "m"}}),
-        agent_backend=None,
-        cli_provider=None,
-        generation=2,
-        child_idx=1,
-        parent=parentless,
-        inspirations=[],
-        objective="obj",
-        space=MetricSpace(),
-        modality="text_generation",
-        domain_definition=_LLM_SERVING_DOMAIN,
-        pass_criteria="crit",  # noqa: S106  # tracked: #288
-        keep_deployments=False,
-        policy_parent_id=None,
-        target_island=None,
-        worktree_lock=threading.Lock(),
-    )
+    seen = []
+    unsubscribe = output_sink().subscribe(seen.append)
+    try:
+        outcome = _evaluate_in_subcontext(
+            parent_ctx,
+            config=Config.model_validate({"model": {"name": "m"}}),
+            agent_backend=None,
+            cli_provider=None,
+            generation=2,
+            child_idx=1,
+            parent=parentless,
+            inspirations=[],
+            objective="obj",
+            space=MetricSpace(),
+            modality="text_generation",
+            domain_definition=_LLM_SERVING_DOMAIN,
+            pass_criteria="crit",  # noqa: S106  # tracked: #288
+            keep_deployments=False,
+            policy_parent_id=None,
+            target_island=None,
+            worktree_lock=threading.Lock(),
+        )
+    finally:
+        unsubscribe()
 
     assert outcome.passed is False
     assert outcome.parent_id == 3
     assert "no parent commit" in outcome.summary
-    assert any("no parent commit" in line for line in logs)
+    warnings = [e.data.summary for e in seen if isinstance(e.data, FrameworkWarningData)]
+    assert any("no parent commit" in summary for summary in warnings)
 
 
 def test_evaluate_in_subcontext_builds_worktree_and_evaluates(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288

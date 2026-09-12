@@ -946,6 +946,247 @@ describe('the carried-forward profile flag', () => {
   });
 });
 
+describe('typed framework events', () => {
+  it('renders a gate start as the gate running its command', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      frameworkEvent(
+        1,
+        'gate_started',
+        {
+          kind: 'gate_started',
+          gate: 'validation',
+          recipe: 'focused-tests',
+          command: 'uv run pytest -q',
+        },
+        {status: 'active'},
+      ),
+    );
+
+    expect(state.transcript).toMatchObject([
+      {
+        kind: 'status',
+        content: 'running focused-tests: uv run pytest -q',
+        label: 'framework-validation · round-1',
+        roundLabel: 'round-1',
+        roundNumber: 1,
+      },
+    ]);
+  });
+
+  // The framework speaks for itself even while an agent phase is active, and
+  // even if an envelope arrived with agent context stamped on it: routing
+  // these labels through `labelFor` would render this one as `judge · round-1`.
+  it('never attributes a framework event to the active agent', () => {
+    let state = reduceEvent(
+      initialCoreState(),
+      executionEvent(1, 'agent_execution_started', 'exec-judge', startedData('Review the diff')),
+    );
+    state = reduceEvent(state, {
+      ...frameworkEvent(
+        2,
+        'gate_started',
+        {kind: 'gate_started', gate: 'validation', recipe: 'focused-tests'},
+        {status: 'active'},
+      ),
+      agent_kind: 'judge',
+    });
+
+    const entry = state.transcript.at(-1);
+    expect(entry?.label).toBe('framework-validation · round-1');
+    expect(entry?.agentKind).toBeUndefined();
+  });
+
+  it('renders gate outcomes: pass, reused pass, and bare pass', () => {
+    const pass = reduceEvent(
+      initialCoreState(),
+      frameworkEvent(
+        1,
+        'gate_finished',
+        {kind: 'gate_finished', gate: 'validation', recipe: 'focused-tests'},
+        {status: 'completed'},
+      ),
+    );
+    const reused = reduceEvent(
+      initialCoreState(),
+      frameworkEvent(
+        1,
+        'gate_finished',
+        {kind: 'gate_finished', gate: 'validation', recipe: 'lint', reused: true},
+        {status: 'completed'},
+      ),
+    );
+    const bare = reduceEvent(
+      initialCoreState(),
+      frameworkEvent(
+        1,
+        'gate_finished',
+        {kind: 'gate_finished', gate: 'accuracy'},
+        {status: 'completed'},
+      ),
+    );
+
+    expect(pass.transcript[0]).toMatchObject({
+      kind: 'status',
+      content: 'PASS: focused-tests',
+      label: 'framework-validation · round-1',
+      tone: 'success',
+    });
+    expect(reused.transcript[0]).toMatchObject({content: 'reused PASS: lint', tone: 'success'});
+    expect(bare.transcript[0]).toMatchObject({
+      content: 'PASS',
+      label: 'framework-accuracy · round-1',
+    });
+  });
+
+  it('renders a failed gate as a diagnostic card carrying the output tail', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      frameworkEvent(
+        1,
+        'gate_finished',
+        {kind: 'gate_finished', gate: 'accuracy', output_tail: 'assert 3 == 4\n1 failed'},
+        {status: 'failed'},
+      ),
+    );
+
+    expect(state.transcript).toMatchObject([
+      {
+        kind: 'diagnostic',
+        content: 'FAIL\nassert 3 == 4\n1 failed',
+        label: 'framework-accuracy · round-1',
+        tone: 'failure',
+      },
+    ]);
+  });
+
+  it('renders a completed benchmark gate as the Benchmark card and folds the measurement', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      frameworkEvent(
+        7,
+        'gate_finished',
+        {
+          kind: 'gate_finished',
+          gate: 'benchmark',
+          metric: 'tok_per_sec',
+          value: 42.5,
+          unit: 'tok/s',
+        },
+        {status: 'completed'},
+      ),
+    );
+
+    expect(state.transcript).toMatchObject([
+      {kind: 'result', content: 'tok_per_sec: 42.5 tok/s', label: 'Benchmark', tone: 'success'},
+    ]);
+    expect(state.benchmarks).toEqual([
+      {sequence: 7, roundNumber: 1, metric: 'tok_per_sec', value: 42.5, unit: 'tok/s'},
+    ]);
+  });
+
+  it('describes each workspace snapshot aspect', () => {
+    type Snapshot = Extract<NonNullable<RunEvent['data']>, {kind?: 'workspace_snapshot'}>;
+    const aspects: Partial<Snapshot>[] = [
+      {label: 'round-1-implementer', commit: '3e7d0a1b2c4d5e6f708192a3b4c5d6e7f8091a2b'},
+      {label: 'round-2-implementer', commit: null},
+      {baseline: '9f2c1d4e6a7b8091a2b3c4d5e6f7a8b9c0d1e2f3'},
+      {excluded_paths: ['logs/', 'artifacts/']},
+    ];
+    const contents = aspects.map(aspect => {
+      const state = reduceEvent(
+        initialCoreState(),
+        frameworkEvent(
+          1,
+          'workspace_snapshot',
+          {kind: 'workspace_snapshot', source: 'git_tracking', ...aspect},
+          {round_label: null},
+        ),
+      );
+      return state.transcript[0];
+    });
+
+    expect(contents).toMatchObject([
+      {kind: 'status', content: "snapshot 'round-1-implementer' at 3e7d0a1", label: 'git-tracking'},
+      {content: "no changes to commit for 'round-2-implementer'", label: 'git-tracking'},
+      {content: 'trusted input baseline: 9f2c1d4', label: 'git-tracking'},
+      {content: 'excluded 2 paths from snapshots', label: 'git-tracking'},
+    ]);
+  });
+
+  it('summarizes the run configuration once', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      frameworkEvent(
+        1,
+        'run_configured',
+        {
+          kind: 'run_configured',
+          run_log_path: 'logs/run',
+          project_root: '/work/project',
+          model: 'claude-sonnet-4-5',
+          objective: 'Raise decode throughput',
+          search_policy: 'beam',
+          source: 'loop',
+        },
+        {round_label: null},
+      ),
+    );
+
+    expect(state.transcript).toMatchObject([
+      {
+        kind: 'status',
+        content:
+          'objective: Raise decode throughput\nmodel: claude-sonnet-4-5\nsearch policy: beam',
+        label: 'framework',
+      },
+    ]);
+  });
+
+  it('folds a framework warning into diagnostics, not the transcript', () => {
+    const state = reduceEvent(initialCoreState(), frameworkWarningEvent(3));
+
+    expect(state.transcript).toEqual([]);
+    expect(state.diagnostics).toMatchObject([
+      {id: 'warn-1', summary: 'profiler failed', severity: 'warning', source: 'loop', sequence: 3},
+    ]);
+  });
+
+  it('projects a framework batch with no entry from the warning', () => {
+    const state = reduceEventBatch(initialCoreState(), [
+      frameworkEvent(
+        1,
+        'run_configured',
+        {kind: 'run_configured', run_log_path: 'logs/run', project_root: '/work', source: 'loop'},
+        {round_label: null},
+      ),
+      frameworkEvent(
+        2,
+        'gate_started',
+        {kind: 'gate_started', gate: 'benchmark', command: 'uv run python bench.py'},
+        {status: 'active'},
+      ),
+      frameworkEvent(
+        3,
+        'gate_finished',
+        {kind: 'gate_finished', gate: 'benchmark', metric: 'ops', value: 9, unit: 'ops/s'},
+        {status: 'completed'},
+      ),
+      frameworkWarningEvent(4),
+      frameworkEvent(5, 'workspace_snapshot', {
+        kind: 'workspace_snapshot',
+        label: 'round-1',
+        commit: 'abcdef0123456789',
+        source: 'git_tracking',
+      }),
+    ]);
+
+    expect(state.transcript).toHaveLength(4);
+    expect(state.transcript.every(entry => entry.content.length > 0)).toBe(true);
+    expect(state.transcript.every(entry => entry.agentKind === undefined)).toBe(true);
+  });
+});
+
 /** One stream touching every transcript merge rule, plus both chat threads. */
 function mixedTranscriptEvents(): RunEvent[] {
   return [
@@ -1151,6 +1392,52 @@ function todoEvent(sequence: number, executionId: string, content: string): RunE
     execution_id: executionId,
     data: {kind: 'todo_update', todos: [{content, status: 'in_progress'}]},
   };
+}
+
+/** A #692 framework event: `agent_kind` null on the wire, round context only. */
+function frameworkEvent(
+  sequence: number,
+  type: RunEvent['type'],
+  data: NonNullable<RunEvent['data']>,
+  overrides: Partial<RunEvent> = {},
+): RunEvent {
+  return {
+    sequence,
+    timestamp: `2026-01-01T00:00:0${sequence}Z`,
+    type,
+    agent_kind: null,
+    round_label: 'round-1',
+    ...overrides,
+    data,
+  };
+}
+
+function frameworkWarningEvent(sequence: number): RunEvent {
+  return frameworkEvent(
+    sequence,
+    'framework_warning',
+    {
+      kind: 'framework_warning',
+      summary: 'profiler failed',
+      detail: 'nsys exited 1',
+      source: 'loop',
+    },
+    {
+      diagnostic: {
+        id: 'warn-1',
+        code: 'framework_warning',
+        summary: 'profiler failed',
+        detail: 'nsys exited 1',
+        hint: null,
+        scope: 'run',
+        severity: 'warning',
+        retryability: 'unknown',
+        cause_id: null,
+        debug_ref: null,
+        source: 'loop',
+      },
+    },
+  );
 }
 
 function diagnosticEvent(

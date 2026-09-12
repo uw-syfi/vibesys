@@ -10,12 +10,24 @@ from tests.server.support import build_server_parts
 
 from server.api.protocol import ChatQuery, ChatThreadCreateQuery
 from server.chat.factory import ChatAgentResources
-from server.events import EventType
+from server.diagnostics import DiagnosticScope, DiagnosticSeverity
+from server.events import EventStatus, EventType
+from server.integration import _CORE_FAILURE_CONTEXTS
+from server.journal import DIAGNOSTIC_FAILURE_EVENTS
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.run.events import (
+    AgentExecutionFinishedData,
     AgentOutputChunkData,
     CoreEventType,
+    FrameworkSource,
+    FrameworkWarningData,
+    GateFinishedData,
+    GateKind,
+    PhaseData,
     ToolCallData,
+)
+from vibesys.run.events import (
+    EventStatus as CoreEventStatus,
 )
 from vibesys.run.integration import (
     AgentSelection,
@@ -109,6 +121,102 @@ def test_core_events_project_to_wire_journal_and_execution_activity(tmp_path):  
     assert activity.mode == "tool"
     assert activity.tool == "Bash"
     assert (tmp_path / "core-events.jsonl").is_file()
+
+
+def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path):  # noqa: ANN001, ANN201
+    parts = build_server_parts(tmp_path)
+    parts.integration.invocations.start("implementer", "round-1", "work")
+
+    # All three events arrive without an agent_kind while an implementer
+    # execution is active. Only the presentation event may inherit it.
+    parts.integration.events.emit(
+        CoreEventType.AGENT_OUTPUT_CHUNK,
+        data=AgentOutputChunkData(channel="assistant", content="working"),
+    )
+    parts.integration.events.emit(
+        CoreEventType.GATE_FINISHED,
+        status=CoreEventStatus.FAILED,
+        round_label="round-1",
+        data=GateFinishedData(gate=GateKind.ACCURACY, output_tail="mismatch"),
+    )
+    parts.integration.events.emit(
+        CoreEventType.FRAMEWORK_WARNING,
+        data=FrameworkWarningData(
+            summary="profiler failed",
+            detail="boom",
+            source=FrameworkSource.LOOP,
+        ),
+    )
+
+    events = parts.journal.read()
+    chunk = next(e for e in events if e.type is EventType.AGENT_OUTPUT_CHUNK)
+    assert chunk.agent_kind == "implementer"
+    gate = next(e for e in events if e.type is EventType.GATE_FINISHED)
+    assert gate.agent_kind is None
+    assert gate.round_label == "round-1"
+    assert gate.status is EventStatus.FAILED
+    # A failed gate is an expected outcome, not a fault: no diagnostic.
+    assert gate.diagnostic is None
+    warning = next(e for e in events if e.type is EventType.FRAMEWORK_WARNING)
+    assert warning.agent_kind is None
+    assert warning.diagnostic is not None
+    assert warning.diagnostic.severity is DiagnosticSeverity.WARNING
+    assert warning.diagnostic.summary == "profiler failed"
+    assert warning.diagnostic.detail == "boom"
+    assert warning.diagnostic.source == "loop"
+
+
+def test_failed_core_events_project_with_synthesized_diagnostics(tmp_path):  # noqa: ANN001, ANN201
+    parts = build_server_parts(tmp_path)
+    handle = parts.integration.invocations.start("implementer", "round-1", "work")
+
+    parts.integration.events.emit(
+        CoreEventType.AGENT_EXECUTION_FINISHED,
+        status=CoreEventStatus.FAILED,
+        agent_kind="implementer",
+        round_label="round-1",
+        execution_id=handle.execution_id,
+        data=AgentExecutionFinishedData(error="RuntimeError: boom"),
+    )
+    parts.integration.events.emit(
+        CoreEventType.PHASE_FINISHED,
+        status=CoreEventStatus.FAILED,
+        agent_kind="implementer",
+        round_label="round-1",
+        execution_id=handle.execution_id,
+        data=PhaseData(phase="implementer"),
+    )
+    parts.integration.events.emit(
+        CoreEventType.RUN_FAILED,
+        "RuntimeError: boom",
+        status=CoreEventStatus.FAILED,
+    )
+
+    events = parts.journal.read()
+    execution = next(e for e in events if e.type is EventType.AGENT_EXECUTION_FINISHED)
+    assert execution.diagnostic is not None
+    assert execution.diagnostic.code == "core_failure"
+    assert execution.diagnostic.summary == "RuntimeError: boom"
+    assert execution.diagnostic.detail is None
+    assert execution.diagnostic.scope is DiagnosticScope.INVOCATION
+    assert execution.diagnostic.severity is DiagnosticSeverity.ERROR
+    assert execution.diagnostic.source == "loop"
+    phase = next(e for e in events if e.type is EventType.PHASE_FINISHED)
+    assert phase.diagnostic is not None
+    assert phase.diagnostic.summary == "Phase implementer failed"
+    assert phase.diagnostic.scope is DiagnosticScope.PHASE
+    assert phase.diagnostic.severity is DiagnosticSeverity.ERROR
+    terminal = next(e for e in events if e.type is EventType.RUN_FAILED)
+    assert terminal.diagnostic is not None
+    assert terminal.diagnostic.summary == "RuntimeError: boom"
+    assert terminal.diagnostic.scope is DiagnosticScope.RUN
+    assert terminal.diagnostic.severity is DiagnosticSeverity.FATAL
+
+
+def test_core_failure_synthesis_covers_the_journal_failure_invariant() -> None:
+    # Every event the journal refuses without a diagnostic must have a
+    # synthesis entry, or a diagnostic-less core failure would crash append.
+    assert set(_CORE_FAILURE_CONTEXTS) == DIAGNOSTIC_FAILURE_EVENTS
 
 
 def test_invocation_adapter_applies_steering_without_emitting_duplicate_lifecycle(

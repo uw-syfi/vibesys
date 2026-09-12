@@ -43,6 +43,7 @@ from server.events import EventType, RunEvent
 from vibesys.loops.agent.hypotheses import reproject_run_evidence
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.metrics import MetricSpace, Objective
+from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vs_project import ProjectStateError
 
@@ -68,6 +69,24 @@ class SubscriptionBootstrap:
     through_sequence: int
     events: list[RunEvent]
     active_executions: list[ActiveAgentExecution]
+
+
+class _DesignLogGitEvents(NullGitTrackerEvents):
+    """Forward design-projection tracker warnings to a journal sink.
+
+    The design tracker is read-only (``diff_name_status`` only), so the
+    snapshot observations never fire and inherit the null no-ops. Warnings
+    are formatted here, at the wiring layer, into the tagged text the run
+    journal shows.
+    """
+
+    def __init__(self, publish: Callable[[str], None]) -> None:
+        self._publish = publish
+
+    def warning(self, summary: str, *, detail: str | None = None) -> None:
+        """Publish one tagged line per tracker fault."""
+        message = summary if detail is None else f"{summary}: {detail}"
+        self._publish(f"[git-tracking] {message}")
 
 
 class RunApi:
@@ -328,7 +347,11 @@ class RunApi:
             cached = self._design
             if cached is not None and cached[0] == (workspace, run_id):
                 return cached[1]
-            tracker = GitTracker(workspace, run_id=run_id, log=self._publish_git_diagnostic())
+            tracker = GitTracker(
+                workspace,
+                run_id=run_id,
+                events=_DesignLogGitEvents(self._publish_git_diagnostic()),
+            )
             design = DesignLog(workspace=workspace, diff=tracker.diff_name_status)
             self._design = ((workspace, run_id), design)
             return design

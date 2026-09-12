@@ -12,7 +12,11 @@ from vibesys.run.events import (
     CommandResultPayload,
     CoreEvent,
     CoreEventType,
+    EventStatus,
+    FrameworkSource,
+    FrameworkWarningData,
     JsonResultPayload,
+    RunConfiguredData,
     TodoItemData,
     TodoUpdateData,
     ToolCallData,
@@ -127,6 +131,82 @@ class TestTypedEmitters:
         assert data.input_tokens == 12_345
         assert data.context_window == 200_000
         assert data.model == "claude-sonnet-4-6"
+
+
+class TestFrameworkEmitters:
+    def test_framework_warning_event(self):  # noqa: ANN201
+        sink = OutputSink()
+        seen, _ = _collect(sink)
+        sink.framework_warning(
+            "profiler failed",
+            detail="boom",
+            source=FrameworkSource.LOOP,
+            round_label="round-2",
+        )
+        assert seen[0].type == CoreEventType.FRAMEWORK_WARNING
+        data = seen[0].data
+        assert isinstance(data, FrameworkWarningData)
+        assert data.summary == "profiler failed"
+        assert data.detail == "boom"
+        assert data.source is FrameworkSource.LOOP
+        assert seen[0].round_label == "round-2"
+
+    def test_framework_warning_defaults(self):  # noqa: ANN201
+        sink = OutputSink()
+        seen, _ = _collect(sink)
+        sink.framework_warning("skills catalog invalid", source_label="skills")
+        data = seen[0].data
+        assert isinstance(data, FrameworkWarningData)
+        assert data.detail is None
+        assert data.source is FrameworkSource.OTHER
+        assert data.source_label == "skills"
+        assert seen[0].round_label is None
+
+    def test_run_configured_keeps_first_objective_line_only(self):  # noqa: ANN201
+        sink = OutputSink()
+        seen, _ = _collect(sink)
+        sink.run_configured(
+            run_log_path="/logs/run.log",
+            project_root="/work/project",
+            objective="\n  \nMake the queue fast.\nSecond paragraph.",
+            search_policy="pareto-ucb",
+            benchmark_contract=True,
+            pareto_objectives="[latency(min)]",
+        )
+        assert seen[0].type == CoreEventType.RUN_CONFIGURED
+        data = seen[0].data
+        assert isinstance(data, RunConfiguredData)
+        assert data.objective == "Make the queue fast."
+        assert data.model is None
+        assert data.search_policy == "pareto-ucb"
+        assert data.benchmark_contract is True
+        assert data.pareto_objectives == "[latency(min)]"
+
+    def test_run_configured_without_objective(self):  # noqa: ANN201
+        sink = OutputSink()
+        seen, _ = _collect(sink)
+        sink.run_configured(run_log_path="/logs/run.log", project_root="/p", model="m")
+        data = seen[0].data
+        assert isinstance(data, RunConfiguredData)
+        assert data.objective is None
+        assert data.model == "m"
+
+    def test_gate_events_carry_envelope_status(self):  # noqa: ANN201
+        from vibesys.run.events import GateFinishedData, GateKind, GateStartedData  # noqa: PLC0415
+
+        sink = OutputSink()
+        seen, _ = _collect(sink)
+        sink.emit(
+            CoreEventType.GATE_STARTED,
+            data=GateStartedData(gate=GateKind.ACCURACY, command="check"),
+            status=EventStatus.ACTIVE,
+        )
+        sink.emit(
+            CoreEventType.GATE_FINISHED,
+            data=GateFinishedData(gate=GateKind.ACCURACY, output_tail="bad"),
+            status=EventStatus.FAILED,
+        )
+        assert [e.status for e in seen] == [EventStatus.ACTIVE, EventStatus.FAILED]
 
 
 class TestComposition:

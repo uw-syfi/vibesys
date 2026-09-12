@@ -14,6 +14,7 @@ from typing import TextIO
 
 from vibesys.constants import DIM, GREEN, RESET, YELLOW
 from vibesys.render.format import format_status_prefix
+from vibesys.render.run_log import format_framework_event
 from vibesys.run.events import (
     AgentOutputChunkData,
     CoreEvent,
@@ -121,6 +122,8 @@ class HeadlessRenderer:
         elif isinstance(data, TodoUpdateData):
             self._break_line()
             self._todo_display.update(data.todos)
+        elif (framework_line := format_framework_event(event)) is not None:
+            self._render_line(framework_line)
         # Other event types (usage updates, lifecycle) carry no direct
         # terminal output; status readings surface through chunk prefixes.
 

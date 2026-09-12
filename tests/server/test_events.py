@@ -3,20 +3,29 @@
 import pytest
 from pydantic import ValidationError
 
+from server.diagnostics import Diagnostic, DiagnosticScope, DiagnosticSeverity
 from server.events import (
     AgentOutputChunkData,
     AgentStatusData,
     BenchmarkResultData,
     CommandResultPayload,
+    EventStatus,
     EventType,
+    FrameworkSource,
+    FrameworkWarningData,
+    GateFinishedData,
+    GateKind,
+    GateStartedData,
     JsonResultPayload,
     RoundFinishedData,
+    RunConfiguredData,
     RunEvent,
     TodoItemData,
     TodoUpdateData,
     ToolCallData,
     ToolResultData,
     UsageUpdateData,
+    WorkspaceSnapshotData,
     make_event,
 )
 
@@ -198,3 +207,130 @@ class TestRoundFinishedProfileSkipped:
         event = RunEvent.model_validate_json(raw)
         assert isinstance(event.data, RoundFinishedData)
         assert event.data.profile_skipped is False
+
+
+class TestFrameworkEventRoundTrip:
+    def test_gate_started(self):  # noqa: ANN201
+        event = make_event(
+            EventType.GATE_STARTED,
+            status=EventStatus.ACTIVE,
+            round_label="round-3",
+            data=GateStartedData(
+                gate=GateKind.VALIDATION,
+                recipe="focused-tests",
+                command="uv run pytest -q",
+            ),
+        )
+        restored = _round_trip(event)
+        assert isinstance(restored.data, GateStartedData)
+        assert restored.data.gate is GateKind.VALIDATION
+        assert restored.data.recipe == "focused-tests"
+        assert restored.data.command == "uv run pytest -q"
+        assert restored.data.source is FrameworkSource.GATES
+        assert restored.status is EventStatus.ACTIVE
+        assert restored.round_label == "round-3"
+
+    def test_gate_finished_pass_with_metric(self):  # noqa: ANN201
+        event = make_event(
+            EventType.GATE_FINISHED,
+            status=EventStatus.COMPLETED,
+            data=GateFinishedData(
+                gate=GateKind.BENCHMARK,
+                metric="tok_per_sec",
+                value=42.5,
+                unit="tok/s",
+            ),
+        )
+        restored = _round_trip(event)
+        assert isinstance(restored.data, GateFinishedData)
+        assert restored.data.gate is GateKind.BENCHMARK
+        assert restored.data.metric == "tok_per_sec"
+        assert restored.data.value == 42.5
+        assert restored.data.unit == "tok/s"
+        assert restored.data.reused is False
+        assert restored.status is EventStatus.COMPLETED
+
+    def test_gate_finished_failure_with_output_tail(self):  # noqa: ANN201
+        event = make_event(
+            EventType.GATE_FINISHED,
+            status=EventStatus.FAILED,
+            data=GateFinishedData(
+                gate=GateKind.ACCURACY,
+                output_tail="assertion mismatch",
+            ),
+        )
+        restored = _round_trip(event)
+        assert isinstance(restored.data, GateFinishedData)
+        assert restored.data.output_tail == "assertion mismatch"
+        assert restored.status is EventStatus.FAILED
+        # A failed gate is an expected outcome, not a run fault: no diagnostic.
+        assert restored.diagnostic is None
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf")])
+    def test_gate_finished_rejects_non_finite_value(self, value):  # noqa: ANN001, ANN201
+        with pytest.raises(ValidationError, match="finite"):
+            GateFinishedData(gate=GateKind.BENCHMARK, metric="m", value=value)
+
+    def test_workspace_snapshot(self):  # noqa: ANN201
+        event = make_event(
+            EventType.WORKSPACE_SNAPSHOT,
+            data=WorkspaceSnapshotData(label="round-2", commit="a" * 40),
+        )
+        restored = _round_trip(event)
+        assert isinstance(restored.data, WorkspaceSnapshotData)
+        assert restored.data.label == "round-2"
+        assert restored.data.commit == "a" * 40
+        assert restored.data.baseline is None
+        assert restored.data.excluded_paths == ()
+        assert restored.data.source is FrameworkSource.GIT_TRACKING
+
+    def test_run_configured(self):  # noqa: ANN201
+        event = make_event(
+            EventType.RUN_CONFIGURED,
+            data=RunConfiguredData(
+                run_log_path="/logs/run-1.log",
+                project_root="/work/project",
+                model="claude-sonnet-4-6",
+                objective="Make the queue fast.",
+                search_policy="pareto-ucb",
+                benchmark_contract=True,
+                pareto_objectives="[latency(min)], frontier_bias=0.5",
+            ),
+        )
+        restored = _round_trip(event)
+        assert isinstance(restored.data, RunConfiguredData)
+        assert restored.data.run_log_path == "/logs/run-1.log"
+        assert restored.data.search_policy == "pareto-ucb"
+        assert restored.data.benchmark_contract is True
+
+    def test_framework_warning_with_diagnostic(self):  # noqa: ANN201
+        """The projection lifts the payload into the wire diagnostic field."""
+        event = make_event(
+            EventType.FRAMEWORK_WARNING,
+            data=FrameworkWarningData(
+                summary="profiler failed",
+                detail="boom",
+                source=FrameworkSource.LOOP,
+            ),
+            diagnostic=Diagnostic(
+                code="framework_warning",
+                summary="profiler failed",
+                detail="boom",
+                scope=DiagnosticScope.RUN,
+                severity=DiagnosticSeverity.WARNING,
+                source="loop",
+            ),
+        )
+        restored = _round_trip(event)
+        assert isinstance(restored.data, FrameworkWarningData)
+        assert restored.data.summary == "profiler failed"
+        assert restored.data.source is FrameworkSource.LOOP
+        assert restored.diagnostic is not None
+        assert restored.diagnostic.severity is DiagnosticSeverity.WARNING
+        assert restored.diagnostic.source == "loop"
+
+    def test_diagnostic_without_source_still_parses(self):  # noqa: ANN201
+        """`source` is additive: persisted diagnostics without it stay valid."""
+        raw = '{"code": "framework_warning", "summary": "s", "scope": "run", "severity": "warning"}'
+        diagnostic = Diagnostic.model_validate_json(raw)
+        assert diagnostic.source is None

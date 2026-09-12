@@ -13,7 +13,18 @@ from server.chat.factory import (
     build_chat_agent,
 )
 from server.chat.options import ChatRunSettings
-from server.events import EventData, EventStatus, EventType, RunEvent
+from server.diagnostics import Diagnostic, DiagnosticScope, DiagnosticSeverity
+from server.events import (
+    AgentExecutionFinishedData,
+    EventData,
+    EventStatus,
+    EventType,
+    FrameworkSource,
+    FrameworkWarningData,
+    InvocationFinishedData,
+    PhaseData,
+    RunEvent,
+)
 from server.run_lifecycle import RunTrigger
 from vibesys.agents.factory import supported_cli_providers
 from vibesys.render.sink import output_sink
@@ -56,6 +67,92 @@ _PRESENTATION_EVENTS = frozenset(
         EventType.USAGE_UPDATE,
     }
 )
+_CORE_FAILURE_CONTEXTS: dict[EventType, tuple[DiagnosticScope, DiagnosticSeverity, str]] = {
+    EventType.CONFIGURATION_FAILED: (
+        DiagnosticScope.CONFIGURATION,
+        DiagnosticSeverity.FATAL,
+        "Configuration failed",
+    ),
+    EventType.INVOCATION_FINISHED: (
+        DiagnosticScope.INVOCATION,
+        DiagnosticSeverity.ERROR,
+        "Agent execution failed",
+    ),
+    EventType.AGENT_EXECUTION_FINISHED: (
+        DiagnosticScope.INVOCATION,
+        DiagnosticSeverity.ERROR,
+        "Agent execution failed",
+    ),
+    EventType.PHASE_FINISHED: (DiagnosticScope.PHASE, DiagnosticSeverity.ERROR, "Phase failed"),
+    EventType.RUN_FAILED: (DiagnosticScope.RUN, DiagnosticSeverity.FATAL, "Run failed"),
+    EventType.RUN_INTERRUPTED: (DiagnosticScope.RUN, DiagnosticSeverity.FATAL, "Run interrupted"),
+}
+"""Scope, severity, and fallback summary per operational failure event.
+
+Keys mirror ``server.journal.DIAGNOSTIC_FAILURE_EVENTS``, the set both journal
+write paths enforce a diagnostic for; a coverage test keeps them aligned. Gate
+and judge failures stay outside both: they are expected semantic outcomes.
+Severity follows the journal's own failure helpers: terminal run events are
+fatal, per-invocation and per-phase failures are errors.
+"""
+
+
+def _framework_warning_diagnostic(data: FrameworkWarningData) -> Diagnostic:
+    """Lift a framework warning into the run-scoped diagnostic surface.
+
+    The full payload still rides on the event's ``data``; the diagnostic is
+    the projection frontends already know how to surface.
+    """
+    return Diagnostic(
+        code="framework_warning",
+        summary=data.summary,
+        detail=data.detail,
+        scope=DiagnosticScope.RUN,
+        severity=DiagnosticSeverity.WARNING,
+        source=data.source_label or data.source.value,
+    )
+
+
+def _core_failure_diagnostic(
+    event_type: EventType, text: str, data: EventData | None
+) -> Diagnostic:
+    """Build a structured diagnostic for a failed core event that lacks one.
+
+    Core events carry unstructured failure facts (event text, a payload error
+    string); the projection lifts them into the diagnostic contract so the
+    journal invariant holds and frontends need no per-event fallback. Only
+    facts the event states are populated: no code beyond the synthesis origin,
+    and no hint.
+    """
+    scope, severity, fallback = _CORE_FAILURE_CONTEXTS[event_type]
+    error_text: str | None = None
+    if isinstance(data, (AgentExecutionFinishedData, InvocationFinishedData)):
+        error_text = data.error
+    elif isinstance(data, PhaseData):
+        fallback = f"Phase {data.phase} failed"
+    summary = text or error_text or fallback
+    return Diagnostic(
+        code="core_failure",
+        summary=summary,
+        detail=error_text if error_text is not None and error_text != summary else None,
+        scope=scope,
+        severity=severity,
+        source=FrameworkSource.LOOP.value,
+    )
+
+
+def _core_event_diagnostic(
+    event_type: EventType,
+    text: str,
+    status: EventStatus | None,
+    data: EventData | None,
+) -> Diagnostic | None:
+    """Return the diagnostic a projected core event must carry, if any."""
+    if isinstance(data, FrameworkWarningData):
+        return _framework_warning_diagnostic(data)
+    if event_type in _CORE_FAILURE_CONTEXTS and status is EventStatus.FAILED:
+        return _core_failure_diagnostic(event_type, text, data)
+    return None
 
 
 class ServerInvocationLifecycle:
@@ -314,12 +411,14 @@ class RunIntegrationAdapter:
         terminal_trigger = _TERMINAL_TRIGGERS.get(event_type)
         if terminal_trigger is not None:
             self.controller.settle(terminal_trigger)
+        status = EventStatus(event.status.value) if event.status is not None else None
         self.journal.append(
             RunEvent(
                 timestamp=event.timestamp,
                 type=event_type,
                 text=event.text,
-                status=(EventStatus(event.status.value) if event.status is not None else None),
+                diagnostic=_core_event_diagnostic(event_type, event.text, status, data),
+                status=status,
                 round_label=event.round_label,
                 agent_kind=event.agent_kind,
                 execution_id=event.execution_id,

@@ -43,6 +43,7 @@ from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.run import GitTracker, RepositoryVisibility
+from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.sandbox.run_environment import RunEnvironmentSpec, make_run_environment_spec
 from vibesys.schemas import (
     CandidateDisposition,
@@ -601,7 +602,7 @@ def test_read_only_role_preserves_allowed_roadmap_and_reverts_other_writes(tmp_p
     roadmap = workspace / "roadmap" / "index.md"
     roadmap.parent.mkdir(parents=True)
     roadmap.write_text("initial roadmap\n")
-    tracker = GitTracker(workspace, run_id="test-run", log=lambda _message: None)
+    tracker = GitTracker(workspace, run_id="test-run", events=NullGitTrackerEvents())
     tracker.init(existing=False)
 
     expected = OrchestratorPlan(
@@ -651,7 +652,7 @@ def test_read_only_role_preserves_allowed_directory_and_reverts_candidate_edits(
     workspace.mkdir(parents=True)
     main = workspace / "main.py"
     main.write_text("accepted candidate\n")
-    tracker = GitTracker(workspace, run_id="test-run", log=lambda _message: None)
+    tracker = GitTracker(workspace, run_id="test-run", events=NullGitTrackerEvents())
     tracker.init(existing=False)
 
     expected = ProfilerSummary(analysis="done", bottlenecks="b", suggestions="s")
@@ -1777,6 +1778,70 @@ def test_framework_local_validation_executes_and_reuses_exact_inputs(tmp_path): 
     ctx.judge_backend.execute.assert_not_called()
     second = progress / "validation" / "round-0002-attempt-01.json"
     assert '"reused": true' in second.read_text()
+
+
+def test_framework_local_validation_emits_balanced_gate_pairs(tmp_path):  # noqa: ANN001, ANN201
+    from vibesys.render.sink import output_sink  # noqa: PLC0415  # tracked: #288
+    from vibesys.run.events import (  # noqa: PLC0415  # tracked: #288
+        CoreEventType,
+        EventStatus,
+        GateFinishedData,
+        GateKind,
+        GateStartedData,
+    )
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "server.py").write_text("READY = True\n")
+    progress = workspace / "progress"
+    recipe = ValidationRecipe(
+        name="focused-tests",
+        command="uv run pytest -q",
+        input_paths=["server.py"],
+        purpose="Exercise the focused local server contract.",
+    )
+    recipe_artifact = workspace / "validation-recipes.json"
+    recipe_artifact.write_text(
+        json.dumps({"version": 1, "recipes": [recipe.model_dump(mode="json")]})
+    )
+    ctx = MagicMock()
+    ctx.workspace = workspace
+    ctx.git.current_sha.return_value = "a" * 40
+    ctx.git.pending_changes.return_value = []
+    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=0, output="1 passed")
+
+    seen = []
+    unsubscribe = output_sink().subscribe(seen.append)
+    try:
+        for round_number in (1, 2):
+            _run_framework_validation_gate(
+                ctx,
+                recipe_artifact=recipe_artifact.name,
+                round_number=round_number,
+                retry=1,
+                progress_path=progress,
+            )
+    finally:
+        unsubscribe()
+
+    started = [e for e in seen if e.type is CoreEventType.GATE_STARTED]
+    finished = [e for e in seen if e.type is CoreEventType.GATE_FINISHED]
+    # One balanced started/finished pair per gate call, run then reuse.
+    assert len(started) == len(finished) == 2
+    for event in started:
+        assert isinstance(event.data, GateStartedData)
+        assert event.data.gate is GateKind.VALIDATION
+        assert event.data.recipe == "focused-tests"
+        assert event.data.command == recipe.command
+    run_finish, reuse_finish = finished
+    assert isinstance(run_finish.data, GateFinishedData)
+    assert run_finish.status is EventStatus.COMPLETED
+    assert run_finish.data.reused is False
+    assert run_finish.round_label == "round-1"
+    assert isinstance(reuse_finish.data, GateFinishedData)
+    assert reuse_finish.status is EventStatus.COMPLETED
+    assert reuse_finish.data.reused is True
+    assert reuse_finish.round_label == "round-2"
 
 
 def test_framework_local_validation_fails_and_restores_mutation(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288

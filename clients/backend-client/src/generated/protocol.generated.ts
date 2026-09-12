@@ -108,6 +108,7 @@ export type DiagnosticSeverity = "warning" | "error" | "fatal";
 export type DiagnosticRetryability = "automatic" | "manual" | "never" | "unknown";
 export type CauseId = string | null;
 export type DebugRef = string | null;
+export type Source = string | null;
 export type Action = "pause" | "resume" | "steer";
 export type Status = "pending" | "consumed";
 export type Question = string;
@@ -121,7 +122,7 @@ export type Provider1 = string;
 export type Model1 = string;
 export type Provider2 = string;
 export type Model2 = string;
-export type Source = "run" | "role" | "suggested";
+export type Source1 = "run" | "role" | "suggested";
 export type Default = boolean;
 export type Models = ChatModelOption[];
 export type Providers = ChatProviderOptions[];
@@ -213,7 +214,12 @@ export type EventType =
   | "tool_call"
   | "tool_result"
   | "todo_update"
-  | "usage_update";
+  | "usage_update"
+  | "gate_started"
+  | "gate_finished"
+  | "workspace_snapshot"
+  | "run_configured"
+  | "framework_warning";
 export type Text2 = string;
 export type EventStatus =
   "active" | "answered" | "pending" | "consumed" | "completed" | "failed" | "cancelled" | "interrupted";
@@ -248,6 +254,11 @@ export type Data =
       | ToolResultData
       | TodoUpdateData
       | UsageUpdateData
+      | GateStartedData
+      | GateFinishedData
+      | WorkspaceSnapshotData
+      | RunConfiguredData
+      | FrameworkWarningData
     )
   | null;
 export type Kind1 = "chat";
@@ -277,7 +288,7 @@ export type Kind6 = "agent_execution_finished";
 export type Error2 = string | null;
 export type Kind7 = "output";
 export type Stream = "stdout" | "stderr";
-export type Source1 = string;
+export type Source2 = string;
 export type Content = string;
 export type Kind8 = "server_ready";
 export type SocketProtocol = "jsonl";
@@ -356,6 +367,59 @@ export type Kind25 = "usage_update";
 export type InputTokens1 = number;
 export type ContextWindow1 = number | null;
 export type Model6 = string | null;
+export type Kind26 = "gate_started";
+/**
+ * Closed set of framework-owned gates a candidate passes through.
+ */
+export type GateKind = "validation" | "accuracy" | "benchmark";
+export type Recipe = string | null;
+export type Command = string | null;
+/**
+ * Closed set of framework subsystems that emit framework events.
+ */
+export type FrameworkSource = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
+export type SourceLabel = string | null;
+export type Kind27 = "gate_finished";
+export type Recipe1 = string | null;
+export type Reused = boolean;
+export type Metric1 = string | null;
+export type Value2 = number | null;
+export type Unit1 = string | null;
+export type OutputTail = string | null;
+/**
+ * Closed set of framework subsystems that emit framework events.
+ */
+export type FrameworkSource1 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
+export type SourceLabel1 = string | null;
+export type Kind28 = "workspace_snapshot";
+export type Label = string;
+export type Commit = string | null;
+export type Baseline = string | null;
+export type ExcludedPaths = string[];
+/**
+ * Closed set of framework subsystems that emit framework events.
+ */
+export type FrameworkSource2 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
+export type Kind29 = "run_configured";
+export type RunLogPath = string;
+export type ProjectRoot = string;
+export type Model7 = string | null;
+export type Objective = string | null;
+export type SearchPolicy = string | null;
+export type BenchmarkContract = boolean;
+export type ParetoObjectives = string | null;
+/**
+ * Closed set of framework subsystems that emit framework events.
+ */
+export type FrameworkSource3 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
+export type Kind30 = "framework_warning";
+export type Summary2 = string;
+export type Detail1 = string | null;
+/**
+ * Closed set of framework subsystems that emit framework events.
+ */
+export type FrameworkSource4 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
+export type SourceLabel2 = string | null;
 export type Events = RunEvent[];
 export type Round = number;
 export type PerfMetric1 = number;
@@ -402,7 +466,7 @@ export type JudgeVerdict1 = ("pass" | "fail" | "deferred") | null;
 export type PerfMetric2 = number | null;
 export type PerfUnit2 = string | null;
 export type PerfDeltaPct = number | null;
-export type Commit = string | null;
+export type Commit1 = string | null;
 export type OfficialEvaluation = boolean;
 /**
  * How a measured candidate should be retained independently of its hypothesis.
@@ -441,7 +505,7 @@ export type Active = boolean;
 export type Experiments = HypothesisEntry[];
 export type ExperimentsReady = boolean | null;
 export type Round2 = number;
-export type Commit1 = string | null;
+export type Commit2 = string | null;
 export type Files = DesignFileChange[] | null;
 export type Path = string;
 export type Change = "added" | "modified" | "deleted" | "renamed";
@@ -636,6 +700,7 @@ export interface Diagnostic {
   retryability?: DiagnosticRetryability;
   cause_id?: CauseId;
   debug_ref?: DebugRef;
+  source?: Source;
 }
 export interface CommandAck {
   action: Action;
@@ -675,7 +740,7 @@ export interface ChatProviderOptions {
  */
 export interface ChatModelOption {
   model: Model2;
-  source: Source;
+  source: Source1;
   default?: Default;
 }
 /**
@@ -816,7 +881,7 @@ export interface Result1 {
 export interface OutputData {
   kind?: Kind7;
   stream: Stream;
-  source?: Source1;
+  source?: Source2;
   content: Content;
   [k: string]: unknown;
 }
@@ -983,6 +1048,85 @@ export interface UsageUpdateData {
   model?: Model6;
   [k: string]: unknown;
 }
+/**
+ * One framework gate began evaluating the current candidate.
+ */
+export interface GateStartedData {
+  kind?: Kind26;
+  gate: GateKind;
+  recipe?: Recipe;
+  command?: Command;
+  source?: FrameworkSource;
+  source_label?: SourceLabel;
+  [k: string]: unknown;
+}
+/**
+ * Outcome of one framework gate; envelope status carries pass or fail.
+ *
+ * ``metric``/``value``/``unit`` are set only on a passing benchmark gate.
+ * ``unit`` keeps the historical fallback of the metric name when the
+ * contract declares no unit. ``output_tail`` carries the trailing command
+ * output on failure.
+ */
+export interface GateFinishedData {
+  kind?: Kind27;
+  gate: GateKind;
+  recipe?: Recipe1;
+  reused?: Reused;
+  metric?: Metric1;
+  value?: Value2;
+  unit?: Unit1;
+  output_tail?: OutputTail;
+  source?: FrameworkSource1;
+  source_label?: SourceLabel1;
+  [k: string]: unknown;
+}
+/**
+ * A Git tracker outcome: a snapshot, baseline, or exclusion change.
+ *
+ * Exactly one aspect is populated per event: a snapshot attempt carries
+ * ``label`` (``commit`` is None when there was nothing to commit), a
+ * trusted-input baseline carries ``baseline``, and a snapshot-exclusion
+ * change carries ``excluded_paths``.
+ */
+export interface WorkspaceSnapshotData {
+  kind?: Kind28;
+  label?: Label;
+  commit?: Commit;
+  baseline?: Baseline;
+  excluded_paths?: ExcludedPaths;
+  source?: FrameworkSource2;
+  [k: string]: unknown;
+}
+/**
+ * One per run: the resolved configuration a loop starts with.
+ */
+export interface RunConfiguredData {
+  kind?: Kind29;
+  run_log_path: RunLogPath;
+  project_root: ProjectRoot;
+  model?: Model7;
+  objective?: Objective;
+  search_policy?: SearchPolicy;
+  benchmark_contract?: BenchmarkContract;
+  pareto_objectives?: ParetoObjectives;
+  source?: FrameworkSource3;
+  [k: string]: unknown;
+}
+/**
+ * A non-fatal framework fault an operator should see.
+ *
+ * The server projection also lifts this payload into the wire event's
+ * ``diagnostic`` field so diagnostic-oriented clients need no new handling.
+ */
+export interface FrameworkWarningData {
+  kind?: Kind30;
+  summary: Summary2;
+  detail?: Detail1;
+  source?: FrameworkSource4;
+  source_label?: SourceLabel2;
+  [k: string]: unknown;
+}
 export interface PerformanceRound {
   round: Round;
   perf_metric: PerfMetric1;
@@ -1060,7 +1204,7 @@ export interface HypothesisRound {
   perf_metric?: PerfMetric2;
   perf_unit?: PerfUnit2;
   perf_delta_pct?: PerfDeltaPct;
-  commit?: Commit;
+  commit?: Commit1;
   official_evaluation?: OfficialEvaluation;
   candidate_disposition?: CandidateDisposition | null;
 }
@@ -1080,7 +1224,7 @@ export interface HypothesisRound {
  */
 export interface DesignRound {
   round: Round2;
-  commit?: Commit1;
+  commit?: Commit2;
   files?: Files;
 }
 /**

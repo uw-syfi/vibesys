@@ -1061,6 +1061,18 @@
           ],
           "default": null,
           "title": "Debug Ref"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
         }
       },
       "required": [
@@ -1212,7 +1224,12 @@
         "tool_call",
         "tool_result",
         "todo_update",
-        "usage_update"
+        "usage_update",
+        "gate_started",
+        "gate_finished",
+        "workspace_snapshot",
+        "run_configured",
+        "framework_warning"
       ],
       "title": "EventType",
       "type": "string"
@@ -1322,6 +1339,236 @@
         "reason"
       ],
       "title": "ExperimentsChangedData",
+      "type": "object"
+    },
+    "FrameworkSource": {
+      "description": "Closed set of framework subsystems that emit framework events.",
+      "enum": [
+        "gates",
+        "git_tracking",
+        "loop",
+        "gpu",
+        "skypilot",
+        "other"
+      ],
+      "title": "FrameworkSource",
+      "type": "string"
+    },
+    "FrameworkWarningData": {
+      "description": "A non-fatal framework fault an operator should see.\n\nThe server projection also lifts this payload into the wire event's\n``diagnostic`` field so diagnostic-oriented clients need no new handling.",
+      "properties": {
+        "kind": {
+          "const": "framework_warning",
+          "default": "framework_warning",
+          "title": "Kind",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "source": {
+          "$ref": "#/$defs/FrameworkSource",
+          "default": "other"
+        },
+        "source_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Label"
+        }
+      },
+      "required": [
+        "summary"
+      ],
+      "title": "FrameworkWarningData",
+      "type": "object"
+    },
+    "GateFinishedData": {
+      "description": "Outcome of one framework gate; envelope status carries pass or fail.\n\n``metric``/``value``/``unit`` are set only on a passing benchmark gate.\n``unit`` keeps the historical fallback of the metric name when the\ncontract declares no unit. ``output_tail`` carries the trailing command\noutput on failure.",
+      "properties": {
+        "kind": {
+          "const": "gate_finished",
+          "default": "gate_finished",
+          "title": "Kind",
+          "type": "string"
+        },
+        "gate": {
+          "$ref": "#/$defs/GateKind"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recipe"
+        },
+        "reused": {
+          "default": false,
+          "title": "Reused",
+          "type": "boolean"
+        },
+        "metric": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metric"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "output_tail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Tail"
+        },
+        "source": {
+          "$ref": "#/$defs/FrameworkSource",
+          "default": "gates"
+        },
+        "source_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Label"
+        }
+      },
+      "required": [
+        "gate"
+      ],
+      "title": "GateFinishedData",
+      "type": "object"
+    },
+    "GateKind": {
+      "description": "Closed set of framework-owned gates a candidate passes through.",
+      "enum": [
+        "validation",
+        "accuracy",
+        "benchmark"
+      ],
+      "title": "GateKind",
+      "type": "string"
+    },
+    "GateStartedData": {
+      "description": "One framework gate began evaluating the current candidate.",
+      "properties": {
+        "kind": {
+          "const": "gate_started",
+          "default": "gate_started",
+          "title": "Kind",
+          "type": "string"
+        },
+        "gate": {
+          "$ref": "#/$defs/GateKind"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recipe"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        },
+        "source": {
+          "$ref": "#/$defs/FrameworkSource",
+          "default": "gates"
+        },
+        "source_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Label"
+        }
+      },
+      "required": [
+        "gate"
+      ],
+      "title": "GateStartedData",
       "type": "object"
     },
     "HistoryQuery": {
@@ -2515,6 +2762,88 @@
       "title": "RoundFinishedData",
       "type": "object"
     },
+    "RunConfiguredData": {
+      "description": "One per run: the resolved configuration a loop starts with.",
+      "properties": {
+        "kind": {
+          "const": "run_configured",
+          "default": "run_configured",
+          "title": "Kind",
+          "type": "string"
+        },
+        "run_log_path": {
+          "title": "Run Log Path",
+          "type": "string"
+        },
+        "project_root": {
+          "title": "Project Root",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "objective": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Objective"
+        },
+        "search_policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Search Policy"
+        },
+        "benchmark_contract": {
+          "default": false,
+          "title": "Benchmark Contract",
+          "type": "boolean"
+        },
+        "pareto_objectives": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pareto Objectives"
+        },
+        "source": {
+          "$ref": "#/$defs/FrameworkSource",
+          "default": "loop"
+        }
+      },
+      "required": [
+        "run_log_path",
+        "project_root"
+      ],
+      "title": "RunConfiguredData",
+      "type": "object"
+    },
     "RunEvent": {
       "additionalProperties": false,
       "description": "One reproducible human, control, or invocation event.\n\nFrozen: a recorded event is a durable fact. Readers that need a variant\nbuild one with ``model_copy(update=...)`` rather than mutating a shared\nobject, which lets ``EventStore`` replay history without copying it.",
@@ -2645,12 +2974,16 @@
                   "chat_thread_created": "#/$defs/ChatThreadCreatedData",
                   "configuration_failed": "#/$defs/ConfigurationFailedData",
                   "experiments_changed": "#/$defs/ExperimentsChangedData",
+                  "framework_warning": "#/$defs/FrameworkWarningData",
+                  "gate_finished": "#/$defs/GateFinishedData",
+                  "gate_started": "#/$defs/GateStartedData",
                   "invocation_finished": "#/$defs/InvocationFinishedData",
                   "invocation_started": "#/$defs/InvocationStartedData",
                   "judge_result": "#/$defs/JudgeResultData",
                   "output": "#/$defs/OutputData",
                   "phase": "#/$defs/PhaseData",
                   "round_finished": "#/$defs/RoundFinishedData",
+                  "run_configured": "#/$defs/RunConfiguredData",
                   "run_interrupted": "#/$defs/RunInterruptedData",
                   "run_started": "#/$defs/RunStartedData",
                   "run_status_changed": "#/$defs/RunStatusChangedData",
@@ -2659,7 +2992,8 @@
                   "todo_update": "#/$defs/TodoUpdateData",
                   "tool_call": "#/$defs/ToolCallData",
                   "tool_result": "#/$defs/ToolResultData",
-                  "usage_update": "#/$defs/UsageUpdateData"
+                  "usage_update": "#/$defs/UsageUpdateData",
+                  "workspace_snapshot": "#/$defs/WorkspaceSnapshotData"
                 },
                 "propertyName": "kind"
               },
@@ -2735,6 +3069,21 @@
                 },
                 {
                   "$ref": "#/$defs/UsageUpdateData"
+                },
+                {
+                  "$ref": "#/$defs/GateStartedData"
+                },
+                {
+                  "$ref": "#/$defs/GateFinishedData"
+                },
+                {
+                  "$ref": "#/$defs/WorkspaceSnapshotData"
+                },
+                {
+                  "$ref": "#/$defs/RunConfiguredData"
+                },
+                {
+                  "$ref": "#/$defs/FrameworkWarningData"
                 }
               ]
             },
@@ -3357,6 +3706,60 @@
         "input_tokens"
       ],
       "title": "UsageUpdateData",
+      "type": "object"
+    },
+    "WorkspaceSnapshotData": {
+      "description": "A Git tracker outcome: a snapshot, baseline, or exclusion change.\n\nExactly one aspect is populated per event: a snapshot attempt carries\n``label`` (``commit`` is None when there was nothing to commit), a\ntrusted-input baseline carries ``baseline``, and a snapshot-exclusion\nchange carries ``excluded_paths``.",
+      "properties": {
+        "kind": {
+          "const": "workspace_snapshot",
+          "default": "workspace_snapshot",
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "title": "Label",
+          "type": "string"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Commit"
+        },
+        "baseline": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Baseline"
+        },
+        "excluded_paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded Paths",
+          "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/FrameworkSource",
+          "default": "git_tracking"
+        }
+      },
+      "title": "WorkspaceSnapshotData",
       "type": "object"
     }
   },

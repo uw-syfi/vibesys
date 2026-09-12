@@ -20,9 +20,12 @@ from server.events import (
     AgentExecutionFinishedData,
     EventStatus,
     EventType,
+    GateFinishedData,
+    GateKind,
     JudgeResultData,
     PhaseData,
     RoundFinishedData,
+    make_event,
 )
 
 
@@ -94,6 +97,7 @@ def test_invocation_and_terminal_failure_share_diagnostic_identity(tmp_path):  #
     [
         EventType.CONFIGURATION_FAILED,
         EventType.INVOCATION_FINISHED,
+        EventType.AGENT_EXECUTION_FINISHED,
         EventType.PHASE_FINISHED,
         EventType.RUN_FAILED,
         EventType.RUN_INTERRUPTED,
@@ -106,6 +110,22 @@ def test_operational_failure_events_require_diagnostics(
     for status in (EventStatus.FAILED, "failed"):
         with pytest.raises(ValueError, match="must include a diagnostic"):
             parts.journal.record(event_type, status=status)
+    with pytest.raises(ValueError, match="must include a diagnostic"):
+        parts.journal.append(make_event(event_type, "boom", status=EventStatus.FAILED))
+
+
+def test_append_accepts_failed_gate_outcomes_without_diagnostics(tmp_path):  # noqa: ANN001, ANN201
+    # A failed gate is an expected semantic outcome, not an operational fault,
+    # so the append invariant must leave it diagnostic-less.
+    parts = build_server_parts(tmp_path)
+    gate = parts.journal.append(
+        make_event(
+            EventType.GATE_FINISHED,
+            status=EventStatus.FAILED,
+            data=GateFinishedData(gate=GateKind.ACCURACY, output_tail="mismatch"),
+        )
+    )
+    assert gate.diagnostic is None
 
 
 def test_semantic_failure_events_do_not_require_diagnostics(tmp_path):  # noqa: ANN001, ANN201

@@ -1519,7 +1519,9 @@ function applyReducedCore(state: SessionState, core: CoreState): SessionState {
     chatConversations: reconcileChatConversations(state.chatConversations, core.chatTranscripts),
   });
   if (core.status === 'failed') {
-    const finalDiagnostic = core.diagnostics.at(-1);
+    // Warnings never banner, so a trailing warning must not mask the failure:
+    // surface the last diagnostic that can.
+    const finalDiagnostic = core.diagnostics.filter(d => d.severity !== 'warning').at(-1);
     if (finalDiagnostic !== undefined) next = reportProjectedDiagnostic(next, finalDiagnostic);
   }
   return next;
@@ -1796,6 +1798,9 @@ export function reportError(
 }
 
 function reportProjectedDiagnostic(state: SessionState, diagnostic: CoreDiagnostic): SessionState {
+  // Warnings (e.g. `framework_warning`, #692) stay in the diagnostics list;
+  // the banner is for errors that need attention now.
+  if (diagnostic.severity === 'warning') return state;
   return reportError(state, diagnostic.summary, {
     scope: diagnostic.scope,
     severity: diagnostic.severity === 'fatal' ? 'fatal' : 'recoverable',
