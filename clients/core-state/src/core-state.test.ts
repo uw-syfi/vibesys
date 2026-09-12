@@ -929,6 +929,83 @@ describe('chunk gluing per channel', () => {
   });
 });
 
+describe('the framework-validation gate command adapter', () => {
+  // Legacy adapter for the shape recorded at
+  // clients/tui/dev/fixtures/bad-cpp-round1.jsonl:388, produced by loop.py's
+  // `ctx.lprint(f"[framework-validation] running {recipe.name}: {recipe.command}")`
+  // on the diagnostic channel. See #692 / PR #697.
+  const GATE_LINE =
+    '[framework-validation] running build-and-correctness-gate: mkdir -p .cache/tmp && TMPDIR="$PWD/.cache/tmp" make -s all && ./bin/tests\n';
+
+  it('splits the recorded gate line into prose and a command field', () => {
+    const state = reduceEvent(initialCoreState(), channelEvent(1, 'diagnostic', GATE_LINE));
+
+    expect(state.transcript[0]?.content).toBe(
+      '[framework-validation] running build-and-correctness-gate: ',
+    );
+    expect(state.transcript[0]?.command).toBe(
+      'mkdir -p .cache/tmp && TMPDIR="$PWD/.cache/tmp" make -s all && ./bin/tests',
+    );
+  });
+
+  it('leaves prose with an ordinary colon alone', () => {
+    const state = reduceEvent(initialCoreState(), channelEvent(1, 'diagnostic', 'Ratio: 3 to 1'));
+
+    expect(state.transcript[0]?.content).toBe('Ratio: 3 to 1');
+    expect(state.transcript[0]?.command).toBeUndefined();
+  });
+
+  it('leaves untagged prose that mentions "running" alone', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      channelEvent(1, 'diagnostic', 'Currently running the correctness gate: watch for output'),
+    );
+
+    expect(state.transcript[0]?.command).toBeUndefined();
+  });
+
+  it('leaves prose that says "running" under a different source tag alone', () => {
+    // The real neighboring line, bad-cpp-round1.jsonl:393: the same
+    // "running: <command>" shape, a different tag. Only the exact
+    // "[framework-validation] running <recipe>: " prefix qualifies.
+    const state = reduceEvent(
+      initialCoreState(),
+      channelEvent(1, 'diagnostic', '[framework-benchmark] running: ./bin/bench --scale 1.0\n'),
+    );
+
+    expect(state.transcript[0]?.command).toBeUndefined();
+  });
+
+  it('leaves a bracket tag with no "running" command alone', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      channelEvent(1, 'diagnostic', '[framework-validation] PASS\n'),
+    );
+
+    expect(state.transcript[0]?.content).toBe('[framework-validation] PASS\n');
+    expect(state.transcript[0]?.command).toBeUndefined();
+  });
+
+  it('captures a command that spans multiple lines', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      channelEvent(1, 'diagnostic', '[framework-validation] running gate: line1\nline2\n'),
+    );
+
+    expect(state.transcript[0]?.command).toBe('line1\nline2');
+  });
+
+  it('does not set an empty command after the colon', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      channelEvent(1, 'diagnostic', '[framework-validation] running gate: \n'),
+    );
+
+    expect(state.transcript[0]?.command).toBeUndefined();
+    expect(state.transcript[0]?.content).toBe('[framework-validation] running gate: \n');
+  });
+});
+
 describe('the carried-forward profile flag', () => {
   it('lands on the round whose round_finished event skipped profiling', () => {
     const state = reduceEvent(initialCoreState(), roundFinishedEvent(1, {profile_skipped: true}));

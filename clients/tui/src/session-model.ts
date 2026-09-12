@@ -285,6 +285,8 @@ export interface ConversationEntry {
   invocationId?: string;
   startsTurn?: boolean;
   toolCall?: string;
+  /** A shell command split out of a legacy bracket-tagged diagnostic line; see core-state's `splitFrameworkValidationCommand`. */
+  command?: string;
   toolResponse?: string;
   toolName?: string;
   toolCallId?: string;
