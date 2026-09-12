@@ -17,6 +17,7 @@ from vibesys.run import (
     RoundTransactionCoordinator,
     RoundTransactionError,
 )
+from vibesys.run.git_events import NullGitTrackerEvents
 from vs_loop_state import RoundRecord
 from vs_project import (
     AgentRunConfiguration,
@@ -63,7 +64,7 @@ def _project(tmp_path: Path) -> tuple[Project, GitTracker, RoundTransactionCoord
     (tmp_path / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
     project = Project.open(tmp_path)
     project.state.create_project("transaction test", now=datetime(2026, 8, 11, tzinfo=UTC))
-    tracker = GitTracker(tmp_path, log=lambda _message: None, run_id=_RUN_ID)
+    tracker = GitTracker(tmp_path, events=NullGitTrackerEvents(), run_id=_RUN_ID)
     tracker.init(existing=False)
     assert tracker.trusted_input_baseline is not None
     assert tracker.project_branch is not None
@@ -297,7 +298,7 @@ def test_transaction_handle_cannot_complete_twice(tmp_path: Path) -> None:
 
 def test_coordinator_requires_matching_run_tracker(tmp_path: Path) -> None:
     project, tracker, _coordinator = _project(tmp_path)
-    wrong_run = GitTracker(tmp_path, log=lambda _message: None, run_id="another-run")
+    wrong_run = GitTracker(tmp_path, events=NullGitTrackerEvents(), run_id="another-run")
 
     with pytest.raises(RoundTransactionError, match="does not match"):
         RoundTransactionCoordinator(

@@ -10,12 +10,20 @@ from tests.server.support import build_server_parts
 
 from server.api.protocol import ChatQuery, ChatThreadCreateQuery
 from server.chat.factory import ChatAgentResources
-from server.events import EventType
+from server.diagnostics import DiagnosticSeverity
+from server.events import EventStatus, EventType
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.run.events import (
     AgentOutputChunkData,
     CoreEventType,
+    FrameworkSource,
+    FrameworkWarningData,
+    GateFinishedData,
+    GateKind,
     ToolCallData,
+)
+from vibesys.run.events import (
+    EventStatus as CoreEventStatus,
 )
 from vibesys.run.integration import (
     AgentSelection,
@@ -109,6 +117,49 @@ def test_core_events_project_to_wire_journal_and_execution_activity(tmp_path):  
     assert activity.mode == "tool"
     assert activity.tool == "Bash"
     assert (tmp_path / "core-events.jsonl").is_file()
+
+
+def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path):  # noqa: ANN001, ANN201
+    parts = build_server_parts(tmp_path)
+    parts.integration.invocations.start("implementer", "round-1", "work")
+
+    # All three events arrive without an agent_kind while an implementer
+    # execution is active. Only the presentation event may inherit it.
+    parts.integration.events.emit(
+        CoreEventType.AGENT_OUTPUT_CHUNK,
+        data=AgentOutputChunkData(channel="assistant", content="working"),
+    )
+    parts.integration.events.emit(
+        CoreEventType.GATE_FINISHED,
+        status=CoreEventStatus.FAILED,
+        round_label="round-1",
+        data=GateFinishedData(gate=GateKind.ACCURACY, output_tail="mismatch"),
+    )
+    parts.integration.events.emit(
+        CoreEventType.FRAMEWORK_WARNING,
+        data=FrameworkWarningData(
+            summary="profiler failed",
+            detail="boom",
+            source=FrameworkSource.LOOP,
+        ),
+    )
+
+    events = parts.journal.read()
+    chunk = next(e for e in events if e.type is EventType.AGENT_OUTPUT_CHUNK)
+    assert chunk.agent_kind == "implementer"
+    gate = next(e for e in events if e.type is EventType.GATE_FINISHED)
+    assert gate.agent_kind is None
+    assert gate.round_label == "round-1"
+    assert gate.status is EventStatus.FAILED
+    # A failed gate is an expected outcome, not a fault: no diagnostic.
+    assert gate.diagnostic is None
+    warning = next(e for e in events if e.type is EventType.FRAMEWORK_WARNING)
+    assert warning.agent_kind is None
+    assert warning.diagnostic is not None
+    assert warning.diagnostic.severity is DiagnosticSeverity.WARNING
+    assert warning.diagnostic.summary == "profiler failed"
+    assert warning.diagnostic.detail == "boom"
+    assert warning.diagnostic.source == "loop"
 
 
 def test_invocation_adapter_applies_steering_without_emitting_duplicate_lifecycle(

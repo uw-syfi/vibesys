@@ -13,7 +13,14 @@ from server.chat.factory import (
     build_chat_agent,
 )
 from server.chat.options import ChatRunSettings
-from server.events import EventData, EventStatus, EventType, RunEvent
+from server.diagnostics import Diagnostic, DiagnosticScope, DiagnosticSeverity
+from server.events import (
+    EventData,
+    EventStatus,
+    EventType,
+    FrameworkWarningData,
+    RunEvent,
+)
 from server.run_lifecycle import RunTrigger
 from vibesys.agents.factory import supported_cli_providers
 from vibesys.render.sink import output_sink
@@ -56,6 +63,22 @@ _PRESENTATION_EVENTS = frozenset(
         EventType.USAGE_UPDATE,
     }
 )
+
+
+def _framework_warning_diagnostic(data: FrameworkWarningData) -> Diagnostic:
+    """Lift a framework warning into the run-scoped diagnostic surface.
+
+    The full payload still rides on the event's ``data``; the diagnostic is
+    the projection frontends already know how to surface.
+    """
+    return Diagnostic(
+        code="framework_warning",
+        summary=data.summary,
+        detail=data.detail,
+        scope=DiagnosticScope.RUN,
+        severity=DiagnosticSeverity.WARNING,
+        source=data.source_label or data.source.value,
+    )
 
 
 class ServerInvocationLifecycle:
@@ -319,6 +342,11 @@ class RunIntegrationAdapter:
                 timestamp=event.timestamp,
                 type=event_type,
                 text=event.text,
+                diagnostic=(
+                    _framework_warning_diagnostic(data)
+                    if isinstance(data, FrameworkWarningData)
+                    else None
+                ),
                 status=(EventStatus(event.status.value) if event.status is not None else None),
                 round_label=event.round_label,
                 agent_kind=event.agent_kind,

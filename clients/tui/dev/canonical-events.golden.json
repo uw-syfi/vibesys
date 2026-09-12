@@ -642,6 +642,26 @@
     [16, "round_finished", null],
     [17, "run_finished", null]
   ],
+  "framework-events.jsonl": [
+    [1, "run_started", null],
+    [2, "run_configured", null],
+    [3, "workspace_snapshot", null],
+    [4, "workspace_snapshot", null],
+    [5, "gate_started", null],
+    [6, "gate_finished", null],
+    [7, "gate_started", null],
+    [8, "gate_finished", null],
+    [9, "gate_started", null],
+    [10, "gate_finished", null],
+    [11, "gate_started", null],
+    [12, "gate_finished", null],
+    [13, "workspace_snapshot", null],
+    [14, "gate_started", null],
+    [15, "gate_finished", null],
+    [16, "framework_warning", null],
+    [17, "workspace_snapshot", null],
+    [18, "run_finished", null]
+  ],
   "bad-cpp-round1.jsonl": [
     [1, "server_started", null],
     [2, "server_ready", null],

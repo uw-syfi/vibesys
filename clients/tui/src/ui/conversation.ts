@@ -633,7 +633,12 @@ export class ConversationView {
   }
 }
 
-/** A bracketed source tag at the start of a line: `[git-tracking]`, `[framework-validation]`. */
+/**
+ * A bracketed source tag at the start of a line: `[git-tracking]`,
+ * `[framework-validation]`. Legacy adapter only: since #692 the backend emits
+ * typed framework events instead of bracket-tagged log text, so this and
+ * `styleSourceTags` survive solely for journals recorded before #692.
+ */
 const SOURCE_TAG = /^\[[A-Za-z0-9][\w-]*\]/;
 
 /**

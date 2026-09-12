@@ -56,9 +56,12 @@ from vibesys.loops.agent.model import (
 )
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.gates import (
+    GATE_LOG_TAIL_CHARS,
     GATE_RECORD_TAIL_CHARS,
     BenchmarkContract,
     FrameworkBenchmarkOutcome,
+    emit_gate_finished,
+    emit_gate_started,
     framework_command_timeout,
     run_accuracy_gate,
     run_benchmark_gate,
@@ -75,12 +78,14 @@ from vibesys.profilers import (
     require_profiler_kind,
 )
 from vibesys.prompts import PROMPTS_DIR, render_template
+from vibesys.render.sink import output_sink
 from vibesys.run import LoopContext, RepositoryVisibility, RunIntegration, RunStateNamespace
 from vibesys.run.events import (
-    BenchmarkResultData,
     CoreEventType,
     EventStatus,
     ExperimentsChangedData,
+    FrameworkSource,
+    GateKind,
     JudgeResultData,
     RoundFinishedData,
 )
@@ -948,7 +953,12 @@ Write bounded durable profile evidence only below
             mcp_servers=[spec] if spec is not None else None,
         )
     except Exception as exc:  # noqa: BLE001  # tracked: #288
-        ctx.lprint(f"[warn] profiler failed: {exc}")
+        output_sink().framework_warning(
+            "profiler failed",
+            detail=str(exc),
+            source=FrameworkSource.LOOP,
+            round_label=f"round-{round_number}",
+        )
         return None
     if summary is None:
         return None
@@ -1188,19 +1198,29 @@ def _validate_skill_selections(
         return [], []
     skill_sources = ctx.skill_source_paths
     if not skill_sources:
-        ctx.lprint("[skills] ignored recommendations because no skills are installed")
+        output_sink().framework_warning(
+            "ignored skill recommendations because no skills are installed",
+            source=FrameworkSource.LOOP,
+            source_label="skills",
+        )
         return [], []
     try:
         catalog = build_skill_catalog(skill_sources)
         resolved, diagnostics = resolve_skill_selections(selections, catalog)
     except (OSError, ValueError) as exc:
-        ctx.lprint(
-            f"[skills] ignored recommendations because the catalog is invalid: "
-            f"{type(exc).__name__}: {exc}"
+        output_sink().framework_warning(
+            "ignored skill recommendations because the catalog is invalid",
+            detail=f"{type(exc).__name__}: {exc}",
+            source=FrameworkSource.LOOP,
+            source_label="skills",
         )
         return [], []
     for diagnostic in diagnostics:
-        ctx.lprint(f"[skills] {diagnostic}")
+        output_sink().framework_warning(
+            diagnostic,
+            source=FrameworkSource.LOOP,
+            source_label="skills",
+        )
 
     validated = [
         SkillResourceSelection(
@@ -1781,10 +1801,27 @@ def _run_framework_validation_gate(  # noqa: C901, PLR0912, PLR0915  # tracked: 
         reused = _reusable_validation_result(progress_path, recipe, input_digest)
         if reused is not None:
             results.append(reused)
-            ctx.lprint(f"[framework-validation] reused PASS: {recipe.name}")
+            emit_gate_started(
+                GateKind.VALIDATION,
+                recipe=recipe.name,
+                command=recipe.command,
+                round_label=f"round-{round_number}",
+            )
+            emit_gate_finished(
+                GateKind.VALIDATION,
+                passed=True,
+                recipe=recipe.name,
+                reused=True,
+                round_label=f"round-{round_number}",
+            )
             continue
 
-        ctx.lprint(f"[framework-validation] running {recipe.name}: {recipe.command}")
+        emit_gate_started(
+            GateKind.VALIDATION,
+            recipe=recipe.name,
+            command=recipe.command,
+            round_label=f"round-{round_number}",
+        )
         try:
             execution = ctx.judge_backend.execute(
                 recipe.command,
@@ -1820,6 +1857,16 @@ def _run_framework_validation_gate(  # noqa: C901, PLR0912, PLR0915  # tracked: 
                 }
             )
         results.append(result)
+        failure_detail = (
+            None if result.passed else (result.error or result.output or "unknown failure")
+        )
+        emit_gate_finished(
+            GateKind.VALIDATION,
+            passed=result.passed,
+            recipe=recipe.name,
+            output_tail=(None if failure_detail is None else failure_detail[-GATE_LOG_TAIL_CHARS:]),
+            round_label=f"round-{round_number}",
+        )
         if not result.passed:
             break
 
@@ -1850,10 +1897,8 @@ def _run_framework_validation_gate(  # noqa: C901, PLR0912, PLR0915  # tracked: 
 
     failed = next((result for result in results if not result.passed), None)
     if failed is None:
-        ctx.lprint("[framework-validation] PASS")
         return None
     detail = failed.error or failed.output or "unknown failure"
-    ctx.lprint(f"[framework-validation] FAIL: {failed.recipe.name}: {detail}")
     return (
         f"Framework local validation failed for {failed.recipe.name!r}: {detail}. "
         f"Inspect `{artifact_location}` and repair only the affected local contract."
@@ -1907,6 +1952,7 @@ def _run_framework_accuracy_gate(  # noqa: PLR0913  # tracked: #288
         process_id=f"accuracy-{round_number}-{retry}",
         timeout_seconds=framework_command_timeout(ctx, timeout_seconds),
         execution_command=execution_command,
+        round_label=f"round-{round_number}",
     )
     if result.passed and not result.executed:
         return None
@@ -1937,10 +1983,10 @@ def _run_framework_benchmark(  # noqa: PLR0913  # tracked: #288
 ) -> FrameworkBenchmarkOutcome:
     """Run the shared benchmark gate and record its agent-loop bookkeeping.
 
-    The gate itself (result recovery, parsing, and the collision-proof result
-    path) lives in :mod:`vibesys.loops.gates`; this wrapper owns what is
-    agent-loop specific: progress notes, workspace snapshots, and the
-    supervisor's benchmark-result event.
+    The gate itself (result recovery, parsing, the collision-proof result
+    path, and the typed gate events) lives in :mod:`vibesys.loops.gates`;
+    this wrapper owns what is agent-loop specific: progress notes and
+    workspace snapshots.
     """
     execution_base = None
     if ctx.judge_benchmark_command:
@@ -1958,6 +2004,7 @@ def _run_framework_benchmark(  # noqa: PLR0913  # tracked: #288
         output_slug=f"{round_number}-{retry}",
         timeout_seconds=framework_command_timeout(ctx, timeout_seconds),
         execution_base=execution_base,
+        round_label=f"round-{round_number}",
     )
     if not result.executed:
         return result.outcome
@@ -1975,21 +2022,6 @@ def _run_framework_benchmark(  # noqa: PLR0913  # tracked: #288
         output=result.output[-GATE_RECORD_TAIL_CHARS:],
     )
     ctx.snapshot_workspace(f"round-{round_number}-retry-{retry}-framework-benchmark")
-    if (
-        result.passed
-        and result.outcome.metric_name is not None
-        and result.outcome.metric_value is not None
-    ):
-        ctx.events.emit(
-            CoreEventType.BENCHMARK_RESULT,
-            status=EventStatus.COMPLETED,
-            round_label=f"round-{round_number}",
-            data=BenchmarkResultData(
-                metric=result.outcome.metric_name,
-                value=result.outcome.metric_value,
-                unit=result.outcome.metric_unit or result.outcome.metric_name,
-            ),
-        )
     return result.outcome
 
 
@@ -2058,7 +2090,17 @@ def _run_framework_gates(  # noqa: PLR0913  # tracked: #288
                 "commit; a later gate, not accuracy, caused the retry."
             ),
         )
-        ctx.lprint("[framework-accuracy] reused prior PASS for unchanged candidate")
+        emit_gate_started(
+            GateKind.ACCURACY,
+            command=ctx.judge_accuracy_command or None,
+            round_label=f"round-{round_number}",
+        )
+        emit_gate_finished(
+            GateKind.ACCURACY,
+            passed=True,
+            reused=True,
+            round_label=f"round-{round_number}",
+        )
     else:
         feedback = _run_framework_accuracy_gate(
             ctx,
@@ -2276,9 +2318,11 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         agent_state_model_type=AgentRunState,
         integration=integration,
     )
-    ctx.lprint(f"[log] orchestrate run: {ctx.run_log_path}")
-    ctx.lprint(f"[log] project root: {ctx.project_root}")
-    ctx.lprint(f"[log] objective: {objective.splitlines()[0] if objective else '(empty)'}")
+    output_sink().run_configured(
+        run_log_path=str(ctx.run_log_path),
+        project_root=str(ctx.project_root),
+        objective=objective,
+    )
 
     roadmap_path, progress_path = issue_board.resolve_paths(ctx.workspace, memory_layout)
     issue_board.ensure_progress_file(progress_path)
@@ -2522,13 +2566,15 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                                 label=(f"agent: set hypothesis {plan.hypothesis_id} parent"),
                             )
                         else:
-                            ctx.lprint(
-                                "[warn] rollback was not applied; will retry round "
-                                f"{plan.revert_to_round} on the next continuation"
+                            output_sink().framework_warning(
+                                "rollback was not applied; will retry round "
+                                f"{plan.revert_to_round} on the next continuation",
+                                source=FrameworkSource.LOOP,
                             )
                     else:
-                        ctx.lprint(
-                            f"[warn] cannot revert: no commit recorded for round {plan.revert_to_round}"
+                        output_sink().framework_warning(
+                            f"cannot revert: no commit recorded for round {plan.revert_to_round}",
+                            source=FrameworkSource.LOOP,
                         )
 
                 # --- Implementer / Judge retry loop ---

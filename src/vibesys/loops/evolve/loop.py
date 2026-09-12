@@ -74,12 +74,9 @@ from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.loops.profiler import invoke_profiler
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.prompts import PROMPTS_DIR
+from vibesys.render.sink import output_sink
 from vibesys.run import LoopContext, RepositoryVisibility, RunIntegration, RunStateNamespace
-from vibesys.run.events import (
-    BenchmarkResultData,
-    CoreEventType,
-    EventStatus,
-)
+from vibesys.run.events import FrameworkSource
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -157,9 +154,16 @@ def _discard_working_tree(ctx: LoopContext) -> None:
     """Drop any uncommitted changes left by a failed mutation attempt."""
     try:
         if not ctx.git.checkout_tree("HEAD", clean=True):
-            ctx.lprint("[warn] discard working tree failed")
+            output_sink().framework_warning(
+                "discard working tree failed",
+                source=FrameworkSource.LOOP,
+            )
     except Exception as exc:  # noqa: BLE001  # tracked: #288
-        ctx.lprint(f"[warn] discard working tree failed: {exc}")
+        output_sink().framework_warning(
+            "discard working tree failed",
+            detail=str(exc),
+            source=FrameworkSource.LOOP,
+        )
 
 
 def _candidate_code(ctx: LoopContext, commit: str) -> str:
@@ -472,6 +476,7 @@ def _run_framework_accuracy_gate(
         ctx,
         process_id=f"evolve-accuracy-{generation}-{child_idx}",
         timeout_seconds=framework_command_timeout(ctx, timeout_seconds),
+        round_label=f"gen-{generation}-cand-{child_idx}",
     )
     return result.feedback
 
@@ -486,11 +491,12 @@ def _run_framework_benchmark_gate(
 ) -> BenchmarkGateResult:
     """Run the declared trusted benchmark result contract for one candidate.
 
-    Publishes the same ``BENCHMARK_RESULT`` event the agent loop publishes, so
-    a client watching an evolve run sees the framework's measurement of a
-    candidate rather than only the agent transcripts around it.
+    The gate publishes the same typed ``gate_started``/``gate_finished``
+    events the agent loop publishes, so a client watching an evolve run sees
+    the framework's measurement of a candidate rather than only the agent
+    transcripts around it.
     """
-    result = run_benchmark_gate(
+    return run_benchmark_gate(
         ctx,
         result_spec=contract.result_spec,
         result_protocol=contract.result_protocol,
@@ -498,20 +504,8 @@ def _run_framework_benchmark_gate(
         process_id=f"evolve-benchmark-{generation}-{child_idx}",
         output_slug=f"gen{generation}-cand{child_idx}",
         timeout_seconds=framework_command_timeout(ctx, contract.timeout_seconds),
+        round_label=f"gen-{generation}-cand-{child_idx}",
     )
-    outcome = result.outcome
-    if result.passed and outcome.metric_name is not None and outcome.metric_value is not None:
-        ctx.events.emit(
-            CoreEventType.BENCHMARK_RESULT,
-            status=EventStatus.COMPLETED,
-            round_label=f"gen-{generation}-cand-{child_idx}",
-            data=BenchmarkResultData(
-                metric=outcome.metric_name,
-                value=outcome.metric_value,
-                unit=outcome.metric_unit or outcome.metric_name,
-            ),
-        )
-    return result
 
 
 def _run_candidate_gates(  # noqa: PLR0913  # tracked: #288
@@ -838,7 +832,10 @@ def _plan_candidate(  # noqa: PLR0913  # tracked: #288
         label="evolve: record search selection",
     )
     if selection is None:
-        ctx.lprint("[warn] no passing parent available; skipping candidate")
+        output_sink().framework_warning(
+            "no passing parent available; skipping candidate",
+            source=FrameworkSource.LOOP,
+        )
     return selection
 
 
@@ -889,9 +886,10 @@ def _run_generation_serial(  # noqa: PLR0913  # tracked: #288
             parent = plan.parent
             inspirations = plan.inspirations
             if parent.commit and not ctx.git.checkout_tree(parent.commit, clean=True):
-                ctx.lprint(
-                    f"[warn] could not check out parent {parent.id} "
-                    f"(commit {parent.commit[:8]}); skipping cand"
+                output_sink().framework_warning(
+                    f"could not check out parent {parent.id} "
+                    f"(commit {parent.commit[:8]}); skipping cand",
+                    source=FrameworkSource.LOOP,
                 )
                 continue
 
@@ -966,7 +964,10 @@ def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
     label = f"g{generation}c{child_idx}"
     commit = parent.commit
     if commit is None:
-        parent_ctx.lprint(f"[warn] candidate {label} has no parent commit; skipping")
+        output_sink().framework_warning(
+            f"candidate {label} has no parent commit; skipping",
+            source=FrameworkSource.LOOP,
+        )
         return _CandidateOutcome(
             passed=False,
             parent_id=parent.id,
@@ -986,7 +987,11 @@ def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
                 cli_provider=cli_provider,
             )
     except Exception as exc:  # noqa: BLE001  # tracked: #288
-        parent_ctx.lprint(f"[warn] candidate {label} setup failed: {exc}")
+        output_sink().framework_warning(
+            f"candidate {label} setup failed",
+            detail=str(exc),
+            source=FrameworkSource.LOOP,
+        )
         return _CandidateOutcome(
             passed=False,
             parent_id=parent.id,
@@ -1019,7 +1024,11 @@ def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
             # object that Git is then free to prune.
             parent_ctx.git.retain_candidate(label, outcome.commit)
     except Exception as exc:  # noqa: BLE001  # tracked: #288
-        parent_ctx.lprint(f"[warn] candidate {label} evaluation raised: {exc}")
+        output_sink().framework_warning(
+            f"candidate {label} evaluation raised",
+            detail=str(exc),
+            source=FrameworkSource.LOOP,
+        )
         return _CandidateOutcome(
             passed=False,
             parent_id=parent.id,
@@ -1033,7 +1042,11 @@ def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
         try:
             subctx.close()
         except Exception as exc:  # noqa: BLE001  # tracked: #288
-            parent_ctx.lprint(f"[warn] candidate {label} teardown failed: {exc}")
+            output_sink().framework_warning(
+                f"candidate {label} teardown failed",
+                detail=str(exc),
+                source=FrameworkSource.LOOP,
+            )
 
 
 def _run_generation_parallel(  # noqa: PLR0913  # tracked: #288
@@ -1089,9 +1102,10 @@ def _run_generation_parallel(  # noqa: PLR0913  # tracked: #288
             continue
         parent = plan.parent
         if not parent.commit:
-            parent_ctx.lprint(
-                f"[warn] parent {parent.id} has no commit; cannot isolate "
-                f"candidate g{generation}c{child_idx}; skipping"
+            output_sink().framework_warning(
+                f"parent {parent.id} has no commit; cannot isolate "
+                f"candidate g{generation}c{child_idx}; skipping",
+                source=FrameworkSource.LOOP,
             )
             continue
         plans.append((child_idx, plan))
@@ -1203,9 +1217,10 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
         wip_seed = _latest_wip_seed(population)
         if wip_seed is not None and wip_seed.commit:  # noqa: SIM102  # tracked: #288
             if not ctx.git.checkout_tree(wip_seed.commit, clean=True):
-                ctx.lprint(
-                    f"[warn] could not check out WIP seed {wip_seed.id} "
-                    f"(commit {wip_seed.commit[:8]}); starting from reference"
+                output_sink().framework_warning(
+                    f"could not check out WIP seed {wip_seed.id} "
+                    f"(commit {wip_seed.commit[:8]}); starting from reference",
+                    source=FrameworkSource.LOOP,
                 )
                 wip_seed = None
 
@@ -1280,7 +1295,11 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
                     if sha_after and sha_after != sha_before:
                         wip_commit = sha_after
                 except Exception as exc:  # noqa: BLE001  # tracked: #288
-                    ctx.lprint(f"[warn] wip-seed snapshot failed: {exc}")
+                    output_sink().framework_warning(
+                        "wip-seed snapshot failed",
+                        detail=str(exc),
+                        source=FrameworkSource.LOOP,
+                    )
                 failed = Individual(
                     id=population.next_id(),
                     generation=0,
@@ -1571,28 +1590,17 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         repo_visibility=repo_visibility,
         integration=integration,
     )
-    ctx.lprint(f"[log] evolutionary run: {ctx.run_log_path}")
-    ctx.lprint(f"[log] project root: {ctx.project_root}")
-    ctx.lprint(f"[log] objective: {objective.splitlines()[0] if objective else '(empty)'}")
-    if space.objectives:
-        spec = ", ".join(f"{o.name}({o.direction})" for o in space.objectives)
-        ctx.lprint(
-            f"[log] pareto objectives: [{spec}], frontier_bias={frontier_bias}, "
-            f"tolerance={space.relative_noise:.0%}"
-        )
-    else:
-        ctx.lprint("[log] single-objective mode (no Pareto frontier)")
-
     state_store = EvolutionStateStore(ctx.state.portable(RunStateNamespace.EVOLVE))
     try:
         population = state_store.load_population()
         # A resumed run whose task file has been edited selects by the new
         # space from here on; say so rather than letting the change be silent.
         if state_store.load_metric_space() not in {space, MetricSpace()}:
-            ctx.lprint(
-                "[log] this run recorded a different metric space; the task file "
+            output_sink().framework_warning(
+                "this run recorded a different metric space; the task file "
                 f"wins and selection now uses {len(space.objectives)} axes within "
-                f"a {space.relative_noise:.0%} tolerance"
+                f"a {space.relative_noise:.0%} tolerance",
+                source=FrameworkSource.LOOP,
             )
         # Materialize an empty population too, so a newly initialized run has
         # one complete, inspectable persistence contract from the start. The
@@ -1622,11 +1630,25 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         ctx.lprint(f"[evolutionary] search-policy initialization failed: {exc}")
         ctx.close()
         return False
-    ctx.lprint(f"[log] search policy: {policy_name.value}")
+
+    # One event per run, emitted only after the search policy resolves so the
+    # payload is complete; a run that dies during initialization emits none.
+    pareto_objectives = None
+    if space.objectives:
+        spec = ", ".join(f"{o.name}({o.direction})" for o in space.objectives)
+        pareto_objectives = (
+            f"[{spec}], frontier_bias={frontier_bias}, tolerance={space.relative_noise:.0%}"
+        )
+    output_sink().run_configured(
+        run_log_path=str(ctx.run_log_path),
+        project_root=str(ctx.project_root),
+        objective=objective,
+        search_policy=policy_name.value,
+        benchmark_contract=benchmark_contract.declared,
+        pareto_objectives=pareto_objectives,
+    )
 
     rng = random.Random(seed)  # noqa: S311  # tracked: #288
-    if benchmark_contract.declared:
-        ctx.lprint("[log] benchmark result contract declared; it owns candidate fitness")
 
     try:
         # Bootstrap phase: guarantee a passing generation-0 seed before the

@@ -12,6 +12,7 @@ from server.api.design import DesignLog
 from server.api.protocol import DesignQuery
 from vibesys.loops.agent.model import AgentRunState, Hypothesis
 from vibesys.loops.agent.state import AgentRunStateStore
+from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vibesys.schemas import OrchestratorPlan
 from vs_loop_state import RoundRecord
@@ -108,8 +109,18 @@ def _name_status(*fields: str) -> str:
 
 def _tracked(workspace: Path) -> DesignLog:
     """Bind a projection to the real read-only tracker for *workspace*."""
-    tracker = GitTracker(workspace, run_id="design-test", log=lambda _message: None)
+    tracker = GitTracker(workspace, run_id="design-test", events=NullGitTrackerEvents())
     return DesignLog(workspace=workspace, diff=tracker.diff_name_status)
+
+
+class _RecordingGitEvents(NullGitTrackerEvents):
+    """Capture tracker warnings; the read-only tracker emits nothing else."""
+
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+
+    def warning(self, summary: str, *, detail: str | None = None) -> None:
+        self.warnings.append(summary if detail is None else f"{summary}: {detail}")
 
 
 def test_design_log_derives_per_round_file_changes(tmp_path: Path) -> None:
@@ -265,7 +276,7 @@ def test_design_log_never_passes_a_non_hex_commit_to_git(tmp_path: Path) -> None
 
 def test_diff_name_status_rejects_a_revision_expression(tmp_path: Path) -> None:
     workspace = _repo(tmp_path / "workspace")
-    tracker = GitTracker(workspace, run_id="design-test", log=lambda _message: None)
+    tracker = GitTracker(workspace, run_id="design-test", events=NullGitTrackerEvents())
 
     with pytest.raises(ValueError, match="not a commit object name"):
         tracker.diff_name_status("HEAD~1", "HEAD")
@@ -278,8 +289,8 @@ def test_diff_name_status_logs_a_failed_subprocess(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Exception
 ) -> None:
     workspace = _repo(tmp_path / "workspace")
-    logged: list[str] = []
-    tracker = GitTracker(workspace, run_id="design-test", log=logged.append)
+    events = _RecordingGitEvents()
+    tracker = GitTracker(workspace, run_id="design-test", events=events)
 
     def explode(*_args: object, **_kwargs: object) -> None:
         raise failure
@@ -287,16 +298,16 @@ def test_diff_name_status_logs_a_failed_subprocess(
     monkeypatch.setattr(subprocess, "run", explode)
 
     assert tracker.diff_name_status("a" * 40, "b" * 40) is None
-    assert [line for line in logged if "read-only diff failed" in line]
+    assert [line for line in events.warnings if "read-only diff failed" in line]
 
 
 def test_diff_name_status_logs_a_nonzero_exit(tmp_path: Path) -> None:
     workspace = _repo(tmp_path / "workspace")
-    logged: list[str] = []
-    tracker = GitTracker(workspace, run_id="design-test", log=logged.append)
+    events = _RecordingGitEvents()
+    tracker = GitTracker(workspace, run_id="design-test", events=events)
 
     assert tracker.diff_name_status("a" * 40, "b" * 40) is None
-    assert [line for line in logged if "read-only diff exit" in line]
+    assert [line for line in events.warnings if "read-only diff exit" in line]
 
 
 def test_design_log_drops_a_rename_out_of_framework_memory(tmp_path: Path) -> None:

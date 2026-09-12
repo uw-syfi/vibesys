@@ -33,6 +33,11 @@ class CoreEventType(StrEnum):
     TOOL_RESULT = "tool_result"
     TODO_UPDATE = "todo_update"
     USAGE_UPDATE = "usage_update"
+    GATE_STARTED = "gate_started"
+    GATE_FINISHED = "gate_finished"
+    WORKSPACE_SNAPSHOT = "workspace_snapshot"
+    RUN_CONFIGURED = "run_configured"
+    FRAMEWORK_WARNING = "framework_warning"
 
 
 class EventStatus(StrEnum):
@@ -48,6 +53,29 @@ class EventStatus(StrEnum):
 OutputStream = Literal["stdout", "stderr"]
 AgentOutputChannel = Literal["assistant", "analysis", "tool", "diagnostic", "prompt"]
 ExecutionActivityMode = Literal["thinking", "responding", "tool", "waiting"]
+
+
+class GateKind(StrEnum):
+    """Closed set of framework-owned gates a candidate passes through."""
+
+    VALIDATION = "validation"
+    ACCURACY = "accuracy"
+    BENCHMARK = "benchmark"
+
+
+class FrameworkSource(StrEnum):
+    """Closed set of framework subsystems that emit framework events.
+
+    ``source_label`` on the payloads carries a finer free-text origin (for
+    example ``"skills"`` within ``LOOP``) without widening this set.
+    """
+
+    GATES = "gates"
+    GIT_TRACKING = "git_tracking"
+    LOOP = "loop"
+    GPU = "gpu"
+    SKYPILOT = "skypilot"
+    OTHER = "other"
 
 
 class EventPayload(BaseModel):
@@ -217,6 +245,88 @@ class RoundFinishedData(EventPayload):  # noqa: D101
     profile_skipped: bool = False
 
 
+class GateStartedData(EventPayload):
+    """One framework gate began evaluating the current candidate.
+
+    Every ``gate_started`` is followed by exactly one ``gate_finished`` for
+    the same gate (and recipe, for validation), including reused results.
+    """
+
+    kind: Literal["gate_started"] = "gate_started"
+    gate: GateKind
+    # The validation recipe being executed; None for accuracy and benchmark.
+    recipe: str | None = None
+    # The trusted command the gate runs, when one is configured.
+    command: str | None = None
+    source: FrameworkSource = FrameworkSource.GATES
+    source_label: str | None = None
+
+
+class GateFinishedData(EventPayload):
+    """Outcome of one framework gate; envelope status carries pass or fail.
+
+    ``metric``/``value``/``unit`` are set only on a passing benchmark gate.
+    ``unit`` keeps the historical fallback of the metric name when the
+    contract declares no unit. ``output_tail`` carries the trailing command
+    output on failure.
+    """
+
+    kind: Literal["gate_finished"] = "gate_finished"
+    gate: GateKind
+    recipe: str | None = None
+    # True when a prior PASS for the exact same input was reused instead of
+    # re-running the command.
+    reused: bool = False
+    metric: str | None = None
+    value: FiniteFloat | None = None
+    unit: str | None = None
+    output_tail: str | None = None
+    source: FrameworkSource = FrameworkSource.GATES
+    source_label: str | None = None
+
+
+class WorkspaceSnapshotData(EventPayload):
+    """A Git tracker outcome: a snapshot, baseline, or exclusion change.
+
+    Exactly one aspect is populated per event: a snapshot attempt carries
+    ``label`` (``commit`` is None when there was nothing to commit), a
+    trusted-input baseline carries ``baseline``, and a snapshot-exclusion
+    change carries ``excluded_paths``.
+    """
+
+    kind: Literal["workspace_snapshot"] = "workspace_snapshot"
+    label: str = ""
+    commit: str | None = None
+    baseline: str | None = None
+    excluded_paths: tuple[str, ...] = ()
+    source: FrameworkSource = FrameworkSource.GIT_TRACKING
+
+
+class RunConfiguredData(EventPayload):
+    """One per run: the resolved configuration a loop starts with."""
+
+    kind: Literal["run_configured"] = "run_configured"
+    run_log_path: str
+    project_root: str
+    model: str | None = None
+    # First line of the objective only; the full text lives in run state.
+    objective: str | None = None
+    search_policy: str | None = None
+    benchmark_contract: bool = False
+    pareto_objectives: str | None = None
+    source: FrameworkSource = FrameworkSource.LOOP
+
+
+class FrameworkWarningData(EventPayload):
+    """A non-fatal framework fault an operator should see."""
+
+    kind: Literal["framework_warning"] = "framework_warning"
+    summary: str
+    detail: str | None = None
+    source: FrameworkSource = FrameworkSource.OTHER
+    source_label: str | None = None
+
+
 CoreEventData = Annotated[
     InvocationStartedData
     | InvocationFinishedData
@@ -234,7 +344,12 @@ CoreEventData = Annotated[
     | ToolCallData
     | ToolResultData
     | TodoUpdateData
-    | UsageUpdateData,
+    | UsageUpdateData
+    | GateStartedData
+    | GateFinishedData
+    | WorkspaceSnapshotData
+    | RunConfiguredData
+    | FrameworkWarningData,
     Field(discriminator="kind"),
 ]
 

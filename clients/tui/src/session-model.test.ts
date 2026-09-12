@@ -104,6 +104,52 @@ describe('event batch projection', () => {
     expect(state.core.status).toBe('failed');
     expect(state.errorBanner).toMatchObject({message: 'The current run failed.', scope: 'run'});
   });
+
+  it('banners the failure even when a warning diagnostic lands after it', () => {
+    const state = applyEventBatch(initialSessionState(), [
+      event(1, 'run_started', {
+        kind: 'run_started',
+        outer_loop: 'agent',
+        input: '.',
+        max_rounds: 3,
+      }),
+      {
+        ...event(2, 'run_failed'),
+        diagnostic: {
+          id: 'failure-1',
+          code: 'run_failed',
+          summary: 'The current run failed.',
+          scope: 'run',
+          severity: 'fatal',
+          retryability: 'never',
+        },
+      },
+      {
+        ...event(3, 'framework_warning', {
+          kind: 'framework_warning',
+          summary: 'profiler failed',
+          detail: 'nsys exited 1',
+          source: 'loop',
+        }),
+        agent_kind: null,
+        diagnostic: {
+          id: 'warn-1',
+          code: 'framework_warning',
+          summary: 'profiler failed',
+          scope: 'run',
+          severity: 'warning',
+          source: 'loop',
+        },
+      },
+    ]);
+
+    expect(state.core.status).toBe('failed');
+    expect(state.core.diagnostics.at(-1)).toMatchObject({id: 'warn-1', severity: 'warning'});
+    expect(state.errorBanner).toMatchObject({
+      message: 'The current run failed.',
+      diagnosticId: 'failure-1',
+    });
+  });
 });
 
 describe('hypothesis planning activity', () => {
@@ -948,6 +994,49 @@ describe('session event model', () => {
       message: 'Run interrupted',
       detail: 'RuntimeError: launcher_terminated (SIGTERM)',
       severity: 'fatal',
+    });
+  });
+
+  it('keeps warning diagnostics off the banner without blocking later errors', () => {
+    const warned = applyEvent(initialSessionState(), {
+      ...event(1, 'framework_warning', {
+        kind: 'framework_warning',
+        summary: 'profiler failed',
+        detail: 'nsys exited 1',
+        source: 'loop',
+      }),
+      agent_kind: null,
+      diagnostic: {
+        id: 'warn-1',
+        code: 'framework_warning',
+        summary: 'profiler failed',
+        detail: 'nsys exited 1',
+        scope: 'run',
+        severity: 'warning',
+        source: 'loop',
+      },
+    });
+
+    expect(warned.core.diagnostics).toMatchObject([
+      {id: 'warn-1', severity: 'warning', source: 'loop'},
+    ]);
+    expect(warned.errorBanner).toBeNull();
+
+    const failed = applyEvent(warned, {
+      ...event(2, 'run_failed'),
+      diagnostic: {
+        id: 'failure-1',
+        code: 'run_failed',
+        summary: 'The current run failed.',
+        scope: 'run',
+        severity: 'fatal',
+        retryability: 'never',
+      },
+    });
+
+    expect(failed.errorBanner).toMatchObject({
+      message: 'The current run failed.',
+      diagnosticId: 'failure-1',
     });
   });
 

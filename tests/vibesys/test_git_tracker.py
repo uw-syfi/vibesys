@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vibesys.run.project_policy import trusted_project_input_paths
 from vs_project import PlainRunConfiguration, Project, RunEnvironmentRecord
@@ -40,7 +41,7 @@ def _tracker(root: Path, run_id: str = "test-run") -> GitTracker:
     return GitTracker(
         root,
         run_id=run_id,
-        log=lambda _message: None,
+        events=NullGitTrackerEvents(),
         excluded_dirs=("attempts",),
     )
 
@@ -466,7 +467,7 @@ def test_repository_tasks_are_trusted_but_generated_state_is_not(tmp_path: Path)
     tracker = GitTracker(
         tmp_path,
         run_id="repository-task",
-        log=lambda _message: None,
+        events=NullGitTrackerEvents(),
         trusted_input_paths=trusted_project_input_paths(
             tmp_path,
             evaluator_source=None,
@@ -522,3 +523,77 @@ def test_candidate_ref_rejects_unsafe_id_or_unknown_commit(tmp_path: Path) -> No
         tracker.retain_candidate("../escape", "HEAD")
     with pytest.raises(ValueError, match="not a commit"):
         tracker.retain_candidate("candidate", "missing")
+
+
+class _RecordingEvents(NullGitTrackerEvents):
+    """Record tracker observations for assertion."""
+
+    def __init__(self) -> None:
+        self.snapshots: list[tuple[str, str | None]] = []
+        self.baselines: list[str] = []
+        self.excluded: list[tuple[str, ...]] = []
+        self.warnings: list[str] = []
+
+    def snapshot_recorded(self, label: str, *, commit: str | None) -> None:
+        self.snapshots.append((label, commit))
+
+    def baseline_configured(self, commit: str) -> None:
+        self.baselines.append(commit)
+
+    def paths_excluded(self, paths: tuple[str, ...]) -> None:
+        self.excluded.append(paths)
+
+    def warning(self, summary: str, *, detail: str | None = None) -> None:
+        self.warnings.append(summary if detail is None else f"{summary}: {detail}")
+
+
+def _recording_tracker(root: Path) -> tuple[GitTracker, _RecordingEvents]:
+    (root / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    events = _RecordingEvents()
+    tracker = GitTracker(root, run_id="test-run", events=events, excluded_dirs=())
+    tracker.init(existing=False)
+    return tracker, events
+
+
+def test_events_report_baseline_then_each_snapshot_outcome(tmp_path: Path) -> None:
+    tracker, events = _recording_tracker(tmp_path)
+    assert events.baselines == [tracker.trusted_input_baseline]
+
+    (tmp_path / "main.py").write_text("VALUE = 2\n", encoding="utf-8")
+    tracker.snapshot("round-1")
+    assert events.snapshots[-1] == ("round-1", tracker.current_sha())
+
+    tracker.snapshot("round-2")
+    assert events.snapshots[-1] == ("round-2", None)
+
+
+def test_events_report_explicitly_configured_baseline(tmp_path: Path) -> None:
+    tracker, events = _recording_tracker(tmp_path)
+    head = tracker.current_sha()
+    assert head is not None
+
+    resolved = tracker.configure_trusted_input_baseline(head)
+
+    assert resolved == head
+    assert events.baselines[-1] == head
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read mode-000 files")
+def test_events_report_unreadable_path_exclusions(tmp_path: Path) -> None:
+    tracker, events = _recording_tracker(tmp_path)
+    unreadable = tmp_path / "system_profile.json"
+    unreadable.write_text("{}", encoding="utf-8")
+    os.chmod(unreadable, 0o000)  # noqa: PTH101
+    try:
+        tracker.snapshot("round-1")
+    finally:
+        os.chmod(unreadable, 0o644)  # noqa: PTH101
+
+    assert any("/system_profile.json" in paths for paths in events.excluded)
+
+
+def test_events_report_failed_tree_restore_as_warning(tmp_path: Path) -> None:
+    tracker, events = _recording_tracker(tmp_path)
+
+    assert tracker.checkout_tree("f" * 40) is False
+    assert any(warning.startswith("git tree restore") for warning in events.warnings)

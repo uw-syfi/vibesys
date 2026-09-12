@@ -122,6 +122,8 @@ export interface CoreDiagnostic {
   hint: string | null;
   severity: 'warning' | 'error' | 'fatal';
   scope: Diagnostic['scope'];
+  /** Which subsystem raised it, e.g. `loop` on a framework warning (#692). */
+  source: string | null;
   agentKind: string | null;
   roundLabel: string | null;
   invocationId: string | null;
@@ -732,6 +734,27 @@ function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder |
       },
     ];
   }
+  // A completed benchmark gate carries the measurement `benchmark_result`
+  // used to, so it feeds the same fold; old journals have only the legacy
+  // kind and new journals only this one (#692).
+  if (
+    data?.kind === 'gate_finished' &&
+    data.gate === 'benchmark' &&
+    event.status !== 'failed' &&
+    data.metric != null &&
+    data.value != null
+  ) {
+    next.benchmarks = [
+      ...next.benchmarks,
+      {
+        sequence,
+        roundNumber: roundNumberFromLabel(event.round_label),
+        metric: data.metric,
+        value: data.value,
+        unit: data.unit ?? data.metric,
+      },
+    ];
+  }
   if (data?.kind === 'experiments_changed') next.experimentsRevision = sequence;
   // The backend owns the run's lifecycle and publishes every move through it,
   // so the projection folds the status it is told rather than inferring one.
@@ -1035,6 +1058,7 @@ function mergeDiagnostic(existing: CoreDiagnostic, incoming: CoreDiagnostic): Co
       diagnosticSeverityRank(incoming.severity) > diagnosticSeverityRank(existing.severity)
         ? incoming.severity
         : existing.severity,
+    source: incoming.source ?? existing.source,
     agentKind: incoming.agentKind ?? existing.agentKind,
     roundLabel: incoming.roundLabel ?? existing.roundLabel,
     invocationId: incoming.invocationId ?? existing.invocationId,
@@ -1101,6 +1125,7 @@ function fromProtocolDiagnostic(event: RunEvent, diagnostic: Diagnostic): CoreDi
     hint: diagnostic.hint ?? null,
     severity: diagnostic.severity ?? 'error',
     scope: diagnostic.scope,
+    source: diagnostic.source ?? null,
     agentKind: event.agent_kind ?? null,
     roundLabel: event.round_label ?? null,
     invocationId: event.invocation_id ?? null,
@@ -1124,6 +1149,7 @@ function fallbackDiagnostic(
     hint: null,
     severity,
     scope,
+    source: null,
     agentKind: event.agent_kind ?? null,
     roundLabel: event.round_label ?? null,
     invocationId: event.invocation_id ?? null,
@@ -1259,6 +1285,42 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
       ...roundFields,
     };
   }
+  // Framework events (#692) are the framework speaking, whichever agent phase
+  // is active: they never take `agentFields` or `labelFor`'s agent fallback,
+  // so the transcript attributes them to their subsystem, not to an agent.
+  if (data?.kind === 'gate_started') {
+    const recipe = data.recipe == null ? '' : ` ${data.recipe}`;
+    const command = data.command == null ? '' : `: ${data.command}`;
+    return {
+      id,
+      kind: 'status',
+      content: `running${recipe}${command}`,
+      label: frameworkLabel(`framework-${data.gate}`, event),
+      ...roundFields,
+    };
+  }
+  if (data?.kind === 'gate_finished') return gateFinishedEntry(event, data, id, roundFields);
+  if (data?.kind === 'workspace_snapshot') {
+    return {
+      id,
+      kind: 'status',
+      content: workspaceSnapshotContent(data),
+      label: frameworkLabel(frameworkSourceName(data.source, null), event),
+      ...roundFields,
+    };
+  }
+  if (data?.kind === 'run_configured') {
+    return {
+      id,
+      kind: 'status',
+      content: runConfiguredContent(data),
+      label: frameworkLabel(frameworkSourceName(data.source, null), event),
+      ...roundFields,
+    };
+  }
+  // The warning rides the envelope's `diagnostic`, which `applyDiagnosticEvent`
+  // has already folded into `diagnostics`; it is not transcript prose.
+  if (data?.kind === 'framework_warning') return null;
   if (data?.kind === 'round_finished') {
     const tone =
       data.judge_verdict === 'pass'
@@ -1318,6 +1380,120 @@ function outputKind(channel: string): TranscriptEntry['kind'] {
 function labelFor(event: RunEvent, fallback: string): string {
   const phase = event.agent_kind ?? fallback;
   return event.round_label ? `${phase} · ${event.round_label}` : phase;
+}
+
+type GateFinishedData = Extract<RunEventData, {kind?: 'gate_finished'}>;
+type WorkspaceSnapshotData = Extract<RunEventData, {kind?: 'workspace_snapshot'}>;
+type RunConfiguredData = Extract<RunEventData, {kind?: 'run_configured'}>;
+/** The generated closed set of framework subsystems, never a local copy. */
+type FrameworkSource = NonNullable<GateFinishedData['source']>;
+
+type RoundFields = Partial<Pick<TranscriptEntry, 'roundLabel' | 'roundNumber'>>;
+
+/**
+ * The transcript name of a framework subsystem. Exhaustive over the protocol's
+ * closed source set, so a new subsystem is a compile error, with `source_label`
+ * as the escape hatch the `other` member carries.
+ */
+function frameworkSourceName(
+  source: FrameworkSource | undefined,
+  sourceLabel: string | null | undefined,
+): string {
+  switch (source) {
+    case 'git_tracking':
+      return 'git-tracking';
+    case 'gpu':
+      return 'gpu';
+    case 'skypilot':
+      return 'skypilot';
+    case 'other':
+      return sourceLabel ?? 'framework';
+    case 'gates':
+    case 'loop':
+    case undefined:
+      return 'framework';
+    default: {
+      const unhandled: never = source;
+      return unhandled;
+    }
+  }
+}
+
+/** `labelFor`'s round suffix without its agent fallback: framework, not agent. */
+function frameworkLabel(base: string, event: RunEvent): string {
+  return event.round_label ? `${base} · ${event.round_label}` : base;
+}
+
+/**
+ * A gate outcome; the envelope's `status` carries pass or fail. A completed
+ * benchmark measurement keeps rendering as the Benchmark result card
+ * `benchmark_result` produced, so the card survives that event's retirement.
+ */
+function gateFinishedEntry(
+  event: RunEvent,
+  data: GateFinishedData,
+  id: string,
+  roundFields: RoundFields,
+): TranscriptEntry {
+  const label = frameworkLabel(`framework-${data.gate}`, event);
+  if (event.status === 'failed') {
+    const heading = data.recipe == null ? 'FAIL' : `FAIL: ${data.recipe}`;
+    return {
+      id,
+      kind: 'diagnostic',
+      content: data.output_tail ? `${heading}\n${data.output_tail}` : heading,
+      label,
+      tone: 'failure',
+      ...roundFields,
+    };
+  }
+  const measurement =
+    data.metric != null && data.value != null
+      ? `${data.metric}: ${data.value} ${data.unit ?? data.metric}`
+      : null;
+  if (data.gate === 'benchmark' && measurement !== null && data.reused !== true) {
+    return {
+      id,
+      kind: 'result',
+      content: measurement,
+      label: 'Benchmark',
+      tone: 'success',
+      ...roundFields,
+    };
+  }
+  const passed = data.reused === true ? 'reused PASS' : 'PASS';
+  const detail = data.recipe ?? measurement;
+  return {
+    id,
+    kind: 'status',
+    content: detail === null ? passed : `${passed}: ${detail}`,
+    label,
+    tone: 'success',
+    ...roundFields,
+  };
+}
+
+/** Exactly one aspect is populated per event; see `WorkspaceSnapshotData`. */
+function workspaceSnapshotContent(data: WorkspaceSnapshotData): string {
+  if (data.baseline != null) return `trusted input baseline: ${shortCommit(data.baseline)}`;
+  const excluded = data.excluded_paths ?? [];
+  if (excluded.length > 0) {
+    return `excluded ${excluded.length} path${excluded.length === 1 ? '' : 's'} from snapshots`;
+  }
+  if (data.commit == null) return `no changes to commit for '${data.label ?? ''}'`;
+  return `snapshot '${data.label ?? ''}' at ${shortCommit(data.commit)}`;
+}
+
+function shortCommit(commit: string): string {
+  return commit.slice(0, 7);
+}
+
+function runConfiguredContent(data: RunConfiguredData): string {
+  const lines: string[] = [];
+  if (data.objective) lines.push(`objective: ${data.objective}`);
+  if (data.model) lines.push(`model: ${data.model}`);
+  if (data.search_policy) lines.push(`search policy: ${data.search_policy}`);
+  return lines.length > 0 ? lines.join('\n') : 'run configured';
 }
 
 /**

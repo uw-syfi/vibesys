@@ -58,6 +58,9 @@ class Diagnostic(BaseModel):
     retryability: DiagnosticRetryability = DiagnosticRetryability.UNKNOWN
     cause_id: str | None = None
     debug_ref: str | None = None
+    # Which subsystem raised the diagnostic (e.g. "git_tracking", "skills").
+    # Optional and additive: events recorded before the field existed omit it.
+    source: str | None = None
 
     @field_validator("summary", "detail", "hint", mode="before")
     @classmethod
