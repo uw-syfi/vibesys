@@ -79,6 +79,28 @@ quantitatively only when a comparable uninstrumented control shows acceptable
 observer effect; asynchronous CPU/CUDA scope totals are not additive without
 timeline evidence.
 {% endif %}
+{% if ranked_bottlenecks is defined and ranked_bottlenecks %}
+### Ranked components (measured attribution)
+{% for b in ranked_bottlenecks %}
+- **{{ b.component }}** — {{ b.ir_pct }}% Ir{% if b.top_functions %} (top: {{ b.top_functions | join(", ") }}){% endif %}
+{% endfor %}
+{% endif %}
+{% if active_component is defined and active_component %}
+## Bottleneck walk (framework-owned focus)
+
+The framework maintains a durable **bottleneck ledger** and walks it deterministically: it profiles the engine, ranks components by measured CPU share, and attacks the top non-exhausted one until it plateaus, then advances to the next. **This round's active component is `{{ active_component }}`.**
+
+Shape this round's `task` to optimize `{{ active_component }}` specifically. This is a **soft focus**, not a hard fence — a coordinated micro-opt that spans a couple of operators to land the `{{ active_component }}` win is fine — but do not wander off into an unrelated component; the ledger has already decided this is where the cycles are.
+
+If you have strong evidence the walk should revisit or reorder (e.g. a component the ledger marked exhausted regressed, or a cross-cutting change unlocks a higher-ranked one), request it through the pre-round decision's `active_component` soft override on the next new-hypothesis round. The framework honors it only if it names a known, non-exhausted component; otherwise it keeps walking the ranked list.
+
+{% if ledger_text is defined and ledger_text %}
+### Ledger state
+```
+{{ ledger_text }}
+```
+{% endif %}
+{% endif %}
 {% if regression_info %}
 The latest progress entry contains a regression or terminal-workspace notice.
 Read it before choosing the parent. For a concrete pre-measurement defect with

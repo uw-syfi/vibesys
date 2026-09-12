@@ -56,3 +56,17 @@ output is a failure, not a win. The honest expectation for an in-place
 micro-optimization is a **modest percentage, not a multiple**; a small or zero
 win that stays genuinely equivalent is acceptable, a large win that does not is
 not.
+{% if modality is defined and modality == "dataflow_opt" %}
+
+## Diff-discipline is yours (dataflow_opt)
+
+The accuracy command runs the behavioral battery (output-equivalence,
+differential fuzz, determinism, crash-recovery, ThreadSanitizer) but does **not**
+run the no-rearchitecture gate. Diff the candidate against the pristine snapshot
+yourself — `diff -ru _ref_engine engine` (ignoring `target/`) — and fail the
+round on any wall breach (a changed algorithm or complexity class, a changed
+arrangement/trace data model, a changed dataflow/execution or worker/concurrency
+model, or a heavyweight new dependency) even when the output is byte-identical
+and the metric improved. Restructuring or reimplementing an operator's
+*internals* within those walls is allowed.
+{% endif %}

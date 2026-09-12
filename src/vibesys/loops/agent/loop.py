@@ -27,7 +27,7 @@ from vibesys.domains.base import DomainDefinition, DomainName, DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.input_manifest import BenchmarkResult, WorkspaceSource  # noqa: TC001  # tracked: #288
-from vibesys.loops.agent import issue_board
+from vibesys.loops.agent import bottleneck_ledger, issue_board
 from vibesys.loops.agent.attempt import (
     JudgeOutcome,
     JudgeReviewed,
@@ -792,6 +792,7 @@ def _run_pre_round_decision(  # noqa: PLR0913  # tracked: #288
     progress_path: Path,
     progress_location: str,
     has_history: bool = True,
+    bottleneck_walk_active: bool = False,
 ) -> PreRoundDecision:
     system_prompt = render_template(
         "orchestrator_pre_round_prompt.j2",
@@ -804,6 +805,7 @@ def _run_pre_round_decision(  # noqa: PLR0913  # tracked: #288
         profiler_kind=ctx.profiler_kind.value,
         profile_execution=ctx.run_environment_view.profile_execution,
         has_history=has_history,
+        bottleneck_walk_active=bottleneck_walk_active,
     )
     decision = _invoke_read_only_role(
         ctx,
@@ -1002,6 +1004,9 @@ def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
     official_eval_every: int = 3,
     provisional_candidates: int = 0,
     official_eval_cadence_due: bool = False,
+    active_component: str = "",
+    ledger_text: str = "",
+    ranked_bottlenecks: list[dict[str, object]] | None = None,
 ) -> OrchestratorPlan:
     domain_orchestrator = render_domain_section(
         domain_definition,
@@ -1027,6 +1032,9 @@ def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
         official_eval_every=official_eval_every,
         provisional_candidates=provisional_candidates,
         official_eval_cadence_due=official_eval_cadence_due,
+        active_component=active_component,
+        ledger_text=ledger_text,
+        ranked_bottlenecks=ranked_bottlenecks or [],
     )
     # One corrective reprompt: a plan that fails lifecycle validation (for
     # example a hypothesis_id already used in this run) is a recoverable agent
@@ -1241,6 +1249,7 @@ def _run_implementer(  # noqa: PLR0913  # tracked: #288
     official_evaluation_due: bool = False,
     official_evaluation_reason: str | None = None,
     prior_attempt_artifact_locations: tuple[str, ...] = (),
+    active_component: str = "",
 ) -> _ImplementerAttempt:
     plan.recommended_skills, resolved_skills = _validate_skill_selections(
         ctx, plan.recommended_skills
@@ -1298,6 +1307,7 @@ def _run_implementer(  # noqa: PLR0913  # tracked: #288
         official_evaluation_reason=official_evaluation_reason,
         recommended_skills=resolved_skills,
         prior_attempt_artifact_locations=prior_attempt_artifact_locations,
+        active_component=active_component,
     )
     # Make this attempt number durable before the turn starts. A process killed
     # mid-invoke writes no completed artifact, so a resume that counted only
@@ -2336,6 +2346,15 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     last_single_agent_response: SingleAgentRoundResponse | None = None
     last_profile_focus: str = "general latency hotspots on /v1/completions"
 
+    # Framework-owned bottleneck-walk cursor for the ``dataflow_opt`` modality.
+    # Durable at ``log_dir/bottlenecks.json`` (outside the git-tracked workspace)
+    # so the walk survives ``--resume``. For every other modality the ledger
+    # stays empty and ``active_component`` stays "", so the prompts render
+    # identically to before (all ledger/focus blocks are ``{% if %}``-guarded).
+    bottleneck_ledger_path = ctx.log_dir / "bottlenecks.json"
+    ledger = bottleneck_ledger.load_ledger(bottleneck_ledger_path)
+    active_component: str = ledger.get("active_component") or ""
+
     try:
         while round_number <= max_rounds:
             ctx.switch_log_file(f"round{round_number:03d}")
@@ -2368,6 +2387,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                             progress_path=progress_path,
                             progress_location=progress_location,
                             has_history=not _is_fresh_cold_start(round_number, records),
+                            bottleneck_walk_active=(modality == "dataflow_opt"),
                         )
                         if pre_decision.need_profile and ctx.profiler_kind is not ProfilerKind.NONE:
                             profiler_summary = _run_profiler(
@@ -2385,6 +2405,42 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         profiler_summary = _profiler_summary_from_single_agent(
                             last_single_agent_response
                         )
+
+                    # Framework-owned bottleneck walk (dataflow_opt only). Run
+                    # deterministic attribution over the *unmodified* candidate,
+                    # merge the ranking into the durable ledger, and let the
+                    # framework -- not the LLM -- pick the round's active
+                    # component (top-ranked non-exhausted). The orchestrator's
+                    # ``active_component`` output is a soft override honored only
+                    # if it names a known, non-exhausted component; the
+                    # pre-round decision may request one for this round.
+                    ledger_text = ""
+                    ranked_bottlenecks_view: list[dict[str, object]] = []
+                    if modality == "dataflow_opt":
+                        attribution = bottleneck_ledger.run_attribution(
+                            ctx, round_number=round_number
+                        )
+                        if attribution is not None:
+                            bottleneck_ledger.repopulate_from_attribution(
+                                ledger, attribution, round_number=round_number
+                            )
+                            ranked_bottlenecks_view = bottleneck_ledger.ranked_bottlenecks(
+                                attribution
+                            )
+                        override = pre_decision.active_component if pre_decision is not None else ""
+                        active_component = (
+                            bottleneck_ledger.select_active_component(
+                                ledger, override=override or None
+                            )
+                            or ""
+                        )
+                        bottleneck_ledger.save_ledger(bottleneck_ledger_path, ledger)
+                        ledger_text = bottleneck_ledger.format_for_prompt(ledger)
+                        if active_component:
+                            ctx.lprint(
+                                f"[ledger] round {round_number} active component: "
+                                f"{active_component}"
+                            )
 
                     plateau_warning = _detect_plateau(records)
                     provisional_candidates = _provisional_candidates_since_official(records)
@@ -2409,6 +2465,9 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         official_eval_cadence_due=(
                             provisional_candidates + 1 >= official_eval_every
                         ),
+                        active_component=active_component,
+                        ledger_text=ledger_text,
+                        ranked_bottlenecks=ranked_bottlenecks_view,
                     )
                     parent_round = (
                         plan.revert_to_round
@@ -2615,6 +2674,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                             official_evaluation_due=(planned_official_reason is not None),
                             official_evaluation_reason=planned_official_reason,
                             prior_attempt_artifact_locations=prior_attempt_artifact_locations,
+                            active_component=active_component,
                         )
                         implementation = attempt.response
                         if attempt.synthesized:
@@ -3463,6 +3523,36 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                 # a rejected review keeps the same claim plus reviewer feedback
                 # so the implementer can address it on the next round.
                 ctx.persist_completed_round()
+
+                # Advance the bottleneck walk with this round's outcome. Only
+                # the active component's counters move; a component-scoped
+                # plateau flips it to ``exhausted`` so the next new-hypothesis
+                # round selects the next component. The walk metric is a
+                # higher-is-better CPU reduction ratio (baseline / candidate);
+                # a failed or unmeasured round still spends the component so a
+                # stuck one eventually exhausts. No-op off ``dataflow_opt``.
+                if modality == "dataflow_opt" and active_component:
+                    walk_metric: float | None = None
+                    if (
+                        official_metric is not None
+                        and official_metric > 0
+                        and baseline_metric is not None
+                        and baseline_metric > 0
+                    ):
+                        walk_metric = baseline_metric / official_metric
+                    bottleneck_ledger.advance_after_round(
+                        ledger,
+                        active_component,
+                        round_number=round_number,
+                        passed=passed,
+                        walk_metric=walk_metric,
+                    )
+                    bottleneck_ledger.save_ledger(bottleneck_ledger_path, ledger)
+                    # The next new-hypothesis round re-selects from the ledger;
+                    # if the active component just exhausted, drop the stale
+                    # focus so a continuation round doesn't reuse it.
+                    active_component = ledger.get("active_component") or ""
+
                 agent_run_state = next_agent_run_state
                 active_hypothesis = agent_run_state.active_hypothesis
                 ctx.events.emit(

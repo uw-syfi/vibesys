@@ -45,3 +45,15 @@ the engine computes:
 Avoid shortcuts that only satisfy the benchmark shape: hard-coded or memorized
 answers for the known workload, short-circuiting the computation, embedding
 another engine, or returning results the real computation would not produce.
+{% if modality is defined and modality == "dataflow_opt" %}
+
+## Bottleneck-walk focus (dataflow_opt)
+
+This run is steered by a framework-owned **bottleneck walk**: each new-hypothesis
+round profiles the engine, ranks its components by measured CPU share, and hands
+you the hottest non-exhausted one. When a focus component is named for the round,
+confine your edits to it where practical — that is where the measured cycles are —
+and keep the diff tight and attributable so the win (or regression) is traceable.
+A coordinated micro-opt spanning a couple of operators to land that component's
+win is fine; wandering into an unrelated component is not.
+{% endif %}

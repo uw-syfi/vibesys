@@ -1,0 +1,30 @@
+## Modality: dataflow_opt (micro-optimize a **real materialized engine's** own source, in place)
+
+The candidate is the **vanilla differential-dataflow source** (`engine/`, materialized verbatim as round 0 from the pristine `_ref_engine/`) that the Implementer may only **micro-optimize in place**. It runs the shipped `bfs` example — incremental breadth-first distance over a graph the binary self-generates from a fixed RNG seed — and its correctness is judged as **output-equivalence with the pristine round-0 engine**: there is no external Python truth, because "correct" here means "computes exactly what vanilla differential-dataflow computes."
+
+**⛔ NO-REARCHITECTURE — HARD GATE, check this FIRST (every round, including round 1).** The accuracy command does **not** run this gate for you — it is yours to enforce. The *walls* are frozen by round 0, not by round 1. Diff the candidate against the pristine snapshot:
+```
+diff -ru _ref_engine engine    # (ignoring target/)
+```
+The walls are: the **algorithm and its complexity class**, the arrangement/trace **data model** (*what* state is kept), the **dataflow/execution and worker/concurrency model**, and the **dependency set**. **Automatic FAIL — even if faster and still byte-identical — only for a wall breach:** the algorithm or its complexity class changed, the data model changed, the dataflow/execution or worker/concurrency model changed, or a heavyweight crate/runtime pulled in. **Restructuring a hot path or reimplementing an operator's *internals* is allowed** — a coordinated multi-hunk rewrite of `join`/`reduce`/`iterate`/`consolidate`/merge internals is fine as long as it keeps the same work, the same complexity class, the same data model, and byte-identical output. For each hunk, confirm it does not breach a wall; reject the round only if one does. A round that restructures a hot routine and stays equivalent is fine to accept even with a small or zero win; a round that changes the algorithm, the data model, or the execution model is not.
+
+**⛔ CORRECTNESS + BEHAVIORAL GATES — HARD GATE.** Run the accuracy command and require **exit 0 / PASS**:
+```
+{{ accuracy_command }}
+```
+It rebuilds the candidate and runs, against the pristine `_ref_engine/` executed **live**, the full behavioral battery:
+- **output-equivalence** — normalized data tuples (sorted) must match byte-for-byte on the canonical **and** perturbation workloads in `reference/workload.py`. Running the pristine engine live on ≥2 distinct workloads is the anti-memorization mechanism: there is no stored golden file to hardcode.
+- **differential fuzz** — a curated boundary/regression corpus plus a fixed-seed random batch of graphs the engine was never shown; every input is graded against the live pristine engine. The only way to pass is to actually compute BFS.
+- **determinism (metamorphic)** — each workload rerun at `-w 1/2/4` must be byte-identical to the single-worker golden; guards against a data race or unordered reduction traded for speed.
+- **crash-recovery** — a `SIGKILL` mid-run then a restart in the same working directory must reproduce a clean run byte-for-byte; guards against corrupt persistent state trusted on recovery.
+- **ThreadSanitizer** — the engine is built under TSan and run multi-worker; any reported race is a hard FAIL even when the output looked right this run.
+
+A nonzero exit is not a passing round: exit 1 is a real correctness/behavioral defect, and exit 2 is a build/setup error (also not acceptable). Name the failing stage and the offending function/branch in `feedback`.
+
+**No reward hacking.** The engine must compute BFS in differential-dataflow's own code — the `iterate`/`join_map`/`reduce`/`consolidate` dataflow. Reading a stored answer, short-circuiting the computation for the known workload, embedding or shelling out to another engine, or hardcoding the expected tuples is a FAIL even at exact match. The failure modes to watch: a hunk that changes what a `bfs.rs` operator computes (wrong distances), a "layout" change that is really a model change (a different arrangement/trace strategy or a different aggregation), an added heavyweight dependency, and any edit that is faster only because it stopped doing part of the work.
+
+**CPU is scored only after every gate above passes** (diff-discipline, output-equivalence, differential-fuzz, determinism, crash-recovery, ThreadSanitizer). The scored metric is `cpu_seconds` (lower is better) from the benchmark command:
+```
+{{ benchmark_command }}
+```
+It is meaningful **only** as a same-code, same-output number won purely by micro-optimization against the pristine `_ref_engine/`. A round that is faster because it changed the model or the output is a FAIL, not a win — the honest expectation is a modest percentage, never a multiple.

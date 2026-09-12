@@ -460,6 +460,28 @@ class ProfilerResponse(BaseModel):
     )
 
 
+class RankedBottleneck(BaseModel):
+    """One component in a framework-owned CPU-attribution ranking.
+
+    Emitted by a modality's attribution capability (e.g. the ``dataflow_opt``
+    bundle's ``profiler/attribute_cpu.py``) and read by the loop's bottleneck
+    ledger to steer the round's ``active_component``. Every field is optional so
+    an older summary without a ranking still parses.
+    """
+
+    component: str = Field(
+        description="Fixed-vocabulary component name (e.g. 'trace/implementations')."
+    )
+    ir_pct: float = Field(
+        default=0.0,
+        description="Share of measured instruction reads attributed to this component.",
+    )
+    top_functions: list[str] = Field(
+        default_factory=list,
+        description="Up to a few hot function labels within the component (narration only).",
+    )
+
+
 class ProfilerSummary(BaseModel):
     """Structured summary from the profiler agent, shared with the orchestrator.
 
@@ -491,6 +513,14 @@ class ProfilerSummary(BaseModel):
             "the evolve loop's Pareto-frontier selection. Single-objective "
             "consumers (agent-loop plateau detection) ignore this field; "
             "they read perf_metric instead."
+        ),
+    )
+    ranked_bottlenecks: list[RankedBottleneck] = Field(
+        default_factory=list,
+        description=(
+            "Optional framework-owned CPU-attribution ranking (highest cost "
+            "first). Populated by modalities with an attribution capability; "
+            "the bottleneck-walk ledger reads it to pick the active component."
         ),
     )
 
@@ -581,6 +611,15 @@ class PreRoundDecision(BaseModel):
     profile_focus: str = Field(
         default="",
         description="Guidance for the profiler (e.g. 'focus on decode-path kernels'). Empty when need_profile is False.",
+    )
+    active_component: str = Field(
+        default="",
+        description=(
+            "Optional soft override naming the component the bottleneck walk should "
+            "attack this round. Honored only when it names a known, non-exhausted "
+            "component; otherwise the framework walks its own ranking. Empty for "
+            "modalities without a bottleneck ledger."
+        ),
     )
     reasoning: str = Field(description="Short explanation of the decision. One or two sentences.")
 

@@ -87,6 +87,7 @@ _MODALITIES = (
     "speech_to_text",
     "realtime_audio",
     "kv_store",
+    "dataflow_opt",
 )
 
 _DEFAULT_CONFIG_TEXT = '[model]\nname = "gpt-5.4"\n'
