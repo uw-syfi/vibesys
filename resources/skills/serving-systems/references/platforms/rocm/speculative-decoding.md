@@ -13,10 +13,10 @@ argv, on top of the accepted TP=4 launch recipe in [`floor.md`](floor.md):
 - `--speculative-num-steps 3`
 - `--speculative-num-draft-tokens 4`: num_draft_tokens = num_steps + 1 for a linear (topk=1) chain.
 - `--enable-linear-replayssm-spec`: replaces per-draft full mamba-state snapshots with a per-slot raw-input window; gated to a linear draft chain only (`speculative_eagle_topk` in `{None, 1}`), which NEXTN satisfies. Requires the linear-attention decode backend to be `triton` or `flashinfer`; this platform's default (`triton`) already satisfies it, no extra flag needed.
-- `--speculative-draft-model-path <original, unsharded checkpoint>`
-- `--speculative-draft-load-format auto`
+- `--speculative-draft-model-path <draft-only sharded artifact, or the original unsharded checkpoint>`
+- `--speculative-draft-load-format sharded_state` (with the draft-only artifact) or `auto` (with the original checkpoint)
 
-See "Pitfalls" below for why the last two flags are mandatory rather than optional on this checkpoint's load path.
+See "Pitfalls" below for why the last two flags are mandatory rather than optional on this checkpoint's load path, and for the draft-only sharded artifact that makes the fast path possible.
 
 This recipe runs with mixed chunked prefill effectively off: the engine forces `enable_mixed_chunk` off whenever a speculative algorithm is set, regardless of whether `--enable-mixed-chunk` is in argv. See [`engines/sglang.md`](../../engines/sglang.md) for the mechanism.
 
@@ -31,15 +31,21 @@ k=3 was chosen over k=2 by the lower-median-TPOT rule after both cleared gates a
 | Uncapped, 48 sessions | 70.86 -> 38.27 ms (-46.0%) | 815.6 -> 759.0 ms (-6.9%) | 2.89 |
 | 16-session cap | 22.10 -> 13.49 ms (-39.0%) | 423.6 -> 451.8 ms (+6.7%) | 2.84 |
 
-Gates 13/13 on every rep at both concurrencies. Boot cost: 2.6 to 2.8x longer than the non-speculative boot (about 800 to 900 s versus about 300 s), because the draft head loads from the unsharded checkpoint and boot captures extra decode graphs for the draft path; a deployment-time cost only, not a serving-time one.
+Gates 13/13 on every rep at both concurrencies. Boot cost without the draft-only sharded artifact: 2.6 to 2.8x longer than the non-speculative boot (about 800 to 900 s versus about 300 s), because the draft head loads from the unsharded checkpoint and boot captures extra decode graphs for the draft path. With the draft-only sharded artifact (see [`weight-loading.md`](weight-loading.md)), boot drops to about 365 s. Either way this is a deployment-time cost only, not a serving-time one: TPOT, p95 TTFT, and accept_len are unaffected by which draft load path was used.
 
 Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633511 (uncapped), 633512 (16-session cap).
 
-## Candidate: disable the overlap scheduler for this recipe
+## Accepted: disable the overlap scheduler for TTFT-weighted multi-turn workloads
 
-A probe at 48 sessions (3 reps per side) against the accepted NEXTN k=3 configuration found `--disable-overlap-schedule` cuts pooled p95 TTFT turn-2+ by 31 percent (749 to 517 ms) and p50 by about one scheduler iteration (97 ms), at +5.7 percent mean TPOT. See [`../../engines/sglang.md`](../../engines/sglang.md)'s overlap-scheduler pitfall for the mechanism (a long-step, TTFT-bound multi-turn workload pays the overlap scheduler's one-iteration publish lag on every first token). Not yet part of the validated recipe above.
+On top of the NEXTN k=3 recipe above, `--disable-overlap-schedule` cuts pooled p95 TTFT turn-2+ by 24.1 percent at 48 sessions uncapped (734.4 to 557.5 ms) and by 28.4 percent at a 16-session cap (438.5 to 313.8 ms), at a median TPOT cost of +3.3 percent (37.21 to 38.45 ms) and +6.8 percent (13.17 to 14.06 ms) respectively. accept_len is unchanged (2.85 vs 2.86 of 4 at 48 sessions, 2.84 vs 2.82 at the 16-session cap).
 
-Status: candidate, acceptance pending (5-rep, two concurrencies). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633552.
+See [`../../engines/sglang.md`](../../engines/sglang.md)'s overlap-scheduler pitfall for the mechanism: with the overlap scheduler on, the scheduler commits the next batch before the current step's results return, so a request that arrives mid-step waits an extra iteration (about 110 ms with spec decode) before its first token is admitted and published; with it off, admission sees a fresh poll every iteration, at the cost of putting the scheduler's own per-step CPU work back on the device's critical path (the TPOT regression).
+
+Rule: for TTFT-weighted multi-turn workloads with spec decode, turn the overlap scheduler off; for throughput-weighted workloads, keep it on.
+
+- `--disable-overlap-schedule`: add to the argv above when the deployment is TTFT-weighted.
+
+Status: accepted. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs 633754 (48 sessions uncapped) and 633755 (16-session cap), 5 reps per side each, gates 13/13 every rep.
 
 ## Pitfalls
 
@@ -63,15 +69,23 @@ Cause:   the TP-sharded fast-path artifact this checkpoint normally boots
          silently inherits the target's `--load-format` unless
          overridden; the target here boots with `sharded_state`, a
          layout the original checkpoint is not in.
-Fix:     set `--speculative-draft-model-path <original checkpoint>` and
-         `--speculative-draft-load-format auto` explicitly. Both are
-         mandatory on this checkpoint and this engine; neither has a
-         working default here.
+Fix:     fast path: save a draft-only `sharded_state` artifact (see
+         [`weight-loading.md`](weight-loading.md)'s sharded draft
+         artifact recipe) and set `--speculative-draft-model-path
+         <draft-only sharded artifact>` with
+         `--speculative-draft-load-format sharded_state`; this cuts the
+         draft's own load-weight phase from about 498 s to about 9.7 s.
+         Where no such artifact exists yet, fall back to
+         `--speculative-draft-model-path <original checkpoint>` and
+         `--speculative-draft-load-format auto`. One of these two is
+         mandatory; neither has a working default here.
 Scope:   rocm, this checkpoint's TP-sharded fast-path artifact. The
          missing auto-default entry is an engine-wide allowlist gap, not
          rocm-specific, but is recorded here because the sharded-artifact
          mechanics that make it bite are this fork's ROCm load path.
-Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633510.
+Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633510
+         (original-checkpoint fallback); fast path verified in jobs
+         633762/633763 (draft-only sharded artifact).
 ```
 
 ## See also

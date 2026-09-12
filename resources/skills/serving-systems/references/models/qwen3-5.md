@@ -121,6 +121,19 @@ Boot cost: 2.6 to 2.8x longer than the non-speculative boot (about 800 to 900 s 
 
 Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633511 (uncapped), 633512 (16-session cap).
 
+### Overlap scheduler off, on top of NEXTN k=3, measured
+
+Paired against the NEXTN k=3 configuration above with the overlap scheduler on, 5 reps per side pooled, gates 13/13 on every rep of every side:
+
+| Concurrency | pooled p95 TTFT turn2+ | TPOT (median) | accept length (median, of 4) |
+|:--|--:|--:|--:|
+| Uncapped, 48 sessions | 734.4 -> 557.5 ms (-24.1%) | 37.21 -> 38.45 ms (+3.3%) | 2.852 vs 2.860 |
+| 16-session cap | 438.5 -> 313.8 ms (-28.4%) | 13.17 -> 14.06 ms (+6.8%) | 2.843 vs 2.823 |
+
+Accepted for TTFT-weighted multi-turn workloads; keep the overlap scheduler on for throughput-weighted ones. See [`platforms/`](../platforms/) for the mechanism (the overlap scheduler's one-iteration publish lag) and the trade-off rule.
+
+Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633754 (uncapped), 633755 (16-session cap).
+
 ### Outcome: resident-fp8 / MXFP4-dequant hybrid MoE weights (superseded)
 
 The gather-dequant hybrid design (keep MXFP4 weights resident, gather-dequant only the experts a batch actually touches into a faster-precision scratch buffer per layer) was carried through to a real end-to-end test under the campaign's numerics policy: only changes that compute the same numbers as production (bf16-rounding-level differences) are admissible, since the 13-probe accuracy gate cannot itself catch a numerics-changing regression. The bf16 target passed that bar (rel L2 0.23 percent vs. production's 0.40 percent) but was a marginal, mixed result end to end: p95 TTFT turn-2+ improved 4.85 percent (649.0 to 617.6 ms) while TPOT regressed 1.58 percent (107.3 to 109.0 ms), because the dequant-into-CK's-preshuffled-layout write traffic largely canceled the CK kernel's own speed advantage. The fp8 target failed the pre-benchmark accuracy gate (6 of 13 probes, garbage output on history and arithmetic probes) because per-token activation quantization changes the computed numbers, which the exact-only policy excludes regardless of speed.

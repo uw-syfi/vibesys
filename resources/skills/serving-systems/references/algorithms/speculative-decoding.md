@@ -25,6 +25,7 @@ Portable across backends; pick on quality/cost grounds, not hardware.
    - **Stochastic** (`temperature > 0`): accept with probability `min(1, p/q)` where `p` is the target's and `q` the drafter's probability for the drafted token; on rejection, resample from the normalized residual `max(0, p - q)`. Using the greedy rule here **silently biases the output distribution** — the result is no longer equivalent to sampling from the target model.
 4. **Roll back all length trackers together.** Rejected drafts already wrote K/V. Resetting only `seq_len` leaves stale K/V visible to any path that indexes by cache metadata.
 5. **Verify uses the same execution path as normal decode.** A separate eager verify path costs more than it saves and can disable the fast path for non-speculative requests too.
+6. **Load drafter weights through the same fast path as the target.** A drafter or MTP head is small next to the target, but a slow, unthreaded, per-tensor loader still costs real boot time if the drafter falls back to it while the target uses a sharded or threaded fast path; give the drafter the same fast loading path.
 
 ## Gating
 
@@ -43,6 +44,7 @@ Acceptance is workload-dependent, and the wrong gate kills a working implementat
 | Corrupt output after a rejected draft | invariant 4 — partial rollback |
 | Non-speculative requests also got slower | invariant 5 — branching disabled the shared fast path |
 | Acceptance near zero | drafter/target vocab or position mismatch, not a perf problem |
+| Boot time dominated by the drafter's own weight load | invariant 6, drafter using a slow/generic loader instead of the target's fast path |
 
 ## Engine interactions
 
