@@ -74,6 +74,27 @@ describe('renderPerformanceCurve', () => {
     expect(chart).toContain('Metric    p99_latency_us · minimize ↓');
   });
 
+  it('names the lowest round best for a minimizing objective', () => {
+    const chart = renderPerformanceCurve(
+      [performance(1, 1000), performance(2, 2000), performance(3, 1500)],
+      [],
+      context({objective_metric: 'p99_latency_us', objective_direction: 'min'}),
+    );
+
+    expect(chart).toContain('best r1 1k total_ops_per_sec');
+    expect(chart).toContain('latest r3 1.5k total_ops_per_sec');
+  });
+
+  it('keeps the highest round best for a maximizing objective', () => {
+    const chart = renderPerformanceCurve(
+      [performance(1, 1000), performance(2, 2000), performance(3, 1500)],
+      [],
+      context({objective_direction: 'max'}),
+    );
+
+    expect(chart).toContain('best r2 2k total_ops_per_sec');
+  });
+
   it('drops the lines for facts the run never recorded', () => {
     const chart = renderPerformanceCurve([performance(1, 1000)], [], context({}));
 
