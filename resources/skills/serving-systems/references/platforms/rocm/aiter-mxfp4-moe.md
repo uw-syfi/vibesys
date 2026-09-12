@@ -148,20 +148,18 @@ Fix:     replace the memory-based lookup with a register-resident one
          and regressed further rather than improving on the
          constant-memory version; see the follow-up entry below. The
          `v_perm_b32`-based version this fix specifies has since been
-         built and is microbench-verified; see "Permute-based fix"
-         below for the design and numbers. It has not yet passed the
-         paired end-to-end acceptance test, so no serving-level speedup
-         is claimed here.
+         built, microbench-verified, and accepted end to end; see
+         "Permute-based fix" below for the design and numbers.
 Scope:   rocm, gfx942, this kernel's compiled decode step, and more
          generally any HIP kernel that indexes a `__constant__` table by
          a per-lane value inside a hot loop.
-Status:  microbench-verified (root-cause mechanism verified by direct
+Status:  job-verified (root-cause mechanism verified by direct
          inspection of the compiled kernel and cross-checked against
          hardware counters on two production dispatch shapes; a first
          fix attempt regressed further instead of confirming a speedup,
          see below; the `v_perm_b32` fix that followed it is now
-         implemented and microbench-verified, see "Permute-based fix"
-         below, but has not yet passed end-to-end acceptance).
+         implemented, microbench-verified, and accepted end to end, see
+         "Permute-based fix" below).
          Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
 ```
 
@@ -211,8 +209,8 @@ Fix:     eliminating the constant-memory gather is necessary but not
          accepting a "register-resident" rewrite as fixed. Do not judge
          a decode-lookup rewrite by "no more global load" alone; check
          the compiled instruction mix and VALUBusy before and after.
-         The permute-based rewrite is still in progress and not yet
-         measured; no speedup is claimed for it here.
+         The permute-based rewrite (see "Permute-based fix" below) is
+         the one that fixed this; it is now accepted end to end.
 Scope:   rocm, gfx942, this kernel's compiled decode step, and more
          generally any HIP kernel where a per-lane runtime-indexed
          table lookup is moved from constant memory to a
@@ -229,9 +227,9 @@ Status:  verified (bit-exact by exhaustive test and full-kernel diff;
          job-verified.
 ```
 
-## Permute-based fix: register byte-permute lookup (microbench-verified, not yet accepted end to end)
+## Permute-based fix: register byte-permute lookup (job-verified, accepted as the default)
 
-Follow-up to the runtime-indexed-array regression above: the `v_perm_b32` design that entry deferred to has now been built and measured. It supersedes the runtime-indexed-array attempt as the fix for the decode step; the constant-memory pitfall description near the top of this file is unchanged.
+Follow-up to the runtime-indexed-array regression above: the `v_perm_b32` design that entry deferred to has now been built, measured at the kernel microbenchmark level, and confirmed end to end in a paired acceptance run. It supersedes the runtime-indexed-array attempt as the fix for the decode step and is accepted as the default fused MXFP4 MoE decode path; the constant-memory pitfall description near the top of this file is unchanged.
 
 Design: an e2m1 nibble is a sign bit plus a 3-bit magnitude index into 8 possible bf16 magnitudes. `ldexpf` and round-to-nearest-even are sign-symmetric, so the 16-entry bf16-bits table collapses to two 8-byte tables (the low and high bytes of the 8 scaled magnitudes) plus a sign OR; this collapse was verified on device over all 256 block exponents x 8 magnitudes (2,048 cases), 0 mismatches. Both 8-byte tables are built once per 32-element block using the same `ldexpf` float path the original decode used, so they are exact by construction rather than by a separately-derived encoding. One `v_perm_b32` (`__builtin_amdgcn_perm`) selects four elements' low bytes from the low table, a second selects their high bytes from the high table, and two more interleave the results into bf16x2 words; the sign bit is OR'd into the unsigned high-byte plane before the interleave (3 ops per 4 elements total).
 
@@ -263,16 +261,56 @@ Fix:     verified exact: exhaustive 256 e8m0 x 256 byte values x 32
 Scope:   rocm, gfx942, this kernel's compiled decode step, and more
          generally any HIP kernel decoding a small fixed codebook (16
          entries or fewer) per lane.
-Status:  microbench-verified (exhaustive exactness check, ISA audit,
-         and hardware counters all confirm the mechanism and the
-         speedup at the kernel microbenchmark level). This has NOT yet
-         passed the paired end-to-end acceptance test; the round-level
-         numbers below are predictions from the microbenchmark ratio,
-         not serving measurements, until that gate runs.
+Status:  job-verified (exhaustive exactness check, ISA audit, and
+         hardware counters confirm the mechanism and the speedup at the
+         kernel microbenchmark level; a paired end-to-end acceptance run
+         then confirmed the speedup holds in the real multiturn server).
+         Accepted as the default fused MXFP4 MoE decode path.
          Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
 ```
 
-Predicted, not measured (same per-layer-ratio extrapolation method used for the skinny-GEMV and split-K entries above, not a serving measurement): decode round about 14 percent faster at batch 16, prefill iteration about 9 percent faster at 337 tokens. Do not cite these as serving numbers until the paired end-to-end acceptance test runs.
+Predicted (same per-layer-ratio extrapolation method used for the skinny-GEMV and split-K entries above): decode round about 14 percent faster at batch 16, prefill iteration about 9 percent faster at 337 tokens.
+
+### Paired end-to-end acceptance, measured
+
+Two jobs, one node each, base (accepted stack head, no permute rewrite) vs perm (this rewrite), 5 reps per side per job, identical harness-default flags on both sides otherwise (NEXTN k=3, sharded draft, overlap off, TunableOp on), gates 13/13 on every rep of every side (20/20 reps total), accept_len unchanged at both concurrencies:
+
+| Concurrency | pooled p95 TTFT turn2+ | median TPOT |
+|:--|--:|--:|
+| Uncapped, 48 sessions | 466.9 -> 405.3 ms (-13.2%) | 21.35 -> 18.71 ms (-12.4%) |
+| 16-session cap | 381.6 -> 341.9 ms (-10.4%) | 12.45 -> 11.89 ms (-4.5%) |
+
+Both p95 TTFT improvements land close to the roughly 9 to 14 percent predicted range above; the TPOT improvement is close to it too at 48 sessions and a smaller but still non-noise effect at 16 sessions (per-rep ranges do not overlap at either concurrency: c48 base 20.78-22.30 vs perm 17.99-19.02 ms; c16 base 12.39-12.61 vs perm 11.69-12.21 ms), consistent with MoE being a smaller share of a shorter, lower-batch decode step at the lower concurrency.
+
+Status: accepted. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
+
+### Pitfall: a shared JIT build-cache directory breaks a paired kernel A/B
+
+```
+Symptom: A paired base-vs-candidate kernel comparison is meant to isolate
+         one source change, but the candidate's build could silently
+         land in the same directory the base side reads, or the base
+         side could pick up a stale candidate build left over from a
+         previous run.
+Cause:   This fused MXFP4 MoE extension is JIT-built by
+         `load_hip_extension()` into a directory keyed by a content hash
+         of the kernel source (plus flags and torch/HIP version):
+         `<SGLANG_HIP_EXT_DIR>/sglang_mxfp4_fused_moe-<hash>/`.
+         `SGLANG_HIP_EXT_DIR` defaults to one shared cache directory, so
+         two sides of a paired run that both leave it unset compile into
+         the same place.
+Fix:     Export a private `SGLANG_HIP_EXT_DIR` per side before staging
+         or booting that side, so base and candidate never read or write
+         the shared cache. Verify after boot that each side's server log
+         names a distinct build-hash directory: this run's two sides
+         built distinct hashes deterministically (identical across both
+         jobs), and the shared cache directory was untouched by either.
+Scope:   sglang with a JIT-built HIP/CUDA extension whose cache directory
+         is controlled by an environment variable with a shared default;
+         applies to any paired kernel A/B, not only this kernel.
+Status:  verified. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12,
+         job-verified.
+```
 
 ## See also
 

@@ -77,7 +77,7 @@ The mapping from finding to remedy is portable even though the tools aren't:
 | Memory-bandwidth bound at decode | expected — check KV layout, quantization, batch size |
 | Collective-bound | [`algorithms/parallelism.md`](../algorithms/parallelism.md) — topology and sharding |
 | High device utilization but low throughput | utilization ≠ efficiency; descend to kernel altitude |
-| Device counters land in the ambiguous middle (neither idle nor saturated) | kernel-internal phase timing or an ISA-level instruction audit to tell latency-bound from instruction-issue-bound; see `platforms/<backend>/profiler.md` |
+| Device counters land in the ambiguous middle (neither idle nor saturated) | kernel-internal phase timing or an ISA-level instruction audit to tell latency-bound from instruction-issue-bound; see `platforms/<backend>/profiler.md`. One such diagnosis (a decode kernel's ambiguous-middle counters resolved to instruction-issue-bound by ISA audit, fixed by cutting instructions per element, not by touching memory scheduling) closed a paired end-to-end acceptance test at 12 percent TPOT and 13 percent p95 TTFT; see `platforms/<backend>/` for the kernel. |
 
 ## Anti-patterns
 
