@@ -166,6 +166,8 @@ Accepted as the default on top of the base configuration above. p95 TTFT is unch
 
 Status: accepted. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633839 (uncapped), 633841 (16-session cap).
 
+Raising k from 3 to 4 (5 draft tokens, its own TunableOp table) was probed and refuted: accept_len rose +8.9% (2.85 to 3.10) but median TPOT regressed +6.9% (22.43 to 23.97 ms) because the per-slot accept rate fell 0.618 to 0.527, so k=3 remains the accepted draft length; see [`platforms/`](../platforms/) for the full comparison.
+
 ### Turn-2+ TTFT decomposition, overlap scheduler off, measured
 
 With the overlap scheduler off (previous section), a five-bucket, request-joined split of turn-2+ TTFT shows queue wait is near zero and rare (zero `NO_TOKEN` admission-budget rejections over 16830 iterations), and the single-request prefill+draft-extend forward is the dominant term, not the queue:
