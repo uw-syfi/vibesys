@@ -1246,6 +1246,180 @@ describe('OpenTUI presentation', () => {
     expect(controller.state.graphWidthOverride).toBeNull();
   });
 
+  /**
+   * `<`/`>`/`=` resize the docked chat pane on the home page, mirroring the
+   * Agents pane's own mechanism above. The experiment log is never given a
+   * width of its own (`width: '100%', flexGrow: 1`), so whatever the chat
+   * pane does not take is exactly what the log gets.
+   */
+  it('changes the chat pane by exactly one step per press, seeded from the current width', async () => {
+    const width = 140; // automatic sizing renders 45 here.
+    const testRenderer = await createTestRenderer({width, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    const chatPane = () => testRenderer.renderer.root.findDescendantById('chat-pane');
+
+    const before = await frameAfter(testRenderer);
+    expect(before).toContain('Experiment chat');
+    expect(controller.state.chatWidthOverride).toBeNull();
+    expect(chatPane()?.width).toBe(45);
+
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(chatPane()?.width).toBe(43); // seeded from 45, one step down.
+    expect(controller.state.chatWidthOverride).toBe(43);
+
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(chatPane()?.width).toBe(41);
+
+    testRenderer.mockInput.pressKey('>');
+    testRenderer.mockInput.pressKey('>');
+    await frameAfter(testRenderer);
+    expect(chatPane()?.width).toBe(45); // back to where it started.
+  });
+
+  it('= hands the chat pane back to automatic sizing after a resize', async () => {
+    const width = 140;
+    const testRenderer = await createTestRenderer({width, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+    const chatPane = () => testRenderer.renderer.root.findDescendantById('chat-pane');
+
+    // 45 down to 25 (CHAT_PANE_MIN) in 10 steps of 2.
+    for (let step = 0; step < 10; step += 1) testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(chatPane()?.width).toBe(25);
+    expect(controller.state.chatWidthOverride).toBe(25);
+
+    testRenderer.mockInput.pressKey('=');
+    await frameAfter(testRenderer);
+
+    expect(controller.state.chatWidthOverride).toBeNull();
+    expect(chatPane()?.width).toBe(45); // automatic sizing at 140, as before any press.
+  });
+
+  it('a < press at CHAT_PANE_MIN stores nothing once the floor is reached', async () => {
+    const width = 140;
+    const testRenderer = await createTestRenderer({width, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+    const chatPane = () => testRenderer.renderer.root.findDescendantById('chat-pane');
+
+    for (let step = 0; step < 15; step += 1) testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(chatPane()?.width).toBe(25);
+    expect(controller.state.chatWidthOverride).toBe(25);
+
+    // Five presses past the floor changed nothing further: the override
+    // itself stayed 25 rather than drifting under CHAT_PANE_MIN.
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(chatPane()?.width).toBe(25);
+    expect(controller.state.chatWidthOverride).toBe(25);
+  });
+
+  it('the override may exceed CHAT_PANE_MAX, but keeps the log at LOG_COMPACT_PANEL_WIDTH, and a further > stores nothing', async () => {
+    // room = 233 once LOG_COMPACT_PANEL_WIDTH (67) is set aside, far past
+    // CHAT_PANE_MAX (52): automatic sizing never asks for more than 52, but an
+    // explicit override is allowed to.
+    const width = 300;
+    const testRenderer = await createTestRenderer({width, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+    const chatPane = () => testRenderer.renderer.root.findDescendantById('chat-pane');
+    const table = () => testRenderer.renderer.root.findDescendantById('experiment-log');
+
+    expect(chatPane()?.width).toBe(52); // automatic sizing already at its own ceiling.
+
+    for (let step = 0; step < 120; step += 1) testRenderer.mockInput.pressKey('>');
+    await frameAfter(testRenderer);
+
+    expect(chatPane()?.width).toBe(233);
+    expect(chatPane()?.width as number).toBeGreaterThan(52);
+    expect(table()?.width).toBe(width - 233); // 67, LOG_COMPACT_PANEL_WIDTH.
+    expect(controller.state.chatWidthOverride).toBe(233);
+
+    // One more press past the ceiling stores nothing further.
+    testRenderer.mockInput.pressKey('>');
+    await frameAfter(testRenderer);
+    expect(chatPane()?.width).toBe(233);
+    expect(controller.state.chatWidthOverride).toBe(233);
+  });
+
+  it('no-ops the chat resize keys on the round view, where experimentLogVisible is false', async () => {
+    const testRenderer = await createTestRenderer({width: 160, height: 30});
+    const controller = new FakeController(threeStageRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+
+    testRenderer.mockInput.pressKey('=');
+    testRenderer.mockInput.pressKey('>');
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(controller.state.chatWidthOverride).toBeNull();
+  });
+
+  it("no-ops the Agents pane's resize keys on the home page, where agentsPaneVisible is false", async () => {
+    // The mirror of the case above: `agentsPaneVisible` returns false wherever
+    // `experimentLogVisible` is true, so the two resize blocks in
+    // `keybindings.ts` never both claim the same press.
+    const testRenderer = await createTestRenderer({width: 160, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('=');
+    testRenderer.mockInput.pressKey('>');
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(controller.state.graphWidthOverride).toBeNull();
+  });
+
+  it('stores nothing on a terminal too narrow for the chat to dock at all', async () => {
+    // 90 columns is under MIN_DOCK_WIDTH (92): chatDockFits is false, so
+    // chatPaneVisible is false and the keys are never claimed.
+    const width = 90;
+    const testRenderer = await createTestRenderer({width, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+    expect(controller.state.chatDockFits).toBe(false);
+
+    testRenderer.mockInput.pressKey('>');
+    testRenderer.mockInput.pressKey('<');
+    testRenderer.mockInput.pressKey('=');
+    await frameAfter(testRenderer);
+    expect(controller.state.chatWidthOverride).toBeNull();
+  });
+
+  it('never advertises the resize keys on LOG_KEY_HELP, where chatPaneVisible is false', async () => {
+    // The resize keys are guarded by `chatPaneVisible(state)`, which is false
+    // in every state that shows `LOG_KEY_HELP` (the chat is either not docked,
+    // as here, or covered by a modal or a different zoom). A binding advertised
+    // on a line where it can never fire is worse than not advertising it at
+    // all, so `<>=: width` belongs only on `LOG_CHAT_KEY_HELP`.
+    const width = 90; // under MIN_DOCK_WIDTH: the chat cannot dock here.
+    const testRenderer = await createTestRenderer({width, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    const frame = await frameAfter(testRenderer);
+
+    expect(controller.state.chatDockFits).toBe(false);
+    expect(frame).not.toContain('<>=: width');
+  });
+
   it("reads the tabs' measured delta from the experiment log, not the design log", async () => {
     // Per-round stage facts, the measured delta included, cross the protocol on
     // `HypothesisRound`; the design log carries only each round's file list. The
@@ -6789,6 +6963,13 @@ class FakeController implements SessionController {
     // over by a double that always publishes.
     if (this.state.graphWidthOverride === width) return;
     this.publish({...this.state, graphWidthOverride: width});
+  }
+
+  setChatWidthOverride(width: number | null): void {
+    // The same dedup the real reducer does
+    // (`session-model.ts#setChatWidthOverride`).
+    if (this.state.chatWidthOverride === width) return;
+    this.publish({...this.state, chatWidthOverride: width});
   }
 
   /** Rows the fake server returns for query.experiments. */

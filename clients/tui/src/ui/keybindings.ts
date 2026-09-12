@@ -12,11 +12,13 @@ import {
   agentPaneWidthWithOverride,
   agentsPaneVisible,
   clampGraphWidthOverride,
-  GRAPH_WIDTH_STEP,
   graphFits,
   STACKED_WIDTH,
 } from './agent-map.js';
+import {chatPaneWidthWithOverride, clampChatWidthOverride} from './chat-pane.js';
 import type {ClipboardCopyResult, SelectionClipboard} from './clipboard.js';
+import {PANE_WIDTH_STEP} from './pane-resize.js';
+import {rightPaneWidth, splitFits} from './right-pane.js';
 
 export interface KeybindingActions {
   completeInput(): boolean;
@@ -40,6 +42,8 @@ export interface KeybindingActions {
   toggleTodos(): void;
   /** `<`/`>`: the Agents pane's explicit column width, already clamped; `=`: null. */
   setGraphWidthOverride(width: number | null): void;
+  /** `<`/`>`: the docked chat pane's explicit column width, already clamped; `=`: null. */
+  setChatWidthOverride(width: number | null): void;
   scrollRightPane(delta: number): void;
   scrollChatPane(delta: number): void;
   scrollExperimentDetail(delta: number): void;
@@ -215,6 +219,63 @@ export function bindKeybindings(
         if (actions.completeChatInput()) key.preventDefault();
         return;
       }
+      // Falls through to the composer's own editor uncaught, on purpose: a
+      // person typing a question must be able to type `<`, `>`, or `=`
+      // literally, so the resize block below never runs while this pane holds
+      // the cursor.
+      return;
+    }
+    // Resizes the docked chat pane by columns, the same mechanism the Agents
+    // pane uses below: `<` shrinks and `>` grows by `PANE_WIDTH_STEP`, and `=`
+    // drops the override back to automatic sizing (`chatPaneWidth`). The
+    // experiment log is `chatPaneWidthWithOverride`'s complement: it is never
+    // given a width of its own, so whatever the chat does not take is exactly
+    // what the log gets, and a resize moves the one column between them
+    // rather than a share of the terminal a floor could round away.
+    //
+    // The pane-visible predicate is `experimentLogVisible(state) &&
+    // chatPaneVisible(state)`, which never overlaps the Agents pane's own
+    // guard below: `agentsPaneVisible` returns false wherever
+    // `experimentLogVisible` is true, so at most one of the two blocks ever
+    // claims a given press. This has to run before `experimentLogVisible`'s
+    // own navigation below, whose final `else return` does not call
+    // `key.preventDefault()`: reaching it with `<`/`>`/`=` unclaimed would
+    // leave the raw key to be typed into the command input instead of
+    // resizing anything.
+    if (
+      (key.name === '>' || key.name === '<' || key.name === '=') &&
+      actions.inputIsEmpty() &&
+      controller.state.layout.zoomedPane === null &&
+      experimentLogVisible(controller.state) &&
+      chatPaneVisible(controller.state)
+    ) {
+      const terminalWidth = renderer.terminalWidth;
+      // A split beside the log takes the same columns off the chat that it
+      // takes off the table (`app.ts` computes `chatWidth` from this same
+      // `rightWidth`), so the override has to clamp against what's actually
+      // left rather than the whole terminal.
+      const rightWidth =
+        controller.state.layout.right !== null && splitFits(terminalWidth)
+          ? rightPaneWidth(terminalWidth)
+          : 0;
+      if (key.name === '=') {
+        actions.setChatWidthOverride(null);
+      } else {
+        const current = chatPaneWidthWithOverride(
+          terminalWidth,
+          rightWidth,
+          controller.state.chatWidthOverride,
+        );
+        const step = key.name === '>' ? PANE_WIDTH_STEP : -PANE_WIDTH_STEP;
+        const next = clampChatWidthOverride(current + step, terminalWidth, rightWidth);
+        // A press that moves nothing stores nothing, the same rule the Agents
+        // pane keeps below: trying the keys can never arm an override the
+        // operator cannot see. It covers a terminal at the low or high clamp
+        // bound already, and a chat pane too narrow to have room to shrink or
+        // grow beside a split.
+        if (next !== current) actions.setChatWidthOverride(next);
+      }
+      key.preventDefault();
       return;
     }
     // The experiment surface owns navigation while it is on screen. The index
@@ -342,7 +403,7 @@ export function bindKeybindings(
       return;
     }
     // Resizes the Agents pane by columns, the way a vim/LazyVim window resize
-    // does: `<` shrinks and `>` grows by `GRAPH_WIDTH_STEP` each press, and `=`
+    // does: `<` shrinks and `>` grows by `PANE_WIDTH_STEP` each press, and `=`
     // drops the override so the pane follows the terminal again, which is
     // vim's `<C-w>=`. An override is otherwise sticky for the life of the
     // process, so without `=` a single press would cost the pane its automatic
@@ -379,7 +440,7 @@ export function bindKeybindings(
         // and the narrowest it goes. The gap up to a graph is 26 columns at
         // three stages, 7 at two, and none at one, so it is never a step.
         const width = current ?? STACKED_WIDTH;
-        const step = key.name === '>' ? GRAPH_WIDTH_STEP : -GRAPH_WIDTH_STEP;
+        const step = key.name === '>' ? PANE_WIDTH_STEP : -PANE_WIDTH_STEP;
         // From the stacked list, `>` is the operator asking for the graph that
         // automatic sizing declined to draw, at the only width it has.
         const next =
