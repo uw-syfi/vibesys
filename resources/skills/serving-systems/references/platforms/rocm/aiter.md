@@ -249,11 +249,31 @@ Fix:     re-tune locally for this (gfx, cu_num) with aiter's own tuner
          the tuner needs --batch 1 to cover the decode shape). Tuning
          helps but does not fully close the gap: even a tuned kernel
          reaches only 3 to 10 percent of peak at M=16 for the skinniest
-         shapes, so treat this as a partial mitigation, not a fix.
-Scope:   rocm, gfx942, MI300A (228 CU), aiter d9e5ef7ce0.
+         shapes, so treat this as a partial mitigation, not a fix. At
+         the spec-decode verify shapes (M=44 to 80, six dense-projection
+         shapes, 345 launches per verify forward), the same untuned
+         fallback is bit-identical to a bare torch.matmul call, and the
+         gap to matmul is a flat 27 to 33 us per launch across every
+         shape regardless of weight bytes moved (0.26 to 42 MB): this
+         miss costs host-side lookup-and-log time only, not GPU-kernel
+         time, and that host cost never executes inside a captured
+         decode graph (capture records only the launch, not the Python
+         dispatch that picked it), so it is very likely already
+         invisible in the deployed speculative-decoding server. Whether
+         the dense set's own kernels are compute- or launch-bound at
+         these shapes inside a captured graph is a separate, still-open
+         question; check with a kernel-only trace comparing
+         captured-graph replay against this eager-mode measurement
+         before spending effort chasing this delta end to end.
+Scope:   rocm, gfx942, MI300A (228 CU), aiter d9e5ef7ce0; host-cost
+         extension additionally covers spec-decode verify shapes
+         M=44-80.
 Status:  verified (mechanism read from the lookup key, plus measured
          per-shape throughput). sglang-v0.5.18-rocm700-mi30x, 2026-09-11,
-         job 631888.
+         job 631888. Host-cost-only finding at M=44-80 also verified
+         (bit-identical output measured); the in-graph kernel-time
+         question is open. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job
+         633740.
 ```
 
 ### Cold dense-GEMM shape resolution is milliseconds, not the cause of multi-second stalls

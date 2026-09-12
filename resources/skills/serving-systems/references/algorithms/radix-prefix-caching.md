@@ -111,11 +111,44 @@ Without UUIDs, there is no cross-session hit because each new request re-hashes 
 
 - **Speculative decoding**: verify rewinds can invalidate a suffix of the committed prefix; the cache must handle "un-commit" correctly, or be conservative about what's shared.
 - **Tool calling / branching**: each branch shares the prompt prefix; radix sharing is exactly the right model.
-- **Multi-turn conversations**: each turn shares the history; prompt caching matters more as conversations grow. On a multi-turn chat workload the prior turns' generated tokens are already committed in the tree, so a turn-2+ request should prefill only the new user message; whether this holds must be verified per deployment (tokenizer, chat template, and eviction pressure vary). Scope: multi-turn chat serving, engine-agnostic. Status: candidate, unverified in the campaign that surfaced it; sglang-v0.5.18-rocm700-mi30x, 2026-09-05.
+- **Multi-turn conversations**: each turn shares the history; prompt caching matters more as conversations grow. On a multi-turn chat workload the prior turns' generated tokens are already committed in the tree, so a turn-2+ request should prefill only the new user message; whether this holds depends on whether the client's chat template renders a past assistant turn identically to how that turn was generated (see the chat-template pitfall below for a template family where it does not). Scope: multi-turn chat serving, engine-agnostic. Status: candidate, unverified in the campaign that surfaced it; sglang-v0.5.18-rocm700-mi30x, 2026-09-05.
 - **Quantized KV**: cache must track the quant scheme as part of the key, else a reuse across schemes silently produces wrong outputs.
 - **Sampling**: output tokens are per-request; only the prefix KV is shared.
 
 ## Pitfalls
+
+```
+Symptom: cached-token count on turn 2+ equals the previous prompt only;
+         a turn's own generated output (100+ tokens) never shows up as
+         cached on the next turn, even though the client resends full
+         conversation history and the previous reply's text is
+         unmodified.
+Cause:   some chat templates render the assistant turn currently being
+         generated differently from every earlier assistant turn (for
+         example: inserting an empty think block for the live
+         generation prompt, but stripping it from history once a new
+         user turn is appended). A client that rebuilds history from
+         returned content reproduces the template's history form, not
+         its generation-prompt form, so turn k's prompt token sequence
+         diverges from what was cached under turn (k-1)'s generation
+         right after the assistant role header, before any reply
+         content, and the entire turn's output is recomputed.
+Fix:     render two consecutive turns through the model's own chat
+         template and tokenizer, and compute the longest common token
+         prefix between turn k's prompt and (turn k-1's prompt plus its
+         tokenized reply). If the match stops immediately after the
+         assistant role header, the fix is on the prompt side (keep the
+         template's own generation-prompt convention, e.g. the empty
+         think block, in history turns too), not an engine or
+         cache change; changing the prompt content is a workload
+         decision, not a serving fix.
+Scope:   chat templates that render the last assistant turn differently
+         from history turns (checked: Qwen3.5-style templates with a
+         `loop.index0 > last_query_index` branch); portable mechanism,
+         not tied to one engine or backend.
+Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs
+         633542, 633710.
+```
 
 - **Cache invalidation boundaries.** A generated token is not shareable until committed. Don't cache output KV prematurely.
 - **Tokenization drift.** Two identical-looking prompts with different BOS / chat-template can tokenize differently — match by token ID, not by string.

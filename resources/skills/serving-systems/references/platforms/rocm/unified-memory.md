@@ -100,14 +100,17 @@ Scope:   MI300A, aiter attention backend, sglang-v0.5.18-rocm700-mi30x,
          OOM-killed on the host side (exit code -9) during "Multi-thread
          loading shards" at both 0.85 and 0.72, while the serving launch
          path loads the same draft at 0.72 without incident. The
-         mem-fraction value is not the lever there; the cause is under
-         diagnosis (suspects: in-process Engine layout duplicating
-         weights across forked ranks, or a smaller batch-job memory
-         allocation).
+         mem-fraction value is not the lever there: the cause is
+         `weight_loader_disable_mmap=True` left on in that save script,
+         which makes every rank read and deserialize its own private
+         copy of every shard instead of sharing mmap'd pages across
+         ranks; see [`weight-loading.md`](weight-loading.md)'s matching
+         pitfall for the mechanism and fix.
 Status:  verified. sglang-v0.5.18-rocm700-mi30x, job 631025, 2026-09-10
          (0.85 required, target loads from the HF checkpoint); jobs
          633543 and 633650, 2026-09-12 (host OOM in the direct-Engine
-         draft save at 0.85 and at 0.72; cause open).
+         draft save, cause: `weight_loader_disable_mmap=True`; fixed and
+         confirmed in job 633711).
 ```
 
 ### KV-pool size drifts across otherwise-identical boots
