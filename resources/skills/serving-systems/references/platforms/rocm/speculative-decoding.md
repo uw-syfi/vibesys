@@ -18,6 +18,8 @@ argv, on top of the accepted TP=4 launch recipe in [`floor.md`](floor.md):
 
 See "Pitfalls" below for why the last two flags are mandatory rather than optional on this checkpoint's load path.
 
+This recipe runs with mixed chunked prefill effectively off: the engine forces `enable_mixed_chunk` off whenever a speculative algorithm is set, regardless of whether `--enable-mixed-chunk` is in argv. See [`engines/sglang.md`](../../engines/sglang.md) for the mechanism.
+
 The aiter attention backend (already the platform default, see [`aiter.md`](aiter.md)) separately gives the draft its own `AiterMultiStepDraftBackend`, keyed off the same `--attention-backend`; no extra flag needed for that either.
 
 k=3 was chosen over k=2 by the lower-median-TPOT rule after both cleared gates and stayed within a 10 percent p95-TTFT budget: a probe measured k=2 at -45.1 percent TPOT with p95 TTFT -8.6 percent, and k=3 at -48.8 percent TPOT with p95 TTFT +2.2 percent.

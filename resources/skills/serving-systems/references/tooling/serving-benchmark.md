@@ -15,6 +15,35 @@ A correct serving benchmark measures steady-state latency percentiles under a re
 
 Report percentiles (p50, p95, p99), not means. Means hide tail behavior that matters for SLOs.
 
+### Queue wait reads near zero under an overlap scheduler even when a request waits a full step for the device
+
+```
+Symptom: server-side request time-stats report queue wait near zero
+         (p50 0.6 ms, p95 1.5 ms) while the client-observed TTFT is
+         several step times (p50 360 ms), with no server-side field
+         that isolates the difference.
+Cause:   under an overlap scheduler, the "picked into a batch" timestamp
+         is stamped at the top of the scheduler loop, when the CPU-side
+         scheduler admits a request into the next batch, before the
+         forward is dispatched and before the *previous* batch's results
+         are even processed. It marks CPU-side admission, not device
+         start; the pick can happen while the prior step's kernels are
+         still in flight. The wait behind that in-flight step, the
+         request's own forward, and publish/detokenize lag all land
+         inside the residual forward-duration field, not in queue wait.
+Fix:     decompose with device-timed spans (bracket the forward with a
+         profiler window) or compute wait as (first-token publish time
+         minus arrival) minus profiled forward duration; do not trust a
+         scheduler's pick-time stamp as queue wait under overlap
+         scheduling. A second-granularity scheduler log cannot resolve
+         this either: it has no per-batch device-duration field.
+Scope:   any engine with an overlap/async scheduler (backend-
+         independent).
+Status:  verified (mechanism read in source, consistent with the
+         measured gap). sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job
+         633542.
+```
+
 ## Open-loop vs closed-loop
 
 **Closed-loop**: each client has a fixed concurrency (e.g., 32 workers sending one request at a time, waiting for response, sending next). Equivalent to Little's Law: throughput × avg_latency = concurrency. Results:
@@ -113,6 +142,14 @@ python benchmarks/benchmark_serving.py \
 - **Long enough**: 500+ requests at target concurrency, not 50.
 - **Fair comparison**: pin hardware, CUDA version, model checkpoint, sampling params.
 - **Report version strings**: engine git hash / version, model, precision, kernel backend.
+
+### Check whether the client is a term of the metric before trusting server-side latency
+
+A single-process asyncio benchmark client that parses every streamed chunk's JSON synchronously on one event loop serializes that CPU work across all concurrent sessions, and the serialization delay counts toward the client-observed TTFT before the request even reaches the server. Measured case: client overhead p50 54 ms / p95 216 ms at 48 concurrent streams, correlated with concurrent streams at send time (Spearman rho 0.44) more than with prompt length (rho -0.21).
+
+Check: compute client TTFT minus server-side first-token time per request, and correlate the difference against concurrent streams at send time. A positive, concurrency-correlated gap means the client is adding its own queueing delay; split sessions across more client processes or pin more cores before attributing the gap to the server.
+
+Scope: any benchmark client using one process/event loop for all concurrent sessions (client-side, backend-independent). Status: verified (measured). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633542.
 
 ### Node-to-node noise on clusters
 

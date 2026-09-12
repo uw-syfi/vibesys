@@ -14,6 +14,48 @@ Fork fix (uw-syfi/sglang commits fcff7c9dd8, bde3bde6be, 68a57d72f9): O(1) exper
 
 Scope: rocm, gfx942, `sglang-v0.5.18-rocm700-mi30x`, Qwen3.5-397B-A17B-MXFP4 (512-expert MoE), TP=4. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-08-25, uw-syfi/sglang commits fcff7c9dd8, bde3bde6be, 68a57d72f9.
 
+### The MTP draft class loads all 512 experts serially; boot with the draft adds minutes with disk and CPU idle
+
+```
+Symptom: booting with the NEXTN/MTP draft enabled adds about 8 minutes
+         to boot versus the non-speculative recipe, with disk and CPU
+         idle throughout the extra time; server.log shows the draft's
+         own "Load weight end." line landing about 455 to 492 s after
+         it starts, while the target's own load-weight phase stays at
+         its usual 85 to 90 s.
+Cause:   `Qwen3_5ForCausalLMMTP.load_weights` (`qwen3_5_mtp.py`,
+         `load_fused_expert_weights`) loops `for expert_id in
+         range(num_experts)` serially, one Python `weight_loader()`
+         call per expert per projection (512 experts x 3 tensors each),
+         with no threading. Per-rank draft memory usage is about 19 to
+         23 GB, loaded in about 455 to 492 s: roughly 200 MB/s
+         aggregate, far below the 10.75 GB/s storage floor measured
+         above, so the load is dispatch-bound, not I/O-bound. This is
+         exactly the pathology already fixed for the target model class
+         (see "Stock per-tensor MoE materialization" above,
+         `ThreadPoolExecutor`, `SGLANG_MOE_EXPERT_LOADER_WORKERS`); the
+         fix was applied to the target class only, and the MTP draft
+         class was never updated.
+Fix:     two options, neither validated end to end yet: (1) a
+         draft-only `sharded_state` artifact. The engine's
+         `save_sharded_model` only saves the target
+         (`weight_updater.py`, `weight_exporter.py`), so a
+         `draft_worker` branch mirroring `save_remote_model`'s existing
+         pattern must be added first; a fix along these lines is in
+         progress (PR pending), and validation of the resulting draft
+         artifact against a live boot is not yet complete. (2) apply
+         the same threaded per-expert loader used by the target class
+         to the MTP draft class.
+Scope:   rocm, sglang-v0.5.18-rocm700-mi30x, Qwen3.5-397B-A17B-MXFP4
+         NEXTN/MTP draft head (512-expert MoE at `mtp.layers.0`); the
+         unthreaded loop is engine source, not platform-specific, but
+         is recorded here because it is this platform's draft-boot
+         cost.
+Status:  verified cause (log timing); fix pending validation.
+         sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs 633510
+         (boot-phase timing), 633511 (spec_k3_c48 boot).
+```
+
 ## Pre-sharded artifact: sharded_state save
 
 1. Call `Engine.save_sharded_model` under TP=4, producing 56 parts totaling 212 GB (4 GiB parts).
