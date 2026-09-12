@@ -96,36 +96,47 @@ Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs
          completed).
 ```
 
-### `save_sharded_model`'s RPC swallows a scheduler-side exception and reports success
+### Standalone engine script silently imports the container's stock engine instead of the staged checkout
 
 ```
-Symptom: a `save_sharded_model` call returns success (`SAVE_EXIT=0`,
-         the calling script's own log ends cleanly) but the output
-         directory holds none of the expected
-         `model-rank-*-part-*.safetensors` files for one branch of the
-         save (here, the draft branch of a target+draft save).
-Cause:   the scheduler-side RPC handler raised inside
-         `save_sharded_model` (an `AttributeError` from assuming an
-         attribute chain the actual worker class doesn't have), and
-         `Scheduler.handle_rpc_request` caught the exception, logged
-         it, and returned `RpcReqOutput(success=False, ...)`; that
-         failure did not reliably propagate back through
-         `Engine.save_sharded_model`'s own `assert recv_req.success` to
-         the calling script, which observed a clean, successful return
-         despite the handler's own failure.
-Fix:     never trust a save call's own reported exit status alone.
-         After any `save_sharded_model` call, check the output
-         directory for the expected rank/part files and fail the job
-         if they are absent; log tensor and byte counts from inside the
-         RPC handler itself, before and after the write, so a future
-         silent failure shows up in the handler's own log rather than
-         only in a downstream postcondition check.
-Scope:   sglang, any backend (engine-level RPC defect, not platform-
-         specific); recorded here because the failure surfaced on this
-         platform's draft-model save path.
-Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633711
-         (draft branch silently wrote zero tensors); fix (postcondition
-         check plus in-handler logging) validated in job 633733.
+Symptom: a save or probe script invoked as `python3
+         /absolute/path/to/script.py` against a staged engine checkout
+         exits 0 with nothing to show for the new code path (a "done"
+         log line comes from the script's own print statement, not
+         from the branch it meant to exercise, and the target
+         directory holds none of the expected new files), or it raises
+         for an argument the staged code accepts, such as
+         `AssertionError: 'path'` wrapping a `KeyError('path')` raised
+         inside the RPC handler.
+Cause:   `python3 /absolute/path/to/script.py` puts the script's own
+         directory at `sys.path[0]`, not the process's cwd and not the
+         staged checkout. With no `PYTHONPATH` set, `import sglang`
+         falls through to whatever the container image bakes in at a
+         fixed path (here, `/sgl-workspace/sglang`), a stock, pre-fork
+         install that silently shadows the staged bundle. The stock
+         code has no new branch: it either ignores the extra kwargs and
+         returns success, or reads a kwarg unconditionally and raises
+         once the caller stops sending it. A preflight check such as
+         `python3 -c "import sglang; print(sglang.__file__)"` run with
+         `cwd=$WS` does not catch this: `-c` puts `''` (cwd) at
+         `sys.path[0]`, so it resolves the staged path and passes even
+         when the real script invocation would not.
+Fix:     export `PYTHONPATH` to the staged bundle's python directory
+         (e.g. `$WS/python`) before running any standalone script
+         against a staged checkout, and have the script itself assert,
+         right after import and before any expensive work, that
+         `sglang.__file__` starts with the staged bundle root, raising
+         if it does not. That check costs about 1 s against a boot it
+         would otherwise waste about 20 minutes discovering. Put the
+         assertion in the script itself, not only in a shell preflight
+         probe: the probe's own `sys.path[0]` differs from the
+         script's and can pass while the script still resolves wrong.
+Scope:   any container image that ships its own baked-in engine
+         install at a fixed import path; independent of backend and of
+         which call is involved. Not platform-specific; recorded here
+         because it surfaced on this platform's draft-model save path.
+Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs
+         633711, 633733, 633762.
 ```
 
 ## Pre-sharded artifact: sharded_state save
