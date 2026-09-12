@@ -51,6 +51,23 @@ Status: accepted. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs 633754 (
 
 Each draft step (`draft_decode`) reruns the same dense projections and the LM head as the verify step, at its own M (batch size, not batch size x draft tokens). A TunableOp table covering the CUDA-graph capture set's M values (see [`floor.md`](floor.md) and [`aiter-tunableop.md`](aiter-tunableop.md)) therefore speeds up all `k` draft steps as well as the verify step, not just the one call a naive estimate would count: this multiplication is most of why the measured end-to-end TPOT gain from tuning comes out well above a verify-only prediction.
 
+Changing k changes `num_draft_tokens`, which changes the `target_verify` and `draft_extend` M values (`M = batch_size x (k+1)`); `draft_decode`'s M set (`M = batch_size`) is unaffected. A table tuned for one k therefore mostly misses the verify-batch cells at a different k: retuning for a new k needs its own table over the new M set, not a reuse of the old one, or the comparison measures untuned-path misses on top of whatever the new k itself does.
+
+## Refuted: NEXTN k=4 (5 draft tokens)
+
+A probe raised the accepted k=3 recipe above to k=4 (`--speculative-num-steps 4 --speculative-num-draft-tokens 5`), with its own TunableOp table covering the k=4 verify-batch M values (see "Interaction" above). Paired against the accepted k3 stack on one node, 3 reps at 48 sessions:
+
+| Side | accept_len (median, of k+1) | per-slot accept rate | TPOT (median) | pooled p95 TTFT turn2+ |
+|:--|--:|--:|--:|--:|
+| k3 (accepted) | 2.85 | 0.618 | 22.43 ms | 478.4 ms |
+| k4 (probe) | 3.10 (+8.9%) | 0.527 | 23.97 ms (+6.9%, regression) | 490.4 ms (+2.5%) |
+
+accept_len rose as predicted, but TPOT regressed rather than improved. The per-slot acceptance rate fell from 0.618 to 0.527: the newly added draft position is accepted less often than the earlier ones, so the extra draft-decode forward plus the larger verify/draft-extend batch (M = batch_size x 5 versus x 4) cost more wall time per round than the accept-length gain repays. See [`../../algorithms/speculative-decoding.md`](../../algorithms/speculative-decoding.md)'s "Choosing k" section for the general mechanism. Gates 13/13 every rep on both sides.
+
+Rejected for promotion to a 5-rep acceptance run; k=3 remains the accepted stack. This depends on this workload's measured per-slot acceptance rate (about 0.53 to 0.62): a workload with a higher rate could still favor k=4, untested here.
+
+Status: refuted, for this workload's acceptance-rate range. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
+
 ## Pitfalls
 
 ### The draft head has no sharded fast-path artifact; point the draft at the original checkpoint

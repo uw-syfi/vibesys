@@ -36,6 +36,19 @@ Acceptance is workload-dependent, and the wrong gate kills a working implementat
 - **Do** compare rolling-average effective tok/s over N≥5 warm requests against a verifier-only baseline on the same workload.
 - **Do** log `attempted / accepted / verifier_steps / target_forwards / emitted_tokens` so the decision is auditable.
 
+## Choosing k (draft length)
+
+Expected accepted length under a per-slot acceptance rate `a` is a geometric sum: `sum_{i=0}^{k} a^i`. Each additional draft position adds `a^(k+1)` tokens of expected value, a strictly smaller increment than the one before it, while cost keeps growing: one more draft forward per round, plus a larger verify batch (`M = N x (k+1)` for N sequences). Raising k therefore has a break-even point; past it, the added draft-forward and verify-batch cost outweighs the value of the extra accepted tokens. Where that point falls depends on `a`, so a workload with a higher per-slot acceptance rate can push the break-even further out than one with a lower rate.
+
+Track both numbers when tuning k, not just one:
+
+- **Expected accepted length** (`accept_len`): the value that determines token savings per verify call.
+- **Per-slot acceptance rate** (`a`): the value that predicts whether the *next* increment of k is still worth it.
+
+`accept_len` can rise while `a` falls: adding a chain position increases the geometric sum even when the newly added term is individually less reliable than the terms before it. A rising `accept_len` alone does not show the per-token rate held up, and does not by itself justify a larger k. Check the marginal cost (draft forward plus verify batch growth) against the marginal `a^(k+1)` gain, not just the trend in `accept_len`.
+
+See [`platforms/`](../platforms/) for measured k-choice numbers per backend.
+
 ## Failure modes if skipped
 
 | Symptom | Usually means |
