@@ -1,12 +1,16 @@
-import {describe, expect, test} from 'bun:test';
+import {describe, expect, spyOn, test} from 'bun:test';
 import {BoxRenderable, rgbToHex, TextAttributes} from '@opentui/core';
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
 import type {HypothesisRound} from '@vibesys/backend-client';
 import type {RoundState} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {RoundTabsView, roundTab, tabWindow} from './round-tabs.js';
 import {contrastRatio, listThemes, resolveTheme, type Theme} from './theme.js';
+
+/** The live round's marker: `slot` draws the spinner's frame 0 here first. */
+const liveMarker = SPINNER_FRAMES[0] ?? '⠋';
 
 const secondsAgo = (seconds: number): string => new Date(Date.now() - seconds * 1000).toISOString();
 const done = (number: number): RoundState => ({number, status: 'completed'});
@@ -306,7 +310,7 @@ describe('RoundTabsView', () => {
     close(bar);
 
     expect(rowText(cells)).toBe(
-      '   r1 ✓ +12%   ▎ r2 ✓ +1.5%     r3 ✗ fail     r4 ✗ fail     r5 ○ skipped     r6 ⟳ 42s     r7 ·',
+      `   r1 ✓ +12%   ▎ r2 ✓ +1.5%     r3 ✗ fail     r4 ✗ fail     r5 ○ skipped     r6 ${liveMarker} 42s     r7 ·`,
     );
     expect(fgOf(cells, 'r1')).toEqual([theme.textMuted]);
     expect(fgOf(cells, '✓')).toEqual([theme.success]);
@@ -318,7 +322,7 @@ describe('RoundTabsView', () => {
       expect(fgOf(cells, part)).toEqual([theme.textSubtle]);
     }
     expect(fgOf(cells, 'r6')).toEqual([theme.textMuted]);
-    expect(fgOf(cells, '⟳')).toEqual([theme.accent]);
+    expect(fgOf(cells, liveMarker)).toEqual([theme.accent]);
     expect(fgOf(cells, '42s')).toEqual([theme.accent]);
     // Only the selected slot has a fill; everything else is the canvas.
     // From the gap after the selected slot through r4, and the margin before r1.
@@ -350,8 +354,10 @@ describe('RoundTabsView', () => {
 
     // r2 carries the selection, r6 the live state, each unmistakably.
     expect(cellsOf(cells, 'r2')[0]?.bg).toBe(theme.selectedSurface);
-    expect(cellsOf(cells, 'r6 ⟳ 42s').map(cell => cell.bg)).not.toContain(theme.selectedSurface);
-    expect(fgOf(cells, '⟳ 42s')).toEqual([theme.accent]);
+    expect(cellsOf(cells, `r6 ${liveMarker} 42s`).map(cell => cell.bg)).not.toContain(
+      theme.selectedSurface,
+    );
+    expect(fgOf(cells, `${liveMarker} 42s`)).toEqual([theme.accent]);
   });
 
   test('keeps the live colours on a selected live round', async () => {
@@ -359,10 +365,10 @@ describe('RoundTabsView', () => {
     const {cells} = bar;
     close(bar);
 
-    const slot = cellsOf(cells, '▎ r6 ⟳ 42s  ');
+    const slot = cellsOf(cells, `▎ r6 ${liveMarker} 42s  `);
     expect(new Set(slot.map(cell => cell.bg))).toEqual(new Set([theme.selectedSurface]));
     expect(cellsOf(cells, 'r6')[0]).toMatchObject({fg: theme.textStrong, bold: true});
-    expect(cellsOf(cells, '⟳')[0]).toMatchObject({fg: theme.accent, bold: true});
+    expect(cellsOf(cells, liveMarker)[0]).toMatchObject({fg: theme.accent, bold: true});
     expect(fgOf(cells, '42s')).toEqual([theme.accent]);
     // r2 is back to an ordinary done tab.
     expect(fgOf(cells, '+1.5%')).toEqual([theme.textMuted]);
@@ -413,19 +419,19 @@ describe('RoundTabsView', () => {
 
     expect(rows).toEqual([
       // L0: everything fits.
-      [58, ' ▎ r1 ✓ +12%     r2 ✓ +1.5%     r3 ✓ -3.0%     r4 ⟳ 42s'],
+      [58, ` ▎ r1 ✓ +12%     r2 ✓ +1.5%     r3 ✓ -3.0%     r4 ${liveMarker} 42s`],
       // L1: tabs that are neither selected nor live lose their metric.
-      [57, ' ▎ r1 ✓ +12%     r2 ✓     r3 ✓     r4 ⟳ 42s'],
-      [46, ' ▎ r1 ✓ +12%     r2 ✓     r3 ✓     r4 ⟳ 42s'],
+      [57, ` ▎ r1 ✓ +12%     r2 ✓     r3 ✓     r4 ${liveMarker} 42s`],
+      [46, ` ▎ r1 ✓ +12%     r2 ✓     r3 ✓     r4 ${liveMarker} 42s`],
       // L2: padding 2 -> 1.
-      [45, ' ▎r1 ✓ +12%   r2 ✓   r3 ✓   r4 ⟳ 42s'],
-      [38, ' ▎r1 ✓ +12%   r2 ✓   r3 ✓   r4 ⟳ 42s'],
+      [45, ` ▎r1 ✓ +12%   r2 ✓   r3 ✓   r4 ${liveMarker} 42s`],
+      [38, ` ▎r1 ✓ +12%   r2 ✓   r3 ✓   r4 ${liveMarker} 42s`],
       // L3: the selected tab loses its metric; the live one keeps its timer.
-      [37, ' ▎r1 ✓   r2 ✓   r3 ✓   r4 ⟳ 42s'],
-      [33, ' ▎r1 ✓   r2 ✓   r3 ✓   r4 ⟳ 42s'],
+      [37, ` ▎r1 ✓   r2 ✓   r3 ✓   r4 ${liveMarker} 42s`],
+      [33, ` ▎r1 ✓   r2 ✓   r3 ✓   r4 ${liveMarker} 42s`],
       // L4: no inner space.
-      [32, ' ▎r1✓   r2✓   r3✓   r4⟳42s'],
-      [28, ' ▎r1✓   r2✓   r3✓   r4⟳42s'],
+      [32, ` ▎r1✓   r2✓   r3✓   r4${liveMarker}42s`],
+      [28, ` ▎r1✓   r2✓   r3✓   r4${liveMarker}42s`],
       // L4 cannot hold both: the selected round wins and the live one goes.
       [27, ' ▎r1✓   r2✓   r3✓   1 ›'],
       [12, ' ▎r1✓   3 ›'],
@@ -491,7 +497,10 @@ describe('RoundTabsView', () => {
     const state = runState([live(1, 9.0)], {selected: 2, maxRounds: 2});
     const bar = await renderBar(state, 40);
     const before = rowText(bar.cells);
-    // The timer ticks on a real one-second interval; wait past one tick.
+    // The timer ticks on a real one-second interval; wait past one tick. The
+    // 120ms spinner also ticks several times in that window (it is a
+    // different timer than the one this test is about), so its glyph is read
+    // as "some spinner frame" rather than pinned to a specific one.
     await new Promise(resolve => setTimeout(resolve, 1100));
     await bar.setup.renderOnce();
     const after = rowText(rowCells(bar.setup));
@@ -499,8 +508,9 @@ describe('RoundTabsView', () => {
 
     // The label changes, and its slot does not: `9s` is padded to the width of
     // `59s`, so the tab beside it keeps its column.
-    expect(before).toBe('   r1 ⟳ 9s    ▎ r2 ·');
-    expect(after).toBe('   r1 ⟳ 10s   ▎ r2 ·');
+    const spinner = `[${SPINNER_FRAMES.join('')}]`;
+    expect(before).toMatch(new RegExp(`^   r1 ${spinner} 9s    ▎ r2 ·$`));
+    expect(after).toMatch(new RegExp(`^   r1 ${spinner} 10s   ▎ r2 ·$`));
     expect(after.indexOf('▎')).toBe(before.indexOf('▎'));
   });
 
@@ -515,5 +525,79 @@ describe('RoundTabsView', () => {
 
     expect(fgOf(cells, '✓')).toEqual([light.success]);
     expect(cellsOf(cells, 'r2')[0]?.bg).toBe(light.selectedSurface);
+  });
+});
+
+/**
+ * Before this, the live round's glyph was the static `⟳`, same as every other
+ * outcome's fixed glyph. It now draws the shared `SPINNER_FRAMES` animation in
+ * that one cell instead, the same braille spinner the activity bar and the
+ * chat composer already animate.
+ */
+describe('round tab spinner animation', () => {
+  test('advances the live tab through the shared spinner frames on its own 120ms tick', async () => {
+    const state = runState([live(1, 9.0)], {selected: 1});
+    const bar = await renderBar(state, 40);
+    const before = rowText(bar.cells);
+    // A comfortable margin past one tick, well short of a full ten-frame wrap
+    // (1200ms), so the frame is guaranteed to differ without pinning exactly
+    // which one it lands on.
+    await new Promise(resolve => setTimeout(resolve, SPINNER_INTERVAL_MS + 130));
+    await bar.setup.renderOnce();
+    const after = rowText(rowCells(bar.setup));
+    close(bar);
+
+    const glyphIndex = before.indexOf('r1') + 3;
+    const beforeGlyph = before[glyphIndex] ?? '';
+    const afterGlyph = after[glyphIndex] ?? '';
+    expect(SPINNER_FRAMES).toContain(beforeGlyph);
+    expect(SPINNER_FRAMES).toContain(afterGlyph);
+    expect(afterGlyph).not.toBe(beforeGlyph);
+    // Only the glyph cell changed: same width, same everything else in the row.
+    expect(after.length).toBe(before.length);
+    expect(after.slice(0, glyphIndex) + after.slice(glyphIndex + 1)).toBe(
+      before.slice(0, glyphIndex) + before.slice(glyphIndex + 1),
+    );
+  });
+
+  test('mutates the live slot in place on a tick, without rebuilding the tab row', async () => {
+    const state = runState([live(1, 9.0)], {selected: 1});
+    const bar = await renderBar(state, 40);
+    const before = [...bar.view.output.getChildren()];
+    await new Promise(resolve => setTimeout(resolve, SPINNER_INTERVAL_MS + 130));
+    await bar.setup.renderOnce();
+    const after = [...bar.view.output.getChildren()];
+    close(bar);
+
+    // No full `#draw()` rebuild happened: `#draw` destroys and re-adds every
+    // slot, so the same slot renderables surviving the tick, in the same
+    // order, is proof the tick only mutated `.content` in place.
+    expect(after.length).toBe(before.length);
+    for (const [index, child] of before.entries()) {
+      expect(after[index]).toBe(child);
+    }
+  });
+
+  test('runs no spinner timer while no round is live, starts one only while one is, and clears it', async () => {
+    const setIntervalSpy = spyOn(globalThis, 'setInterval');
+    const clearIntervalSpy = spyOn(globalThis, 'clearInterval');
+    const idle = runState([done(1)], {selected: 1, records: [measured(1, 12)]});
+    const bar = await renderBar(idle, 40);
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+
+    await redraw(bar, runState([live(1, 9.0)], {selected: 1}), 41);
+    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+
+    await redraw(bar, runState([done(1)], {selected: 1, records: [measured(1, 12)]}), 42);
+    expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+
+    await redraw(bar, runState([live(1, 9.0)], {selected: 1}), 43);
+    expect(setIntervalSpy).toHaveBeenCalledTimes(2);
+    bar.view.destroy();
+    expect(clearIntervalSpy).toHaveBeenCalledTimes(2);
+
+    close(bar);
+    setIntervalSpy.mockRestore();
+    clearIntervalSpy.mockRestore();
   });
 });
