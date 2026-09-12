@@ -134,6 +134,36 @@ Accepted for TTFT-weighted multi-turn workloads; keep the overlap scheduler on f
 
 Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633754 (uncapped), 633755 (16-session cap).
 
+### Turn-2+ TTFT decomposition, overlap scheduler off, measured
+
+With the overlap scheduler off (previous section), a five-bucket, request-joined split of turn-2+ TTFT shows queue wait is near zero and rare (zero `NO_TOKEN` admission-budget rejections over 16830 iterations), and the single-request prefill+draft-extend forward is the dominant term, not the queue:
+
+| Bucket | c48 p50 | c48 p95 | c16 p50 | c16 p95 |
+|:--|--:|--:|--:|--:|
+| client send -> server receipt | 1.9 ms | 3.7 ms | 2.3 ms | 3.6 ms |
+| receipt -> scheduler queue arrival | 55.3 ms | 204.2 ms | 22.0 ms | 125.7 ms |
+| queue wait | 0.6 ms | 1.1 ms | 0.5 ms | 1.0 ms |
+| prefill + draft-extend forward | 186.1 ms | 400.8 ms | 173.3 ms | 260.8 ms |
+| publish -> client receipt | 2.7 ms | 4.9 ms | 3.0 ms | 4.2 ms |
+
+See [`../engines/sglang.md`](../engines/sglang.md) for what the receipt-to-queue-arrival term measures, and [`../tooling/performance-modeling.md`](../tooling/performance-modeling.md) for the decomposition method.
+
+Status: verified (request-joined, 100 percent match rate both concurrencies, residual near logging precision). Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, job 633804.
+
+### Turn-2+ prefill forward, kernel breakdown, measured
+
+A single-request (bs=1) turn-2+ prefill+draft-extend forward is compute-bound at these extend-token counts, not bandwidth-bound: 337 extend tokens, 187.2 ms wall / 164.1 ms GPU busy; 919 extend tokens, 282.0 ms wall / 263.2 ms GPU busy. OLS fit (bs=1 only, n=429): `d_ms = 43.2 + 0.341 x extend_tokens` (R^2 = 0.54).
+
+| Block | 337 tok | 919 tok |
+|:--|--:|--:|
+| Routed MoE (stage1+stage2) | 91.3 ms (49%) | 168.3 ms (60%) |
+| Dense GEMM | 34.5 ms | 37.7 ms |
+| Collectives (TP=4 all-reduce) | 24.5 ms | 35.8 ms |
+
+Routed MoE dominates and grows fastest with extend length; dense GEMM is nearly flat (weight-read-bound, not compute-bound, at this token range). See [`platforms/`](../platforms/) for the MoE kernel this measures and its own floor comparison.
+
+Status: verified (kernel-named torch-profiler capture, cross-validated against the bucket decomposition above to within a few ms). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633822.
+
 ### Outcome: resident-fp8 / MXFP4-dequant hybrid MoE weights (superseded)
 
 The gather-dequant hybrid design (keep MXFP4 weights resident, gather-dequant only the experts a batch actually touches into a faster-precision scratch buffer per layer) was carried through to a real end-to-end test under the campaign's numerics policy: only changes that compute the same numbers as production (bf16-rounding-level differences) are admissible, since the 13-probe accuracy gate cannot itself catch a numerics-changing regression. The bf16 target passed that bar (rel L2 0.23 percent vs. production's 0.40 percent) but was a marginal, mixed result end to end: p95 TTFT turn-2+ improved 4.85 percent (649.0 to 617.6 ms) while TPOT regressed 1.58 percent (107.3 to 109.0 ms), because the dequant-into-CK's-preshuffled-layout write traffic largely canceled the CK kernel's own speed advantage. The fp8 target failed the pre-benchmark accuracy gate (6 of 13 probes, garbage output on history and arithmetic probes) because per-token activation quantization changes the computed numbers, which the exact-only policy excludes regardless of speed.

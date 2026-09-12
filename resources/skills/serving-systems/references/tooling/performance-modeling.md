@@ -248,6 +248,38 @@ E2E = TTFT + remaining_decode_and_drain
 Throughput parity that violates TTFT, TPOT, latency, accuracy, precision, or
 failure constraints is not parity.
 
+### Decompose TTFT into a request-joined bucket split
+
+Prerequisite: server-side per-request timestamps (arrival, queue-entry,
+admission, forward completion, publish) that join 1:1 to the client's own
+recorded TTFT for the same request id. A request-id join, not a shared clock
+alone, is what lets the split reconstruct the client's number rather than
+estimate it.
+
+A workable minimum split, in causal order:
+
+1. client send -> server receipt (transport and framing)
+2. receipt -> scheduler queue arrival (tokenize plus inter-process dispatch)
+3. queue wait (arrival -> admission)
+4. admission -> forward-complete (the prefill/first-decode step itself)
+5. forward-complete -> client receipt (publish and transport)
+
+Sum the buckets per request and compare to that request's own measured TTFT;
+a near-zero residual (to logging precision) validates the join. Do not judge
+the join by comparing bucket percentiles to the total's percentile instead:
+percentiles of a sum are not the sum of percentiles, so summed bucket p50s
+can undershoot the total TTFT p50 by several percent even under a valid,
+per-request-exact join. Where the scheduler exposes an iteration-level
+admission-rejection counter, cross-check a "queue wait is near zero" reading
+against the rejection count over the same window before ruling out an
+admission-budget knob: a near-zero counter corroborates that admission is
+inactive as a lever, rather than the bucket merely under-sampling a rare
+event.
+
+Compatibility: engine- and backend-agnostic; the exact field names differ per
+engine and must be joined on a shared request id, not assumed from a shared
+wall clock.
+
 ## Calibrate with measurements
 
 1. Predict at least one measured operating point before using the model for

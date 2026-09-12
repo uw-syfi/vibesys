@@ -119,6 +119,14 @@ Stage1 time, old dispatch to new: M=16 0.4022 to 0.3042 ms, M=32 0.6497 to 0.520
 
 Scope: rocm, gfx942, sglang-v0.5.18 fork (`moe/stage1-small-m`, PR #40). Status: verified (measured on real layer-30 rank-0 weights across the production M range; 11 unit tests pass). Stamp: `sglang-v0.5.18-rocm700-mi30x`, rocm 7.0, 2026-09-11, job 632917.
 
+### Prefill-M microbenchmark: floor gap confirmed at higher M, dispatch threshold refined
+
+A one-device microbenchmark (uniform and popularity-skewed top-10 routing, M=16 to 2048) extends the decode-M findings above to prefill M. At M=337 (this campaign's turn-2+ baseline extend length) the fused kernel runs 1.86 to 2.03 ms/layer against a per-rank weight-bandwidth floor of about 0.16 ms/layer (a full 512-expert weight read at peak HBM bandwidth, versus the 233 MB/E=138 decode-M=16 figure above scaled to all 512 experts): an 88 to 96x gap, the same dequant-instruction/issue-latency-bound mechanism as the decode-M=16 pitfall below, not bandwidth. At M=919 (this campaign's p95 extend length) the gap narrows to 56x as fixed per-launch overhead amortizes better at higher M. No wired alternative beats it at either length: the Triton `fused_moe_kernel_gptq_awq` fallback is 2.4 to 2.6x slower at M=337 and 1.6 to 1.7x slower at M=919; no aiter kernel consumes this quant format on gfx942 at all (capability table above).
+
+The scaffold-vs-templated dispatch threshold above is measurably conservative: the wall-clock crossover is about 741 to 743 sorted blocks (M~417-420), not the shipped 1024. This affects only M~420-868, worth 2.9 to 4.7 percent of a single stage1 call there (an estimated 0.4 percent of pooled TTFT, below this campaign's own measurement noise floor). Both of this campaign's own measured extend lengths already sit on the correct side of the shipped threshold either way, so lowering it to about 750 is a candidate, zero-new-code change worth bundling with unrelated MoE work rather than shipping alone.
+
+Scope: rocm, gfx942, this fork's `mxfp4_fused` stage1/stage2 kernel. Status: verified (one-device microbenchmark, 8 M points x 2 routings, bf16-rounding-level correctness against an fp32 reference at every point). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, job 633851.
+
 ### Custom skinny bf16 GEMM closes most of the tuned-GEMM gap at decode M
 
 The tuned-GEMM pitfall below shows aiter's own tuner reaching only 3 to 10 percent of peak at M=16 on the model's six dense-projection shapes, because 256-wide hipBLASLt tiles leave most of MI300A's 228 CUs idle at these skinny M values. A HIP kernel purpose-built for this M range, using one workgroup per slice of `w`'s rows, 16-byte loads, fp32 accumulation, wave-shuffle (`__shfl_xor`) reduction, and split-K for the small-N shapes, reaches up to 1018 GB/s (about 19 percent of the 5.3 TB/s peak) on the same shapes, 1.8x to 8.7x faster per call than hipBLASLt's default kernel at M=15/16 across all six shapes (best-config sweep; the kernel's own default-heuristic config under-picks the row-tile width and lands up to 1.4x below the sweep best on 5 of 6 shapes). aiter's own `wvSpltK` kernel only covers M=1 to 4, so it is not a competing option at decode M=15/16.
@@ -275,6 +283,32 @@ Status:  verified (mechanism read from the lookup key, plus measured
          question is open. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job
          633740.
 ```
+
+### PyTorch TunableOp full-coverage tuning, and its per-device filename pitfall
+
+A PyTorch TunableOp sweep over every M value the CUDA-graph capture set dispatches (36 M values across the target-verify, draft-decode, draft-extend, and gate-probe capture sets, times the model's six per-rank dense-projection shapes plus the LM head, which shares one cache key with the dense shapes) tunes all 252 cells, 0 misses. This is a different tuning path from the aiter tuned-GEMM gap above: TunableOp tunes at the `F.linear`/`torch.matmul` dispatch level and does not depend on aiter's own (gfx, cu_num)-keyed lookup table, so it recovers the gap that pitfall describes without an aiter-side config regeneration. Per-forward dense GEMM plus LM head time drops from about 23 ms to 2.6 to 6.2 ms across the sampled M values (1.32x to 18.65x per cell on GPU kernel time); max abs diff 9.77e-4 (one bf16 ULP) against the untuned baseline.
+
+```
+Symptom: loading this table via PYTORCH_TUNABLEOP_ENABLED=1
+         PYTORCH_TUNABLEOP_TUNING=0 PYTORCH_TUNABLEOP_FILENAME=<one path>
+         on a TP=4 server only speeds up rank 0; the other ranks log a
+         could-not-open error or run untuned from an empty file, and the
+         TP step waits for the slowest rank, so p95 latency gets worse,
+         not better, than the untuned baseline.
+Cause:   PyTorch substitutes the device ordinal into the filename; see
+         [`../../frameworks/pytorch.md`](../../frameworks/pytorch.md) for
+         the substitution rule and the unconditional at-exit rewrite,
+         which apply here unchanged.
+Fix:     write one file per rank (<name>0.<ext> through <name>3.<ext>) up
+         front, make them read-only, and gate the launch on every rank
+         logging a successful load with no could-not-open line.
+Scope:   rocm, gfx942, sglang TP=4, this image's torch 2.9.0a0.
+Status:  verified (mechanism per pytorch.md; reproduced here with the
+         wrong file layout). sglang-v0.5.18-rocm700-mi30x, 2026-09-12,
+         jobs 633800, 633801.
+```
+
+Scope: rocm, gfx942, MI300A, this image's stack (PyTorch 2.9.0, ROCm 7.0.0.0-38-9428210, hipBLASLt 100000-976b9c4a87), TP=4 per-rank shapes of this checkpoint. Status: candidate for the serving-level effect (the acceptance pair above voided on the filename pitfall before producing a valid result); the tuning-table measurement itself is verified. Do not claim acceptance. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, job 633793 (tuning), jobs 633800/633801 (voided acceptance attempt).
 
 ### Cold dense-GEMM shape resolution is milliseconds, not the cause of multi-second stalls
 

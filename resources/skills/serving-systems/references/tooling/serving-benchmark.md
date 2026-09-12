@@ -228,11 +228,11 @@ Scope: any engine, backend-independent. Status: verified (measured). Stamp: sgla
 
 ### An unexplained single-rep stall: report pooled quantiles with and without it, gate on the steady-state reps
 
-A reference side can show a one-rep server-side stall with no established cause: the client keeps sending on schedule throughout, the server produces zero scheduler log activity for the stall's duration, then drains a real backlog once it clears. One measured case: an 82 second scheduler blackout in one rep of five, that rep's own p95 TTFT turn2+ at 68.5 s and `schedule_bound_fraction` down to 0.687, against every other rep and the rest of the stalled rep matching steady state.
+A reference side can show a one-rep server-side stall with no established cause: the client keeps sending on schedule throughout, the server produces zero scheduler log activity for the stall's duration, then drains a real backlog once it clears. Two measured cases, same signature: an 82 second scheduler blackout in one rep of five (that rep's own p95 TTFT turn2+ at 68.5 s and `schedule_bound_fraction` down to 0.687, against every other rep and the rest of the stalled rep matching steady state), and a shorter 14 second blackout in a separate job's rep 1 (p95 TTFT turn2+ 6111.7 ms and TPOT 51.9 ms for that rep, against 434.9-493.4 ms / 35.8-41.1 ms for the other reps of the same side). Both show the same backlog-burst-drain pattern with no error or retract logged; the underlying cause is still unidentified across both occurrences.
 
 Practice: report both pooled-quantile numbers, across all reps and across the steady-state reps only, and use the steady-state figure as the reference for any accept/reject rule. Do not drop the stalled rep from the record: a rep that still passes its own correctness gate despite a latency stall is real signal, not noise to discard, and averaging it into the accept/reject numbers would hide a real event rather than surface it.
 
-Scope: any engine, backend-independent. Status: verified (measured; root cause of the stall itself unresolved). Stamp: sglang-v0.5.18 fork, benchmark_version 4, 2026-09-12, job 633512.
+Scope: any engine, backend-independent. Status: observed twice, cause unknown (measured; root cause of the stall itself unresolved in either occurrence). Stamp: sglang-v0.5.18 fork, benchmark_version 4, 2026-09-12, jobs 633512 (82 s) and 633800 (14 s).
 
 ## Reading a benchmark report (skeptically)
 
