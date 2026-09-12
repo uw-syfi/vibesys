@@ -652,4 +652,8 @@ class OpenEvolveSearchPolicy:
                 # A ranking score for the upstream database, not a comparison:
                 # it must stay monotone in the primary axis.
                 return primary.signed(value)
-        return float(individual.perf_metric or 0.0)
+        if individual.perf_metric is None:
+            return 0.0
+        # The profiler contract defines perf_metric as the configured primary's
+        # headline value when an objective space exists.
+        return space.signed_primary(individual.perf_metric)
