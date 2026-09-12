@@ -29,8 +29,14 @@ interface Mounted {
   draw(entries: ConversationEntry[], selectedId?: string | null): Promise<void>;
 }
 
-async function mount(theme: Theme = resolveTheme(null)): Promise<Mounted> {
-  const testRenderer = await createTestRenderer({width: 80, height: 40});
+async function mount(
+  theme: Theme = resolveTheme(null),
+  // Tall enough for every test's cards to keep their natural height: rows the
+  // root has to flex-shrink land several cards on one row, and which card
+  // paints a contended cell is not part of any behaviour under test.
+  size: {width: number; height: number} = {width: 80, height: 40},
+): Promise<Mounted> {
+  const testRenderer = await createTestRenderer(size);
   // The list is swapped per draw rather than fixed at construction, because
   // the incremental paths below need one view to see several lists.
   let entries: ConversationEntry[] = [];
@@ -387,6 +393,105 @@ describe('speaker runs survive incremental rendering (#565)', () => {
     const restored = await renderEntries(asJudge);
     expect(shapeOf(mounted.view)).toBe(shapeOf(restored.view));
     expect(mounted.testRenderer.captureCharFrame()).toBe(restored.testRenderer.captureCharFrame());
+  });
+});
+
+/**
+ * A selection move used to invalidate the whole rendered window: the cursor is
+ * drawn into the cards, and `render` cleared its incremental state whenever
+ * `selectedEntryId` changed, so every arrow key paid a full card rebuild (a
+ * few hundred milliseconds near `CONVERSATION_WINDOW_THRESHOLD`). Only the
+ * two cards the cursor moves between change appearance, so the move now
+ * replaces exactly those, and the result must stay identical to a fresh
+ * render of the same state, alone and composed with the append and reveal
+ * paths.
+ */
+describe('a selection move re-renders only the cards it touches', () => {
+  it('replaces the two cards the cursor moves between and no others', async () => {
+    const run = [
+      from(judge, 'a', 'one'),
+      from(judge, 'b', 'two'),
+      from(judge, 'c', 'three'),
+      from(implementer, 'i', 'four'),
+    ];
+    const mounted = await mount();
+    await mounted.draw(run, 'b');
+    const before = [...mounted.view.output.getChildren()];
+    await mounted.draw(run, 'c');
+    const after = mounted.view.output.getChildren();
+    const replaced = after.flatMap((card, index) => (card === before[index] ? [] : [index]));
+    expect(replaced).toEqual([1, 2]);
+  });
+
+  it('draws the same frame as a fresh render after a selection-only update', async () => {
+    const run = [from(judge, 'a', 'one'), from(judge, 'b', 'two'), from(implementer, 'i', 'three')];
+    const mounted = await mount();
+    await mounted.draw(run);
+    const untouched = mounted.view.output.getChildren()[2];
+    for (const selectedId of ['b', 'a', null]) {
+      await mounted.draw(run, selectedId);
+      const fresh = await renderEntries(run, selectedId);
+      expect(shapeOf(mounted.view)).toBe(shapeOf(fresh.view));
+      expect(mounted.testRenderer.captureCharFrame()).toBe(fresh.testRenderer.captureCharFrame());
+    }
+    // Incremental, not a rebuild: a card the cursor never visited survives the
+    // whole tour.
+    expect(mounted.view.output.getChildren()[2]).toBe(untouched);
+  });
+
+  it('applies a selection move and an append arriving in the same render', async () => {
+    const shown = [from(judge, 'a', 'one'), from(judge, 'b', 'two'), from(judge, 'c', 'three')];
+    const grown = [...shown, from(implementer, 'i', 'four')];
+    const mounted = await mount();
+    await mounted.draw(shown, 'a');
+    const kept = mounted.view.output.getChildren()[2];
+    // One render sees both: the cursor moved a→b and 'i' arrived.
+    await mounted.draw(grown, 'b');
+    expect(mounted.view.output.getChildren()[2]).toBe(kept);
+    expect(cardOf(mounted.view, 'b').border).toEqual(['left']);
+    const fresh = await renderEntries(grown, 'b');
+    expect(shapeOf(mounted.view)).toBe(shapeOf(fresh.view));
+    expect(mounted.testRenderer.captureCharFrame()).toBe(fresh.testRenderer.captureCharFrame());
+  });
+
+  it('materializes the cursor on an entry appended in the same render', async () => {
+    const shown = [from(judge, 'a', 'one'), from(judge, 'b', 'two')];
+    const grown = [...shown, from(judge, 'c', 'three')];
+    const mounted = await mount();
+    await mounted.draw(shown, 'a');
+    const kept = mounted.view.output.getChildren()[1];
+    await mounted.draw(grown, 'c');
+    expect(mounted.view.output.getChildren()[1]).toBe(kept);
+    expect(cardOf(mounted.view, 'c').border).toEqual(['left']);
+    const fresh = await renderEntries(grown, 'c');
+    expect(shapeOf(mounted.view)).toBe(shapeOf(fresh.view));
+    expect(mounted.testRenderer.captureCharFrame()).toBe(fresh.testRenderer.captureCharFrame());
+  });
+
+  it('composes with the window: selecting into history reveals it without rebuilding the tail', async () => {
+    // One entry past the threshold, so the first paint windows to the tail and
+    // the history above it is unmaterialized. The viewport holds all 206
+    // one-row cards plus the opener's chrome, so the frame comparison covers
+    // the whole seam between the revealed head and the kept tail.
+    const size = {width: 80, height: 220};
+    const all = Array.from({length: 2_001}, (_, index) =>
+      from(judge, `e${index}`, `line ${index}`),
+    );
+    const mounted = await mount(undefined, size);
+    await mounted.draw(all);
+    expect(mounted.view.output.getChildren()).toHaveLength(200);
+    const lastCard = mounted.view.output.getChildren().at(-1);
+    // The cursor lands six entries above the window: the reveal path
+    // materializes those with the cursor already on the right card, and the
+    // 200 cards on screen are not rebuilt for it.
+    await mounted.draw(all, 'e1795');
+    expect(mounted.view.output.getChildren()).toHaveLength(206);
+    expect(mounted.view.output.getChildren().at(-1)).toBe(lastCard);
+    expect(cardOf(mounted.view, 'e1795').border).toEqual(['top', 'left']);
+    const fresh = await mount(undefined, size);
+    await fresh.draw(all, 'e1795');
+    expect(shapeOf(mounted.view)).toBe(shapeOf(fresh.view));
+    expect(mounted.testRenderer.captureCharFrame()).toBe(fresh.testRenderer.captureCharFrame());
   });
 });
 
