@@ -275,6 +275,19 @@ Status:  accepted. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs 633754
          cap, 5 reps per side), gates 13/13 every rep.
 ```
 
+### Where the per-round host time goes with the overlap scheduler off
+
+Elaborates the "Cause" above: the host-side gap between GPU kernels in one decode round (the busiest stream's idle time) splits into two roughly equal phases, not one. Measured at 16 concurrent sessions under the same NEXTN k=3, overlap-off configuration, the total host gap is 2.56 ms/round (about 4.5 percent of a 56.5 ms round):
+
+| Phase | ms/round | Share of round | What dominates it |
+|:--|--:|--:|:--|
+| verify's last kernel -> next draft forward's first kernel | 1.42 | 2.5% | the scheduler's own per-iteration Python control-loop functions (request receive, batch-result processing, next-batch selection; roughly 1 ms combined), plus a CPU-side control-plane broadcast and copying results back to host (roughly 0.5 ms) |
+| draft-KV-extend step -> next draft-loop's CUDA-graph replay | 1.10 | 1.9% | host dispatch of the next draft forward's Python/graph-replay path issuing while the GPU is still finishing the previous segment (0.7 to 1.0 ms), plus the graph-launch call itself (about 0.2 ms) |
+
+These sub-mechanism figures overlap partially (a wrapper CPU annotation can enclose a more specific one measured separately) and are not strictly additive to the phase totals; the phase totals themselves are exact (clipped to each idle interval, no double counting). Neither phase is GPU compute: the rejection-sampling kernels that do run are cheap and already counted in the engine's own sampling/verify kernel bucket. The largest single software term is the scheduler's Python control-loop itself, at roughly 1 ms/round (1.7 percent of the round). This term, not GPU-side sampling, is what turning the overlap scheduler off exposes directly on the critical path (see the pitfall above): with the overlap scheduler on, this same host work runs on the following iteration underneath the GPU's own step instead of gating it.
+
+Scope: sglang, any backend (scheduler behavior, not platform-specific). Measured under NEXTN k=3 with the overlap scheduler off, one concurrency (16 sessions); the two-phase split is expected to generalize to any speculative-decoding configuration pairing a verify step with a following draft-extend step, but the exact millisecond figures are specific to this batch size and draft length. Status: verified (measured via per-phase clipped-overlap event attribution against traced rounds). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
+
 A standalone script invoked outside the normal serving launch path (a
 direct `Engine()` save or probe script, run by absolute path with no
 `PYTHONPATH` set) can silently resolve `import sglang` to a different

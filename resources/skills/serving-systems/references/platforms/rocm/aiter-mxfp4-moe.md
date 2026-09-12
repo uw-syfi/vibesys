@@ -143,17 +143,81 @@ Fix:     replace the memory-based lookup with a register-resident one
          over compile-time immediate constants; all 16 MXFP4 levels are
          exactly representable in bf16, so the general rounding step the
          current code applies can also be skipped for this specific
-         value set. A register-resident prototype of this fix is in
-         progress; it is not yet measured end to end, so no speedup is
-         claimed here.
+         value set. A first prototype implemented the register-resident
+         table as a plain runtime-indexed array instead of `v_perm_b32`
+         and regressed further rather than improving on the
+         constant-memory version; see the follow-up entry below. The
+         `v_perm_b32`-based version this fix specifies has not been
+         built yet, so no speedup is claimed here.
 Scope:   rocm, gfx942, this kernel's compiled decode step, and more
          generally any HIP kernel that indexes a `__constant__` table by
          a per-lane value inside a hot loop.
-Status:  candidate (ISA-level mechanism confirmed by direct inspection
+Status:  candidate (root-cause mechanism verified by direct inspection
          of the compiled kernel and cross-checked against hardware
-         counters on two production dispatch shapes; the register-
-         resident fix itself is not yet measured). Stamp:
-         sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
+         counters on two production dispatch shapes; a first fix
+         attempt regressed further instead of confirming a speedup, see
+         below, so the specific `v_perm_b32` fix remains unverified).
+         Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
+```
+
+## Register-table fix attempt: a runtime-indexed array regresses further than the constant-memory load it replaced
+
+Follow-up to the fix proposed above: it was implemented and measured. The rewrite replaces the per-lane constant-memory gather with a 16-entry bf16-bits table built once per call (from the same `ldexpf`+`to_bf16_bits` functions the old path called per element) held in a plain local array (`tbl[byte & 0xF]`, still a runtime C array index, not the `v_perm_b32` byte-select the fix above specifies) with a compile-time-constant table index so the table build itself folds to immediates.
+
+```
+Symptom: A register-resident rewrite of the decode lookup above is
+         bit-exact (0 mismatches over all 2,097,152 (block_exp, byte)
+         pairs in an exhaustive test; full-kernel output identical to
+         the old kernel, rel L2 bit-identical, at every M tested), but
+         every measured M is slower than the constant-memory kernel it
+         replaced, 22 to 54 percent slower in stage1+stage2 wall time,
+         worst at the two largest M where an auto-dispatched, larger
+         templated kernel's own register footprint compounds with the
+         rewrite's VGPR growth.
+Cause:   moving the table into registers does not by itself avoid a
+         per-lane, per-element runtime index: hipcc (ROCm 7.0, gfx942)
+         lowers a plain array index (`tbl[byte & 0xF]`) over a
+         register-resident table into a chain of compare-select
+         instructions, one per table entry, rather than a single
+         hardware byte-permute. Instruction-level counting confirmed
+         this directly: VALU instructions per decoded element roughly
+         tripled (stage1 6.3 to 17.6, stage2 8.3 to 19.6) instead of
+         dropping to the predicted 3.3 to 4.3 per element, and VGPR
+         usage grew enough to cost an occupancy wave at both kernels
+         (stage1 82 to 113 VGPRs, 5 to 4 waves/SIMD, plus a new
+         22-instruction register spill that did not exist before;
+         stage2 78 to 119 VGPRs, 6 to 4 waves/SIMD). Hardware counters
+         confirm the shift: VALUBusy went from 30 to 46 percent (the
+         original ambiguous-middle reading) to 96 to 108 percent, an
+         issue-bound kernel by construction now, not only by
+         measurement. The per-element constant-memory load this
+         rewrite set out to remove is genuinely gone (loads per element
+         dropped 6 to 7x, confirmed at both the static-ISA and
+         achieved-fetch-rate level), but removing a memory access that
+         was never the true bottleneck at the cost of a much larger
+         instruction count is a net loss.
+Fix:     eliminating the constant-memory gather is necessary but not
+         sufficient; the lookup must also be expressed so the compiler
+         emits a hardware byte-permute or bit-arithmetic sequence, not
+         a runtime-indexed local array. Use explicit byte-select
+         intrinsics (`v_perm_b32` / `__builtin_amdgcn_perm`) over a
+         packed constant, or check whether a differently-aligned
+         storage layout changes the compiler's lowering choice, before
+         accepting a "register-resident" rewrite as fixed. Do not judge
+         a decode-lookup rewrite by "no more global load" alone; check
+         the compiled instruction mix and VALUBusy before and after.
+         The permute-based rewrite is still in progress and not yet
+         measured; no speedup is claimed for it here.
+Scope:   rocm, gfx942, this kernel's compiled decode step, and more
+         generally any HIP kernel where a per-lane runtime-indexed
+         table lookup is moved from constant memory to a
+         register-resident array without controlling the selection
+         instruction.
+Status:  verified (bit-exact by exhaustive test and full-kernel diff;
+         every measured M regressed 22 to 54 percent; ISA-level
+         instruction counts and hardware counters both confirm the
+         mechanism). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12,
+         job-verified.
 ```
 
 ## See also
