@@ -25,6 +25,7 @@ import {
   resolveColumns,
   selectionCaret,
   sentenceCase,
+  unownedRoundCells,
 } from './experiment-log.js';
 import {resolveTheme, THEME_NAMES} from './theme.js';
 
@@ -287,10 +288,16 @@ describe('experiment log rows', () => {
     const header = headerRow(columns);
     const row = entryRow(entry({hypothesis_id: 'm1-preallocated-spsc-ring'}), columns);
     const roundsStart = header.indexOf('Rounds');
+    const claimStart = header.indexOf('Implementation Details');
 
-    expect(row).toContain('m1-prealloca…  41');
+    expect(row).toContain('m1-prealloca…');
+    // Rounds right-aligns (see "right-aligns the numeric columns" below), so
+    // the gutter before it is padding, not the fixed single space a
+    // left-aligned column would have kept.
     expect(row[roundsStart - 1]).toBe(' ');
-    expect(row.slice(roundsStart).startsWith('41')).toBe(true);
+    // The two-digit round number lands flush against the next column's gutter
+    // (the fixed two-space gap) rather than at the start of its own column.
+    expect(row.slice(roundsStart, claimStart - 2).endsWith('41')).toBe(true);
   });
 
   it('keeps the ? marker readable when a long unit truncates at MEASURED_WIDTH', () => {
@@ -344,6 +351,97 @@ describe('experiment log rows', () => {
       resolveColumns(WIDE),
     );
     expect(withActionOnly.leading).toContain('Batch prefill');
+  });
+});
+
+/**
+ * A round with agent turns but no owning hypothesis (a profiling round before
+ * hypothesis 1, or any round the orchestrator has not yet attached to a
+ * claim) is the default landing state, not an edge case: a task profiles
+ * before proposing its first hypothesis, so nearly every run shows this row
+ * first. `unownedRoundCells` has to land on the same column grid
+ * `entryCells` does, or the columns above it read as unused chrome.
+ */
+describe('unownedRoundCells', () => {
+  it('lands on the same column offsets as a hypothesis row at every width the panel degrades through', () => {
+    // Real recorded round, not an invented fixture: hypothesis
+    // M1-superlinear-elimination, round 1, 562.9504 total_ms, from
+    // ~/dev/vibesys-runs/bad-cpp/.../agent/rounds/0001.json.
+    const recorded = entry({
+      hypothesis_id: 'M1-superlinear-elimination',
+      first_round: 1,
+      last_round: 1,
+      perf_metric: 562.9504,
+      perf_unit: 'total_ms',
+      perf_delta_pct: null,
+      resolved_outcome: 'proven',
+    });
+    for (const width of [120, 104, 103, 90, 89, 72, 62, 61, 54, 40]) {
+      const columns = resolveColumns(width);
+      const hypothesisCells = entryCells(recorded, columns);
+      const roundCells = unownedRoundCells(2, columns);
+      expect(roundCells.leading.length, `leading at ${width}`).toBe(hypothesisCells.leading.length);
+      expect(roundCells.outcome.length, `outcome at ${width}`).toBe(hypothesisCells.outcome.length);
+      expect(roundCells.trailing.length, `trailing at ${width}`).toBe(
+        hypothesisCells.trailing.length,
+      );
+      // Same columns dropped, not just the same total width.
+      expect(roundCells.trailing === '').toBe(hypothesisCells.trailing === '');
+    }
+  });
+
+  it('renders absent measured, outcome, and kept values as the existing placeholder, not empty strings', () => {
+    const columns = resolveColumns(WIDE);
+    const cells = unownedRoundCells(3, columns);
+    expect(cells.outcome.trim()).toBe('—');
+    expect(cells.trailing.trim()).toBe('—');
+    expect(cells.leading.trimEnd().endsWith('—')).toBe(true);
+  });
+
+  it('carries a real round number and the honest "recorded agent turns" text, never an invented claim', () => {
+    const cells = unownedRoundCells(7, resolveColumns(WIDE));
+    expect(cells.leading).toContain('(no hypothes');
+    expect(cells.leading).toContain('7');
+    expect(cells.leading).toContain('recorded agent turns');
+  });
+
+  it('keeps the selection caret in the same reserved column a hypothesis row uses', () => {
+    const columns = resolveColumns(WIDE);
+    const selected = unownedRoundCells(1, columns, true);
+    const unselected = unownedRoundCells(1, columns, false);
+    expect(selected.leading.startsWith('›')).toBe(true);
+    expect(unselected.leading.startsWith(' ')).toBe(true);
+    expect(selected.leading.slice(1)).toBe(unselected.leading.slice(1));
+  });
+});
+
+describe('right-aligned numeric columns', () => {
+  it('right-aligns Rounds so it ends flush at the column boundary regardless of digit count', () => {
+    // At a width below CLAIM_MIN_WIDTH and MEASURED_MIN_WIDTH, Rounds is the
+    // trailing segment of `leading`, so a right-aligned cell makes `leading`
+    // end with the value itself; a left-aligned one would end with padding.
+    const columns = resolveColumns(NARROW);
+    expect(columns.claim).toBe(false);
+    expect(columns.measured).toBe(false);
+    const short = entryCells(entry({first_round: 2, last_round: 2}), columns);
+    const long = entryCells(entry({first_round: 10, last_round: 99}), columns);
+    expect(short.leading.endsWith('2')).toBe(true);
+    expect(long.leading.endsWith('10-99')).toBe(true);
+  });
+
+  it('right-aligns Measured so it ends flush at the column boundary regardless of value length', () => {
+    const columns = resolveColumns(WIDE);
+    const short = entry({perf_delta_pct: null, perf_metric: 5});
+    const long = entry({perf_delta_pct: null, perf_metric: 123456.78, perf_unit: 'tokens/s'});
+    expect(entryCells(short, columns).leading.endsWith(formatMeasured(short))).toBe(true);
+    expect(entryCells(long, columns).leading.endsWith(formatMeasured(long))).toBe(true);
+  });
+
+  it('right-aligns Kept so "Yes" and "No" both end flush at the column boundary', () => {
+    const columns = resolveColumns(WIDE);
+    expect(columns.kept).toBe(true);
+    expect(entryCells(entry({kept: true}), columns).trailing.endsWith('Yes')).toBe(true);
+    expect(entryCells(entry({kept: false}), columns).trailing.endsWith('No')).toBe(true);
   });
 });
 
@@ -482,13 +580,14 @@ describe('experiment log selection', () => {
 });
 
 /**
- * The pure helpers above prove the caret occupies a reserved column; these
- * tests reproduce the symptom the issue reported (selection legible only by a
- * background swap) through the real OpenTUI test renderer, per
+ * The pure helpers above prove the caret occupies a reserved column and that
+ * an unowned round's cells share a hypothesis row's widths; these tests
+ * reproduce both the original selection symptom and the column-alignment
+ * defect through the real OpenTUI test renderer, per
  * coding-best-practices.md's rule that a terminal-geometry symptom needs the
  * renderer, not just a formatter test.
  */
-describe('experiment log rendered selection glyph', () => {
+describe('experiment log rendered rows', () => {
   const cleanup: Array<() => void> = [];
 
   afterEach(() => {
@@ -566,15 +665,113 @@ describe('experiment log rendered selection glyph', () => {
       [],
     );
     const frame = (await renderLog(withActivity)).split('\n');
-    const rowSelected = frame.findIndex(line => line.includes('Round 3'));
-    const rowUnselected = frame.findIndex(line => line.includes('Round 4'));
-    const colSelected = frame[rowSelected]?.indexOf('Round 3') ?? -1;
-    const colUnselected = frame[rowUnselected]?.indexOf('Round 4') ?? -1;
+    // "recorded agent turns" is the round row's Implementation Details cell;
+    // both round rows carry it, in ascending round order (3, then 4), and
+    // round 3 is selected by default since it is the first unowned round.
+    const roundLines = frame.filter(line => line.includes('recorded agent turns'));
+    expect(roundLines).toHaveLength(2);
+    const [selectedLine, unselectedLine] = roundLines as [string, string];
+    const colSelected = selectedLine.indexOf('(no hypothes');
+    const colUnselected = unselectedLine.indexOf('(no hypothes');
     expect(colSelected).toBeGreaterThan(0);
     expect(colSelected).toBe(colUnselected);
-    // The caret sits two columns before "Round": one column for itself, one
-    // for the space that always follows it.
-    expect(frame[rowSelected]?.[colSelected - 2]).toBe('›');
-    expect(frame[rowUnselected]?.[colUnselected - 2]).toBe(' ');
+    // The caret sits two columns before the identity text: one column for
+    // itself, one for the space that always follows it, exactly like a
+    // hypothesis row's marker.
+    expect(selectedLine[colSelected - 2]).toBe('›');
+    expect(unselectedLine[colUnselected - 2]).toBe(' ');
+  });
+
+  it('aligns an unowned round row to the same column offsets as a hypothesis row sharing the same frame', async () => {
+    const state = setExperiments(
+      openExperimentLog({
+        ...initialSessionState(),
+        core: {...initialSessionState().core, rounds: [{number: 5, status: 'completed'}]},
+      }),
+      [entry({hypothesis_id: 'H-01', first_round: 1, last_round: 1})],
+    );
+    const frame = (await renderLog(state)).split('\n');
+    const hypothesisLine = frame.find(line => line.includes('H-01'));
+    const roundLine = frame.find(line => line.includes('recorded agent turns'));
+    if (hypothesisLine === undefined || roundLine === undefined) {
+      throw new Error('expected both a hypothesis row and an unowned round row');
+    }
+    // Both rows reserve the same two-character marker slot before their
+    // identity text: this is the defect the issue reported, restated as a
+    // column offset rather than as a screenshot.
+    expect(roundLine.indexOf('(no hypothes')).toBe(hypothesisLine.indexOf('H-01'));
+  });
+
+  it('draws a rule under the header that reserves its row regardless of how many rows follow', async () => {
+    const oneRound = setExperiments(
+      openExperimentLog({
+        ...initialSessionState(),
+        core: {...initialSessionState().core, rounds: [{number: 1, status: 'completed'}]},
+      }),
+      [],
+    );
+    const twoRounds = setExperiments(
+      openExperimentLog({
+        ...initialSessionState(),
+        core: {
+          ...initialSessionState().core,
+          rounds: [
+            {number: 1, status: 'completed'},
+            {number: 2, status: 'completed'},
+          ],
+        },
+      }),
+      [],
+    );
+    const frameOne = (await renderLog(oneRound)).split('\n');
+    const frameTwo = (await renderLog(twoRounds)).split('\n');
+    const headerIndexOne = frameOne.findIndex(
+      line => line.includes('Hypothesis') && line.includes('Rounds'),
+    );
+    const headerIndexTwo = frameTwo.findIndex(
+      line => line.includes('Hypothesis') && line.includes('Rounds'),
+    );
+    expect(headerIndexOne).toBeGreaterThanOrEqual(0);
+    // The rule sits at a fixed offset from the header whether one row follows
+    // it or two: nothing above the rows moves when a row appears.
+    expect(headerIndexOne).toBe(headerIndexTwo);
+    const ruleOne = frameOne[headerIndexOne + 1] ?? '';
+    const ruleTwo = frameTwo[headerIndexTwo + 1] ?? '';
+    // The pane's own border/padding sit either side of the line; the rule
+    // itself is the contiguous run of the rule glyph in the middle.
+    const ruleRun = ruleOne.match(/─+/)?.[0] ?? '';
+    expect(ruleRun.length).toBeGreaterThan(40);
+    expect(ruleOne).toBe(ruleTwo);
+  });
+
+  it('gives the unowned-round state a next-step line distinct from the zero-row wording', async () => {
+    const zeroRows = logState([]);
+    const zeroFrame = (await renderLog(zeroRows)).split('\n');
+    // Unchanged: the existing zero-row empty state keeps its own wording.
+    expect(zeroFrame.some(line => line.includes('No hypotheses have been recorded yet.'))).toBe(
+      true,
+    );
+    expect(
+      zeroFrame.some(line =>
+        line.includes('The first one appears once the orchestrator has planned a round.'),
+      ),
+    ).toBe(true);
+
+    const unownedRound = setExperiments(
+      openExperimentLog({
+        ...initialSessionState(),
+        core: {...initialSessionState().core, rounds: [{number: 1, status: 'completed'}]},
+      }),
+      [],
+    );
+    const roundFrame = (await renderLog(unownedRound)).split('\n');
+    // A round has genuinely run here, unlike the zero-row case, so the
+    // wording does not repeat "No hypotheses have been recorded yet."
+    expect(roundFrame.some(line => line.includes('No hypotheses have been recorded yet.'))).toBe(
+      false,
+    );
+    expect(
+      roundFrame.some(line => line.includes('The first hypothesis appears once the orchestrator')),
+    ).toBe(true);
   });
 });

@@ -5260,7 +5260,13 @@ describe('theming', () => {
     const kickoff = await frameAfter(testRenderer);
     expect(kickoff).toContain('Planning Hypothesis 1');
     expect(kickoff).toContain('Round 2');
-    expect(kickoff).toContain('Round 1 · recorded agent turns · no hypothesis');
+    // The round row now lands on the same column grid a hypothesis row uses
+    // (see experiment-log.test.ts), so its cells are checked rather than the
+    // single string the row used to be. "(no hypothes…" is the ID column,
+    // which never drops at a narrow width, unlike the claim column.
+    const unassociatedLine = kickoff.split('\n').find(line => line.includes('(no hypothes'));
+    expect(unassociatedLine).toBeDefined();
+    expect(unassociatedLine).toMatch(/\b1\b/);
 
     testRenderer.mockInput.pressEnter();
     const round = await frameAfter(testRenderer);
@@ -5285,9 +5291,10 @@ describe('theming', () => {
     registerCleanup(testRenderer.renderer, app);
     await controller.openExperimentLog();
 
-    expect(await frameAfter(testRenderer)).toContain(
-      'Round 7 · recorded agent turns · no hypothesis',
-    );
+    const indexed = await frameAfter(testRenderer);
+    const indexedLine = indexed.split('\n').find(line => line.includes('(no hypothes'));
+    expect(indexedLine).toBeDefined();
+    expect(indexedLine).toMatch(/\b7\b/);
 
     testRenderer.mockInput.pressEnter();
     const detail = await frameAfter(testRenderer);
@@ -5296,9 +5303,10 @@ describe('theming', () => {
     expect(detail).not.toContain('other round');
 
     testRenderer.mockInput.pressKey('ESCAPE');
-    expect(await frameAfterEscape(testRenderer)).toContain(
-      'Round 7 · recorded agent turns · no hypothesis',
-    );
+    const reopened = await frameAfterEscape(testRenderer);
+    const reopenedLine = reopened.split('\n').find(line => line.includes('(no hypothes'));
+    expect(reopenedLine).toBeDefined();
+    expect(reopenedLine).toMatch(/\b7\b/);
   });
 
   it('keeps later hypothesis planning below the existing history', async () => {
@@ -5352,12 +5360,22 @@ describe('theming', () => {
     await controller.openExperimentLog();
 
     const frame = await frameAfter(testRenderer);
+    const lines = frame.split('\n');
+    // Round rows no longer carry "Round N" as literal text (see
+    // experiment-log.test.ts), so the two unowned-round rows are told apart
+    // by their line order instead: ascending by round number, round 2 first.
+    // "(no hypothes…" is the ID column, which never drops at a narrow width,
+    // unlike the claim column "recorded agent turns" sits in.
+    const unownedRoundLineIndices = lines
+      .map((line, index) => (line.includes('(no hypothes') ? index : -1))
+      .filter(index => index >= 0);
+    expect(unownedRoundLineIndices).toHaveLength(2);
     const positions = [
-      frame.indexOf('H-01'),
-      frame.indexOf('Round 2 · recorded'),
-      frame.indexOf('H-03'),
-      frame.indexOf('Round 4 · recorded'),
-      frame.indexOf('Planning Hypothesis 3'),
+      lines.findIndex(line => line.includes('H-01')),
+      unownedRoundLineIndices[0] ?? -1,
+      lines.findIndex(line => line.includes('H-03')),
+      unownedRoundLineIndices[1] ?? -1,
+      lines.findIndex(line => line.includes('Planning Hypothesis 3')),
     ];
     expect(positions.every(position => position >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((left, right) => left - right));
