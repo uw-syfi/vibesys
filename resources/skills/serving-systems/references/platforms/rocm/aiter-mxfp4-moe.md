@@ -147,16 +147,21 @@ Fix:     replace the memory-based lookup with a register-resident one
          table as a plain runtime-indexed array instead of `v_perm_b32`
          and regressed further rather than improving on the
          constant-memory version; see the follow-up entry below. The
-         `v_perm_b32`-based version this fix specifies has not been
-         built yet, so no speedup is claimed here.
+         `v_perm_b32`-based version this fix specifies has since been
+         built and is microbench-verified; see "Permute-based fix"
+         below for the design and numbers. It has not yet passed the
+         paired end-to-end acceptance test, so no serving-level speedup
+         is claimed here.
 Scope:   rocm, gfx942, this kernel's compiled decode step, and more
          generally any HIP kernel that indexes a `__constant__` table by
          a per-lane value inside a hot loop.
-Status:  candidate (root-cause mechanism verified by direct inspection
-         of the compiled kernel and cross-checked against hardware
-         counters on two production dispatch shapes; a first fix
-         attempt regressed further instead of confirming a speedup, see
-         below, so the specific `v_perm_b32` fix remains unverified).
+Status:  microbench-verified (root-cause mechanism verified by direct
+         inspection of the compiled kernel and cross-checked against
+         hardware counters on two production dispatch shapes; a first
+         fix attempt regressed further instead of confirming a speedup,
+         see below; the `v_perm_b32` fix that followed it is now
+         implemented and microbench-verified, see "Permute-based fix"
+         below, but has not yet passed end-to-end acceptance).
          Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
 ```
 
@@ -216,9 +221,58 @@ Scope:   rocm, gfx942, this kernel's compiled decode step, and more
 Status:  verified (bit-exact by exhaustive test and full-kernel diff;
          every measured M regressed 22 to 54 percent; ISA-level
          instruction counts and hardware counters both confirm the
-         mechanism). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12,
+         mechanism). Superseded by: the permute-based fix below
+         (`v_perm_b32` byte-select over compile-time-immediate tables)
+         replaces this runtime-indexed-array variant as the fix for the
+         decode step; do not implement this variant.
+         Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12,
          job-verified.
 ```
+
+## Permute-based fix: register byte-permute lookup (microbench-verified, not yet accepted end to end)
+
+Follow-up to the runtime-indexed-array regression above: the `v_perm_b32` design that entry deferred to has now been built and measured. It supersedes the runtime-indexed-array attempt as the fix for the decode step; the constant-memory pitfall description near the top of this file is unchanged.
+
+Design: an e2m1 nibble is a sign bit plus a 3-bit magnitude index into 8 possible bf16 magnitudes. `ldexpf` and round-to-nearest-even are sign-symmetric, so the 16-entry bf16-bits table collapses to two 8-byte tables (the low and high bytes of the 8 scaled magnitudes) plus a sign OR; this collapse was verified on device over all 256 block exponents x 8 magnitudes (2,048 cases), 0 mismatches. Both 8-byte tables are built once per 32-element block using the same `ldexpf` float path the original decode used, so they are exact by construction rather than by a separately-derived encoding. One `v_perm_b32` (`__builtin_amdgcn_perm`) selects four elements' low bytes from the low table, a second selects their high bytes from the high table, and two more interleave the results into bf16x2 words; the sign bit is OR'd into the unsigned high-byte plane before the interleave (3 ops per 4 elements total).
+
+```
+Symptom: (of the runtime-indexed-array fix above) resolved. Replacing
+         `tbl[byte & 0xF]` with two v_perm_b32-based byte-select tables
+         removes the compare-select chain the runtime index produced.
+Cause:   the runtime-indexed-array fix moved the table into registers
+         but still indexed it with a per-lane runtime value, which
+         hipcc lowers to a compare-select chain, not a permute.
+         Selecting a byte with `v_perm_b32` over compile-time-immediate
+         table bytes avoids the runtime index altogether.
+Fix:     verified exact: exhaustive 256 e8m0 x 256 byte values x 32
+         elements per case (2,097,152 cases), 0 mismatches against the
+         legacy constant-memory decode; full-kernel max abs diff 0.0 at
+         M 16, 64, 337, 919. ISA, stage1 scaffold (per element): VALU
+         6.31 to 2.66 (4.25 counting the permutes), loads 1.19 to 0.41,
+         VGPRs 82 to 66, occupancy 5 to 7 waves/SIMD, compare/select
+         chain absent. Stage2 tpl: VALU 8.27 to 4.63, VGPRs 78 to 79,
+         occupancy 6 waves/SIMD. Hardware counters: VALUBusy 18 to 29
+         percent (legacy 30 to 46 percent, the runtime-indexed-array
+         variant 96 to 108 percent); VALU instruction count 0.53 to
+         0.57x legacy. Microbenchmark, stage1+stage2 wall time vs
+         legacy: 1.27x at M=16, 1.24x at M=64, 1.23x at M=337, 1.34x at
+         M=919, 1.32x at M=2048. Remaining known inefficiency: the
+         compiler still splits the 16-byte weight load into eight
+         2-byte loads (0.41 loads/element where 0.19 is possible); not
+         yet fixed.
+Scope:   rocm, gfx942, this kernel's compiled decode step, and more
+         generally any HIP kernel decoding a small fixed codebook (16
+         entries or fewer) per lane.
+Status:  microbench-verified (exhaustive exactness check, ISA audit,
+         and hardware counters all confirm the mechanism and the
+         speedup at the kernel microbenchmark level). This has NOT yet
+         passed the paired end-to-end acceptance test; the round-level
+         numbers below are predictions from the microbenchmark ratio,
+         not serving measurements, until that gate runs.
+         Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
+```
+
+Predicted, not measured (same per-layer-ratio extrapolation method used for the skinny-GEMV and split-K entries above, not a serving measurement): decode round about 14 percent faster at batch 16, prefill iteration about 9 percent faster at 337 tokens. Do not cite these as serving numbers until the paired end-to-end acceptance test runs.
 
 ## See also
 

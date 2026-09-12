@@ -43,6 +43,10 @@ Peak BF16 dense on MI300X: ~1.3 PFLOP/s; FP8 roughly doubles that.
 | INT4 (via dequant paths) | software | |
 | FP4 | CDNA4+ | |
 
+## ISA note: small in-kernel lookup tables
+
+`v_perm_b32` (`__builtin_amdgcn_perm`) is gfx9's register-resident byte-select primitive for small per-lane lookup tables (a handful of bytes, compile-time-immediate selector, no memory access); a plain runtime-indexed array over the same table compiles to a compare-select chain instead and can cost more VALU issue than the load it was meant to replace, see [`aiter-mxfp4-moe.md`](aiter-mxfp4-moe.md).
+
 ## Topology
 
 Typical MI300X node: **8 GPUs + Infinity Fabric mesh**. Pair bandwidth is lower than NVLink 4 on a DGX H100, but aggregate within-node bandwidth is comparable.
