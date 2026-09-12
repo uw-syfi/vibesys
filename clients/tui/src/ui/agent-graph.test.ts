@@ -112,6 +112,44 @@ describe('layoutAgentGraph', () => {
     expect(narrow.nodes[0]?.width).toBeGreaterThanOrEqual(14);
   });
 
+  test('a two-source fan-in still draws both edges, correctly routed, below the full-name floor', () => {
+    // Two implementer attempts (an interrupted one and the one that replaced
+    // it) both feed the single judge: in-degree 2 at the judge node, the case
+    // the graph/transcript-split resize has to keep drawable, however narrow
+    // an explicit override makes the pane. `graphPaneBounds` with no
+    // `labelWidth` (the default) gives the geometric floor: every column at
+    // its own 14-column minimum plus one gutter per gap, ignoring names.
+    const fanIn = [
+      phase('orchestrator', 'completed'),
+      phase('implementer', 'interrupted'),
+      phase('implementer', 'active'),
+      phase('judge', 'pending'),
+    ];
+    const graph = layoutAgentGraph(fanIn, graphPaneBounds(fanIn).min - 4);
+
+    expect(graph.nodes).toHaveLength(4);
+    const implementers = graph.nodes.filter(node => node.phase.kind === 'implementer');
+    expect(implementers).toHaveLength(2);
+    for (const node of graph.nodes) expect(node.width).toBeGreaterThanOrEqual(14);
+    // One arrow head at the judge: both attempts feed it, and a fed node gets
+    // one head regardless of how many sources reach it (also true of the
+    // orchestrator -> two-implementer edge, one head each since both
+    // implementers are themselves fed).
+    expect(graph.cells.filter(cell => cell.glyph === '▶')).toHaveLength(3);
+    // Edges still route through the gutter, never on top of a node, even
+    // though columns are not all the same width at this narrow a pane.
+    for (const cell of graph.cells) {
+      const onANode = graph.nodes.some(
+        node =>
+          cell.x >= node.x &&
+          cell.x < node.x + node.width &&
+          cell.y >= node.y &&
+          cell.y < node.y + NODE_HEIGHT,
+      );
+      expect(onANode).toBe(false);
+    }
+  });
+
   test('gives a long name the columns a short one does not need', () => {
     // 56 columns split evenly are three nodes of 15, one short of `✓ orchestrator`,
     // while `judge` leaves six of its own unused.

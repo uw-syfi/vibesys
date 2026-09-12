@@ -66,6 +66,17 @@ export interface SessionState {
   /** Non-null while the composer's inline command menu is open. */
   chatMenu: ChatMenu | null;
   todosExpanded: boolean;
+  /**
+   * Explicit column width for the Agents pane, set and stepped by `<`/`>` and
+   * cleared by `=`. `null` means automatic: `agent-map.ts#agentPaneWidth`
+   * decides, exactly as it always has, including its no-truncation floor and
+   * the stacked-list fallback on a narrow terminal. Once set it is sticky, so
+   * the pane stops following the terminal and stops growing with longer agent
+   * names until `=` hands it back; an explicit width that drifted would not be
+   * one, and `=` is what keeps that from being a trap. Session-only view state:
+   * it carries no `agent.toml` key and does not persist past this process.
+   */
+  graphWidthOverride: number | null;
   themeName: ThemeName;
   experimentLog: ExperimentLogState | null;
   /**
@@ -310,6 +321,7 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     chatPendingThreads: {},
     chatMenu: null,
     todosExpanded: false,
+    graphWidthOverride: null,
     themeName,
     // The experiment log is the landing view: a run's history reads as a short
     // list of claims before it reads as a long list of rounds.
@@ -1931,6 +1943,16 @@ export function visiblePhases(state: SessionState): AgentPhase[] {
 
 export function toggleTodos(state: SessionState): SessionState {
   return {...state, todosExpanded: !state.todosExpanded};
+}
+
+/**
+ * `<`/`>`: sets the Agents pane's explicit column width. `=`: clears it back
+ * to automatic (`null`). The value handed in is already clamped by the caller
+ * (`agent-map.ts#clampGraphWidthOverride`), which needs the terminal width and
+ * the visible phases to do that; this reducer only applies it.
+ */
+export function setGraphWidthOverride(state: SessionState, width: number | null): SessionState {
+  return state.graphWidthOverride === width ? state : {...state, graphWidthOverride: width};
 }
 
 /**
