@@ -91,6 +91,7 @@ The mapping from finding to remedy is portable even though the tools aren't:
 - "Increase batch size" without bottleneck evidence.
 - Treating high utilization as proof of efficiency.
 - Profiling a run that includes compilation or cache warmup.
+- **Gating a capture window on a bursty open-loop benchmark's own live signal and assuming it lands at the target concurrency.** A window gated on elapsed time plus a running-request threshold can fire exactly as designed and still capture a burst's decaying tail (e.g. batch size 2) rather than the sustained load the benchmark's aggregate numbers reflect, because request arrivals under an open-loop benchmark stay bursty well past ramp-up. Read the trace's own per-step batch size to confirm what load was actually captured; do not trust the gate signal alone. For a per-round kernel profile at a specific batch size, drive a synthetic steady stream at that fixed batch size instead of gating an open-loop benchmark's own traffic. Scope: any open-loop, bursty-arrival benchmark, engine- and backend-agnostic. Status: verified (gate fired at the intended threshold; trace confirmed the window still landed on a decaying burst at bs=2). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633974.
 
 ## Platform toolchains
 
