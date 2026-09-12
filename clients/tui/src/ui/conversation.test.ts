@@ -1,6 +1,7 @@
 import {afterEach, describe, expect, it} from 'bun:test';
 import {
   BoxRenderable,
+  CodeRenderable,
   type Renderable,
   rgbToHex,
   TextAttributes,
@@ -674,5 +675,54 @@ describe('transcript run ids take the card label color, source tags recede (#647
     expect(text.content.chunks).toHaveLength(1);
     expect(text.content.chunks[0]?.text).toBe('plain content');
     expect(rgbToHex(text.fg).toLowerCase()).toBe(palette.content.toLowerCase());
+  });
+});
+
+describe('a split gate command entry (the legacy framework-validation adapter)', () => {
+  // Shape of clients/tui/dev/fixtures/bad-cpp-round1.jsonl:388, already split
+  // by core-state's `splitFrameworkValidationCommand` into prose plus
+  // `command`.
+  const GATE_COMMAND = 'mkdir -p .cache/tmp && TMPDIR="$PWD/.cache/tmp" make -s all && ./bin/tests';
+
+  it('draws the command in a CodeRenderable with char wrap, not word wrap', async () => {
+    const entries: ConversationEntry[] = [
+      {
+        id: 'g1',
+        kind: 'diagnostic',
+        label: 'judge · round-1-retry-1-judge',
+        content: '[framework-validation] running build-and-correctness-gate: ',
+        command: GATE_COMMAND,
+      },
+    ];
+    const {view} = await renderEntries(entries);
+    const card = cardOf(view, 'g1');
+    const code = card.getChildren().find(child => child instanceof CodeRenderable);
+    if (!(code instanceof CodeRenderable)) throw new Error('command code block missing');
+    expect(code.content).toBe(GATE_COMMAND);
+    // The core of the fix: a shell command's spaces are argument separators,
+    // not soft-wrap points, so it must break anywhere rather than at spaces.
+    expect(code.wrapMode).toBe('char');
+    // The prose still draws as it does today, ahead of the command: the
+    // bracket tag muted and the rest content-colored, same as any other
+    // diagnostic line (the "mutes the bracketed tag" case above).
+    const text = card.getChildren().find(child => child instanceof TextRenderable);
+    if (!(text instanceof TextRenderable)) throw new Error('prose text missing');
+    const prose =
+      typeof text.content === 'string'
+        ? text.content
+        : text.content.chunks.map(chunk => chunk.text).join('');
+    expect(prose).toBe('[framework-validation] running build-and-correctness-gate: ');
+  });
+
+  it('renders an entry without a command exactly as before: no code block', async () => {
+    const entries: ConversationEntry[] = [
+      {id: 'g2', kind: 'diagnostic', label: 'launcher', content: 'plain diagnostic line'},
+    ];
+    const {view} = await renderEntries(entries);
+    const card = cardOf(view, 'g2');
+    expect(card.getChildren().find(child => child instanceof CodeRenderable)).toBeUndefined();
+    const text = card.getChildren().find(child => child instanceof TextRenderable);
+    if (!(text instanceof TextRenderable)) throw new Error('content text missing');
+    expect(text.wrapMode).toBe('word');
   });
 });
