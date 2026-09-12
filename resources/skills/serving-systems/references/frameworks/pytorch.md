@@ -47,6 +47,8 @@ with torch.inference_mode():
 
 `PYTORCH_TUNABLEOP_ENABLED=1` turns on PyTorch's opt-in per-shape GEMM autotuner, independent of `torch.compile`: `PYTORCH_TUNABLEOP_TUNING=1` (the default once enabled) explores kernel choices for each new shape it sees and appends the winner to a results CSV; `PYTORCH_TUNABLEOP_TUNING=0` replays only what that CSV already holds, tuning nothing new. `F.linear` and `torch.matmul(x, w.T)` dispatch to the same underlying GEMM call, so they share one TunableOp cache key: a table built by exercising one call site covers the other.
 
+The cache key is the exact (M, N, K), so any call site with a variable M (a prefill batch, a dynamic sequence length) needs an explicit padding or bucketing scheme in front of TunableOp to get cache hits at all; a table built at fixed M values does not generalize to arbitrary M the way a shape-agnostic kernel would.
+
 ### TunableOp's results filename substitutes the device ordinal, and rewrites at exit regardless of tuning state
 
 ```
