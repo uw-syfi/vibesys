@@ -345,10 +345,38 @@ def _format_metric_row(metrics: dict[str, float], objectives: Sequence[Objective
 def _pareto_archive_summary(records: list[RoundRecord], space: MetricSpace) -> str:
     """Render trusted frontier parents and any measured points awaiting review."""
     objectives = space.objectives
+    latest = max(records, key=lambda record: record.round_number, default=None)
+    latest_metrics = (
+        _format_metric_row(latest.metrics, objectives)
+        if latest is not None
+        and latest.official_evaluation
+        and trusted_perf_provenance(latest.perf_provenance)
+        and objectives
+        and space.complete(latest.metrics)
+        else (
+            f"{latest.perf_metric:.6g} {latest.perf_unit or ''}".strip()
+            if latest is not None
+            and latest.official_evaluation
+            and trusted_perf_provenance(latest.perf_provenance)
+            and latest.perf_metric is not None
+            else "(none)"
+        )
+    )
+    latest_line = (
+        "Latest completed round: none."
+        if latest is None
+        else (
+            f"Latest completed round: round {latest.round_number}, "
+            f"commit {(latest.commit or '(missing)')[:12]}, "
+            f"official metrics: {latest_metrics}; "
+            f"retained: {_record_candidate_retained(latest)}."
+        )
+    )
     if not objectives:
         return (
             "No objective axes are configured. Use objectives.toml to enable "
-            "multi-objective checkpoint retention; official scalar tracking remains active."
+            "multi-objective checkpoint retention; official scalar tracking remains active.\n"
+            f"{latest_line}"
         )
 
     lines = [
@@ -359,6 +387,7 @@ def _pareto_archive_summary(records: list[RoundRecord], space: MetricSpace) -> s
             f"within {space.relative_noise:.0%} on every axis and better by more than "
             f"{space.relative_noise:.0%} on at least one."
         ),
+        latest_line,
     ]
     frontier = _pareto_frontier_records(records, space)
     if frontier:
@@ -417,6 +446,118 @@ def _pareto_archive_summary(records: list[RoundRecord], space: MetricSpace) -> s
                 f"reason: {record.candidate_retention_reason or '(unspecified)'}"
             )
     return "\n".join(lines)
+
+
+def _headline_measurement(record: RoundRecord) -> Measurement | None:
+    """Return a record's scalar headline as a typed measurement."""
+    if record.perf_metric is None or record.perf_unit is None:
+        return None
+    return Measurement(
+        metric=record.perf_unit,
+        value=record.perf_metric,
+        direction=record.perf_direction,
+    )
+
+
+def _trusted_final_records(records: list[RoundRecord], space: MetricSpace) -> list[RoundRecord]:
+    """Return retained records with canonical framework-owned measurements."""
+    return [
+        record
+        for record in records
+        if record.commit
+        and record.passed
+        and record.reviewed
+        and record.official_evaluation
+        and trusted_perf_provenance(record.perf_provenance)
+        and _record_candidate_retained(record) is True
+        and (
+            space.complete(record.metrics)
+            if space.objectives
+            else space.direction(_headline_measurement(record)) is not None
+        )
+    ]
+
+
+def _select_final_candidate(records: list[RoundRecord], space: MetricSpace) -> RoundRecord | None:
+    """Select the latest noise-aware winner from trusted retained records."""
+    newest_first = sorted(
+        _trusted_final_records(records, space),
+        key=lambda record: record.round_number,
+        reverse=True,
+    )
+    if space.primary is not None:
+        frontier_rounds = {
+            record.round_number for record in _pareto_frontier_records(newest_first, space)
+        }
+        candidates = [record for record in newest_first if record.round_number in frontier_rounds]
+        primary = space.primary
+
+        def primary_measurement(record: RoundRecord) -> Measurement:
+            return Measurement(
+                metric=primary.name,
+                value=record.metrics[primary.name],
+                direction=primary.direction,
+            )
+
+        return space.best(candidates, primary_measurement)
+    return space.best(newest_first, _headline_measurement)
+
+
+def _finalize_agent_run(
+    ctx: LoopContext,
+    *,
+    records: list[RoundRecord],
+    space: MetricSpace,
+    progress_path: Path,
+) -> None:
+    """Persist the final archive, report trusted results, and restore the winner."""
+    issue_board.write_pareto_archive(progress_path, _pareto_archive_summary(records, space))
+    if space.objectives:
+        frontier = _pareto_frontier_records(records, space)
+        ctx.lprint(f"\nFinal Pareto frontier ({len(frontier)} rounds):")
+        for record in frontier:
+            ctx.lprint(
+                f"  round {record.round_number}: "
+                f"{_format_metric_row(_record_candidate_metrics(record), space.objectives)} "
+                f"(commit {(record.commit or 'n/a')[:12]})"
+            )
+
+    winner = _select_final_candidate(records, space)
+    relative_memory = tuple(
+        str(path.relative_to(ctx.workspace))
+        for path in issue_board.framework_memory_paths(ctx.workspace)
+    )
+    if winner is None:
+        baseline = ctx.git.trusted_input_baseline
+        if baseline is None:
+            raise RuntimeError(  # noqa: TRY003
+                "no trusted retained candidate or trusted input baseline is available"
+            )
+        if not ctx.git.checkout_tree(baseline, clean=True, preserve_paths=relative_memory):
+            raise RuntimeError(  # noqa: TRY003
+                f"could not restore trusted input baseline at {baseline}"
+            )
+        ctx.snapshot_workspace("agent: restore trusted input baseline")
+        ctx.lprint(
+            f"\nNo evaluated winner was retained. Restored trusted input baseline {baseline[:12]}."
+        )
+        return
+    assert winner.commit is not None  # noqa: S101  # selected records require a commit
+    ctx.git.retain_candidate(f"selected-round-{winner.round_number:04d}", winner.commit)
+    if not ctx.git.checkout_tree(winner.commit, clean=True, preserve_paths=relative_memory):
+        raise RuntimeError(  # noqa: TRY003
+            f"could not materialize selected round {winner.round_number} at {winner.commit}"
+        )
+    ctx.snapshot_workspace(f"agent: select round {winner.round_number}")
+    metrics = (
+        _format_metric_row(_record_candidate_metrics(winner), space.objectives)
+        if space.objectives
+        else f"{winner.perf_metric:.6g} {winner.perf_unit or ''}"
+    )
+    ctx.lprint(
+        f"\nFinal selected candidate: round {winner.round_number}, "
+        f"commit {winner.commit[:12]}, official metrics: {metrics.strip()}"
+    )
 
 
 def _pareto_archive_conflict(
@@ -2323,10 +2464,25 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     carry = _CarryOver(regression_info=_terminal_workspace_notice(records))
     round_number = start_round if start_round is not None else len(records) + 1
     if round_number > max_rounds:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"This run has completed {round_number - 1} rounds; max_rounds={max_rounds} "
-            "is a total limit. Increase --max-rounds to continue."
-        )
+        try:
+            if existing and records:
+                ctx.lprint(
+                    f"This run already completed {len(records)} rounds; "
+                    "finalizing its retained result."
+                )
+                _finalize_agent_run(
+                    ctx,
+                    records=records,
+                    space=agent_run_state.metrics,
+                    progress_path=progress_path,
+                )
+                return True
+            raise ValueError(  # noqa: TRY003  # tracked: #288
+                f"This run has completed {round_number - 1} rounds; max_rounds={max_rounds} "
+                "is a total limit. Increase --max-rounds to continue."
+            )
+        finally:
+            ctx.close()
 
     # When inner_loop == "single-agent", we don't run a separate
     # pre-round decision or profiler invocation. We thread the previous
@@ -3491,6 +3647,12 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                 round_number += 1
 
         ctx.lprint(f"Reached max_rounds={max_rounds}. Stopping.")
+        _finalize_agent_run(
+            ctx,
+            records=records,
+            space=agent_run_state.metrics,
+            progress_path=progress_path,
+        )
         return True
     finally:
         ctx.close()
