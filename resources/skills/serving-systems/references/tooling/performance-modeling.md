@@ -372,6 +372,22 @@ Reject the model as stale when it names a removed bottleneck, contradicts
 activation telemetry, cannot reproduce any retained measurement, or reports a
 measured saturation point as though it were the hardware roofline.
 
+### A kernel variant wins its microbenchmark and regresses the serving metric
+
+```
+Symptom: a kernel variant wins its microbenchmark by 1.2 to 1.3x and
+         regresses the serving metric by 17 percent end to end.
+Cause:   the microbenchmark baseline was a different kernel from the one
+         production dispatches (a scaffold path vs the templated path
+         chosen at the production dispatch threshold).
+Fix:     the microbenchmark baseline must be the production dispatch
+         path at the production shapes; confirm by name against a
+         kernel trace of the server before integrating.
+Scope:   any kernel-variant comparison feeding an integration decision,
+         backend-independent.
+Status:  verified. 2026-09-12, job 633183.
+```
+
 ## Pitfalls
 
 - Mixing per-kernel, per-step, and client-observed metrics.

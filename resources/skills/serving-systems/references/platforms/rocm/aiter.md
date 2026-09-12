@@ -313,7 +313,7 @@ Cause:   in-block phase timing (decode M=16, per 16-row expert block):
          cause is refuted; MemUnitStalled near zero here is consistent
          with a latency-bound, underfed memory unit, not with the
          absence of a memory-side limiter (see profiler.md).
-Fix:     no fix closes the gap yet. Five refuted, one open candidate:
+Fix:     no fix closes the gap yet. Six refuted:
          - persistent grid with an atomic tile queue: bit-identical
            output, +2.8 percent at M=16, -3.5 percent at M=256. Launch
            shape and tail idle are not the term.
@@ -333,11 +333,18 @@ Fix:     no fix closes the gap yet. Five refuted, one open candidate:
            blocks with 4 or fewer real tokens): 1.64x slower at M=16; the
            activation block held in LDS caps occupancy at 1 to 2 waves
            per SIMD.
-         Candidate, not verified: skinny GEMV stage 2 for the down
-         projection, on blocks with 4 or fewer real tokens, is 1.20x
-         faster at M=16 and 1.29x faster at M=64 in a microbenchmark
-         (relative L2 2.35e-5 against the existing kernel, fp32
-         reassociation level); end-to-end acceptance is still pending.
+         - skinny GEMV stage 2 for the down projection: refuted end to
+           end. Its 1.20x/1.29x microbenchmark win (M=16/M=64) compared
+           against the scaffold stage2 kernel (0.222 ms at M=16), not
+           the production templated kernel that actually dispatches
+           (0.113 ms); against production the skinny kernel itself
+           measures 1.5x to 1.6x slower (176 vs 113 us at M=16, 411 vs
+           276 us at M=48). A paired multi-turn run (uncapped 48
+           sessions, 5 reps/side, exactness gates 13/13 throughout,
+           worst-case rel L2 2.73e-5 on real weights) confirmed the
+           regression end to end with the switch on: median TPOT +16.8
+           percent (77.49 vs 66.32 ms) and pooled p95 TTFT turn-2+ +8.7
+           percent (720.9 vs 663.3 ms).
          Why the padding matters: at decode M=16 with top-10 routing,
          each 16-row block carries about 1.2 real tokens, so about 94
          percent of the MFMA rows are padding, and the kernel sits about
@@ -345,13 +352,46 @@ Fix:     no fix closes the gap yet. Five refuted, one open candidate:
          of expert weights a rank reads per layer).
 Scope:   rocm, gfx942, this kernel (mxfp4_fused_moe stage1/stage2) at
          decode M=16.
-Status:  verified (phase timing), refuted fixes listed, 2026-09-11.
+Status:  verified (phase timing), refuted fixes listed, 2026-09-11;
+         skinny stage 2 refuted end to end, 2026-09-12.
          sglang-v0.5.18-rocm700-mi30x, job 633024 (phase timing); jobs
          633006, 633013, 633019 (persistent grid, refuted); jobs 633018,
          633021 (integer decode, refuted); job 633174 (register
          prefetch and LDS-staged block, refuted); job 633180 (LDS rings,
          refuted); jobs 633173, 633179, 633182 (skinny GEMV: stage 1
-         refuted, stage 2 candidate, not yet accepted end to end).
+         refuted, stage 2 microbenchmarked); job 633183 (skinny stage 2:
+         paired benchmark and kernel trace, refuted end to end).
+```
+
+### A host sync in a custom kernel's dispatch crashes decode graph capture at boot
+
+```
+Symptom: server crashes during boot, before serving any request, with
+         `torch.AcceleratorError: HIP error: operation not permitted
+         when stream is capturing`, raised from a custom kernel's
+         Python dispatch wrapper calling `.item()` on a device tensor.
+Cause:   sglang captures a decode CUDA graph as part of normal server
+         boot, before it signals ready. A host sync (`.item()`, `.cpu()`,
+         `.tolist()`) anywhere in code that runs during that capture is
+         illegal on the stream being captured; the custom kernel's own
+         device code can be correct while the Python wrapper around it
+         still crashes boot by reading a tensor back to build a
+         host-side dispatch decision (here, a token count used to split
+         work between two kernel variants).
+Fix:     replace the host-built split with device-side predication:
+         launch every candidate kernel variant over the same
+         shape-derived grid bound the unmodified kernel already uses,
+         and let each block decide on-device whether it owns the work,
+         with no data-dependent Python control flow. Verify graph safety
+         with a capture-vs-eager equivalence check before any end-to-end
+         run; the predicated extra launch's own overhead is small
+         (measured 7 to 29 us total per call in one case), so overhead
+         is not a reason to keep the host sync.
+Scope:   rocm, gfx942, any custom kernel dispatch that reads a
+         data-dependent count on the host inside the decode path.
+Status:  verified (crash reproduced, then fixed and confirmed graph-safe
+         by a capture-vs-eager check). sglang-v0.5.18-rocm700-mi30x,
+         2026-09-12, job 633183.
 ```
 
 ## Out of scope: kernel implementation
