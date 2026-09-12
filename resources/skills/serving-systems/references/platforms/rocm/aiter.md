@@ -313,7 +313,7 @@ Cause:   in-block phase timing (decode M=16, per 16-row expert block):
          cause is refuted; MemUnitStalled near zero here is consistent
          with a latency-bound, underfed memory unit, not with the
          absence of a memory-side limiter (see profiler.md).
-Fix:     no fix closes the gap yet. Six refuted:
+Fix:     no fix closes the gap yet. Seven refuted:
          - persistent grid with an atomic tile queue: bit-identical
            output, +2.8 percent at M=16, -3.5 percent at M=256. Launch
            shape and tail idle are not the term.
@@ -345,6 +345,26 @@ Fix:     no fix closes the gap yet. Six refuted:
            regression end to end with the switch on: median TPOT +16.8
            percent (77.49 vs 66.32 ms) and pooled p95 TTFT turn-2+ +8.7
            percent (720.9 vs 663.3 ms).
+         - split-K across S workgroups for stage 1 (S in 4/8/16, T=4
+           rows/workgroup, fp32 atomic partials plus a reduce+SiLU
+           epilogue kernel): refuted at the first experiment, every (M,
+           S) point tried. Exact (rel L2 up to 3.6e-5), but 0.49x to
+           0.58x production at M=16, 0.56x to 0.63x at M=48, and 0.78x
+           to 0.94x at M=192 (the speculative-decode verify shape,
+           where 32.7 percent of active blocks exceed T_MAX=4 rows and
+           are not owned by this kernel at all). The reduce kernel
+           alone (2560 workgroups at M=16) is already about 1.7x slower
+           than the entire production kernel it aims to replace (479 vs
+           282 us), and every specialization spills 80 B/lane to
+           scratch memory that production's kernel pays zero of.
+           Splitting K multiplies workgroup-launch count by S and adds
+           atomic-reduction plus scratch traffic that a single-pass,
+           MFMA-based kernel never pays; that overhead exceeds the
+           entire production kernel's own runtime rather than fitting
+           inside memory-bandwidth headroom. The fifth memory-oriented
+           rewrite in this campaign to lose to the same issue-latency
+           limiter (after register prefetch, LDS staging, pre-gather,
+           and skinny GEMV).
          Why the padding matters: at decode M=16 with top-10 routing,
          each 16-row block carries about 1.2 real tokens, so about 94
          percent of the MFMA rows are padding, and the kernel sits about
@@ -353,14 +373,16 @@ Fix:     no fix closes the gap yet. Six refuted:
 Scope:   rocm, gfx942, this kernel (mxfp4_fused_moe stage1/stage2) at
          decode M=16.
 Status:  verified (phase timing), refuted fixes listed, 2026-09-11;
-         skinny stage 2 refuted end to end, 2026-09-12.
+         skinny stage 2 refuted end to end, split-K stage 1 refuted,
+         2026-09-12.
          sglang-v0.5.18-rocm700-mi30x, job 633024 (phase timing); jobs
          633006, 633013, 633019 (persistent grid, refuted); jobs 633018,
          633021 (integer decode, refuted); job 633174 (register
          prefetch and LDS-staged block, refuted); job 633180 (LDS rings,
          refuted); jobs 633173, 633179, 633182 (skinny GEMV: stage 1
          refuted, stage 2 microbenchmarked); job 633183 (skinny stage 2:
-         paired benchmark and kernel trace, refuted end to end).
+         paired benchmark and kernel trace, refuted end to end); job
+         633546 (split-K stage 1, refuted).
 ```
 
 ### A host sync in a custom kernel's dispatch crashes decode graph capture at boot

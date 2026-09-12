@@ -44,6 +44,10 @@ Acceptance is workload-dependent, and the wrong gate kills a working implementat
 | Non-speculative requests also got slower | invariant 5 — branching disabled the shared fast path |
 | Acceptance near zero | drafter/target vocab or position mismatch, not a perf problem |
 
+## Engine interactions
+
+SGLang forces `enable_mixed_chunk` off whenever a speculative algorithm is set (an assertion at boot, not a runtime choice), so prefill and decode never share an iteration under speculative decoding on that engine; see [`engines/sglang.md`](../engines/sglang.md).
+
 ## Platform implementations
 
 The divergence is **variable accepted length**, which is a shape change per step:

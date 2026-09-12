@@ -177,9 +177,21 @@ time. If cutting compute does not move the needle, the kernel is bound by the
 padded tile shape and the bytes it reads, not by the arithmetic inside it; the
 next step is a byte-floor comparison, not further ALU reduction.
 
+A related trap on the fix side: raising bytes in flight by splitting the
+reduction dimension across more workgroups only helps when the limiter is too
+few outstanding memory requests to hide latency. It does not help when the
+limiter is per-workgroup launch and issue overhead, which this trick makes
+worse, not better. Check the kernel trace for register or scratch spills and
+per-launch cost before predicting a win from more concurrency, not just the
+resource-usage estimate: splitting K for this same kernel's stage 1 regressed
+further at every measured shape because the added reduce kernel's own launch
+and atomic-reduction overhead exceeded the entire production kernel it aimed
+to replace.
+
 Scope: MoE grouped GEMM, any backend, small per-request batch with expert
 routing (for example top-k routing at decode). Status: verified. Stamp:
-sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job 633024.
+sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job 633024 (padding-floor tell);
+job 633546, 2026-09-12 (split-K counter-example).
 
 ## Connect device and service ceilings
 

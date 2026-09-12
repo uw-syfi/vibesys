@@ -98,6 +98,7 @@ One line per known pitfall; detail lives at the link.
 - Server crashes at boot during decode graph capture with "operation not permitted when stream is capturing". [`aiter.md#a-host-sync-in-a-custom-kernels-dispatch-crashes-decode-graph-capture-at-boot`](aiter.md#a-host-sync-in-a-custom-kernels-dispatch-crashes-decode-graph-capture-at-boot)
 - Speculative decoding's draft model doesn't find MTP weights unless pointed explicitly at the original checkpoint, with an explicit draft load format too. [`speculative-decoding.md#the-draft-head-has-no-sharded-fast-path-artifact-point-the-draft-at-the-original-checkpoint`](speculative-decoding.md#the-draft-head-has-no-sharded-fast-path-artifact-point-the-draft-at-the-original-checkpoint)
 - Booting expert parallelism from the unsharded checkpoint OOM-kills a rank's scheduler during initialization. [`weight-loading.md#the-tp-sharded-loader-has-no-layout-check-ep-boots-from-the-unsharded-checkpoint-and-ooms`](weight-loading.md#the-tp-sharded-loader-has-no-layout-check-ep-boots-from-the-unsharded-checkpoint-and-ooms)
+- Booting with the NEXTN/MTP draft adds about 8 minutes with disk and CPU idle: the draft class loads all 512 experts serially with no threading. [`weight-loading.md#the-mtp-draft-class-loads-all-512-experts-serially-boot-with-the-draft-adds-minutes-with-disk-and-cpu-idle`](weight-loading.md#the-mtp-draft-class-loads-all-512-experts-serially-boot-with-the-draft-adds-minutes-with-disk-and-cpu-idle)
 
 ## Where ROCm differs from CUDA
 

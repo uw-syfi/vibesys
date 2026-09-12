@@ -88,10 +88,26 @@ Cause:   AITER's 0.85x mem_fraction_static multiplier (context > 8192)
          shrinks the effective pool further; the pool must still cover
          resident weights plus the mandatory Mamba state cache.
 Fix:     set mem_fraction_static=0.85 for the save step (effective
-         0.7225). 0.35 and 0.72 both fail.
+         0.7225) when the target itself loads from the raw HF
+         checkpoint during the save; 0.35 and 0.72 both fail there with
+         the GPU-side error above.
 Scope:   MI300A, aiter attention backend, sglang-v0.5.18-rocm700-mi30x,
-         Qwen3.5-397B-A17B (hybrid attention/Mamba).
-Status:  verified. sglang-v0.5.18-rocm700-mi30x, job 631025, 2026-09-10.
+         Qwen3.5-397B-A17B (hybrid attention/Mamba); target loaded from
+         the raw HF checkpoint during the save. A different failure
+         applies when the target loads from an already-sharded artifact
+         and only a draft model loads through the HF safetensors loader
+         inside a direct Engine() save script: a rank scheduler is
+         OOM-killed on the host side (exit code -9) during "Multi-thread
+         loading shards" at both 0.85 and 0.72, while the serving launch
+         path loads the same draft at 0.72 without incident. The
+         mem-fraction value is not the lever there; the cause is under
+         diagnosis (suspects: in-process Engine layout duplicating
+         weights across forked ranks, or a smaller batch-job memory
+         allocation).
+Status:  verified. sglang-v0.5.18-rocm700-mi30x, job 631025, 2026-09-10
+         (0.85 required, target loads from the HF checkpoint); jobs
+         633543 and 633650, 2026-09-12 (host OOM in the direct-Engine
+         draft save at 0.85 and at 0.72; cause open).
 ```
 
 ### KV-pool size drifts across otherwise-identical boots

@@ -190,6 +190,40 @@ Status:  verified (mechanism read from the profiling-flag lifecycle in
          source). sglang-v0.5.18-rocm700-mi30x, 2026-09-11.
 ```
 
+### `--enable-mixed-chunk` is silently forced off whenever a speculative algorithm is set
+
+```
+Symptom: launch argv carries both `--enable-mixed-chunk` and a
+         speculative-decoding algorithm; every iteration runs prefill
+         and decode as separate forwards, and the mixed-chunk TTFT
+         benefit disappears with no warning naming the interaction in
+         the log.
+Cause:   `is_mixed_chunk` requires `get_schedule().enable_mixed_chunk`
+         (`managers/scheduler.py`), but `server_args.py` asserts
+         `not enable_mixed_chunk` whenever `speculative_algorithm` is
+         set (`server_args.py:9195-9197`). NEXTN resolves to the EAGLE
+         family (`speculative_hook.py:52`), and `_handle_eagle_family`
+         unconditionally sets `enable_mixed_chunk = False`
+         (`speculative_hook.py:572-576`, with a warning, but not one
+         that names this interaction) before that assert runs.
+         `get_next_batch_to_run` already prefers a prefill batch over
+         decode on every iteration regardless
+         (`scheduler.py:3125-3131`, "Run prefill first if possible"),
+         so once mixed chunk is off, an iteration runs either a
+         prefill/extend batch or a decode/verify batch, never both.
+Fix:     treat mixed chunk and speculative decoding as mutually
+         exclusive in this engine version. Decide which one the target
+         metric needs, and re-measure TTFT after enabling speculative
+         decoding instead of assuming the mixed-chunk result carries
+         over; do not rely on the boot log to flag the conflict.
+Scope:   sglang, any backend (engine behavior, not platform-specific).
+         Confirmed for NEXTN; other speculative algorithms route
+         through the same EAGLE-family hook.
+Status:  verified (mechanism read in source; a paired boot confirmed
+         prefill and decode running as separate batches). sglang fork
+         at b6f3d5d6c8, 2026-09-12, job 633542.
+```
+
 ## See also
 
 - `engines/vllm/`, `engines/trtllm/`
