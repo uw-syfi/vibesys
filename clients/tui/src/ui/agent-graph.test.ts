@@ -75,10 +75,63 @@ describe('layoutAgentGraph', () => {
   test('tones an edge by the phases it connects', () => {
     const four = [...CHAIN, phase('profiler', 'pending')];
     const graph = layoutAgentGraph(four, graphPaneBounds(four).max - 4);
-    // The frontier glows: an edge is live while either end is running. Two
-    // stages that have not run yet stay idle.
+    // Live means data has flowed: a completed source feeding an active
+    // target. A stage that has not produced anything yet, or that feeds a
+    // stage that has not started, stays idle.
     expect(graph.cells.some(cell => cell.tone === 'live')).toBe(true);
     expect(graph.cells.some(cell => cell.tone === 'idle')).toBe(true);
+  });
+
+  test('an edge from an active source to a pending target is idle, not live', () => {
+    // The active node has not produced anything yet, so its outbound edge
+    // must not be painted as live dataflow.
+    const activeToPending = [phase('implementer', 'active'), phase('judge', 'pending')];
+    const graph = layoutAgentGraph(activeToPending, graphPaneBounds(activeToPending).max - 4);
+    expect(graph.cells.every(cell => cell.tone === 'idle')).toBe(true);
+  });
+
+  test('an edge from a completed source to an active target is still live', () => {
+    const completedToActive = [phase('implementer', 'completed'), phase('judge', 'active')];
+    const graph = layoutAgentGraph(completedToActive, graphPaneBounds(completedToActive).max - 4);
+    expect(graph.cells.every(cell => cell.tone === 'live')).toBe(true);
+  });
+
+  test.each([
+    'failed',
+    'cancelled',
+    'interrupted',
+  ] as const)('a %s source still fails the edge, even into an active target', status => {
+    const badSource = [phase('implementer', status), phase('judge', 'active')];
+    const graph = layoutAgentGraph(badSource, graphPaneBounds(badSource).max - 4);
+    expect(graph.cells.every(cell => cell.tone === 'failed')).toBe(true);
+  });
+
+  test('a completed source into any non-pending target still reads as done', () => {
+    const completedToFailed = [phase('implementer', 'completed'), phase('judge', 'failed')];
+    const graph = layoutAgentGraph(completedToFailed, graphPaneBounds(completedToFailed).max - 4);
+    expect(graph.cells.every(cell => cell.tone === 'done')).toBe(true);
+  });
+
+  test('an active fan-out node leaves every outbound edge idle', () => {
+    const fanOut = [
+      phase('orchestrator', 'active'),
+      phase('implementer', 'pending'),
+      phase('implementer', 'pending'),
+      phase('implementer', 'pending'),
+    ];
+    const graph = layoutAgentGraph(fanOut, graphPaneBounds(fanOut).max - 4);
+    expect(graph.cells.every(cell => cell.tone === 'idle')).toBe(true);
+  });
+
+  test('an active fan-in node has every completed-source inbound edge live', () => {
+    const fanIn = [
+      phase('implementer', 'completed'),
+      phase('implementer', 'completed'),
+      phase('implementer', 'completed'),
+      phase('judge', 'active'),
+    ];
+    const graph = layoutAgentGraph(fanIn, graphPaneBounds(fanIn).max - 4);
+    expect(graph.cells.every(cell => cell.tone === 'live')).toBe(true);
   });
 
   test('a finished handover between finished stages reads as done', () => {
