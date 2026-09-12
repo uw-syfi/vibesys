@@ -216,22 +216,71 @@ def parse_typed_response_text(text: str, response_cls: type[T]) -> T | None:
     fenced_matches = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
     candidates.extend(match.strip() for match in fenced_matches if match.strip())
 
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        candidates.append(text[start : end + 1].strip())
+    # Every balanced top-level ``{...}`` object, in order. Narrative text often
+    # carries inline braces (``{"cudagraph_mode": "FULL"}``) before the real
+    # reply, so a single first-``{``-to-last-``}`` slice would fail to parse.
+    candidates.extend(_balanced_objects(text))
 
     seen: set[str] = set()
     for candidate in candidates:
         if not candidate or candidate in seen:
             continue
         seen.add(candidate)
-        try:
-            payload = json.loads(candidate)
-            return response_cls.model_validate(payload)
-        except (json.JSONDecodeError, ValidationError, TypeError):
-            continue
+        for attempt in (candidate, _escape_control_chars_in_strings(candidate)):
+            try:
+                payload = json.loads(attempt)
+                return response_cls.model_validate(payload)
+            except (json.JSONDecodeError, ValidationError, TypeError):
+                continue
     return None
+
+
+def _balanced_objects(text: str) -> list[str]:
+    """Return each balanced top-level ``{...}`` span of *text*, in order."""
+    spans: list[str] = []
+    depth = 0
+    start = -1
+    for index, char in enumerate(text):
+        if char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == "}" and depth > 0:
+            depth -= 1
+            if depth == 0:
+                spans.append(text[start : index + 1].strip())
+    return spans
+
+
+def _escape_control_chars_in_strings(candidate: str) -> str:
+    r"""Escape raw newlines, tabs and carriage returns inside JSON string values.
+
+    Some models (Kimi K3 through OpenRouter, for one) emit literal newlines
+    inside string values instead of the ``\\n`` escape JSON requires, which
+    makes ``json.loads`` fail with "Unterminated string". Everything outside
+    string values is left untouched.
+    """
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    for char in candidate:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            elif char in _CONTROL_ESCAPES:
+                out.append(_CONTROL_ESCAPES[char])
+                continue
+        elif char == '"':
+            in_string = True
+        out.append(char)
+    return "".join(out)
+
+
+_CONTROL_ESCAPES = {"\n": "\\n", "\t": "\\t", "\r": "\\r"}
 
 
 def _coerce_typed_response(payload: Any, response_cls: type[T]) -> T | None:  # noqa: ANN401  # tracked: #288
