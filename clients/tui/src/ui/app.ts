@@ -19,7 +19,7 @@ import {AgentMapView, agentsPaneVisible} from './agent-map.js';
 import {fillLayer} from './box-fill.js';
 import {createChatDraft} from './chat-composer.js';
 import {ChatOverlayView} from './chat-overlay.js';
-import {ChatPaneView, chatDockFits, chatPaneWidth} from './chat-pane.js';
+import {ChatPaneView, chatDockFits, chatPaneWidthWithOverride} from './chat-pane.js';
 import {RendererSelectionClipboard, type SelectionClipboard} from './clipboard.js';
 import {createCommandInputPanel} from './command-input.js';
 import {ConversationView} from './conversation.js';
@@ -57,7 +57,21 @@ type FocusTarget = 'command' | 'chat' | 'modal';
 const KEY_HELP = `←→: agents/transcript · ↑↓: within · [/]: round · <>=: width · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
 const SCOPED_KEY_HELP = `←→: agents/transcript · ↑↓: within · [/]: round · <>=: width · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
 const LOG_KEY_HELP = `↑↓ or scroll: select · Enter/click: open hypothesis · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
-const LOG_CHAT_KEY_HELP = `↑↓: select · Enter/click: hypothesis · Ctrl+W: chat · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
+// The resize keys are guarded by `chatPaneVisible(state)` (`keybindings.ts`),
+// which is false in every state `LOG_KEY_HELP` covers, so `<>=: width` goes
+// only on this line, the one state where the keys can actually fire.
+// Advertising a binding that cannot fire is worse than not advertising it at
+// all: tui-conventions.md's "Bindings are visible" is about a person not
+// having to already know a binding, and a dead one on the help line breaks
+// that trust the same way a false error would break the banner's (#635).
+//
+// This line is one row and clips rather than wraps (see `KEY_HELP` above), so
+// the new token still costs a token: `/open-round --N` (93 characters with it
+// restored, one over the 92-column budget at the narrowest terminal the chat
+// can dock in) rather than `Ctrl+W: chat`, which has no other affordance
+// advertising it.
+const LOG_CHAT_KEY_HELP =
+  '↑↓: select · Enter/click: hypothesis · <>=: width · Ctrl+W: chat · F4: zoom';
 const HYPOTHESIS_KEY_HELP =
   '↑↓: select round · Enter/click: trajectory · PgUp/PgDn: scroll · Esc: hypotheses';
 /** Bezel, one content row, bezel. See the header frame below. */
@@ -408,7 +422,7 @@ export function createOpenTuiApp(
     const chatWidth = showChatPane
       ? zoomedPane === 'chat'
         ? renderer.terminalWidth
-        : chatPaneWidth(renderer.terminalWidth, rightWidth)
+        : chatPaneWidthWithOverride(renderer.terminalWidth, rightWidth, state.chatWidthOverride)
       : 0;
     const showExperimentLog = showLog && (zoomedPane === null || zoomedPane === 'experiments');
     paintHeader(renderHeader(state, showLog, renderer.terminalWidth - HEADER_CHROME));
@@ -591,6 +605,7 @@ export function createOpenTuiApp(
     selectPreviousRound: () => controller.selectPreviousRound(),
     toggleTodos: () => controller.toggleTodos(),
     setGraphWidthOverride: width => controller.setGraphWidthOverride(width),
+    setChatWidthOverride: width => controller.setChatWidthOverride(width),
     scrollRightPane: delta => rightPane.scrollBy(delta),
     scrollChatPane: delta => chatPane.scrollBy(delta),
     scrollExperimentDetail: delta => experimentLog.scrollBy(delta),

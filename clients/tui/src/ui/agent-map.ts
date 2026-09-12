@@ -49,16 +49,6 @@ const HEADING_ROWS = 1;
 export const TRANSCRIPT_MIN = 42;
 /** Share of the terminal the graph takes when there is room for it. */
 const GRAPH_SHARE = 0.4;
-/**
- * Columns `<`/`>` move the Agents pane by on each press. 2 rather than 1: a
- * node's width ranges from the 14-column floor to roughly 90 for a wide
- * multi-stage round, and at 1 column a press would rarely change which
- * characters of a name are visible, only pad or shave whitespace no label
- * uses. 2 halves the number of presses to cross that range while still
- * landing on most of the widths where a label's next character appears or
- * disappears.
- */
-export const GRAPH_WIDTH_STEP = 2;
 
 function statusColor(theme: Theme, status: AgentPhase['status']): string {
   if (status === 'active') return theme.success;

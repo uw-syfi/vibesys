@@ -77,6 +77,16 @@ export interface SessionState {
    * it carries no `agent.toml` key and does not persist past this process.
    */
   graphWidthOverride: number | null;
+  /**
+   * Explicit column width for the docked chat pane on the home page, set and
+   * stepped by `<`/`>` and cleared by `=`. `null` means automatic:
+   * `chat-pane.ts#chatPaneWidth` decides, exactly as it always has. Mirrors
+   * `graphWidthOverride` above in shape and in the reason it exists: an
+   * explicit width is sticky, and `=` is what keeps that from being a trap.
+   * Session-only view state: it carries no `agent.toml` key and does not
+   * persist past this process.
+   */
+  chatWidthOverride: number | null;
   themeName: ThemeName;
   experimentLog: ExperimentLogState | null;
   /**
@@ -322,6 +332,7 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     chatMenu: null,
     todosExpanded: false,
     graphWidthOverride: null,
+    chatWidthOverride: null,
     themeName,
     // The experiment log is the landing view: a run's history reads as a short
     // list of claims before it reads as a long list of rounds.
@@ -1953,6 +1964,16 @@ export function toggleTodos(state: SessionState): SessionState {
  */
 export function setGraphWidthOverride(state: SessionState, width: number | null): SessionState {
   return state.graphWidthOverride === width ? state : {...state, graphWidthOverride: width};
+}
+
+/**
+ * `<`/`>`: sets the docked chat pane's explicit column width. `=`: clears it
+ * back to automatic (`null`). The value handed in is already clamped by the
+ * caller (`chat-pane.ts#clampChatWidthOverride`), which needs the terminal
+ * width and the right pane's width to do that; this reducer only applies it.
+ */
+export function setChatWidthOverride(state: SessionState, width: number | null): SessionState {
+  return state.chatWidthOverride === width ? state : {...state, chatWidthOverride: width};
 }
 
 /**
