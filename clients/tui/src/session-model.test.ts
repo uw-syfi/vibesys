@@ -8,6 +8,7 @@ import {
   applyEventBatch,
   chatDocked,
   chatPaneVisible,
+  clearInputError,
   closePane,
   closeThemePicker,
   cyclePaneFocus,
@@ -52,9 +53,49 @@ import {
 } from './session-model.js';
 import {runStateText, usageText} from './ui/header.js';
 
+describe('input errors', () => {
+  it('routes a scope: input report to the hint row, never the banner', () => {
+    const state = reportError(initialSessionState(), 'Enter a slash command. Use /help.', {
+      scope: 'input',
+    });
+
+    expect(state.inputError).toBe('Enter a slash command. Use /help.');
+    expect(state.errorBanner).toBeNull();
+  });
+
+  it('leaves inputError alone for a real backend scope, and vice versa', () => {
+    const withBanner = reportError(initialSessionState(), 'The request failed.', {
+      scope: 'request',
+    });
+    expect(withBanner.errorBanner).toMatchObject({message: 'The request failed.'});
+    expect(withBanner.inputError).toBeNull();
+
+    const withInput = reportError(withBanner, 'Unknown command: /nope. Use /help.', {
+      scope: 'input',
+    });
+    // Routing input off the banner does not disturb a standing banner from a
+    // real scope, and the reverse: a later banner does not clear the hint.
+    expect(withInput.errorBanner).toEqual(withBanner.errorBanner);
+    expect(withInput.inputError).toBe('Unknown command: /nope. Use /help.');
+  });
+
+  it('clears on request, once, and leaves everything else untouched', () => {
+    const state = reportError({...initialSessionState(), selectedRound: 2}, 'Usage: /pause', {
+      scope: 'input',
+    });
+    const cleared = clearInputError(state);
+
+    expect(cleared.inputError).toBeNull();
+    expect(cleared.selectedRound).toBe(2);
+    expect(clearInputError(cleared)).toBe(cleared);
+  });
+});
+
 describe('event batch projection', () => {
   it('keeps the existing banner while resumed history ends in a running session', () => {
-    const before = reportError(initialSessionState(), 'Local input problem', {scope: 'input'});
+    const before = reportError(initialSessionState(), 'Local protocol problem', {
+      scope: 'protocol',
+    });
 
     const state = applyEventBatch(before, [
       {

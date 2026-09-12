@@ -8,6 +8,7 @@ import {
   rgbToHex,
   ScrollBoxRenderable,
   TextareaRenderable,
+  TextRenderable,
 } from '@opentui/core';
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
 import type {ChatOptions, HypothesisEntry} from '@vibesys/backend-client';
@@ -20,6 +21,7 @@ import {
   chatMenuCustomModel,
   clearAgentSelection,
   clearEntrySelection,
+  clearInputError,
   closeChatMenu,
   closeOverlays,
   closePane,
@@ -529,9 +531,13 @@ describe('OpenTUI presentation', () => {
     expect(viewportBottomBorder).toBeGreaterThan(commandTop);
     expect(viewportBottomBorder).toBeLessThan(helpLine);
     const transcriptColumn = Math.max(0, (activityLine?.indexOf('Implementer') ?? 2) - 2);
+    // The command input's reserved hint row sits directly above the box's own
+    // top border, one row of furniture the same way the box itself is, so the
+    // blank-fill check stops above it rather than above the box.
+    const commandChromeTop = commandTop - 1;
     expect(
       lines
-        .slice(activityLineIndex + 1, commandTop)
+        .slice(activityLineIndex + 1, commandChromeTop)
         .every(line => line.slice(transcriptColumn).replaceAll(FRAME_VERTICALS, '').trim() === ''),
     ).toBe(true);
 
@@ -1709,10 +1715,46 @@ describe('OpenTUI presentation', () => {
 
     await testRenderer.mockInput.typeText('what is running?');
     testRenderer.mockInput.pressEnter();
-    const frame = await testRenderer.waitForFrame(value => value.includes('Commands start with /'));
-    expect(frame).toContain('Use Experiment chat for questions.');
+    // Wait on the real state, not frame text: the hint row is half the
+    // screen's width, so this message is truncated on screen and never
+    // appears there verbatim.
+    await testRenderer.waitForFrame(() => controller.state.inputError !== null);
+    // The message lands on the command input's own hint row, not the
+    // full-width banner: #564/#635's reasoning ("reporting a no-op as an error
+    // trains the operator to ignore the banner") applies just as well to a
+    // wrong command as to an empty box.
+    expect(commandHintText(testRenderer)).toBe(
+      '✗ Commands start with /. Use Experiment chat for questions.',
+    );
+    expect(testRenderer.renderer.root.findDescendantById('error-banner')?.visible).toBe(false);
     expect(controller.submissions).toEqual([]);
     expect(controller.chatSubmissions).toEqual([]);
+  });
+
+  it('clears the input error on the next keystroke, and reverts the box border', async () => {
+    const testRenderer = await createTestRenderer({width: 80, height: 16});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    const box = (): BoxRenderable => {
+      const node = testRenderer.renderer.root.findDescendantById('command-input-box');
+      if (!(node instanceof BoxRenderable)) throw new Error('command box was missing');
+      return node;
+    };
+    const restingColor = rgbToHex(box().borderColor).toLowerCase();
+
+    await testRenderer.mockInput.typeText('what is running?');
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.state.inputError !== null);
+    expect(controller.state.inputError).not.toBeNull();
+    expect(rgbToHex(box().borderColor).toLowerCase()).not.toBe(restingColor);
+
+    // The message named a typo in what was just typed, so it is stale the
+    // moment the operator starts fixing it: the next keystroke clears it.
+    await testRenderer.mockInput.typeText('/');
+    await frameAfter(testRenderer);
+    expect(controller.state.inputError).toBeNull();
+    expect(rgbToHex(box().borderColor).toLowerCase()).toBe(restingColor);
   });
 
   it('suggests and completes slash commands with Tab', async () => {
@@ -3683,7 +3725,11 @@ describe('theming', () => {
     // the boxes share a row because they are siblings rather than because a
     // row was budgeted for it. That budget is what #556 measured, and it is
     // gone: nothing is bought, so a short terminal has nothing to give up.
-    const testRenderer = await createTestRenderer({width: 100, height: 16});
+    //
+    // The command input's own reserved hint row (#input-error-inline) costs
+    // every view one more row than #556 measured, so the heights that used to
+    // mark this boundary are each one row taller now.
+    const testRenderer = await createTestRenderer({width: 100, height: 17});
     const controller = kickoffController();
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
@@ -3709,7 +3755,7 @@ describe('theming', () => {
     expect(bottomRows().command).toBe(bottomRows().message);
 
     // And at the height that could afford it before, copy still whole.
-    testRenderer.renderer.resize(100, 17);
+    testRenderer.renderer.resize(100, 18);
     const taller = await frameAfter(testRenderer);
     expect(taller).toContain('This activity becomes');
     expect(bottomRows().command).toBe(bottomRows().message);
@@ -3767,11 +3813,19 @@ describe('theming', () => {
 
     await testRenderer.mockInput.typeText('this belongs in chat');
     testRenderer.mockInput.pressEnter();
-    await testRenderer.waitForFrame(value => value.includes('Commands start with /'));
+    // Wait on the real state, not frame text: the hint row is half the
+    // screen's width, so this message is truncated on screen and never
+    // appears there verbatim.
+    await testRenderer.waitForFrame(() => controller.state.inputError !== null);
+    expect(commandHintText(testRenderer)).toBe(
+      '✗ Commands start with /. Use Experiment chat for questions.',
+    );
     expect(controller.submissions).toEqual([]);
     expect(controller.chatSubmissions).toEqual([]);
     testRenderer.mockInput.pressKey('ESCAPE');
     await frameAfterEscape(testRenderer);
+    // Esc clears the input error the same way it dismisses the banner.
+    expect(controller.state.inputError).toBeNull();
 
     testRenderer.mockInput.pressKey('w', {ctrl: true});
     await frameAfter(testRenderer);
@@ -5219,7 +5273,11 @@ describe('theming', () => {
   });
 
   it('uses the empty hypotheses screen as a truthful planning kickoff', async () => {
-    const testRenderer = await createTestRenderer({width: 100, height: 16});
+    // The command input's own reserved hint row (#input-error-inline) costs
+    // every view one more row than this screen used to need, so the kickoff
+    // copy needs one extra row of height to stay on screen (see the sibling
+    // boundary test above, which hit the same shift).
+    const testRenderer = await createTestRenderer({width: 100, height: 17});
     const controller = kickoffController();
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
@@ -6163,6 +6221,18 @@ function boxOf(testRenderer: TestRendererSetup, id: string): Renderable {
   return found;
 }
 
+/**
+ * The command input hint row's rendered text, flattened from its `StyledText`
+ * content (`.content` is not a plain string, so it cannot be compared with
+ * `toBe`/`toMatchObject` directly). Throws if the row is missing, so a typo'd
+ * id fails loudly instead of the assertion passing vacuously.
+ */
+function commandHintText(testRenderer: TestRendererSetup): string {
+  const hint = testRenderer.renderer.root.findDescendantById('command-input-hint');
+  if (!(hint instanceof TextRenderable)) throw new Error('command-input-hint was missing');
+  return hint.content.chunks.map(chunk => chunk.text).join('');
+}
+
 /** The colors of the span carrying `needle`, which the caller expects on screen. */
 function requireSpanColors(
   testRenderer: TestRendererSetup,
@@ -6493,6 +6563,9 @@ class FakeController implements SessionController {
   }
   dismissErrorBanner(): void {
     this.publish(dismissErrorBanner(this.state));
+  }
+  clearInputError(): void {
+    this.publish(clearInputError(this.state));
   }
   cyclePaneFocus(): void {
     this.publish(cyclePaneFocus(this.state));

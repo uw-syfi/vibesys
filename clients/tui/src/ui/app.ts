@@ -276,6 +276,7 @@ export function createOpenTuiApp(
     value => void controller.submitCommand(value),
     theme,
     () => controller.focusPane('left'),
+    () => controller.clearInputError(),
   );
   /**
    * Moves the command box, and the list that completes it, into one pane.
@@ -287,7 +288,7 @@ export function createOpenTuiApp(
    */
   const hostCommandSurface = (pane: BoxRenderable): void => {
     pane.add(commandInput.suggestions);
-    pane.add(commandInput.box);
+    pane.add(commandInput.output);
   };
 
   // A slash command and a key toggle the same prompt: the controller routes the
@@ -507,7 +508,7 @@ export function createOpenTuiApp(
     // down rather than following the zoom into a pane that does not want it.
     // The key-help line goes with it, the way it did when the two shared a row.
     const showCommand = zoomedPane !== 'chat';
-    commandInput.box.visible = showCommand;
+    commandInput.output.visible = showCommand;
     if (!showCommand) commandInput.suggestions.visible = false;
     help.visible = showCommand;
     // Which pane the command box writes to, and therefore which one it is drawn
@@ -527,13 +528,14 @@ export function createOpenTuiApp(
             : transcriptFrame;
     if (nextHost !== commandHost) {
       commandHost.remove(commandInput.suggestions);
-      commandHost.remove(commandInput.box);
+      commandHost.remove(commandInput.output);
       hostCommandSurface(nextHost);
       commandHost = nextHost;
     }
     // The command list completes the box it belongs to, and on this view that
     // box cannot open a chat that is already beside it.
     commandInput.setCommandContext({chatDocked: showChatPane});
+    commandInput.render(state);
     experimentLog.setAvailableWidth(showSplit || showChatPane ? leftWidth - chatWidth : null);
     experimentLog.render(state);
     experimentLog.output.visible = showExperimentLog;
