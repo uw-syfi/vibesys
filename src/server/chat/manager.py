@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -18,8 +19,6 @@ from server.events import (
 )
 
 if TYPE_CHECKING:
-    import threading
-
     from server.chat.options import ChatRunSettings
     from server.journal import EventJournal
     from server.run_lifecycle import RunStatus
@@ -61,6 +60,7 @@ class ChatManager:
         self._condition = condition
         self._journal = journal
         self._run_status = run_status
+        self._chat_response_local = _ChatResponseLocal()
         self._fallback_answer: Callable[[str], str] | None = None
         self._default_handler: Callable[[str], str] | None = None
         self._thread_factory: ChatThreadFactory | None = None
@@ -82,6 +82,9 @@ class ChatManager:
 
     def apply_replayed_event(self, event: RunEvent) -> None:
         """Fold chat metadata from a live append or resumed journal."""
+        captures = self._chat_response_local.captures
+        if event.type is EventType.CHAT and captures:
+            captures[-1] = event
         if event.type is EventType.CHAT_THREAD_CREATED and isinstance(
             event.data, ChatThreadCreatedData
         ):
@@ -142,6 +145,18 @@ class ChatManager:
         finally:
             if handler is not None:
                 self._release_default_call()
+
+    def chat_with_event(
+        self, text: str, thread_id: str | None = None
+    ) -> tuple[str, RunEvent | None]:
+        """Answer a question and return its synchronously folded terminal event."""
+        captures = self._chat_response_local.captures
+        captures.append(None)
+        try:
+            answer = self.chat(text, thread_id)
+            return answer, captures[-1]
+        finally:
+            captures.pop()
 
     def create_thread(
         self,
@@ -365,3 +380,10 @@ def _chat_thread_title(question: str) -> str:
     cut = line[:_CHAT_THREAD_TITLE_MAX_CHARS]
     head, separator, _rest = cut.rpartition(" ")
     return f"{head.rstrip() if separator else cut}…"
+
+
+class _ChatResponseLocal(threading.local):
+    """Active request scopes awaiting a terminal chat event on this thread."""
+
+    def __init__(self) -> None:
+        self.captures: list[RunEvent | None] = []

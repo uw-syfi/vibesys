@@ -164,12 +164,11 @@ class RunApi:
         return Response(request_id=request.request_id, ack=ack)
 
     def _execute_chat(self, request: ChatQuery) -> Response:
-        sequence = self._journal.latest_sequence
-        answer = self._chat.chat(request.text, thread_id=request.thread_id)
+        answer, event = self._chat.chat_with_event(request.text, thread_id=request.thread_id)
         return Response(
             request_id=request.request_id,
             chat=ChatResult(question=request.text, answer=answer, thread_id=request.thread_id),
-            events=self._journal.read(sequence),
+            events=[] if event is None else [event],
         )
 
     def _execute_chat_thread_create(self, request: ChatThreadCreateQuery) -> Response:
