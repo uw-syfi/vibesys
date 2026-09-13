@@ -55,12 +55,12 @@ type FocusTarget = 'command' | 'chat' | 'modal';
 // matter most. All three ride one token, and the round tabs gave up `or click`
 // to pay for it: a tab is the most clickable-looking thing on the screen, while
 // `<>=` is advertised nowhere else.
-const KEY_HELP = `←→: agents/transcript · ↑↓: within · [/]: round · <>=: width · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
-const SCOPED_KEY_HELP = `←→: agents/transcript · ↑↓: within · [/]: round · <>=: width · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
-const LOG_KEY_HELP = `↑↓ or scroll: select · Enter/click: open hypothesis · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
-const LOG_CHAT_KEY_HELP = `↑↓: select · Enter/click: hypothesis · Ctrl+W: chat · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
+const KEY_HELP = `←→: agents/transcript · ↑↓: within · [/]: round · <>=: width · Tab: complete · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
+const SCOPED_KEY_HELP = `←→: agents/transcript · ↑↓: within · [/]: round · <>=: width · Tab: complete · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
+const LOG_KEY_HELP = `↑↓ or scroll: select · Enter/click: open hypothesis · Tab: complete · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
+const LOG_CHAT_KEY_HELP = `↑↓: select · Enter/click: hypothesis · Tab: complete · Ctrl+W: chat · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
 const HYPOTHESIS_KEY_HELP =
-  '↑↓: select round · Enter/click: trajectory · PgUp/PgDn: scroll · Esc: hypotheses';
+  '↑↓: select round · Enter/click: trajectory · Tab: complete · PgUp/PgDn: scroll · Esc: hypotheses';
 /** Bezel, one content row, bezel. See the header frame below. */
 const HEADER_FRAME_HEIGHT = 3;
 

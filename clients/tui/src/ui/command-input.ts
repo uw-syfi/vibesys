@@ -31,8 +31,12 @@ export interface CommandInputPanel {
 
 const COMMAND_TITLE = 'Command';
 
-/** Key hints shown on the reserved row above the box while no input error stands. */
-const RESTING_HINT = 'Enter: run · Tab: complete';
+/**
+ * The reserved row above the box is blank while no input error stands: it only
+ * holds its height, so an error never moves the layout. Bindings belong on the
+ * key-help line (tui-conventions.md, "Bindings are visible").
+ */
+const RESTING_HINT = '';
 
 /** The bordered box's own rows: top border, the input line, bottom border. */
 const BOX_CHROME = 3;

@@ -50,11 +50,12 @@ async function mount(theme: Theme, onChange: () => void = () => {}): Promise<Mou
 }
 
 describe('command input hint row', () => {
-  it('is reserved at rest, with useful key hints', async () => {
+  it('is reserved and blank at rest', async () => {
     const theme = resolveTheme('dark');
     const {hint, destroy} = await mount(theme);
     try {
-      expect(text(hint())).toBe('Enter: run · Tab: complete');
+      expect(text(hint())).toBe('');
+      expect(hint().height).toBe(1);
     } finally {
       destroy();
     }
@@ -90,7 +91,7 @@ describe('command input hint row', () => {
       expect(rgbToHex(box().borderColor).toLowerCase()).toBe(theme.error.toLowerCase());
 
       render(null);
-      expect(text(hint())).toBe('Enter: run · Tab: complete');
+      expect(text(hint())).toBe('');
       expect(rgbToHex(box().borderColor).toLowerCase()).toBe(restingColor);
     } finally {
       destroy();
