@@ -20,7 +20,8 @@
     "precheck": "pnpm --filter @vibesys/core-state^... build",
     "check": "tsc -p tsconfig.check.json",
     "pretest": "pnpm --filter @vibesys/core-state^... build",
-    "test": "bun test --max-concurrency 1 src"
+    "test": "bun test --max-concurrency 1 src",
+    "bench:run-map": "bun bench/run-map.ts"
   },
   "dependencies": {
     "@vibesys/backend-client": "workspace:*"
