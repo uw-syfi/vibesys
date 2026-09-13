@@ -42,8 +42,15 @@ Numerics note: flipping the dispatch threshold changes which kernel a given M re
 
 Status: microbench-verified (crossover measured directly by an 11-point sweep from M=16 to M=2048; not yet shipped). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, microbench-verified.
 
+## fp8-expand decode: analytical design, candidate
+
+Follows from [`aiter-fp8-moe.md`](aiter-fp8-moe.md) finding no usable existing kernel for fp8-activation, 4-bit-weight MoE on gfx942: a from-scratch design keeps weights 4-bit in memory and decodes each nibble to an fp8 e4m3fnuz byte in-register via a 16-entry permute table, rather than porting the H-A/H-B decode's bf16 sign-OR trick, since fnuz has no negative zero and byte `0x80` is NaN there. The e8m0 block scale applies to the fp32 partial sum of each K=32 block, not the fp8 operand (whose exponent range is too narrow to hold e8m0's full range); activations quantize per-token to fp8. Estimated instruction budget is about 3 to 4.5 VALU+perm per element, close to H-A's own measured 4.25/element for the exact bf16 path, so the design's real gain is not fewer decode instructions but an 8x cut in matrix-instruction issue count (one native fp8x32 MFMA call replaces eight bf16 `_1k` calls per weight column). Pre-expanding weights to fp8 in memory instead of decoding in-kernel would double weight-byte footprint and does not fit at this model's size.
+
+Scope: rocm, gfx942, this fork's MXFP4 fused MoE kernel. Status: candidate (analytical design only; no cluster job run). What would verify it: a stage1-only prototype at decode M=64 reaching at least 1.5x over this kernel's own stage1 time, with rel_l2 within the e4m3 expectation and no NaN/inf. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, candidate.
+
 ## See also
 
 - [`aiter-mxfp4-moe.md`](aiter-mxfp4-moe.md): the permute-based decode16 fix this file follows up on, and its own remaining-inefficiency note
 - [`aiter.md`](aiter.md): the stage1 scaffold-versus-templated dispatch this file's H-C retunes, and the prefill-M dispatch-threshold history that first characterized the scaffold-versus-big reduction-order difference
+- [`aiter-fp8-moe.md`](aiter-fp8-moe.md): the fp8-activation kernel survey this candidate design follows from
 - [`../../tooling/profiler.md`](../../tooling/profiler.md): the portable note on re-running the issue-bound-versus-latency-bound discriminator after an instruction-count fix

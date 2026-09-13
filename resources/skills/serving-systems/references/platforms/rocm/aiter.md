@@ -95,6 +95,10 @@ Beyond the AITER MXFP4 gate in the capability table above, every other shipped k
 
 Scope: gfx942, aiter `d9e5ef7ce0`, CK `f33252ce`. Status: verified (mechanism read from source at every row; the CK-Tile row also reproduced live). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11.
 
+### No fp8-activation MoE kernel is reachable on gfx942 either
+
+A separate question from the table above: could this checkpoint get fp8-activation (rather than bf16) MoE, paired with any 4-bit weight, via some other aiter kernel? Surveyed and refuted: the checkpoint's own scheme falls back to bf16 activations on this platform, aiter's native MXFP4 path aborts before it can pick an activation dtype, and the one kernel family that both runs on gfx942 and pairs fp8 activation with a 4-bit weight (CK "wint4") returns NaN output. Full survey, compatibility table, and both pitfalls: see [`aiter-fp8-moe.md`](aiter-fp8-moe.md).
+
 ### From-scratch HIP fused w4a16 MoE kernel: bypasses the gap above
 
 A HIP kernel that decodes e2m1 (MXFP4) nibbles via a 16-entry LUT plus an exponent add directly into `v_mfma_f32_16x16x16_bf16` B fragments works on gfx942, with no separate dequant pass and no CK weight-preshuffle step:
@@ -425,6 +429,7 @@ Writing new CDNA kernels (HIP, CK templates) is outside this collection. This fi
 
 - [`aiter-tunableop.md`](aiter-tunableop.md): PyTorch TunableOp tuned dense GEMM, full recipe and accepted numbers
 - [`aiter-mxfp4-moe.md`](aiter-mxfp4-moe.md): decode-M issue-latency pitfall detail for the fused MXFP4 MoE kernel, and its seven refuted alternatives
+- [`aiter-fp8-moe.md`](aiter-fp8-moe.md): fp8-activation x 4-bit-weight kernel survey on gfx942, why none is usable today
 - [`floor.md`](floor.md): where the fused kernel sits in the optimization floor, and the validated launch recipe
 - [`hardware.md`](hardware.md): CDNA3/CDNA4 precision support and GFX IDs
 - [`unified-memory.md`](unified-memory.md): the mem_fraction_static x0.85 multiplier this library applies, and its consequence for save-time memory math
