@@ -67,6 +67,25 @@ reuse at "previous prompt only" regardless of any radix-cache tracking
 knob; see [`../algorithms/radix-prefix-caching.md`](../algorithms/radix-prefix-caching.md)'s
 chat-template pitfall for the mechanism and the check.
 
+### Accuracy evaluation
+
+GSM8K 8-shot accuracy for this checkpoint on the accepted serving stack is
+94.1 percent (pooled across two 500-question passes), not the ~30 percent
+an earlier evaluation reported; that earlier number was an
+evaluation-harness bug (a raw completion prompt against this thinking chat
+model with no chat template), not a property of the model or the stack.
+Greedy generations are also not run-to-run text-identical on this stack,
+even at concurrency 1, from intrinsic per-request kernel and
+speculative-decoding-verify numerics rather than batch composition; use
+task accuracy with a stated standard error, not text agreement, as the
+correctness signal. See
+[`../tooling/accuracy-checker.md`](../tooling/accuracy-checker.md) for the
+evaluation protocol, the nondeterminism measurement, and the acceptance
+tolerance template.
+
+Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13,
+job-verified.
+
 ## Measured
 
 | Metric | Pre-kernel baseline (baseline_v1cfg) | Accepted config: fused MoE + skinny GEMM + mixed chunked prefill (defaults) | Scope |
