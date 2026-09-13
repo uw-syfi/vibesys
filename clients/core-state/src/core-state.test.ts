@@ -1043,6 +1043,14 @@ describe('batched transcript folding', () => {
     );
   });
 
+  it('keeps batch and sequential folds equivalent across randomized event families', () => {
+    const events = randomizedFoldEvents();
+
+    expect(reduceEventBatch(initialCoreState(), events)).toEqual(
+      events.reduce(reduceEvent, initialCoreState()),
+    );
+  });
+
   it('correlates interleaved tool results by call id within one batch', () => {
     const events = [
       toolEvent(1, 'tool_call', 'call-a', 'first'),
@@ -1502,6 +1510,39 @@ function mixedTranscriptEvents(): RunEvent[] {
     roundToolEvent(15, 'tool_call', 'call-c', 'third'),
     roundToolEvent(16, 'tool_result', 'call-c', 'third result'),
   ];
+}
+
+function randomizedFoldEvents(): RunEvent[] {
+  let seed = 0x5eed;
+  const nextRandom = (): number => {
+    seed = (seed * 1_664_525 + 1_013_904_223) >>> 0;
+    return seed;
+  };
+  const events: RunEvent[] = [];
+  for (let sequence = 1; sequence <= 96; sequence += 1) {
+    events.push(randomizedFoldEvent(sequence, nextRandom() % 8));
+  }
+  return events;
+}
+
+function randomizedFoldEvent(sequence: number, choice: number): RunEvent {
+  if (choice === 0) return outputEvent(sequence, `assistant-${sequence}`, `turn-${sequence % 3}`);
+  if (choice === 1) return channelEvent(sequence, 'diagnostic', `diagnostic-${sequence}`);
+  if (choice === 2) return toolEvent(sequence, 'tool_call', `call-${sequence}`, 'echo');
+  if (choice === 3) {
+    return toolEvent(sequence, 'tool_result', `call-${sequence - 1}`, `result-${sequence}`);
+  }
+  if (choice === 4) return todoEvent(sequence, `exec-${sequence % 4}`, `todo-${sequence}`);
+  if (choice === 5) return statusEvent(sequence, `exec-${sequence % 4}`, 'agent_output_chunk');
+  if (choice === 6) {
+    return frameworkEvent(sequence, 'gate_started', {
+      kind: 'gate_started',
+      gate: 'validation',
+      recipe: `recipe-${sequence}`,
+      command: 'bun test',
+    });
+  }
+  return roundOutputEvent(sequence, (sequence % 3) + 1);
 }
 
 function roundOutputEvent(sequence: number, round: number): RunEvent {
