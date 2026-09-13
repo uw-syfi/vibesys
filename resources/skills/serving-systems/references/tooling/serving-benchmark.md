@@ -252,6 +252,33 @@ Two byte-identical boots of the same configuration on the same node produced 3 o
 
 Scope: any engine and backend, any comparison of a stochastic per-rep failure or collapse rate. Status: verified (measured: 3/5 vs 0/5 across two identical configurations). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
+### Sequential same-node two-boot sweeps can carry a boot-order confound
+
+Staging two configurations as sequential boots on the same node (same job,
+one boot after the other, common when a held-server comparison needs only
+one config difference) does not guarantee the only thing that differs
+between them is the config. In one measured case, two boots differing only
+in a TunableOp table (13 tuned buckets added) showed a *larger* single-request
+TTFT improvement at prompt lengths entirely outside the tuned range, where
+the two configs' tables are byte-identical (-20.3 to -34.5 ms), than at the
+tuned lengths the change was supposed to help (-0.6 to -14.7 ms, mostly
+smaller than the sweep's own within-target spread). No content difference
+between the two boots can explain an improvement at a shape neither side's
+table differs on.
+
+Check: before crediting a delta to the config difference under test, compare
+the delta at a shape or setting the config change does not touch. If that
+untouched-shape delta is comparable in size to the touched-shape delta, the
+comparison is confounded by boot order or node state, not measuring the
+intended effect; a single sequential pair cannot separate the two. Confirm
+with a multi-rep, order-randomized design (alternate which config boots
+first, or run more than one pair) before trusting the delta.
+
+Scope: any engine and backend, any two-sided comparison staged as sequential
+boots on one node. Status: verified (measured: one config pair's off-target
+delta exceeded its on-target delta). Stamp: sglang-v0.5.18-rocm700-mi30x,
+2026-09-13, job-verified.
+
 ## Reading a benchmark report (skeptically)
 
 Checklist before trusting someone's numbers:
