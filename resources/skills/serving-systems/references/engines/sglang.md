@@ -312,31 +312,49 @@ Symptom: at uncapped (unbounded) concurrency around 48 sessions, a
          throughput than same-size batches elsewhere in the same run, a
          queue backlog building behind it, with tail episodes
          clustering inside about 30 second windows.
-Cause:   not fully diagnosed. Six candidates checked, five refuted: KV
-         or Mamba pool pressure (no memory, OOM, or page-reclaim signal
-         in any log); TunableOp online tuning (tuning is hard-disabled
-         at serving time, zero tuning output logged, the table is
-         read-only and unchanged); plain prefill saturation (the
-         scheduler's own instrumented throughput field reports 15x to
-         300x lower tok/s for the slow batch than same-size batches
-         moments earlier in the identical run); allocator refill after
-         a cache flush, by timing (slow batches start 14 to 183 s after
-         the preceding flush, not on the first post-flush batch, and
-         recur several times within one flush); Triton autotune (every
-         autotune key reachable from this model's prefill path is
-         pinned to a fixed value, and the on-disk autotune cache shows
-         zero writes inside any blackout window). One is not fully
-         resolved either way: an aiter tuned-shape-table miss versus a
-         hit does not discriminate the slow batch (a first-occurrence
-         shape is no more likely to be slow than a repeat shape: 5 to
-         12 percent of first-occurrence batches are slow versus 0 to 7
-         percent of no-miss batches, and 4 of 10 actual slow batches
-         carry no shape miss at all), which also refutes first-touch
-         shape cost as the main cause. Live candidate: a silent
-         caching-allocator retry inside the untuned GEMM fallback path;
-         testable only by logging `torch.cuda.memory_stats()` counters
-         (retry counts and similar), since no endpoint or log line
-         exposes them today.
+Cause:   not fully diagnosed. Six candidates checked, all six now
+         refuted: KV or Mamba pool pressure (no memory, OOM, or
+         page-reclaim signal in any log); TunableOp online tuning
+         (tuning is hard-disabled at serving time, zero tuning output
+         logged, the table is read-only and unchanged); plain prefill
+         saturation (the scheduler's own instrumented throughput field
+         reports 15x to 300x lower tok/s for the slow batch than
+         same-size batches moments earlier in the identical run);
+         allocator refill after a cache flush, by timing (slow batches
+         start 14 to 183 s after the preceding flush, not on the first
+         post-flush batch, and recur several times within one flush);
+         Triton autotune (every autotune key reachable from this
+         model's prefill path is pinned to a fixed value, and the
+         on-disk autotune cache shows zero writes inside any blackout
+         window); an aiter tuned-shape-table miss versus a hit (a
+         first-occurrence shape is no more likely to be slow than a
+         repeat shape: 5 to 12 percent of first-occurrence batches are
+         slow versus 0 to 7 percent of no-miss batches, and 4 of 10
+         actual slow batches carry no shape miss at all, which also
+         refutes first-touch shape cost as the main cause). The sixth
+         and last live candidate, a silent caching-allocator retry
+         inside the untuned GEMM fallback path, is now refuted too:
+         appending `torch.cuda.memory_stats()` counters (retries, ooms,
+         device alloc/free, reserved/allocated bytes) to every
+         scheduler batch and `flush_cache` log line and reading them
+         across 3911 logged observations (10 reps, one boot) found
+         `retries` and `ooms` at zero everywhere, without exception,
+         including at every rep-boundary flush (the largest deliberate
+         allocator-stress event available) and at every one of 184
+         milder slow-batch instances the run's own throughput-band
+         proxy signature flagged; the only counter that ever moved
+         (`dev_alloc`, by 1 to 6 at a time) moved with the same
+         distribution on slow and normal batches, so it does not
+         discriminate one from the other. Caveat: this run reproduced
+         only the milder proxy signature (batches 4x to 20x below band
+         median); it did not reproduce a severe multi-second blackout
+         (p95 TTFT turn2+ never exceeded 392 ms in 10 reps), so the
+         refutation covers the proxy signature's mechanism, not a
+         confirmed severe episode under the same counters. With all six
+         checked candidates refuted, the remaining candidates sit
+         outside this process: host-side memory reclaim under pressure
+         from something other than this process's own allocator,
+         another tenant sharing the node, or a driver-level effect.
 Fix:     none yet. Exclude affected reps symmetrically (same rule both
          sides of a paired comparison) and report both the raw and the
          collapse-excluded numbers rather than averaging over it
@@ -352,12 +370,14 @@ Scope:   sglang, uncapped concurrency around 48 sessions; not observed
          platform-specific; see [`platforms/`](../platforms/) for the
          platform-specific detail behind each refuted candidate.
 Status:  candidate (recurs across multiple separate jobs at this
-         concurrency; root-cause mechanism not yet identified, five of
-         six checked candidates refuted). What would verify it: a
-         `torch.cuda.memory_stats()` trace of an affected rep showing a
-         retry counter move at the collapse boundary, reproduced
-         against a fix. sglang-v0.5.18-rocm700-mi30x, 2026-09-13,
-         job-verified.
+         concurrency; root-cause mechanism not yet identified, all six
+         checked candidates now refuted, including the allocator-retry
+         candidate). What would verify a fix: a reproduction of the
+         severe multi-second blackout itself (not only the milder
+         throughput-band proxy) under the same
+         `torch.cuda.memory_stats()` counter logging, to check the
+         host-level candidates above against a real severe episode.
+         sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 ```
 
 ## See also
