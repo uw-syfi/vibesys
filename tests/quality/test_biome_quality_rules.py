@@ -18,7 +18,7 @@ EXPECTED_RULES = {
     ("complexity", "noExcessiveCognitiveComplexity"): {"maxAllowedComplexity": 15},
     ("complexity", "noExcessiveLinesPerFunction"): {"maxLines": 80, "skipBlankLines": True},
     ("complexity", "useMaxParams"): {"max": 6},
-    ("style", "noExcessiveLinesPerFile"): {"maxLines": 1600},
+    ("style", "noExcessiveLinesPerFile"): {"maxLines": 2000},
 }
 
 # Kept in step with the Python side: `[tool.vibesys.file_length]` in

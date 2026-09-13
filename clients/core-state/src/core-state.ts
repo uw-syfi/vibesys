@@ -1,4 +1,3 @@
-// biome-ignore lint/style/noExcessiveLinesPerFile: pre-existing; tracked: #288
 import type {Diagnostic, RunEvent, RunSnapshot, RunStatus} from '@vibesys/backend-client';
 import {
   applyExecutionStatus,
