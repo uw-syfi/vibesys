@@ -1,0 +1,52 @@
+version = 1
+
+[agent]
+domain = "microservices"
+
+[evaluator]
+source = "../../../resources/evaluators/microservice"
+
+[accuracy]
+command = [
+  "go", "-C", "evaluator", "run", "-modfile=runtime.mod",
+  "./cmd/hotel-correctness",
+  "--mode", "accuracy",
+  "--workload", "${PROJECT_ROOT}/benchmark/workload.toml",
+  "--seed", "random",
+  "--candidate-dir", "${PROJECT_ROOT}/deathstarbench/hotelReservation",
+  "--run-command-json", "[\"docker\",\"compose\",\"up\",\"-d\",\"--build\"]",
+  "--stop-command-json", "[\"docker\",\"compose\",\"kill\",\"frontend\",\"geo\",\"profile\",\"rate\",\"recommendation\",\"reservation\",\"search\",\"user\"]",
+  "--cleanup-command-json", "[\"docker\",\"compose\",\"down\",\"-v\",\"--remove-orphans\"]",
+  "--startup-timeout", "120",
+]
+timeout_seconds = 900
+
+[benchmark]
+command = [
+  "go", "-C", "_evaluator/microservice",
+  "run", "./cmd/servicebench",
+  "trace",
+  "--workload", "${PROJECT_ROOT}/benchmark/workload.toml",
+  "--seed", "random",
+  "--fixture-seed", "random",
+  "--candidate-dir", "${PROJECT_ROOT}/deathstarbench/hotelReservation",
+  "--run-command-json", "[\"sh\",\"-c\",\"rm -f /tmp/vibesys-hotel-reservation/otel/traces.otlp.ndjson && go -C \\\"$1\\\" run ./cmd/otelinject --compose \\\"$2\\\" --config \\\"$3\\\" --metrics-dir /tmp/vibesys-hotel-reservation/otel --output /tmp/vibesys-hotel-reservation/otel/compose.telemetry.yaml && docker compose -f \\\"$2\\\" -f /tmp/vibesys-hotel-reservation/otel/compose.telemetry.yaml up -d --build\",\"vibesys-hotel-run\",\"_evaluator/microservice\",\"${PROJECT_ROOT}/deathstarbench/hotelReservation/docker-compose.yml\",\"${PROJECT_ROOT}/benchmark/telemetry.toml\"]",
+  "--stop-command-json", "[\"docker\",\"compose\",\"stop\",\"-t\",\"10\",\"frontend\",\"geo\",\"profile\",\"rate\",\"recommendation\",\"reservation\",\"search\",\"user\"]",
+  "--cleanup-command-json", "[\"docker\",\"compose\",\"down\",\"-v\",\"--remove-orphans\"]",
+  "--startup-timeout", "120",
+  "--telemetry-command-json", "[\"go\",\"-C\",\"_evaluator/microservice\",\"run\",\"./cmd/otelcapture\",\"--input-json\",\"/tmp/vibesys-hotel-reservation/otel/traces.otlp.ndjson\",\"--settle-seconds\",\"5\"]",
+  "--telemetry-output", "/tmp/vibesys-hotel-reservation/otel/telemetry.json",
+  "--trace-graph-json", "/tmp/vibesys-hotel-reservation/otel/trace-graph.json",
+  "--telemetry-timeout", "60",
+]
+timeout_seconds = 360
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "primary_value"
+
+[[workspace.sources]]
+name = "deathstarbench"
+repo = "https://github.com/vibesys-playground/DeathStarBench.git"
+commit = "867806e575e1f7fb24437ae969910ddb17a76121"
+dest = "deathstarbench"

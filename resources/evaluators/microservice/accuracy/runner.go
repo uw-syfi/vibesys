@@ -190,25 +190,35 @@ func (r *Runner) Run(ctx context.Context, workload api.Workload) (result Result)
 		result.Error = err.Error()
 		return result
 	}
+	var crash func(context.Context) error
+	var start func(context.Context) error
 	var restart func(context.Context) error
 	if r.options.Lifecycle != nil {
-		restart = func(restartContext context.Context) error {
-			if err := r.options.Lifecycle.Stop(restartContext, true); err != nil {
+		crash = func(crashContext context.Context) error {
+			if err := r.options.Lifecycle.Stop(crashContext, true); err != nil {
 				return fmt.Errorf("crash candidate: %w", err)
 			}
-			if err := probing.WaitStopped(restartContext, runtime, probes, probeOptions); err != nil {
+			return probing.WaitStopped(crashContext, runtime, probes, probeOptions)
+		}
+		start = func(startContext context.Context) error {
+			if err := r.options.Lifecycle.Start(startContext); err != nil {
+				return fmt.Errorf("start candidate: %w", err)
+			}
+			return probing.WaitReady(startContext, runtime, probes, probeOptions)
+		}
+		restart = func(restartContext context.Context) error {
+			if err := crash(restartContext); err != nil {
 				return err
 			}
-			if err := r.options.Lifecycle.Start(restartContext); err != nil {
-				return fmt.Errorf("restart candidate: %w", err)
-			}
-			return probing.WaitReady(restartContext, runtime, probes, probeOptions)
+			return start(restartContext)
 		}
 	}
 	err = application.Check(ctx, runtime, api.AccuracyContext{
 		Seed:           r.options.Seed,
 		Cases:          result.RandomCases,
 		CleanupTimeout: r.options.CleanupTimeout,
+		Crash:          crash,
+		Start:          start,
 		Restart:        restart,
 	}, recorder)
 	result.Checks, result.Properties = recorder.snapshot()

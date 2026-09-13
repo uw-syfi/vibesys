@@ -1,0 +1,16 @@
+# Telemetry description consumed by cmd/otelinject for the Hotel example.
+version = 1
+collector_service_name = "jaeger"
+sample_ratio = 0.1
+
+[services]
+frontend = "jaeger-native"
+geo = "jaeger-native"
+profile = "jaeger-native"
+rate = "jaeger-native"
+recommendation = "jaeger-native"
+reservation = "jaeger-native"
+search = "jaeger-native"
+user = "jaeger-native"
+review = "jaeger-native"
+attractions = "jaeger-native"

@@ -31,7 +31,9 @@ except ProjectLayoutError as error:
     )
 DEATHSTAR_TASKS = {task.name.value: task for task in DEATHSTAR_LAYOUT.discover_tasks()}
 LEGACY_SCENARIOS = (MICROSERVICE_ROOT / "train-ticket",)
+HOTEL_CORRECTNESS_ROOT = MICROSERVICE_ROOT / "hotel-correctness"
 HOTEL_TEMP_ROOT = Path("/") / "tmp" / "vibesys-hotel-reservation" / "otel"
+HOTEL_BENCHMARK_ROOT = HOTEL_CORRECTNESS_ROOT / "benchmark"
 
 
 def _deathstar_bundle(task_name: str) -> InputBundle:
@@ -88,6 +90,7 @@ def test_microservice_scenarios_are_discovered() -> None:
         "social-network-read-timeline",
     }
     assert {path.name for path in LEGACY_SCENARIOS} == {"train-ticket"}
+    assert HOTEL_CORRECTNESS_ROOT.is_dir()
 
 
 def test_train_ticket_accuracy_uses_source_evaluator() -> None:
@@ -104,13 +107,23 @@ def test_train_ticket_accuracy_uses_source_evaluator() -> None:
 
 
 def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() -> None:
-    bundle = _deathstar_bundle("hotel-reservation")
+    bundle = load_input_bundle(HOTEL_CORRECTNESS_ROOT)
     accuracy_pairs = _adjacent_pairs(bundle.accuracy_command)
     benchmark_pairs = _adjacent_pairs(bundle.benchmark_command)
-    assert bundle.accuracy_command[:5] == (
+    assert bundle.evaluator_path == (PROJECT_ROOT / "resources" / "evaluators" / "microservice")
+    assert bundle.evaluator_package_digest is None
+    assert bundle.accuracy_command[:6] == (
         "go",
         "-C",
-        str(PROJECT_ROOT / "resources" / "evaluators" / "microservice"),
+        "evaluator",
+        "run",
+        "-modfile=runtime.mod",
+        "./cmd/hotel-correctness",
+    )
+    assert bundle.benchmark_command[:5] == (
+        "go",
+        "-C",
+        "_evaluator/microservice",
         "run",
         "./cmd/servicebench",
     )
@@ -120,11 +133,15 @@ def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() ->
     assert ("--fixture-seed", "random") in benchmark_pairs
     assert (
         "--candidate-dir",
-        f"{PROJECT_ROOT_TOKEN}/hotelReservation",
+        f"{PROJECT_ROOT_TOKEN}/deathstarbench/hotelReservation",
     ) in accuracy_pairs
     assert (
         "--workload",
-        f"{PROJECT_ROOT_TOKEN}/.vibesys/tasks/hotel-reservation/benchmark/workload.toml",
+        f"{PROJECT_ROOT_TOKEN}/benchmark/workload.toml",
+    ) in accuracy_pairs
+    assert (
+        "--workload",
+        f"{PROJECT_ROOT_TOKEN}/benchmark/workload.toml",
     ) in benchmark_pairs
     assert (
         "--run-command-json",
@@ -132,7 +149,7 @@ def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() ->
     ) in accuracy_pairs
     assert (
         "--stop-command-json",
-        '["docker","compose","stop","-t","10","frontend","geo","profile","rate",'
+        '["docker","compose","kill","frontend","geo","profile","rate",'
         '"recommendation","reservation","search","user"]',
     ) in accuracy_pairs
     assert (
@@ -151,8 +168,23 @@ def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() ->
     run_argv = json.loads(run_command)
     assert run_argv[:2] == ["sh", "-c"]
     assert 'go -C "$1" run ./cmd/otelinject' in run_argv[2]
-    assert run_argv[4] == str(PROJECT_ROOT / "resources" / "evaluators" / "microservice")
-    assert run_argv[5] == f"{PROJECT_ROOT_TOKEN}/hotelReservation/docker-compose.yml"
+    assert run_argv[4] == "_evaluator/microservice"
+    assert run_argv[5] == (
+        f"{PROJECT_ROOT_TOKEN}/deathstarbench/hotelReservation/docker-compose.yml"
+    )
+    assert run_argv[6] == f"{PROJECT_ROOT_TOKEN}/benchmark/telemetry.toml"
+    assert (HOTEL_BENCHMARK_ROOT / "workload.toml").is_file()
+    assert (HOTEL_BENCHMARK_ROOT / "telemetry.toml").is_file()
+    assert (HOTEL_CORRECTNESS_ROOT / "evaluator" / "go.mod").is_file()
+    assert (HOTEL_CORRECTNESS_ROOT / "evaluator" / "runtime.mod").is_file()
+    assert (
+        HOTEL_CORRECTNESS_ROOT / "evaluator" / "cmd" / "hotel-correctness" / "main.go"
+    ).is_file()
+    assert bundle.manifest.workspace is not None
+    assert bundle.manifest.workspace.sources[0].commit == (
+        "867806e575e1f7fb24437ae969910ddb17a76121"
+    )
+    assert bundle.manifest.workspace.sources[0].dest == "deathstarbench"
 
 
 @pytest.mark.parametrize(

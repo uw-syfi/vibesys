@@ -260,11 +260,22 @@ type AccuracyCasePolicy struct {
 	RandomExtraCases int
 }
 
+// AccuracyContext supplies application checks with reproducible generation
+// inputs and, for managed candidates, verified lifecycle transitions.
 type AccuracyContext struct {
 	Seed           int64
 	Cases          int
 	CleanupTimeout time.Duration
-	Restart        func(context.Context) error
+	// Crash force-stops a managed candidate and returns only after every
+	// readiness endpoint is unreachable. It is nil for unmanaged candidates.
+	Crash func(context.Context) error
+	// Start starts a candidate previously stopped by Crash and returns only
+	// after every readiness endpoint is ready. It is nil for unmanaged
+	// candidates.
+	Start func(context.Context) error
+	// Restart is the legacy composition of Crash followed by Start. New event
+	// programs should use the separate lifecycle hooks.
+	Restart func(context.Context) error
 }
 
 type AccuracyRecorder interface {
