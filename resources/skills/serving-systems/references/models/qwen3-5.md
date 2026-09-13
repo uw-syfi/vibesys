@@ -278,6 +278,24 @@ At the prefill extend lengths this campaign tracks, GPU kernel time for routed M
 
 Status: job-verified (N-sweep and prefill breakdown gated and cross-checked; bucket-sum vs. measured GPU-busy time within 0.4 percent). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
+### Decode remainder at N=16, term by term, measured and estimated
+
+With the MoE kernel at its floor (round wall 36.86 ms above), the remainder was decomposed term by term, with what each term is bound by and a recoverable estimate:
+
+| Term | ms/round | Bound by | Recoverable estimate | Confidence |
+|:--|--:|:--|--:|:--|
+| Dense GEMM | 5.75 | TunableOp-tuned hipBLASLt or the skinny kernel; no torch fallback dispatches in production. LM head (62080x4096) is about 83 percent of total dense weight bytes; most other shapes are launch-overhead bound (under 2 MB/call) | up to 1.6 ms/round aggregate (every shape uniformly reaching 1.2x its own byte floor, an implausible upper bound); the LM head alone plausibly accounts for 0.17-0.35 ms of that | medium (byte floor solid; the LM head's production dispatch-count assumption is not) |
+| Collectives | 3.6 | 124 launches/round of the aiter custom all-reduce (`aiter::cross_device_reduce_2stage`) at about 19 us/launch, already at the latency floor for this message size (128 KiB at batch 16); a faster all-reduce implementation cannot help a latency-bound message this small | 0.4-0.6 ms/round from cutting launch count (all-reduce plus RMSNorm fusion), not from a faster implementation | medium-high (per-launch latency floor is solid) |
+| CPU-only gap | 2.7 | host-side scheduler bookkeeping and CPU racing ahead of the GPU; unchanged from the pre-MoE-fix profile. Largest single sub-item is the scheduler's own Python control loop, about 1 ms/round | effectively 0 from a kernel change; this is host-side Python/scheduling, outside kernel scope | high |
+| Gated-DeltaNet: update kernel | 1.36 (45 launches/round) | launch granularity, not bandwidth or instruction issue: FETCH_SIZE matches its computed byte requirement almost exactly, VALU/element is only about 0.3, yet each of the 45 per-layer launches is too small (1024-4096 total waves across 228 CUs) to hide its own HBM round-trip latency | about 1.0-1.05 ms/round by packing the layer axis into one launch (candidate, not built) | medium (mechanism confirmed by ISA and counter audit; fix unbuilt) |
+| Gated-DeltaNet: fold kernel | 0.69 (1 launch/round, all layers) | HBM bandwidth: 1.79-1.82x its own read-plus-write byte floor. The kernel's own source comment records that tuning was tried and rejected (more warps would improve latency-hiding but breaks the bit-identical reduction order the numerics contract requires) | 0 (closed, no lever short of relaxing a correctness requirement) | high |
+
+The two audited Gated-DeltaNet kernels (1.36 + 0.69 = 2.05 ms) do not fully account for that bucket's roughly 3.0 ms total; the remainder is smaller conv/gating/split glue kernels not yet audited at the kernel level. See [`platforms/`](../platforms/) for the byte-floor tables, instruction-density counters, and the packing-fix design behind the two Gated-DeltaNet rows.
+
+None of the five terms individually clears about 15 percent of the round; the only candidate with a concrete, sized fix is the Gated-DeltaNet update kernel, and its predicted gain (about 1.0-1.05 ms/round) sits at the edge of this campaign's own detectable-delta floor (about 1.5 ms/round, about 0.5 ms/token). Recorded as in progress: worth the cheap microbenchmark-level test described in [`platforms/`](../platforms/) before an accept/reject call, not yet an accepted change.
+
+Status: mixed. Dense GEMM, collectives, and CPU-gap rows: job-verified (read from the same re-profile as the table above). Gated-DeltaNet classification: microbench-verified. Gated-DeltaNet packing fix: candidate. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13.
+
 ### Turn-2+ TTFT decomposition, overlap scheduler off, measured
 
 With the overlap scheduler off (previous section), a five-bucket, request-joined split of turn-2+ TTFT shows queue wait is near zero and rare (zero `NO_TOKEN` admission-budget rejections over 16830 iterations), and the single-request prefill+draft-extend forward is the dominant term, not the queue:

@@ -53,6 +53,10 @@ Each draft step (`draft_decode`) reruns the same dense projections and the LM he
 
 Changing k changes `num_draft_tokens`, which changes the `target_verify` and `draft_extend` M values (`M = batch_size x (k+1)`); `draft_decode`'s M set (`M = batch_size`) is unaffected. A table tuned for one k therefore mostly misses the verify-batch cells at a different k: retuning for a new k needs its own table over the new M set, not a reuse of the old one, or the comparison measures untuned-path misses on top of whatever the new k itself does.
 
+## Kernel audit: the replayssm-spec decode kernels
+
+The two Triton kernels this fast path dispatches per decode round (a per-layer state-update kernel and a once-per-round all-layer fold kernel) were audited for bandwidth-bound vs. launch-granularity-bound: one is at its byte floor with no further lever, the other has a concrete, unbuilt fix. See [`gated-delta-net.md`](gated-delta-net.md) for the byte-floor tables, instruction-density counters, and the candidate grid-packing fix.
+
 ## Refuted: NEXTN k=4 (5 draft tokens)
 
 A probe raised the accepted k=3 recipe above to k=4 (`--speculative-num-steps 4 --speculative-num-draft-tokens 5`), with its own TunableOp table covering the k=4 verify-batch M values (see "Interaction" above). Paired against the accepted k3 stack on one node, 3 reps at 48 sessions:
@@ -113,4 +117,5 @@ Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633510
 
 - [`floor.md`](floor.md): the base TP=4 launch recipe this recipe extends
 - [`weight-loading.md`](weight-loading.md): sharded-artifact mechanics, and the expert-parallel load-path pitfall blocking an EP-based draft/verify layout
+- [`gated-delta-net.md`](gated-delta-net.md): kernel-level audit of the two replayssm-spec decode kernels
 - [`../../algorithms/speculative-decoding.md`](../../algorithms/speculative-decoding.md): the portable contract

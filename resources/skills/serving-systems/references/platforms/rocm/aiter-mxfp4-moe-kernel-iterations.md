@@ -90,8 +90,10 @@ A fresh re-profile of the accepted stack (permute decode plus H-A dword-wide loa
 | Collectives | 3.58 | -- | -- |
 | CPU-only gap | 2.74 | -- | -- |
 | Attention | 1.14 | -- | -- |
-| Other | 3.00 | -- | -- |
+| Other (folds norm, sampling/verify glue, shared-expert kernels) | 3.00 | -- | -- |
 | **Round wall** | **36.86** (was 51.11) | **18.28** | **2.02x** (was 2.80x) |
+
+Correction: an earlier reading of this "Other" row against the post-permute stack's own residual figure treated the two as directly comparable and reported growth from about 1.7 to 3.0 ms. They are not comparable: this row folds norm, sampling/verify-glue, and shared-expert kernels together, while the post-permute-stack figure it was compared against was the bare, unfolded residual before that same fold. Reprocessing both profiles' raw traces with an identical classifier and an identical fold gives 2.79 ms (post-permute stack) to 3.00 ms (this stack), a 0.21 ms (7.3 percent) growth spread across roughly 20 already-existing small per-layer kernels (norm, residual add, SiLU, KV-cache store), consistent with ordinary run-to-run measurement noise rather than a regression from H-A/H-C. See the bucket-fold comparison pitfall in [`../../tooling/profiler.md`](../../tooling/profiler.md).
 
 At N=8, MoE routed is 1.47x its 8.78 ms floor; at N=32, 1.01x its 22.51 ms floor, essentially at the floor. The over-floor ratio keeps shrinking with batch size exactly as every prior re-profile in this campaign found (1.47x, 1.19x, 1.01x at N=8/16/32), uniformly lower than any earlier point. **This crosses MoE routed from the "1.3x to 3x: tuning and overhead" band into the "under 1.3x: at the floor for this design" band** in the optimization-loop skill's own stop-criterion table. Round wall stays at 1.9x to 2.3x its own floor at every N: the non-MoE buckets (dense GEMM, Gated DeltaNet, collectives, CPU-only gap) did not shrink along with MoE, so they now make up most of a much smaller round; see the stop-criterion note in [`../../models/qwen3-5.md`](../../models/qwen3-5.md).
 
