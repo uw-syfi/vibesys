@@ -475,7 +475,6 @@ function earliestTimestamp(
   return new Date(right).getTime() < new Date(left).getTime() ? right : left;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 function updateRoundAgentElapsed(
   round: RoundSummary,
   phases: AgentPhase[],
@@ -487,21 +486,20 @@ function updateRoundAgentElapsed(
     if (event.type !== 'round_finished') return round;
     return closeActiveAgentTimings(round, event.timestamp, event.sequence ?? null);
   }
-  if (event.type === 'phase_started' || event.type === 'phase_finished') {
-    const executionId = event.execution_id ?? event.invocation_id;
-    const existing = phases.find(
-      phase =>
-        executionId != null &&
-        phase.executionId === executionId &&
-        phase.kind === event.agent_kind &&
-        phase.roundNumber === roundNumberFromLabel(event.round_label),
-    );
-    if (
-      (started && existing?.status === 'active') ||
-      (finished && existing !== undefined && existing.status !== 'active')
-    ) {
-      return round;
-    }
-  }
+  if (compatibilityPhaseTimingAlreadyApplied(phases, event)) return round;
   return started ? startAgentTiming(round, event) : finishAgentTiming(round, event);
+}
+
+function compatibilityPhaseTimingAlreadyApplied(phases: AgentPhase[], event: RunEvent): boolean {
+  if (event.type !== 'phase_started' && event.type !== 'phase_finished') return false;
+  const executionId = event.execution_id ?? event.invocation_id;
+  if (executionId == null) return false;
+  const existing = phases.find(
+    phase =>
+      phase.executionId === executionId &&
+      phase.kind === event.agent_kind &&
+      phase.roundNumber === roundNumberFromLabel(event.round_label),
+  );
+  if (event.type === 'phase_started') return existing?.status === 'active';
+  return existing !== undefined && existing.status !== 'active';
 }
