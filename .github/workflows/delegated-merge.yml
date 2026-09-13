@@ -1,4 +1,4 @@
-name: Scoped TUI and server merge
+name: Delegated merge
 
 on:
   issue_comment:
@@ -11,14 +11,14 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: scoped-merge-${{ github.event.issue.number }}
+  group: delegated-merge-${{ github.event.issue.number }}
   cancel-in-progress: false
 
 jobs:
   merge:
     if: >-
       github.event.issue.pull_request &&
-      github.event.comment.body == '/merge-tui'
+      startsWith(github.event.comment.body, '/merge-')
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -34,5 +34,5 @@ jobs:
       - name: Authorize and merge
         env:
           GH_TOKEN: ${{ github.token }}
-          SCOPED_MERGE_USERS: ${{ vars.SCOPED_MERGE_USERS }}
-        run: python3 scripts/scoped_merge.py --event "$GITHUB_EVENT_PATH"
+          DELEGATED_MERGE_GRANTS: ${{ vars.DELEGATED_MERGE_GRANTS }}
+        run: python3 scripts/delegated_merge.py --event "$GITHUB_EVENT_PATH"

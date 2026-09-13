@@ -1,4 +1,4 @@
-"""Contracts for path-scoped pull request merging."""
+"""Contracts for capability-scoped pull request merging."""
 
 from __future__ import annotations
 
@@ -10,18 +10,24 @@ from pathlib import Path
 
 import pytest
 import yaml
-from scripts.scoped_merge import (
+from scripts.delegated_merge import (
+    Check,
     Event,
     GitHubAPI,
     GitHubAPIError,
     MergeRefusalError,
+    Policy,
+    Rule,
+    authorize_capabilities,
+    authorize_check_job,
     authorize_event,
     authorize_files,
     authorize_pull_request,
     authorize_repository_access,
-    authorize_workflow,
+    load_grants,
     load_policy,
     run,
+    select_workflow_run,
 )
 
 REPO_ROOT = Path(__file__).parents[2]
@@ -34,7 +40,7 @@ def _event(**changes: object) -> Event:
         "actor": "maintainer",
         "actor_type": "User",
         "action": "created",
-        "body": "/merge-tui",
+        "body": "/merge-scoped",
         "is_pull_request": True,
     }
     values.update(changes)
@@ -60,22 +66,32 @@ def _pull(**changes: object) -> dict[str, object]:
 
 def test_policy_accepts_only_exact_delegated_paths_and_both_sides_of_renames() -> None:
     policy = load_policy()
-    authorize_files(
+    capabilities, checks = authorize_files(
         [[{"filename": "clients/tui/src/view.ts", "previous_filename": "src/server/view.py"}]],
         changed_files=1,
         policy=policy,
     )
+    assert capabilities == {"tui", "server"}
+    assert checks == {"pr-ci"}
 
     for filename in [
         "clients/tui/package.json",
         "clients/tuition/view.ts",
         "src/entrypoints/server.py",
-        ".github/scoped-merge.toml",
         "src/server/../vibesys/core.py",
         "src/server\\escape.py",
     ]:
-        with pytest.raises(MergeRefusalError, match="outside"):
+        with pytest.raises(MergeRefusalError, match=r"does not match|safe repository"):
             authorize_files([[{"filename": filename}]], changed_files=1, policy=policy)
+
+    for controlled_path in [
+        ".github/delegated-merge.toml",
+        ".github/workflows/delegated-merge.yml",
+        ".github/workflows/test.yml",
+        "scripts/delegated_merge.py",
+    ]:
+        with pytest.raises(MergeRefusalError, match="controlled by"):
+            authorize_files([[{"filename": controlled_path}]], changed_files=1, policy=policy)
 
     with pytest.raises(MergeRefusalError, match=r"old/location\.py"):
         authorize_files(
@@ -83,6 +99,60 @@ def test_policy_accepts_only_exact_delegated_paths_and_both_sides_of_renames() -
             changed_files=1,
             policy=policy,
         )
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ("schema_version = 1", "schema_version = 2", "schema_version"),
+        ('command = "/merge-scoped"', 'command = "/land"', "must start"),
+        ('required_checks = ["pr-ci"]', "required_checks = []", "at least one"),
+        ('workflow_file = "test.yml"', 'workflow_file = "../test.yml"', "workflow filename"),
+        ('requires = ["tui"]', "requires = []", "at least one capability"),
+        (
+            "additional_checks = []",
+            'additional_checks = ["undefined"]',
+            "undefined checks",
+        ),
+    ],
+)
+def test_policy_rejects_invalid_contracts(tmp_path: Path, old: str, new: str, message: str) -> None:
+    policy_path = tmp_path / "policy.toml"
+    policy_path.write_text(
+        (REPO_ROOT / ".github" / "delegated-merge.toml").read_text().replace(old, new, 1)
+    )
+
+    with pytest.raises(MergeRefusalError, match=message):
+        load_policy(policy_path)
+
+
+def test_file_rules_union_every_matching_capability_and_check() -> None:
+    policy = load_policy()
+    overlapping = Policy(
+        schema_version=policy.schema_version,
+        command=policy.command,
+        repository=policy.repository,
+        base_branch=policy.base_branch,
+        merge_method=policy.merge_method,
+        required_checks=policy.required_checks,
+        checks={**policy.checks, "security": Check("security.yml", "Security")},
+        rules=(
+            *policy.rules,
+            Rule(
+                prefixes=("src/",),
+                paths=frozenset(),
+                requires=frozenset({"platform"}),
+                additional_checks=frozenset({"security"}),
+            ),
+        ),
+    )
+
+    capabilities, checks = authorize_files(
+        [[{"filename": "src/server/events.py"}]], changed_files=1, policy=overlapping
+    )
+
+    assert capabilities == {"server", "platform"}
+    assert checks == {"pr-ci", "security"}
 
 
 def test_file_validation_fails_closed_on_empty_truncated_or_oversized_diffs() -> None:
@@ -98,9 +168,9 @@ def test_file_validation_fails_closed_on_empty_truncated_or_oversized_diffs() ->
 @pytest.mark.parametrize(
     ("changes", "message"),
     [
-        ({"actor": "stranger"}, "not an authorized"),
-        ({"actor_type": "Bot"}, "not an authorized"),
-        ({"body": "/merge-tui now"}, "exact command"),
+        ({"actor_type": "Bot"}, "must be a GitHub user"),
+        ({"body": "/merge-scoped now"}, "exact command"),
+        ({"body": "/merge-scoped "}, "exact command"),
         ({"repository": "other/repo"}, "not for"),
         ({"is_pull_request": False}, "pull request comment"),
     ],
@@ -109,12 +179,32 @@ def test_event_authorization_rejects_wrong_actor_or_scope(
     changes: dict[str, object], message: str
 ) -> None:
     with pytest.raises(MergeRefusalError, match=message):
-        authorize_event(_event(**changes), load_policy(), "maintainer, someone-else")
+        authorize_event(_event(**changes), load_policy())
 
 
-def test_event_authorization_requires_configured_users() -> None:
-    with pytest.raises(MergeRefusalError, match="no scoped merge maintainers"):
-        authorize_event(_event(), load_policy(), "")
+def test_grants_are_case_insensitive_and_require_every_capability() -> None:
+    grants = load_grants('{"MainTainer": ["tui", "server"], "admin": ["*"]}')
+    authorize_capabilities(grants, actor="maintainer", required=frozenset({"tui", "server"}))
+    authorize_capabilities(grants, actor="ADMIN", required=frozenset({"future"}))
+    with pytest.raises(MergeRefusalError, match="lacks required capabilities"):
+        authorize_capabilities(grants, actor="maintainer", required=frozenset({"platform"}))
+    with pytest.raises(MergeRefusalError, match="no delegated merge grant"):
+        authorize_capabilities(grants, actor="stranger", required=frozenset({"tui"}))
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        "",
+        "[]",
+        '{"Alice": ["tui"], "alice": ["server"]}',
+        '{"alice": []}',
+        '{"alice": ["not valid"]}',
+    ],
+)
+def test_grants_reject_malformed_or_ambiguous_documents(document: str) -> None:
+    with pytest.raises(MergeRefusalError):
+        load_grants(document)
 
 
 def test_repository_access_is_checked_live() -> None:
@@ -148,43 +238,36 @@ def test_pull_request_authorization_requires_exact_clean_destination(
         authorize_pull_request(_pull(**changes), policy=load_policy(), expected_number=42)
 
 
-def test_workflow_authorization_requires_latest_current_head_success() -> None:
-    authorize_workflow(
-        {
-            "workflow_runs": [
-                {
-                    "id": 1,
-                    "head_sha": "abc123",
-                    "event": "pull_request",
-                    "status": "completed",
-                    "conclusion": "success",
-                }
-            ]
-        },
-        head_sha="abc123",
+def test_check_authorization_uses_latest_exact_head_run_and_exact_job() -> None:
+    runs = {
+        "workflow_runs": [
+            {"id": 1, "head_sha": "old", "event": "pull_request"},
+            {"id": 2, "head_sha": "abc123", "event": "push"},
+            {"id": 3, "head_sha": "abc123", "event": "pull_request"},
+            {"id": 4, "head_sha": "abc123", "event": "pull_request"},
+        ]
+    }
+    assert select_workflow_run(runs, head_sha="abc123", check_id="pr-ci") == 4
+    authorize_check_job(
+        [{"jobs": [{"name": "Required PR CI", "status": "completed", "conclusion": "success"}]}],
+        check_id="pr-ci",
+        job_name="Required PR CI",
     )
-    with pytest.raises(MergeRefusalError, match="has not succeeded"):
-        authorize_workflow(
+
+    for jobs in [
+        [{"jobs": []}],
+        [{"jobs": [{"name": "Required PR CI", "status": "completed", "conclusion": "failure"}]}],
+        [
             {
-                "workflow_runs": [
-                    {
-                        "id": 1,
-                        "head_sha": "abc123",
-                        "event": "pull_request",
-                        "status": "completed",
-                        "conclusion": "success",
-                    },
-                    {
-                        "id": 2,
-                        "head_sha": "abc123",
-                        "event": "pull_request",
-                        "status": "in_progress",
-                        "conclusion": None,
-                    },
+                "jobs": [
+                    {"name": "Required PR CI", "status": "completed", "conclusion": "success"},
+                    {"name": "Required PR CI", "status": "completed", "conclusion": "success"},
                 ]
-            },
-            head_sha="abc123",
-        )
+            }
+        ],
+    ]:
+        with pytest.raises(MergeRefusalError):
+            authorize_check_job(jobs, check_id="pr-ci", job_name="Required PR CI")
 
 
 class FakeGitHubAPI:
@@ -210,11 +293,21 @@ class FakeGitHubAPI:
                         "id": 7,
                         "head_sha": "abc123",
                         "event": "pull_request",
-                        "status": "completed",
-                        "conclusion": "success",
                     }
                 ]
             }
+        if endpoint.endswith("/actions/runs/7/jobs?per_page=100") and paginate:
+            return [
+                {
+                    "jobs": [
+                        {
+                            "name": "Required PR CI",
+                            "status": "completed",
+                            "conclusion": "success",
+                        }
+                    ]
+                }
+            ]
         pytest.fail(f"unexpected GET {endpoint}")
 
     def write(self, endpoint: str, *, method: str, payload: Mapping[str, object]) -> object:
@@ -230,7 +323,7 @@ def _write_event(path: Path) -> None:
                 "repository": {"full_name": "uw-syfi/vibesys"},
                 "issue": {"number": 42, "pull_request": {"url": "unused"}},
                 "comment": {
-                    "body": "/merge-tui",
+                    "body": "/merge-scoped",
                     "user": {"login": "maintainer", "type": "User"},
                 },
             }
@@ -243,7 +336,7 @@ def test_complete_merge_rechecks_head_and_sends_atomic_squash_request(tmp_path: 
     _write_event(event_path)
     api = FakeGitHubAPI()
 
-    assert run(event_path, authorized_users="maintainer", api=api) == "merge456"
+    assert run(event_path, grants_json='{"maintainer": ["server"]}', api=api) == "merge456"
     assert api.pull_reads == 2
     assert api.writes == [
         (
@@ -260,13 +353,13 @@ def test_complete_merge_refuses_head_change_before_write(tmp_path: Path) -> None
     api = FakeGitHubAPI(refreshed_sha="new789")
 
     with pytest.raises(MergeRefusalError, match="changed during validation"):
-        run(event_path, authorized_users="maintainer", api=api)
+        run(event_path, grants_json='{"maintainer": ["server"]}', api=api)
 
     assert api.writes == []
 
 
 def test_workflow_uses_trusted_default_branch_and_pinned_actions() -> None:
-    path = REPO_ROOT / ".github" / "workflows" / "scoped-merge.yml"
+    path = REPO_ROOT / ".github" / "workflows" / "delegated-merge.yml"
     text = path.read_text()
     workflow = yaml.safe_load(text)
     jobs = workflow["jobs"]
@@ -281,6 +374,8 @@ def test_workflow_uses_trusted_default_branch_and_pinned_actions() -> None:
         "pull-requests": "read",
     }
     assert "github.event.repository.default_branch" in text
+    assert "startsWith(github.event.comment.body, '/merge-')" in text
+    assert "/merge-scoped" not in text
     assert "persist-credentials: false" in text
     assert "github.event.pull_request.head" not in text
     assert "github.event.comment.body" not in "\n".join(step.get("run", "") for step in steps)
@@ -290,11 +385,16 @@ def test_workflow_uses_trusted_default_branch_and_pinned_actions() -> None:
             assert re.fullmatch(r"[0-9a-f]{40}", reference)
     assert "actions/create-github-app-token" not in text
     assert "GH_TOKEN: ${{ github.token }}" in text
+    assert "DELEGATED_MERGE_GRANTS: ${{ vars.DELEGATED_MERGE_GRANTS }}" in text
 
 
-def test_test_workflow_exposes_stable_scoped_merge_gate() -> None:
+def test_test_workflow_exposes_required_ci_and_compatibility_alias() -> None:
     workflow = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "test.yml").read_text())
-    gate = workflow["jobs"]["scoped-merge-gate"]
+    gate = workflow["jobs"]["required-pr-ci"]
     assert gate["if"] == "always()"
     assert "typecheck" in gate["needs"]
     assert "ci-budget" not in gate["needs"]
+    assert gate["name"] == "Required PR CI"
+    alias = workflow["jobs"]["scoped-merge-gate"]
+    assert alias["needs"] == "required-pr-ci"
+    assert alias["name"] == "Scoped merge gate"
