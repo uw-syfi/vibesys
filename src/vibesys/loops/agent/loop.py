@@ -1155,9 +1155,7 @@ def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
     official_eval_every: int = 3,
     provisional_candidates: int = 0,
     official_eval_cadence_due: bool = False,
-    active_component: str = "",
-    ledger_text: str = "",
-    ranked_bottlenecks: list[dict[str, object]] | None = None,
+    bottleneck_walk: bottleneck_ledger.BottleneckWalk | None = None,
 ) -> OrchestratorPlan:
     domain_orchestrator = render_domain_section(
         domain_definition,
@@ -1183,9 +1181,7 @@ def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
         official_eval_every=official_eval_every,
         provisional_candidates=provisional_candidates,
         official_eval_cadence_due=official_eval_cadence_due,
-        active_component=active_component,
-        ledger_text=ledger_text,
-        ranked_bottlenecks=ranked_bottlenecks or [],
+        **(bottleneck_walk.plan_prompt_context() if bottleneck_walk else {}),
     )
     # One corrective reprompt: a plan that fails lifecycle validation (for
     # example a hypothesis_id already used in this run) is a recoverable agent
@@ -1410,7 +1406,7 @@ def _run_implementer(  # noqa: PLR0913  # tracked: #288
     official_evaluation_due: bool = False,
     official_evaluation_reason: str | None = None,
     prior_attempt_artifact_locations: tuple[str, ...] = (),
-    active_component: str = "",
+    bottleneck_walk: bottleneck_ledger.BottleneckWalk | None = None,
 ) -> _ImplementerAttempt:
     plan.recommended_skills, resolved_skills = _validate_skill_selections(
         ctx, plan.recommended_skills
@@ -1468,7 +1464,7 @@ def _run_implementer(  # noqa: PLR0913  # tracked: #288
         official_evaluation_reason=official_evaluation_reason,
         recommended_skills=resolved_skills,
         prior_attempt_artifact_locations=prior_attempt_artifact_locations,
-        active_component=active_component,
+        **(bottleneck_walk.implementer_prompt_context() if bottleneck_walk else {}),
     )
     # Make this attempt number durable before the turn starts. A process killed
     # mid-invoke writes no completed artifact, so a resume that counted only
@@ -2474,7 +2470,6 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         project_root=str(ctx.project_root),
         objective=objective,
     )
-
     roadmap_path, progress_path = issue_board.resolve_paths(ctx.workspace, memory_layout)
     issue_board.ensure_progress_file(progress_path)
     issue_board.ensure_roadmap_file(roadmap_path)
@@ -2483,7 +2478,6 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     roadmap_location = issue_board.display_path(roadmap_path, ctx.workspace)
     pareto_archive_path = issue_board.pareto_archive_path(progress_path)
     pareto_archive_location = issue_board.display_path(pareto_archive_path, ctx.workspace)
-
     portable_agent_state = ctx.state.portable(RunStateNamespace.AGENT)
     local_agent_state = ctx.state.local(RunStateNamespace.AGENT)
     state_store = AgentRunStateStore(portable_agent_state)
@@ -2504,17 +2498,14 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         active_hypothesis, agent_run_state.rounds
     ):
         agent_run_state = update_active_hypothesis(agent_run_state, active_hypothesis)
-
     # Replace the legacy portable namespace exactly, then remove the local
     # restart checkpoint only after its unified replacement is committed.
     state_store.save(agent_run_state)
     state_store.cleanup_legacy_portable([record.round_number for record in legacy_records])
     ctx.state.commit("agent: migrate unified hypothesis state", state_store.namespace)
     state_store.cleanup_legacy_local(local_agent_state)
-
     round_history = RoundHistory(records=agent_run_state.rounds)
     records = round_history.records
-
     carry = _CarryOver(regression_info=_terminal_workspace_notice(records))
     round_number = start_round if start_round is not None else len(records) + 1
     if round_number > max_rounds:
@@ -2545,16 +2536,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     # rounds. The first round has no prior profile to feed forward.
     last_single_agent_response: SingleAgentRoundResponse | None = None
     last_profile_focus: str = "general latency hotspots on /v1/completions"
-
-    # Framework-owned bottleneck-walk cursor for the ``dataflow_opt`` modality.
-    # Durable at ``log_dir/bottlenecks.json`` (outside the git-tracked workspace)
-    # so the walk survives ``--resume``. For every other modality the ledger
-    # stays empty and ``active_component`` stays "", so the prompts render
-    # identically to before (all ledger/focus blocks are ``{% if %}``-guarded).
-    bottleneck_ledger_path = ctx.log_dir / "bottlenecks.json"
-    ledger = bottleneck_ledger.load_ledger(bottleneck_ledger_path)
-    active_component: str = ledger.get("active_component") or ""
-
+    walk = bottleneck_ledger.BottleneckWalk.create(ctx, modality)
     try:
         while round_number <= max_rounds:
             ctx.switch_log_file(f"round{round_number:03d}")
@@ -2564,7 +2546,6 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
             )
             round_progress = RoundProgress(round_number, max_rounds)
             ctx.lprint(f"\n{'=' * 60}\n  {round_progress.label()}\n{'=' * 60}\n")
-
             with ctx.progress(round_progress):
                 # The designer runs only when selecting a new causal claim.
                 # A continuing hypothesis remains owned by its persistent
@@ -2605,43 +2586,6 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         profiler_summary = _profiler_summary_from_single_agent(
                             last_single_agent_response
                         )
-
-                    # Framework-owned bottleneck walk (dataflow_opt only). Run
-                    # deterministic attribution over the *unmodified* candidate,
-                    # merge the ranking into the durable ledger, and let the
-                    # framework -- not the LLM -- pick the round's active
-                    # component (top-ranked non-exhausted). The orchestrator's
-                    # ``active_component`` output is a soft override honored only
-                    # if it names a known, non-exhausted component; the
-                    # pre-round decision may request one for this round.
-                    ledger_text = ""
-                    ranked_bottlenecks_view: list[dict[str, object]] = []
-                    if modality == "dataflow_opt":
-                        attribution = bottleneck_ledger.run_attribution(
-                            ctx, round_number=round_number
-                        )
-                        if attribution is not None:
-                            bottleneck_ledger.repopulate_from_attribution(
-                                ledger, attribution, round_number=round_number
-                            )
-                            ranked_bottlenecks_view = bottleneck_ledger.ranked_bottlenecks(
-                                attribution
-                            )
-                        override = pre_decision.active_component if pre_decision is not None else ""
-                        active_component = (
-                            bottleneck_ledger.select_active_component(
-                                ledger, override=override or None
-                            )
-                            or ""
-                        )
-                        bottleneck_ledger.save_ledger(bottleneck_ledger_path, ledger)
-                        ledger_text = bottleneck_ledger.format_for_prompt(ledger)
-                        if active_component:
-                            ctx.lprint(
-                                f"[ledger] round {round_number} active component: "
-                                f"{active_component}"
-                            )
-
                     plateau_warning = _detect_plateau(records)
                     provisional_candidates = _provisional_candidates_since_official(records)
                     plan = _run_orchestrator_plan(
@@ -2665,9 +2609,10 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         official_eval_cadence_due=(
                             provisional_candidates + 1 >= official_eval_every
                         ),
-                        active_component=active_component,
-                        ledger_text=ledger_text,
-                        ranked_bottlenecks=ranked_bottlenecks_view,
+                        bottleneck_walk=walk.prepare_round(
+                            round_number=round_number,
+                            override=pre_decision.active_component if pre_decision else None,
+                        ),
                     )
                     parent_round = (
                         plan.revert_to_round
@@ -2720,7 +2665,6 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                     ctx.lprint(
                         f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped"
                     )
-
                 planned_official_reason = _official_evaluation_reason(
                     records=records,
                     round_number=round_number,
@@ -2729,13 +2673,11 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                     requested=plan.request_official_evaluation,
                     candidate_ready=True,
                 )
-
                 # No early stop: the loop always consumes the full max_rounds
                 # budget. Previously OrchestratorPlan had a ``done`` field that
                 # could halt the loop; it was removed because the orchestrator
                 # can't reliably tell when the objective is "fully met" and
                 # early-stopping masks further optimization opportunities.
-
                 # --- Optional rollback ---
                 if plan.revert_to_round is not None and not active_hypothesis.revert_applied:
                     target = next(
@@ -2791,7 +2733,6 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                             f"cannot revert: no commit recorded for round {plan.revert_to_round}",
                             source=FrameworkSource.LOOP,
                         )
-
                 # --- Implementer / Judge retry loop ---
                 # Round-scoped accumulators: these describe the round as a
                 # whole and intentionally survive every attempt (the best
@@ -2876,7 +2817,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                             official_evaluation_due=(planned_official_reason is not None),
                             official_evaluation_reason=planned_official_reason,
                             prior_attempt_artifact_locations=prior_attempt_artifact_locations,
-                            active_component=active_component,
+                            bottleneck_walk=walk,
                         )
                         implementation = attempt.response
                         if attempt.synthesized:
@@ -3257,7 +3198,6 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                             active_hypothesis,
                             label=f"agent: checkpoint hypothesis {plan.hypothesis_id}",
                         )
-
                 # --- Record round result & update carry-over ---
                 # Only the final attempt describes the round, so its outcome is
                 # the one the record and the lifecycle transition read.
@@ -3386,7 +3326,6 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                     candidate_evaluation_artifact = None
                     candidate_operating_point = ""
                     candidate_retention_reason = ""
-
                 # A framework-gate retry may correctly return no fresh candidate
                 # row. Preserve the judge-approved provisional evidence for the
                 # unchanged checkpoint just as canonical evidence is preserved.
@@ -3725,36 +3664,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                 # a rejected review keeps the same claim plus reviewer feedback
                 # so the implementer can address it on the next round.
                 ctx.persist_completed_round()
-
-                # Advance the bottleneck walk with this round's outcome. Only
-                # the active component's counters move; a component-scoped
-                # plateau flips it to ``exhausted`` so the next new-hypothesis
-                # round selects the next component. The walk metric is a
-                # higher-is-better CPU reduction ratio (baseline / candidate);
-                # a failed or unmeasured round still spends the component so a
-                # stuck one eventually exhausts. No-op off ``dataflow_opt``.
-                if modality == "dataflow_opt" and active_component:
-                    walk_metric: float | None = None
-                    if (
-                        official_metric is not None
-                        and official_metric > 0
-                        and baseline_metric is not None
-                        and baseline_metric > 0
-                    ):
-                        walk_metric = baseline_metric / official_metric
-                    bottleneck_ledger.advance_after_round(
-                        ledger,
-                        active_component,
-                        round_number=round_number,
-                        passed=passed,
-                        walk_metric=walk_metric,
-                    )
-                    bottleneck_ledger.save_ledger(bottleneck_ledger_path, ledger)
-                    # The next new-hypothesis round re-selects from the ledger;
-                    # if the active component just exhausted, drop the stale
-                    # focus so a continuation round doesn't reuse it.
-                    active_component = ledger.get("active_component") or ""
-
+                walk.advance_round(round_number, (passed, official_metric, baseline_metric))
                 agent_run_state = next_agent_run_state
                 active_hypothesis = agent_run_state.active_hypothesis
                 ctx.events.emit(

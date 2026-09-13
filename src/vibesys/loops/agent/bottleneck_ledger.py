@@ -22,6 +22,7 @@ import contextlib
 import json
 import shlex
 import uuid
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -49,6 +50,90 @@ _ATTRIBUTION_END_MARKER = "__VIBESYS_ATTRIBUTION_END__"
 _ATTRIBUTION_TIMEOUT_S = 1800
 
 _LEDGER_STATUSES = ("open", "active", "exhausted")
+
+
+@dataclass
+class BottleneckWalk:
+    """Own the loop-facing state and lifecycle of a modality bottleneck walk."""
+
+    ctx: LoopContext
+    enabled: bool
+    path: Path
+    ledger: dict[str, Any]
+    active_component: str = ""
+    ledger_text: str = ""
+    ranked_bottlenecks: list[dict[str, object]] = field(default_factory=list)
+
+    @classmethod
+    def create(cls, ctx: LoopContext, modality: str | None) -> BottleneckWalk:
+        """Load durable walk state and enable orchestration for ``dataflow_opt``."""
+        path = ctx.log_dir / "bottlenecks.json"
+        ledger = load_ledger(path)
+        return cls(
+            ctx=ctx,
+            enabled=modality == "dataflow_opt",
+            path=path,
+            ledger=ledger,
+            active_component=ledger.get("active_component") or "",
+        )
+
+    def prepare_round(self, *, round_number: int, override: str | None) -> BottleneckWalk:
+        """Refresh attribution and select the component focus for a planning round."""
+        self.ledger_text = ""
+        self.ranked_bottlenecks = []
+        if not self.enabled:
+            return self
+        attribution = run_attribution(self.ctx, round_number=round_number)
+        if attribution is not None:
+            repopulate_from_attribution(self.ledger, attribution, round_number=round_number)
+            self.ranked_bottlenecks = ranked_bottlenecks(attribution)
+        self.active_component = select_active_component(self.ledger, override=override) or ""
+        save_ledger(self.path, self.ledger)
+        self.ledger_text = format_for_prompt(self.ledger)
+        if self.active_component:
+            self.ctx.lprint(
+                f"[ledger] round {round_number} active component: {self.active_component}"
+            )
+        return self
+
+    def plan_prompt_context(self) -> dict[str, object]:
+        """Return template variables consumed by the orchestrator plan."""
+        return {
+            "active_component": self.active_component,
+            "ledger_text": self.ledger_text,
+            "ranked_bottlenecks": self.ranked_bottlenecks,
+        }
+
+    def implementer_prompt_context(self) -> dict[str, object]:
+        """Return template variables consumed by the implementer."""
+        return {"active_component": self.active_component}
+
+    def advance_round(
+        self,
+        round_number: int,
+        outcome: tuple[bool, float | None, float | None],
+    ) -> None:
+        """Record a completed round and update the next component focus."""
+        passed, official_metric, baseline_metric = outcome
+        if not (self.enabled and self.active_component):
+            return
+        walk_metric = None
+        if (
+            official_metric is not None
+            and official_metric > 0
+            and baseline_metric is not None
+            and baseline_metric > 0
+        ):
+            walk_metric = baseline_metric / official_metric
+        advance_after_round(
+            self.ledger,
+            self.active_component,
+            round_number=round_number,
+            passed=passed,
+            walk_metric=walk_metric,
+        )
+        save_ledger(self.path, self.ledger)
+        self.active_component = self.ledger.get("active_component") or ""
 
 
 # ---------------------------------------------------------------------------

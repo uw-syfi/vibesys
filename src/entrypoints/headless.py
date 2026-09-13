@@ -132,7 +132,6 @@ _RUN_ENVIRONMENT_OPTION_CLI_FIELDS: dict[str, str] = {
     "modal_model_volume": "model_volume",
     "modal_app": "app",
 }
-
 _AGENT_RESUME_CLI_FIELDS: dict[str, str] = {
     "inner_loop": "inner_loop",
     "interface": "interface",
