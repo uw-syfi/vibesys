@@ -15,7 +15,7 @@ import pytest
 from vibesys.input_manifest import load_input_bundle
 
 _REPO = Path(__file__).resolve().parents[2]
-_BUNDLE = _REPO / "examples" / "differential-dataflow-cpu-bench"
+_BUNDLE = _REPO / "examples" / "database" / "differential-dataflow"
 _PINNED_COMMIT = "4f05cbb61775a45844a0905de9dacfee1e91dd80"
 
 

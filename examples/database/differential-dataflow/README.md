@@ -117,7 +117,7 @@ uv run python profiler/attribute_cpu.py \
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
 vibesys --headless --outer-loop agent \
-  --input examples/differential-dataflow-cpu-bench \
+  --input examples/database/differential-dataflow \
   --runs-dir /work/vibesys-runs --local \
   --exp-name dd-superopt \
   --backend cpu \
@@ -146,7 +146,7 @@ contract from the copied project root:
 ## Files
 
 ```
-examples/differential-dataflow-cpu-bench/
+examples/database/differential-dataflow/
 ├── vibesys.input.toml               # manifest: database domain, strict checker/benchmark commands, 2 workspace sources
 ├── objectives.toml                  # metric direction (cpu_seconds, min) + pareto noise
 ├── OBJECTIVE.md                     # target spec (read by the orchestrator)
