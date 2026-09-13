@@ -629,6 +629,44 @@ jobs:
           VIBESYS_REQUIRE_SANDBOX_TESTS: "1"
         run: uv run python -m pytest tests/vibesys/agents/test_hostsandbox.py -v
 
+  # One stable, always-present result for protected-branch automation. Filtered
+  # jobs may skip, but every job that ran must succeed. Keep this independent
+  # of ci-budget, which is intentionally advisory and does not depend on
+  # typecheck.
+  scoped-merge-gate:
+    name: Scoped merge gate
+    needs:
+      - changes
+      - python-checks
+      - typecheck
+      - tui
+      - queue-native
+      - validate-examples
+      - agent-image
+      - test
+      - sandbox-linux
+      - sandbox-macos
+    if: always()
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Require every applicable test job to succeed
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          results = {
+              name: details["result"]
+              for name, details in json.loads(os.environ["JOB_RESULTS"]).items()
+          }
+          failed = {name: result for name, result in results.items() if result not in {"success", "skipped"}}
+          if failed:
+              raise SystemExit(f"Required test jobs did not succeed: {failed}")
+          PY
+
   # Reports the run's wall time against CI_WALL_TIME_BUDGET_SECONDS (issue
   # #474). Warns rather than fails: a green run that is merely slow should still
   # be mergeable, and macOS runner queueing can push a run over the budget for

@@ -1,0 +1,19 @@
+command = "/merge-tui"
+repository = "uw-syfi/vibesys"
+base_branch = "main"
+workflow_file = "test.yml"
+merge_method = "squash"
+
+# Keep shared manifests, dependency locks, entrypoint composition, workflows,
+# and this policy under the normal maintainer path.
+allowed_prefixes = [
+  "clients/backend-client/src/",
+  "clients/core-state/src/",
+  "clients/tui/dev/",
+  "clients/tui/src/",
+  "src/server/",
+  "tests/server/",
+]
+allowed_paths = [
+  "tests/entrypoints/test_server.py",
+]

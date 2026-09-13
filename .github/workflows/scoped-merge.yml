@@ -1,0 +1,49 @@
+name: Scoped TUI and server merge
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scoped-merge-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.comment.body == '/merge-tui'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # issue_comment workflows use the default branch. Pin the checkout to it
+      # explicitly and never fetch or execute the pull request head.
+      - name: Check out trusted merge policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Create scoped merge app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ vars.SCOPED_MERGE_APP_ID }}
+          private-key: ${{ secrets.SCOPED_MERGE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-contents: write
+          permission-issues: write
+          permission-metadata: read
+          permission-pull-requests: read
+
+      - name: Authorize and merge
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SCOPED_MERGE_USERS: ${{ vars.SCOPED_MERGE_USERS }}
+        run: python3 scripts/scoped_merge.py --event "$GITHUB_EVENT_PATH"
