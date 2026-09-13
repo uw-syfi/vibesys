@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
+from server.chat.manager import ChatAnswer
 from server.chat.prompts import (
     experiment_chat_continuation_prompt,
     experiment_chat_system_prompt,
@@ -56,6 +57,10 @@ class ExperimentChatDependencies:
     #: Identity of this thread's provider conversation. Follow-ups reuse it so
     #: the agent keeps the context of the questions before them.
     session_key: AgentSessionKey
+    #: Thread this session answers on, as the wire names it. ``None`` is the
+    #: run's default chat, which carries no thread ID of its own, so streamed
+    #: output lands in the same transcript as the terminal answer event.
+    chat_thread_id: str | None
     workspace: Path
     state_dir: Path
     agent_shared_state_dir: str
@@ -83,6 +88,7 @@ class ExperimentChatSession:
         self._executions = dependencies.executions
         self._agent_client = dependencies.agent_client
         self._session_key = dependencies.session_key
+        self._chat_thread_id = dependencies.chat_thread_id
         self._workspace = dependencies.workspace
         self._state_dir = dependencies.state_dir
         self._evidence = dependencies.evidence
@@ -103,7 +109,7 @@ class ExperimentChatSession:
             dependencies.agent_state_dir
         )
 
-    def ask(self, question: str) -> str:
+    def ask(self, question: str) -> ChatAnswer:
         """Refresh evidence, invoke the chat agent, and persist its answer."""
         with self._lock:
             self._evidence.refresh(self._system_prompt)
@@ -133,15 +139,20 @@ class ExperimentChatSession:
                     "re-asking with the full instructions"
                 )
                 answer = self._invoke(question, resumed=False)
-            if not answer.strip():
-                answer = (
-                    "Chat agent did not return an answer.\n\n"
-                    f"Fallback diagnostic:\n{self._fallback(question)}"
+            if not answer.text.strip():
+                # The turn still ran under the invocation's identity, so the
+                # substitute text keeps that id and closes the streamed turn.
+                answer = replace(
+                    answer,
+                    text=(
+                        "Chat agent did not return an answer.\n\n"
+                        f"Fallback diagnostic:\n{self._fallback(question)}"
+                    ),
                 )
-            self._append_exchange(question, answer)
+            self._append_exchange(question, answer.text)
             return answer
 
-    def _invoke(self, question: str, *, resumed: bool) -> str:
+    def _invoke(self, question: str, *, resumed: bool) -> ChatAnswer:
         """Run one chat turn, reusing this thread's provider conversation."""
         system_prompt = self._continuation_prompt if resumed else self._system_prompt
         execution = self._controller.start_agent_execution(
@@ -161,6 +172,7 @@ class ExperimentChatSession:
             agent_kind="chat",
             round_label="experiment-chat",
             invocation_id=execution.execution_id,
+            chat_thread_id=self._chat_thread_id,
         ):
             try:
                 answer = self._agent_client.invoke_text(
@@ -191,7 +203,7 @@ class ExperimentChatSession:
                     execution_id=execution.execution_id,
                 )
         assert answer is not None  # noqa: S101
-        return answer
+        return ChatAnswer(text=answer, invocation_id=execution.execution_id)
 
     def close(self) -> None:
         """Release resources owned by this chat session once."""

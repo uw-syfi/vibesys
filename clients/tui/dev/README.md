@@ -90,6 +90,7 @@ re-record ever makes the diff noise a real problem, mark them then.
 | --- | --- | --- |
 | `bad-cpp-round1.jsonl` | 403 | The only capture with a full lifecycle: `run_started` through `judge_result`, `benchmark_result`, `round_finished`, `run_finished`, plus four `chat` turns. |
 | `queue-rs-payloads.jsonl` | 628 | Every one of its 105 `tool_result` events carries a typed `payload` (`kind: "command"`), and it has 214 `agent_execution_activity_changed` events. This is the one to use for tool-result rendering work. It ends in `run_interrupted`/`run_failed`, so it also exercises the error banner. |
+| `framework-events.jsonl` | 18 | Synthetic (see below). The #692 typed framework events: gate pairs including a reused pass and a failure with `output_tail`, a benchmark measurement, all three `workspace_snapshot` aspects, `run_configured`, and a `framework_warning` with its lifted diagnostic. |
 
 Neither carries `todo_update` events, so the todo strip stays empty on both.
 
@@ -119,6 +120,18 @@ It covers inline markers, headings, ordered and unordered lists, a blockquote, a
 link, a narrow table, a table wide enough to need shrinking inside a card, two
 fenced code blocks, and the same table again split mid-row across three chunks
 so the streaming path is exercised too.
+
+### `framework-events.jsonl`
+
+Synthetic, written through the Python `RunEvent` model (which is what makes its
+declared byte-for-byte round trip hold): no real capture yet carries the typed
+framework events of #692. One run, two rounds: round 1 passes two validation
+recipes (one reused), accuracy, and a benchmark gate with a
+`tok_per_sec` measurement; round 2 fails accuracy with an `output_tail` and
+raises a `framework_warning` whose diagnostic (severity `warning`, source
+`loop`) rides the envelope. Around them sit `run_configured` and all three
+`workspace_snapshot` aspects: baseline, exclusions, and snapshots with and
+without a commit.
 
 ### Legacy translation
 

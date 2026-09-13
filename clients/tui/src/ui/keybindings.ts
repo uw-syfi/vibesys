@@ -4,6 +4,7 @@ import {
   chatPaneFocused,
   chatPaneVisible,
   experimentLogVisible,
+  focusedPane,
   todoListFocused,
   visiblePhases,
 } from '../session-model.js';
@@ -87,6 +88,14 @@ export function bindKeybindings(
     }
     if (controller.state.errorBanner !== null && key.name === 'escape') {
       controller.dismissErrorBanner();
+      key.preventDefault();
+      return;
+    }
+    // The command input's own error clears the same way: Esc goes back one
+    // level (tui-conventions.md), and a stale input error is a level to leave
+    // just as much as the banner is.
+    if (controller.state.inputError !== null && key.name === 'escape') {
+      controller.clearInputError();
       key.preventDefault();
       return;
     }
@@ -291,12 +300,15 @@ export function bindKeybindings(
     }
     if (key.name === 'up' || key.name === 'down') {
       if (!actions.navigateSuggestions(key.name === 'up' ? -1 : 1)) {
-        if (controller.state.roundFocus === 'transcript') {
-          controller.selectNextEntry(key.name === 'down' ? 1 : -1);
-          actions.revealSelectedEntry();
-        } else {
+        // `roundFocus` can sit parked on the agents pane while a visualization
+        // hides it, so the keys follow the pane that is actually on screen:
+        // the same authority the focus border reads.
+        if (focusedPane(controller.state) === 'agents') {
           if (key.name === 'down') controller.selectNextAgent();
           else controller.selectPreviousAgent();
+        } else {
+          controller.selectNextEntry(key.name === 'down' ? 1 : -1);
+          actions.revealSelectedEntry();
         }
       }
       key.preventDefault();
@@ -304,7 +316,7 @@ export function bindKeybindings(
     }
     if (
       (key.name === 'return' || key.name === 'enter') &&
-      controller.state.roundFocus === 'transcript' &&
+      focusedPane(controller.state) === 'transcript' &&
       actions.inputIsEmpty() &&
       actions.toggleSelectedTool()
     ) {

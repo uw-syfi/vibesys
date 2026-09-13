@@ -24,6 +24,7 @@ from vibesys.loops.agent.loop import (
     FrameworkBenchmarkOutcome,
     _backfill_revert_commit,
     _candidate_evidence_is_fresh,
+    _finalize_agent_run,
     _invoke_read_only_role,
     _missing_implementer_response,
     _official_evaluation_reason,
@@ -33,6 +34,7 @@ from vibesys.loops.agent.loop import (
     _provisional_candidates_since_official,
     _review_due,
     _run_framework_validation_gate,
+    _select_final_candidate,
     _terminal_workspace_notice,
     _trusted_candidate_records,
     run_agent_loop,
@@ -43,6 +45,7 @@ from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.run import GitTracker, RepositoryVisibility
+from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.sandbox.run_environment import RunEnvironmentSpec, make_run_environment_spec
 from vibesys.schemas import (
     CandidateDisposition,
@@ -601,7 +604,7 @@ def test_read_only_role_preserves_allowed_roadmap_and_reverts_other_writes(tmp_p
     roadmap = workspace / "roadmap" / "index.md"
     roadmap.parent.mkdir(parents=True)
     roadmap.write_text("initial roadmap\n")
-    tracker = GitTracker(workspace, run_id="test-run", log=lambda _message: None)
+    tracker = GitTracker(workspace, run_id="test-run", events=NullGitTrackerEvents())
     tracker.init(existing=False)
 
     expected = OrchestratorPlan(
@@ -651,7 +654,7 @@ def test_read_only_role_preserves_allowed_directory_and_reverts_candidate_edits(
     workspace.mkdir(parents=True)
     main = workspace / "main.py"
     main.write_text("accepted candidate\n")
-    tracker = GitTracker(workspace, run_id="test-run", log=lambda _message: None)
+    tracker = GitTracker(workspace, run_id="test-run", events=NullGitTrackerEvents())
     tracker.init(existing=False)
 
     expected = ProfilerSummary(analysis="done", bottlenecks="b", suggestions="s")
@@ -1116,12 +1119,188 @@ def test_implementer_report_cannot_seed_archive_or_dominate_candidates():  # noq
     # Trusted Pareto-parent selection is gated on framework provenance.
     assert _trusted_candidate_records([implementer], space) == []
     assert _trusted_candidate_records([framework], space) == [framework]
-
     # A weaker later candidate is only dominated by the trusted framework row,
     # never by the untrusted implementer self-report.
     weaker = {"accuracy": 0.80}
     assert _pareto_archive_dominators(weaker, [implementer], space) == []
     assert _pareto_archive_dominators(weaker, [framework], space) == [framework]
+
+
+def _official_record(  # noqa: PLR0913  # test record builder
+    round_number: int,
+    commit: str,
+    perf: float,
+    *,
+    retained: bool = True,
+    passed: bool = True,
+    provenance: Literal["framework", "implementer"] = "framework",
+    metrics: dict[str, float] | None = None,
+) -> RoundRecord:
+    """Build one reviewed record eligible for final selection when trusted."""
+    return RoundRecord(
+        round_number,
+        commit,
+        perf,
+        "throughput",
+        passed,
+        reviewed=True,
+        judge_verdict="pass" if passed else "fail",
+        metrics=metrics or {},
+        official_evaluation=True,
+        candidate_retained=retained,
+        perf_direction="max",
+        perf_provenance=provenance,
+    )
+
+
+def test_final_candidate_is_noise_aware_and_rejects_untrusted_records():  # noqa: ANN201  # tracked: #288
+    space = MetricSpace(relative_noise=0.05)
+    older = _official_record(1, "a" * 40, 100.0)
+    newer_within_noise = _official_record(2, "b" * 40, 103.0)
+    self_reported = _official_record(3, "c" * 40, 500.0, provenance="implementer")
+    rejected = _official_record(4, "d" * 40, 600.0, retained=False)
+    failed = _official_record(5, "e" * 40, 700.0, passed=False)
+
+    assert (
+        _select_final_candidate([older, newer_within_noise, self_reported, rejected, failed], space)
+        is newer_within_noise
+    )
+
+
+def test_final_pareto_candidate_requires_canonical_official_metrics():  # noqa: ANN201  # tracked: #288
+    official = _official_record(
+        1,
+        "a" * 40,
+        100.0,
+        metrics={"throughput": 100.0, "latency": 10.0},
+    )
+    provisional = RoundRecord(
+        2,
+        "b" * 40,
+        None,
+        None,
+        True,  # noqa: FBT003  # tracked: #288
+        reviewed=True,
+        judge_verdict="pass",
+        candidate_metrics={"throughput": 200.0, "latency": 5.0},
+        candidate_retained=True,
+    )
+
+    assert _select_final_candidate([official, provisional], _THROUGHPUT_LATENCY) is official
+
+
+def test_finalize_restores_winner_after_failed_last_round_and_updates_archive(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    candidate = workspace / "candidate.txt"
+    candidate.write_text("baseline\n")
+    tracker = GitTracker(workspace, run_id="test-run", events=NullGitTrackerEvents())
+    tracker.init(existing=False)
+
+    candidate.write_text("winner\n")
+    tracker.snapshot("round 1 winner")
+    winner_commit = tracker.current_sha()
+    assert winner_commit is not None
+    candidate.write_text("failed final attempt\n")
+    tracker.snapshot("round 2 failed")
+    failed_commit = tracker.current_sha()
+    assert failed_commit is not None
+
+    progress_path = workspace / "progress.md"
+    issue_board.ensure_progress_file(progress_path)
+    logs: list[str] = []
+    ctx = SimpleNamespace(
+        workspace=workspace,
+        git=tracker,
+        snapshot_workspace=tracker.snapshot,
+        lprint=logs.append,
+    )
+    winner = _official_record(1, winner_commit, 125.0)
+    failed = _official_record(2, failed_commit, 250.0, retained=False, passed=False)
+
+    _finalize_agent_run(
+        cast("LoopContext", ctx),
+        records=[winner, failed],
+        space=MetricSpace(),
+        progress_path=progress_path,
+    )
+
+    assert candidate.read_text() == "winner\n"
+    selected_ref = (
+        tracker.run(["git", "rev-parse", "refs/vibesys/test-run/candidates/selected-round-0001"])
+        .stdout.decode()
+        .strip()
+    )
+    assert selected_ref == winner_commit
+    archive = issue_board.pareto_archive_path(progress_path).read_text()
+    assert "Latest completed round: round 2" in archive
+    assert failed_commit[:12] in archive
+    report = "\n".join(logs)
+    assert "Final selected candidate: round 1" in report
+    assert winner_commit[:12] in report
+    assert "official metrics: 125 throughput" in report
+
+
+def test_finalize_with_no_eligible_candidate_restores_trusted_baseline(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    candidate = workspace / "candidate.txt"
+    candidate.write_text("trusted input\n")
+    tracker = GitTracker(workspace, run_id="test-run", events=NullGitTrackerEvents())
+    tracker.init(existing=False)
+    baseline = tracker.trusted_input_baseline
+    assert baseline is not None
+    candidate.write_text("failed candidate\n")
+    tracker.snapshot("failed round")
+    failed_commit = tracker.current_sha()
+    assert failed_commit is not None
+
+    progress_path = workspace / "progress.md"
+    logs: list[str] = []
+    ctx = SimpleNamespace(
+        workspace=workspace,
+        git=tracker,
+        snapshot_workspace=tracker.snapshot,
+        lprint=logs.append,
+    )
+    untrusted = _official_record(1, failed_commit, 999.0, provenance="implementer")
+
+    _finalize_agent_run(
+        cast("LoopContext", ctx),
+        records=[untrusted],
+        space=MetricSpace(),
+        progress_path=progress_path,
+    )
+
+    assert candidate.read_text() == "trusted input\n"
+    assert tracker.pending_changes() == []
+    assert "No evaluated winner was retained" in "\n".join(logs)
+    assert baseline[:12] in "\n".join(logs)
+    assert (
+        "Latest completed round: round 1"
+        in issue_board.pareto_archive_path(progress_path).read_text()
+    )
+
+
+def test_finalize_fails_when_neither_winner_nor_baseline_exists(tmp_path: Path) -> None:
+    ctx = MagicMock()
+    ctx.workspace = tmp_path
+    ctx.git.trusted_input_baseline = None
+
+    with pytest.raises(RuntimeError, match="no trusted retained candidate"):
+        _finalize_agent_run(
+            ctx,
+            records=[],
+            space=MetricSpace(),
+            progress_path=tmp_path / "progress.md",
+        )
+
+    ctx.git.checkout_tree.assert_not_called()
+    ctx.snapshot_workspace.assert_not_called()
 
 
 def test_official_evaluation_cadence_resets_at_verified_checkpoint():  # noqa: ANN201  # tracked: #288
@@ -1779,6 +1958,70 @@ def test_framework_local_validation_executes_and_reuses_exact_inputs(tmp_path): 
     assert '"reused": true' in second.read_text()
 
 
+def test_framework_local_validation_emits_balanced_gate_pairs(tmp_path):  # noqa: ANN001, ANN201
+    from vibesys.render.sink import output_sink  # noqa: PLC0415  # tracked: #288
+    from vibesys.run.events import (  # noqa: PLC0415  # tracked: #288
+        CoreEventType,
+        EventStatus,
+        GateFinishedData,
+        GateKind,
+        GateStartedData,
+    )
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "server.py").write_text("READY = True\n")
+    progress = workspace / "progress"
+    recipe = ValidationRecipe(
+        name="focused-tests",
+        command="uv run pytest -q",
+        input_paths=["server.py"],
+        purpose="Exercise the focused local server contract.",
+    )
+    recipe_artifact = workspace / "validation-recipes.json"
+    recipe_artifact.write_text(
+        json.dumps({"version": 1, "recipes": [recipe.model_dump(mode="json")]})
+    )
+    ctx = MagicMock()
+    ctx.workspace = workspace
+    ctx.git.current_sha.return_value = "a" * 40
+    ctx.git.pending_changes.return_value = []
+    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=0, output="1 passed")
+
+    seen = []
+    unsubscribe = output_sink().subscribe(seen.append)
+    try:
+        for round_number in (1, 2):
+            _run_framework_validation_gate(
+                ctx,
+                recipe_artifact=recipe_artifact.name,
+                round_number=round_number,
+                retry=1,
+                progress_path=progress,
+            )
+    finally:
+        unsubscribe()
+
+    started = [e for e in seen if e.type is CoreEventType.GATE_STARTED]
+    finished = [e for e in seen if e.type is CoreEventType.GATE_FINISHED]
+    # One balanced started/finished pair per gate call, run then reuse.
+    assert len(started) == len(finished) == 2
+    for event in started:
+        assert isinstance(event.data, GateStartedData)
+        assert event.data.gate is GateKind.VALIDATION
+        assert event.data.recipe == "focused-tests"
+        assert event.data.command == recipe.command
+    run_finish, reuse_finish = finished
+    assert isinstance(run_finish.data, GateFinishedData)
+    assert run_finish.status is EventStatus.COMPLETED
+    assert run_finish.data.reused is False
+    assert run_finish.round_label == "round-1"
+    assert isinstance(reuse_finish.data, GateFinishedData)
+    assert reuse_finish.status is EventStatus.COMPLETED
+    assert reuse_finish.data.reused is True
+    assert reuse_finish.round_label == "round-2"
+
+
 def test_framework_local_validation_fails_and_restores_mutation(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -2365,6 +2608,38 @@ def test_loop_round_one_no_profile_runs_one_round(tmp_path, ref_file):  # noqa: 
     assert runner.counters["orch_plan"] == 1
     assert runner.counters["impl"] == 1
     assert runner.counters["judge"] == 1
+
+
+def test_resume_at_completed_limit_finalizes_without_replaying_agents(
+    tmp_path: Path,
+    ref_file: str,
+) -> None:
+    first_runner = _make_orchestrate_runner()
+    assert _invoke_orchestrate(tmp_path, ref_file, first_runner, max_rounds=1) is True
+
+    project_path = _created_project(tmp_path)
+    run_id = _run_id(project_path)
+    resumed_runner = _make_orchestrate_runner()
+    assert (
+        _invoke_orchestrate(
+            tmp_path,
+            str(project_path / "resume-input"),
+            resumed_runner,
+            exp_name=run_id,
+            existing=True,
+            start_round=2,
+            max_rounds=1,
+        )
+        is True
+    )
+
+    assert resumed_runner.counters == {
+        "impl": 0,
+        "judge": 0,
+        "orch_pre": 0,
+        "orch_plan": 0,
+        "prof": 0,
+    }
 
 
 def test_continuing_hypothesis_uses_unified_run_state(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
@@ -3662,12 +3937,13 @@ def test_hypothesis_revert_is_applied_once_across_continuation_rounds(tmp_path, 
             judge_every=10,
         )
 
-    assert checkout_tree.call_count == 1
-    checkout_tree.assert_called_once_with(
-        ANY,
-        clean=True,
-        preserve_paths=("roadmap.md", "progress.md", "pareto-frontier.md"),
-    )
+    assert checkout_tree.call_count == 2
+    assert checkout_tree.call_args_list[0].args == (ANY,)
+    assert checkout_tree.call_args_list[0].kwargs == {
+        "clean": True,
+        "preserve_paths": ("roadmap.md", "progress.md", "pareto-frontier.md"),
+    }
+    assert "progress-artifacts" in checkout_tree.call_args_list[1].kwargs["preserve_paths"]
     repair_calls = [
         call
         for call in runner.invoke.call_args_list
@@ -3748,7 +4024,7 @@ def test_failed_hypothesis_revert_is_retried_and_not_claimed_as_applied(tmp_path
 
     with patch(
         "vibesys.run.git_tracker.GitTracker.checkout_tree",
-        side_effect=[False, True],
+        side_effect=[False, True, True],
     ) as checkout_tree:
         _invoke_orchestrate(
             tmp_path,
@@ -3758,7 +4034,7 @@ def test_failed_hypothesis_revert_is_retried_and_not_claimed_as_applied(tmp_path
             judge_every=10,
         )
 
-    assert checkout_tree.call_count == 2
+    assert checkout_tree.call_count == 3
     retry_calls = [
         call
         for call in runner.invoke.call_args_list

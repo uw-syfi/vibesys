@@ -14,14 +14,16 @@ if TYPE_CHECKING:
 
     import pytest
 
-from server.chat.manager import TerminalChatResource
+from server.chat.manager import ChatAnswer, TerminalChatResource
 
 
 def test_installing_handler_takes_over_from_fallback(tmp_path):  # noqa: ANN001, ANN201
     parts = build_server_parts(tmp_path)
     assert parts.chat.default_agent_available() is False
 
-    parts.chat.install_default_handler(lambda question: f"agent answered: {question}")
+    parts.chat.install_default_handler(
+        lambda question: ChatAnswer(text=f"agent answered: {question}", invocation_id="exec-1")
+    )
 
     assert parts.chat.default_agent_available() is True
     assert parts.chat.chat("why did round 3 fail?") == ("agent answered: why did round 3 fail?")
@@ -35,7 +37,7 @@ def test_retained_resource_remains_available_until_explicit_close(tmp_path):  # 
     parts.chat.enable_terminal_retention()
     closed = threading.Event()
     resource = TerminalChatResource(
-        handler=lambda _question: "terminal agent answer",
+        handler=lambda _question: ChatAnswer(text="terminal agent answer", invocation_id="exec-1"),
         close=closed.set,
     )
 
@@ -56,10 +58,10 @@ def test_terminal_cleanup_waits_for_in_flight_answer(tmp_path):  # noqa: ANN001,
     release_handler = threading.Event()
     cleanup_finished = threading.Event()
 
-    def handler(_question: str) -> str:
+    def handler(_question: str) -> ChatAnswer:
         handler_started.set()
         release_handler.wait()
-        return "finished answer"
+        return ChatAnswer(text="finished answer", invocation_id="exec-1")
 
     assert parts.chat.retain_terminal_resource(
         TerminalChatResource(handler=handler, close=cleanup_finished.set)
@@ -87,10 +89,10 @@ def test_terminal_cleanup_bounds_wait_and_defers_close(
     release_handler = threading.Event()
     resource_closed = threading.Event()
 
-    def handler(_question: str) -> str:
+    def handler(_question: str) -> ChatAnswer:
         handler_started.set()
         release_handler.wait()
-        return "late answer"
+        return ChatAnswer(text="late answer", invocation_id="exec-1")
 
     assert parts.chat.retain_terminal_resource(
         TerminalChatResource(handler=handler, close=resource_closed.set)

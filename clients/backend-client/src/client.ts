@@ -26,6 +26,13 @@ export interface SubscribeOptions {
    * which is exactly how a caller probes for the capability.
    */
   tail?: number;
+  /**
+   * The store the caller's `afterSequence` numbers, carried by a resume so the
+   * server can tell whether that cursor still belongs to the live store. Sent
+   * only when non-empty; a server that predates the field forbids it and
+   * rejects the subscription, so the caller falls back to a plain resume.
+   */
+  storeId?: string;
 }
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 5_000;
@@ -194,6 +201,7 @@ export class ServerClient {
             // fields, so a default subscribe must stay byte-for-byte what it
             // has always been.
             ...(options.tail === undefined ? {} : {tail: options.tail}),
+            ...(options.storeId ? {store_id: options.storeId} : {}),
           })}\n`,
         );
       });

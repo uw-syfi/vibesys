@@ -64,7 +64,13 @@ export function renderPerformanceCurve(
   const maxLabel = `r${maxRound}`;
   lines.push(`${''.padStart(10)}${minLabel}${maxLabel.padStart(PLOT_WIDTH - minLabel.length)}`);
 
-  const best = visible.reduce((current, point) => (point.value > current.value ? point : current));
+  // "best" follows the objective direction: for a minimizing objective the
+  // lowest value wins. Without a recorded direction the historical
+  // higher-is-better reading stands.
+  const minimize = context?.objective_direction === 'min';
+  const best = visible.reduce((current, point) =>
+    (minimize ? point.value < current.value : point.value > current.value) ? point : current,
+  );
   const latest = visible.at(-1);
   if (latest) {
     lines.push(
@@ -97,6 +103,23 @@ function performancePoints(
         metric: data.metric,
         value: data.value,
         unit: data.unit,
+      });
+    }
+    // The measurement `benchmark_result` used to carry rides a completed
+    // benchmark gate on new journals (#692); the map keyed by round keeps a
+    // journal carrying both kinds from double-counting.
+    if (
+      data?.kind === 'gate_finished' &&
+      data.gate === 'benchmark' &&
+      event.status !== 'failed' &&
+      data.metric != null &&
+      data.value != null
+    ) {
+      byRound.set(round, {
+        round,
+        metric: data.metric,
+        value: data.value,
+        unit: data.unit ?? data.metric,
       });
     }
     if (data?.kind === 'round_finished' && typeof data.perf_metric === 'number') {

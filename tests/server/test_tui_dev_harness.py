@@ -85,6 +85,16 @@ FIXTURES: tuple[FixtureContract, ...] = (
         ),
     ),
     FixtureContract(
+        name="framework-events.jsonl",
+        age=SchemaAge.CURRENT,
+        reason=(
+            "Synthetic, written through the current models because no real "
+            "capture yet carries the #692 typed framework events: gate pairs "
+            "(including reused and failed), workspace snapshots, run_configured, "
+            "and a framework_warning with its lifted diagnostic."
+        ),
+    ),
+    FixtureContract(
         name="bad-cpp-round1.jsonl",
         age=SchemaAge.LEGACY,
         reason=(

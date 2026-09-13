@@ -8,6 +8,7 @@ import {
 import {COMMAND_NAMES} from '../commands.js';
 import type {SessionController} from '../session-controller.js';
 import {
+  chatPaneFocused,
   experimentLogVisible,
   focusedPane,
   type SessionState,
@@ -281,6 +282,7 @@ export function createOpenTuiApp(
     value => void controller.submitCommand(value),
     theme,
     () => controller.focusPane('left'),
+    () => controller.clearInputError(),
   );
   /**
    * Moves the command box, and the list that completes it, into one pane.
@@ -292,7 +294,7 @@ export function createOpenTuiApp(
    */
   const hostCommandSurface = (pane: BoxRenderable): void => {
     pane.add(commandInput.suggestions);
-    pane.add(commandInput.box);
+    pane.add(commandInput.output);
   };
 
   // A slash command and a key toggle the same prompt: the controller routes the
@@ -514,7 +516,7 @@ export function createOpenTuiApp(
     // down rather than following the zoom into a pane that does not want it.
     // The key-help line goes with it, the way it did when the two shared a row.
     const showCommand = zoomedPane !== 'chat';
-    commandInput.box.visible = showCommand;
+    commandInput.output.visible = showCommand;
     if (!showCommand) commandInput.suggestions.visible = false;
     help.visible = showCommand;
     // Which pane the command box writes to, and therefore which one it is drawn
@@ -534,13 +536,14 @@ export function createOpenTuiApp(
             : transcriptFrame;
     if (nextHost !== commandHost) {
       commandHost.remove(commandInput.suggestions);
-      commandHost.remove(commandInput.box);
+      commandHost.remove(commandInput.output);
       hostCommandSurface(nextHost);
       commandHost = nextHost;
     }
     // The command list completes the box it belongs to, and on this view that
     // box cannot open a chat that is already beside it.
     commandInput.setCommandContext({chatDocked: showChatPane});
+    commandInput.render(state);
     experimentLog.setAvailableWidth(showSplit || showChatPane ? leftWidth - chatWidth : null);
     experimentLog.render(state);
     experimentLog.output.visible = showExperimentLog;
@@ -572,11 +575,20 @@ export function createOpenTuiApp(
         : chatPane.navigateSuggestions(direction),
     completeChatInput: () =>
       controller.state.chatOpen ? chat.completeSuggestion() : chatPane.completeSuggestion(),
-    // Enter belongs to a pane only when nothing is typed anywhere. Asking which
-    // box has the cursor is not enough: a question waiting in the other box is
-    // still a question, and Enter must never discard it to open a hypothesis.
+    // Enter and the single-key bindings yield to typing, and typing happens
+    // in exactly one composer: the modal chat while it is open, the focused
+    // docked chat, otherwise the command box. Only that composer's text
+    // matters. A draft parked in a closed or unfocused chat surface cannot
+    // take the keystroke, and it survives whatever the binding does, so it
+    // must not disable navigation. The ladder mirrors the key router's own
+    // early returns, so any state it routes to a chat composer is exactly a
+    // state this gate consults that composer in.
     inputIsEmpty: () =>
-      commandInput.isEmpty() && chatPane.isComposerEmpty() && chat.isComposerEmpty(),
+      controller.state.chatOpen
+        ? chat.isComposerEmpty()
+        : chatPaneFocused(controller.state)
+          ? chatPane.isComposerEmpty()
+          : commandInput.isEmpty(),
     closeChat: () => controller.closeChat(),
     toggleLatestPrompt: () => conversation.toggleLatestPrompt(),
     toggleSelectedTool: () => conversation.toggleSelectedTool(),

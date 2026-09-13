@@ -49,6 +49,8 @@ from vibesys.profilers import (
     profiler_definition,
     resolve_profiler_kind,
 )
+from vibesys.render.run_log import RunLogRenderer
+from vibesys.render.sink import output_sink
 from vibesys.resource_paths import profiler_support_dir
 from vibesys.run import (
     AgentRuntimeResources,
@@ -80,6 +82,7 @@ from vibesys.run.events import (
     PhaseData,
     json_value,
 )
+from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.run.project_policy import (
     build_project_path_policy,
@@ -568,6 +571,9 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             integration.attach(log_dir)
             logger = RunLogger(log_dir)
             teardown_stack.callback(logger.close)
+            # Registered after logger.close so LIFO teardown unsubscribes the
+            # renderer before the log file closes.
+            teardown_stack.callback(output_sink().subscribe(RunLogRenderer(logger.writer).handle))
             hook_log[0] = logger.lprint
             for message in buffered_logs:
                 logger.lprint(message)
@@ -588,7 +594,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             git = GitTracker(
                 project_root,
                 run_id=run_id,
-                log=logger.lprint,
+                events=CoreGitTrackerEvents(),
                 excluded_dirs=project_excluded_dirs,
                 trusted_input_paths=trusted_project_input_paths(
                     project_root,
@@ -1108,7 +1114,7 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
     git = GitTracker(
         workspace,
         run_id=parent.run_id,
-        log=logger.lprint,
+        events=CoreGitTrackerEvents(),
         excluded_dirs=parent.EXCLUDED_WORKSPACE_DIRS,
         trusted_input_paths=trusted_project_input_paths(
             workspace,

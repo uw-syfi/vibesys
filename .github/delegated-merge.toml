@@ -1,0 +1,34 @@
+schema_version = 1
+command = "/merge-scoped"
+repository = "uw-syfi/vibesys"
+base_branch = "main"
+merge_method = "squash"
+required_checks = ["pr-ci"]
+
+[checks.pr-ci]
+workflow_file = "test.yml"
+job_name = "Required PR CI"
+
+# Keep shared manifests, dependency locks, entrypoint composition, workflows,
+# and this broker's policy and implementation under the normal maintainer path.
+[capabilities.tui]
+members = ["AyanBinRafaih", "Nano-AI"]
+prefixes = [
+  "clients/backend-client/src/",
+  "clients/core-state/src/",
+  "clients/tui/dev/",
+  "clients/tui/src/",
+]
+paths = []
+additional_checks = []
+
+[capabilities.server]
+members = ["AyanBinRafaih", "Nano-AI"]
+prefixes = [
+  "src/server/",
+  "tests/server/",
+]
+paths = [
+  "tests/entrypoints/test_server.py",
+]
+additional_checks = []

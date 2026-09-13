@@ -80,6 +80,18 @@ export function truncateToWidth(text: string, maxWidth: number): string {
 }
 
 /**
+ * `text` followed by the spaces that bring it to exactly `width` cells.
+ *
+ * The column-alignment counterpart of `truncateToWidth`: `String.padEnd`
+ * counts code units, so a cell holding CJK text comes out short of its column
+ * and pushes every later column out of line. Text already at or past the
+ * budget is returned unchanged; trimming it is `truncateToWidth`'s job.
+ */
+export function padToWidth(text: string, width: number): string {
+  return text + ' '.repeat(Math.max(0, width - displayWidth(text)));
+}
+
+/**
  * A cluster is as wide as the character it is built around: the code points
  * after the first are marks, joiners and selectors that render into the same
  * cells.
