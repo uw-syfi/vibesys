@@ -1261,20 +1261,39 @@ function failureKind(
   return eventType === 'run_interrupted' ? 'run_interruption' : scope;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
 function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
-  const data = event.data;
-  const id = String(event.sequence ?? `${event.timestamp}-${event.type}`);
-  const agentFields = event.agent_kind ? {agentKind: event.agent_kind} : {};
+  const fields = transcriptFields(event);
+  const dataEntry = eventDataToTranscriptEntry(event, fields);
+  return dataEntry === undefined ? eventTypeToTranscriptEntry(event, fields) : dataEntry;
+}
+
+interface TranscriptFields {
+  id: string;
+  agentFields: {agentKind?: string};
+  roundFields: {roundLabel?: string; roundNumber?: number};
+}
+
+function transcriptFields(event: RunEvent): TranscriptFields {
   const roundNumber = roundNumberFromLabel(event.round_label);
-  const roundFields = {
-    ...(event.round_label ? {roundLabel: event.round_label} : {}),
-    ...(roundNumber === null ? {} : {roundNumber}),
+  return {
+    id: String(event.sequence ?? `${event.timestamp}-${event.type}`),
+    agentFields: event.agent_kind ? {agentKind: event.agent_kind} : {},
+    roundFields: {
+      ...(event.round_label ? {roundLabel: event.round_label} : {}),
+      ...(roundNumber === null ? {} : {roundNumber}),
+    },
   };
+}
+
+/** Projects typed payloads in wire order, preserving mixed-envelope precedence. */
+function eventDataToTranscriptEntry(
+  event: RunEvent,
+  fields: TranscriptFields,
+): TranscriptEntry | null | undefined {
+  const data = event.data;
   if (data?.kind === 'configuration_failed') {
     return {
-      id,
+      id: fields.id,
       kind: 'result',
       content: configurationFailureContent(data),
       label: 'Configuration failed',
@@ -1282,167 +1301,58 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
     };
   }
   if (data?.kind === 'chat') {
-    // The invocation id names the turn this answer closes: the same id the
-    // turn's streamed chunks carried. `foldChatAnswer` matches on it so the
-    // answer can never fold over a different turn's abandoned stream. Records
-    // written before the field existed carry none.
-    const invocationId = data.invocation_id ?? undefined;
-    return {
-      id,
-      kind: 'assistant',
-      content: data.answer,
-      label: 'Answer',
-      ...agentFields,
-      ...roundFields,
-      ...(invocationId === undefined ? {} : {invocationId}),
-    };
+    return chatTranscriptEntry(data, fields);
   }
   if (data?.kind === 'agent_output_chunk') {
-    const kind = outputKind(data.channel);
-    const invocationId = event.invocation_id ?? undefined;
-    const gate = kind === 'diagnostic' ? splitFrameworkValidationCommand(data.content) : null;
-    return {
-      id,
-      kind,
-      content: gate?.content ?? data.content,
-      label: labelFor(event, data.channel),
-      ...agentFields,
-      ...roundFields,
-      turnId: invocationId ?? id,
-      ...(invocationId === undefined ? {} : {invocationId}),
-      ...(kind === 'tool' && data.content.trimStart().startsWith('→ ')
-        ? {startsTurn: true, toolCall: data.content}
-        : {}),
-      ...(gate?.command === undefined ? {} : {command: gate.command}),
-    };
+    return outputTranscriptEntry(event, data, fields);
   }
-  if (data?.kind === 'tool_call') {
-    const invocationId = event.invocation_id ?? undefined;
-    return {
-      id,
-      kind: 'tool',
-      content: '',
-      label: labelFor(event, 'tool'),
-      ...agentFields,
-      ...roundFields,
-      turnId: invocationId ?? id,
-      ...(invocationId === undefined ? {} : {invocationId}),
-      startsTurn: true,
-      toolName: data.tool,
-      toolArguments: data.args ?? {},
-      ...(data.call_id == null ? {} : {toolCallId: data.call_id}),
-    };
-  }
-  if (data?.kind === 'tool_result') {
-    const invocationId = event.invocation_id ?? undefined;
-    return {
-      id,
-      kind: 'tool',
-      content: data.content,
-      label: labelFor(event, 'tool'),
-      ...(data.is_error ? {tone: 'failure' as const} : {}),
-      ...agentFields,
-      ...roundFields,
-      turnId: invocationId ?? id,
-      toolName: data.tool,
-      toolResult: data,
-      ...(data.call_id == null ? {} : {toolCallId: data.call_id}),
-      ...(invocationId === undefined ? {} : {invocationId}),
-    };
+  if (data?.kind === 'tool_call' || data?.kind === 'tool_result') {
+    return toolTranscriptEntry(event, data, fields);
   }
   if (data?.kind === 'subprocess_output') {
     return {
-      id,
+      id: fields.id,
       kind: 'subprocess',
       content: data.content,
       label: `${data.process_kind} · ${data.stream}`,
-      ...agentFields,
-      ...roundFields,
-    };
-  }
-  if (event.type === 'phase_started') {
-    return {
-      id,
-      kind: 'status',
-      content: 'started',
-      label: labelFor(event, 'phase'),
-      ...agentFields,
-      ...roundFields,
-    };
-  }
-  if (data?.kind === 'judge_result') {
-    return {
-      id,
-      kind: 'result',
-      content: data.feedback || `Judge returned ${data.verdict}.`,
-      label: `Judge · ${data.verdict.toUpperCase()}`,
-      tone: data.verdict === 'pass' ? 'success' : 'failure',
-      ...agentFields,
-      ...roundFields,
-    };
-  }
-  if (data?.kind === 'benchmark_result') {
-    return {
-      id,
-      kind: 'result',
-      content: `${data.metric}: ${data.value} ${data.unit}`,
-      label: 'Benchmark',
-      tone: 'success',
-      ...agentFields,
-      ...roundFields,
-    };
-  }
-  // Framework events (#692) are the framework speaking, whichever agent phase
-  // is active: they never take `agentFields` or `labelFor`'s agent fallback,
-  // so the transcript attributes them to their subsystem, not to an agent.
-  if (data?.kind === 'gate_started') {
-    const recipe = data.recipe == null ? '' : ` ${data.recipe}`;
-    return {
-      id,
-      kind: 'status',
-      content: `running${recipe}`,
-      label: frameworkLabel(`framework-${data.gate}`, event),
-      ...roundFields,
-      ...(data.command == null ? {} : {command: data.command}),
-    };
-  }
-  if (data?.kind === 'gate_finished') return gateFinishedEntry(event, data, id, roundFields);
-  if (data?.kind === 'workspace_snapshot') {
-    return {
-      id,
-      kind: 'status',
-      content: workspaceSnapshotContent(data),
-      label: frameworkLabel(frameworkSourceName(data.source, null), event),
-      ...roundFields,
-    };
-  }
-  if (data?.kind === 'run_configured') {
-    return {
-      id,
-      kind: 'status',
-      content: runConfiguredContent(data),
-      label: frameworkLabel(frameworkSourceName(data.source, null), event),
-      ...roundFields,
+      ...fields.agentFields,
+      ...fields.roundFields,
     };
   }
   // The warning rides the envelope's `diagnostic`, which `applyDiagnosticEvent`
   // has already folded into `diagnostics`; it is not transcript prose.
   if (data?.kind === 'framework_warning') return null;
-  if (data?.kind === 'round_finished') {
-    const tone =
-      data.judge_verdict === 'pass'
-        ? 'success'
-        : data.judge_verdict === 'fail'
-          ? 'failure'
-          : 'normal';
+  if (
+    data?.kind === 'judge_result' ||
+    data?.kind === 'benchmark_result' ||
+    data?.kind === 'round_finished'
+  ) {
+    return resultTranscriptEntry(event, data, fields);
+  }
+  if (
+    data?.kind === 'gate_started' ||
+    data?.kind === 'gate_finished' ||
+    data?.kind === 'workspace_snapshot' ||
+    data?.kind === 'run_configured'
+  ) {
+    return frameworkTranscriptEntry(event, data, fields);
+  }
+  return undefined;
+}
+
+function eventTypeToTranscriptEntry(
+  event: RunEvent,
+  fields: TranscriptFields,
+): TranscriptEntry | null {
+  const data = event.data;
+  if (event.type === 'phase_started') {
     return {
-      id,
-      kind: 'result',
-      content: `${data.attempts} attempt(s)`,
-      label: `${event.round_label ?? 'Round'} · ${data.judge_verdict.toUpperCase()}`,
-      tone,
-      ...agentFields,
-      ...roundFields,
+      id: fields.id,
+      kind: 'status',
+      content: 'started',
+      label: labelFor(event, 'phase'),
+      ...fields.agentFields,
+      ...fields.roundFields,
     };
   }
   if (event.type === 'run_failed' || event.type === 'run_interrupted') {
@@ -1452,16 +1362,180 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
         ? `${data.reason}${data.signal === null ? '' : ` (${data.signal})`}`
         : '';
     return {
-      id,
+      id: fields.id,
       kind: 'result',
       content: event.text || interruption || (interrupted ? 'Run interrupted.' : 'Run failed.'),
       label: interrupted ? 'Run interrupted' : 'Run failed',
       tone: 'failure',
-      ...agentFields,
-      ...roundFields,
+      ...fields.agentFields,
+      ...fields.roundFields,
     };
   }
   return null;
+}
+
+function chatTranscriptEntry(
+  data: Extract<RunEventData, {kind?: 'chat'}>,
+  fields: TranscriptFields,
+): TranscriptEntry {
+  // The invocation id names the turn this answer closes. Records written before
+  // the field existed carry none.
+  const invocationId = data.invocation_id ?? undefined;
+  return {
+    id: fields.id,
+    kind: 'assistant',
+    content: data.answer,
+    label: 'Answer',
+    ...fields.agentFields,
+    ...fields.roundFields,
+    ...(invocationId === undefined ? {} : {invocationId}),
+  };
+}
+
+function outputTranscriptEntry(
+  event: RunEvent,
+  data: Extract<RunEventData, {kind?: 'agent_output_chunk'}>,
+  fields: TranscriptFields,
+): TranscriptEntry {
+  const kind = outputKind(data.channel);
+  const invocationId = event.invocation_id ?? undefined;
+  const gate = kind === 'diagnostic' ? splitFrameworkValidationCommand(data.content) : null;
+  return {
+    id: fields.id,
+    kind,
+    content: gate?.content ?? data.content,
+    label: labelFor(event, data.channel),
+    ...fields.agentFields,
+    ...fields.roundFields,
+    turnId: invocationId ?? fields.id,
+    ...(invocationId === undefined ? {} : {invocationId}),
+    ...(kind === 'tool' && data.content.trimStart().startsWith('→ ')
+      ? {startsTurn: true, toolCall: data.content}
+      : {}),
+    ...(gate?.command === undefined ? {} : {command: gate.command}),
+  };
+}
+
+function toolTranscriptEntry(
+  event: RunEvent,
+  data: Extract<RunEventData, {kind?: 'tool_call' | 'tool_result'}>,
+  fields: TranscriptFields,
+): TranscriptEntry {
+  const invocationId = event.invocation_id ?? undefined;
+  if (data.kind === 'tool_call') {
+    return {
+      id: fields.id,
+      kind: 'tool',
+      content: '',
+      label: labelFor(event, 'tool'),
+      ...fields.agentFields,
+      ...fields.roundFields,
+      turnId: invocationId ?? fields.id,
+      ...(invocationId === undefined ? {} : {invocationId}),
+      startsTurn: true,
+      toolName: data.tool,
+      toolArguments: data.args ?? {},
+      ...(data.call_id == null ? {} : {toolCallId: data.call_id}),
+    };
+  }
+  return {
+    id: fields.id,
+    kind: 'tool',
+    content: data.content,
+    label: labelFor(event, 'tool'),
+    ...(data.is_error ? {tone: 'failure' as const} : {}),
+    ...fields.agentFields,
+    ...fields.roundFields,
+    turnId: invocationId ?? fields.id,
+    toolName: data.tool,
+    toolResult: data,
+    ...(data.call_id == null ? {} : {toolCallId: data.call_id}),
+    ...(invocationId === undefined ? {} : {invocationId}),
+  };
+}
+
+function resultTranscriptEntry(
+  event: RunEvent,
+  data: Extract<RunEventData, {kind?: 'judge_result' | 'benchmark_result' | 'round_finished'}>,
+  fields: TranscriptFields,
+): TranscriptEntry {
+  if (data.kind === 'judge_result') {
+    return {
+      id: fields.id,
+      kind: 'result',
+      content: data.feedback || `Judge returned ${data.verdict}.`,
+      label: `Judge · ${data.verdict.toUpperCase()}`,
+      tone: data.verdict === 'pass' ? 'success' : 'failure',
+      ...fields.agentFields,
+      ...fields.roundFields,
+    };
+  }
+  if (data.kind === 'benchmark_result') {
+    return {
+      id: fields.id,
+      kind: 'result',
+      content: `${data.metric}: ${data.value} ${data.unit}`,
+      label: 'Benchmark',
+      tone: 'success',
+      ...fields.agentFields,
+      ...fields.roundFields,
+    };
+  }
+  const tone =
+    data.judge_verdict === 'pass'
+      ? 'success'
+      : data.judge_verdict === 'fail'
+        ? 'failure'
+        : 'normal';
+  return {
+    id: fields.id,
+    kind: 'result',
+    content: `${data.attempts} attempt(s)`,
+    label: `${event.round_label ?? 'Round'} · ${data.judge_verdict.toUpperCase()}`,
+    tone,
+    ...fields.agentFields,
+    ...fields.roundFields,
+  };
+}
+
+function frameworkTranscriptEntry(
+  event: RunEvent,
+  data: Extract<
+    RunEventData,
+    {kind?: 'gate_started' | 'gate_finished' | 'workspace_snapshot' | 'run_configured'}
+  >,
+  fields: TranscriptFields,
+): TranscriptEntry {
+  if (data.kind === 'gate_started') {
+    const recipe = data.recipe == null ? '' : ` ${data.recipe}`;
+    return {
+      id: fields.id,
+      kind: 'status',
+      content: `running${recipe}`,
+      label: frameworkLabel(`framework-${data.gate}`, event),
+      ...fields.roundFields,
+      ...(data.command == null ? {} : {command: data.command}),
+    };
+  }
+  if (data.kind === 'gate_finished') {
+    return gateFinishedEntry(event, data, fields.id, fields.roundFields);
+  }
+  if (data.kind === 'workspace_snapshot') {
+    return {
+      id: fields.id,
+      kind: 'status',
+      content: workspaceSnapshotContent(data),
+      label: frameworkLabel(frameworkSourceName(data.source, null), event),
+      ...fields.roundFields,
+    };
+  }
+  return {
+    id: fields.id,
+    kind: 'status',
+    content: runConfiguredContent(data),
+    label: frameworkLabel(frameworkSourceName(data.source, null), event),
+    ...fields.roundFields,
+  };
 }
 
 function configurationFailureContent(data: {

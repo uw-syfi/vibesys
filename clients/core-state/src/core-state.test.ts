@@ -855,6 +855,31 @@ describe('core state projection', () => {
     });
   });
 
+  it('keeps typed payload precedence over conflicting event-type fallbacks', () => {
+    const chat = reduceEvent(initialCoreState(), {
+      ...baseEvent(1, 'phase_started'),
+      data: {kind: 'chat', answer: 'typed answer'},
+    });
+    const gate = reduceEvent(initialCoreState(), {
+      ...baseEvent(2, 'run_failed'),
+      data: {
+        kind: 'gate_started',
+        gate: 'validation',
+        recipe: 'focused-tests',
+        command: 'bun test',
+      },
+    });
+
+    expect(chat.transcript).toMatchObject([{kind: 'assistant', content: 'typed answer'}]);
+    expect(gate.transcript).toMatchObject([
+      {
+        kind: 'status',
+        content: 'running focused-tests',
+        label: 'framework-validation · round-1-implementer',
+      },
+    ]);
+  });
+
   it('exposes experiment changes only as stream-derived invalidation', () => {
     const state = reduceEvent(initialCoreState(), {
       ...baseEvent(12, 'experiments_changed'),
