@@ -274,7 +274,12 @@ def test_workflow_uses_trusted_default_branch_and_pinned_actions() -> None:
 
     assert "issue_comment:" in text
     assert "types: [created]" in text
-    assert workflow["permissions"] == {"contents": "read"}
+    assert workflow["permissions"] == {
+        "actions": "read",
+        "contents": "write",
+        "issues": "write",
+        "pull-requests": "read",
+    }
     assert "github.event.repository.default_branch" in text
     assert "persist-credentials: false" in text
     assert "github.event.pull_request.head" not in text
@@ -283,16 +288,8 @@ def test_workflow_uses_trusted_default_branch_and_pinned_actions() -> None:
         if "uses" in step:
             reference = step["uses"].split("@", maxsplit=1)[1].split()[0]
             assert re.fullmatch(r"[0-9a-f]{40}", reference)
-    app_token = next(step for step in steps if step.get("id") == "app-token")
-    assert {
-        key: value for key, value in app_token["with"].items() if key.startswith("permission-")
-    } == {
-        "permission-actions": "read",
-        "permission-contents": "write",
-        "permission-issues": "write",
-        "permission-metadata": "read",
-        "permission-pull-requests": "read",
-    }
+    assert "actions/create-github-app-token" not in text
+    assert "GH_TOKEN: ${{ github.token }}" in text
 
 
 def test_test_workflow_exposes_stable_scoped_merge_gate() -> None:
