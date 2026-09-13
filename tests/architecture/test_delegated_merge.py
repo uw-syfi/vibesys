@@ -32,6 +32,7 @@ from scripts.delegated_merge import (
 )
 
 REPO_ROOT = Path(__file__).parents[2]
+CONFIGURED_MEMBERS = 'members = ["AyanBinRafaih", "Nano-AI"]'
 
 
 def _event(**changes: object) -> Event:
@@ -67,7 +68,8 @@ def _pull(**changes: object) -> dict[str, object]:
 
 def test_policy_accepts_only_exact_delegated_paths_and_both_sides_of_renames() -> None:
     policy = load_policy()
-    assert all(not capability.members for capability in policy.capabilities.values())
+    assert policy.capabilities["tui"].members == {"ayanbinrafaih", "nano-ai"}
+    assert policy.capabilities["server"].members == {"ayanbinrafaih", "nano-ai"}
     capabilities, checks = authorize_files(
         [[{"filename": "clients/tui/src/view.ts", "previous_filename": "src/server/view.py"}]],
         changed_files=1,
@@ -189,7 +191,7 @@ def test_membership_is_case_insensitive_and_requires_every_capability(tmp_path: 
     policy_path.write_text(
         (REPO_ROOT / ".github" / "delegated-merge.toml")
         .read_text()
-        .replace("members = []", 'members = ["MainTainer"]')
+        .replace(CONFIGURED_MEMBERS, 'members = ["MainTainer"]')
     )
     policy = load_policy(policy_path)
     assert all(capability.members == {"maintainer"} for capability in policy.capabilities.values())
@@ -232,7 +234,7 @@ def test_policy_rejects_invalid_capability_members(
     policy_path.write_text(
         (REPO_ROOT / ".github" / "delegated-merge.toml")
         .read_text()
-        .replace("members = []", f"members = {members}", 1)
+        .replace(CONFIGURED_MEMBERS, f"members = {members}", 1)
     )
 
     with pytest.raises(MergeRefusalError, match=message):

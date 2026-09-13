@@ -12,7 +12,7 @@ job_name = "Required PR CI"
 # Keep shared manifests, dependency locks, entrypoint composition, workflows,
 # and this broker's policy and implementation under the normal maintainer path.
 [capabilities.tui]
-members = []
+members = ["AyanBinRafaih", "Nano-AI"]
 prefixes = [
   "clients/backend-client/src/",
   "clients/core-state/src/",
@@ -23,7 +23,7 @@ paths = []
 additional_checks = []
 
 [capabilities.server]
-members = []
+members = ["AyanBinRafaih", "Nano-AI"]
 prefixes = [
   "src/server/",
   "tests/server/",
