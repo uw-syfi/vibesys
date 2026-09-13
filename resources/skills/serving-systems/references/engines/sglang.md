@@ -178,6 +178,82 @@ See [`../tooling/performance-modeling.md`](../tooling/performance-modeling.md) f
 
 Scope: sglang, any backend (scheduler behavior, not platform-specific). Status: verified (measured via a request-id join, residual near logging precision; mechanism read from the recv-loop/`PrefillAdder` gating in `managers/scheduler.py`). Stamp: sglang fork at `b6f3d5d6c8`, 2026-09-12, job 633804.
 
+## Per-phase prefill CUDA graph: breakable backend accepted
+
+`--cuda-graph-config` selects a capture backend independently per phase
+(`decode`, `target_verify`, `draft_decode`, `draft_extend`, `prefill`, ...).
+For the prefill phase this fork exposes four backends: `full`, `breakable`,
+`tc_piecewise`, and `disabled` (the default: prefill always runs eager).
+Locking a phase backend explicitly on the launch command bypasses
+`server_args.py`'s own auto-disable cascade for that phase (the non-CUDA-hardware
+rule and, discovered by this campaign, a multimodal-architecture rule), which
+otherwise silently forces prefill graph capture off.
+
+**`tc_piecewise` is a silent no-op under speculative decoding on this fork.**
+This model_runner's `cuda_graph_setup.py` routes the target prefill forward
+of an EAGLE-family speculative-decoding target (NEXTN counts as EAGLE-family
+in this fork's own `spec_algorithm` classification) to the eager runner
+whenever the configured backend is not `breakable`, citing a named FP4/MoE
+decode-replay corruption bug (upstream issues #28386, #28870). The
+client-visible prefill path never runs under a captured graph for
+`tc_piecewise`, `full`, or `disabled` once a spec-decode target is active: a
+fixed-prompt output-token-id check confirms this indirectly (`tc_piecewise`
+is bit-exact against base, 24/24 tokens, consistent with never taking the
+graph path). Do not read a lack of TTFT change on `tc_piecewise` under
+spec-decode as a tuning miss; it is this routing rule, confirmed in source.
+
+**`breakable` captures the target prefill and is accepted end to end.** A
+single-request TTFT sweep found a real win at the small end of a 13-bucket
+ladder (256 to 1024 tokens, step 64): 256 tokens 181.6 to 119.4 ms (-34
+percent), 512 tokens 174.4 to 139.3 ms (-20 percent), shrinking to noise by
+768-1024 tokens as the captured segment's own GPU compute (MoE routed +
+dense GEMM) grows with token count and the graph has proportionally less
+CPU-dispatch overhead left to hide (see
+[`../tooling/performance-modeling.md`](../tooling/performance-modeling.md)
+for the general rule this is one case of). Paired end-to-end acceptance
+against the real multiturn harness:
+
+| Concurrency | pooled p95 TTFT turn2+ | pooled p50 TTFT | median TPOT |
+|:--|:--|:--|:--|
+| 48 sessions, uncapped | -11.7 percent (363.6 to 321.1 ms) | -23.3 percent (195.6 to 150.1 ms) | -12.4 percent (12.94 to 11.34 ms) |
+| 16-session cap | -29.5 percent raw, -32.4 percent collapse-excluded (292.9 to 206.4 ms) | n/a | -9.1 percent raw, -7.3 percent collapse-excluded |
+
+Gates 13/13 every rep both concurrencies; boot time within budget at 48
+sessions, a large swing at 16 sessions attributed to this cluster's own
+sequential-boot variance, not the change (per-rank capture-elapsed lines show
+the graph capture step itself cost only 58-60 s).
+
+**Exactness cannot be certified token-for-token on this stack.** A fixed-prompt
+check first found `breakable` diverging from base at token index 10 of 24.
+A follow-up ran 5 fixed prompts x 3 repeats greedy at concurrency 1: base
+matched its own repeat only 3 of 15 times (20 percent), and `breakable`
+matched base 2 of 15 times (13 percent), not distinguishably worse than
+base's own repeat-to-repeat rate at this sample size. Both sides show top-1
+logprob differences up to about 0.5 nats on matching prefixes, far above
+bf16-rounding-level (order 1e-2 to 1e-3): this stack's greedy output is not
+run-to-run reproducible at concurrency 1 regardless of the graph backend.
+`breakable` was accepted on the accuracy evaluation of record instead
+(GSM8K level 1 and level-2 agreement, both inside the accepted tolerance
+band; see
+[`../tooling/accuracy-checker.md`](../tooling/accuracy-checker.md)), not on
+token-level exactness.
+
+**Capture cost is flat with bucket count.** Comparing 13-, 21-, and 4-bucket
+ladders on the same boot: capture elapsed 48.88 s / 46.13 s / 26.46 s and
+capture memory 16.04 / 16.48 / 15.43 GiB. Extending the ladder to 1536/2048
+tokens gains only 5-15 percent there (not the 20-34 percent seen at
+256-512), consistent with the same GPU-compute-growth effect above, not with
+capture cost scaling with bucket count.
+
+Scope: this fork, gfx942 MI300A TP=4, this hybrid GDN+MoE MXFP4 model under
+NEXTN k=3 speculative decode with `--disable-overlap-schedule`, the aiter
+attention backend, the fused MXFP4 MoE HIP extension path
+(`SGLANG_MXFP4_MOE_HIP=1`). Status: `breakable` accepted (TTFT/TPOT paired
+acceptance at two concurrencies plus the accuracy gate of record, all
+passed); `tc_piecewise` refuted for this deployment (confirmed mechanism,
+not a tuning miss); `full` not tested. Stamp: sglang-v0.5.18-rocm700-mi30x,
+2026-09-13, job-verified.
+
 ## Pitfalls
 
 ### `profile_by_stage` cannot isolate a stage rarer than the ones around it

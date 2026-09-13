@@ -376,6 +376,34 @@ rearrange work, and a slow replacement kernel may hide the value of the work it
 targets. Record these limitations. The requirement is to reconcile the new
 estimate with prior causal evidence, not to overfit one noisy delta.
 
+### A GPU kernel win does not reach the wall when the step is dispatch-bound
+
+Test a kernel-level win at the wall level before investing further in it.
+Profile the GPU-busy fraction of the step first: a kernel change that is 47 to
+75 percent faster in isolation produced zero end-to-end change in one measured
+case, twice. Once, a dense-GEMM bucket-tuning table applied on top of an
+otherwise-eager (un-graphed) prefill forward moved single-request TTFT by only
+a few ms in the opposite direction from predicted, at a step whose own
+GPU-busy fraction was under 50 percent (the CPU-dispatch cost this section's
+prefill example measures dominates the wall; the isolated kernel saving is
+real but is not the term the wall is waiting on). The same tuning, retried on
+top of a CUDA-graph-captured version of the same forward that removes most of
+the dispatch cost, still did not reach the wall reliably: the captured
+window's own GPU-busy fraction stayed at 44 to 46 percent even with dispatch
+hidden, so more than half the window was still non-GPU time the tuning does
+not touch, and the small delta that was measured could not be distinguished
+from unrelated run-to-run noise (see the boot-order pitfall in
+[`serving-benchmark.md`](serving-benchmark.md)). Do not extrapolate an
+isolated kernel microbenchmark's saving to the wall without first measuring
+what fraction of the step it is GPU-busy dispatching against; a large fraction
+of "not GPU-busy" is not itself a target the kernel change can shrink.
+
+Scope: any engine and backend, any step whose GPU-busy fraction of wall time
+is measured, not assumed. Status: verified (measured twice, both refutations
+on the same mechanism). See [`platforms/`](../platforms/) for the full
+kernel-tuning numbers this generalizes from. Stamp:
+sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
+
 ## Plateau workflow for the outer loop
 
 Refresh the model after the first valid baseline, after a material architecture
@@ -455,6 +483,9 @@ See [`performance-modeling-freshness.md`](performance-modeling-freshness.md) for
 - Changing precision, workload, or semantics outside operator constraints.
 - Optimizing a measured fraction whose perfect-removal ceiling cannot explain a
   material part of the remaining gap.
+- Trusting an isolated kernel microbenchmark's saving to reach the wall
+  without first profiling the step's own GPU-busy fraction; a dispatch-bound
+  step absorbs a real GPU-side win with no end-to-end change.
 
 ## See also
 

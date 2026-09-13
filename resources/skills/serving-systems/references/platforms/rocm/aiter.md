@@ -392,7 +392,7 @@ A live single-request TTFT sweep isolates the first-touch component from the sur
 
 Padding prefill M up to the next multiple of 64 above the TunableOp-tuned range, plus a boot-time warmup of the resulting padded buckets, collapsed the pooled new-shape gap from 93 ms to 15 ms on a held server. Candidate, not yet accepted: two exact-multiple-of-64 M values still showed an elevated TTFT despite the warmup (406 ms and 391 ms against a 156 to 175 ms band elsewhere at the same target), not fully explained here, affecting 2 of 32 in-range rows measured; burst-admission maxima were unaffected by this change, since that mechanism is queueing, not per-shape first-touch.
 
-Paired end-to-end acceptance (48-session and 16-session concurrency, 5 reps per side each) found no regression from this fix (gates 13/13 on all 20 reps, TPOT flat within each side's own rep-to-rep spread at both concurrencies) but did not confirm the narrow first-touch win the held-server sweep isolated: pooled p95 TTFT turn2+ is flat at 48 sessions (+0.3 percent) and a small +4.4 to +4.7 percent regression at 16 sessions, both well inside the accepted 10 percent regression budget but the opposite sign from the predicted improvement. Accepted as a correctly-scoped, no-regression change and an enabling change for the bucket-dependent prefill levers it unblocks (TunableOp coverage at the padded buckets, prefill graph capture), not as a standalone TTFT win: a fix that removes a per-new-shape first-touch tax does not by itself move a metric whose noise floor in the end-to-end harness is larger than the tax it removed.
+Paired end-to-end acceptance (48-session and 16-session concurrency, 5 reps per side each) found no regression from this fix (gates 13/13 on all 20 reps, TPOT flat within each side's own rep-to-rep spread at both concurrencies) but did not confirm the narrow first-touch win the held-server sweep isolated: pooled p95 TTFT turn2+ is flat at 48 sessions (+0.3 percent) and a small +4.4 to +4.7 percent regression at 16 sessions, both well inside the accepted 10 percent regression budget but the opposite sign from the predicted improvement. Accepted as a correctly-scoped, no-regression change and an enabling change for the bucket-dependent prefill levers it unblocks (TunableOp coverage at the padded buckets, prefill graph capture), not as a standalone TTFT win: a fix that removes a per-new-shape first-touch tax does not by itself move a metric whose noise floor in the end-to-end harness is larger than the tax it removed. That prediction is now confirmed: the fixed-bucket M padding this fix introduced is the prerequisite the accepted `breakable` prefill CUDA graph (see [`../../engines/sglang.md`](../../engines/sglang.md)) captures against, which is where this change actually pays off.
 
 Scope: rocm, gfx942, aiter d9e5ef7ce0, this model's prefill dense projections. Status: dispatch mechanism verified (lru_cache confirmed at source); first-touch cost measured, verified; padding-plus-warmup fix accepted as a no-regression, enabling change (paired acceptance passed at both 48- and 16-session concurrency; does not itself move p95 TTFT turn2+ end to end). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
@@ -440,6 +440,18 @@ Status:  verified (crash reproduced, then fixed and confirmed graph-safe
          by a capture-vs-eager check). sglang-v0.5.18-rocm700-mi30x,
          2026-09-12, job 633183.
 ```
+
+### Graph capture by phase, this fork
+
+| Phase | Backend | Status |
+|:--|:--|:--|
+| decode / verify / draft | (any) | supported, subject to the host-sync pitfall above |
+| prefill | `disabled` (default) | eager |
+| prefill | `full` | not tested |
+| prefill | `breakable` | supported; accepted end to end under NEXTN spec-decode |
+| prefill | `tc_piecewise` | N/A under spec-decode: silently routed to eager for every EAGLE-family target on this fork, not a boot failure |
+
+See [`../../engines/sglang.md`](../../engines/sglang.md) for the mechanism, the TTFT and accuracy-gate numbers, and the capture-cost-vs-bucket-count result.
 
 ## Out of scope: kernel implementation
 

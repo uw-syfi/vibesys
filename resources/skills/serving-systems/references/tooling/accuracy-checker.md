@@ -302,6 +302,44 @@ speculative decoding. Status: verified (measured at two concurrencies on
 two independent workloads, both showing the same pattern). Stamp:
 sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
+### Token-level exactness cannot certify a graph-capture or scheduling change on a stack with this much intrinsic drift
+
+```
+Symptom: a fixed-prompt output-token-id check finds a candidate (here, a
+         CUDA-graph-captured prefill path) diverging from the base build
+         at token index 10 of 24 on an ordinary greedy prompt, and there
+         is no obvious way to tell whether that is a real bug or just
+         this stack's own noise.
+Cause:   the base build's own greedy output is not reproducible run to
+         run at this stack's baseline nondeterminism level: repeating 5
+         fixed prompts x 3 times each at concurrency 1 found base
+         matching its own prior run only 3 of 15 times (20 percent), with
+         top-1 logprob differences up to 0.510 nats on matching prefixes,
+         far above bf16-rounding-level (order 1e-2 to 1e-3). The
+         candidate's own repeat rate against base, 2 of 15 (13 percent),
+         is not distinguishably worse than base's self-repeat rate at
+         this sample size. A single-prompt exactness check has no floor
+         to compare against unless it also measures the base's own
+         self-repeat rate on the same prompts.
+Fix:     do not decide graph-capture or scheduling correctness from
+         token-level exactness once the base build itself fails to
+         reproduce its own greedy output at a similar rate. Use the
+         accuracy evaluation of record instead (task accuracy within the
+         acceptance-tolerance template below, plus level-2 agreement at
+         or above the base's own self-agreement level), and reserve
+         bit-exact or ULP-level checks for kernel changes compared in
+         isolation against a fixed numerical reference, not for
+         end-to-end generations on a stack with this much intrinsic
+         drift.
+Scope:   any stack whose own greedy self-repeat rate at concurrency 1 is
+         measured and found well below reproducible; engine- and
+         backend-agnostic. Status: verified (measured: base-vs-base 3/15,
+         candidate-vs-base 2/15, not distinguishable at this sample
+         size; the candidate was separately accepted on the task-accuracy
+         gate below). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13,
+         job-verified.
+```
+
 ### Acceptance tolerance template for a lossy serving change
 
 When a candidate change may alter computed numbers (not just kernel
@@ -341,3 +379,13 @@ concurrency):
 Status: verified (baseline measured, tolerance derived from the same
 measurement). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13,
 job-verified.
+
+Applied to the graph-capture case above (a CUDA-graph-captured prefill path
+whose token-level exactness check could not be trusted, per the pitfall
+above): base scored 93.8 percent (469/500), candidate 95.0 percent
+(475/500), both inside the [91.9%, 96.3%] band; level-2 base-vs-candidate
+agreement (text-identical 3.47 percent, mean token-agreement 20.33 percent,
+mean absolute logprob difference 0.0167) cleared all three thresholds and
+sat close to the baseline's own self-agreement numbers above. Accepted on
+this gate. See [`../engines/sglang.md`](../engines/sglang.md) for the full
+finding this decided.
