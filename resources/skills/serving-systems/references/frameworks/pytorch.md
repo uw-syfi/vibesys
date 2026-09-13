@@ -120,6 +120,44 @@ Status:  verified (reproduced: a launch missing this var produced zero
          job-verified.
 ```
 
+### A TunableOp results CSV with CRLF line endings silently discards the whole table
+
+```
+Symptom: a TunableOp results table loads without error (load-verify gate
+         passes, no could-not-open line, `PYTORCH_TUNABLEOP_VERBOSE=1`
+         shows a load attempt), but no dispatched kernel ever matches a
+         tuned solution name from the table, at any shape or M, whether
+         a CUDA graph is capturing or the process is eager. Aggregate
+         GPU time also never moves versus an untuned baseline.
+Cause:   PyTorch's TunableOp results loader validates the file's header
+         lines (library/hardware/version identifiers) by exact string
+         match before accepting any row, and rejects the entire file,
+         not just the offending line, on any mismatch. A CSV with CRLF
+         line endings on those header lines (common after a hand-merge
+         or an edit in a CRLF-normalizing tool) fails this compare even
+         when every other byte is correct, and the rejection is a single
+         warning per process, easy to miss among boot log noise:
+         "results validator check failed, Failed validator
+         ROCBLAS_VERSION, Tunable.cpp:366".
+Fix:     stage TunableOp CSVs with LF line endings only; add a hard
+         check at staging time (0 CR bytes in every per-rank file)
+         before trusting a boot's load-verify gate. Do not rely on
+         aggregate GPU time or client latency alone to confirm a table
+         is in effect: audit kernel names in a profiler trace against
+         the table's own tuned-solution column for the shape and M
+         under test, since aggregate time cannot distinguish "the
+         tuned tile never ran" from "the tuned tile ran but did not
+         help." Grep server logs for "validator" after any TunableOp
+         table change, not just for the load-verify success line.
+Scope:   PyTorch TunableOp, any backend, any (gfx, cu_num) or CUDA SM
+         target; the validator and its exact-string compare are
+         PyTorch-internal, not engine- or backend-specific.
+Status:  verified (root-caused after four unexplained refutations of an
+         otherwise-correct tuned table on one backend; see
+         [`platforms/`](../platforms/) for the full episode). Stamp:
+         torch 2.9.0a0, 2026-09-13, job-verified.
+```
+
 ### Validated end to end on rocm
 
 The fix above (one read-only results file per device ordinal) was validated end-to-end on a real multi-device tensor-parallel server on rocm: a full-coverage TunableOp table over a model's dense projections and LM head cut median decode-step latency (TPOT) by up to about 40 percent at exact numerics, with the tuned shapes' own correctness unchanged from the untuned baseline. See [`platforms/`](../platforms/) for the per-backend numbers and recipe; the substitution rule and the win itself are both engine- and backend-agnostic, so expect a comparable result on any backend where TunableOp covers a serving-relevant GEMM shape.

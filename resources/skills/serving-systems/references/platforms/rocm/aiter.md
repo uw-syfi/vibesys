@@ -374,6 +374,8 @@ Env vars: `PYTORCH_TUNABLEOP_ENABLED=1`, `PYTORCH_TUNABLEOP_TUNING=0`, one read-
 
 Scope: rocm, gfx942, MI300A, this image's stack (PyTorch 2.9.0a0, ROCm 7.0.0.0-38-9428210, hipBLASLt 100000-976b9c4a87), TP=4 per-rank shapes of this checkpoint and its MTP draft. Status: accepted. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, job-verified across the tuning, 48-session, and 16-session-cap runs.
 
+A follow-on table adds prefill-M coverage (13 padded buckets, `SGLANG_AITER_GEMM_PAD_M=64`) and is also **accepted**: pooled p95 TTFT turn2+ -39.7 percent at 48 sessions, no regression at a 16-session cap (an improvement there too), TPOT -8.7/-1.7 percent, accuracy inside tolerance. This candidate was refuted four times before a CRLF line-ending bug in the merged results CSV, which silently discarded the whole tuned table on every prior boot, was found and fixed. See [`aiter-tunableop.md`](aiter-tunableop.md#the-bucketing-scheme-is-accepted-the-four-prior-refutations-were-one-file-level-bug) for the pitfall, the kernel-name-audit diagnostic, and the full numbers.
+
 ### Cold dense-GEMM shape resolution is milliseconds, not the cause of multi-second stalls
 
 ```
