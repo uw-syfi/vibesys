@@ -2018,6 +2018,99 @@ describe('stream reconnect', () => {
     expect(controller.state.core.sequence).toBe(7);
     expect(controller.state.core.historyAfterSequence).toBe(5);
   });
+
+  it('re-bootstraps when the store was swapped while the stream was severed', async () => {
+    const transport = new ReconnectTransport();
+    const controller = new SocketSessionController(transport, undefined, undefined, [0]);
+    await controller.start();
+    // Boot against the bootstrap store: sequences 1 and 2 are folded from it.
+    transport.emitBatch(
+      [
+        event(1, 'agent_output_chunk', 'server started\n'),
+        event(2, 'agent_output_chunk', 'server ready\n'),
+      ],
+      0,
+      'bootstrap-store',
+    );
+    expect(controller.state.core.sequence).toBe(2);
+
+    transport.sever();
+    await settle();
+    // While severed, the durable log was attached: a new store whose sequence 1
+    // is `run_started`, not the output the client folded at 1 in the old store.
+    transport.emitBatch(
+      [
+        {
+          ...event(1, 'run_started'),
+          data: {kind: 'run_started', outer_loop: 'agent', input: '.', max_rounds: 3},
+        },
+        event(2, 'agent_output_chunk', 'two\n'),
+      ],
+      0,
+      'run-store',
+    );
+
+    // The resume named the store the client last saw, and the batch that named
+    // a different one superseded the fold: `run_started` at sequence 1 lands
+    // even though sequence 1 was already folded, which the extend path drops.
+    expect(transport.subscribeCalls.at(-1)?.storeId).toBe('bootstrap-store');
+    expect(controller.state.core.maxRounds).toBe(3);
+    expect(controller.state.core.outerLoop).toBe('agent');
+    expect(controller.state.core.historyAfterSequence).toBe(0);
+  });
+
+  it('keeps the fold when an old-server fallback omits store identity', async () => {
+    const transport = new ReconnectTransport();
+    const controller = new SocketSessionController(transport, undefined, undefined, [0]);
+    await controller.start();
+    transport.emitBatch(
+      [
+        {
+          ...event(1, 'run_started'),
+          data: {kind: 'run_started', outer_loop: 'agent', input: '.', max_rounds: 3},
+        },
+      ],
+      0,
+      'run-store',
+    );
+
+    // A server predating store-aware resumes rejects the first dial, then the
+    // stream falls back to a plain cursor resume whose suffix names no store.
+    transport.refuseSubscribes = 1;
+    transport.sever();
+    await settle();
+    expect(transport.subscribeCalls.at(-1)?.storeId).toBeUndefined();
+    transport.emitBatch([event(2, 'agent_output_chunk', 'two\n')]);
+
+    expect(controller.state.core.maxRounds).toBe(3);
+    expect(controller.state.core.sequence).toBe(2);
+    expect(controller.state.core.transcript.map(item => item.content).join('')).toContain('two\n');
+  });
+
+  it('keeps the fold and learns an identity first seen on a resumed suffix', async () => {
+    const transport = new ReconnectTransport();
+    const controller = new SocketSessionController(transport, undefined, undefined, [0, 0]);
+    await controller.start();
+    transport.emitBatch([
+      {
+        ...event(1, 'run_started'),
+        data: {kind: 'run_started', outer_loop: 'agent', input: '.', max_rounds: 3},
+      },
+    ]);
+
+    transport.sever();
+    await settle();
+    transport.emitBatch([event(2, 'agent_output_chunk', 'two\n')], 0, 'run-store');
+
+    expect(controller.state.core.maxRounds).toBe(3);
+    expect(controller.state.core.sequence).toBe(2);
+    expect(controller.state.core.transcript.map(item => item.content).join('')).toContain('two\n');
+
+    // Once learned, the identity protects the next cursor resume.
+    transport.sever();
+    await settle();
+    expect(transport.subscribeCalls.at(-1)?.storeId).toBe('run-store');
+  });
 });
 
 class FakeTransport implements ServerTransport {
@@ -2095,8 +2188,12 @@ class FakeTransport implements ServerTransport {
  */
 class ReconnectTransport implements ServerTransport {
   readonly requests: RequestInput[] = [];
-  /** Every subscribe: the cursor and tail it carried, in order. */
-  readonly subscribeCalls: Array<{afterSequence: number; tail: number | undefined}> = [];
+  /** Every subscribe: the cursor, tail, and store it carried, in order. */
+  readonly subscribeCalls: Array<{
+    afterSequence: number;
+    tail: number | undefined;
+    storeId: string | undefined;
+  }> = [];
   /** How many upcoming subscribes to reject before letting one through. */
   refuseSubscribes = 0;
   #message: ((message: ServerMessage) => void) | null = null;
@@ -2119,7 +2216,7 @@ class ReconnectTransport implements ServerTransport {
     onDisconnect: (error: Error) => void,
     options?: SubscribeOptions,
   ): Promise<EventSubscription> {
-    this.subscribeCalls.push({afterSequence, tail: options?.tail});
+    this.subscribeCalls.push({afterSequence, tail: options?.tail, storeId: options?.storeId});
     if (this.refuseSubscribes > 0) {
       this.refuseSubscribes -= 1;
       return Promise.reject(new Error('connection refused'));
@@ -2129,11 +2226,12 @@ class ReconnectTransport implements ServerTransport {
     return Promise.resolve({close: async () => undefined});
   }
 
-  emitBatch(events: readonly RunEvent[], historyAfterSequence = 0): void {
+  emitBatch(events: readonly RunEvent[], historyAfterSequence = 0, storeId?: string): void {
     this.#message?.({
       type: 'event_batch',
       events: [...events],
       history_after_sequence: historyAfterSequence,
+      ...(storeId === undefined ? {} : {store_id: storeId}),
     });
   }
 

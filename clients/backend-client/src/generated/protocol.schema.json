@@ -3452,6 +3452,11 @@
           ],
           "default": null,
           "title": "Tail"
+        },
+        "store_id": {
+          "default": "",
+          "title": "Store Id",
+          "type": "string"
         }
       },
       "title": "SubscribeRequest",

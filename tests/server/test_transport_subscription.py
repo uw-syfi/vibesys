@@ -207,14 +207,16 @@ def test_bootstrap_tail_stays_bounded_when_events_land_mid_bootstrap(  # noqa: A
     original_bootstrap = parts.api.subscription_bootstrap
     pre_burst_watermarks: list[int] = []
 
-    def bursty_bootstrap(after_sequence: int, tail_bound: int | None):  # noqa: ANN202
+    def bursty_bootstrap(  # noqa: ANN202
+        after_sequence: int, tail_bound: int | None, *, store_id: str | None = None
+    ):
         # Reproduce the bootstrap race deterministically: a burst of appends
         # lands after the handler commits to bootstrapping but before the
         # bootstrap's own locked read.
         pre_burst_watermarks.append(parts.api.latest_sequence)
         for index in range(3000):
             parts.journal.publish_output("stdout", f"burst-{index}")
-        return original_bootstrap(after_sequence, tail_bound)
+        return original_bootstrap(after_sequence, tail_bound, store_id=store_id)
 
     monkeypatch.setattr(parts.api, "subscription_bootstrap", bursty_bootstrap)
 
@@ -406,6 +408,58 @@ def test_late_attach_rebootstraps_a_run_log_shorter_than_the_tail(tmp_path):  # 
     # store holds, starting at the ``run_started`` the stale cursor covered.
     assert [event["sequence"] for event in batch["events"]] == list(range(1, latest + 1))
     assert batch["events"][0]["type"] == "run_started"
+
+
+def test_resume_across_a_store_swap_rebootstraps(tmp_path):  # noqa: ANN001, ANN201
+    # A reconnect that redials with the client's cursor and the store it last
+    # saw must not resume that cursor against a log attached while it was gone:
+    # the cursor numbers the retired store. The server drops it and replays the
+    # live store. Only the identity, not the log length, reveals the swap here,
+    # since the whole durable log fits inside the tail the boot dialed.
+    parts = build_server_parts(tmp_path / "server")
+
+    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=1_000)) as read:
+        assert read()["type"] == "subscribed"
+        bootstrap = read()
+    cursor = bootstrap["through_sequence"]
+
+    parts.attach(_write_log(tmp_path / "logs", _round_log(200)))
+    latest = parts.api.snapshot().sequence
+    assert latest < 1_000
+
+    subscribed, batch = _subscribe(
+        parts.api, SubscribeRequest(after_sequence=cursor, store_id=bootstrap["store_id"])
+    )
+
+    assert subscribed["type"] == "subscribed"
+    assert batch["store_id"] != bootstrap["store_id"]
+    assert batch["history_after_sequence"] == 0
+    assert batch["through_sequence"] == latest
+    # A whole-log replay from sequence 1, so the resumed client re-folds to what
+    # the durable store holds instead of extending its stale cursor.
+    assert [event["sequence"] for event in batch["events"]] == list(range(1, latest + 1))
+    assert batch["events"][0]["type"] == "run_started"
+
+
+def test_resume_within_the_same_store_extends_from_the_cursor(tmp_path):  # noqa: ANN001, ANN201
+    # The mirror: a resume that names the store still live keeps its cursor, so a
+    # reconnect with no swap streams incrementally rather than re-bootstrapping.
+    parts = _attach(tmp_path, _round_log(50))
+
+    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=1_000)) as read:
+        assert read()["type"] == "subscribed"
+        bootstrap = read()
+    store = bootstrap["store_id"]
+    cursor = bootstrap["through_sequence"]
+
+    subscribed, batch = _subscribe(
+        parts.api, SubscribeRequest(after_sequence=cursor, store_id=store)
+    )
+
+    assert subscribed["type"] == "subscribed"
+    assert batch["store_id"] == store
+    assert batch["through_sequence"] == cursor
+    assert batch["events"] == []
 
 
 def test_attach_into_an_empty_log_keeps_the_subscription_streaming(tmp_path):  # noqa: ANN001, ANN201
