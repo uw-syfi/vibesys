@@ -124,6 +124,39 @@ Status:  verified (reproduced: a launch missing this var produced zero
 
 The fix above (one read-only results file per device ordinal) was validated end-to-end on a real multi-device tensor-parallel server on rocm: a full-coverage TunableOp table over a model's dense projections and LM head cut median decode-step latency (TPOT) by up to about 40 percent at exact numerics, with the tuned shapes' own correctness unchanged from the untuned baseline. See [`platforms/`](../platforms/) for the per-backend numbers and recipe; the substitution rule and the win itself are both engine- and backend-agnostic, so expect a comparable result on any backend where TunableOp covers a serving-relevant GEMM shape.
 
+### `PYTORCH_HIP_ALLOC_CONF=expandable_segments:True` reaches the process but is rejected on rocm
+
+```
+Symptom: an allocator-configuration A/B test shows no measurable
+         difference between sides, or replicates the control side's
+         numbers exactly; nothing in the launch command or the process
+         environment looks wrong, and /proc/<pid>/environ on the server
+         process confirms the variable did reach it.
+Cause:   on this rocm build, PyTorch's HIPAllocatorConfig parses
+         expandable_segments:True and explicitly declines it, logging
+         "UserWarning: expandable_segments not supported on this
+         platform" (c10/hip/HIPAllocatorConfig.h). Both
+         PYTORCH_HIP_ALLOC_CONF and PYTORCH_CUDA_ALLOC_CONF set to
+         expandable_segments:True are silently accepted into the
+         environment and silently rejected by the allocator: the
+         "candidate" side of the A/B runs the identical default caching
+         allocator as the control side, not a different configuration.
+Fix:     grep the boot log for the rejection warning (or any other
+         "not supported" line) before reading an env-var experiment's
+         numbers; a variable reaching the process is not the same as it
+         changing observable allocator behavior. Confirming the process
+         environment alone is not sufficient. On this build,
+         expandable_segments is not an available lever; a different test
+         is needed for any hypothesis that depends on it.
+Scope:   rocm, this image's PyTorch/HIP allocator build. Whether this is
+         rocm-wide or specific to this torch/ROCm version pairing is not
+         established; confirm against your own build before assuming it
+         generalizes.
+Status:  verified (warning text plus process-environment inspection both
+         confirmed). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13,
+         job-verified.
+```
+
 ## torch.compile for serving
 
 Two compile modes relevant to serving:
