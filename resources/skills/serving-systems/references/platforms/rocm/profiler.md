@@ -74,6 +74,31 @@ Scope:   rocm, sglang-v0.5.18-rocm700-mi30x image.
 Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job 631890.
 ```
 
+### A `--pmc` counter report averages across counters, not just across dispatches, when it doesn't group by `Counter_Name`
+
+```
+Symptom: A rocprofv3 `--pmc` counter report reads plausible per-dispatch
+         numbers, but they disagree with a hand-reaggregation of the
+         same raw CSV once more than one counter was requested in the
+         same pass.
+Cause:   The report script averages the raw `Counter_Value` column
+         across every row in a kernel/grid group without first
+         splitting by `Counter_Name`. A single `--pmc` pass that
+         requests several counters interleaves each dispatch's rows
+         across those counters, so a blanket average blends unrelated
+         counters together (for example VALUBusy rows averaged in with
+         SQ_WAIT_INST_ANY rows) into one meaningless number.
+Fix:     Group by `Counter_Name` first, then average `Counter_Value`
+         within each group, one mean per counter per dispatch. Check
+         this whenever a `--pmc` pass requests more than one counter; a
+         report script that is correct for a single-counter pass can
+         still be silently wrong for a multi-counter one.
+Scope:   rocm, rocprofv3, any counter-report script reading `--pmc` CSV
+         output with more than one counter requested per pass.
+Status:  verified. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13,
+         job-verified.
+```
+
 ## See also
 
 - [`floor.md`](floor.md) — the optimization floor

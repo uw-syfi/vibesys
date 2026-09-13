@@ -86,7 +86,20 @@ Status:  verified (reproduced live; matches aiter.md's prior source-read
 
 ## Recommendation
 
-No existing kernel gives this checkpoint fp8-activation, 4-bit-weight MoE on gfx942 today. Fixing the CK wint4 NaN is the cheapest lever if pursued (candidate, above); absent that, the next-cheapest lever is a custom in-kernel fp8-expand decode, tracked as a candidate design in [`aiter-mxfp4-moe-kernel-iterations.md`](aiter-mxfp4-moe-kernel-iterations.md).
+No existing kernel gives this checkpoint fp8-activation, 4-bit-weight MoE on gfx942 today. Fixing the CK wint4 NaN is the cheapest lever if pursued (candidate, above); a custom in-kernel fp8-expand decode was also designed (analytical only) and is now closed, not built, for the reasons below.
+
+## Closed: fp8-expand decode design, not built
+
+A from-scratch fp8-expand decode kernel (weights stay 4-bit in memory, each nibble decodes in-register to an fp8 e4m3fnuz byte; see [`aiter-mxfp4-moe-kernel-iterations.md`](aiter-mxfp4-moe-kernel-iterations.md) for the design) was scoped as the fallback if a higher-priority lever ran out of headroom first. The final re-profile of the accepted exact stack (permute decode plus dword-wide loads plus the dispatch-threshold retune, see the same file's closing section) closed it before implementation, for three independent reasons:
+
+1. **No headroom left to take.** The design's own milestone required at least 1.5x faster than the exact kernel's stage1 time at decode M=64. Stage1 alone at M=64 now measures 0.98x of its own share of the combined stage1+stage2 weight-byte floor (about 0.32 ms); even a hypothetical kernel that removed every remaining instruction-issue overhead could buy at most about 1.36x on stage1+stage2 combined, well short of 1.5x on stage1 alone.
+2. **The lever does not move the bound the floor is built from.** The 0.32 ms floor is a weight-bandwidth floor over MXFP4 weight bytes. An fp8-activation scheme changes only the activation tensor's dtype during the GEMM; the same weight bytes still move through HBM regardless. fp8's real structural gain (an 8x cut in matrix-instruction issue count) attacks an instruction-issue budget, not a byte-movement one, and the exact kernel is already fighting mostly a byte-movement wall at this M (39.5 to 45.8 percent of peak achieved fetch rate).
+3. **The instruction-issue slack the design was scoped against is already mostly gone.** The design's own VALU-per-element estimate (about 3 to 4.5) was set against the pre-dword-wide-loads scaffold kernel's 2.66 to 4.63 VALU/elem. The kernel production actually dispatches today already measures about 2.03 VALU/elem, so the design's own estimate is no longer an improvement over what already ships; the milestone it was scoped against used the wrong baseline.
+4. No fp8-activation-times-4-bit-weight kernel exists on gfx942 in this image anyway (the survey above): even setting aside points 1 to 3, there would be no aiter kernel to build on without a from-scratch CK/HIP implementation.
+
+General lesson: check which bound a lossy-format proposal actually attacks, and how close the exact kernel already is to that specific bound, before spending accuracy budget on it; see the portable note in [`../../tooling/performance-modeling.md`](../../tooling/performance-modeling.md).
+
+Scope: rocm, gfx942, this fork's MXFP4 fused MoE kernel. Status: closed (decision made from a job-verified re-profile; no cluster job spent on the fp8-expand design itself). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
 ## Out of scope: kernel implementation
 
@@ -95,5 +108,6 @@ Writing new CDNA kernels (HIP, CK templates) is outside this collection. This fi
 ## See also
 
 - [`aiter.md`](aiter.md): the MXFP4 capability table and gate mechanism this file's kernel families are checked against
-- [`aiter-mxfp4-moe-kernel-iterations.md`](aiter-mxfp4-moe-kernel-iterations.md): the fp8-expand candidate design that follows from this survey finding no usable existing kernel
+- [`aiter-mxfp4-moe-kernel-iterations.md`](aiter-mxfp4-moe-kernel-iterations.md): the fp8-expand design this survey led to, now closed, and the final re-profile that closed it
 - [`../../algorithms/quantization-schemes.md`](../../algorithms/quantization-schemes.md): the portable N/A row for this finding
+- [`../../tooling/performance-modeling.md`](../../tooling/performance-modeling.md): the portable lesson on checking which bound a lossy-format change attacks before spending accuracy budget on it

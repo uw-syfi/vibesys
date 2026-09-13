@@ -74,16 +74,50 @@ Accepted as the default at 48-session concurrency: a real, non-noise TPOT improv
 
 Status: job-verified at 48-session concurrency (accepted); microbench-verified only at a 16-session cap (no regression, improvement not distinguishable from rep-to-rep noise). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
-## fp8-expand decode: analytical design, candidate
+## State after iteration 4: final re-profile on the accepted stack (H-A + H-C), job-verified
+
+A fresh re-profile of the accepted stack (permute decode plus H-A dword-wide loads plus H-C's threshold-160 retune) against the campaign's floors, using the same decode-round classifier and prefill kernel breakdown as every earlier re-profile in this file. Two jobs, one for the decode-round and prefill sweep and one for a kernel microbenchmark plus rocprofv3 counters.
+
+**Decode round, N=16 (pooled medians, previous stack in parentheses):**
+
+| Block | ms | Floor (ms) | Ratio |
+|:--|--:|--:|--:|
+| MoE stage1 | 11.49 | -- | -- |
+| MoE stage2 | 6.08 | -- | -- |
+| **MoE routed total** | **17.57** (was 32.47) | **14.81** | **1.19x** (was 2.19x) |
+| Dense GEMM | 5.75 | 3.47 | 1.66x |
+| Gated DeltaNet | 2.96 | -- | -- |
+| Collectives | 3.58 | -- | -- |
+| CPU-only gap | 2.74 | -- | -- |
+| Attention | 1.14 | -- | -- |
+| Other | 3.00 | -- | -- |
+| **Round wall** | **36.86** (was 51.11) | **18.28** | **2.02x** (was 2.80x) |
+
+At N=8, MoE routed is 1.47x its 8.78 ms floor; at N=32, 1.01x its 22.51 ms floor, essentially at the floor. The over-floor ratio keeps shrinking with batch size exactly as every prior re-profile in this campaign found (1.47x, 1.19x, 1.01x at N=8/16/32), uniformly lower than any earlier point. **This crosses MoE routed from the "1.3x to 3x: tuning and overhead" band into the "under 1.3x: at the floor for this design" band** in the optimization-loop skill's own stop-criterion table. Round wall stays at 1.9x to 2.3x its own floor at every N: the non-MoE buckets (dense GEMM, Gated DeltaNet, collectives, CPU-only gap) did not shrink along with MoE, so they now make up most of a much smaller round; see the stop-criterion note in [`../../models/qwen3-5.md`](../../models/qwen3-5.md).
+
+**Prefill** (GPU kernel time only, unaffected by an unrelated aiter tuning-config first-touch lock at the 337-token point, see the pitfall in [`aiter.md`](aiter.md)): routed MoE falls 50 percent at 337 extend tokens (80.84 to 40.09 ms) and 44 percent at 919 extend tokens (144.67 to 81.52 ms) versus the pre-H-A/H-C stack. Dense GEMM, attention, and the small buckets are flat.
+
+**Kernel microbenchmark and rocprofv3 counters, stage1, M=16/64.** Every production M measured (16 to 2048) now dispatches the templated "big" stage1 kernel; the scaffold kernel every earlier ISA audit in this file targeted no longer runs at any of these shapes under threshold=160. Stage1+stage2 combined: 0.1456 ms at M=16, 0.4335 ms at M=64, against the roughly 0.32 ms combined floor (0.98x at M=16 for stage1 alone against its own share of that floor, 1.36x combined at M=64, down from 2.2 to 2.6x for the scaffold kernel in earlier iterations). Static instruction count for the dispatched kernel: about 2.03 VALU (int, float, packed) instructions per weight element, versus 2.66 to 4.63 for the scaffold kernel the earlier permute-fix ISA audit characterized. Hardware counters: VALUBusy 38.2 percent at M=16, 43.8 percent at M=64 (the same "neither idle nor saturated" issue-bound band every kernel in this campaign has shown, 30 to 46 percent); `SQ_WAIT_INST_ANY` about 9x lower than the old scaffold kernel's own M=64 figure at a comparable VALUBusy, i.e. much less time stalled on outstanding loads at a similar issue rate.
+
+**Classification: still instruction-issue-bound, but the absolute overhead over the floor has shrunk from 2.2 to 2.6x (scaffold kernel, earlier iterations) to 0.96 to 1.36x (this kernel, this stack).** The kernel is not a different bottleneck class; the padding and load-shape overhead this campaign kept cutting is now mostly gone.
+
+**Recommendation, and why the fp8-activation design below does not clear its own bar:** the milestone an fp8-activation MoE kernel was scoped against (at least 1.5x faster than the exact kernel's own stage1 time at M=64) is no longer reachable by construction, because there is no longer 1.5x of headroom over the combined floor to take: stage1 alone at M=64 is already at 0.98x of its own share of the 0.32 ms combined floor. See [`aiter-fp8-moe.md`](aiter-fp8-moe.md) for the full closure reasoning. The better-targeted next iteration is the non-MoE decode-round buckets (dense GEMM, Gated DeltaNet, collectives, CPU-only gap), which have never had the exact-numerics scrutiny the MoE kernel got and now dominate the round's remaining over-floor gap.
+
+Scope: rocm, gfx942, this fork's MXFP4 fused MoE kernel, the accepted H-A + H-C stack. Status: job-verified (decode-round N-sweep, prefill kernel breakdown, and kernel microbenchmark/counter audit all gated and cross-checked; bucket-sum vs. measured GPU-busy time within 0.4 percent). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
+
+## fp8-expand decode: analytical design, closed (not built)
 
 Follows from [`aiter-fp8-moe.md`](aiter-fp8-moe.md) finding no usable existing kernel for fp8-activation, 4-bit-weight MoE on gfx942: a from-scratch design keeps weights 4-bit in memory and decodes each nibble to an fp8 e4m3fnuz byte in-register via a 16-entry permute table, rather than porting the H-A/H-B decode's bf16 sign-OR trick, since fnuz has no negative zero and byte `0x80` is NaN there. The e8m0 block scale applies to the fp32 partial sum of each K=32 block, not the fp8 operand (whose exponent range is too narrow to hold e8m0's full range); activations quantize per-token to fp8. Estimated instruction budget is about 3 to 4.5 VALU+perm per element, close to H-A's own measured 4.25/element for the exact bf16 path, so the design's real gain is not fewer decode instructions but an 8x cut in matrix-instruction issue count (one native fp8x32 MFMA call replaces eight bf16 `_1k` calls per weight column). Pre-expanding weights to fp8 in memory instead of decoding in-kernel would double weight-byte footprint and does not fit at this model's size.
 
-Scope: rocm, gfx942, this fork's MXFP4 fused MoE kernel. Status: candidate (analytical design only; no cluster job run). What would verify it: a stage1-only prototype at decode M=64 reaching at least 1.5x over this kernel's own stage1 time, with rel_l2 within the e4m3 expectation and no NaN/inf. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, candidate.
+Closed after the final re-profile above found the exact kernel already within 1.0 to 1.2x of the weight-byte floor this design's target instruction cut does not move; see [`aiter-fp8-moe.md`](aiter-fp8-moe.md) for the full reasoning. Not built; the design and its instruction-budget estimate above are kept as a record of the analysis, not a queued task.
+
+Scope: rocm, gfx942, this fork's MXFP4 fused MoE kernel. Status: closed (analytical design only; no cluster job run; superseded by the closure decision in [`aiter-fp8-moe.md`](aiter-fp8-moe.md)). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
 ## See also
 
 - [`aiter-mxfp4-moe.md`](aiter-mxfp4-moe.md): the permute-based decode16 fix this file follows up on, and its own remaining-inefficiency note
 - [`aiter.md`](aiter.md): the stage1 scaffold-versus-templated dispatch this file's H-C retunes, and the prefill-M dispatch-threshold history that first characterized the scaffold-versus-big reduction-order difference
-- [`aiter-fp8-moe.md`](aiter-fp8-moe.md): the fp8-activation kernel survey this candidate design follows from
+- [`aiter-fp8-moe.md`](aiter-fp8-moe.md): the fp8-activation kernel survey this closed design followed from, and the closure reasoning after the final re-profile above
+- [`../../models/qwen3-5.md`](../../models/qwen3-5.md): the decode-round and prefill numbers the final re-profile above is drawn from, and the current-state note on the remaining round-level gap
 - [`../../tooling/profiler.md`](../../tooling/profiler.md): the portable notes on re-running the issue-bound-versus-latency-bound discriminator after an instruction-count fix, on checking wait-region counts rather than load counts alone (H-B/H-B2), and on re-deriving thresholds from a raw sweep rather than trusting a crossover interpolator (H-C)
 - [`../../tooling/serving-benchmark.md`](../../tooling/serving-benchmark.md): the general lesson that a dispatch threshold goes stale after the kernel it dispatches between changes, and what the second-concurrency check in a paired acceptance run is actually guarding against
