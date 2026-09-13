@@ -16,7 +16,12 @@ import {hasRunEnded} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import type {ConversationEntry, SessionState} from '../session-model.js';
 import {visibleConversation} from '../session-model.js';
-import {promptPreview, toolCallPreview, toolResultPreview} from './previews.js';
+import {
+  type CollapsiblePreview,
+  promptPreview,
+  toolCallPreview,
+  toolResultPreview,
+} from './previews.js';
 import {
   codeSurface,
   createMarkdownBlockOptions,
@@ -617,12 +622,8 @@ export class ConversationView {
     }
   }
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
   #renderToolTurn(card: BoxRenderable, entry: ConversationEntry): void {
-    const toolCall =
-      entry.toolName !== undefined && entry.toolArguments !== undefined
-        ? toolCallPreview(entry.toolName, entry.toolArguments)
-        : (entry.toolCall ?? '');
+    const toolCall = toolCallText(entry);
     const toolResponse = entry.toolResult?.content ?? entry.toolResponse;
     card.add(
       new TextRenderable(this.renderer, {
@@ -651,15 +652,11 @@ export class ConversationView {
         }),
       );
       if (response.collapsible) {
-        const hidden =
-          response.hiddenLines > 0
-            ? `${response.hiddenLines} more line${response.hiddenLines === 1 ? '' : 's'}`
-            : `${response.hiddenCharacters} more characters`;
         card.add(
           new TextRenderable(this.renderer, {
             content: expanded
               ? '▴ click or Enter to collapse response'
-              : `▾ Show full response · ${hidden} · click or Enter`,
+              : `▾ Show full response · ${hiddenToolResponseSize(response)} · click or Enter`,
             fg: this.#theme.info,
             width: '100%',
           }),
@@ -667,6 +664,19 @@ export class ConversationView {
       }
     }
   }
+}
+
+function toolCallText(entry: ConversationEntry): string {
+  if (entry.toolName !== undefined && entry.toolArguments !== undefined) {
+    return toolCallPreview(entry.toolName, entry.toolArguments);
+  }
+  return entry.toolCall ?? '';
+}
+
+function hiddenToolResponseSize(response: CollapsiblePreview): string {
+  if (response.hiddenLines === 0) return `${response.hiddenCharacters} more characters`;
+  const unit = response.hiddenLines === 1 ? 'line' : 'lines';
+  return `${response.hiddenLines} more ${unit}`;
 }
 
 /**
