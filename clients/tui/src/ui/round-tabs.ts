@@ -117,6 +117,73 @@ interface TabWindow {
   last: number;
 }
 
+/** Measures candidate windows against the same gaps and markers the view draws. */
+class TabWindowBudget {
+  readonly #prefixWidths: number[];
+
+  constructor(
+    widths: readonly number[],
+    private readonly available: number,
+  ) {
+    this.#prefixWidths = [0];
+    for (const width of widths) {
+      this.#prefixWidths.push((this.#prefixWidths.at(-1) ?? 0) + width);
+    }
+  }
+
+  fits({first, last}: TabWindow): boolean {
+    const slots = (this.#prefixWidths[last + 1] ?? 0) - (this.#prefixWidths[first] ?? 0);
+    let used = slots + GAP * (last - first);
+    // Measured the way `#marker` sizes the cell it draws, so the reserve and
+    // the drawn width cannot disagree.
+    if (first > 0) used += displayWidth(beforeMarker(first)) + MARKER_GAP;
+    const count = this.#prefixWidths.length - 1;
+    if (last < count - 1) used += MARKER_GAP + displayWidth(afterMarker(count - 1 - last));
+    return used <= this.available - EDGE;
+  }
+}
+
+/** Extends the selected window monotonically until it includes the live round. */
+function includeLiveRound(
+  window: TabWindow,
+  live: number | null,
+  budget: TabWindowBudget,
+): TabWindow | null {
+  if (live === null) return window;
+  while (live > window.last) {
+    const next = {...window, last: window.last + 1};
+    if (!budget.fits(next)) return null;
+    window = next;
+  }
+  while (live < window.first) {
+    const next = {...window, first: window.first - 1};
+    if (!budget.fits(next)) return null;
+    window = next;
+  }
+  return window;
+}
+
+/** Fills remaining space around the selection, preferring the later side on ties. */
+function fillAroundSelection(
+  window: TabWindow,
+  selected: number,
+  count: number,
+  budget: TabWindowBudget,
+): TabWindow {
+  for (;;) {
+    const after = {...window, last: window.last + 1};
+    const before = {...window, first: window.first - 1};
+    const canAfter = window.last < count - 1 && budget.fits(after);
+    const canBefore = window.first > 0 && budget.fits(before);
+    if (!canAfter && !canBefore) return window;
+    if (canAfter && (!canBefore || window.last - selected <= selected - window.first)) {
+      window = after;
+    } else {
+      window = before;
+    }
+  }
+}
+
 /**
  * The slots that fit in `width` columns, holding the `selected` slot and, when
  * given, the `live` one; null when they cannot both fit.
@@ -126,7 +193,6 @@ interface TabWindow {
  * only for a side that is still hidden.
  */
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 export function tabWindow(
   widths: readonly number[],
   selected: number,
@@ -134,35 +200,14 @@ export function tabWindow(
   width: number,
 ): TabWindow | null {
   const count = widths.length;
-  // ponytail: re-sums the window per probe, O(n^2) in rounds; fine at run sizes.
-  const fits = (first: number, last: number): boolean => {
-    let used = GAP * (last - first);
-    for (let index = first; index <= last; index += 1) used += widths[index] ?? 0;
-    // Measured the way `#marker` sizes the cell it draws, so the reserve and
-    // the drawn width cannot disagree.
-    if (first > 0) used += displayWidth(beforeMarker(first)) + MARKER_GAP;
-    if (last < count - 1) used += MARKER_GAP + displayWidth(afterMarker(count - 1 - last));
-    return used <= width - EDGE;
-  };
-  if (fits(0, count - 1)) return {first: 0, last: count - 1};
-  if (!fits(selected, selected)) return null;
-  let first = selected;
-  let last = selected;
-  while (live !== null && live > last) {
-    if (!fits(first, last + 1)) return null;
-    last += 1;
-  }
-  while (live !== null && live < first) {
-    if (!fits(first - 1, last)) return null;
-    first -= 1;
-  }
-  for (;;) {
-    const canAfter = last < count - 1 && fits(first, last + 1);
-    const canBefore = first > 0 && fits(first - 1, last);
-    if (!canAfter && !canBefore) return {first, last};
-    if (canAfter && (!canBefore || last - selected <= selected - first)) last += 1;
-    else first -= 1;
-  }
+  const budget = new TabWindowBudget(widths, width);
+  const all = {first: 0, last: count - 1};
+  if (budget.fits(all)) return all;
+
+  const selectedOnly = {first: selected, last: selected};
+  if (!budget.fits(selectedOnly)) return null;
+  const required = includeLiveRound(selectedOnly, live, budget);
+  return required === null ? null : fillAroundSelection(required, selected, count, budget);
 }
 
 /**
