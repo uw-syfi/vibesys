@@ -190,11 +190,10 @@ max_lines = 1600
 # exempts `*.test.ts` from its file-length rule for the same reason.
 roots = ["src", "libs", "scripts", "sdk"]
 
-# Files already over the ceiling, recorded at their length on 2026-09-13. This
-# is a shrink-only ratchet: exceeding a recorded count fails, and an entry that
-# drops back to 1600 or below is reported as stale and must be deleted. Splitting
-# any of these is a separate refactor, not a prerequisite for turning the check
-# on.
+# Temporary migration debt only. Do not add entries or raise recorded counts.
+# Remove each entry as its file is refactored below the ceiling. Exceeding a
+# recorded count fails, and an entry that drops back to 1600 or below is stale.
+# These counts record the existing debt on 2026-09-13.
 [tool.vibesys.file_length.allowlist]
 # The agent loop: round orchestration, agent invocation, and result handling in
 # one module. The largest single refactor target in the repo.

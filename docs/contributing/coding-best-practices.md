@@ -239,6 +239,11 @@ The thresholds live in `pyproject.toml` (`[tool.ruff.lint]`,
 
 ### Ratchets
 
+The escape hatches below are temporary migration debt and are being removed as
+the affected code is refactored. Do not add new waivers, suppression comments,
+or file-length allowlist entries for these rules. Fix new violations by
+splitting or simplifying the affected code.
+
 - **Python functions.** A site-level `# noqa: <rule>  # tracked: #288` waives a
   rule at one call site. Ruff's `RUF100` fails on a waiver that no longer
   suppresses anything, so refactoring a function requires deleting its waiver
@@ -247,9 +252,6 @@ The thresholds live in `pyproject.toml` (`[tool.ruff.lint]`,
   comment waives one site. Biome reports a suppression that no longer
   suppresses anything as an unused-suppression diagnostic, so stale waivers
   surface in `pnpm lint:ts` output and should be deleted with the refactor.
-  Grandfather a bulk change with
-  `pnpm exec biome lint --suppress --reason="pre-existing; tracked: #288"`.
-  Never add a waiver to new code: split the function instead.
 - **Python file length.** `[tool.vibesys.file_length.allowlist]` in
   `pyproject.toml` records each over-ceiling file at its current line count,
   with a comment saying what it holds. `scripts/check_file_length.py` fails when
