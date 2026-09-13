@@ -156,6 +156,34 @@ Stop and reconsider if:
 - Model architecture shifts (shape space blows up).
 - The kernel has been buggy twice in a row — sign your fusion is more fragile than the wins justify.
 
+## Pitfalls
+
+```
+Symptom: a kernel that packs an axis the caller used to loop over into an
+         extra grid dimension gives wrong results, or silently wrong
+         results, at some call sites but not others, even though the
+         kernel and its own unit tests pass.
+Cause:   the kernel derived a grid index by dividing out a tensor's own
+         leading-dimension size (a constexpr read from the tensor's
+         shape). A production call site that flattens the batch into a
+         single leading row and carries the true per-call count in a
+         separate cu_seqlens-style tensor makes that constexpr differ
+         from the true count the grid actually needs to iterate over.
+         A hand-built unit test that constructs inputs with an explicit
+         per-item batch dimension never exercises the mismatch.
+Fix:     never derive a grid index from a tensor's own shape when a call
+         site may flatten that dimension; pass the true iteration count
+         as its own explicit constexpr, set by the caller, and exercise
+         the grid-index logic against the flattened/varlen call shape
+         specifically, not only the unflattened shape a hand-built test
+         defaults to.
+Scope:   any Triton kernel where a host-side loop over an axis is being
+         folded into the grid, when at least one call site uses a
+         flattened or varlen batch layout; backend-agnostic.
+Status:  verified. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13,
+         microbench-verified.
+```
+
 ## Out of scope
 
 - **How to write Triton kernels** (block sizes, autotune config design, Hopper-specific features like TMA / WGMMA / warp specialization, Gluon) → [`agent-gpu-skills`](https://github.com/slowlyC/agent-gpu-skills) `triton-skill`

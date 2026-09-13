@@ -101,15 +101,88 @@ Scope:   any kernel-internal profile where FETCH_SIZE is within a few
          percent of the computed byte requirement but VALUBusy is low
          and time is several times the byte floor, backend- and
          engine-agnostic.
-Status:  candidate (mechanism confirmed by ISA and counter audit and
-         cross-validated against a production trace to within 3 percent
-         on one kernel pair; the fix itself, layer-axis grid packing,
-         was not built or tested). Stamp: sglang-v0.5.18-rocm700-mi30x,
-         2026-09-13, candidate.
+Status:  verified. Mechanism confirmed by ISA and counter audit and
+         cross-validated against a production trace to within 3 percent;
+         the fix itself (layer-axis grid packing) was then built and
+         measured in isolation: exact against the unpacked baseline and
+         6.17x/2.50x/1.82x faster at three batch sizes, the shape
+         predicted. On the one kernel pair this was tried on, the fix
+         could not be wired into production; see the next example for
+         the dependency check that would flag this before implementing.
+         Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13,
+         microbench-verified.
+```
+
+### A launch-packing fix can be exact and fast in isolation yet unreachable in production
+
+```
+Symptom: a candidate fix packs many small per-item launches into one
+         larger launch, is bit-exact against the unpacked baseline, and
+         measures several times faster in an isolated microbenchmark,
+         matching or exceeding the predicted magnitude, and still
+         cannot be shipped.
+Cause:   the "items" being packed were never independent data at any
+         single point on the production call path. Each one was
+         produced by, and its output consumed by, a per-item step in a
+         sequential loop (for example one step per decoder layer, each
+         step's output feeding the next step's input), so all items'
+         inputs are never simultaneously available to hand to one grid.
+         A sibling kernel elsewhere may already pack the same axis
+         successfully; that only proves the data layout supports
+         packing, not that this call site's data dependency does.
+Fix:     before implementing a launch-packing round, trace whether the
+         launches being packed are independent at the point they would
+         be packed: does launch i's output feed launch i+1's input
+         before launch i+1 runs? If yes, packing across that axis needs
+         restructuring the surrounding control flow, a materially
+         bigger change than a kernel round, not just a grid change;
+         scope the round to an isolated diagnostic build instead of a
+         production integration, and say so up front.
+Scope:   any launch-count-reduction hypothesis where the launches being
+         merged are dispatched from a host-side loop with an
+         intervening per-iteration consumer, backend- and
+         engine-agnostic.
+Status:  verified. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13,
+         microbench-verified.
+```
+
+### Widening a launch's own grid is not the same lever as cutting launch count
+
+```
+Symptom: a launch-granularity-bound kernel is made to run more grid
+         programs per launch (a finer tile split) while its launch
+         count stays fixed, hoping the extra programs hide latency the
+         way more total waves did for a sibling kernel that packs its
+         axis into fewer, larger launches instead. Every measured cell
+         comes out slower than the unmodified kernel, and the slowdown
+         grows both with the split factor and with batch size, the
+         opposite of the predicted direction and trend.
+Cause:   launch count, not per-launch grid size, was the fixed cost the
+         hypothesis meant to amortize. Splitting a tile across more
+         grid programs does not touch launch count, and each added
+         program reloads and re-derives shared per-program setup work
+         (gating, normalization, or other per-tile inputs) that used to
+         run once; that duplicated work is real, growing cost with no
+         offsetting latency-hiding gain when occupancy under the
+         unmodified grid was already adequate.
+Fix:     name which fixed cost a lever actually removes before running
+         it. A kernel that is slow because of too few launches needs
+         fewer, larger launches (pack the independent axis into the
+         grid); a kernel that is slow because of too few waves within
+         an already-large launch needs a finer tile. Confirm which
+         regime applies from the audit (occupancy and wave count at the
+         current grid) before choosing between them; they are not
+         interchangeable, and applying the wrong one adds cost instead
+         of removing it.
+Scope:   any launch-granularity-bound kernel where a grid-widening fix
+         is proposed as an alternative to reducing launch count,
+         backend- and engine-agnostic.
+Status:  verified. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13,
+         microbench-verified.
 ```
 
 ## See also
 
 - [`performance-modeling.md`](performance-modeling.md): the main analytical-modeling workflow this file follows up on
 - [`profiler.md`](profiler.md): the issue-bound-vs-latency-bound discriminator and the bucket-fold comparison pitfall
-- `platforms/rocm/gated-delta-net.md`: the worked kernel pair (update kernel launch-granularity-bound, fold kernel already packs the same axis) the third example above generalizes from
+- `platforms/rocm/gated-delta-net.md`: the worked kernel pair (update kernel launch-granularity-bound, fold kernel already packs the same axis) the launch-granularity examples above generalize from, and the full account of the packing round this file's dependency-check and grid-widening examples are drawn from
