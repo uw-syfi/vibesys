@@ -285,20 +285,20 @@ describe('selectionBackdrop', () => {
   /** Bounds with slack on every side: the common case, nothing clipped. */
   const ROOMY = {width: 100, height: 100};
 
-  test('draws the right column and the bottom row, sharing one corner cell', () => {
+  test('draws the right column full-height and the bottom row at half height, sharing one corner cell', () => {
     const node: GraphNode = {phase: phase('implementer', 'active'), x: 0, y: 0, width: 10};
     const graph = graphOf([node], [], 30, 30);
     const cells = selectionBackdrop(graph, node, ROOMY);
 
-    // Right column: x = 10 (one past the border), rows 1..NODE_HEIGHT.
-    for (let y = 1; y <= NODE_HEIGHT; y += 1) {
-      expect(cells).toContainEqual({x: 10, y});
+    // Right column: x = 10 (one past the border), rows 1..NODE_HEIGHT - 1, full cells.
+    for (let y = 1; y < NODE_HEIGHT; y += 1) {
+      expect(cells).toContainEqual({x: 10, y, half: false});
     }
-    // Bottom row: y = NODE_HEIGHT (one past the border), columns 1..width.
+    // Bottom row: y = NODE_HEIGHT (one past the border), columns 1..width, half cells.
     for (let x = 1; x <= 10; x += 1) {
-      expect(cells).toContainEqual({x, y: NODE_HEIGHT});
+      expect(cells).toContainEqual({x, y: NODE_HEIGHT, half: true});
     }
-    // The shared corner, (10, NODE_HEIGHT), appears once.
+    // The shared corner, (10, NODE_HEIGHT), appears once, as part of the bottom row.
     expect(cells.filter(cell => cell.x === 10 && cell.y === NODE_HEIGHT)).toHaveLength(1);
     expect(cells).toHaveLength(NODE_HEIGHT - 1 + node.width);
   });
@@ -313,8 +313,8 @@ describe('selectionBackdrop', () => {
     // The renderer paints this backdrop before the edges, so a cell that also
     // carries an edge glyph stays part of it: the edge's own transparent
     // background lets the backdrop colour show through underneath its glyph.
-    expect(cells).toContainEqual({x: 10, y: 1});
-    expect(cells).toContainEqual({x: 10, y: 3});
+    expect(cells).toContainEqual({x: 10, y: 1, half: false});
+    expect(cells).toContainEqual({x: 10, y: 3, half: false});
   });
 
   test('skips a cell that sits inside another node', () => {

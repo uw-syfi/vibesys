@@ -191,6 +191,14 @@ export function layoutAgentGraph(
 export interface BackdropCell {
   x: number;
   y: number;
+  /**
+   * A terminal cell is about twice as tall as it is wide, so a full-height
+   * bottom row reads twice as thick as the right column beside it. `half`
+   * cells are the bottom row (and the corner it shares with the right
+   * column): the renderer draws them as an upper-half block in
+   * `selectedSurface` foreground with no background, instead of a full cell.
+   */
+  half: boolean;
 }
 
 /**
@@ -210,10 +218,16 @@ export interface CanvasBounds {
  * The visible cells of a copy of the selected node's own rectangle, offset
  * one column right and one row down and painted behind everything else
  * (`agent-map.ts#renderGraph`, in `theme.selectedSurface`): one column past
- * the node's right border (rows `node.y + 1` through `node.y + NODE_HEIGHT`)
- * and one row past its bottom border (columns `node.x + 1` through
- * `node.x + node.width`), sharing one corner cell. Every other cell of the
- * offset copy lands on `node` itself and is never drawn.
+ * the node's right border (rows `node.y + 1` through `node.y + NODE_HEIGHT -
+ * 1`, full cells) and one row past its bottom border (columns `node.x + 1`
+ * through `node.x + node.width`, half cells, `BackdropCell.half`), sharing
+ * one corner cell that the bottom row owns. Every other cell of the offset
+ * copy lands on `node` itself and is never drawn.
+ *
+ * The bottom row is half-height, not full, because a terminal cell is about
+ * twice as tall as it is wide: a full cell below the node would read twice as
+ * thick as the full-cell column beside it, where a half block reads as the
+ * same line weight.
  *
  * An edge or arrowhead cell (`graph.cells`) is left in the returned list
  * rather than pulled out of it: the renderer paints this backdrop before it
@@ -246,12 +260,13 @@ export function selectionBackdrop(
 
   const cells = new Map<string, BackdropCell>();
   const rightX = node.x + node.width;
-  for (let y = node.y + 1; y <= node.y + NODE_HEIGHT; y += 1) {
-    if (safe(rightX, y)) cells.set(`${rightX},${y}`, {x: rightX, y});
+  // Full cells; the bottom row below picks up the shared corner instead.
+  for (let y = node.y + 1; y < node.y + NODE_HEIGHT; y += 1) {
+    if (safe(rightX, y)) cells.set(`${rightX},${y}`, {x: rightX, y, half: false});
   }
   const bottomY = node.y + NODE_HEIGHT;
   for (let x = node.x + 1; x <= node.x + node.width; x += 1) {
-    if (safe(x, bottomY)) cells.set(`${x},${bottomY}`, {x, y: bottomY});
+    if (safe(x, bottomY)) cells.set(`${x},${bottomY}`, {x, y: bottomY, half: true});
   }
   return [...cells.values()];
 }

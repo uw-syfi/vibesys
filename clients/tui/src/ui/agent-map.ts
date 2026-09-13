@@ -328,11 +328,15 @@ export class AgentMapView {
       // Painted first, so it sits behind the edges and the nodes drawn below:
       // an edge or arrowhead cell that lands on it keeps its own glyph and
       // foreground and simply picks up this background (`selectionBackdrop`).
+      // The bottom row (`cell.half`) draws as an upper-half block in the
+      // surface colour instead: a full cell there would read twice as thick
+      // as the full-cell column beside it, cells being about twice as tall as
+      // wide.
       for (const cell of selectionBackdrop(graph, selectedNode, bounds)) {
         canvas.add(
           new TextRenderable(this.renderer, {
-            content: ' ',
-            bg: this.#theme.selectedSurface,
+            content: cell.half ? '▀' : ' ',
+            ...(cell.half ? {fg: this.#theme.selectedSurface} : {bg: this.#theme.selectedSurface}),
             position: 'absolute',
             left: cell.x,
             top: cell.y,

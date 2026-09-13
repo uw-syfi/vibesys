@@ -163,17 +163,44 @@ describe("selected agent node's backdrop", () => {
     expect(interior?.bg).not.toBe(theme.selectedSurface.toLowerCase());
   });
 
-  it("paints the cell right of the node and the cell below it in the theme's selectedSurface", async () => {
+  it("paints the cell right of the node as a full cell in the theme's selectedSurface", async () => {
     const theme = resolveTheme(null);
     const testRenderer = await renderChain('implementer');
     const node = testRenderer.renderer.root.findDescendantById('agent-implementer-0');
     expect(node).toBeInstanceOf(BoxRenderable);
     if (!(node instanceof BoxRenderable)) return;
 
+    // This chain's departure edge crosses exactly this cell (see the
+    // edge-glyph test below), so only the background is this test's concern.
     const rightOfNode = spanAt(testRenderer, node.y + 1, node.x + node.width);
-    const belowNode = spanAt(testRenderer, node.y + node.height, node.x + 1);
     expect(rightOfNode?.bg).toBe(theme.selectedSurface.toLowerCase());
-    expect(belowNode?.bg).toBe(theme.selectedSurface.toLowerCase());
+
+    // The right column's own last row, one above the bottom row, is still a
+    // full cell too.
+    const rightLastRow = spanAt(testRenderer, node.y + node.height - 1, node.x + node.width);
+    expect(rightLastRow?.text).toBe(' ');
+    expect(rightLastRow?.bg).toBe(theme.selectedSurface.toLowerCase());
+  });
+
+  it('draws the bottom row, corner included, at half height: an upper-half block in selectedSurface foreground, no fill', async () => {
+    const theme = resolveTheme(null);
+    const testRenderer = await renderChain('implementer');
+    const node = testRenderer.renderer.root.findDescendantById('agent-implementer-0');
+    expect(node).toBeInstanceOf(BoxRenderable);
+    if (!(node instanceof BoxRenderable)) return;
+
+    // A cell the backdrop never reaches, to read the canvas's own background
+    // off the render rather than hardcoding a theme field.
+    const canvasBg = spanAt(testRenderer, node.y, node.x + node.width)?.bg;
+
+    const belowNode = spanAt(testRenderer, node.y + node.height, node.x + 1);
+    const corner = spanAt(testRenderer, node.y + node.height, node.x + node.width);
+    for (const cell of [belowNode, corner]) {
+      expect(cell?.text).toBe('▀');
+      expect(cell?.fg).toBe(theme.selectedSurface.toLowerCase());
+      expect(cell?.bg).toBe(canvasBg);
+      expect(cell?.bg).not.toBe(theme.selectedSurface.toLowerCase());
+    }
   });
 
   it("leaves the cells level with the node's own top row and left column unpainted", async () => {
