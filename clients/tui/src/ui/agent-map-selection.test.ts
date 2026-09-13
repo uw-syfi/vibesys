@@ -5,7 +5,7 @@ import type {AgentPhase} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
 import {AgentMapView, nodeLabel} from './agent-map.js';
-import {resolveTheme, shadowColor} from './theme.js';
+import {resolveTheme} from './theme.js';
 
 // Kept apart from agent-map.test.ts (layout/width tests) so unrelated changes
 // to that suite do not textually conflict with these selection-glyph tests.
@@ -75,14 +75,14 @@ describe('agent node rendered selection glyph', () => {
 });
 
 /**
- * The selected node's fill-under-border and drop shadow: `agent-map.ts`'s
- * `#renderGraph`, `borderCoveringFill` (box-fill.ts) and `shadowCells`
- * (agent-graph.ts). `agent-map.test.ts` covers layout and width; the
- * selection-glyph tests above cover the caret. This covers the pixels: the
- * fill reaches the border ring, the border glyph keeps its own colour on top
- * of it, and the shadow lands only where `shadowCells` says it can.
+ * The selected node's backdrop: `agent-map.ts`'s `#renderGraph` and
+ * `selectionBackdrop` (agent-graph.ts). `agent-map.test.ts` covers layout and
+ * width; the selection-glyph tests above cover the caret. This covers the
+ * pixels: the node's own interior stays plain canvas, the offset rectangle
+ * lands only where `selectionBackdrop` says it can, and an edge cell inside
+ * it keeps its own glyph and colour.
  */
-describe('selected agent node fill and drop shadow', () => {
+describe("selected agent node's backdrop", () => {
   const cleanup: Array<() => void> = [];
 
   afterEach(() => {
@@ -108,18 +108,22 @@ describe('selected agent node fill and drop shadow', () => {
     ];
   }
 
-  /** A span's colours as lowercase hex, so they compare against theme values directly. */
+  /** A cell's colours as lowercase hex, so they compare against theme values directly. */
   function spanAt(
     testRenderer: TestRendererSetup,
     row: number,
     col: number,
-  ): {fg: string; bg: string} | undefined {
+  ): {text: string; fg: string; bg: string} | undefined {
     const line = testRenderer.captureSpans().lines[row];
     if (line === undefined) return undefined;
     let cursor = 0;
     for (const span of line.spans) {
       if (col < cursor + span.width) {
-        return {fg: rgbToHex(span.fg).toLowerCase(), bg: rgbToHex(span.bg).toLowerCase()};
+        return {
+          text: span.text[col - cursor] ?? '',
+          fg: rgbToHex(span.fg).toLowerCase(),
+          bg: rgbToHex(span.bg).toLowerCase(),
+        };
       }
       cursor += span.width;
     }
@@ -143,97 +147,85 @@ describe('selected agent node fill and drop shadow', () => {
     return testRenderer;
   }
 
-  it("covers the selected node's own border ring with the fill, border glyph colour kept", async () => {
+  it('leaves the selected node itself on the plain canvas, not the backdrop colour', async () => {
     const theme = resolveTheme(null);
-    const testRenderer = await renderChain('implementer');
-    const root = testRenderer.renderer.root;
-    const node = root.findDescendantById('agent-implementer-0');
-    const fill = root.findDescendantById('agent-implementer-0-fill');
+    const selected = await renderChain('implementer');
+    const node = selected.renderer.root.findDescendantById('agent-implementer-0');
+    const judge = selected.renderer.root.findDescendantById('agent-judge-0');
     expect(node).toBeInstanceOf(BoxRenderable);
-    expect(fill).toBeInstanceOf(BoxRenderable);
-    if (!(node instanceof BoxRenderable) || !(fill instanceof BoxRenderable)) return;
+    expect(judge).toBeInstanceOf(BoxRenderable);
+    if (!(node instanceof BoxRenderable) || !(judge instanceof BoxRenderable)) return;
 
-    // The fill is a sibling sized to the node's own outer rectangle, not an
-    // inner box (`borderCoveringFill`).
-    expect({x: fill.x, y: fill.y, width: fill.width, height: fill.height}).toEqual({
-      x: node.x,
-      y: node.y,
-      width: node.width,
-      height: node.height,
-    });
-
-    const rows = testRenderer.captureCharFrame().split('\n');
-    // Every corner of the node's own border still shows its glyph.
-    expect(rows[node.y]?.[node.x]).toBe('┌');
-    expect(rows[node.y]?.[node.x + node.width - 1]).toBe('┐');
-    expect(rows[node.y + node.height - 1]?.[node.x]).toBe('└');
-    expect(rows[node.y + node.height - 1]?.[node.x + node.width - 1]).toBe('┘');
-
-    // The border glyph keeps the selected border colour, painted over the
-    // fill's background rather than the fill erasing it.
-    const corner = spanAt(testRenderer, node.y, node.x);
-    expect(corner?.fg).toBe(theme.borderFocus.toLowerCase());
-    expect(corner?.bg).toBe(theme.selectedSurface.toLowerCase());
-
-    // An interior cell shows the same fill background, as it always has.
-    const interior = spanAt(testRenderer, node.y + 1, node.x + 1);
-    expect(interior?.bg).toBe(theme.selectedSurface.toLowerCase());
+    const interior = spanAt(selected, node.y + 1, node.x + 1);
+    // Same background as an ordinary, unselected node's interior: neither
+    // carries a fill of its own.
+    expect(interior?.bg).toBe(spanAt(selected, judge.y + 1, judge.x + 1)?.bg);
+    expect(interior?.bg).not.toBe(theme.selectedSurface.toLowerCase());
   });
 
-  it('leaves an unselected node without a fill or a shadow', async () => {
+  it("paints the cell right of the node and the cell below it in the theme's selectedSurface", async () => {
     const theme = resolveTheme(null);
     const testRenderer = await renderChain('implementer');
-    const root = testRenderer.renderer.root;
-    const node = root.findDescendantById('agent-judge-0');
+    const node = testRenderer.renderer.root.findDescendantById('agent-implementer-0');
     expect(node).toBeInstanceOf(BoxRenderable);
     if (!(node instanceof BoxRenderable)) return;
 
-    expect(root.findDescendantById('agent-judge-0-fill')).toBeUndefined();
-    const corner = spanAt(testRenderer, node.y, node.x);
-    expect(corner?.bg).not.toBe(theme.selectedSurface.toLowerCase());
-
-    // Nothing in the column immediately right of it, or the row immediately
-    // below it, carries a shadow glyph.
-    const rows = testRenderer.captureCharFrame().split('\n');
-    const rightColumn = rows
-      .slice(node.y, node.y + node.height + 1)
-      .map(row => row[node.x + node.width] ?? '')
-      .join('');
-    expect(rightColumn).not.toContain('▌');
-    const belowRow = (rows[node.y + node.height] ?? '').slice(node.x, node.x + node.width + 1);
-    expect(belowRow).not.toContain('▀');
+    const rightOfNode = spanAt(testRenderer, node.y + 1, node.x + node.width);
+    const belowNode = spanAt(testRenderer, node.y + node.height, node.x + 1);
+    expect(rightOfNode?.bg).toBe(theme.selectedSurface.toLowerCase());
+    expect(belowNode?.bg).toBe(theme.selectedSurface.toLowerCase());
   });
 
-  it("shadows the selected node's right column and bottom row, skipping the edge's departure cell", async () => {
+  it("leaves the cells level with the node's own top row and left column unpainted", async () => {
     const theme = resolveTheme(null);
-    const shadow = shadowColor(theme).toLowerCase();
     const testRenderer = await renderChain('implementer');
-    const root = testRenderer.renderer.root;
-    const node = root.findDescendantById('agent-implementer-0');
+    const node = testRenderer.renderer.root.findDescendantById('agent-implementer-0');
     expect(node).toBeInstanceOf(BoxRenderable);
     if (!(node instanceof BoxRenderable)) return;
 
-    const rows = testRenderer.captureCharFrame().split('\n');
-    const rightX = node.x + node.width;
+    // The offset rectangle starts one row below and one column right of the
+    // node's own corner: the cell dead level with its top border, past its
+    // right edge, and the cell dead level with its left border, past its
+    // bottom edge, are outside it.
+    const level = spanAt(testRenderer, node.y, node.x + node.width);
+    const flush = spanAt(testRenderer, node.y + node.height, node.x);
+    expect(level?.bg).not.toBe(theme.selectedSurface.toLowerCase());
+    expect(flush?.bg).not.toBe(theme.selectedSurface.toLowerCase());
+  });
+
+  it('gives an unselected node no backdrop at all', async () => {
+    const theme = resolveTheme(null);
+    const testRenderer = await renderChain('implementer');
+    const judge = testRenderer.renderer.root.findDescendantById('agent-judge-0');
+    expect(judge).toBeInstanceOf(BoxRenderable);
+    if (!(judge instanceof BoxRenderable)) return;
+
+    const rightOfJudge = spanAt(testRenderer, judge.y + 1, judge.x + judge.width);
+    const belowJudge = spanAt(testRenderer, judge.y + judge.height, judge.x + 1);
+    expect(rightOfJudge?.bg).not.toBe(theme.selectedSurface.toLowerCase());
+    expect(belowJudge?.bg).not.toBe(theme.selectedSurface.toLowerCase());
+  });
+
+  it("keeps an edge cell's own glyph and colour, adding only the backdrop as its background", async () => {
+    const theme = resolveTheme(null);
+    const selected = await renderChain('implementer');
+    const unselected = await renderChain(null);
+    const node = selected.renderer.root.findDescendantById('agent-implementer-0');
+    expect(node).toBeInstanceOf(BoxRenderable);
+    if (!(node instanceof BoxRenderable)) return;
+    // Selection never resizes the graph (`selectedLabelWidth` always sizes
+    // for the widest, selected label), so the same coordinates line up in
+    // both renders.
     const departureRow = node.y + 1;
+    const rightX = node.x + node.width;
 
-    // The departure cell an outgoing edge already occupies keeps its own
-    // glyph and colour: no shadow painted over it.
-    expect(rows[departureRow]?.[rightX]).not.toBe('▌');
-    expect(spanAt(testRenderer, departureRow, rightX)?.fg).not.toBe(shadow);
-
-    // Every other row of the right column shows the shadow glyph and colour.
-    for (let y = node.y + 2; y < node.y + node.height; y += 1) {
-      expect(rows[y]?.[rightX]).toBe('▌');
-      expect(spanAt(testRenderer, y, rightX)?.fg).toBe(shadow);
-    }
-
-    // The bottom row, one past the border, shows the shadow glyph across the
-    // node's width, corner included.
-    const bottomY = node.y + node.height;
-    for (let x = node.x + 1; x <= node.x + node.width; x += 1) {
-      expect(rows[bottomY]?.[x]).toBe('▀');
-      expect(spanAt(testRenderer, bottomY, x)?.fg).toBe(shadow);
-    }
+    const withBackdrop = spanAt(selected, departureRow, rightX);
+    const withoutBackdrop = spanAt(unselected, departureRow, rightX);
+    // An outgoing edge leaves 'implementer' from exactly this cell.
+    expect(withBackdrop?.text).not.toBe(' ');
+    expect(withBackdrop?.text).toBe(withoutBackdrop?.text);
+    expect(withBackdrop?.fg).toBe(withoutBackdrop?.fg);
+    expect(withBackdrop?.bg).toBe(theme.selectedSurface.toLowerCase());
+    expect(withoutBackdrop?.bg).not.toBe(theme.selectedSurface.toLowerCase());
   });
 });

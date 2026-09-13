@@ -276,28 +276,6 @@ export function scrim(theme: Theme): Scrim {
   return {color, strength: MAX_SCRIM_STRENGTH};
 }
 
-/** How far toward black a drop-shadow cell pulls the canvas underneath it. */
-const SHADOW_MIX = 0.4;
-
-/**
- * A drop shadow's colour: the theme's own canvas pulled toward black by
- * `mix`, the same blend a fill or a scrim uses, rather than a fixed hex, so
- * every theme gets a shadow relative to its own canvas and a shadow cell
- * reads as a recessed edge of whatever it sits on rather than as another
- * surface.
- *
- * High Contrast Dark's canvas is `#000000`, the darkest an RGB colour can be,
- * so mixing it toward black moves nothing: there is no darker shade to reach.
- * There the shadow instead borrows the theme's own `surface`, its next
- * distinguishable step up, because once "darker" is physically impossible the
- * property that still has to hold is that a shadow cell reads as distinct
- * from the canvas, not specifically that it reads as darker.
- */
-export function shadowColor(theme: Theme): string {
-  const darker = mix(theme.canvas, '#000000', SHADOW_MIX);
-  return darker === theme.canvas ? theme.surface : darker;
-}
-
 interface ThemeSpec {
   name: ThemeName;
   label: string;

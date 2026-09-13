@@ -21,13 +21,13 @@ import {
   graphWindow,
   layoutAgentGraph,
   NODE_HEIGHT,
-  shadowCells,
+  selectionBackdrop,
 } from './agent-graph.js';
 import {agentRuntimeLabel} from './agent-runtime-label.js';
-import {borderCoveringFill, fillLayer} from './box-fill.js';
+import {fillLayer} from './box-fill.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {elapsedLabel} from './previews.js';
-import {shadowColor, type Theme} from './theme.js';
+import type {Theme} from './theme.js';
 
 const STATUS_MARKER: Record<AgentPhase['status'], string> = {
   pending: '○',
@@ -319,10 +319,27 @@ export class AgentMapView {
     this.#content.add(area);
     area.add(canvas);
     // The canvas box is only ever as tall as the graph itself (`height:
-    // graph.height` above), with no row held back for a shadow past the
-    // tallest column, so a shadow cell's real safety bound is the space
-    // `#renderGraph` was actually given, not the graph's own footprint.
+    // graph.height` above), with no row held back for a backdrop past the
+    // tallest column, so a backdrop cell's real safety bound is the space
+    // this method was actually given, not the graph's own footprint.
     const bounds = {width: paneWidth - 4, height: graphRows};
+    const selectedNode = graph.nodes.find(node => node.phase.kind === selectedKind);
+    if (selectedNode !== undefined) {
+      // Painted first, so it sits behind the edges and the nodes drawn below:
+      // an edge or arrowhead cell that lands on it keeps its own glyph and
+      // foreground and simply picks up this background (`selectionBackdrop`).
+      for (const cell of selectionBackdrop(graph, selectedNode, bounds)) {
+        canvas.add(
+          new TextRenderable(this.renderer, {
+            content: ' ',
+            bg: this.#theme.selectedSurface,
+            position: 'absolute',
+            left: cell.x,
+            top: cell.y,
+          }),
+        );
+      }
+    }
     for (const run of edgeRuns(graph)) {
       canvas.add(
         new TextRenderable(this.renderer, {
@@ -335,40 +352,7 @@ export class AgentMapView {
       );
     }
     for (const node of graph.nodes) {
-      const selected = node.phase.kind === selectedKind;
-      if (selected) {
-        // Sibling, not child, and added first: `borderCoveringFill`
-        // (box-fill.ts) explains why a fill that reaches this node's own
-        // border ring cannot live inside the node's own box the way every
-        // other fill in this app does.
-        canvas.add(
-          borderCoveringFill(
-            this.renderer,
-            `agent-${node.phase.kind}-${node.y}-fill`,
-            this.#theme.selectedSurface,
-            {x: node.x, y: node.y, width: node.width, height: NODE_HEIGHT},
-          ),
-        );
-      }
-      canvas.add(this.#renderNode(node.phase, selected, node));
-      if (selected) {
-        // The fill spilling half a cell past the border reads as a bleed
-        // unless something marks it as deliberate: a one-cell drop shadow,
-        // left off wherever it would land on an edge, an arrowhead, another
-        // node, or past the graph's own bounds (`shadowCells`).
-        const shadow = shadowColor(this.#theme);
-        for (const cell of shadowCells(graph, node, bounds)) {
-          canvas.add(
-            new TextRenderable(this.renderer, {
-              content: cell.edge === 'right' ? '▌' : '▀',
-              fg: shadow,
-              position: 'absolute',
-              left: cell.x,
-              top: cell.y,
-            }),
-          );
-        }
-      }
+      canvas.add(this.#renderNode(node.phase, node.phase.kind === selectedKind, node));
     }
   }
 
@@ -389,10 +373,9 @@ export class AgentMapView {
       // No horizontal padding: two columns of it is the difference between
       // "implementer" and "implement…" at the widths a four-stage round leaves.
       border: true,
-      // Square, and not because of the fill: the fill is a separate layer
-      // (tui-conventions.md; `borderCoveringFill` for the selected node's own
-      // version of it), so the shape is free either way and this is a look
-      // decision. A stage reads as a slot in a pipeline rather than as a
+      // Square, and not because of the fill: that sits on an inner layer
+      // (tui-conventions.md), so the shape is free either way and this is a
+      // look decision. A stage reads as a slot in a pipeline rather than as a
       // card, and the map's edges arrive at its sides. Unconditional rather
       // than square-only-when-selected, because swapping the shape on
       // selection reads as the node becoming a different kind of object,
@@ -407,9 +390,9 @@ export class AgentMapView {
       // one clears the filter: the same toggle Tab and Esc give the keyboard.
       onMouseUp: () => this.controller.selectAgent(phase.kind),
     });
-    // The selected node's fill (and its drop shadow) are added by the caller,
-    // `#renderGraph`, as siblings of this box rather than children of it: see
-    // `borderCoveringFill` in box-fill.ts for why.
+    // No interior fill: the selected node stays plain canvas inside its
+    // border. Its backdrop is a separate rectangle drawn behind everything by
+    // `#renderGraph` (`selectionBackdrop`).
     const inner = node.width - 2;
     box.add(
       new TextRenderable(this.renderer, {
@@ -475,12 +458,6 @@ export class AgentMapView {
         : {}),
       onMouseUp: () => this.controller.selectAgent(phase.kind),
     });
-    // Interior only, unlike the graph node: `row` is a normal flex child with
-    // no coordinates of its own until layout runs, so there is nothing to
-    // give a sibling fill to draw at ahead of time the way `#renderGraph`
-    // does for its absolutely positioned nodes. The drop shadow does not fit
-    // here either, for the more basic reason that a full-width row has no
-    // free cell to its right or below beyond the "↓" separator.
     if (selected) fillLayer(row, `agent-${phase.kind}-fill`, this.#theme.selectedSurface);
     const color = statusColor(this.#theme, phase.status);
     row.add(

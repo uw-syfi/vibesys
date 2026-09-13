@@ -5582,62 +5582,20 @@ describe('box fills', () => {
     for (const child of renderable.getChildren()) yield* boxesIn(child);
   }
 
-  /**
-   * Whether `candidate` is a fill sized to `box`'s own outer rectangle: the
-   * shape `agent-map.ts` paints under a selected node's border ring, via
-   * `borderCoveringFill` (box-fill.ts), as a sibling rather than a child.
-   * Checked by bounds and background alone, since a fill built this way
-   * carries no border of its own.
-   */
-  function coversWholeBox(candidate: Renderable, box: BoxRenderable): boolean {
-    return (
-      candidate instanceof BoxRenderable &&
-      candidate.backgroundColor.a > 0 &&
-      candidate.x === box.x &&
-      candidate.y === box.y &&
-      candidate.width === box.width &&
-      candidate.height === box.height
-    );
-  }
-
-  /**
-   * The one box allowed a fill that reaches its own border ring, its own or a
-   * preceding sibling's: the selected agent node in the round view's graph
-   * (`agent-map.ts#renderGraph`). Its border is always square
-   * (`agent-graph.ts` never swaps a node's shape on selection,
-   * tui-conventions.md), so the drawn rectangle and the fill's rectangle are
-   * the same rectangle: no corner cell sits outside the line the way a
-   * rounded arc's does, so nothing bleeds. `id` matches only the graph node
-   * (`agent-<kind>-<y>`); the stacked fallback's row keeps the old,
-   * interior-only fill (`#renderStackedPhase`), so it is never exempted here.
-   */
-  function isSelectedAgentNode(box: BoxRenderable): boolean {
-    return box.id.startsWith('agent-') && box.borderStyle !== 'rounded';
-  }
-
   /** The id of every box that breaks the rule, so a failure names the site. */
   function offenders(renderable: Renderable): string[] {
     const found: string[] = [];
     for (const box of boxesIn(renderable)) {
       const sides = getBorderSides(box.border);
       if (!sides.top && !sides.right && !sides.bottom && !sides.left) continue;
-      if (box.backgroundColor.a > 0) {
-        // An overlay may keep the outer fill, but only square. The fill
-        // reaches the ring either way, and a ring of fill under a rounded arc
-        // is #642.
-        if (isOverlay(box.id) && box.borderStyle !== 'rounded') continue;
-        found.push(box.id);
-        continue;
-      }
-      // `transparent` on the box itself is what "no fill of its own" means
-      // here, but a preceding sibling sized to this box's own rectangle
-      // reaches the same ring from outside it (`borderCoveringFill`). Only
-      // the selected agent node is allowed that.
-      const siblings = box.parent?.getChildren() ?? [];
-      const before = siblings[siblings.indexOf(box) - 1];
-      if (before !== undefined && coversWholeBox(before, box) && !isSelectedAgentNode(box)) {
-        found.push(box.id);
-      }
+      // `transparent` is the default and is what "no fill of its own" means
+      // here: `drawBox` leaves the rectangle alone, so the ring keeps whatever
+      // was already under it.
+      if (box.backgroundColor.a === 0) continue;
+      // An overlay may keep the outer fill, but only square. The fill reaches
+      // the ring either way, and a ring of fill under a rounded arc is #642.
+      if (isOverlay(box.id) && box.borderStyle !== 'rounded') continue;
+      found.push(box.id);
     }
     return found;
   }
@@ -5778,50 +5736,6 @@ describe('box fills', () => {
     }
 
     expect(offenders(renderer.root)).toEqual(['bordered-and-filled', 'overlay']);
-  });
-
-  it('flags a border-covering sibling fill on any box but the selected agent node', async () => {
-    // The other route to the same #642 shape: a fill that never touches the
-    // bordered box's own `backgroundColor`, sized to its rectangle and
-    // painted as a preceding sibling instead (`borderCoveringFill`). A rounded
-    // box reintroduces the bleed this way exactly as it would with its own
-    // background; a square `agent-<kind>-<y>` box is the one recognized case.
-    const {renderer, renderOnce} = await createTestRenderer({width: 20, height: 10});
-    cleanup.push(() => renderer.destroy());
-
-    for (const [id, borderStyle, left] of [
-      ['rounded', 'rounded', 0],
-      ['agent-implementer-0', 'single', 8],
-    ] as const) {
-      const fill = new BoxRenderable(renderer, {
-        id: `${id}-fill`,
-        position: 'absolute',
-        left,
-        top: 0,
-        width: 6,
-        height: 3,
-        backgroundColor: '#ffffff',
-      });
-      const box = new BoxRenderable(renderer, {
-        id,
-        position: 'absolute',
-        left,
-        top: 0,
-        width: 6,
-        height: 3,
-        border: true,
-        borderStyle,
-      });
-      renderer.root.add(fill);
-      renderer.root.add(box);
-      cleanup.push(() => {
-        fill.destroyRecursively();
-        box.destroyRecursively();
-      });
-    }
-    await renderOnce();
-
-    expect(offenders(renderer.root)).toEqual(['rounded']);
   });
 });
 
