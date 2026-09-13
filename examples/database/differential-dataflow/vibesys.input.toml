@@ -15,6 +15,13 @@ timeout_seconds = 1800
 json_argument = "--output-json"
 metric = "cpu_seconds"
 
+[profile_guided]
+command = ["uv", "run", "python", "profiler/attribute_cpu.py"]
+timeout_seconds = 1800
+result_protocol = 1
+min_measured_rounds = 2
+min_relative_improvement = 0.02
+
 [[workspace.sources]]
 name = "engine"
 repo = "https://github.com/HQingXuan/differential-dataflow-pinned"

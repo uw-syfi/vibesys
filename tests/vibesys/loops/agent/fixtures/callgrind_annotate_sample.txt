@@ -1,9 +1,9 @@
 --------------------------------------------------------------------------------
 Profile data file '/tmp/cgw_20000_200000_200_10.out' (creator: callgrind-3.18.1)
 --------------------------------------------------------------------------------
-I1 cache: 
-D1 cache: 
-LL cache: 
+I1 cache:
+D1 cache:
+LL cache:
 Timerange: Basic block 0 - 209531846
 Trigger: Program termination
 Profiled target:  ./target/release/examples/bfs 20000 200000 200 10 inspect -w 1 (PID 2024788, part 1)
@@ -11,12 +11,12 @@ Events recorded:  Ir
 Events shown:     Ir
 Event sort order: Ir
 Thresholds:       100
-Include dirs:     
-User annotated:   
+Include dirs:
+User annotated:
 Auto-annotation:  off
 
 --------------------------------------------------------------------------------
-Ir                     
+Ir
 --------------------------------------------------------------------------------
 1,203,529,123 (100.0%)  PROGRAM TOTALS
 

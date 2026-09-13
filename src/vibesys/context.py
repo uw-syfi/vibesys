@@ -102,6 +102,7 @@ from vibesys.sandbox.run_environment import (
     make_run_environment_spec,
 )
 from vs_project import (
+    AgentRunConfiguration,
     Project,
     RunConfiguration,
     StateTransition,
@@ -165,8 +166,8 @@ def _resume_configuration_update(
     recorded_core = recorded.model_dump(exclude={limit_field})
     requested_core = requested.model_dump(exclude={limit_field})
     migrate_agent_objectives = (
-        recorded.outer_loop == "agent"
-        and requested.outer_loop == "agent"
+        isinstance(recorded, AgentRunConfiguration)
+        and isinstance(requested, AgentRunConfiguration)
         and "objectives" not in recorded.model_fields_set
         and bool(requested_core.get("objectives"))
     )
@@ -711,7 +712,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                 )
 
         with boot_trace.span("round_transaction_recovery"):
-            if project_configuration.outer_loop == "agent":
+            if isinstance(project_configuration, AgentRunConfiguration):
                 if agent_state_model_type is None:
                     raise ValueError("agent runs require an agent state model type")  # noqa: TRY003  # tracked: #288
                 round_transaction_coordinator = RoundTransactionCoordinator(

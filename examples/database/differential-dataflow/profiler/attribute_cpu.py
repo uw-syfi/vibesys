@@ -1,6 +1,6 @@
 """Measured CPU attribution for the differential-dataflow `bfs` engine.
 
-This is the *ranking* half of the profile-guided bottleneck walk: it profiles the
+This is the attribution input to the profile-guided policy: it profiles the
 **unmodified** candidate `bfs` binary and produces a deterministic, quantified
 list of which engine **components** burn the most CPU, so the loop can attack the
 hottest one first. It does NOT score the engine — the scored metric stays
@@ -31,10 +31,10 @@ Ir undercounts cache/memory-bound cost; if the top-`Ir` component fails to move
 
 Exit 0 = wrote a ranked attribution; 2 = build/setup/tool error (no verdict).
 
-Usage (the profiler role runs this each profile round):
+Usage (the profile-guided outer loop runs this when selecting a new focus):
   python3 profiler/attribute_cpu.py \
       --engine-cmd 'engine/target/release/examples/bfs' \
-      --output-json logs/attribution.json
+      --vs-output logs/attribution.json
 """
 
 from __future__ import annotations
@@ -237,6 +237,23 @@ def aggregate(rows: list[tuple[int, str, str]]) -> list[dict]:
     return ranked
 
 
+def protocol_result(components: list[dict]) -> dict:
+    """Project task-specific Callgrind data into profile-guided protocol v1."""
+    return {
+        "version": 1,
+        "cost_unit": "instructions",
+        "components": [
+            {
+                "name": component["component"],
+                "cost": component["ir"],
+                "share": component["pct"] / 100.0,
+                "evidence": component["top_functions"],
+            }
+            for component in components
+        ],
+    }
+
+
 def _run_callgrind(binary: str, args: list[str], out_file: str) -> tuple[bool, str]:
     """Profile `binary args` under callgrind; write raw counts to `out_file`."""
     cmd = [
@@ -291,7 +308,9 @@ def main() -> int:
         "--rebuild-cmd", default=None, help="shell command to rebuild the candidate first"
     )
     ap.add_argument(
-        "--output-json", default=None, help="where to write the ranked attribution JSON"
+        "--vs-output",
+        required=True,
+        help="where to write the profile-guided protocol v1 result",
     )
     args = ap.parse_args()
 
@@ -338,12 +357,7 @@ def main() -> int:
         return 2
     components = aggregate(rows)
 
-    result = {
-        "version": 1,
-        "workload": wl,
-        "total_ir": sum(ir for ir, _, _ in rows),
-        "components": components,
-    }
+    result = protocol_result(components)
 
     print("-" * 72)
     print(f"{'component':<28} {'Ir %':>7}  top function")
@@ -355,11 +369,10 @@ def main() -> int:
     if components:
         print(f"Top bottleneck: {components[0]['component']} ({components[0]['pct']}% of Ir)")
 
-    if args.output_json:
-        os.makedirs(os.path.dirname(os.path.abspath(args.output_json)), exist_ok=True)
-        with open(args.output_json, "w") as f:
-            json.dump(result, f, indent=2)
-        print(f"  wrote {args.output_json}")
+    os.makedirs(os.path.dirname(os.path.abspath(args.vs_output)), exist_ok=True)
+    with open(args.vs_output, "w") as f:
+        json.dump(result, f, indent=2)
+    print(f"  wrote {args.vs_output}")
     return 0
 
 

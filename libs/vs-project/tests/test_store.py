@@ -278,6 +278,19 @@ def test_run_configuration_discriminates_outer_loop(
         parsed.agent_backend = "stub"
 
 
+def test_profile_guided_run_configuration_round_trips_as_agent_configuration() -> None:
+    payload = _configuration().model_dump()
+    payload["outer_loop"] = "profile-guided"
+
+    parsed = RUN_CONFIGURATION_ADAPTER.validate_python(
+        payload,
+        strict=True,
+    )
+
+    assert type(parsed) is AgentRunConfiguration
+    assert parsed.model_dump() == payload
+
+
 @pytest.mark.parametrize("outer_loop", [None, "unknown"])
 def test_run_configuration_requires_known_outer_loop(outer_loop: str | None) -> None:
     raw = _configuration().model_dump()

@@ -2,7 +2,7 @@
 
 ``examples/database/differential-dataflow/profiler/attribute_cpu.py`` turns
 ``callgrind_annotate`` output into a ranked, fixed-vocabulary component list that
-drives the loop's bottleneck walk. The heavy part — running valgrind — is not
+drives the profile-guided policy. The heavy part, running valgrind, is not
 exercised here; instead we feed a captured, trimmed real ``callgrind_annotate``
 sample (``fixtures/callgrind_annotate_sample.txt``) through the pure parsing +
 classification + aggregation path and assert the ranking is stable and correct.
