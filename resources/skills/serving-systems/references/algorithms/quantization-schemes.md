@@ -87,7 +87,7 @@ one. Backend values are exact `ComputeBackend` names.
 | Marlin (AWQ/GPTQ kernel) | ✓ | ✓ | via CUTLASS | Ampere+ |
 | MXFP4, native tensor path | ✓ (mxfp4.py) | ✓ (mxfp4.py) | ✓ | gfx950 (CDNA4), `cuda` Blackwell |
 | MXFP4 on gfx942 (`rocm`, MI300A/MI300X) | ✓ (mxfp4.py) | ✓ (mxfp4.py) | — | **N/A** native tensor path; weight-only via a dequant-in-kernel fallback |
-| fp8-activation x MXFP4-weight MoE (`rocm`, gfx942) | n/a | n/a | n/a | **N/A** in this image: every reachable kernel forces bf16 activations off gfx950, and the one native fp8-capable path aborts before it can quantize activations at all; gfx950 has the working native path |
+| fp8-activation x MXFP4-weight MoE (`rocm`, gfx942) | n/a | n/a | n/a | **N/A** in this image: every reachable kernel forces bf16 activations off gfx950, and the one native fp8-capable path aborts before it can quantize activations at all; gfx950 has the working native path. A from-scratch fp8-expand-decode design was closed without a build: the exact bf16-activation kernel already sits within 1.0 to 1.2x of the MXFP4 weight-byte floor the fp8 activation format does not move, so its own accuracy cost had no bound left to buy against. |
 | NVFP4 | ✓ (modelopt) | ✓ (modelopt_quant) | ✓ (fp4_utils) | Blackwell |
 | GGUF | ✓ | ✓ | — | CPU or GPU |
 | bitsandbytes (nf4 / int8) | ✓ | ✓ | — | wide |

@@ -445,6 +445,33 @@ Scope:   any kernel-variant comparison feeding an integration decision,
 Status:  verified. 2026-09-12, job 633183.
 ```
 
+### A lossy-format change is only worth its accuracy cost if it attacks the live bound
+
+```
+Symptom: a lower-precision kernel design promises fewer arithmetic
+         instructions per element, but the exact kernel it would
+         replace is already close to a different bound (a byte-
+         movement floor), not an instruction-issue ceiling.
+Cause:   a lossy format change only pays off against the bound it
+         actually moves. A narrower activation format can cut matrix-
+         instruction issue count without touching the weight bytes a
+         byte-bandwidth floor is built from; if the exact kernel is
+         already close to that floor, cutting issue count further
+         cannot close the remaining gap.
+Fix:     name which bound (compute, byte movement, launch/latency) the
+         format change attacks, then check the exact kernel's distance
+         from that specific bound, not an aggregate wall-clock or ALU-
+         utilization number, before spending accuracy budget on it.
+Scope:   any lossy numerics change proposed against a kernel with an
+         existing exact implementation, backend- and engine-agnostic.
+Status:  verified (an fp8-activation MoE kernel design predicted an 8x
+         cut in matrix-instruction issue count, but the exact kernel it
+         would replace was already within 1.0 to 1.2x of the weight-
+         byte floor the format change does not touch, so the design
+         was closed before implementation). Stamp: sglang-v0.5.18-
+         rocm700-mi30x, 2026-09-13, job-verified.
+```
+
 ## Pitfalls
 
 - Mixing per-kernel, per-step, and client-observed metrics.

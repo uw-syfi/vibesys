@@ -257,6 +257,27 @@ Cumulative for the stack: median TPOT at 48 sessions has moved from about 38 ms 
 
 Status: accepted at 48-session concurrency (job-verified); not confirmed as an unconditional default at a 16-session cap (no regression, improvement inside rep-to-rep noise). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
+### Decode round breakdown and prefill, final re-profile on the accepted stack (H-A + H-C), measured
+
+A final re-profile of the accepted stack (permute decode plus dword-wide loads plus the threshold-160 retune above), pooled medians across ranks and rounds, N=16 (n=160), previous (post-permute, pre-H-A/H-C) stack alongside:
+
+| Block | Previous (ms) | New (ms) | Floor (ms) | New ratio to floor |
+|:--|--:|--:|--:|--:|
+| MoE routed total | 32.47 | 17.57 | 14.81 | 1.19x (was 2.19x) |
+| Dense GEMM | 5.57 | 5.75 | 3.47 | 1.66x |
+| Collectives | 3.48 | 3.58 | -- | -- |
+| Gated DeltaNet | -- | 2.96 | -- | -- |
+| CPU-only gap | 2.75 | 2.74 | -- | -- |
+| **Round wall** | **51.11** | **36.86** | **18.28** | **2.02x** (was 2.80x) |
+
+At N=8, MoE routed total is 1.47x its 8.78 ms floor; at N=32 it is 1.01x its 22.51 ms floor, essentially at the floor. **This crosses MoE routed from the "1.3x to 3x: tuning and overhead" band into the "under 1.3x: at the floor for this design" band** in the optimization-loop skill's own stop-criterion table. Round wall stays at 1.9x to 2.3x its own floor at every N: the non-MoE buckets did not shrink along with MoE, so they now make up most of a much smaller round.
+
+At the prefill extend lengths this campaign tracks, GPU kernel time for routed MoE (unaffected by the aiter tuning-config first-touch lock at the 337-token point, see [`../platforms/`](../platforms/)) falls a further 50 percent at 337 tokens (80.84 to 40.09 ms) and 44 percent at 919 tokens (144.67 to 81.52 ms) versus the post-permute stack above; dense GEMM and the small buckets are flat.
+
+**Stop criterion reached for this kernel, current state of the remaining gap.** The remaining decode-round gap over floor (about 18 ms of a 37 ms round at N=16) is now spread over five terms of 2.7 to 5.8 ms each (dense GEMM, Gated DeltaNet, collectives, CPU-only gap, attention plus the small residual), none individually above about 15 percent of the round: no single term dominates the way MoE once did. Further kernel-level work on the MoE decode path itself has reached diminishing returns (see [`../platforms/`](../platforms/) for the kernel-level ISA and counter detail and the fp8-activation design closed for the same reason); the better-targeted next iteration is one of these round-level terms, not another MoE kernel change.
+
+Status: job-verified (N-sweep and prefill breakdown gated and cross-checked; bucket-sum vs. measured GPU-busy time within 0.4 percent). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
+
 ### Turn-2+ TTFT decomposition, overlap scheduler off, measured
 
 With the overlap scheduler off (previous section), a five-bucket, request-joined split of turn-2+ TTFT shows queue wait is near zero and rare (zero `NO_TOKEN` admission-budget rejections over 16830 iterations), and the single-request prefill+draft-extend forward is the dominant term, not the queue:
