@@ -6,6 +6,17 @@ import {
   type Renderable,
   SyntaxStyle,
 } from '@opentui/core';
+import bash from 'highlight.js/lib/languages/bash';
+import c from 'highlight.js/lib/languages/c';
+import cpp from 'highlight.js/lib/languages/cpp';
+import diff from 'highlight.js/lib/languages/diff';
+import go from 'highlight.js/lib/languages/go';
+import ini from 'highlight.js/lib/languages/ini';
+import json from 'highlight.js/lib/languages/json';
+import python from 'highlight.js/lib/languages/python';
+import rust from 'highlight.js/lib/languages/rust';
+import yaml from 'highlight.js/lib/languages/yaml';
+import {createLowlight} from 'lowlight';
 import type {ConversationEntry} from '../session-model.js';
 import type {ConversationRole, ConversationRoleColors, Theme} from './theme.js';
 
@@ -145,6 +156,8 @@ function asCodeBlockOnly(renderNode: MarkdownRenderNode): MarkdownRenderNode {
  * so the filetype alone does not say whether highlighting can run. Only
  * these five are bundled; vendoring more (issue #575 wants C++, Rust, Go,
  * Python) was measured and declined for now - see the module doc comment.
+ * `lowlight` below covers a further set of those without a tree-sitter
+ * grammar; a filetype in neither set draws flat.
  */
 const GRAMMAR_FILETYPES = new Set([
   'javascript',
@@ -155,6 +168,119 @@ const GRAMMAR_FILETYPES = new Set([
   'markdown',
   'markdown_inline',
 ]);
+
+/**
+ * Languages with no tree-sitter grammar in `GRAMMAR_FILETYPES`, highlighted
+ * instead by running `highlight.js` (via `lowlight`, its hast-producing
+ * wrapper) directly over the fence text. Deliberately narrow and one import
+ * per language rather than lowlight's `common`/`all` bundle, so a transcript
+ * never ships a parser nothing asked for. `registered()` (used below) also
+ * matches each grammar's own declared aliases, so `toml` (via `ini`), `sh`/
+ * `zsh` (via `bash`), `c++`/`hpp`/... (via `cpp`), `patch` (via `diff`) and
+ * `py` (via `python`) resolve too.
+ */
+const lowlight = createLowlight({bash, c, cpp, diff, go, ini, json, python, rust, yaml});
+
+/** `CodeRenderable.onHighlight`'s type, which `@opentui/core` does not export by name. */
+type OnHighlightCallback = NonNullable<CodeRenderable['onHighlight']>;
+type HighlightContext = Parameters<OnHighlightCallback>[1];
+type SimpleHighlight = Parameters<OnHighlightCallback>[0][number];
+
+/** The nine code families `createMarkdownStyle` registers a color for. */
+type HljsFamily =
+  | 'keyword'
+  | 'string'
+  | 'comment'
+  | 'number'
+  | 'function'
+  | 'type'
+  | 'operator'
+  | 'variable'
+  | 'punctuation';
+
+/**
+ * Maps a `highlight.js` scope's rendered class name(s) to the family above it
+ * reads as. Most scopes are one class; a dotted scope such as "title.function"
+ * renders as two ("hljs-title", "function_"), so those two are matched
+ * together. `built_in` (a mix of builtin functions and builtin objects across
+ * these grammars) and diff's `addition`/`deletion` have no good single family
+ * here and are left out, same as any class below with no entry at all.
+ */
+const HLJS_FAMILY: Record<string, HljsFamily> = {
+  'hljs-keyword': 'keyword',
+  'hljs-literal': 'keyword',
+  'hljs-variable': 'variable',
+  'hljs-subst': 'variable',
+  'hljs-attr': 'variable',
+  'hljs-property': 'variable',
+  'hljs-params': 'variable',
+  'hljs-type': 'type',
+  'hljs-class': 'type',
+  'hljs-section': 'type',
+  'hljs-string': 'string',
+  'hljs-regexp': 'string',
+  'hljs-symbol': 'string',
+  'hljs-comment': 'comment',
+  'hljs-doctag': 'comment',
+  'hljs-meta': 'comment',
+  'hljs-number': 'number',
+  'hljs-operator': 'operator',
+  'hljs-punctuation': 'punctuation',
+  'hljs-function': 'function',
+  'hljs-title function_': 'function',
+  'hljs-title class_': 'type',
+};
+
+/** The family `className` maps to, matching a two-part scope before a one-part one. */
+function hljsFamily(className: Array<string> | undefined): HljsFamily | undefined {
+  if (className === undefined || className.length === 0) return undefined;
+  return (
+    HLJS_FAMILY[className.join(' ')] ??
+    (className.length > 2 ? HLJS_FAMILY[className.slice(0, 2).join(' ')] : undefined) ??
+    HLJS_FAMILY[className[0] ?? '']
+  );
+}
+
+/**
+ * The `highlight.js` spans for one fence, converted to `SimpleHighlight`s.
+ *
+ * Walks the hast tree `lowlight.highlight` returns, giving each text node the
+ * family of its nearest ancestor `hljsFamily` maps; an ancestor it does not
+ * map keeps its own parent's (a bare "title" wrapping a "function", say), and
+ * text under no mapped ancestor at all emits nothing, leaving it to
+ * `baseHighlight`. That walk only ever grows one running offset across
+ * sibling and child text nodes in document order, so the spans it emits are
+ * already non-overlapping. Offsets are plain string indices - `content.slice`
+ * is what `treeSitterToTextChunks` uses to cash them in, and lowlight's own
+ * `.length` walk is over the same (UTF-16) string, so the two already agree.
+ */
+function lowlightHighlights(filetype: string, content: string): SimpleHighlight[] {
+  const root = lowlight.highlight(filetype, content);
+  const highlights: SimpleHighlight[] = [];
+  let offset = 0;
+  const walk = (node: (typeof root.children)[number], family: HljsFamily | undefined): void => {
+    if (node.type === 'text') {
+      if (family !== undefined && node.value.length > 0) {
+        highlights.push([offset, offset + node.value.length, family]);
+      }
+      offset += node.value.length;
+      return;
+    }
+    if (node.type !== 'element') return;
+    const nextFamily = hljsFamily(node.properties.className) ?? family;
+    for (const child of node.children) walk(child, nextFamily);
+  };
+  for (const child of root.children) walk(child, undefined);
+  return highlights;
+}
+
+/** `CodeRenderable.onHighlight` for a filetype lowlight covers instead of tree-sitter. */
+function highlightWithLowlight(
+  _highlights: SimpleHighlight[],
+  {content, filetype}: HighlightContext,
+) {
+  return lowlightHighlights(filetype, content);
+}
 
 const probedFiletypes = new Set<string>();
 
@@ -169,10 +295,13 @@ const probedFiletypes = new Set<string>();
  * only repeat the same answer.
  *
  * Quiet by design: `console.debug` for "no parser", which is the expected
- * case for anything not in `GRAMMAR_FILETYPES` (rust, cpp, go, python
- * included - see the module doc comment), and `console.warn` for an actual
+ * case for anything in neither `GRAMMAR_FILETYPES` nor `lowlight` (ruby,
+ * elixir, ... - see the module doc comment), and `console.warn` for an actual
  * error, which means one of the five bundled grammars is broken. Neither
- * renders anything; this is a developer signal, not a UI banner.
+ * renders anything; this is a developer signal, not a UI banner. Never called
+ * for a filetype `lowlight` covers: tree-sitter having no parser for it is
+ * expected there too, but `drawOnCodeSurface` already has a substitute, so
+ * probing for it would only be noise.
  *
  * ponytail: a grammar that loads fine but fails on one specific fence's
  * content is not caught after the first probe for that filetype. Widen to
@@ -191,14 +320,18 @@ function warnIfHighlightSignalsTrouble(block: CodeRenderable): void {
 /** Puts one block the renderer already built on the code surface. */
 function drawOnCodeSurface(block: CodeRenderable, {fg, bg}: CodeSurface): void {
   block.bg = bg;
-  if (block.filetype !== undefined) warnIfHighlightSignalsTrouble(block);
-  if (block.filetype !== undefined && GRAMMAR_FILETYPES.has(block.filetype)) {
-    // A shipped grammar highlights this block on its own: forcing a flat fg
-    // or drawUnstyledText would suppress the per-token colors it produces.
-    // `markup.raw.block` is the code style already registered for a plain
-    // block, so captures this syntax style does not name (most identifiers,
-    // punctuation, types) still read as code rather than falling back to the
-    // prose default.
+  const {filetype} = block;
+  const hasGrammar = filetype !== undefined && GRAMMAR_FILETYPES.has(filetype);
+  const lowlightCovers = filetype !== undefined && !hasGrammar && lowlight.registered(filetype);
+  if (filetype !== undefined && !lowlightCovers) warnIfHighlightSignalsTrouble(block);
+  if (hasGrammar || lowlightCovers) {
+    // A shipped grammar, or lowlight standing in for one, highlights this
+    // block on its own: forcing a flat fg or drawUnstyledText would suppress
+    // the per-token colors either produces. `markup.raw.block` is the code
+    // style already registered for a plain block, so captures neither names
+    // (most identifiers, punctuation, types) still read as code rather than
+    // falling back to the prose default.
+    if (lowlightCovers) block.onHighlight = highlightWithLowlight;
     block.baseHighlight = 'markup.raw.block';
     return;
   }
@@ -235,12 +368,13 @@ function* fencedBlocks(renderable: Renderable): Generator<CodeRenderable> {
  * is rendered by `CodeRenderable`, which colors text from tree-sitter captures
  * for the block's own language. The package ships grammars for markdown,
  * JavaScript, TypeScript and Zig; the info string of a transcript fence
- * otherwise usually names a language it has no grammar for. Restyling the
- * default block gives it a code surface either way. When a grammar is
- * available, per-token highlighting draws on top of that surface. When it is
- * not, the wait for highlighting would resolve to plain text anyway, so the
- * block is drawn flat and unstyled immediately instead of sitting blank until
- * it does.
+ * otherwise usually names a language it has no grammar for, though `lowlight`
+ * (see `drawOnCodeSurface`) substitutes for a further set of those. Restyling
+ * the default block gives it a code surface either way. When a grammar or a
+ * `lowlight` language is available, per-token highlighting draws on top of
+ * that surface. When neither is, the wait for highlighting would resolve to
+ * plain text anyway, so the block is drawn flat and unstyled immediately
+ * instead of sitting blank until it does.
  *
  * The default block is restyled rather than replaced. A replacement would
  * discard the margins, streaming mode, concealment, tree-sitter client, and
