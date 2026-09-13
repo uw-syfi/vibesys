@@ -1196,7 +1196,7 @@ def test_finalize_restores_winner_after_failed_last_round_and_updates_archive(
     workspace.mkdir()
     candidate = workspace / "candidate.txt"
     candidate.write_text("baseline\n")
-    tracker = GitTracker(workspace, run_id="test-run", log=lambda _message: None)
+    tracker = GitTracker(workspace, run_id="test-run", events=NullGitTrackerEvents())
     tracker.init(existing=False)
 
     candidate.write_text("winner\n")
@@ -1250,7 +1250,7 @@ def test_finalize_with_no_eligible_candidate_restores_trusted_baseline(
     workspace.mkdir()
     candidate = workspace / "candidate.txt"
     candidate.write_text("trusted input\n")
-    tracker = GitTracker(workspace, run_id="test-run", log=lambda _message: None)
+    tracker = GitTracker(workspace, run_id="test-run", events=NullGitTrackerEvents())
     tracker.init(existing=False)
     baseline = tracker.trusted_input_baseline
     assert baseline is not None
