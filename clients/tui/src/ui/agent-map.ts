@@ -1,4 +1,11 @@
-import {BoxRenderable, type CliRenderer, TextRenderable} from '@opentui/core';
+import {
+  BoxRenderable,
+  type CliRenderer,
+  fg,
+  StyledText,
+  type TextChunk,
+  TextRenderable,
+} from '@opentui/core';
 import {
   type AgentPhase,
   hasActiveAgentTiming,
@@ -18,6 +25,7 @@ import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {
   type AgentGraph,
   type EdgeTone,
+  type GraphNode,
   graphPaneBounds,
   graphWindow,
   layoutAgentGraph,
@@ -27,7 +35,7 @@ import {agentRuntimeLabel} from './agent-runtime-label.js';
 import {fillLayer} from './box-fill.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {elapsedLabel} from './previews.js';
-import type {Theme} from './theme.js';
+import {mix, type Theme} from './theme.js';
 
 const STATUS_MARKER: Record<AgentPhase['status'], string> = {
   pending: '○',
@@ -88,6 +96,24 @@ function edgeColor(theme: Theme, tone: EdgeTone): string {
   return theme.borderStrong;
 }
 
+/** How far the live edge colour is pulled toward `textStrong` for the flow
+ * band's two brightness steps. Toward `textStrong` rather than toward white:
+ * white would lower contrast against a light theme's canvas, `textStrong` is
+ * whichever extreme actually widens it there, in every theme. */
+const BAND_BRIGHTER_LIFT = 0.35;
+const BAND_BRIGHTEST_LIFT = 0.7;
+
+/** The flow band's three colours: the edge's own live tone, unlifted, and two
+ * lifts of it for the head cell and the cell behind it. */
+function edgeFlowColors(theme: Theme): {live: string; brighter: string; brightest: string} {
+  const live = edgeColor(theme, 'live');
+  return {
+    live,
+    brighter: mix(live, theme.textStrong, BAND_BRIGHTER_LIFT),
+    brightest: mix(live, theme.textStrong, BAND_BRIGHTEST_LIFT),
+  };
+}
+
 /**
  * A node's label at its widest, selected: caret, status marker, and kind. The
  * graph is sized for it, so no name is ever cut and picking a node never moves
@@ -141,6 +167,10 @@ export class AgentMapView {
     text: TextRenderable;
     inner: number | null;
   }> = [];
+  /** How far the travelling band has advanced; ticks alongside the spinner frame. */
+  #flowTick = 0;
+  /** Every inbound-edge run animating a band, refreshed in place on the same tick. */
+  #flowEdges: Array<{text: TextRenderable; glyphs: string}> = [];
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -341,16 +371,28 @@ export class AgentMapView {
     });
     this.#content.add(area);
     area.add(canvas);
-    for (const run of edgeRuns(graph)) {
-      canvas.add(
-        new TextRenderable(this.renderer, {
-          content: run.glyphs,
-          fg: edgeColor(this.#theme, run.tone),
-          position: 'absolute',
-          left: run.x,
-          top: run.y,
-        }),
-      );
+    const runs = edgeRuns(graph);
+    const flowing = flowRuns(graph.nodes, runs);
+    const flowColors = edgeFlowColors(this.#theme);
+    for (const run of runs) {
+      const isFlow = flowing.has(run);
+      const text = new TextRenderable(this.renderer, {
+        content: isFlow
+          ? paintEdgeFlow(
+              run.glyphs,
+              this.#flowTick,
+              flowColors.live,
+              flowColors.brighter,
+              flowColors.brightest,
+            )
+          : run.glyphs,
+        ...(isFlow ? {} : {fg: edgeColor(this.#theme, run.tone)}),
+        position: 'absolute',
+        left: run.x,
+        top: run.y,
+      });
+      canvas.add(text);
+      if (isFlow) this.#flowEdges.push({text, glyphs: run.glyphs});
     }
     for (const node of graph.nodes) {
       canvas.add(this.#renderNode(node.phase, node.phase.kind === selectedKind, node));
@@ -531,6 +573,19 @@ export class AgentMapView {
         const label = nodeLabel(node.phase, node.selected, this.#spinnerFrame);
         node.text.content = node.inner === null ? label : truncate(label, node.inner);
       }
+      // Same tick as the node spinner above, per the design: one interval
+      // drives both, never a second timer.
+      this.#flowTick += 1;
+      const flowColors = edgeFlowColors(this.#theme);
+      for (const edge of this.#flowEdges) {
+        edge.text.content = paintEdgeFlow(
+          edge.glyphs,
+          this.#flowTick,
+          flowColors.live,
+          flowColors.brighter,
+          flowColors.brightest,
+        );
+      }
     }, SPINNER_INTERVAL_MS);
   }
 
@@ -544,6 +599,7 @@ export class AgentMapView {
     this.#runningRound = null;
     this.#stopElapsedTimer();
     this.#spinnerNodes = [];
+    this.#flowEdges = [];
     this.#stopSpinnerTimer();
     for (const child of [...this.#content.getChildren()]) {
       this.#content.remove(child);
@@ -575,6 +631,86 @@ export function edgeRuns(
     runs.push({x: cell.x, y: cell.y, glyphs: cell.glyph, tone: cell.tone});
   }
   return runs;
+}
+
+type EdgeRun = ReturnType<typeof edgeRuns>[number];
+
+function cellKey(x: number, y: number): string {
+  return `${x},${y}`;
+}
+
+/**
+ * Edge runs that carry data into an active node from a completed source in
+ * the column before it: the only edges the band animates. Selected by node
+ * status, not by `'live'` tone: `routeEdges` gives every lane segment of a
+ * bent edge the same tone, and those segments have no arrowhead of their own.
+ *
+ * A run qualifies when its first cell is some node's departure point (`x +
+ * width, y + 1`) and its last cell is an active node's arrival point (`x - 1,
+ * y + 1`), the two fixed offsets `routeEdges` (agent-graph.ts) always starts
+ * and ends an edge at, whatever bend it took in between.
+ *
+ * Only a straight, single-row hop is found this way: a bent edge (a column
+ * stacking more than one agent) routes through separate lane runs per row, so
+ * its cells never sit in one run and this returns nothing for it. ponytail:
+ * acceptable today because a live inbound edge onto a stacked column is rare;
+ * extend to multi-run paths if that combination becomes common.
+ */
+export function flowRuns(nodes: GraphNode[], runs: readonly EdgeRun[]): Set<EdgeRun> {
+  const departures = new Map<string, AgentPhase>();
+  const arrivals = new Set<string>();
+  for (const node of nodes) {
+    departures.set(cellKey(node.x + node.width, node.y + 1), node.phase);
+    if (node.phase.status === 'active') arrivals.add(cellKey(node.x - 1, node.y + 1));
+  }
+  const flows = new Set<EdgeRun>();
+  for (const run of runs) {
+    const source = departures.get(cellKey(run.x, run.y));
+    if (source?.status !== 'completed') continue;
+    if (arrivals.has(cellKey(run.x + run.glyphs.length - 1, run.y))) flows.add(run);
+  }
+  return flows;
+}
+
+/**
+ * A flow run's glyphs, unchanged, with a 2-cell brightness band riding the
+ * line: the cell at `tick`'s position is `brightestColor`, the cell behind it
+ * (toward the source) is `brighterColor`, and every other line cell,
+ * including the ones the band has already passed, is `liveColor`, the
+ * edge's ordinary live-tone colour. The band moves one cell per call; the
+ * tail does not wrap, so the cell behind the head is only ever the one cell
+ * immediately before it, never the run's far end. The head itself wraps, from
+ * the run's last line cell back to its first.
+ *
+ * `tick` cycles over every cell except the run's last one: `routeEdges`
+ * always writes the arrowhead there, and it keeps its own glyph and
+ * `liveColor` always, never joining the band, so direction always reads from
+ * its own glyph rather than from wherever the band happens to be.
+ *
+ * Known limits, not fixed here: several inbound edges into one node tick in
+ * lockstep (one shared `tick`) and would read as a single band rather than
+ * distinct flows; `routeEdges` also merges cells where edges overlap near a
+ * shared target, so two bands could land on the same cells and fuse into one.
+ * Neither shows today because execution is sequential: at most one edge feeds
+ * an active node at a time.
+ */
+export function paintEdgeFlow(
+  glyphs: string,
+  tick: number,
+  liveColor: string,
+  brighterColor: string,
+  brightestColor: string,
+): StyledText {
+  const chars = [...glyphs];
+  const pathLength = chars.length - 1;
+  const headIndex = pathLength > 0 ? tick % pathLength : -1;
+  const chunks: TextChunk[] = chars.map((glyph, index) => {
+    if (index === pathLength) return fg(liveColor)(glyph);
+    if (index === headIndex) return fg(brightestColor)(glyph);
+    if (index === headIndex - 1) return fg(brighterColor)(glyph);
+    return fg(liveColor)(glyph);
+  });
+  return new StyledText(chunks);
 }
 
 /** `4 agents · 1 active · 2 done`, with failures and skips only when they exist. */
