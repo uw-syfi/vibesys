@@ -312,7 +312,12 @@ Status:  verified. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12,
          job-verified.
 ```
 
+## Next iteration: dword-wide loads and dispatch retune
+
+The "Remaining known inefficiency" noted above (the compiler splitting the 16-byte weight load into eight 2-byte loads) is the starting point for the next optimization-loop iteration: microbench-verified, end-to-end acceptance in progress. See [`aiter-mxfp4-moe-kernel-iterations.md`](aiter-mxfp4-moe-kernel-iterations.md) for the dword-wide-load fix, a refuted shared-activation-fragment variant, and the dispatch-threshold retune it motivates.
+
 ## See also
 
 - [`aiter.md`](aiter.md): the kernel this pitfall applies to, the prefill-M microbenchmark, and the dequant-to-bf16-scratch alternative refuted at prefill M
+- [`aiter-mxfp4-moe-kernel-iterations.md`](aiter-mxfp4-moe-kernel-iterations.md): the next iteration after the permute fix (dword-wide loads, a refuted shared-fragment variant, and a dispatch-threshold retune)
 - [`profiler.md`](profiler.md): the `rocprofv3` counters (`MemUnitStalled`, `VALUBusy`) used to classify this as latency-bound, not bandwidth-bound, and the in-kernel phase timing method that first separated latency-bound from ALU-bound here

@@ -128,6 +128,26 @@ A later audit of the trace classifier (see [`../tooling/profiler.md`](../tooling
 
 Status: verified (four clean batch-size points for the round breakdown and floor ratios; classifier fix for Attention, Gated DeltaNet, and Other reprocessed and confirmed at two of the four, N=16 and N=32). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
 
+### Decode round breakdown, post-permute re-profile, measured
+
+Re-profiled the same driven fixed-batch sweep after the register byte-permute `decode16` kernel below (see the Measured section) was accepted as the default. Pooled medians across ranks and rounds, N=16 (n=116), previous stack alongside:
+
+| Block | Previous (ms) | New (ms) | Delta | Floor at 5.3 TB/s (ms) | New ratio to floor |
+|:--|--:|--:|--:|--:|--:|
+| MoE stage1 | 27.36 | 23.00 | -15.9% | -- | -- |
+| MoE stage2 | 10.33 | 9.46 | -8.4% | -- | -- |
+| **MoE routed total** | **37.69** | **32.47** | **-13.9%** | **14.81** | **2.19x** (was 2.55x) |
+| Dense GEMM | 5.67 | 5.57 | -1.8% | 3.47 | 1.60x (was 1.63x) |
+| Collectives | 3.28 | 3.48 | +6.1% | -- | -- |
+| CPU-only gap | 2.56 | 2.75 | +7.2% | -- | -- |
+| **Round wall** | **56.54** | **51.11** | **-9.6%** | **18.28** | **2.80x** (was 3.09x) |
+
+Attention, Gated DeltaNet, sampling/verify glue, and the residual "other" bucket are flat within noise and omitted above; see the previous section for their shares. Routed MoE remains the largest single block by a wide margin (63.5 percent of the round at N=16) and still the top optimization target, now at a smaller absolute size and a smaller over-floor ratio.
+
+The same shrinking-ratio shape holds at the other two clean batch sizes swept: MoE routed total measures 23.18 ms at N=8 (2.64x its 8.78 ms floor, was 3.06x) and 44.11 ms at N=32 (1.96x its 22.51 ms floor, was 2.30x); round wall measures 37.67 ms at N=8 and 69.66 ms at N=32. N=48 collapsed again for the same admission-queueing reason documented in the previous section (observed verify batch sizes never reached 48), so it is not reported here.
+
+Status: job-verified (N=16 previous-vs-new comparison and the N=8/N=32 ratio shifts reproduced across two independent boots; bucket-sum cross-check against measured GPU-busy time held). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
+
 ### Speculative decoding (NEXTN, k=3), measured
 
 Paired against the accepted fused-kernel defaults (no speculative decoding), 5 reps per side pooled, gates 13/13 on every rep of every side:
@@ -215,6 +235,18 @@ A single-request (bs=1) turn-2+ prefill+draft-extend forward is compute-bound at
 Routed MoE dominates and grows fastest with extend length; dense GEMM is nearly flat (weight-read-bound, not compute-bound, at this token range). See [`platforms/`](../platforms/) for the MoE kernel this measures and its own floor comparison.
 
 Status: verified (kernel-named torch-profiler capture, cross-validated against the bucket decomposition above to within a few ms). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633822.
+
+**Post-permute re-profile.** GPU kernel time by block (mean across ranks, two independent boots, reproduced consistently in both):
+
+| Block | 337 tok, previous | 337 tok, post-permute | 919 tok, previous | 919 tok, post-permute |
+|:--|--:|--:|--:|--:|
+| Routed MoE (stage1+stage2) | 91.3 ms | about 79 ms | 168.3 ms | about 139 ms |
+| Dense GEMM | 34.5 ms | flat within noise | 37.7 ms | flat within noise |
+| Collectives (TP=4 all-reduce) | 24.5 ms | unreliable at this point, see pitfall below | 35.8 ms | flat within noise |
+
+Routed MoE falls 11 to 16 percent at 337 tokens and 14 to 21 percent at 919 tokens, consistent across both boots. The 337-token point's own wall-clock, CPU-gap, and collectives numbers are unreliable in both boots: a first-touch aiter tuning-config file lock contended when several ranks resolved an untried batch shape at once, unrelated to the kernel under test; see the aiter tuning-config lock pitfall under [`platforms/`](../platforms/). GPU kernel time by block only counts kernel execution, so it is unaffected by that lock wait and is what is reported here.
+
+Status: job-verified (GPU kernel time reproduced consistently across two independent boots; the 337-token point's wall-clock, CPU-gap, and collectives numbers are separately flagged unreliable, see the pitfall referenced above). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
 
 ### Outcome: resident-fp8 / MXFP4-dequant hybrid MoE weights (superseded)
 

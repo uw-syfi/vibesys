@@ -229,6 +229,43 @@ Scope:   rocm, gfx942, sglang-v0.5.18-rocm700-mi30x with aiter bundled.
 Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job 623402.
 ```
 
+### First-touch tuned-MoE config lock inflates the first profiled iteration after boot
+
+```
+Symptom: the first profiled prefill iteration after boot shows a wall-clock
+         and CPU-launch-gap spike well above every later iteration at the
+         same shape (observed: a 337-token extend step measured 308 to 721
+         ms wall time and up to 564 ms of CPU/launch gap on the contended
+         rank, against a clean 187 ms wall time measured earlier under
+         identical flags), while GPU kernel time by block is unaffected.
+Cause:   aiter resolves its own tuned fused-MoE config lazily, per process,
+         the first time a rank hits a batch shape not already covered by
+         boot-time CUDA-graph capture. Several TP ranks reaching that
+         shape at once contend on a file lock ("waiting for baton release
+         at tuned_fmoe.csv.lock" in the log) while one rank performs the
+         lookup; the TP all-reduce then blocks every other rank until the
+         locked rank catches up, which also inflates whichever rank's
+         collectives bucket was waiting. This reproduced in two
+         independent boots at very different magnitudes (roughly 130 to
+         180 ms and 560 to 580 ms of blocked wait), consistent with
+         lock-contention timing rather than a fixed cost, and is unrelated
+         to any kernel change under test or to the JIT extension cache
+         directory.
+Fix:     do not trust wall-clock, CPU-gap, or collectives timing on the
+         first profiled iteration at a shape after boot. Either read GPU
+         kernel time by block instead (it only counts kernel execution,
+         not inter-rank wait, and reproduces cleanly across boots), or
+         warm the exact batch shape once, outside the profiled window,
+         before starting measurement.
+Scope:   rocm, gfx942, sglang-v0.5.18-rocm700-mi30x with aiter bundled;
+         general to any first-touch aiter tuned-config lookup contended
+         across tensor-parallel ranks, not specific to this kernel.
+Status:  job-verified (reproduced in two independent boots at different
+         lock-wait magnitudes; GPU kernel time confirmed unaffected in
+         both). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13,
+         job-verified.
+```
+
 ### Dequant Triton kernels measure at 4-5 percent of HBM bandwidth (not bandwidth-bound)
 
 ```
