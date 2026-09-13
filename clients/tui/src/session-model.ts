@@ -672,75 +672,119 @@ export function openExperimentLog(state: SessionState): SessionState {
   };
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 export function setExperiments(state: SessionState, entries: HypothesisEntry[]): SessionState {
   const log = state.experimentLog;
   if (log === null) return state;
+
   const activity = hypothesisPlanningActivity(state);
-  const selectedActivityRound =
-    log.selectedActivity === true
-      ? (log.selectedActivityRound ?? activity?.roundNumber ?? null)
-      : null;
-  const orderedEntries = [...entries].sort(compareHypothesisEntries);
-  const keys = orderedEntries.map(entryKey);
-  const materializedActivity =
-    selectedActivityRound === null
-      ? undefined
-      : orderedEntries.find(entry => scopeRounds(entry).includes(selectedActivityRound));
-  // Keep the operator's row when it still exists; otherwise fall back to the
-  // active hypothesis, then to the first row.
-  const selectedId =
-    materializedActivity !== undefined
-      ? entryKeyFor(orderedEntries, materializedActivity)
-      : log.selectedId !== null && keys.includes(log.selectedId)
-        ? log.selectedId
-        : (keys[orderedEntries.findIndex(entry => entry.active === true)] ?? keys[0] ?? null);
-  const unownedRounds = unownedExperimentRounds(state, orderedEntries);
-  const currentUnownedRound = log.selectedUnownedRound;
-  const selectedUnownedRound =
-    currentUnownedRound !== undefined &&
-    currentUnownedRound !== null &&
-    unownedRounds.includes(currentUnownedRound)
-      ? currentUnownedRound
-      : orderedEntries.length === 0
-        ? (unownedRounds[0] ?? null)
-        : null;
-  const currentDetail = state.hypothesisDetail;
-  const detailEntry =
-    currentDetail === null
-      ? undefined
-      : orderedEntries.find((entry, index) => entryKey(entry, index) === currentDetail.entryKey);
-  const detailRounds = detailEntry === undefined ? [] : scopeRounds(detailEntry);
-  const hypothesisDetail =
-    currentDetail === null || detailEntry === undefined
-      ? null
-      : {
-          entryKey: currentDetail.entryKey,
-          selectedRound:
-            currentDetail.selectedRound !== null &&
-            detailRounds.includes(currentDetail.selectedRound)
-              ? currentDetail.selectedRound
-              : (detailRounds.at(-1) ?? null),
-        };
+  const indexed = orderAndIndexExperiments(entries);
+  const selection = reconcileExperimentSelection(log, indexed, activity);
+  const unownedRounds = unownedExperimentRounds(state, indexed.entries);
+  const selectedUnownedRound = reconcileUnownedRoundSelection(
+    log.selectedUnownedRound,
+    unownedRounds,
+    indexed.entries.length === 0,
+  );
+  const hypothesisDetail = reconcileHypothesisDetail(state.hypothesisDetail, indexed.entries);
   const refreshed: SessionState = {
     ...state,
     hypothesisDetail,
     experimentLog: {
       ...log,
-      entries: orderedEntries,
-      selectedId,
-      selectedActivity: materializedActivity === undefined && log.selectedActivity === true,
-      selectedActivityRound: materializedActivity === undefined ? selectedActivityRound : null,
+      entries: indexed.entries,
+      ...selection,
       selectedUnownedRound,
       pending: false,
       error: null,
     },
   };
-  if (state.hypothesisScope === null) return refreshed;
+  return refreshLiveHypothesisScope(state, refreshed);
+}
+
+interface IndexedExperiments {
+  entries: HypothesisEntry[];
+  keys: string[];
+}
+
+/** Establish the canonical response order once and retain its stable row identities. */
+function orderAndIndexExperiments(entries: HypothesisEntry[]): IndexedExperiments {
+  const ordered = [...entries].sort(compareHypothesisEntries);
+  return {entries: ordered, keys: ordered.map(entryKey)};
+}
+
+type ExperimentSelection = Pick<
+  ExperimentLogState,
+  'selectedId' | 'selectedActivity' | 'selectedActivityRound'
+>;
+
+/** Reconcile the selected index row, including planning work that became persistent. */
+function reconcileExperimentSelection(
+  log: ExperimentLogState,
+  indexed: IndexedExperiments,
+  activity: HypothesisPlanningActivity | null,
+): ExperimentSelection {
+  const selectedActivityRound =
+    log.selectedActivity === true
+      ? (log.selectedActivityRound ?? activity?.roundNumber ?? null)
+      : null;
+  const materializedActivity =
+    selectedActivityRound === null
+      ? undefined
+      : indexed.entries.find(entry => scopeRounds(entry).includes(selectedActivityRound));
+  // Keep the operator's row when it still exists; otherwise fall back to the
+  // active hypothesis, then to the first row.
+  const selectedId =
+    materializedActivity !== undefined
+      ? entryKeyFor(indexed.entries, materializedActivity)
+      : log.selectedId !== null && indexed.keys.includes(log.selectedId)
+        ? log.selectedId
+        : (indexed.keys[indexed.entries.findIndex(entry => entry.active === true)] ??
+          indexed.keys[0] ??
+          null);
+  return {
+    selectedId,
+    selectedActivity: materializedActivity === undefined && log.selectedActivity === true,
+    selectedActivityRound: materializedActivity === undefined ? selectedActivityRound : null,
+  };
+}
+
+/** Keep an unowned-round cursor only while that row remains in the refreshed index. */
+function reconcileUnownedRoundSelection(
+  current: number | null | undefined,
+  unownedRounds: number[],
+  hasNoHypotheses: boolean,
+): number | null {
+  if (current !== undefined && current !== null && unownedRounds.includes(current)) return current;
+  return hasNoHypotheses ? (unownedRounds[0] ?? null) : null;
+}
+
+/** Keep an open summary on the same hypothesis and fall back to its latest available round. */
+function reconcileHypothesisDetail(
+  currentDetail: HypothesisDetail | null,
+  entries: HypothesisEntry[],
+): HypothesisDetail | null {
+  const detailEntry =
+    currentDetail === null
+      ? undefined
+      : entries.find((entry, index) => entryKey(entry, index) === currentDetail.entryKey);
+  const detailRounds = detailEntry === undefined ? [] : scopeRounds(detailEntry);
+  if (currentDetail === null || detailEntry === undefined) return null;
+  return {
+    entryKey: currentDetail.entryKey,
+    selectedRound:
+      currentDetail.selectedRound !== null && detailRounds.includes(currentDetail.selectedRound)
+        ? currentDetail.selectedRound
+        : (detailRounds.at(-1) ?? null),
+  };
+}
+
+/** Re-derive an open trajectory's scope from the refreshed ownership payload. */
+function refreshLiveHypothesisScope(previous: SessionState, refreshed: SessionState): SessionState {
+  if (previous.hypothesisScope === null) return refreshed;
   // A live scope must describe the fresh payload: a continuation round joins
   // its hypothesis's scope, and a scope whose hypothesis vanished degrades to
   // the round on screen rather than keeping the stale title over it.
-  const anchor = visibleRoundNumber(state);
+  const anchor = visibleRoundNumber(previous);
   return anchor === null ? refreshed : {...refreshed, ...scopeStateForRound(refreshed, anchor)};
 }
 

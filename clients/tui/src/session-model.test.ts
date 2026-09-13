@@ -525,6 +525,47 @@ describe('hypothesis planning activity', () => {
   });
 });
 
+describe('experiment refresh reconciliation', () => {
+  const entry = (
+    id: string,
+    round: number,
+    active = false,
+  ): Parameters<typeof setExperiments>[1][number] => ({
+    hypothesis_id: id,
+    identified: true,
+    first_round: round,
+    last_round: round,
+    rounds: [{round, passed: true, reviewed: true}],
+    kept: false,
+    active,
+  });
+
+  it('keeps the current hypothesis selected across response reordering', () => {
+    const current = setExperiments(initialSessionState(), [entry('H-01', 1), entry('H-02', 2)]);
+    const refreshed = setExperiments(current, [entry('H-02', 2, true), entry('H-01', 1)]);
+
+    expect(refreshed.experimentLog?.entries.map(item => item.hypothesis_id)).toEqual([
+      'H-01',
+      'H-02',
+    ]);
+    expect(refreshed.experimentLog?.selectedId).toBe('H-01');
+  });
+
+  it('falls back to the active hypothesis when the selected row vanishes', () => {
+    const current = setExperiments(initialSessionState(), [entry('H-01', 1)]);
+    const refreshed = setExperiments(current, [entry('H-02', 2), entry('H-03', 3, true)]);
+
+    expect(refreshed.experimentLog?.selectedId).toBe('H-03');
+  });
+
+  it('falls back to the first ordered row when no refreshed hypothesis is active', () => {
+    const current = setExperiments(initialSessionState(), [entry('H-01', 1)]);
+    const refreshed = setExperiments(current, [entry('H-03', 3), entry('H-02', 2)]);
+
+    expect(refreshed.experimentLog?.selectedId).toBe('H-02');
+  });
+});
+
 describe('hypothesis scope label', () => {
   it('prefers the backend-supplied title over the hypothesis id', () => {
     const state = setExperiments(initialSessionState(), [
@@ -1761,6 +1802,20 @@ describe('hypothesis detail navigation', () => {
     const detail = enterExperimentDrilldown(setExperiments(initialSessionState(), [hypothesis]));
 
     expect(setExperiments(detail, []).hypothesisDetail).toBeNull();
+  });
+
+  it('moves a detail cursor to the latest round when its selected round disappears', () => {
+    let detail = enterExperimentDrilldown(setExperiments(initialSessionState(), [hypothesis]));
+    detail = moveHypothesisRoundSelection(detail, -1);
+    const refreshed = setExperiments(detail, [
+      {
+        ...hypothesis,
+        first_round: 2,
+        rounds: [{round: 2, passed: false, reviewed: true}],
+      },
+    ]);
+
+    expect(refreshed.hypothesisDetail).toEqual({entryKey: 'H-01', selectedRound: 2});
   });
 });
 
