@@ -117,6 +117,7 @@ export function applyExecutionStatusUsage(
 }
 
 /** Restores fields supplied by an older status when a partial tail status owns usage. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 export function mergeExecutionStatusUsagePrefix(
   usage: ExecutionUsage | null,
   statuses: StatusMap,

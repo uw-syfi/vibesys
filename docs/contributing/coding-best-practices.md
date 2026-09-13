@@ -218,6 +218,53 @@ failure cases.
   (`createTestRenderer` from `@opentui/core/testing`); a pure-function test
   over a formatter is not accepted for such symptoms.
 
+## Size And Complexity Limits
+
+God files, god functions, deep branching, and long parameter lists are enforced
+by the linters already in the toolchain, not by review alone. Both languages use
+a shrink-only ratchet: existing violations are grandfathered at a recorded site,
+and the waiver becomes an error once it is no longer needed.
+
+| Metric | Python | TypeScript |
+| --- | --- | --- |
+| Cyclomatic / cognitive complexity | ruff `C901` (max 10) and `PLR0912` (max 12 branches) | biome `complexity/noExcessiveCognitiveComplexity`, max 15 |
+| Function length | ruff `PLR0915`, max 50 statements | biome `complexity/noExcessiveLinesPerFunction`, 80 lines, blanks skipped |
+| Parameters | ruff `PLR0913`, max 5 | biome `complexity/useMaxParams`, max 6 |
+| File length | `scripts/check_file_length.py`, 2,000 lines | biome `style/noExcessiveLinesPerFile`, 2,000 lines |
+
+Test files are exempt from the two length rules in both languages: long test
+modules are normal. They are still held to the complexity and parameter rules.
+The thresholds live in `pyproject.toml` (`[tool.ruff.lint]`,
+`[tool.vibesys.file_length]`) and `biome.json`.
+
+### Ratchets
+
+The escape hatches below are temporary migration debt and are being removed as
+the affected code is refactored. Do not add new waivers, suppression comments,
+or file-length allowlist entries for these rules. Fix new violations by
+splitting or simplifying the affected code.
+
+- **Python functions.** A site-level `# noqa: <rule>  # tracked: #288` waives a
+  rule at one call site. Ruff's `RUF100` fails on a waiver that no longer
+  suppresses anything, so refactoring a function requires deleting its waiver
+  and the count can only shrink.
+- **TypeScript.** A `// biome-ignore lint/<group>/<rule>: pre-existing; tracked: #288`
+  comment waives one site. Biome reports a suppression that no longer
+  suppresses anything as an unused-suppression diagnostic, so stale waivers
+  surface in `pnpm lint:ts` output and should be deleted with the refactor.
+- **Python file length.** `[tool.vibesys.file_length.allowlist]` in
+  `pyproject.toml` records each over-ceiling file at its current line count,
+  with a comment saying what it holds. `scripts/check_file_length.py` fails when
+  a non-allowlisted file crosses 2,000 lines, when an allowlisted file grows past
+  its recorded count, and when an entry is stale (the file is gone or now fits
+  under the ceiling, so the entry must be deleted). Shrinking a file is always
+  allowed; the check prints the entries whose recorded count can be lowered.
+
+```bash
+uv run python scripts/check_file_length.py
+pnpm lint:ts
+```
+
 ## Avoid
 
 - Large unrelated refactors.

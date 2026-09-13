@@ -529,6 +529,8 @@ export function reduceEventPrefix(
  * - Two typed `tool_result` events carrying the same `call_id`, which only a
  *   malformed producer emits, diverge.
  */
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 function mergeTranscriptPrefix(
   older: readonly TranscriptEntry[],
   newer: readonly TranscriptEntry[],
@@ -705,6 +707,8 @@ export function reduceEvent(state: CoreState, event: RunEvent): CoreState {
   return foldEvent(state, event, null);
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
 function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder | null): CoreState {
   const sequence = event.sequence ?? 0;
   if (sequence > 0 && sequence <= state.sequence) return state;
@@ -1164,6 +1168,7 @@ function diagnosticSeverityRank(severity: CoreDiagnostic['severity']): number {
   return 0;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 function diagnosticFromEvent(event: RunEvent): CoreDiagnostic | null {
   const diagnostic = event.diagnostic;
   if (diagnostic !== null && diagnostic !== undefined) {
@@ -1256,6 +1261,8 @@ function failureKind(
   return eventType === 'run_interrupted' ? 'run_interruption' : scope;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
 function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
   const data = event.data;
   const id = String(event.sequence ?? `${event.timestamp}-${event.type}`);

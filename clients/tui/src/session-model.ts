@@ -672,6 +672,7 @@ export function openExperimentLog(state: SessionState): SessionState {
   };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 export function setExperiments(state: SessionState, entries: HypothesisEntry[]): SessionState {
   const log = state.experimentLog;
   if (log === null) return state;
@@ -905,6 +906,7 @@ export function selectExperimentActivity(state: SessionState): SessionState {
  * Advances the experiment navigation by one level: index to hypothesis
  * summary, then hypothesis summary to its selected round trajectory.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 export function enterExperimentDrilldown(state: SessionState): SessionState {
   if (state.hypothesisDetail !== null) {
     const roundNumber = state.hypothesisDetail.selectedRound;
@@ -1878,6 +1880,7 @@ export function clearInputError(state: SessionState): SessionState {
  * `detail`/`hint`, so it belongs on the command input's own hint row instead
  * of the shared error surface (see `command-input.ts`).
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 export function reportError(
   state: SessionState,
   message: string,

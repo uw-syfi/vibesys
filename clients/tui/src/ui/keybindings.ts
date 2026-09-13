@@ -38,6 +38,7 @@ export interface KeybindingActions {
   showClipboardStatus(result: Exclude<ClipboardCopyResult, 'no-selection'>): void;
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
 export function bindKeybindings(
   renderer: CliRenderer,
   controller: SessionController,
@@ -45,6 +46,8 @@ export function bindKeybindings(
   clipboard: SelectionClipboard,
   actions: KeybindingActions,
 ): () => void {
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
   const onKey = (key: KeyEvent): void => {
     if (key.ctrl && !key.shift && key.name === 'c') {
       key.preventDefault();

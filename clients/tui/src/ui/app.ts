@@ -79,6 +79,7 @@ function emptyTranscriptMessage(state: SessionState): string {
   return 'Waiting for run events…';
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
 export function createOpenTuiApp(
   renderer: CliRenderer,
   controller: SessionController,
@@ -364,6 +365,8 @@ export function createOpenTuiApp(
 
   let focusTarget: FocusTarget = 'command';
   let lastState: SessionState = controller.state;
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
   const render = (state: SessionState): void => {
     lastState = state;
     const previewName = state.themePicker?.selected ?? state.themeName;

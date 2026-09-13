@@ -1050,6 +1050,7 @@ export class SocketSessionController implements SessionController {
     }
   }
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
   #onMessage(message: ServerMessage, resumed: boolean): void {
     if (message.type === 'event') {
       this.#setState(applyEvent(this.#state, message.event));

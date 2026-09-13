@@ -917,6 +917,8 @@ const CHANNELS = ['assistant', 'assistant', 'assistant', 'analysis', 'prompt'] a
  * Sized well under MAX_TRANSCRIPT_ENTRIES so cap eviction, which replay and
  * backfill are not required to agree on, never enters the comparison.
  */
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds = 5): RunEvent[] {
   const rng = new Rng(seed);
   const events: RunEvent[] = [];

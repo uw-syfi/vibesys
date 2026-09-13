@@ -369,6 +369,7 @@ describe('RoundTabsView', () => {
     expect(cellsOf(cells, 'r2')[0]?.bg).toBe(theme.canvas);
   });
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
   test('keeps every colour on the fill readable, in every theme', async () => {
     const failures: string[] = [];
     for (const each of listThemes()) {

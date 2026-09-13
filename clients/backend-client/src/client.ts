@@ -205,6 +205,7 @@ export class ServerClient {
           })}\n`,
         );
       });
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
       socket.on('data', chunk => {
         buffer += chunk.toString();
         const lines = buffer.split('\n');
@@ -320,6 +321,7 @@ export class ServerClient {
           if (error) fail(error);
         });
       });
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
       socket.on('data', chunk => {
         buffer += chunk.toString();
         const lines = buffer.split('\n');
