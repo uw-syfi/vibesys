@@ -11,13 +11,13 @@ from pathlib import Path
 import pytest
 import yaml
 from scripts.delegated_merge import (
+    Capability,
     Check,
     Event,
     GitHubAPI,
     GitHubAPIError,
     MergeRefusalError,
     Policy,
-    Rule,
     authorize_capabilities,
     authorize_check_job,
     authorize_event,
@@ -108,7 +108,7 @@ def test_policy_accepts_only_exact_delegated_paths_and_both_sides_of_renames() -
         ('command = "/merge-scoped"', 'command = "/land"', "must start"),
         ('required_checks = ["pr-ci"]', "required_checks = []", "at least one"),
         ('workflow_file = "test.yml"', 'workflow_file = "../test.yml"', "workflow filename"),
-        ('requires = ["tui"]', "requires = []", "at least one capability"),
+        ("[capabilities.tui]", '[capabilities."not valid"]', "capability name"),
         (
             "additional_checks = []",
             'additional_checks = ["undefined"]',
@@ -126,7 +126,7 @@ def test_policy_rejects_invalid_contracts(tmp_path: Path, old: str, new: str, me
         load_policy(policy_path)
 
 
-def test_file_rules_union_every_matching_capability_and_check() -> None:
+def test_path_matches_union_every_matching_capability_and_check() -> None:
     policy = load_policy()
     overlapping = Policy(
         schema_version=policy.schema_version,
@@ -136,15 +136,14 @@ def test_file_rules_union_every_matching_capability_and_check() -> None:
         merge_method=policy.merge_method,
         required_checks=policy.required_checks,
         checks={**policy.checks, "security": Check("security.yml", "Security")},
-        rules=(
-            *policy.rules,
-            Rule(
+        capabilities={
+            **policy.capabilities,
+            "platform": Capability(
                 prefixes=("src/",),
                 paths=frozenset(),
-                requires=frozenset({"platform"}),
                 additional_checks=frozenset({"security"}),
             ),
-        ),
+        },
     )
 
     capabilities, checks = authorize_files(

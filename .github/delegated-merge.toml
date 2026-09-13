@@ -11,7 +11,7 @@ job_name = "Required PR CI"
 
 # Keep shared manifests, dependency locks, entrypoint composition, workflows,
 # and this broker's policy and implementation under the normal maintainer path.
-[[rules]]
+[capabilities.tui]
 prefixes = [
   "clients/backend-client/src/",
   "clients/core-state/src/",
@@ -19,10 +19,9 @@ prefixes = [
   "clients/tui/src/",
 ]
 paths = []
-requires = ["tui"]
 additional_checks = []
 
-[[rules]]
+[capabilities.server]
 prefixes = [
   "src/server/",
   "tests/server/",
@@ -30,5 +29,4 @@ prefixes = [
 paths = [
   "tests/entrypoints/test_server.py",
 ]
-requires = ["server"]
 additional_checks = []

@@ -8,13 +8,15 @@ short-lived `GITHUB_TOKEN` to perform the merge.
 ## Policy
 
 `.github/delegated-merge.toml` owns the repository, base branch, merge method,
-named required checks, and path rules. Each rule maps repository path prefixes
-and exact paths to required capabilities and optional additional checks. Every
-changed path must match at least one rule. For renames, both the old and new
-path are evaluated. When a diff matches several rules, the broker requires the
-union of every matching rule's capabilities and checks. The broker's policy,
-workflow, and implementation paths are always denied, even if a future rule
-would otherwise match them.
+named required checks, and capability-indexed path policy. Each
+`[capabilities.<name>]` section lists repository path prefixes, exact paths, and
+optional additional checks. Matching a section implicitly requires its
+capability name. Every changed path must match at least one section. For
+renames, both the old and new path are evaluated. When a path or diff matches
+several capability sections, the broker requires the union of all matching
+capability names and checks. The broker's policy, workflow, implementation, and
+configured check workflow paths are always denied, even if a future capability
+section would otherwise match them.
 
 The repository Actions variable `DELEGATED_MERGE_GRANTS` is a JSON object whose
 case-insensitive GitHub logins map to capability arrays. For example:

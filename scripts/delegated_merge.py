@@ -72,12 +72,11 @@ class Check:
 
 
 @dataclass(frozen=True)
-class Rule:
-    """Capabilities and extra checks required by a set of repository paths."""
+class Capability:
+    """Repository paths and extra checks governed by one named capability."""
 
     prefixes: tuple[str, ...]
     paths: frozenset[str]
-    requires: frozenset[str]
     additional_checks: frozenset[str]
 
 
@@ -92,7 +91,7 @@ class Policy:
     merge_method: str
     required_checks: frozenset[str]
     checks: Mapping[str, Check]
-    rules: tuple[Rule, ...]
+    capabilities: Mapping[str, Capability]
 
 
 @dataclass(frozen=True)
@@ -162,7 +161,7 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
         "merge_method",
         "required_checks",
         "checks",
-        "rules",
+        "capabilities",
     }
     if set(document) != expected:
         _refuse(f"policy keys must be exactly {sorted(expected)}")
@@ -179,9 +178,11 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
     )
     if not required_checks:
         _refuse("policy must define at least one required check")
-    rules = _load_rules(document["rules"])
+    capabilities = _load_capabilities(document["capabilities"])
     referenced_checks = required_checks | frozenset(
-        check_id for rule in rules for check_id in rule.additional_checks
+        check_id
+        for capability in capabilities.values()
+        for check_id in capability.additional_checks
     )
     unknown_checks = referenced_checks - checks.keys()
     if unknown_checks:
@@ -194,7 +195,7 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
         merge_method=cast("str", document["merge_method"]),
         required_checks=required_checks,
         checks=checks,
-        rules=rules,
+        capabilities=capabilities,
     )
 
 
@@ -218,45 +219,40 @@ def _load_checks(raw_checks: object) -> Mapping[str, Check]:
     return checks
 
 
-def _load_rules(raw_rules: object) -> tuple[Rule, ...]:
-    rules_document = _list(raw_rules, "rules")
-    if not rules_document:
-        _refuse("policy must define at least one rule")
-    rules: list[Rule] = []
-    for index, rule_value in enumerate(rules_document):
-        rule_document = _mapping(rule_value, f"rules[{index}]")
-        expected_rule = {"prefixes", "paths", "requires", "additional_checks"}
-        if set(rule_document) != expected_rule:
-            _refuse(f"rules[{index}] keys must be exactly {sorted(expected_rule)}")
-        prefixes = _string_collection(rule_document["prefixes"], name=f"rules[{index}].prefixes")
-        paths = _string_collection(rule_document["paths"], name=f"rules[{index}].paths")
-        requires = frozenset(
-            _string_collection(rule_document["requires"], name=f"rules[{index}].requires")
+def _load_capabilities(raw_capabilities: object) -> Mapping[str, Capability]:
+    capabilities_document = _mapping(raw_capabilities, "capabilities")
+    if not capabilities_document:
+        _refuse("policy must define at least one capability")
+    capabilities: dict[str, Capability] = {}
+    for name, capability_value in capabilities_document.items():
+        if not _identifier(name):
+            _refuse(f"capability name {name!r} is invalid")
+        capability_document = _mapping(capability_value, f"capabilities.{name}")
+        expected_fields = {"prefixes", "paths", "additional_checks"}
+        if set(capability_document) != expected_fields:
+            _refuse(f"capabilities.{name} keys must be exactly {sorted(expected_fields)}")
+        prefixes = _string_collection(
+            capability_document["prefixes"], name=f"capabilities.{name}.prefixes"
         )
+        paths = _string_collection(capability_document["paths"], name=f"capabilities.{name}.paths")
         additional_checks = frozenset(
             _string_collection(
-                rule_document["additional_checks"], name=f"rules[{index}].additional_checks"
+                capability_document["additional_checks"],
+                name=f"capabilities.{name}.additional_checks",
             )
         )
         if not prefixes and not paths:
-            _refuse(f"rules[{index}] must match at least one path")
-        if not requires:
-            _refuse(f"rules[{index}] must require at least one capability")
+            _refuse(f"capabilities.{name} must match at least one path")
         if any(not prefix.endswith("/") or not _safe_path(prefix[:-1]) for prefix in prefixes):
-            _refuse(f"rules[{index}] prefixes must be safe repository paths ending in '/'")
+            _refuse(f"capabilities.{name} prefixes must be safe repository paths ending in '/'")
         if any(not _safe_path(path_value) for path_value in paths):
-            _refuse(f"rules[{index}] paths must be safe repository paths")
-        if any(not _identifier(capability) for capability in requires):
-            _refuse(f"rules[{index}] contains an invalid capability")
-        rules.append(
-            Rule(
-                prefixes=prefixes,
-                paths=frozenset(paths),
-                requires=requires,
-                additional_checks=additional_checks,
-            )
+            _refuse(f"capabilities.{name} paths must be safe repository paths")
+        capabilities[name] = Capability(
+            prefixes=prefixes,
+            paths=frozenset(paths),
+            additional_checks=additional_checks,
         )
-    return tuple(rules)
+    return capabilities
 
 
 def parse_event(document: object) -> Event:
@@ -382,14 +378,18 @@ def authorize_files(
                 _refuse(f"{name} is controlled by the delegated merge broker")
             if not _safe_path(name):
                 _refuse(f"{name} is not a safe repository path")
-            matching = [rule for rule in policy.rules if _rule_matches(name, rule)]
+            matching = {
+                capability_name: capability
+                for capability_name, capability in policy.capabilities.items()
+                if _capability_matches(name, capability)
+            }
             if not matching:
-                _refuse(f"{name} does not match a delegated merge rule")
-            required_capabilities.update(
-                capability for rule in matching for capability in rule.requires
-            )
+                _refuse(f"{name} does not match a delegated merge capability")
+            required_capabilities.update(matching)
             required_checks.update(
-                check_id for rule in matching for check_id in rule.additional_checks
+                check_id
+                for capability in matching.values()
+                for check_id in capability.additional_checks
             )
     return frozenset(required_capabilities), frozenset(required_checks)
 
@@ -492,8 +492,10 @@ def _comment(api: GitHubClient, event: Event, body: str) -> None:
     )
 
 
-def _rule_matches(path: str, rule: Rule) -> bool:
-    return path in rule.paths or any(path.startswith(prefix) for prefix in rule.prefixes)
+def _capability_matches(path: str, capability: Capability) -> bool:
+    return path in capability.paths or any(
+        path.startswith(prefix) for prefix in capability.prefixes
+    )
 
 
 def _identifier(value: str) -> bool:
