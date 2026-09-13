@@ -114,6 +114,12 @@ export interface TranscriptEntry {
   invocationId?: string;
   startsTurn?: boolean;
   toolCall?: string;
+  /**
+   * A shell command to give code treatment instead of word-wrapped prose.
+   * Populated straight from a typed `gate_started` event's `command` field,
+   * or, for recorded/legacy prose, split out by `splitFrameworkValidationCommand`.
+   */
+  command?: string;
   toolResponse?: string;
   toolName?: string;
   toolCallId?: string;
@@ -1287,10 +1293,11 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
   if (data?.kind === 'agent_output_chunk') {
     const kind = outputKind(data.channel);
     const invocationId = event.invocation_id ?? undefined;
+    const gate = kind === 'diagnostic' ? splitFrameworkValidationCommand(data.content) : null;
     return {
       id,
       kind,
-      content: data.content,
+      content: gate?.content ?? data.content,
       label: labelFor(event, data.channel),
       ...agentFields,
       ...roundFields,
@@ -1299,6 +1306,7 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
       ...(kind === 'tool' && data.content.trimStart().startsWith('→ ')
         ? {startsTurn: true, toolCall: data.content}
         : {}),
+      ...(gate?.command === undefined ? {} : {command: gate.command}),
     };
   }
   if (data?.kind === 'tool_call') {
@@ -1382,13 +1390,13 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
   // so the transcript attributes them to their subsystem, not to an agent.
   if (data?.kind === 'gate_started') {
     const recipe = data.recipe == null ? '' : ` ${data.recipe}`;
-    const command = data.command == null ? '' : `: ${data.command}`;
     return {
       id,
       kind: 'status',
-      content: `running${recipe}${command}`,
+      content: `running${recipe}`,
       label: frameworkLabel(`framework-${data.gate}`, event),
       ...roundFields,
+      ...(data.command == null ? {} : {command: data.command}),
     };
   }
   if (data?.kind === 'gate_finished') return gateFinishedEntry(event, data, id, roundFields);
@@ -1459,6 +1467,34 @@ function configurationFailureContent(data: {
   if (data.usage) sections.push(data.usage);
   sections.push(`Code: ${data.code} · Stage: ${data.stage}`);
   return sections.join('\n\n');
+}
+
+/**
+ * Legacy/recorded-prose adapter: a live backend on `main` now emits a typed
+ * `gate_started` event whose `command` field `eventToTranscriptEntry` reads
+ * directly (see above), but a run recorded before #697 (e.g. the dev harness
+ * fixture `clients/tui/dev/fixtures/bad-cpp-round1.jsonl`, replayed byte for
+ * byte as `agent_output_chunk`/diagnostic) still carries the gate command as
+ * free text: loop.py's old `ctx.lprint(f"[framework-validation] running
+ * {recipe.name}: {recipe.command}")`. This is the one place that text is
+ * folded into an entry, so it is split here rather than let the TUI
+ * word-wrap a shell command as prose.
+ *
+ * Deliberately narrow: only the exact "[framework-validation] running
+ * <recipe>: " prefix qualifies, so ordinary diagnostic prose (a colon, the
+ * word "running", a bracket tag with a different shape, such as the sibling
+ * `[framework-validation] PASS` / `reused PASS: ...` lines) is never mistaken
+ * for a command.
+ */
+const FRAMEWORK_VALIDATION_RUN = /^\[framework-validation\] running [^:\n]+: ([\s\S]*)$/;
+
+function splitFrameworkValidationCommand(content: string): {content: string; command?: string} {
+  const match = FRAMEWORK_VALIDATION_RUN.exec(content);
+  if (match === null) return {content};
+  const raw = match[1] ?? '';
+  const command = raw.endsWith('\n') ? raw.slice(0, -1) : raw;
+  if (command === '') return {content};
+  return {content: content.slice(0, content.length - raw.length), command};
 }
 
 function outputKind(channel: string): TranscriptEntry['kind'] {

@@ -55,9 +55,9 @@ type FocusTarget = 'command' | 'chat' | 'modal';
 // matter most. All three ride one token, and the round tabs gave up `or click`
 // to pay for it: a tab is the most clickable-looking thing on the screen, while
 // `<>=` is advertised nowhere else.
-const KEY_HELP = `←→: agents/transcript · ↑↓: within · [/]: round · <>=: width · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
-const SCOPED_KEY_HELP = `←→: agents/transcript · ↑↓: within · [/]: round · <>=: width · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
-const LOG_KEY_HELP = `↑↓ or scroll: select · Enter/click: open hypothesis · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
+const KEY_HELP = `←→: agents/transcript · ↑↓: within · [/]: round · <>=: width · Tab: complete · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
+const SCOPED_KEY_HELP = `←→: agents/transcript · ↑↓: within · [/]: round · <>=: width · Tab: complete · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
+const LOG_KEY_HELP = `↑↓ or scroll: select · Enter/click: open hypothesis · Tab: complete · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
 // The resize keys are guarded by `chatPaneVisible(state)` (`keybindings.ts`),
 // which is false in every state `LOG_KEY_HELP` covers, so `<>=: width` goes
 // only on this line, the one state where the keys can actually fire.
@@ -67,14 +67,14 @@ const LOG_KEY_HELP = `↑↓ or scroll: select · Enter/click: open hypothesis �
 // that trust the same way a false error would break the banner's (#635).
 //
 // This line is one row and clips rather than wraps (see `KEY_HELP` above), so
-// the new token still costs a token: `/open-round --N` (93 characters with it
-// restored, one over the 92-column budget at the narrowest terminal the chat
+// the new token still costs a token: `/open-round --N` (109 characters with it
+// restored, over the 92-column budget at the narrowest terminal the chat
 // can dock in) rather than `Ctrl+W: chat`, which has no other affordance
 // advertising it.
 const LOG_CHAT_KEY_HELP =
-  '↑↓: select · Enter/click: hypothesis · <>=: width · Ctrl+W: chat · F4: zoom';
+  '↑↓: select · Enter/click: hypothesis · <>=: width · Tab: complete · Ctrl+W: chat · F4: zoom';
 const HYPOTHESIS_KEY_HELP =
-  '↑↓: select round · Enter/click: trajectory · PgUp/PgDn: scroll · Esc: hypotheses';
+  '↑↓: select round · Enter/click: trajectory · Tab: complete · PgUp/PgDn: scroll · Esc: hypotheses';
 /** Bezel, one content row, bezel. See the header frame below. */
 const HEADER_FRAME_HEIGHT = 3;
 
