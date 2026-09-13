@@ -2,7 +2,7 @@
 
 Follow-up file for [`aiter-mxfp4-moe.md`](aiter-mxfp4-moe.md)'s permute-based `decode16` fix (job-verified, accepted as the default). That section's own "Remaining known inefficiency" note flagged that the compiler still splits the 16-byte packed-weight load into eight 2-byte loads (0.41 loads per element where 0.19 is possible). This file covers the next optimization-loop iteration that targets exactly that gap, one refuted alternative tried alongside it, and a dispatch-threshold retune the permute fix's own speedup made necessary.
 
-**End-to-end status: H-A (dword-wide packed-weight loads) is job-verified and accepted as the default.** H-B (shared activation fragment) is refuted. H-C (dispatch threshold retune) remains microbench-verified only, not yet shipped. See each hypothesis's own status line below for the numbers.
+**End-to-end status: H-A (dword-wide packed-weight loads) is job-verified and accepted as the default.** H-B (shared activation fragment) is refuted. H-C (dispatch threshold retune) is job-verified at 48-session concurrency and accepted there; the same paired run at a 16-session cap shows no regression on any metric but does not clear the acceptance rule's noise bar, so H-C is not yet an unconditional default. See each hypothesis's own status line below for the numbers.
 
 ## Discriminator flip: no longer issue-bound, now latency-bound on load shape
 
@@ -46,7 +46,7 @@ Mechanism (confirmed by hardware counters, resolving the open question from the 
 
 Status: refuted (H-B and H-B2 both reproduce the regression across three M values, with near-identical compiled loops and statistically indistinguishable timing between the two variants; the mechanism is now confirmed by hardware counters, not just the earlier static ISA read). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, microbench-verified.
 
-## H-C: scaffold-versus-template dispatch threshold retune
+## H-C: scaffold-versus-template dispatch threshold retune (accepted at 48-session concurrency)
 
 An earlier pass through this kernel, before H-A's dword-wide loads applied to both the scaffold and the templated ("big") stage1 kernel, estimated the scaffold-versus-template crossover had moved to about 530 sorted blocks. That estimate no longer holds: once dword-wide loads apply to both kernels, the crossover disappears across the whole range measured. An 11-point sweep from M=16 to M=2048 (160 to 1761 sorted blocks) found "big" winning at every point, including the smallest, so there is no sign change left for a crossover-interpolation script to find in this range.
 
@@ -56,9 +56,23 @@ Recommendation: ship `STAGE1_SCAFFOLD_BLOCK_THRESHOLD=160` as a separate, one-co
 
 Numerics note: flipping the dispatch threshold changes which kernel a given M reaches, and the two kernels are each correct at bf16-rounding-level but not bit-identical to each other. At threshold 160, M in {16, 64, 337} moves from scaffold to "big"; max-abs-diff versus the unflipped dispatch is 1.953e-3, 3.906e-3, and 7.812e-3 respectively, each exactly 2x the previous as reduction depth grows: reduction-order noise between two independently-correct kernels, the same phenomenon already characterized (not a numerics defect) for this scaffold-versus-template boundary in [`aiter.md`](aiter.md)'s prefill-M microbenchmark entry.
 
-Method lesson: the crossover-interpolation script assumes a sign change exists in the swept range and has no way to report "none found"; here it silently kept the stale threshold (1024) instead, making that run's own retuned variant a no-op until the dedicated threshold=160 rerun above supplied real numbers. Re-derive thresholds from the raw sweep table, not the interpolator's output, after any kernel change that shifts per-block cost on either side of the dispatch. See the portable note in [`../../tooling/profiler.md`](../../tooling/profiler.md).
+Method lesson: the crossover-interpolation script assumes a sign change exists in the swept range and has no way to report "none found"; here it silently kept the stale threshold (1024) instead, making that run's own retuned variant a no-op until the dedicated threshold=160 rerun above supplied real numbers. Re-derive thresholds from the raw sweep table, not the interpolator's output, after any kernel change that shifts per-block cost on either side of the dispatch. See the portable note in [`../../tooling/profiler.md`](../../tooling/profiler.md) for the script pitfall, and [`../../tooling/serving-benchmark.md`](../../tooling/serving-benchmark.md) for the general staleness lesson this motivated plus the second-concurrency check it was verified against.
 
-Status: microbench-verified (crossover re-measured directly by an 11-point sweep from M=16 to M=2048, plus a dedicated threshold=160 rerun with real dispatch-flip and speedup numbers; not yet shipped). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, microbench-verified.
+### Paired end-to-end acceptance, measured
+
+Two jobs, one node each, base (accepted dword-loads stack, H-A merged) vs cand (this change, threshold 160), 5 reps per side per job, identical harness-default flags otherwise (NEXTN k=3, sharded draft, overlap off, TunableOp on), gates 13/13 on every rep of every side (20/20 reps total), accept_len unchanged at both concurrencies:
+
+| Concurrency | median TPOT | pooled p95 TTFT turn2+ |
+|:--|--:|--:|
+| Uncapped, 48 sessions, turn-1-admission-delay reps excluded | 13.83 -> 12.60 ms (-8.9%) | 374.9 -> 374.4 ms (-0.15%, flat) |
+| Uncapped, 48 sessions, raw (all 5 reps/side) | 13.83 -> 12.66 ms (-8.5%) | 374.9 -> 369.0 ms (-1.6%) |
+| 16-session cap | 9.91 -> 9.61 ms (-3.0%) | 295.7 -> 278.9 ms (-5.7%) |
+
+At 48 sessions, cand reps 2 and 4 show a self-contained turn-1-only admission delay (never reaching turn2+, `schedule_bound_fraction` dips only to 0.994) that inflates cand's raw TPOT rep spread; excluding those two reps gives non-overlapping per-rep TPOT ranges (base 13.52-14.38 ms, cand 12.56-12.66 ms) larger than either side's own clean spread (6.2%, 0.8%), and pooled p95 TTFT turn2+ is flat. At the 16-session cap, no rep on either side shows any stall, but the 3.0% TPOT improvement (0.30 ms) is smaller than both sides' own rep-to-rep spread (5.2%, 3.5%) and one of five paired per-rep differences has cand's TPOT higher than base's: not distinguishable from noise at this concurrency, though every metric is flat to improved (no regression).
+
+Accepted as the default at 48-session concurrency: a real, non-noise TPOT improvement with p95 TTFT flat to slightly better. Not confirmed as an unconditional default at a 16-session cap, since the acceptance rule requires the TPOT improvement to exceed rep spread at every concurrency tested and it does not here; recorded as "no regression at the secondary concurrency," not a second confirmed win. A larger rep count or a lower-noise measurement at 16 sessions would be needed before shipping this threshold unconditionally.
+
+Status: job-verified at 48-session concurrency (accepted); microbench-verified only at a 16-session cap (no regression, improvement not distinguishable from rep-to-rep noise). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
 ## fp8-expand decode: analytical design, candidate
 
@@ -72,3 +86,4 @@ Scope: rocm, gfx942, this fork's MXFP4 fused MoE kernel. Status: candidate (anal
 - [`aiter.md`](aiter.md): the stage1 scaffold-versus-templated dispatch this file's H-C retunes, and the prefill-M dispatch-threshold history that first characterized the scaffold-versus-big reduction-order difference
 - [`aiter-fp8-moe.md`](aiter-fp8-moe.md): the fp8-activation kernel survey this candidate design follows from
 - [`../../tooling/profiler.md`](../../tooling/profiler.md): the portable notes on re-running the issue-bound-versus-latency-bound discriminator after an instruction-count fix, on checking wait-region counts rather than load counts alone (H-B/H-B2), and on re-deriving thresholds from a raw sweep rather than trusting a crossover interpolator (H-C)
+- [`../../tooling/serving-benchmark.md`](../../tooling/serving-benchmark.md): the general lesson that a dispatch threshold goes stale after the kernel it dispatches between changes, and what the second-concurrency check in a paired acceptance run is actually guarding against

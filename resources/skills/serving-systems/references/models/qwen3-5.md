@@ -242,6 +242,21 @@ Accepted as the default fused MXFP4 MoE weight-load path, on top of the permute-
 
 Status: accepted. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
+### Stage1 scaffold-versus-template dispatch threshold retune, on top of the dword-wide-loads stack above, measured
+
+Once dword-wide loads (above) applied to both the scaffold and the templated stage1 kernel, the scaffold-versus-template crossover this stack's own dispatch threshold was tuned against disappeared: a sweep found the templated path winning at every measured sorted-block count (160 to 1761), so `STAGE1_SCAFFOLD_BLOCK_THRESHOLD` moved from 1024 to 160, the smallest block count directly measured. See [`platforms/`](../platforms/) for the sweep and the dispatch-flip numerics note (bf16-rounding-level reduction-order noise, not a defect). Paired end to end against the dword-wide-loads stack above, one node per concurrency, 5 reps per side per job, identical harness-default flags otherwise, gates 13/13 on every rep of every side (20/20 reps total), accept_len unchanged:
+
+| Concurrency | median TPOT | pooled p95 TTFT turn2+ |
+|:--|--:|--:|
+| Uncapped, 48 sessions, turn-1-admission-delay reps excluded | 13.83 -> 12.60 ms (-8.9%) | 374.9 -> 374.4 ms (flat) |
+| 16-session cap | 9.91 -> 9.61 ms (-3.0%, inside rep spread) | 295.7 -> 278.9 ms (-5.7%) |
+
+The 48-session TPOT improvement exceeds both sides' own rep-to-rep spread (base range 13.52-14.38 ms, cand range 12.56-12.66 ms) once two cand reps with a self-contained turn-1-only admission delay are set aside; p95 TTFT turn2+ is flat. At the 16-session cap the TPOT improvement is smaller than both sides' own spread and one of five paired reps reverses sign, so it does not clear the acceptance rule there, though no metric regresses.
+
+Cumulative for the stack: median TPOT at 48 sessions has moved from about 38 ms (the NEXTN speculative-decoding acceptance point, about 7x the roughly 5.5 ms weight-bandwidth floor) to 12.6 ms, about 2.3x that same floor. Accepted as the default at 48-session concurrency; not yet an unconditional default, since the 16-session result does not clear the acceptance rule (no regression there either).
+
+Status: accepted at 48-session concurrency (job-verified); not confirmed as an unconditional default at a 16-session cap (no regression, improvement inside rep-to-rep noise). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
+
 ### Turn-2+ TTFT decomposition, overlap scheduler off, measured
 
 With the overlap scheduler off (previous section), a five-bucket, request-joined split of turn-2+ TTFT shows queue wait is near zero and rare (zero `NO_TOKEN` admission-budget rejections over 16830 iterations), and the single-request prefill+draft-extend forward is the dominant term, not the queue:
