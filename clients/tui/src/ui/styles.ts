@@ -93,6 +93,10 @@ export function createMarkdownStyle(theme: Theme): SyntaxStyle {
     operator: {fg: markdown.operator},
     variable: {fg: markdown.variable},
     punctuation: {fg: markdown.punctuation},
+    // A diff's changed lines, named as nvim's diff captures so a tree-sitter
+    // diff grammar would land on the same entries lowlight's spans do.
+    'diff.plus': {fg: theme.success},
+    'diff.minus': {fg: theme.error},
   });
 }
 
@@ -186,7 +190,7 @@ type OnHighlightCallback = NonNullable<CodeRenderable['onHighlight']>;
 type HighlightContext = Parameters<OnHighlightCallback>[1];
 type SimpleHighlight = Parameters<OnHighlightCallback>[0][number];
 
-/** The nine code families `createMarkdownStyle` registers a color for. */
+/** The code families `createMarkdownStyle` registers a color for. */
 type HljsFamily =
   | 'keyword'
   | 'string'
@@ -196,15 +200,17 @@ type HljsFamily =
   | 'type'
   | 'operator'
   | 'variable'
-  | 'punctuation';
+  | 'punctuation'
+  | 'diff.plus'
+  | 'diff.minus';
 
 /**
  * Maps a `highlight.js` scope's rendered class name(s) to the family above it
  * reads as. Most scopes are one class; a dotted scope such as "title.function"
  * renders as two ("hljs-title", "function_"), so those two are matched
  * together. `built_in` (a mix of builtin functions and builtin objects across
- * these grammars) and diff's `addition`/`deletion` have no good single family
- * here and are left out, same as any class below with no entry at all.
+ * these grammars) has no good single family here and is left out, same as
+ * any class below with no entry at all.
  */
 const HLJS_FAMILY: Record<string, HljsFamily> = {
   'hljs-keyword': 'keyword',
@@ -229,16 +235,14 @@ const HLJS_FAMILY: Record<string, HljsFamily> = {
   'hljs-function': 'function',
   'hljs-title function_': 'function',
   'hljs-title class_': 'type',
+  'hljs-addition': 'diff.plus',
+  'hljs-deletion': 'diff.minus',
 };
 
 /** The family `className` maps to, matching a two-part scope before a one-part one. */
 function hljsFamily(className: Array<string> | undefined): HljsFamily | undefined {
-  if (className === undefined || className.length === 0) return undefined;
-  return (
-    HLJS_FAMILY[className.join(' ')] ??
-    (className.length > 2 ? HLJS_FAMILY[className.slice(0, 2).join(' ')] : undefined) ??
-    HLJS_FAMILY[className[0] ?? '']
-  );
+  if (className === undefined) return undefined;
+  return HLJS_FAMILY[className.slice(0, 2).join(' ')] ?? HLJS_FAMILY[className[0] ?? ''];
 }
 
 /**

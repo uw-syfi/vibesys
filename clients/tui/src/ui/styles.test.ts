@@ -396,6 +396,23 @@ describe('markdown code blocks', () => {
     expect(drawnSurface(fixture, 'fn').fg).toBe(theme.markdown.keyword);
   });
 
+  it('colors the added and removed lines of a diff fence', async () => {
+    const theme = resolveTheme('dark');
+    const content = '@@ -1 +1 @@\n-old\n+new';
+    const fixture = await renderMarkdown(`\`\`\`diff\n${content}\n\`\`\`\n`, theme);
+    await fixture.layout();
+
+    const code = fencedBlock(fixture.markdown, content);
+    fixture.treeSitterClient.resolveAllHighlightOnce();
+    await code.highlightingDone;
+    await fixture.layout();
+
+    // The changed lines are the point of a diff; without their own styles
+    // they read as plain code and only the hunk header is colored.
+    expect(drawnSurface(fixture, '-old').fg).toBe(theme.error);
+    expect(drawnSurface(fixture, '+new').fg).toBe(theme.success);
+  });
+
   it('leaves prose coalesced instead of one renderable per paragraph', async () => {
     const theme = resolveTheme('dark');
     const content = Array.from({length: 100}, (_, index) => `Paragraph ${index + 1}.`).join('\n\n');
