@@ -289,6 +289,27 @@ admission-budget knob: a near-zero counter corroborates that admission is
 inactive as a lever, rather than the bucket merely under-sampling a rare
 event.
 
+Once the join validates and the queue-wait bucket is ruled out, rank what
+still drives the tail by testing the natural enrichment candidates against
+the top-of-tail cohort directly, not by assuming the hypothesis under test is
+automatically the largest one. In a repeated production decomposition, three
+candidates were checked against the top 5 percent of TTFT: a request's own
+forward landing in a batch with another concurrent request (own batch size
+at least 2) enriched about 5.8x over its base rate, the strongest single
+driver; a request arriving while another request's own forward was already
+in flight enriched about 2.6x; a long uncached extend length enriched about
+2.4x. The two arrival-related conditions overlap substantially (arriving
+during any forward raises the odds of also landing in that or the next
+multi-request batch), so rank by measured enrichment on the same cohort
+rather than treating the named mechanism as the answer once it shows any
+enrichment at all. This ranking is a property of the batching, admission,
+and scheduling policy under test, not a portable constant: re-derive it
+whenever any of those change materially, or when a change to one of them
+(for example a fix that shrinks the request-joined bucket the ranking is
+computed on) shifts which candidate a fixed absolute cost is now large
+relative to. See [`platforms/`](../platforms/) for a worked case and its
+numbers.
+
 Compatibility: engine- and backend-agnostic; the exact field names differ per
 engine and must be joined on a shared request id, not assumed from a shared
 wall clock.
