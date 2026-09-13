@@ -190,8 +190,8 @@ to replace.
 
 Scope: MoE grouped GEMM, any backend, small per-request batch with expert
 routing (for example top-k routing at decode). Status: verified. Stamp:
-sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job 633024 (padding-floor tell);
-job 633546, 2026-09-12 (split-K counter-example).
+sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job-verified (padding-floor tell);
+job-verified, 2026-09-12 (split-K counter-example).
 
 A four-point batch-size sweep (clean fixed-batch captures at each point, see
 `profiler.md`) confirms the shrinking-ratio trend directly instead of by

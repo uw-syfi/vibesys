@@ -39,7 +39,7 @@ Scope: rocm, `sglang-v0.5.18-rocm700-mi30x` with aiter bundled. Status: verified
 
 `rocprofv3 --list-counters` is the source of truth for what a given ROCm/rocprofv3 build actually exposes; don't assume a name from documentation or another image. On this image, `MemUnitBusy` and `TCC_EA_RDREQ` are not listed under those names: `MemUnitStalled` (the stall-side complement) and the per-XCC `TCC_EA0_RDREQ` are present instead, and the derived `FETCH_SIZE` metric is built on `TCC_EA0_RDREQ`. Counters must be split across multiple `--pmc` passes; run `--list-counters` before setting up passes rather than guessing names from a counter list written for another build.
 
-Scope: rocm, `sglang-v0.5.18-rocm700-mi30x` image, rocprofv3 1.0.0, ROCm 7.0.0. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job 632991.
+Scope: rocm, `sglang-v0.5.18-rocm700-mi30x` image, rocprofv3 1.0.0, ROCm 7.0.0. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job-verified.
 
 ## In-kernel phase timing
 
@@ -49,7 +49,7 @@ Method: insert a `clock64()`-style timestamp read at each phase boundary inside 
 
 Pitfall: **"`MemUnitStalled` near zero" does not rule out memory latency as the limiter.** It only rules out bandwidth saturation (the memory pipeline backing up). A kernel can be latency-bound on scattered, low-reuse loads while `MemUnitStalled` reads near zero, because the memory unit is issuing requests without a backlog; it is underfed, not saturated. Phase timing, not the stall counter, is what separates "waiting on scattered gathers" from "compute-bound."
 
-Scope: rocm, gfx942, `sglang-v0.5.18-rocm700-mi30x`. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job 633024.
+Scope: rocm, gfx942, `sglang-v0.5.18-rocm700-mi30x`. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job-verified.
 
 A related counter-altitude ambiguity: `VALUBusy` sitting well under 100 percent (for example 30 to 46 percent) does not by itself mean the kernel has ALU headroom to spare. It only rules out full ALU saturation; a kernel can still be instruction-issue-bound if its per-element instruction count is far above the minimal sequence the work needs, even while achieved HBM fetch rate is also well under peak. Descend to an ISA-level instruction audit (count real instructions per unit of useful work, separating genuine memory operations from ones a smarter code path could keep register-resident) rather than concluding "neither bandwidth- nor ALU-bound" means the kernel is already near-optimal. See [`aiter-mxfp4-moe.md`](aiter-mxfp4-moe.md) for a worked example where this distinguished an instruction-issue-bound decode step from the memory-bandwidth or occupancy fixes that were tried and failed first, and where a follow-up fix that moved the lookup into a plain runtime-indexed register array (rather than a hardware byte-permute) regressed further for the same instruction-issue reason.
 
@@ -83,7 +83,7 @@ Fix:     use rocprofv3 (1.0.0 on this image) directly for kernel-level
          --pmc invocation in a timeout and keep each pass to counters
          that fit in one hardware counter block.
 Scope:   rocm, sglang-v0.5.18-rocm700-mi30x image.
-Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job 631890.
+Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job-verified.
 ```
 
 ### A `--pmc` counter report averages across counters, not just across dispatches, when it doesn't group by `Counter_Name`

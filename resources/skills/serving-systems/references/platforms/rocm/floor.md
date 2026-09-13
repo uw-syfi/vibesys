@@ -55,7 +55,7 @@ Environment:
 - `SGLANG_MXFP4_MOE_HIP=1`: on by default in the fork's platform config, replaces the Triton MXFP4 MoE fallback with a from-scratch fused HIP kernel. See [`aiter.md`](aiter.md).
 - `SGLANG_SKINNY_GEMM=1`: on by default in the fork's platform config, custom skinny bf16 GEMM for the dense projections at decode M; stacks with the line above. See [`aiter.md`](aiter.md).
 
-Together with mixed chunked prefill, these two flags cut median TPOT about 80 percent and pooled p95 TTFT turn-2+ about 44 percent versus all three off, under the same admission-aware open-loop schedule (benchmark_version 3, job 632958). See [`../../models/qwen3-5.md`](../../models/qwen3-5.md) for the four-side matrix.
+Together with mixed chunked prefill, these two flags cut median TPOT about 80 percent and pooled p95 TTFT turn-2+ about 44 percent versus all three off, under the same admission-aware open-loop schedule (benchmark_version 3, the four-side-matrix job). See [`../../models/qwen3-5.md`](../../models/qwen3-5.md) for the four-side matrix.
 
 argv:
 

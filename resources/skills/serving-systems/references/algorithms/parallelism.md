@@ -74,7 +74,7 @@ Whole-model TP is a validated alternative when EP has not been exercised on the 
 
 Expert parallelism: **blocked**, not refuted, on this platform. EP requires its own checkpoint layout (whole experts per rank, not a column shard of every expert), and the existing TP-sharded fast-path artifact does not provide it; booting EP from the original, unsharded checkpoint instead exhausted per-rank host memory during rank-scheduler initialization, reproduced on two independent nodes. Analytical prediction, not yet measured: roughly 6 to 14 percent TPOT improvement at batch 16 versus this TP layout. What would verify it is an EP-aware sharded artifact plus the same paired comparison against this TP layout at the same expert count and hardware; see [`platforms/`](../platforms/) for the load-path detail.
 
-Status: verified (TP=4 configuration, validated as a working configuration, not individually ablated against other TP degrees); blocked (EP row: boot-time OOM under the current load path, analytical prediction not yet measured). Scope: `rocm`, MI300A, sglang-v0.5.18-rocm700-mi30x, 2026-09-10, job 631025 (TP=4); 2026-09-12, job 633509 (EP boot failure).
+Status: verified (TP=4 configuration, validated as a working configuration, not individually ablated against other TP degrees); blocked (EP row: boot-time OOM under the current load path, analytical prediction not yet measured). Scope: `rocm`, MI300A, sglang-v0.5.18-rocm700-mi30x, 2026-09-10, job-verified (TP=4); 2026-09-12, job-verified (EP boot failure).
 
 ## Collective primitives
 

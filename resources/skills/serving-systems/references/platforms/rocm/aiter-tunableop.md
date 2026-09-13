@@ -8,7 +8,7 @@ A pure-torch TunableOp sweep over every M value the CUDA-graph capture set dispa
 
 This is a different tuning path from the aiter tuned-GEMM gap in [`aiter.md`](aiter.md): TunableOp tunes at the `F.linear`/`torch.matmul` dispatch level and does not depend on aiter's own `(gfx, cu_num)`-keyed lookup table, so it recovers that gap without an aiter-side config regeneration.
 
-Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, job 633793.
+Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, job-verified.
 
 ## Recipe
 
@@ -43,7 +43,7 @@ Scope:   rocm, gfx942, sglang TP=4, this image's torch 2.9.0a0.
 Status:  verified (mechanism per pytorch.md; reproduced here with the
          wrong file layout, then fixed and reproduced correct with the
          per-rank layout). sglang-v0.5.18-rocm700-mi30x, 2026-09-12,
-         jobs 633800, 633801 (void); 633839, 633841 (fixed, accepted
+         job-verified: two runs (void), then two more (fixed, accepted
          below).
 ```
 
@@ -58,7 +58,7 @@ Paired against the NEXTN k=3 + `--disable-overlap-schedule` base configuration (
 
 accept_len is statistically unchanged at both concurrencies, confirming TunableOp changes only GEMM kernel dispatch, not the speculative accept/reject logic.
 
-Status: accepted. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, jobs 633839 (48 sessions), 633841 (16-session cap).
+Status: accepted. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, job-verified at both the 48-session and the 16-session-cap runs.
 
 ## Mechanism: why the TPOT gain exceeds the single-verify prediction
 
@@ -122,10 +122,11 @@ Fix:     do not ship a tuned table (bucketed or not) as-is at every M
 Scope:   PyTorch TunableOp, any (gfx, cu_num) combination; observed
          values are gfx942, this image's stack.
 Status:  verified (measured, cross-validated on trace and wall-clock).
-         sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633873/634017.
+         sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified across
+         both runs.
 ```
 
-Status: verified (measured on a real one-device sweep; not reproduced a second time, but the mechanism, an exact-(M,N,K) cache key against arbitrary prefill M, is read from PyTorch's own TunableOp dispatch, see [`../../frameworks/pytorch.md`](../../frameworks/pytorch.md)). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, jobs 633873 (tuning + coverage, TIMEOUT on the trace step after 45/84 cells) and 634017 (completion job, remaining 39 trace cells against the same tuned CSV).
+Status: verified (measured on a real one-device sweep; not reproduced a second time, but the mechanism, an exact-(M,N,K) cache key against arbitrary prefill M, is read from PyTorch's own TunableOp dispatch, see [`../../frameworks/pytorch.md`](../../frameworks/pytorch.md)). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, job-verified across an initial run (tuning + coverage, TIMEOUT on the trace step after 45/84 cells) and a completion run (remaining 39 trace cells against the same tuned CSV).
 
 ## See also
 

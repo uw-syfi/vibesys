@@ -13,7 +13,7 @@ Qwen3.5's Gated DeltaNet (linear-attention) prefill path (`chunk_gated_delta_rul
 
 Every fresh token count that does not cross a bucket boundary compiles in under 1.5 ms; the cost is bucket-keyed, not token-count-keyed, so it cannot explain a stall recurring at repeated, already-warm token counts.
 
-Scope: rocm, gfx942, sglang fork's Gated DeltaNet / linear-attention prefill path. Status: verified (mechanism read from source at `chunk_fwd.py:30-36` and `chunk_delta_h.py:29-51,383`, reproduced on-device). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job 632946.
+Scope: rocm, gfx942, sglang fork's Gated DeltaNet / linear-attention prefill path. Status: verified (mechanism read from source at `chunk_fwd.py:30-36` and `chunk_delta_h.py:29-51,383`, reproduced on-device). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job-verified.
 
 ## Custom HIP extensions: about 50-55 s cold build per extension
 
@@ -21,7 +21,7 @@ The fork's two custom HIP extensions (`sglang_mxfp4_fused_moe`, gated by `SGLANG
 
 This build is separate from AITER's own JIT cache (see [`aiter.md`](aiter.md), JIT cache section), which has no per-launch rebuild problem.
 
-Scope: rocm, gfx942, sglang fork. Status: verified (measured on-device, first vs second call at fresh M). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job 632946.
+Scope: rocm, gfx942, sglang fork. Status: verified (measured on-device, first vs second call at fresh M). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job-verified.
 
 ## The HIP extension loader keys staleness on path and mtime, not content
 
@@ -53,7 +53,8 @@ Scope:   rocm, sglang fork's HIP extension loader; the underlying
          applies to any cpp_extension-based build triggered from a
          per-launch staging path, not only this fork.
 Status:  verified (measured, two boots). sglang-v0.5.18-rocm700-mi30x,
-         2026-09-11, jobs 632594 (defect), 632837 (fix, PR #35 merged).
+         2026-09-11, job-verified (defect); a later job (fix, PR #35
+         merged).
 ```
 
 ## See also

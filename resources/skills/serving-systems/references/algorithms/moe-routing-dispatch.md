@@ -71,7 +71,7 @@ Expert popularity is skewed in practice. Static assignment + skewed traffic = GP
 | MXFP4 fused MoE, gfx942 | SGLang | `moe_runner/` | **N/A**: no AITER MXFP4 MoE kernel in the aiter build bundled with sglang-v0.5.18-rocm700; falls back to a Triton w4a16 kernel with in-kernel dequant | `rocm` gfx942 (MI300A, MI300X) |
 | Fused HIP w4a16 MoE (LUT decode direct into MFMA), gfx942 | SGLang (fork) | `moe_runner/` | from-scratch HIP kernel, no AITER/CK/Triton dependency; decodes MXFP4 in-register into bf16 MFMA B-fragments, no separate dequant pass | `rocm` gfx942 (MI300A) |
 
-Status: verified (gfx942 N/A row, observed and explained by mechanism read in source and reconfirmed at the source level, `is_fp4_avail` scoped to gfx950/gfx1250, in aiter d9e5ef7ce0; fused-HIP row verified against real checkpoint weights and the production benchmark), candidate on the gfx950 row (public target, not exercised in this campaign). sglang-v0.5.18-rocm700-mi30x / sglang-v0.5.18 fork, 2026-09-05 to 2026-09-11, job 623402, aiter d9e5ef7ce0; fused-HIP row: jobs 632237, 632253, 632489, 632503.
+Status: verified (gfx942 N/A row, observed and explained by mechanism read in source and reconfirmed at the source level, `is_fp4_avail` scoped to gfx950/gfx1250, in aiter d9e5ef7ce0; fused-HIP row verified against real checkpoint weights and the production benchmark), candidate on the gfx950 row (public target, not exercised in this campaign). sglang-v0.5.18-rocm700-mi30x / sglang-v0.5.18 fork, 2026-09-05 to 2026-09-11, job-verified, aiter d9e5ef7ce0; fused-HIP row: job-verified across four runs.
 
 ## Engine pointers
 

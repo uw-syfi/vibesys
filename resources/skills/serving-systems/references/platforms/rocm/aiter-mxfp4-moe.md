@@ -92,14 +92,14 @@ Scope:   rocm, gfx942, this kernel (mxfp4_fused_moe stage1/stage2) at
 Status:  verified (phase timing), refuted fixes listed, 2026-09-11;
          skinny stage 2 refuted end to end, split-K stage 1 refuted,
          2026-09-12.
-         sglang-v0.5.18-rocm700-mi30x, job 633024 (phase timing); jobs
-         633006, 633013, 633019 (persistent grid, refuted); jobs 633018,
-         633021 (integer decode, refuted); job 633174 (register
-         prefetch and LDS-staged block, refuted); job 633180 (LDS rings,
-         refuted); jobs 633173, 633179, 633182 (skinny GEMV: stage 1
-         refuted, stage 2 microbenchmarked); job 633183 (skinny stage 2:
-         paired benchmark and kernel trace, refuted end to end); job
-         633546 (split-K stage 1, refuted).
+         sglang-v0.5.18-rocm700-mi30x, job-verified (phase timing);
+         job-verified (persistent grid, refuted); job-verified (integer
+         decode, refuted); job-verified (register prefetch and
+         LDS-staged block, refuted); job-verified (LDS rings, refuted);
+         job-verified (skinny GEMV: stage 1 refuted, stage 2
+         microbenchmarked); job-verified (skinny stage 2: paired
+         benchmark and kernel trace, refuted end to end); job-verified
+         (split-K stage 1, refuted).
 ```
 
 ## MXFP4 weight decode: a constant-memory lookup table compiles to a real per-element global load
