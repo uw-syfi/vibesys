@@ -200,8 +200,6 @@ roots = ["src", "libs", "scripts", "sdk"]
 "src/vibesys/loops/agent/loop.py" = 3704
 # CLI entry point; every subcommand's argument wiring lives here.
 "src/entrypoints/headless.py" = 2663
-# Generated-state accessors for the whole `.vibesys` layout.
-"libs/vs-project/src/vs_project/_state.py" = 2125
 # Sandbox run environment: setup, execution, and teardown across strategies.
 "src/vibesys/sandbox/run_environment.py" = 2253
 
