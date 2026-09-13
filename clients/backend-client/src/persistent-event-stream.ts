@@ -29,6 +29,13 @@ export interface PersistentEventStreamCallbacks {
    */
   cursor(): number;
   /**
+   * The store the cursor belongs to, as the caller last saw it named. Carried
+   * on a resume so the server can tell whether that cursor still numbers the
+   * live store; empty until the caller has seen one, in which case the resume
+   * is a plain cursor resume.
+   */
+  storeId(): string;
+  /**
    * Whether a dropped stream is worth redialing. A finished run or a protocol
    * error has nothing more to stream, so the drop is lifecycle cleanup rather
    * than an outage, and the stream stays down without a banner.
@@ -168,13 +175,26 @@ export class PersistentEventStream {
   }
 
   /**
-   * Resubscribes from the caller's cursor with no tail. A failure is silent:
-   * the disconnect banner is already up and accurate, and the next attempt, if
-   * the schedule has one, speaks for itself.
+   * Resubscribes from the caller's cursor with no tail, naming the store that
+   * cursor belongs to so the server drops it if the store was swapped while the
+   * stream was down. A server that predates the field rejects it, so the known
+   * store falls back to a plain cursor resume rather than failing the reconnect.
+   * A failure is otherwise silent: the disconnect banner is already up and
+   * accurate, and the next attempt, if the schedule has one, speaks for itself.
    */
   async #resumeDial(): Promise<boolean> {
+    const cursor = this.#active().cursor();
+    const storeId = this.#active().storeId();
+    if (storeId) {
+      try {
+        return await this.#dial(cursor, true, {storeId});
+      } catch {
+        // Expected against a server without `store_id` on subscribe; fall
+        // through to a cursor-only resume.
+      }
+    }
     try {
-      return await this.#dial(this.#active().cursor(), true);
+      return await this.#dial(cursor, true);
     } catch {
       return false;
     }

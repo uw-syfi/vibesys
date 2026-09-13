@@ -133,6 +133,15 @@ class SubscribeRequest(Request):  # noqa: D101  # tracked: #288
     # ``after_sequence``. An old server forbids the field, so the rejection is
     # the capability probe.
     tail: int | None = Field(default=None, ge=1)
+    # The store the client's ``after_sequence`` numbers, as the last batch named
+    # it. A resume across a dropped connection carries it so the server can tell
+    # whether that cursor still belongs to the live store: if a durable log was
+    # attached while the client was gone, the cursor numbers a store that is
+    # gone, so the server drops it and bootstraps the live store instead of
+    # extending a fold with another log's sequences. Empty (the default, and a
+    # fresh dial that has seen no store) means resume the cursor as before, and
+    # an old server forbids the field, so the client falls back to that.
+    store_id: str = ""
 
 
 ProtocolRequest = Annotated[
