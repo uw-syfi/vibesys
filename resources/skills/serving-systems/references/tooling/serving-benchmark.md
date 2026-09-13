@@ -279,6 +279,44 @@ boots on one node. Status: verified (measured: one config pair's off-target
 delta exceeded its on-target delta). Stamp: sglang-v0.5.18-rocm700-mi30x,
 2026-09-13, job-verified.
 
+A second, independent case reproduces the same class of confound, this time
+from a genuine counterbalanced design rather than a single held-server pair.
+A tokenizer-side candidate, suffix-only incremental tokenization (tokenize
+only the text after the cached-prefix boundary instead of the whole rendered
+conversation), is bit-exact against full re-tokenization on every real turn
+shape this harness produces when the cache boundary sits immediately before
+a special token (0 of 253 turns mismatched, direct check against the real
+checkpoint tokenizer), with a 75.9 percent cache hit rate over a 48-session
+round-robin block; the per-turn saving scales with the previous assistant
+turn's own length (the new suffix to tokenize), not a flat amount. On the
+mechanism alone this candidate measured a client p95 TTFT turn2+ improvement
+of 25.9 percent on one held-server pair; replicating that
+exact boot order on a different node showed a 1.1 percent regression
+instead, flipping the order showed a 14.3 percent improvement (not a clean
+reversal, and not the original 25.9 percent either), and a third run at a
+lighter concurrency cap showed only a 1.5 percent difference. None of the
+three counterbalanced jobs regressed on any metric, and the underlying
+tokenizer-stage-level saving this candidate targets (2-6 ms, measured
+directly by host stamps, not by end-to-end client timing) is real and
+separately confirmed; what did not survive counterbalancing was the larger
+end-to-end client-level number the single-pair design produced. Absolute
+p95 TTFT at this benchmark's uncapped 48-session concurrency varies enough
+boot to boot on its own (one base configuration's own pooled p95 measured
+397 ms in one boot and 321-333 ms in another, same code, same environment,
+same node type) that a single paired comparison can show a swing this size
+by chance alone.
+
+Practical bar from this case: treat a single-pair client p95 TTFT delta
+under about 15 percent as indistinguishable from this cluster's own
+boot-to-boot noise until confirmed by at least one order-reversed repeat.
+A delta that does not hold sign and rough magnitude across both orders is
+not yet evidence of a real, order-independent effect, even when every
+correctness gate passes cleanly on every rep.
+
+Scope: same as above. Status: verified (three-job counterbalanced design,
+one held-server pair per job). Stamp: sglang-v0.5.18-rocm700-mi30x,
+2026-09-13, job-verified.
+
 ### A synthetic session driver's own text length can flip which padded bucket a rep lands in
 
 ```
@@ -338,6 +376,7 @@ If the report misses these, the numbers are suggestive, not authoritative.
 - **Comparing under-saturated vs saturated.** At low concurrency, server throughput is bounded by request arrivals, not server capacity. Sweep concurrency until saturation.
 - **First request after boot.** It can trigger lazy kernel compilation and contaminates turn-1 TTFT by an order of magnitude; discard it as warmup, separate from the steady-state warmup window above. Scope: any backend with JIT/lazy kernel builds. Status: verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job-verified.
 - **A decode-only speedup regresses p95 TTFT in a closed-loop multi-turn benchmark.** Symptom: a change that only speeds up decode (TPOT down 20 percent, throughput up 22 percent, correctness gates pass) raises p95 TTFT for turn 2+ by 17 percent. Cause: a closed-loop client (each session sends its next turn as soon as the previous answer completes, plus think time) turns a decode speedup into higher offered load, because nothing paces the aggregate turn-arrival rate independently of how fast the server answers: prefill arrivals rose 21.6 percent, co-batched prefills roughly doubled (2.0 to 3.8 percent), and a new turn more often waits behind another session's in-flight prefill. The metric moved because offered load shifted, not because the server got slower. Fix: pace turns on a fixed schedule derived from a reference server speed (send turn k at the later of the scheduled time and the previous completion plus think time), so offered load is independent of the server under test; report throughput next to latency; keep per-turn records so tail attribution is possible. Scope: any engine, backend-independent. Status: verified (mechanism plus measured). Stamp: sglang-v0.5.18 fork, 2026-09-11, job-verified.
+- **Enabling multiple tokenizer-worker processes can turn an occasional multi-second client stall into a routine one, invisibly to server-side tokenizer instrumentation.** Symptom: raising SGLang's tokenizer-worker count (`--tokenizer-worker-num`, a multi-process HTTP mode with a router fanning requests out to several tokenizer worker processes) left every `TokenizerManager`-side timing stamp in its normal few-millisecond range, and left the correctness gate clean on every rep, but pooled client-visible p95 TTFT turn2+ went from 386.7 ms to 9492.6 ms (+2354 percent) at uncapped 48-session concurrency, with individual turns up to 19.5 seconds and a stall count (TTFT over 3000 ms) rising from 3 to 91. Cause: not diagnosed to a specific line; the regression sits at a boundary neither `TokenizerManager`-side timing nor scheduler-side timing stamps, most likely the multi-worker router's own request or response fan-out across worker processes. Because every stamped stage looks normal, a benchmark that only checks `TokenizerManager`-side timings (or the correctness gate) will not catch this: only the end-to-end client-visible TTFT distribution shows it. Fix: do not enable more than one tokenizer worker on this stack without a dedicated investigation instrumenting the router/fan-out boundary itself; if testing it anyway, always compare pooled client-visible tail latency, not just server-side per-stage timings or gate pass/fail. Scope: sglang's Granian multi-worker HTTP mode with `MultiTokenizerRouter` fan-out, any backend; not confirmed whether this is universal to multi-tokenizer-worker mode or specific to this fork's routing implementation. Status: verified (reproduced in one boot at uncapped 48-session concurrency; root cause not yet localized). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
 ## See also
 
