@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -19,6 +18,7 @@ from urllib.parse import quote, urlencode
 REPO_ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = REPO_ROOT / ".github" / "delegated-merge.toml"
 MAX_CHANGED_FILES = 3_000
+MAX_GITHUB_LOGIN_LENGTH = 39
 API_TIMEOUT_SECONDS = 30
 HARD_DENIED_PATHS = frozenset(
     {
@@ -75,6 +75,7 @@ class Check:
 class Capability:
     """Repository paths and extra checks governed by one named capability."""
 
+    members: frozenset[str]
     prefixes: tuple[str, ...]
     paths: frozenset[str]
     additional_checks: frozenset[str]
@@ -228,9 +229,12 @@ def _load_capabilities(raw_capabilities: object) -> Mapping[str, Capability]:
         if not _identifier(name):
             _refuse(f"capability name {name!r} is invalid")
         capability_document = _mapping(capability_value, f"capabilities.{name}")
-        expected_fields = {"prefixes", "paths", "additional_checks"}
+        expected_fields = {"members", "prefixes", "paths", "additional_checks"}
         if set(capability_document) != expected_fields:
             _refuse(f"capabilities.{name} keys must be exactly {sorted(expected_fields)}")
+        members = _member_collection(
+            capability_document["members"], name=f"capabilities.{name}.members"
+        )
         prefixes = _string_collection(
             capability_document["prefixes"], name=f"capabilities.{name}.prefixes"
         )
@@ -248,6 +252,7 @@ def _load_capabilities(raw_capabilities: object) -> Mapping[str, Capability]:
         if any(not _safe_path(path_value) for path_value in paths):
             _refuse(f"capabilities.{name} paths must be safe repository paths")
         capabilities[name] = Capability(
+            members=members,
             prefixes=prefixes,
             paths=frozenset(paths),
             additional_checks=additional_checks,
@@ -285,37 +290,16 @@ def authorize_event(event: Event, policy: Policy) -> None:
         _refuse(f"the exact command is {policy.command}")
 
 
-def load_grants(document: str) -> Mapping[str, frozenset[str]]:
-    """Parse the case-insensitive login-to-capabilities grant map."""
-    try:
-        value = json.loads(document)
-    except json.JSONDecodeError:
-        _refuse("DELEGATED_MERGE_GRANTS is not valid JSON")
-    grants_document = _mapping(value, "DELEGATED_MERGE_GRANTS")
-    grants: dict[str, frozenset[str]] = {}
-    for login, capabilities_value in grants_document.items():
-        normalized = login.casefold()
-        if not login or not normalized or normalized in grants:
-            _refuse("DELEGATED_MERGE_GRANTS contains an empty or duplicate login")
-        capabilities = frozenset(_string_collection(capabilities_value, name=f"grants.{login}"))
-        if not capabilities or any(
-            capability != "*" and not _identifier(capability) for capability in capabilities
-        ):
-            _refuse(f"grants.{login} must contain valid capabilities or '*'")
-        grants[normalized] = capabilities
-    return grants
-
-
-def authorize_capabilities(
-    grants: Mapping[str, frozenset[str]], *, actor: str, required: frozenset[str]
-) -> None:
-    """Require the command issuer to hold every capability selected by the diff."""
-    held = grants.get(actor.casefold())
-    if held is None:
-        _refuse(f"@{actor} has no delegated merge grant")
-    missing = required - held
-    if "*" not in held and missing:
-        _refuse(f"@{actor} lacks required capabilities: {sorted(missing)}")
+def authorize_membership(policy: Policy, *, actor: str, required: frozenset[str]) -> None:
+    """Require membership in every capability selected by the diff."""
+    login = actor.casefold()
+    missing = sorted(
+        capability_name
+        for capability_name in required
+        if login not in policy.capabilities[capability_name].members
+    )
+    if missing:
+        _refuse(f"@{actor} is not a member of required capabilities: {missing}")
 
 
 def authorize_repository_access(permission: object, *, actor: str) -> None:
@@ -430,12 +414,11 @@ def authorize_check_job(jobs: object, *, check_id: str, job_name: str) -> None:
         _refuse(f"check {check_id!r} job {job_name!r} has not succeeded")
 
 
-def run(event_path: Path, *, grants_json: str, api: GitHubClient) -> str:
+def run(event_path: Path, *, api: GitHubClient) -> str:
     """Validate every gate, merge atomically, and return the merge SHA."""
     policy = load_policy()
     event = parse_event(json.loads(event_path.read_text()))
     authorize_event(event, policy)
-    grants = load_grants(grants_json)
     repository = quote(policy.repository, safe="/")
     pull_endpoint = f"repos/{repository}/pulls/{event.number}"
     actor = quote(event.actor, safe="")
@@ -451,7 +434,7 @@ def run(event_path: Path, *, grants_json: str, api: GitHubClient) -> str:
         changed_files=changed_files,
         policy=policy,
     )
-    authorize_capabilities(grants, actor=event.actor, required=required_capabilities)
+    authorize_membership(policy, actor=event.actor, required=required_capabilities)
     query = urlencode({"head_sha": head_sha, "event": "pull_request", "per_page": 100})
     for check_id in sorted(required_checks):
         check = policy.checks[check_id]
@@ -546,6 +529,23 @@ def _string_collection(value: object, *, name: str) -> tuple[str, ...]:
     return tuple(strings)
 
 
+def _member_collection(value: object, *, name: str) -> frozenset[str]:
+    members = _string_collection(value, name=name)
+    normalized = tuple(member.casefold() for member in members)
+    if any(not _github_login(member) for member in members):
+        _refuse(f"{name} must contain only valid GitHub logins")
+    if len(normalized) != len(set(normalized)):
+        _refuse(f"{name} contains case-insensitive duplicates")
+    return frozenset(normalized)
+
+
+def _github_login(value: str) -> bool:
+    return (
+        len(value) <= MAX_GITHUB_LOGIN_LENGTH
+        and re.fullmatch(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*", value) is not None
+    )
+
+
 def _refuse(message: str) -> Never:
     raise MergeRefusalError(message)
 
@@ -565,11 +565,7 @@ def main() -> int:
         event = parse_event(json.loads(args.event.read_text()))
         if event.body.strip() != load_policy().command:
             return 0
-        merge_sha = run(
-            args.event,
-            grants_json=os.environ.get("DELEGATED_MERGE_GRANTS", ""),
-            api=api,
-        )
+        merge_sha = run(args.event, api=api)
     except MergeRefusalError as exc:
         message = f"Scoped merge refused: {exc}."
     except (GitHubAPIError, OSError, json.JSONDecodeError, tomllib.TOMLDecodeError):

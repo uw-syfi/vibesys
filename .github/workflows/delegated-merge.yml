@@ -34,5 +34,4 @@ jobs:
       - name: Authorize and merge
         env:
           GH_TOKEN: ${{ github.token }}
-          DELEGATED_MERGE_GRANTS: ${{ vars.DELEGATED_MERGE_GRANTS }}
         run: python3 scripts/delegated_merge.py --event "$GITHUB_EVENT_PATH"

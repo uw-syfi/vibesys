@@ -6,10 +6,12 @@ import json
 import re
 import subprocess
 from collections.abc import Mapping  # noqa: TC003  # runtime Protocol conformance
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 import yaml
+from scripts import delegated_merge
 from scripts.delegated_merge import (
     Capability,
     Check,
@@ -18,13 +20,12 @@ from scripts.delegated_merge import (
     GitHubAPIError,
     MergeRefusalError,
     Policy,
-    authorize_capabilities,
     authorize_check_job,
     authorize_event,
     authorize_files,
+    authorize_membership,
     authorize_pull_request,
     authorize_repository_access,
-    load_grants,
     load_policy,
     run,
     select_workflow_run,
@@ -66,6 +67,7 @@ def _pull(**changes: object) -> dict[str, object]:
 
 def test_policy_accepts_only_exact_delegated_paths_and_both_sides_of_renames() -> None:
     policy = load_policy()
+    assert all(not capability.members for capability in policy.capabilities.values())
     capabilities, checks = authorize_files(
         [[{"filename": "clients/tui/src/view.ts", "previous_filename": "src/server/view.py"}]],
         changed_files=1,
@@ -139,6 +141,7 @@ def test_path_matches_union_every_matching_capability_and_check() -> None:
         capabilities={
             **policy.capabilities,
             "platform": Capability(
+                members=frozenset({"maintainer"}),
                 prefixes=("src/",),
                 paths=frozenset(),
                 additional_checks=frozenset({"security"}),
@@ -181,29 +184,46 @@ def test_event_authorization_rejects_wrong_actor_or_scope(
         authorize_event(_event(**changes), load_policy())
 
 
-def test_grants_are_case_insensitive_and_require_every_capability() -> None:
-    grants = load_grants('{"MainTainer": ["tui", "server"], "admin": ["*"]}')
-    authorize_capabilities(grants, actor="maintainer", required=frozenset({"tui", "server"}))
-    authorize_capabilities(grants, actor="ADMIN", required=frozenset({"future"}))
-    with pytest.raises(MergeRefusalError, match="lacks required capabilities"):
-        authorize_capabilities(grants, actor="maintainer", required=frozenset({"platform"}))
-    with pytest.raises(MergeRefusalError, match="no delegated merge grant"):
-        authorize_capabilities(grants, actor="stranger", required=frozenset({"tui"}))
+def test_membership_is_case_insensitive_and_requires_every_capability(tmp_path: Path) -> None:
+    policy_path = tmp_path / "policy.toml"
+    policy_path.write_text(
+        (REPO_ROOT / ".github" / "delegated-merge.toml")
+        .read_text()
+        .replace("members = []", 'members = ["MainTainer"]')
+    )
+    policy = load_policy(policy_path)
+    assert all(capability.members == {"maintainer"} for capability in policy.capabilities.values())
+
+    authorize_membership(policy, actor="MainTainer", required=frozenset({"tui", "server"}))
+    for actor in ["stranger", "admin"]:
+        with pytest.raises(MergeRefusalError, match="not a member"):
+            authorize_membership(policy, actor=actor, required=frozenset({"server"}))
 
 
 @pytest.mark.parametrize(
-    "document",
+    ("members", "message"),
     [
-        "",
-        "[]",
-        '{"Alice": ["tui"], "alice": ["server"]}',
-        '{"alice": []}',
-        '{"alice": ["not valid"]}',
+        ('["Alice", "alice"]', "case-insensitive duplicates"),
+        ('["-alice"]', "valid GitHub logins"),
+        ('["alice-"]', "valid GitHub logins"),
+        ('["alice--bob"]', "valid GitHub logins"),
+        ('["alice_user"]', "valid GitHub logins"),
+        (f'["{"a" * 40}"]', "valid GitHub logins"),
+        ("[1]", "non-empty strings"),
     ],
 )
-def test_grants_reject_malformed_or_ambiguous_documents(document: str) -> None:
-    with pytest.raises(MergeRefusalError):
-        load_grants(document)
+def test_policy_rejects_invalid_capability_members(
+    tmp_path: Path, members: str, message: str
+) -> None:
+    policy_path = tmp_path / "policy.toml"
+    policy_path.write_text(
+        (REPO_ROOT / ".github" / "delegated-merge.toml")
+        .read_text()
+        .replace("members = []", f"members = {members}", 1)
+    )
+
+    with pytest.raises(MergeRefusalError, match=message):
+        load_policy(policy_path)
 
 
 def test_repository_access_is_checked_live() -> None:
@@ -330,12 +350,22 @@ def _write_event(path: Path) -> None:
     )
 
 
-def test_complete_merge_rechecks_head_and_sends_atomic_squash_request(tmp_path: Path) -> None:
+def _authorize_server_member(monkeypatch: pytest.MonkeyPatch) -> None:
+    policy = load_policy()
+    server = replace(policy.capabilities["server"], members=frozenset({"maintainer"}))
+    authorized = replace(policy, capabilities={**policy.capabilities, "server": server})
+    monkeypatch.setattr(delegated_merge, "load_policy", lambda: authorized)
+
+
+def test_complete_merge_rechecks_head_and_sends_atomic_squash_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     event_path = tmp_path / "event.json"
     _write_event(event_path)
+    _authorize_server_member(monkeypatch)
     api = FakeGitHubAPI()
 
-    assert run(event_path, grants_json='{"maintainer": ["server"]}', api=api) == "merge456"
+    assert run(event_path, api=api) == "merge456"
     assert api.pull_reads == 2
     assert api.writes == [
         (
@@ -346,13 +376,16 @@ def test_complete_merge_rechecks_head_and_sends_atomic_squash_request(tmp_path: 
     ]
 
 
-def test_complete_merge_refuses_head_change_before_write(tmp_path: Path) -> None:
+def test_complete_merge_refuses_head_change_before_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     event_path = tmp_path / "event.json"
     _write_event(event_path)
+    _authorize_server_member(monkeypatch)
     api = FakeGitHubAPI(refreshed_sha="new789")
 
     with pytest.raises(MergeRefusalError, match="changed during validation"):
-        run(event_path, grants_json='{"maintainer": ["server"]}', api=api)
+        run(event_path, api=api)
 
     assert api.writes == []
 
@@ -383,8 +416,7 @@ def test_workflow_uses_trusted_default_branch_and_pinned_actions() -> None:
             reference = step["uses"].split("@", maxsplit=1)[1].split()[0]
             assert re.fullmatch(r"[0-9a-f]{40}", reference)
     assert "actions/create-github-app-token" not in text
-    assert "GH_TOKEN: ${{ github.token }}" in text
-    assert "DELEGATED_MERGE_GRANTS: ${{ vars.DELEGATED_MERGE_GRANTS }}" in text
+    assert steps[-1]["env"] == {"GH_TOKEN": "${{ github.token }}"}
 
 
 def test_test_workflow_exposes_required_ci_and_compatibility_alias() -> None:
