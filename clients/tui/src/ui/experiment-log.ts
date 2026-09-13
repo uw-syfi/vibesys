@@ -916,16 +916,10 @@ export function hypothesisMetadata(entry: HypothesisEntry): string {
  * delta the table compresses into one cell.
  */
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 function measurementMetadata(entry: HypothesisEntry): string[] {
   const parts: string[] = [];
   const name = entry.perf_metric_name ?? null;
-  const direction =
-    entry.perf_direction === 'max'
-      ? 'maximize'
-      : entry.perf_direction === 'min'
-        ? 'minimize'
-        : null;
+  const direction = measurementDirection(entry.perf_direction);
   if (name !== null) parts.push(`Metric ${name}${direction === null ? '' : ` (${direction})`}`);
   else if (direction !== null) parts.push(`Direction ${direction}`);
   // Legacy rounds recorded the metric name as the unit; once the name clause
@@ -949,6 +943,14 @@ function measurementMetadata(entry: HypothesisEntry): string[] {
   const reason = deltaReasonLabel(entry.perf_delta_reason);
   if (reason !== null) parts.push(reason);
   return parts;
+}
+
+function measurementDirection(
+  direction: HypothesisEntry['perf_direction'],
+): 'maximize' | 'minimize' | null {
+  if (direction === 'max') return 'maximize';
+  if (direction === 'min') return 'minimize';
+  return null;
 }
 
 /**

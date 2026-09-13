@@ -232,6 +232,15 @@ describe('experiment log rows', () => {
     expect(metadata).toContain('Measured 2412.5 ops/s');
   });
 
+  it('shows a measurement direction even when the metric name is absent', () => {
+    expect(hypothesisMetadata(entry({perf_metric_name: null, perf_direction: 'max'}))).toContain(
+      'Direction maximize',
+    );
+    expect(hypothesisMetadata(entry({perf_metric_name: null, perf_direction: 'min'}))).toContain(
+      'Direction minimize',
+    );
+  });
+
   it('spells out the baseline identity in the drill-down metadata', () => {
     const metadata = hypothesisMetadata(
       entry({
