@@ -49,6 +49,18 @@ describe('phase description', () => {
     expect(phaseText(describePhase('experiment-chat', 'chat'))).toBe('answering');
   });
 
+  it('applies label-family precedence before ordinary kind fallback', () => {
+    expect(phaseText(describePhase('gen-2-cand-1-mutator', 'judge'))).toBe('mutating candidate 1');
+    expect(phaseText(describePhase('impl issue #7 att2', 'judge'))).toBe(
+      'implementing issue #7 · attempt 2',
+    );
+    expect(phaseText(describePhase('round-4-plan', 'implementer'))).toBe('planning');
+  });
+
+  it('lets the chat kind override a stale loop label', () => {
+    expect(phaseText(describePhase('round-4-plan', 'chat'))).toBe('answering');
+  });
+
   it('never returns a raw backend identifier', () => {
     // The acceptance criterion for #517: no round_label reaches the header in
     // any loop mode, including labels this parser does not recognize.
