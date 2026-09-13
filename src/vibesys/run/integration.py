@@ -13,6 +13,8 @@ from vibesys.run.event_journal import EventJournal
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
+    from pydantic import BaseModel
+
     from vibesys.config import Config
     from vibesys.constants import ComputeBackend
     from vibesys.sandbox.run_environment import RunEnvironment, RunEnvironmentRequest
@@ -161,6 +163,14 @@ class RunIntegration(Protocol):
         self, attachment: RunAttachment
     ) -> Callable[[], None] | None: ...
 
+    def publish_committed_state(  # noqa: D102
+        self,
+        namespace: str,
+        state: BaseModel,
+        *,
+        changed_keys: tuple[str, ...] | None = None,
+    ) -> None: ...
+
     def close(self) -> None: ...  # noqa: D102
 
 
@@ -197,3 +207,13 @@ class LocalRunIntegration:
         """Ignore optional application surfaces in a local run."""
         del attachment
         return None
+
+    def publish_committed_state(
+        self,
+        namespace: str,
+        state: BaseModel,
+        *,
+        changed_keys: tuple[str, ...] | None = None,
+    ) -> None:
+        """Ignore transient state hints when no application consumes them."""
+        del namespace, state, changed_keys

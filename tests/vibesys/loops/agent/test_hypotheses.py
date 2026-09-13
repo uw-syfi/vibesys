@@ -11,6 +11,7 @@ from vibesys.loops.agent.hypotheses import (
     adopt_metric_space,
     append_round,
     apply_strategy_updates,
+    finish_hypothesis,
     measurement_delta_reason,
     metric_baseline,
     project_round_evidence,
@@ -130,6 +131,48 @@ def test_hypothesis_owns_all_of_its_rounds_and_active_is_only_a_pointer() -> Non
     started_hypothesis = started.by_id("H-1")
     assert started_hypothesis is not None
     assert started_hypothesis.rounds == []
+
+
+def test_projection_revision_advances_only_for_visible_lifecycle_changes() -> None:
+    initial = AgentRunState()
+    started = start_hypothesis(initial, _plan("H-1"), started_round=1)
+    assert started.experiment_revision == 1
+    assert started.hypotheses[0].last_experiment_revision == 1
+
+    checkpoint = started.active_hypothesis
+    assert checkpoint is not None
+    checkpoint.feedback = "restart-only detail"
+    restarted = update_active_hypothesis(started, checkpoint)
+    assert restarted.experiment_revision == 1
+
+    appended = append_round(
+        restarted,
+        _round(1, 100.0, hypothesis_id="H-1"),
+        keep_active=True,
+    )
+    assert appended.experiment_revision == 2
+    assert appended.hypotheses[0].last_experiment_revision == 2
+
+    finished = finish_hypothesis(appended)
+    assert finished.experiment_revision == 3
+    assert finished.hypotheses[0].last_experiment_revision == 3
+
+
+def test_legacy_projection_revisions_default_to_zero() -> None:
+    state = AgentRunState.model_validate(
+        {
+            "hypotheses": [
+                {
+                    "hypothesis_id": "H-1",
+                    "plan": _plan("H-1").model_dump(),
+                    "started_round": 1,
+                }
+            ]
+        }
+    )
+
+    assert state.experiment_revision == 0
+    assert state.hypotheses[0].last_experiment_revision == 0
 
 
 def test_operational_restart_fields_live_on_the_same_hypothesis() -> None:

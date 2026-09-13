@@ -105,6 +105,9 @@ class Hypothesis(BaseModel):
     candidate_retained: bool | None = None
     strategy: HypothesisStrategy = HypothesisStrategy.AVAILABLE
     strategy_reason: str | None = None
+    # Revision of the last change visible through the experiment-log projection.
+    # Restart-only checkpoint fields may change without advancing this value.
+    last_experiment_revision: Annotated[int, Field(ge=0)] = 0
 
     @model_validator(mode="after")
     def _valid_identity(self) -> Self:
@@ -143,6 +146,9 @@ class AgentRunState(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     schema_version: Literal[1] = 1
+    # Monotonic version of the experiment-log projection. The persisted
+    # aggregate owns it; event and query cursors only report this value.
+    experiment_revision: Annotated[int, Field(ge=0)] = 0
     active_hypothesis_id: str | None = None
     metrics: MetricSpace = Field(default_factory=MetricSpace)
     hypotheses: list[Hypothesis] = Field(default_factory=list)

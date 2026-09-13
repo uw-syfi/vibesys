@@ -19,6 +19,8 @@ export type {
   DesignFileChange,
   DesignRound,
   Diagnostic,
+  ExperimentCursor,
+  ExperimentUpdate,
   HypothesisEntry,
   HypothesisRound,
   ProtocolRequest,

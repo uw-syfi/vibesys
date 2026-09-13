@@ -99,10 +99,20 @@ class PerformanceQuery(Request):  # noqa: D101  # tracked: #288
     type: Literal["query.performance"] = "query.performance"
 
 
+class ExperimentCursor(ProtocolModel):
+    """Client's last completely applied experiment projection."""
+
+    run_id: str
+    projection_id: str
+    revision: int = Field(ge=0)
+
+
 class ExperimentQuery(Request):
     """Request the hypothesis-level experiment log for the attached run."""
 
     type: Literal["query.experiments"] = "query.experiments"
+    # Omitted by legacy clients, which continue receiving a complete snapshot.
+    after: ExperimentCursor | None = None
 
 
 class DesignQuery(Request):
@@ -310,6 +320,22 @@ class HypothesisEntry(ProtocolModel):
     active: bool = False
 
 
+class ExperimentUpdate(ProtocolModel):
+    """How to apply ``Response.experiments`` to a client's prior snapshot.
+
+    A reset replaces the entire list. A delta replaces entries by stable
+    hypothesis ID and then removes the named IDs. ``from_revision`` is None for
+    a reset because no prior client state is trusted.
+    """
+
+    run_id: str
+    projection_id: str
+    from_revision: int | None = Field(default=None, ge=0)
+    through_revision: int = Field(ge=0)
+    reset: bool
+    removed_hypothesis_ids: list[str] = Field(default_factory=list)
+
+
 class DesignFileChange(ProtocolModel):
     """One workspace file a round's commit range touched."""
 
@@ -363,6 +389,9 @@ class Response(ProtocolModel):  # noqa: D101  # tracked: #288
     # distinct from a run whose plot is merely empty so far.
     performance_context: PerformanceContext | None = None
     experiments: list[HypothesisEntry] = Field(default_factory=list)
+    # Present on revision-aware servers. The experiments list is complete when
+    # reset is true and contains only replacements when reset is false.
+    experiment_update: ExperimentUpdate | None = None
     # False means canonical project/run state is not attached yet. Keeping the
     # readiness marker separate preserves the protocol-v1 list contract while
     # distinguishing bootstrap from an authoritative empty experiment log.
