@@ -224,11 +224,6 @@ export interface CanvasBounds {
  * one corner cell that the bottom row owns. Every other cell of the offset
  * copy lands on `node` itself and is never drawn.
  *
- * The bottom row is half-height, not full, because a terminal cell is about
- * twice as tall as it is wide: a full cell below the node would read twice as
- * thick as the full-cell column beside it, where a half block reads as the
- * same line weight.
- *
  * An edge or arrowhead cell (`graph.cells`) is left in the returned list
  * rather than pulled out of it: the renderer paints this backdrop before it
  * draws the edges, so a cell that carries both keeps the edge's own glyph and
