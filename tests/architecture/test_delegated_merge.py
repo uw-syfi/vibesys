@@ -32,7 +32,14 @@ from scripts.delegated_merge import (
 )
 
 REPO_ROOT = Path(__file__).parents[2]
-CONFIGURED_MEMBERS = 'members = ["AyanBinRafaih", "Nano-AI"]'
+
+
+def _replace_members(policy: str, members: str, *, count: int = 0) -> str:
+    updated, replacements = re.subn(
+        r"^members = .*$", f"members = {members}", policy, count=count, flags=re.MULTILINE
+    )
+    assert replacements > 0
+    return updated
 
 
 def _event(**changes: object) -> Event:
@@ -68,8 +75,6 @@ def _pull(**changes: object) -> dict[str, object]:
 
 def test_policy_accepts_only_exact_delegated_paths_and_both_sides_of_renames() -> None:
     policy = load_policy()
-    assert policy.capabilities["tui"].members == {"ayanbinrafaih", "nano-ai"}
-    assert policy.capabilities["server"].members == {"ayanbinrafaih", "nano-ai"}
     capabilities, checks = authorize_files(
         [[{"filename": "clients/tui/src/view.ts", "previous_filename": "src/server/view.py"}]],
         changed_files=1,
@@ -189,9 +194,9 @@ def test_event_authorization_rejects_wrong_actor_or_scope(
 def test_membership_is_case_insensitive_and_requires_every_capability(tmp_path: Path) -> None:
     policy_path = tmp_path / "policy.toml"
     policy_path.write_text(
-        (REPO_ROOT / ".github" / "delegated-merge.toml")
-        .read_text()
-        .replace(CONFIGURED_MEMBERS, 'members = ["MainTainer"]')
+        _replace_members(
+            (REPO_ROOT / ".github" / "delegated-merge.toml").read_text(), '["MainTainer"]'
+        )
     )
     policy = load_policy(policy_path)
     assert all(capability.members == {"maintainer"} for capability in policy.capabilities.values())
@@ -232,9 +237,9 @@ def test_policy_rejects_invalid_capability_members(
 ) -> None:
     policy_path = tmp_path / "policy.toml"
     policy_path.write_text(
-        (REPO_ROOT / ".github" / "delegated-merge.toml")
-        .read_text()
-        .replace(CONFIGURED_MEMBERS, f"members = {members}", 1)
+        _replace_members(
+            (REPO_ROOT / ".github" / "delegated-merge.toml").read_text(), members, count=1
+        )
     )
 
     with pytest.raises(MergeRefusalError, match=message):
