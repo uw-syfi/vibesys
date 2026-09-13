@@ -52,6 +52,7 @@ from vibesys.repository import (
 from vibesys.resource_paths import default_skill_roots
 from vibesys.run.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.run.experiment_repo import ExperimentRepository
+from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vibesys.run.integration import LocalRunIntegration, RunIntegration
 from vibesys.sandbox.run_environment import (
@@ -1479,7 +1480,7 @@ def _switch_project_resume_branch(project_root: Path, run_id: str) -> None:
         return
     tracker = GitTracker(
         project_root,
-        log=lambda _message: None,
+        events=NullGitTrackerEvents(),
         run_id=run_id,
     )
     try:

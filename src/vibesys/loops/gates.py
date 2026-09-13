@@ -12,8 +12,16 @@ from typing import TYPE_CHECKING, Literal
 
 from vibesys.input_manifest import BenchmarkResult  # noqa: TC001  # tracked: #288
 from vibesys.loops.metrics import Objective  # noqa: TC001  # tracked: #288
+from vibesys.render.sink import output_sink
 from vibesys.run import LoopContext  # noqa: TC001  # tracked: #288
-from vibesys.run.events import CoreEventType, SubprocessOutputData
+from vibesys.run.events import (
+    CoreEventType,
+    EventStatus,
+    GateFinishedData,
+    GateKind,
+    GateStartedData,
+    SubprocessOutputData,
+)
 from vs_evaluator_protocol import (
     Hello,
     ProtocolError,
@@ -31,6 +39,55 @@ if TYPE_CHECKING:
 GATE_LOG_TAIL_CHARS = 1000
 GATE_FEEDBACK_TAIL_CHARS = 4000
 GATE_RECORD_TAIL_CHARS = 8000
+
+
+def emit_gate_started(
+    gate: GateKind,
+    *,
+    recipe: str | None = None,
+    command: str | None = None,
+    round_label: str | None = None,
+) -> None:
+    """Publish that one framework gate began evaluating a candidate.
+
+    Every emission must be balanced by exactly one :func:`emit_gate_finished`
+    for the same gate (and recipe), including reused and early-failure paths.
+    """
+    output_sink().emit(
+        CoreEventType.GATE_STARTED,
+        data=GateStartedData(gate=gate, recipe=recipe, command=command),
+        status=EventStatus.ACTIVE,
+        round_label=round_label,
+    )
+
+
+def emit_gate_finished(  # noqa: PLR0913  # independent payload dimensions
+    gate: GateKind,
+    *,
+    passed: bool,
+    recipe: str | None = None,
+    reused: bool = False,
+    metric: str | None = None,
+    value: float | None = None,
+    unit: str | None = None,
+    output_tail: str | None = None,
+    round_label: str | None = None,
+) -> None:
+    """Publish one framework gate outcome; envelope status carries the verdict."""
+    output_sink().emit(
+        CoreEventType.GATE_FINISHED,
+        data=GateFinishedData(
+            gate=gate,
+            recipe=recipe,
+            reused=reused,
+            metric=metric,
+            value=value,
+            unit=unit,
+            output_tail=output_tail,
+        ),
+        status=EventStatus.COMPLETED if passed else EventStatus.FAILED,
+        round_label=round_label,
+    )
 
 
 def framework_command_timeout(ctx: LoopContext, timeout_seconds: int | None) -> int | None:
@@ -61,19 +118,26 @@ class AccuracyGateResult:
     executed: bool
 
 
-def run_accuracy_gate(
+def run_accuracy_gate(  # tracked: #288
     ctx: LoopContext,
     *,
     process_id: str,
     timeout_seconds: int | None = None,
     execution_command: str | None = None,
+    round_label: str | None = None,
 ) -> AccuracyGateResult:
     """Run the trusted accuracy command without delegating acceptance to an agent."""
     changed = ctx.trusted_input_changes()
     command = ctx.judge_accuracy_command
     if changed:
         output = "Evaluator-owned files were modified: " + ", ".join(changed)
-        ctx.lprint(f"[framework-accuracy] FAIL: {output}")
+        emit_gate_started(GateKind.ACCURACY, command=command or None, round_label=round_label)
+        emit_gate_finished(
+            GateKind.ACCURACY,
+            passed=False,
+            output_tail=output[-GATE_LOG_TAIL_CHARS:],
+            round_label=round_label,
+        )
         return AccuracyGateResult(
             command=command,
             passed=False,
@@ -90,7 +154,7 @@ def run_accuracy_gate(
             executed=False,
         )
 
-    ctx.lprint(f"[framework-accuracy] running: {command}")
+    emit_gate_started(GateKind.ACCURACY, command=command, round_label=round_label)
     command_to_execute = execution_command or command
     try:
         if timeout_seconds is None:
@@ -113,10 +177,15 @@ def run_accuracy_gate(
         passed = False
 
     if passed:
-        ctx.lprint("[framework-accuracy] PASS")
+        emit_gate_finished(GateKind.ACCURACY, passed=True, round_label=round_label)
         feedback = None
     else:
-        ctx.lprint(f"[framework-accuracy] FAIL: {output[-GATE_LOG_TAIL_CHARS:]}")
+        emit_gate_finished(
+            GateKind.ACCURACY,
+            passed=False,
+            output_tail=output[-GATE_LOG_TAIL_CHARS:],
+            round_label=round_label,
+        )
         feedback = f"Framework accuracy gate failed.\n{output[-GATE_FEEDBACK_TAIL_CHARS:]}"
 
     return AccuracyGateResult(
@@ -354,6 +423,7 @@ def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #28
     output_slug: str,
     timeout_seconds: int | None = None,
     execution_base: str | None = None,
+    round_label: str | None = None,
 ) -> BenchmarkGateResult:
     """Run and parse an opt-in trusted benchmark result contract.
 
@@ -410,7 +480,7 @@ def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #28
         f" && cat {shlex.quote(output_path)}"
         f" && printf '\\n{FRAMEWORK_BENCHMARK_END_MARKER}\\n'"
     )
-    ctx.lprint(f"[framework-benchmark] running: {base_command}")
+    emit_gate_started(GateKind.BENCHMARK, command=base_command, round_label=round_label)
     metric_name = result_spec.metric if result_spec is not None else None
     metric_value: float | None = None
     metric_direction: Literal["max", "min"] | None = None
@@ -509,7 +579,17 @@ def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #28
         row = None
 
     if passed:
-        ctx.lprint(f"[framework-benchmark] PASS: {metric_name}={metric_value}")
+        has_metric = metric_name is not None and metric_value is not None
+        emit_gate_finished(
+            GateKind.BENCHMARK,
+            passed=True,
+            metric=metric_name if has_metric else None,
+            value=metric_value if has_metric else None,
+            # Preserve the historical fallback: the scalar contract declares
+            # no unit, so the metric name stands in for it.
+            unit=(metric_unit or metric_name) if has_metric else None,
+            round_label=round_label,
+        )
         outcome = FrameworkBenchmarkOutcome(
             metric_name=metric_name,
             metric_value=metric_value,
@@ -530,7 +610,12 @@ def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #28
             row=row,
         )
     else:
-        ctx.lprint(f"[framework-benchmark] FAIL: {output[-GATE_LOG_TAIL_CHARS:]}")
+        emit_gate_finished(
+            GateKind.BENCHMARK,
+            passed=False,
+            output_tail=output[-GATE_LOG_TAIL_CHARS:],
+            round_label=round_label,
+        )
         outcome = FrameworkBenchmarkOutcome(
             feedback=f"Framework benchmark failed.\n{output[-GATE_FEEDBACK_TAIL_CHARS:]}"
         )

@@ -38,6 +38,7 @@ from vibesys.loops.plain.runner_ext import PlainLoopAgentClient
 from vibesys.loops.plain.state import PlainStateStore
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, Prompt
+from vibesys.render.sink import output_sink
 from vibesys.run import LoopContext, RepositoryVisibility, RunIntegration, RunStateNamespace
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
@@ -350,9 +351,11 @@ def run_plain_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         repo_visibility=repo_visibility,
         integration=integration,
     ) as ctx:
-        ctx.lprint(f"[log] experiment log: {ctx.run_log_path}")
-        ctx.lprint(f"[log] project root: {ctx.project_root}")
-        ctx.lprint(f"[log] model: {ctx.model_name}")
+        output_sink().run_configured(
+            run_log_path=str(ctx.run_log_path),
+            project_root=str(ctx.project_root),
+            model=ctx.model_name,
+        )
         prompt = Prompt(_TEMPLATE_DIR, ctx.backend)
         portable_namespace = ctx.state.portable(RunStateNamespace.PLAIN)
         state_store = PlainStateStore(portable_namespace)

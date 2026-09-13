@@ -1,8 +1,10 @@
-"""Durable journal attachment, diagnostics, and failure-helper tests."""
+"""Durable journal attachment, replay translation, diagnostics, and failure-helper tests."""
 
 from __future__ import annotations
 
+import itertools
 import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -17,17 +19,44 @@ from server.diagnostics import (
     DiagnosticSeverity,
 )
 from server.events import (
+    AgentExecutionActivityData,
     AgentExecutionFinishedData,
+    AgentExecutionStartedData,
     EventStatus,
     EventType,
+    GateFinishedData,
+    GateKind,
     JudgeResultData,
     PhaseData,
     RoundFinishedData,
+    RunEvent,
+    make_event,
 )
 
 
 def _events(path):  # noqa: ANN001, ANN202
     return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def _write_stored_events(log_dir, events):  # noqa: ANN001, ANN202
+    log_dir.mkdir()
+    (log_dir / "run-events.jsonl").write_text(
+        "".join(event.model_dump_json() + "\n" for event in events)
+    )
+
+
+def _stored_event(sequence, event_type, status, data):  # noqa: ANN001, ANN202
+    return RunEvent(
+        sequence=sequence,
+        run_id="persisted-run",
+        timestamp=datetime(2024, 1, 1, tzinfo=UTC),
+        type=event_type,
+        status=status,
+        agent_kind="implementer",
+        round_label="round 1",
+        execution_id="exec-1",
+        data=data,
+    )
 
 
 def test_bootstrap_events_join_durable_history(tmp_path):  # noqa: ANN001, ANN201
@@ -54,6 +83,117 @@ def test_bootstrap_events_join_durable_history(tmp_path):  # noqa: ANN001, ANN20
     assert [event.type for event in current.journal.read()] == expected
     assert [event["type"] for event in _events(tmp_path / "durable/run-events.jsonl")] == [
         event.value for event in expected
+    ]
+
+
+def test_attach_renumbering_bootstrap_events_starts_a_new_sequence_space(tmp_path):  # noqa: ANN001, ANN201
+    durable = build_server_parts(tmp_path / "durable")
+    durable.journal.record(EventType.RUN_FINISHED, status=EventStatus.COMPLETED)
+
+    current = build_server_parts(tmp_path / "bootstrap")
+    bootstrap_store = current.journal.store_id_locked()
+    folded = current.journal.read()
+    current.attach(tmp_path / "durable")
+    attached = current.journal.read()[: len(folded)]
+
+    # The bootstrap events were re-appended onto the durable log's tail, so the
+    # sequences a subscriber already folded now name different events. That is
+    # a different sequence space and the identity has to say so.
+    assert current.journal.store_id_locked() != bootstrap_store
+    assert [event.sequence for event in attached] == [event.sequence for event in folded]
+    assert attached != folded
+
+
+def test_attach_into_an_empty_log_keeps_the_sequence_space(tmp_path):  # noqa: ANN001, ANN201
+    current = build_server_parts(tmp_path / "bootstrap")
+    bootstrap_store = current.journal.store_id_locked()
+    before = [(event.sequence, event.type) for event in current.journal.read()]
+
+    current.attach(tmp_path / "durable")
+
+    # Nothing was renumbered, so every folded sequence still names the same
+    # event and a subscriber has nothing to re-fold.
+    assert current.journal.store_id_locked() == bootstrap_store
+    assert [(event.sequence, event.type) for event in current.journal.read()] == before
+
+
+def test_phase_only_legacy_replay_translates_in_place(tmp_path):  # noqa: ANN001, ANN201
+    """A translated phase event replaces the original at its stored sequence."""
+    log_dir = tmp_path / "legacy"
+    _write_stored_events(
+        log_dir,
+        [
+            _stored_event(
+                1,
+                EventType.PHASE_STARTED,
+                EventStatus.ACTIVE,
+                PhaseData(phase="implementer", attempt=1),
+            ),
+            _stored_event(
+                2,
+                EventType.PHASE_FINISHED,
+                EventStatus.COMPLETED,
+                PhaseData(phase="implementer", attempt=1),
+            ),
+        ],
+    )
+
+    parts = build_server_parts(log_dir)
+    events = parts.journal.read()
+
+    sequences = [event.sequence for event in events]
+    assert all(left < right for left, right in itertools.pairwise(sequences)), sequences
+    started, finished = events[0], events[1]
+    assert started.type is EventType.AGENT_EXECUTION_STARTED
+    assert started.sequence == 1
+    assert isinstance(started.data, AgentExecutionStartedData)
+    assert started.data.stage == "implementer"
+    assert started.data.attempt == 1
+    assert finished.type is EventType.AGENT_EXECUTION_FINISHED
+    assert finished.sequence == 2
+    assert finished.status is EventStatus.COMPLETED
+    assert not any(
+        event.type in {EventType.PHASE_STARTED, EventType.PHASE_FINISHED} for event in events
+    )
+
+
+def test_modern_phase_events_replay_unchanged(tmp_path):  # noqa: ANN001, ANN201
+    """Phase events with a canonical lifecycle sibling pass through untouched."""
+    log_dir = tmp_path / "modern"
+    activity = AgentExecutionActivityData(mode="thinking", summary="Implementing")
+    stored = [
+        _stored_event(
+            1,
+            EventType.AGENT_EXECUTION_STARTED,
+            EventStatus.ACTIVE,
+            AgentExecutionStartedData(stage="implementer", attempt=1, activity=activity),
+        ),
+        _stored_event(
+            2,
+            EventType.PHASE_STARTED,
+            EventStatus.ACTIVE,
+            PhaseData(phase="implementer", attempt=1),
+        ),
+        _stored_event(
+            3,
+            EventType.AGENT_EXECUTION_FINISHED,
+            EventStatus.COMPLETED,
+            AgentExecutionFinishedData(result={"ok": True}),
+        ),
+        _stored_event(
+            4,
+            EventType.PHASE_FINISHED,
+            EventStatus.COMPLETED,
+            PhaseData(phase="implementer", attempt=1),
+        ),
+    ]
+    _write_stored_events(log_dir, stored)
+
+    parts = build_server_parts(log_dir)
+    events = parts.journal.read()
+
+    assert [event.model_dump_json() for event in events[: len(stored)]] == [
+        event.model_dump_json() for event in stored
     ]
 
 
@@ -94,6 +234,7 @@ def test_invocation_and_terminal_failure_share_diagnostic_identity(tmp_path):  #
     [
         EventType.CONFIGURATION_FAILED,
         EventType.INVOCATION_FINISHED,
+        EventType.AGENT_EXECUTION_FINISHED,
         EventType.PHASE_FINISHED,
         EventType.RUN_FAILED,
         EventType.RUN_INTERRUPTED,
@@ -106,6 +247,22 @@ def test_operational_failure_events_require_diagnostics(
     for status in (EventStatus.FAILED, "failed"):
         with pytest.raises(ValueError, match="must include a diagnostic"):
             parts.journal.record(event_type, status=status)
+    with pytest.raises(ValueError, match="must include a diagnostic"):
+        parts.journal.append(make_event(event_type, "boom", status=EventStatus.FAILED))
+
+
+def test_append_accepts_failed_gate_outcomes_without_diagnostics(tmp_path):  # noqa: ANN001, ANN201
+    # A failed gate is an expected semantic outcome, not an operational fault,
+    # so the append invariant must leave it diagnostic-less.
+    parts = build_server_parts(tmp_path)
+    gate = parts.journal.append(
+        make_event(
+            EventType.GATE_FINISHED,
+            status=EventStatus.FAILED,
+            data=GateFinishedData(gate=GateKind.ACCURACY, output_tail="mismatch"),
+        )
+    )
+    assert gate.diagnostic is None
 
 
 def test_semantic_failure_events_do_not_require_diagnostics(tmp_path):  # noqa: ANN001, ANN201

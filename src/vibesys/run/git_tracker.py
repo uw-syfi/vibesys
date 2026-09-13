@@ -13,8 +13,9 @@ from typing import TYPE_CHECKING
 from vs_project import Project
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Iterable
 
+    from vibesys.run.git_events import GitTrackerEvents
     from vs_project import GitSnapshotPlan, ProjectGitIntegration, StateSnapshot
 
 
@@ -97,14 +98,14 @@ class GitTracker:
         root: Path,
         *,
         run_id: str,
-        log: Callable[[str], None],
+        events: GitTrackerEvents,
         excluded_dirs: Iterable[str] = (),
         trusted_input_paths: Iterable[str | Path] = (),
     ) -> None:
         self.root = root.expanduser().resolve()
         if not self.root.is_dir():
             raise ValueError(f"project root must be an existing directory: {self.root}")  # noqa: TRY003  # tracked: #288
-        self._log = log
+        self._events = events
         self._excluded_dirs = frozenset(excluded_dirs)
         self.run_id = run_id
         self._trusted_input_paths = tuple(
@@ -159,8 +160,10 @@ class GitTracker:
         )
         if check and result.returncode != 0:
             stderr = result.stderr.decode(errors="replace").strip()
-            self._log(f"[git-tracking] command failed: {' '.join(cmd)}")
-            self._log(f"[git-tracking] exit code {result.returncode}: {stderr}")
+            self._events.warning(
+                f"git command failed: {' '.join(cmd)}",
+                detail=f"exit code {result.returncode}: {stderr}",
+            )
             result.check_returncode()
         return result
 
@@ -325,16 +328,22 @@ class GitTracker:
         try:
             result = self.run(command, check=False, timeout=self._READ_TIMEOUT_SECONDS)
         except (OSError, subprocess.TimeoutExpired) as error:
-            self._log(f"[git-tracking] read-only diff failed: {' '.join(command)}: {error}")
+            self._events.warning(
+                f"read-only diff failed: {' '.join(command)}",
+                detail=str(error),
+            )
             return None
         if result.returncode != 0:
             stderr = result.stderr.decode(errors="replace").strip()
-            self._log(f"[git-tracking] read-only diff exit {result.returncode}: {stderr}")
+            self._events.warning(
+                f"read-only diff exit {result.returncode}",
+                detail=stderr,
+            )
             return None
         return result.stdout.decode("utf-8", errors="replace")
 
     def _commit_staged(self, label: str) -> None:
-        """Commit the current index, logging when it contains no changes."""
+        """Commit the current index, reporting the snapshot outcome."""
         # git diff --cached --quiet exits 1 when there are staged changes
         has_changes = (
             self.run(
@@ -345,8 +354,9 @@ class GitTracker:
         )
         if has_changes:
             self.run(["git", "commit", "-m", label])
+            self._events.snapshot_recorded(label, commit=self.current_sha())
         else:
-            self._log(f"[git-tracking] no changes to commit for '{label}'")
+            self._events.snapshot_recorded(label, commit=None)
 
     def snapshot_with_framework_metadata(
         self,
@@ -389,8 +399,9 @@ class GitTracker:
         )
         if has_changes:
             self.run(["git", "commit", "--only", "-m", label, "--", *pathspecs])
+            self._events.snapshot_recorded(label, commit=self.current_sha())
         else:
-            self._log(f"[git-tracking] no changes to commit for '{label}'")
+            self._events.snapshot_recorded(label, commit=None)
 
     def _validated_framework_snapshot_plan(
         self,
@@ -509,8 +520,9 @@ class GitTracker:
                     plan.scope_pathspec,
                 ]
             )
+            self._events.snapshot_recorded(label, commit=self.current_sha())
         else:
-            self._log(f"[git-tracking] no changes to commit for '{label}'")
+            self._events.snapshot_recorded(label, commit=None)
 
     def current_sha(self) -> str | None:
         """Return the HEAD commit sha, or ``None`` if it cannot be resolved."""
@@ -536,7 +548,7 @@ class GitTracker:
         """Resolve and install the persisted trusted-input baseline."""
         resolved = self._resolve_trusted_input_baseline(revision)
         self._trusted_input_baseline = resolved
-        self._log(f"[git-tracking] trusted input baseline: {resolved[:12]}")
+        self._events.baseline_configured(resolved)
         return resolved
 
     def pending_changes(self) -> list[str]:
@@ -613,11 +625,14 @@ class GitTracker:
             try:
                 self._restore_preserved_paths(preserved)
             except Exception as preserve_exc:  # noqa: BLE001  # tracked: #288
-                self._log(
-                    "[warn] failed to restore preserved workspace memory after "
-                    f"tree restore error: {preserve_exc}"
+                self._events.warning(
+                    "failed to restore preserved workspace memory after tree restore error",
+                    detail=str(preserve_exc),
                 )
-            self._log(f"[warn] git tree restore {sha[:8]} failed: {exc}")
+            self._events.warning(
+                f"git tree restore {sha[:8]} failed",
+                detail=str(exc),
+            )
             return False
 
     def _capture_preserved_paths(self, paths: Iterable[str | Path]) -> dict[Path, bytes]:
@@ -820,7 +835,7 @@ class GitTracker:
             raise ValueError(f"VibeSys run branch already exists: {branch}")  # noqa: TRY003  # tracked: #288
         self.run(["git", "switch", "-c", branch])
         self._trusted_input_baseline = branch_point
-        self._log(f"[git-tracking] trusted input baseline: {branch_point[:12]}")
+        self._events.baseline_configured(branch_point)
 
     def _install_project_excludes(self) -> None:
         """Idempotently add local/private paths to ``.git/info/exclude``."""
@@ -976,8 +991,7 @@ class GitTracker:
             return
         prefix = "" if (not existing or existing.endswith("\n")) else "\n"
         exclude_file.write_text(existing + prefix + "\n".join(new) + "\n")
-        shown = ", ".join(new[:5]) + ("…" if len(new) > 5 else "")  # noqa: PLR2004  # tracked: #288
-        self._log(f"[git-tracking] excluded {len(new)} unreadable path(s) from snapshot: {shown}")
+        self._events.paths_excluded(tuple(new))
 
     def _add_all(self) -> None:
         """``git add -A``, resilient to files the host user cannot read.

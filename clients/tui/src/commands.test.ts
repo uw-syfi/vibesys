@@ -88,10 +88,13 @@ describe('parseCommand', () => {
   });
 
   it('diagnoses non-command and unknown input on the command surface', () => {
-    expect(onCommand('')).toEqual({kind: 'error', error: 'Enter a slash command. Use /help.'});
+    expect(onCommand('')).toEqual({
+      kind: 'error',
+      error: 'Enter a slash command: try /help for the list.',
+    });
     expect(onCommand('what is happening?')).toEqual({
       kind: 'error',
-      error: 'Commands start with /. Use Experiment chat for questions.',
+      error: 'Not a command: try /help, or ask in Experiment chat.',
     });
     expect(onCommand('/round 4')).toEqual({kind: 'unknown', text: '/round 4'});
     expect(onCommand('/invocation abc')).toEqual({kind: 'unknown', text: '/invocation abc'});

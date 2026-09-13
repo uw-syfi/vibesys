@@ -1,5 +1,14 @@
 import type {Diagnostic, RunEvent, RunSnapshot, RunStatus} from '@vibesys/backend-client';
 import {
+  applyExecutionStatus,
+  applyExecutionStatusUsage,
+  type ExecutionStatus,
+  mergeExecutionStatusesPrefix,
+  mergeExecutionStatusUsagePrefix,
+  reconcileExecutionStatuses,
+  removeExecutionStatus,
+} from './execution-status.js';
+import {
   type AgentPhase,
   applyRunMapEvent,
   mergePhaseLists,
@@ -122,6 +131,8 @@ export interface CoreDiagnostic {
   hint: string | null;
   severity: 'warning' | 'error' | 'fatal';
   scope: Diagnostic['scope'];
+  /** Which subsystem raised it, e.g. `loop` on a framework warning (#692). */
+  source: string | null;
   agentKind: string | null;
   roundLabel: string | null;
   invocationId: string | null;
@@ -179,6 +190,8 @@ export interface CoreState {
   /** Run lifetime boundaries retained from the replayed event stream. */
   runLifetimeBoundaries: readonly RunLifetimeBoundary[];
   activeExecutions: Record<string, ActiveAgentExecution>;
+  /** Freshest structured status for each active or not-yet-checkpointed execution. */
+  executionStatuses: Record<string, ExecutionStatus>;
   transcript: TranscriptEntry[];
   /** The default thread's transcript; equals `chatTranscripts[DEFAULT_CHAT_THREAD_ID]`. */
   chatTranscript: TranscriptEntry[];
@@ -220,6 +233,7 @@ export function initialCoreState(): CoreState {
     lastRunMapSequence: 0,
     runLifetimeBoundaries: [],
     activeExecutions: {},
+    executionStatuses: {},
     transcript: [],
     chatTranscript: [],
     chatTranscripts: {[DEFAULT_CHAT_THREAD_ID]: []},
@@ -298,13 +312,13 @@ export function reduceSnapshot(state: CoreState, snapshot: RunSnapshot): CoreSta
   // has seen the run end, a snapshot no newer than the fold cannot un-end it;
   // a genuinely newer one (a resumed run) still applies.
   if (hasRunEnded(registered) && snapshot.sequence <= registered.sequence) return registered;
-  return {
-    ...registered,
+  const next = cloneCoreStateWith(registered, {
     status: snapshot.status,
     agentKind: snapshot.agent_kind ?? null,
     roundLabel: snapshot.round_label ?? null,
     activeExecutions: activeExecutionsFromCheckpoint(snapshot.active_executions ?? []),
-  };
+  });
+  return next;
 }
 
 export type ActiveExecutionCheckpoint = NonNullable<RunSnapshot['active_executions']>;
@@ -316,7 +330,10 @@ export function reconcileActiveExecutions(
   throughSequence?: number,
 ): CoreState {
   if (throughSequence !== undefined && throughSequence < state.sequence) return state;
-  return {...state, activeExecutions: activeExecutionsFromCheckpoint(executions)};
+  const next = cloneCoreStateWith(state, {
+    activeExecutions: activeExecutionsFromCheckpoint(executions),
+  });
+  return next;
 }
 
 /**
@@ -443,12 +460,27 @@ export function reduceEventPrefix(
     ),
     // Liveness comes from the backend checkpoint, never from replayed history.
     activeExecutions: state.activeExecutions,
+    executionStatuses: mergeExecutionStatusesPrefix(
+      older.executionStatuses,
+      state.executionStatuses,
+      state.activeExecutions,
+    ),
     transcript: mergeTranscriptPrefix(older.transcript, state.transcript),
     chatTranscripts,
     chatTranscript: chatTranscripts[DEFAULT_CHAT_THREAD_ID] ?? [],
     chatThreads: mergeChatThreadsPrefix(older.chatThreads, state.chatThreads),
     todos: mergeTodosPrefix(older.todos, state.todos),
-    usage: state.usage ?? older.usage,
+    usage: mergeExecutionStatusUsagePrefix(
+      state.usage ?? older.usage,
+      mergeExecutionStatusesPrefix(
+        older.executionStatuses,
+        state.executionStatuses,
+        state.activeExecutions,
+      ),
+      older.executionStatuses,
+      events,
+      older.usage,
+    ),
     // Sorted rather than concatenated for the same reason the transcript is
     // merged: a tail batch can carry events from below its own floor.
     benchmarks: [...older.benchmarks, ...state.benchmarks].sort(
@@ -511,10 +543,12 @@ function mergeTranscriptPrefix(
     const entry = source === older ? older[left++] : newer[right++];
     if (entry === undefined) continue;
     // A terminal chat answer carries no turn id and, in replay, folds over its
-    // own still-open streamed turn through `foldChatAnswer`. When the turn's
-    // chunks sit below the history floor and the answer above it, the two
-    // arrive from opposite lists, so reconcile them here as replay would; a
-    // second entry would otherwise survive. Anything else takes the normal step.
+    // own still-open streamed turn through `foldChatAnswer` (which matches the
+    // answer's invocation id, so an abandoned turn's stream is never claimed).
+    // When the turn's chunks sit below the history floor and the answer above
+    // it, the two arrive from opposite lists, so reconcile them here as replay
+    // would; a second entry would otherwise survive. Anything else takes the
+    // normal step.
     if (
       entry.kind === 'assistant' &&
       entry.turnId === undefined &&
@@ -671,6 +705,7 @@ function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder |
   let next: CoreState = {...state, sequence: Math.max(state.sequence, sequence)};
   next = applyDiagnosticEvent(next, event);
   next = applyAgentExecutionEvent(next, event);
+  next = applyAgentStatusEvent(next, event);
   if (event.agent_kind === 'chat') return applyChatEvent(next, event, folder);
   if (event.agent_kind) next.agentKind = event.agent_kind;
   if (event.round_label) next.roundLabel = event.round_label;
@@ -732,6 +767,27 @@ function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder |
       },
     ];
   }
+  // A completed benchmark gate carries the measurement `benchmark_result`
+  // used to, so it feeds the same fold; old journals have only the legacy
+  // kind and new journals only this one (#692).
+  if (
+    data?.kind === 'gate_finished' &&
+    data.gate === 'benchmark' &&
+    event.status !== 'failed' &&
+    data.metric != null &&
+    data.value != null
+  ) {
+    next.benchmarks = [
+      ...next.benchmarks,
+      {
+        sequence,
+        roundNumber: roundNumberFromLabel(event.round_label),
+        metric: data.metric,
+        value: data.value,
+        unit: data.unit ?? data.metric,
+      },
+    ];
+  }
   if (data?.kind === 'experiments_changed') next.experimentsRevision = sequence;
   // The backend owns the run's lifecycle and publishes every move through it,
   // so the projection folds the status it is told rather than inferring one.
@@ -756,6 +812,19 @@ function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder |
   if (event.type === 'run_failed' || event.type === 'run_interrupted') {
     return terminate(next, 'failed');
   }
+  return next;
+}
+
+function cloneCoreState(state: CoreState): CoreState {
+  return Object.create(
+    Object.getPrototypeOf(state),
+    Object.getOwnPropertyDescriptors(state),
+  ) as CoreState;
+}
+
+function cloneCoreStateWith(state: CoreState, patch: Partial<CoreState>): CoreState {
+  const next = cloneCoreState(state);
+  Object.assign(next, patch);
   return next;
 }
 
@@ -858,6 +927,37 @@ function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState 
     return {...state, activeExecutions: remaining};
   }
   return state;
+}
+
+function applyAgentStatusEvent(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  const executionId = event.execution_id;
+  let executionStatuses =
+    Object.keys(state.activeExecutions).length === 0
+      ? state.executionStatuses
+      : reconcileExecutionStatuses(state.executionStatuses, state.activeExecutions);
+  if (data?.kind === 'agent_execution_started') {
+    executionStatuses = reconcileExecutionStatuses(executionStatuses, state.activeExecutions);
+  } else if (data?.kind === 'agent_execution_finished' && executionId != null) {
+    executionStatuses = removeExecutionStatus(executionStatuses, executionId);
+  } else if (
+    event.type === 'run_finished' ||
+    event.type === 'run_failed' ||
+    event.type === 'run_interrupted'
+  ) {
+    executionStatuses = {};
+  } else {
+    executionStatuses = applyExecutionStatus(executionStatuses, event);
+  }
+  const usage = applyExecutionStatusUsage(
+    state.usage,
+    state.executionStatuses,
+    executionStatuses,
+    state.activeExecutions,
+    event,
+  );
+  if (executionStatuses === state.executionStatuses && usage === state.usage) return state;
+  return cloneCoreStateWith(state, {executionStatuses, usage});
 }
 
 function updateTodos(previous: ExecutionTodos[], event: RunEvent): ExecutionTodos[] {
@@ -991,10 +1091,19 @@ function appendChatTranscript(
  * dropped because the turn is over: neither a later chunk nor a later answer
  * may fold into it. Returns false when there is no open streamed turn, in
  * which case the answer appends as its own entry.
+ *
+ * An answer stamped with an invocation id owns exactly the turn that streamed
+ * under that id: a mismatch means the open turn was abandoned (its invocation
+ * failed before a terminal answer was recorded), so the answer appends and
+ * the abandoned turn stays as it streamed. Answers from journals written
+ * before the id existed carry none and keep the last-open-turn fold.
  */
 function foldChatAnswer(entries: TranscriptEntry[], incoming: TranscriptEntry): boolean {
   const last = entries.at(-1);
   if (last === undefined || last.kind !== 'assistant' || last.turnId === undefined) return false;
+  if (incoming.invocationId !== undefined && incoming.invocationId !== last.invocationId) {
+    return false;
+  }
   const {turnId: _closed, ...merged} = {...last, ...incoming, id: last.id};
   entries[entries.length - 1] = merged;
   return true;
@@ -1035,6 +1144,7 @@ function mergeDiagnostic(existing: CoreDiagnostic, incoming: CoreDiagnostic): Co
       diagnosticSeverityRank(incoming.severity) > diagnosticSeverityRank(existing.severity)
         ? incoming.severity
         : existing.severity,
+    source: incoming.source ?? existing.source,
     agentKind: incoming.agentKind ?? existing.agentKind,
     roundLabel: incoming.roundLabel ?? existing.roundLabel,
     invocationId: incoming.invocationId ?? existing.invocationId,
@@ -1101,6 +1211,7 @@ function fromProtocolDiagnostic(event: RunEvent, diagnostic: Diagnostic): CoreDi
     hint: diagnostic.hint ?? null,
     severity: diagnostic.severity ?? 'error',
     scope: diagnostic.scope,
+    source: diagnostic.source ?? null,
     agentKind: event.agent_kind ?? null,
     roundLabel: event.round_label ?? null,
     invocationId: event.invocation_id ?? null,
@@ -1124,6 +1235,7 @@ function fallbackDiagnostic(
     hint: null,
     severity,
     scope,
+    source: null,
     agentKind: event.agent_kind ?? null,
     roundLabel: event.round_label ?? null,
     invocationId: event.invocation_id ?? null,
@@ -1157,6 +1269,11 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
     };
   }
   if (data?.kind === 'chat') {
+    // The invocation id names the turn this answer closes: the same id the
+    // turn's streamed chunks carried. `foldChatAnswer` matches on it so the
+    // answer can never fold over a different turn's abandoned stream. Records
+    // written before the field existed carry none.
+    const invocationId = data.invocation_id ?? undefined;
     return {
       id,
       kind: 'assistant',
@@ -1164,6 +1281,7 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
       label: 'Answer',
       ...agentFields,
       ...roundFields,
+      ...(invocationId === undefined ? {} : {invocationId}),
     };
   }
   if (data?.kind === 'agent_output_chunk') {
@@ -1259,6 +1377,42 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
       ...roundFields,
     };
   }
+  // Framework events (#692) are the framework speaking, whichever agent phase
+  // is active: they never take `agentFields` or `labelFor`'s agent fallback,
+  // so the transcript attributes them to their subsystem, not to an agent.
+  if (data?.kind === 'gate_started') {
+    const recipe = data.recipe == null ? '' : ` ${data.recipe}`;
+    const command = data.command == null ? '' : `: ${data.command}`;
+    return {
+      id,
+      kind: 'status',
+      content: `running${recipe}${command}`,
+      label: frameworkLabel(`framework-${data.gate}`, event),
+      ...roundFields,
+    };
+  }
+  if (data?.kind === 'gate_finished') return gateFinishedEntry(event, data, id, roundFields);
+  if (data?.kind === 'workspace_snapshot') {
+    return {
+      id,
+      kind: 'status',
+      content: workspaceSnapshotContent(data),
+      label: frameworkLabel(frameworkSourceName(data.source, null), event),
+      ...roundFields,
+    };
+  }
+  if (data?.kind === 'run_configured') {
+    return {
+      id,
+      kind: 'status',
+      content: runConfiguredContent(data),
+      label: frameworkLabel(frameworkSourceName(data.source, null), event),
+      ...roundFields,
+    };
+  }
+  // The warning rides the envelope's `diagnostic`, which `applyDiagnosticEvent`
+  // has already folded into `diagnostics`; it is not transcript prose.
+  if (data?.kind === 'framework_warning') return null;
   if (data?.kind === 'round_finished') {
     const tone =
       data.judge_verdict === 'pass'
@@ -1318,6 +1472,120 @@ function outputKind(channel: string): TranscriptEntry['kind'] {
 function labelFor(event: RunEvent, fallback: string): string {
   const phase = event.agent_kind ?? fallback;
   return event.round_label ? `${phase} · ${event.round_label}` : phase;
+}
+
+type GateFinishedData = Extract<RunEventData, {kind?: 'gate_finished'}>;
+type WorkspaceSnapshotData = Extract<RunEventData, {kind?: 'workspace_snapshot'}>;
+type RunConfiguredData = Extract<RunEventData, {kind?: 'run_configured'}>;
+/** The generated closed set of framework subsystems, never a local copy. */
+type FrameworkSource = NonNullable<GateFinishedData['source']>;
+
+type RoundFields = Partial<Pick<TranscriptEntry, 'roundLabel' | 'roundNumber'>>;
+
+/**
+ * The transcript name of a framework subsystem. Exhaustive over the protocol's
+ * closed source set, so a new subsystem is a compile error, with `source_label`
+ * as the escape hatch the `other` member carries.
+ */
+function frameworkSourceName(
+  source: FrameworkSource | undefined,
+  sourceLabel: string | null | undefined,
+): string {
+  switch (source) {
+    case 'git_tracking':
+      return 'git-tracking';
+    case 'gpu':
+      return 'gpu';
+    case 'skypilot':
+      return 'skypilot';
+    case 'other':
+      return sourceLabel ?? 'framework';
+    case 'gates':
+    case 'loop':
+    case undefined:
+      return 'framework';
+    default: {
+      const unhandled: never = source;
+      return unhandled;
+    }
+  }
+}
+
+/** `labelFor`'s round suffix without its agent fallback: framework, not agent. */
+function frameworkLabel(base: string, event: RunEvent): string {
+  return event.round_label ? `${base} · ${event.round_label}` : base;
+}
+
+/**
+ * A gate outcome; the envelope's `status` carries pass or fail. A completed
+ * benchmark measurement keeps rendering as the Benchmark result card
+ * `benchmark_result` produced, so the card survives that event's retirement.
+ */
+function gateFinishedEntry(
+  event: RunEvent,
+  data: GateFinishedData,
+  id: string,
+  roundFields: RoundFields,
+): TranscriptEntry {
+  const label = frameworkLabel(`framework-${data.gate}`, event);
+  if (event.status === 'failed') {
+    const heading = data.recipe == null ? 'FAIL' : `FAIL: ${data.recipe}`;
+    return {
+      id,
+      kind: 'diagnostic',
+      content: data.output_tail ? `${heading}\n${data.output_tail}` : heading,
+      label,
+      tone: 'failure',
+      ...roundFields,
+    };
+  }
+  const measurement =
+    data.metric != null && data.value != null
+      ? `${data.metric}: ${data.value} ${data.unit ?? data.metric}`
+      : null;
+  if (data.gate === 'benchmark' && measurement !== null && data.reused !== true) {
+    return {
+      id,
+      kind: 'result',
+      content: measurement,
+      label: 'Benchmark',
+      tone: 'success',
+      ...roundFields,
+    };
+  }
+  const passed = data.reused === true ? 'reused PASS' : 'PASS';
+  const detail = data.recipe ?? measurement;
+  return {
+    id,
+    kind: 'status',
+    content: detail === null ? passed : `${passed}: ${detail}`,
+    label,
+    tone: 'success',
+    ...roundFields,
+  };
+}
+
+/** Exactly one aspect is populated per event; see `WorkspaceSnapshotData`. */
+function workspaceSnapshotContent(data: WorkspaceSnapshotData): string {
+  if (data.baseline != null) return `trusted input baseline: ${shortCommit(data.baseline)}`;
+  const excluded = data.excluded_paths ?? [];
+  if (excluded.length > 0) {
+    return `excluded ${excluded.length} path${excluded.length === 1 ? '' : 's'} from snapshots`;
+  }
+  if (data.commit == null) return `no changes to commit for '${data.label ?? ''}'`;
+  return `snapshot '${data.label ?? ''}' at ${shortCommit(data.commit)}`;
+}
+
+function shortCommit(commit: string): string {
+  return commit.slice(0, 7);
+}
+
+function runConfiguredContent(data: RunConfiguredData): string {
+  const lines: string[] = [];
+  if (data.objective) lines.push(`objective: ${data.objective}`);
+  if (data.model) lines.push(`model: ${data.model}`);
+  if (data.search_policy) lines.push(`search policy: ${data.search_policy}`);
+  return lines.length > 0 ? lines.join('\n') : 'run configured';
 }
 
 /**

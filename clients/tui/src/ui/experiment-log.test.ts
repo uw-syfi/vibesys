@@ -26,6 +26,7 @@ import {
   selectionCaret,
   sentenceCase,
 } from './experiment-log.js';
+import {displayWidth} from './text-width.js';
 import {resolveTheme, THEME_NAMES} from './theme.js';
 
 const WIDE = 120;
@@ -347,6 +348,48 @@ describe('experiment log rows', () => {
   });
 });
 
+/**
+ * Column arithmetic in cells, not code units: a CJK character is one code
+ * unit but two terminal cells, so `padEnd`/`slice` layouts drift as soon as a
+ * title or id carries one.
+ */
+describe('experiment log CJK column alignment', () => {
+  function columnOf(row: string, needle: string): number {
+    const index = row.indexOf(needle);
+    expect(index, `${needle} in ${row}`).toBeGreaterThanOrEqual(0);
+    return displayWidth(row.slice(0, index));
+  }
+
+  it('keeps the outcome column aligned when the claim is CJK', () => {
+    const columns = resolveColumns(WIDE);
+    const ascii = entryRow(entry(), columns);
+    const cjk = entryRow(entry({title: '缓存优化提升吞吐'}), columns);
+
+    expect(displayWidth(cjk)).toBe(displayWidth(ascii));
+    expect(columnOf(cjk, 'Accepted')).toBe(columnOf(ascii, 'Accepted'));
+  });
+
+  it('truncates a CJK claim by cells and never splits a wide character', () => {
+    const columns = resolveColumns(WIDE);
+    const cells = entryCells(entry({title: '性'.repeat(60)}), columns);
+
+    // The claim budget is odd here, so the last ideograph would straddle it:
+    // it is dropped whole and the ellipsis marks the cut.
+    expect(cells.leading).toContain(`${'性'.repeat(25)}…`);
+    expect(cells.leading).not.toContain('性'.repeat(26));
+    expect(displayWidth(cells.leading)).toBe(displayWidth(entryCells(entry(), columns).leading));
+  });
+
+  it('truncates a CJK hypothesis id by cells so the rounds column stays put', () => {
+    const columns = resolveColumns(WIDE);
+    const ascii = entryRow(entry(), columns);
+    const cjk = entryRow(entry({hypothesis_id: '缓存优化假设编号很长'}), columns);
+
+    expect(cjk).toContain('缓存优化假设…');
+    expect(columnOf(cjk, '41')).toBe(columnOf(ascii, '41'));
+  });
+});
+
 describe('selectionCaret', () => {
   it('renders a caret for the selected row and a matching blank otherwise', () => {
     expect(selectionCaret(true)).toBe('›');
@@ -549,6 +592,32 @@ describe('experiment log rendered selection glyph', () => {
     expect(h02Selected[rowH02AfterMove]?.indexOf('H-02')).toBe(colH02);
     expect(h02Selected[rowH01AfterMove]?.[colH01 - 2]).toBe(' ');
     expect(h02Selected[rowH02AfterMove]?.[colH02 - 2]).toBe('›');
+  });
+
+  it('keeps the outcome column aligned on screen when a claim is CJK', async () => {
+    const frame = (
+      await renderLog(
+        logState([
+          entry({hypothesis_id: 'H-01', first_round: 1, last_round: 1}),
+          entry({hypothesis_id: 'H-02', first_round: 2, last_round: 2, title: '缓存优化提升吞吐'}),
+        ]),
+      )
+    ).split('\n');
+    const asciiRow = frame.find(line => line.includes('H-01'));
+    const cjkRow = frame.find(line => line.includes('H-02'));
+    expect(asciiRow).toBeDefined();
+    expect(cjkRow).toBeDefined();
+    if (asciiRow === undefined || cjkRow === undefined) throw new Error('rows did not render');
+
+    // The frame stores a wide character once per grapheme, so the on-screen
+    // column of a cell is the display width of everything before it, not its
+    // string index.
+    const columnOf = (line: string, needle: string): number => {
+      const index = line.indexOf(needle);
+      expect(index, `${needle} in ${line}`).toBeGreaterThanOrEqual(0);
+      return displayWidth(line.slice(0, index));
+    };
+    expect(columnOf(cjkRow, 'Accepted')).toBe(columnOf(asciiRow, 'Accepted'));
   });
 
   it('marks the selected unowned round row with the same caret, in its own reserved column', async () => {

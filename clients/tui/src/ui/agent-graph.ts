@@ -382,7 +382,7 @@ function edgeTone(source: AgentPhase, target: AgentPhase): EdgeTone {
     source.status === 'interrupted'
   )
     return 'failed';
-  if (source.status === 'active' || (source.status === 'completed' && target.status === 'active')) {
+  if (source.status === 'completed' && target.status === 'active') {
     return 'live';
   }
   if (source.status === 'completed' && target.status !== 'pending') return 'done';

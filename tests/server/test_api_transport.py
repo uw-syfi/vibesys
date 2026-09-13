@@ -14,6 +14,7 @@ from server.api.protocol import (
     SnapshotQuery,
     SubscribeRequest,
 )
+from server.chat.manager import ChatAnswer
 from server.events import EventType
 from server.transport.unix_jsonl import UnixJsonlServer
 from vibesys.unix_socket import (
@@ -36,7 +37,9 @@ def test_api_routes_chat_to_configured_handler(tmp_path):  # noqa: ANN001, ANN20
     parts = build_server_parts(tmp_path)
     questions: list[str] = []
     parts.chat.install_default_handler(
-        lambda question: questions.append(question) or "agent answer"
+        lambda question: (
+            questions.append(question) or ChatAnswer(text="agent answer", invocation_id="exec-1")
+        )
     )
 
     response = parts.api.execute(ChatQuery(text="what changed?"))
@@ -78,7 +81,7 @@ def test_transport_supports_multiple_clients_and_replay(tmp_path):  # noqa: ANN0
 def test_transport_returns_sanitized_request_errors(tmp_path):  # noqa: ANN001, ANN201
     parts = build_server_parts(tmp_path / "logs")
 
-    def fail_chat(question: str) -> str:
+    def fail_chat(question: str) -> ChatAnswer:
         raise RuntimeError(  # noqa: TRY003
             f"token=super-secret Chat agent failed while answering: {question}"
         )
@@ -128,8 +131,10 @@ def test_subscription_reports_structured_stream_failure(
     parts = build_server_parts(tmp_path / "logs")
     socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"  # noqa: S108
 
-    def fail_replay(after_sequence: int, *, bootstrap_spine: bool = False):  # noqa: ANN202
-        del after_sequence, bootstrap_spine
+    def fail_replay(  # noqa: ANN202
+        after_sequence: int, *, store_id: str | None = None, bootstrap_spine: bool = False
+    ):
+        del after_sequence, store_id, bootstrap_spine
         raise RuntimeError("event store is unavailable")  # noqa: TRY003
 
     monkeypatch.setattr(parts.api, "subscription_checkpoint", fail_replay)

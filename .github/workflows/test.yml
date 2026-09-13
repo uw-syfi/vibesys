@@ -3,15 +3,8 @@ name: Tests
 on:
   push:
     branches: [main]
-    # Skip CI for changes that can't affect backend correctness:
-    # pure-documentation changes and the Docusaurus site (checked separately
-    # by website.yml). Root-level Markdown, docs/, website/, and the website
-    # workflow itself are ignored by exact name, not `.github/workflows/**`,
-    # so edits to this workflow (or publish.yml) still run the full matrix.
-    # Markdown under resources/skills/ and test fixtures is consumed by
-    # prompt/skill snapshot tests, so it is deliberately not listed here. A
-    # change touching any non-ignored file still runs the full matrix
-    # (paths-ignore skips only when every changed file matches).
+    # Post-merge CI can still skip pure documentation and website changes.
+    # Pull-request CI always runs below so Required PR CI is always reported.
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -19,11 +12,6 @@ on:
       - '.github/workflows/website.yml'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '*.md'
-      - 'docs/**'
-      - 'website/**'
-      - '.github/workflows/website.yml'
 
 env:
   # Wall-clock budget for a whole run, enforced as a warning by `ci-budget`
@@ -32,10 +20,9 @@ env:
   CI_WALL_TIME_BUDGET_SECONDS: '300'
 
 jobs:
-  # The workflow-level `paths-ignore` above already skips everything for
-  # docs-only changes. This job covers the case it deliberately cannot express:
-  # which *parts* of the tree a non-doc change can affect. It is the only place
-  # that decides, so a new job opts in by reading one of these outputs.
+  # This job decides which parts of the tree a change can affect. The workflow
+  # itself always runs so Required PR CI is always reported; expensive jobs opt
+  # in by reading these outputs and can skip for documentation-only changes.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -65,6 +52,8 @@ jobs:
               - 'libs/**'
               - 'sdk/**'
               - 'scripts/**'
+              - '.github/delegated-merge.toml'
+              - '.github/workflows/delegated-merge.yml'
               - 'examples/**'
               - 'resources/**'
               - '*.py'
@@ -173,10 +162,10 @@ jobs:
       - name: Test repository launcher
         run: uv run vibesys --headless --help >/dev/null
 
-  # Fully independent: no `needs:`, so it starts with the run rather than after
-  # the filter, and nothing waits on it. Type checking is not sequenced with
-  # anything else, and at ~20s it is not worth a filter's latency.
+  # Python type checking is unnecessary when the Python watch set is untouched.
   typecheck:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -496,10 +485,14 @@ jobs:
           VIBESYS_E2E_DOCKER: "1"
         run: uv run pytest tests/e2e/test_agent_image_e2e.py -v -s --no-cov
 
-  # Deliberately unfiltered: several tests read clients/ directly (packaging,
-  # theme, and distribution tests), so a TypeScript-only change still needs
-  # this job.
+  # Several tests read clients/ directly (packaging, theme, and distribution
+  # tests), so a TypeScript-only change still needs this job. Documentation-only
+  # changes do not.
   test:
+    needs: changes
+    if: >-
+      needs.changes.outputs.python == 'true' ||
+      needs.changes.outputs.tui == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -564,6 +557,8 @@ jobs:
   # forces the tests to run — VIBESYS_REQUIRE_SANDBOX_TESTS=1 turns a missing or
   # broken sandbox into a failure instead of a silent skip.
   sandbox-linux:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -607,6 +602,8 @@ jobs:
   # step is needed; VIBESYS_REQUIRE_SANDBOX_TESTS=1 forces the Seatbelt test to
   # run (and fail loudly) rather than skip.
   sandbox-macos:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: macos-latest
 
     steps:
@@ -629,16 +626,70 @@ jobs:
           VIBESYS_REQUIRE_SANDBOX_TESTS: "1"
         run: uv run python -m pytest tests/vibesys/agents/test_hostsandbox.py -v
 
+  # One stable, always-present result for branch protection and delegated merge
+  # policy. Filtered jobs may skip, but every job that ran must succeed. Keep
+  # this independent of ci-budget, which is intentionally advisory.
+  required-pr-ci:
+    name: Required PR CI
+    needs:
+      - changes
+      - python-checks
+      - typecheck
+      - tui
+      - queue-native
+      - validate-examples
+      - agent-image
+      - test
+      - sandbox-linux
+      - sandbox-macos
+    if: always()
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Require every applicable test job to succeed
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          results = {
+              name: details["result"]
+              for name, details in json.loads(os.environ["JOB_RESULTS"]).items()
+          }
+          failed = {name: result for name, result in results.items() if result not in {"success", "skipped"}}
+          if failed:
+              raise SystemExit(f"Required test jobs did not succeed: {failed}")
+          PY
+
+  # Temporary branch-protection compatibility alias. Remove this after main
+  # requires Required PR CI instead of Scoped merge gate.
+  scoped-merge-gate:
+    name: Scoped merge gate
+    needs: required-pr-ci
+    if: always()
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Mirror Required PR CI
+        env:
+          REQUIRED_PR_CI_RESULT: ${{ needs.required-pr-ci.result }}
+        run: |
+          if [[ "$REQUIRED_PR_CI_RESULT" != "success" ]]; then
+            echo "Required PR CI did not succeed: $REQUIRED_PR_CI_RESULT" >&2
+            exit 1
+          fi
+
   # Reports the run's wall time against CI_WALL_TIME_BUDGET_SECONDS (issue
   # #474). Warns rather than fails: a green run that is merely slow should still
   # be mergeable, and macOS runner queueing can push a run over the budget for
   # reasons no workflow change can fix, so the summary reports queue time
   # separately from execution time.
   #
-  # `typecheck` is deliberately absent from `needs` so that nothing in this
-  # workflow sequences it. It still appears in the table: the step reads every
-  # job of the run from the API, not just the ones listed here, and at ~20s it
-  # has long finished by the time the jobs below have.
+  # `typecheck` is deliberately absent from `needs`; Required PR CI owns that
+  # dependency. It still appears in the table because this step reads every job
+  # of the run from the API, not just the ones listed here.
   ci-budget:
     needs:
       - changes

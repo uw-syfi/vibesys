@@ -13,6 +13,7 @@ import {
   reduceEventRebootstrap,
   reduceSnapshot,
 } from './core-state.js';
+import {executionStatusFor} from './execution-status.js';
 
 describe('core state projection', () => {
   it('projects snapshots without changing event-derived history', () => {
@@ -222,6 +223,171 @@ describe('core state projection', () => {
     });
   });
 
+  it('tracks structured output and tool status independently per execution', () => {
+    let state = initialCoreState();
+    state = reduceEvent(
+      state,
+      executionEvent(1, 'agent_execution_started', 'first', startedData('First')),
+    );
+    state = reduceEvent(
+      state,
+      executionEvent(2, 'agent_execution_started', 'second', startedData('Second')),
+    );
+    state = reduceEvent(
+      state,
+      statusEvent(3, 'first', 'agent_output_chunk', {
+        progress: 'Round 1/3',
+        agent_label: 'Implementer',
+        elapsed_seconds: 12.5,
+        input_tokens: 8_000,
+        context_window: 200_000,
+      }),
+    );
+    state = reduceEvent(
+      state,
+      statusEvent(4, 'second', 'tool_call', {
+        progress: 'Reviewing',
+        agent_label: 'Judge',
+        elapsed_seconds: 3,
+        input_tokens: 2_000,
+        context_window: 100_000,
+      }),
+    );
+
+    expect(state.executionStatuses).toEqual({
+      first: {
+        executionId: 'first',
+        sequence: 3,
+        observedAt: '2026-01-01T00:00:03Z',
+        progress: 'Round 1/3',
+        agentLabel: 'Implementer',
+        elapsedSeconds: 12.5,
+        inputTokens: 8_000,
+        contextWindow: 200_000,
+      },
+      second: {
+        executionId: 'second',
+        sequence: 4,
+        observedAt: '2026-01-01T00:00:04Z',
+        progress: 'Reviewing',
+        agentLabel: 'Judge',
+        elapsedSeconds: 3,
+        inputTokens: 2_000,
+        contextWindow: 100_000,
+      },
+    });
+    expect(state.usage).toEqual({inputTokens: 2_000, contextWindow: 100_000, model: null});
+
+    state = reduceEvent(
+      state,
+      statusEvent(5, 'first', 'agent_output_chunk', {input_tokens: 9_000}),
+    );
+    expect(state.executionStatuses['first']).toMatchObject({
+      sequence: 5,
+      inputTokens: 9_000,
+      contextWindow: 200_000,
+    });
+    expect(state.usage).toEqual({inputTokens: 9_000, contextWindow: 200_000, model: null});
+  });
+
+  it('treats a zero input-token status as no update, keeping the live reading', () => {
+    let state = reduceEvent(
+      initialCoreState(),
+      executionEvent(1, 'agent_execution_started', 'first', startedData('First')),
+    );
+    state = reduceEvent(
+      state,
+      statusEvent(2, 'first', 'agent_output_chunk', {input_tokens: 8_000, context_window: 200_000}),
+    );
+    expect(state.usage).toEqual({inputTokens: 8_000, contextWindow: 200_000, model: null});
+
+    // The backend seeds input_tokens at 0 and emits that before the agent's
+    // next completion; a 0 must not overwrite the live count or blank the meter.
+    state = reduceEvent(state, statusEvent(3, 'first', 'agent_output_chunk', {input_tokens: 0}));
+    expect(state.executionStatuses['first']).toMatchObject({sequence: 3, inputTokens: 8_000});
+    expect(state.usage).toEqual({inputTokens: 8_000, contextWindow: 200_000, model: null});
+  });
+
+  it('reconciles status through checkpoints and clears only the execution that finishes', () => {
+    let state = reduceEvent(initialCoreState(), statusEvent(1, 'first', 'agent_output_chunk'));
+    state = reduceEvent(state, statusEvent(2, 'second', 'tool_call'));
+    state = reconcileActiveExecutions(state, [checkpoint('first'), checkpoint('second')], 2);
+
+    expect(Object.keys(state.executionStatuses)).toEqual(['first', 'second']);
+
+    state = reduceEvent(
+      state,
+      executionEvent(3, 'agent_execution_finished', 'first', {
+        kind: 'agent_execution_finished',
+        error: null,
+      }),
+    );
+    expect(Object.keys(state.executionStatuses)).toEqual(['second']);
+
+    state = reconcileActiveExecutions(
+      state,
+      [checkpoint('second', {started_at: '2026-01-01T00:00:05Z'})],
+      3,
+    );
+    const restarted = state.activeExecutions['second'];
+    if (restarted === undefined) throw new Error('checkpoint dropped its active execution');
+    expect(executionStatusFor(state.executionStatuses, restarted)).toBeUndefined();
+
+    state = reduceEvent(state, outputEvent(4, 'legacy after checkpoint', 'second'));
+    expect(state.executionStatuses).toEqual({});
+  });
+
+  it('leaves legacy output without structured status unchanged', () => {
+    const started = reduceEvent(
+      initialCoreState(),
+      executionEvent(1, 'agent_execution_started', 'first', startedData('First')),
+    );
+    const projected = reduceEvent(started, outputEvent(2, 'legacy', 'first'));
+
+    expect(projected.executionStatuses).toBe(started.executionStatuses);
+    expect(projected.usage).toBeNull();
+  });
+
+  it('advances repeated unsequenced status without replacing sequenced status', () => {
+    let state = reduceEvent(initialCoreState(), statusEvent(0, 'first', 'agent_output_chunk'));
+    state = reduceEvent(
+      state,
+      statusEvent(0, 'first', 'tool_call', {progress: 'second unsequenced'}),
+    );
+    expect(state.executionStatuses['first']?.progress).toBe('second unsequenced');
+
+    state = reduceEvent(
+      state,
+      statusEvent(2, 'first', 'agent_output_chunk', {
+        progress: 'sequenced',
+        input_tokens: 7_000,
+        context_window: 20_000,
+      }),
+    );
+    state = reduceEvent(
+      state,
+      statusEvent(0, 'first', 'agent_output_chunk', {
+        progress: 'stale unsequenced',
+        input_tokens: 1,
+        context_window: 2,
+      }),
+    );
+    expect(state.executionStatuses['first']?.progress).toBe('sequenced');
+    expect(state.executionStatuses['first']?.sequence).toBe(2);
+    expect(state.usage).toEqual({inputTokens: 7_000, contextWindow: 20_000, model: null});
+  });
+
+  it('clears pending status when the run terminates before a checkpoint arrives', () => {
+    const pending = reduceEvent(initialCoreState(), statusEvent(1, 'first', 'agent_output_chunk'));
+    const ended = reduceEvent(pending, {
+      ...baseEvent(2, 'run_failed'),
+      agent_kind: null,
+      round_label: null,
+    });
+
+    expect(ended.executionStatuses).toEqual({});
+  });
+
   it('captures runtime identity from agent_execution_started when present', () => {
     const state = reduceEvent(
       initialCoreState(),
@@ -419,6 +585,40 @@ describe('core state projection', () => {
       content: 'The queue is lock-free.',
     });
     expect(state.chatTranscript[0]?.turnId).toBeUndefined();
+  });
+
+  it('folds a stamped answer over the turn that streamed under the same invocation', () => {
+    let state = initialCoreState();
+    state = reduceEvent(state, chatStreamEvent(1, 'The queue ', 'exec-1'));
+    state = reduceEvent(state, chatStreamEvent(2, 'is lock-free.', 'exec-1'));
+    state = reduceEvent(state, chatAnswerEvent(3, 'The queue is lock-free.', undefined, 'exec-1'));
+
+    expect(state.chatTranscript).toHaveLength(1);
+    expect(state.chatTranscript[0]).toMatchObject({id: '1', content: 'The queue is lock-free.'});
+    expect(state.chatTranscript[0]?.turnId).toBeUndefined();
+  });
+
+  it('never folds an answer over a turn another invocation abandoned', () => {
+    const events = [
+      chatStreamEvent(1, 'partial ', 'exec-1'),
+      chatStreamEvent(2, 'answer', 'exec-1'),
+      // exec-1 failed before recording a terminal answer; the next question's
+      // answer arrives stamped with its own invocation.
+      chatAnswerEvent(3, 'later answer', undefined, 'exec-2'),
+    ];
+    const batched = reduceEventBatch(initialCoreState(), events);
+    let single = initialCoreState();
+    for (const item of events) single = reduceEvent(single, item);
+
+    // The abandoned turn keeps its partial stream; the unrelated answer
+    // appends instead of rewriting it in place.
+    for (const state of [batched, single]) {
+      expect(state.chatTranscript.map(entry => [entry.id, entry.content])).toEqual([
+        ['1', 'partial answer'],
+        ['3', 'later answer'],
+      ]);
+      expect(state.chatTranscript[0]?.turnId).toBe('exec-1');
+    }
   });
 
   it('reconciles each chat turn separately and appends unstreamed answers', () => {
@@ -946,6 +1146,247 @@ describe('the carried-forward profile flag', () => {
   });
 });
 
+describe('typed framework events', () => {
+  it('renders a gate start as the gate running its command', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      frameworkEvent(
+        1,
+        'gate_started',
+        {
+          kind: 'gate_started',
+          gate: 'validation',
+          recipe: 'focused-tests',
+          command: 'uv run pytest -q',
+        },
+        {status: 'active'},
+      ),
+    );
+
+    expect(state.transcript).toMatchObject([
+      {
+        kind: 'status',
+        content: 'running focused-tests: uv run pytest -q',
+        label: 'framework-validation · round-1',
+        roundLabel: 'round-1',
+        roundNumber: 1,
+      },
+    ]);
+  });
+
+  // The framework speaks for itself even while an agent phase is active, and
+  // even if an envelope arrived with agent context stamped on it: routing
+  // these labels through `labelFor` would render this one as `judge · round-1`.
+  it('never attributes a framework event to the active agent', () => {
+    let state = reduceEvent(
+      initialCoreState(),
+      executionEvent(1, 'agent_execution_started', 'exec-judge', startedData('Review the diff')),
+    );
+    state = reduceEvent(state, {
+      ...frameworkEvent(
+        2,
+        'gate_started',
+        {kind: 'gate_started', gate: 'validation', recipe: 'focused-tests'},
+        {status: 'active'},
+      ),
+      agent_kind: 'judge',
+    });
+
+    const entry = state.transcript.at(-1);
+    expect(entry?.label).toBe('framework-validation · round-1');
+    expect(entry?.agentKind).toBeUndefined();
+  });
+
+  it('renders gate outcomes: pass, reused pass, and bare pass', () => {
+    const pass = reduceEvent(
+      initialCoreState(),
+      frameworkEvent(
+        1,
+        'gate_finished',
+        {kind: 'gate_finished', gate: 'validation', recipe: 'focused-tests'},
+        {status: 'completed'},
+      ),
+    );
+    const reused = reduceEvent(
+      initialCoreState(),
+      frameworkEvent(
+        1,
+        'gate_finished',
+        {kind: 'gate_finished', gate: 'validation', recipe: 'lint', reused: true},
+        {status: 'completed'},
+      ),
+    );
+    const bare = reduceEvent(
+      initialCoreState(),
+      frameworkEvent(
+        1,
+        'gate_finished',
+        {kind: 'gate_finished', gate: 'accuracy'},
+        {status: 'completed'},
+      ),
+    );
+
+    expect(pass.transcript[0]).toMatchObject({
+      kind: 'status',
+      content: 'PASS: focused-tests',
+      label: 'framework-validation · round-1',
+      tone: 'success',
+    });
+    expect(reused.transcript[0]).toMatchObject({content: 'reused PASS: lint', tone: 'success'});
+    expect(bare.transcript[0]).toMatchObject({
+      content: 'PASS',
+      label: 'framework-accuracy · round-1',
+    });
+  });
+
+  it('renders a failed gate as a diagnostic card carrying the output tail', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      frameworkEvent(
+        1,
+        'gate_finished',
+        {kind: 'gate_finished', gate: 'accuracy', output_tail: 'assert 3 == 4\n1 failed'},
+        {status: 'failed'},
+      ),
+    );
+
+    expect(state.transcript).toMatchObject([
+      {
+        kind: 'diagnostic',
+        content: 'FAIL\nassert 3 == 4\n1 failed',
+        label: 'framework-accuracy · round-1',
+        tone: 'failure',
+      },
+    ]);
+  });
+
+  it('renders a completed benchmark gate as the Benchmark card and folds the measurement', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      frameworkEvent(
+        7,
+        'gate_finished',
+        {
+          kind: 'gate_finished',
+          gate: 'benchmark',
+          metric: 'tok_per_sec',
+          value: 42.5,
+          unit: 'tok/s',
+        },
+        {status: 'completed'},
+      ),
+    );
+
+    expect(state.transcript).toMatchObject([
+      {kind: 'result', content: 'tok_per_sec: 42.5 tok/s', label: 'Benchmark', tone: 'success'},
+    ]);
+    expect(state.benchmarks).toEqual([
+      {sequence: 7, roundNumber: 1, metric: 'tok_per_sec', value: 42.5, unit: 'tok/s'},
+    ]);
+  });
+
+  it('describes each workspace snapshot aspect', () => {
+    type Snapshot = Extract<NonNullable<RunEvent['data']>, {kind?: 'workspace_snapshot'}>;
+    const aspects: Partial<Snapshot>[] = [
+      {label: 'round-1-implementer', commit: '3e7d0a1b2c4d5e6f708192a3b4c5d6e7f8091a2b'},
+      {label: 'round-2-implementer', commit: null},
+      {baseline: '9f2c1d4e6a7b8091a2b3c4d5e6f7a8b9c0d1e2f3'},
+      {excluded_paths: ['logs/', 'artifacts/']},
+    ];
+    const contents = aspects.map(aspect => {
+      const state = reduceEvent(
+        initialCoreState(),
+        frameworkEvent(
+          1,
+          'workspace_snapshot',
+          {kind: 'workspace_snapshot', source: 'git_tracking', ...aspect},
+          {round_label: null},
+        ),
+      );
+      return state.transcript[0];
+    });
+
+    expect(contents).toMatchObject([
+      {kind: 'status', content: "snapshot 'round-1-implementer' at 3e7d0a1", label: 'git-tracking'},
+      {content: "no changes to commit for 'round-2-implementer'", label: 'git-tracking'},
+      {content: 'trusted input baseline: 9f2c1d4', label: 'git-tracking'},
+      {content: 'excluded 2 paths from snapshots', label: 'git-tracking'},
+    ]);
+  });
+
+  it('summarizes the run configuration once', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      frameworkEvent(
+        1,
+        'run_configured',
+        {
+          kind: 'run_configured',
+          run_log_path: 'logs/run',
+          project_root: '/work/project',
+          model: 'claude-sonnet-4-5',
+          objective: 'Raise decode throughput',
+          search_policy: 'beam',
+          source: 'loop',
+        },
+        {round_label: null},
+      ),
+    );
+
+    expect(state.transcript).toMatchObject([
+      {
+        kind: 'status',
+        content:
+          'objective: Raise decode throughput\nmodel: claude-sonnet-4-5\nsearch policy: beam',
+        label: 'framework',
+      },
+    ]);
+  });
+
+  it('folds a framework warning into diagnostics, not the transcript', () => {
+    const state = reduceEvent(initialCoreState(), frameworkWarningEvent(3));
+
+    expect(state.transcript).toEqual([]);
+    expect(state.diagnostics).toMatchObject([
+      {id: 'warn-1', summary: 'profiler failed', severity: 'warning', source: 'loop', sequence: 3},
+    ]);
+  });
+
+  it('projects a framework batch with no entry from the warning', () => {
+    const state = reduceEventBatch(initialCoreState(), [
+      frameworkEvent(
+        1,
+        'run_configured',
+        {kind: 'run_configured', run_log_path: 'logs/run', project_root: '/work', source: 'loop'},
+        {round_label: null},
+      ),
+      frameworkEvent(
+        2,
+        'gate_started',
+        {kind: 'gate_started', gate: 'benchmark', command: 'uv run python bench.py'},
+        {status: 'active'},
+      ),
+      frameworkEvent(
+        3,
+        'gate_finished',
+        {kind: 'gate_finished', gate: 'benchmark', metric: 'ops', value: 9, unit: 'ops/s'},
+        {status: 'completed'},
+      ),
+      frameworkWarningEvent(4),
+      frameworkEvent(5, 'workspace_snapshot', {
+        kind: 'workspace_snapshot',
+        label: 'round-1',
+        commit: 'abcdef0123456789',
+        source: 'git_tracking',
+      }),
+    ]);
+
+    expect(state.transcript).toHaveLength(4);
+    expect(state.transcript.every(entry => entry.content.length > 0)).toBe(true);
+    expect(state.transcript.every(entry => entry.agentKind === undefined)).toBe(true);
+  });
+});
+
 /** One stream touching every transcript merge rule, plus both chat threads. */
 function mixedTranscriptEvents(): RunEvent[] {
   return [
@@ -1014,13 +1455,22 @@ function baseEvent(sequence: number, type: RunEvent['type']): RunEvent {
   };
 }
 
-function chatAnswerEvent(sequence: number, answer: string, threadId?: string): RunEvent {
+function chatAnswerEvent(
+  sequence: number,
+  answer: string,
+  threadId?: string,
+  invocationId?: string,
+): RunEvent {
   return {
     ...baseEvent(sequence, 'chat'),
     agent_kind: 'chat',
     round_label: 'experiment-chat',
     ...(threadId === undefined ? {} : {chat_thread_id: threadId}),
-    data: {kind: 'chat', answer},
+    data: {
+      kind: 'chat',
+      answer,
+      ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
+    },
   };
 }
 
@@ -1091,6 +1541,29 @@ function executionEvent(
   return {...baseEvent(sequence, type), execution_id: executionId, data};
 }
 
+function statusEvent(
+  sequence: number,
+  executionId: string,
+  kind: 'agent_output_chunk' | 'tool_call',
+  status: {
+    progress?: string;
+    agent_label?: string;
+    elapsed_seconds?: number;
+    input_tokens?: number;
+    context_window?: number;
+  } = {progress: `step ${sequence}`},
+): RunEvent {
+  return {
+    ...baseEvent(sequence, kind),
+    execution_id: executionId,
+    invocation_id: executionId,
+    data:
+      kind === 'agent_output_chunk'
+        ? {kind, channel: 'analysis', content: '', status}
+        : {kind, tool: 'Bash', call_id: `call-${sequence}`, args: {}, status},
+  };
+}
+
 function startedData(assignment: string): NonNullable<RunEvent['data']> {
   return {
     kind: 'agent_execution_started',
@@ -1151,6 +1624,52 @@ function todoEvent(sequence: number, executionId: string, content: string): RunE
     execution_id: executionId,
     data: {kind: 'todo_update', todos: [{content, status: 'in_progress'}]},
   };
+}
+
+/** A #692 framework event: `agent_kind` null on the wire, round context only. */
+function frameworkEvent(
+  sequence: number,
+  type: RunEvent['type'],
+  data: NonNullable<RunEvent['data']>,
+  overrides: Partial<RunEvent> = {},
+): RunEvent {
+  return {
+    sequence,
+    timestamp: `2026-01-01T00:00:0${sequence}Z`,
+    type,
+    agent_kind: null,
+    round_label: 'round-1',
+    ...overrides,
+    data,
+  };
+}
+
+function frameworkWarningEvent(sequence: number): RunEvent {
+  return frameworkEvent(
+    sequence,
+    'framework_warning',
+    {
+      kind: 'framework_warning',
+      summary: 'profiler failed',
+      detail: 'nsys exited 1',
+      source: 'loop',
+    },
+    {
+      diagnostic: {
+        id: 'warn-1',
+        code: 'framework_warning',
+        summary: 'profiler failed',
+        detail: 'nsys exited 1',
+        hint: null,
+        scope: 'run',
+        severity: 'warning',
+        retryability: 'unknown',
+        cause_id: null,
+        debug_ref: null,
+        source: 'loop',
+      },
+    },
+  );
 }
 
 function diagnosticEvent(

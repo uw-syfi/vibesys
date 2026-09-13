@@ -36,6 +36,33 @@ describe('renderPerformanceCurve', () => {
     expect(renderPerformanceCurve([])).toBe('No performance data yet.');
   });
 
+  it('plots completed benchmark gate events (#692)', () => {
+    const chart = renderPerformanceCurve(
+      [],
+      [benchmarkGate(1, 1, 1000), benchmarkGate(2, 2, 2000), benchmarkGate(3, 3, 1500)],
+    );
+
+    expect(chart).toContain('Performance · total_ops_per_sec');
+    expect(chart).toContain('best r2 2k ops/s');
+    expect(chart).toContain('latest r3 1.5k ops/s');
+    expect(chart.match(/●/g)).toHaveLength(3);
+  });
+
+  it('counts a round once when both benchmark spellings land on it', () => {
+    const chart = renderPerformanceCurve([], [benchmark(1, 1, 1000), benchmarkGate(2, 1, 1000)]);
+
+    expect(chart).toContain('best r1 1k ops/s');
+    expect(chart.match(/●/g)).toHaveLength(1);
+  });
+
+  it('ignores failed and measurement-free benchmark gates', () => {
+    const failed: RunEvent = {...benchmarkGate(1, 1, 1000), status: 'failed'};
+    const bare = benchmarkGate(2, 2, 1000);
+    if (bare.data?.kind === 'gate_finished') bare.data = {...bare.data, metric: null, value: null};
+
+    expect(renderPerformanceCurve([], [failed, bare])).toBe('No performance data yet.');
+  });
+
   it('titles the plot with the backend metric name instead of the unit', () => {
     const record = {...performance(1, 1000), perf_unit: 'ops/s'};
     const chart = renderPerformanceCurve([record], [], context({objective_unit: 'ops/s'}));
@@ -72,6 +99,27 @@ describe('renderPerformanceCurve', () => {
     );
 
     expect(chart).toContain('Metric    p99_latency_us · minimize ↓');
+  });
+
+  it('names the lowest round best for a minimizing objective', () => {
+    const chart = renderPerformanceCurve(
+      [performance(1, 1000), performance(2, 2000), performance(3, 1500)],
+      [],
+      context({objective_metric: 'p99_latency_us', objective_direction: 'min'}),
+    );
+
+    expect(chart).toContain('best r1 1k total_ops_per_sec');
+    expect(chart).toContain('latest r3 1.5k total_ops_per_sec');
+  });
+
+  it('keeps the highest round best for a maximizing objective', () => {
+    const chart = renderPerformanceCurve(
+      [performance(1, 1000), performance(2, 2000), performance(3, 1500)],
+      [],
+      context({objective_direction: 'max'}),
+    );
+
+    expect(chart).toContain('best r2 2k total_ops_per_sec');
   });
 
   it('drops the lines for facts the run never recorded', () => {
@@ -205,6 +253,25 @@ function benchmark(sequence: number, round: number, value: number): RunEvent {
     round_label: `round-${round}`,
     data: {
       kind: 'benchmark_result',
+      metric: 'total_ops_per_sec',
+      value,
+      unit: 'ops/s',
+    },
+  };
+}
+
+/** The measurement as a completed `gate_finished` benchmark carries it (#692). */
+function benchmarkGate(sequence: number, round: number, value: number): RunEvent {
+  return {
+    sequence,
+    timestamp: '2026-01-01T00:00:00Z',
+    type: 'gate_finished',
+    status: 'completed',
+    agent_kind: null,
+    round_label: `round-${round}`,
+    data: {
+      kind: 'gate_finished',
+      gate: 'benchmark',
       metric: 'total_ops_per_sec',
       value,
       unit: 'ops/s',
