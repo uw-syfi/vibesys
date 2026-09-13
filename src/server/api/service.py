@@ -289,15 +289,25 @@ class RunApi:
             )
 
     def subscription_bootstrap(
-        self, after_sequence: int, tail: int | None
+        self, after_sequence: int, tail: int | None, *, store_id: str | None = None
     ) -> SubscriptionBootstrap:
         """Capture one atomic bootstrap state for a new or restarted subscription.
 
         Appends acquire the same condition, so computing the tail floor and
         reading the checkpoint under one acquisition keeps the replay bounded
         by ``tail`` no matter how many events land during the bootstrap.
+
+        ``store_id`` names the store the caller's ``after_sequence`` belongs to,
+        carried by a resume across a dropped connection. When the journal has
+        since attached a different one, that cursor numbers a log that is gone,
+        so it is dropped and the live store is replayed from its floor: the
+        client re-folds from the batch's identity rather than extending a stale
+        fold. An empty or matching id resumes the cursor as before, which is
+        also what a fresh dial (no store seen yet) and old clients get.
         """
         with self._condition:
+            if store_id and store_id != self._journal.store_id_locked():
+                after_sequence = 0
             latest = self._journal.latest_sequence_locked()
             floor = after_sequence if tail is None else max(after_sequence, latest - tail)
             through_sequence, events = self._journal.checkpoint_locked(

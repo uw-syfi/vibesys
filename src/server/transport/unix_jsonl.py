@@ -74,7 +74,9 @@ class _RequestHandler(socketserver.StreamRequestHandler):
     def _stream(self, request: SubscribeRequest) -> None:
         api = self.server.api
         try:
-            bootstrap = api.subscription_bootstrap(request.after_sequence, request.tail)
+            bootstrap = api.subscription_bootstrap(
+                request.after_sequence, request.tail, store_id=request.store_id
+            )
         except Exception:
             # A bootstrap failure must not reject the dial: the client probes
             # ``tail`` support by dialing and treats a pre-handshake failure
@@ -139,7 +141,10 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         """Restart this subscription's replay against the journal's live state."""
         api = self.server.api
         return self._write_bootstrap(
-            request, api.subscription_bootstrap(request.after_sequence, request.tail)
+            request,
+            api.subscription_bootstrap(
+                request.after_sequence, request.tail, store_id=request.store_id
+            ),
         )
 
     def _write_bootstrap(

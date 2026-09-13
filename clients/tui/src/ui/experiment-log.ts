@@ -62,6 +62,7 @@ export class ExperimentLogView {
   readonly output: BoxRenderable;
   readonly #fill: BoxRenderable;
   readonly #header: TextRenderable;
+  readonly #headerRule: TextRenderable;
   readonly #rows: ScrollBoxRenderable;
   readonly #footerLine: TextRenderable;
   #theme: Theme;
@@ -103,6 +104,22 @@ export class ExperimentLogView {
       wrapMode: 'none',
       truncate: true,
     });
+    // Meaningful only under the table's column header, so it costs no row in
+    // every other view (kickoff, drill-down, loading, error, empty): `#clear`
+    // collapses it to height 0 before every render, and only `#renderTable`
+    // opens it back to 1. Inside the table view that height is fixed
+    // regardless of how many rows follow, so it is a permanent row there
+    // (tui-conventions.md, "nothing moves that does not have to") without
+    // taxing views that have no header row to rule under.
+    this.#headerRule = new TextRenderable(renderer, {
+      content: '',
+      fg: theme.border,
+      width: '100%',
+      height: 0,
+      flexShrink: 0,
+      wrapMode: 'none',
+      truncate: true,
+    });
     // A scroll box rather than a hand-rolled window: it gives wheel and
     // trackpad scrolling for free, and keeps the whole log reachable instead
     // of only the rows around the selection.
@@ -127,6 +144,7 @@ export class ExperimentLogView {
       truncate: true,
     });
     this.output.add(this.#header);
+    this.output.add(this.#headerRule);
     this.output.add(this.#rows);
     this.output.add(this.#footerLine);
   }
@@ -145,6 +163,7 @@ export class ExperimentLogView {
     this.output.borderColor = theme.border;
     this.#fill.backgroundColor = theme.canvas;
     this.#header.fg = theme.textSubtle;
+    this.#headerRule.fg = theme.border;
     this.#footerLine.fg = theme.textSubtle;
     this.#renderedState = null;
   }
@@ -233,9 +252,10 @@ export class ExperimentLogView {
     );
     const unowned = unownedExperimentRounds(state);
     if (unowned.length > 0) {
+      const columns = resolveColumns(this.#bodyWidth());
       this.#line('UNASSOCIATED ROUNDS', this.#theme.textSubtle);
       for (const [index, roundNumber] of unowned.entries()) {
-        this.#roundRow(roundNumber, selectedUnownedRound === roundNumber, index + 1);
+        this.#roundRow(roundNumber, columns, selectedUnownedRound === roundNumber, index + 1);
       }
     }
     this.#footerLine.content =
@@ -251,6 +271,12 @@ export class ExperimentLogView {
     const items = experimentIndexItems(state);
     const selected = selectedExperimentIndexItem(state);
     this.#header.content = headerRow(columns, measuredDirection(log.entries));
+    // A permanent rule under the header (tui-conventions.md, "nothing moves
+    // that does not have to"): fixed at height 1 regardless of row count, so
+    // it reads as a header rather than as one more line of text that happens
+    // to sit above the rows.
+    this.#headerRule.height = 1;
+    this.#headerRule.content = '─'.repeat(this.#bodyWidth());
     let selectedRenderIndex = 0;
     let renderedRows = 0;
     for (const [navigationIndex, item] of items.entries()) {
@@ -261,7 +287,7 @@ export class ExperimentLogView {
         if (isSelected) selectedRenderIndex = renderedRows;
         renderedRows += 1;
       } else if (item.kind === 'round') {
-        this.#roundRow(item.roundNumber, isSelected, navigationIndex);
+        this.#roundRow(item.roundNumber, columns, isSelected, navigationIndex);
         if (isSelected) selectedRenderIndex = renderedRows;
         renderedRows += 1;
       } else {
@@ -286,7 +312,15 @@ export class ExperimentLogView {
       this.#bodyWidth() >= HINT_MIN_WIDTH
         ? '↑↓ or scroll: select · Enter or click: open hypothesis'
         : '↑↓ · Enter';
-    this.#footerLine.content = `${position} · ${hint}`;
+    // The common landing state: a round has run (unlike the zero-row empty
+    // state above) but the orchestrator has not yet attached a hypothesis to
+    // it. The position/hint pair describes navigating a hypothesis list that
+    // does not exist yet here, so the next-step sentence replaces it instead
+    // of competing with it.
+    this.#footerLine.content =
+      log.entries.length === 0
+        ? 'The first hypothesis appears once the orchestrator forms one.'
+        : `${position} · ${hint}`;
   }
 
   #renderDetail(entry: HypothesisEntry, state: SessionState): void {
@@ -413,7 +447,12 @@ export class ExperimentLogView {
     this.#rows.add(row);
   }
 
-  #roundRow(roundNumber: number, isSelected: boolean, navigationIndex: number): void {
+  #roundRow(
+    roundNumber: number,
+    columns: Columns,
+    isSelected: boolean,
+    navigationIndex: number,
+  ): void {
     const row = new BoxRenderable(this.renderer, {
       id: `unowned-round-${roundNumber}`,
       width: '100%',
@@ -425,9 +464,13 @@ export class ExperimentLogView {
         this.controller.moveExperimentSelection(navigationIndex - this.#selectedNavigationIndex());
       },
     });
+    // One cell on the same column grid `entryCells` uses, not a single
+    // unstructured string: the round has a real round number and genuinely
+    // recorded agent turns, but no hypothesis, measurement, or outcome yet,
+    // so it lands under the same headers a hypothesis row would.
     row.add(
       this.#cell(
-        `${selectionCaret(isSelected)} Round ${roundNumber} · recorded agent turns · no hypothesis`,
+        unownedRoundRow(roundNumber, columns, isSelected),
         this.#theme.textPrimary,
         isSelected,
       ),
@@ -537,6 +580,8 @@ export class ExperimentLogView {
 
   #clear(): void {
     this.#activeActivityLine = null;
+    this.#headerRule.height = 0;
+    this.#headerRule.content = '';
     this.#stopElapsedTimer();
     for (const child of [...this.#rows.getChildren()]) {
       this.#rows.remove(child);
@@ -574,6 +619,25 @@ const MEASURED_WIDTH = 20;
 const OUTCOME_WIDTH = 11;
 const KEPT_WIDTH = 4;
 const COLUMN_GAP = '  ';
+/** The one glyph the file uses for a value that is genuinely absent. */
+const PLACEHOLDER = '—';
+
+type Align = 'left' | 'right';
+
+/**
+ * One alignment per column, read by both `headerRow` and the cell renderers
+ * (`entryCells`, `unownedRoundCells`) so a header label and its column's
+ * values, placeholders included, share one source of truth and cannot drift
+ * apart again. Numeric columns (Rounds, Measured, Kept) read right to left;
+ * text columns (Hypothesis, Implementation Details, Outcome) read left to
+ * right.
+ */
+const ID_ALIGN: Align = 'left';
+const ROUNDS_ALIGN: Align = 'right';
+const CLAIM_ALIGN: Align = 'left';
+const MEASURED_ALIGN: Align = 'right';
+const OUTCOME_ALIGN: Align = 'left';
+const KEPT_ALIGN: Align = 'right';
 
 export function resolveColumns(width: number): Columns {
   const claim = width >= CLAIM_MIN_WIDTH;
@@ -598,17 +662,22 @@ export function resolveColumns(width: number): Columns {
 }
 
 export function headerRow(columns: Columns, direction: 'max' | 'min' | null = null): string {
-  const parts = [padToWidth(' Hypothesis', ID_WIDTH), padToWidth('Rounds', ROUNDS_WIDTH)];
-  if (columns.claim) parts.push(padToWidth('Implementation Details', columns.claimWidth));
+  const parts = [
+    fitColumn(' Hypothesis', ID_WIDTH, ID_ALIGN),
+    fitColumn('Rounds', ROUNDS_WIDTH, ROUNDS_ALIGN),
+  ];
+  if (columns.claim) {
+    parts.push(fitColumn('Implementation Details', columns.claimWidth, CLAIM_ALIGN));
+  }
   if (columns.measured) {
     // The glyph is the way improvement points, so a signed delta below reads
     // as good or bad without task knowledge. A glyph rather than color, which
     // the outcome column already spends; the drill-down spells out the word.
     const label = direction === null ? 'Measured' : `Measured ${direction === 'max' ? '↑' : '↓'}`;
-    parts.push(padToWidth(label, MEASURED_WIDTH));
+    parts.push(fitColumn(label, MEASURED_WIDTH, MEASURED_ALIGN));
   }
-  parts.push(padToWidth('Outcome', OUTCOME_WIDTH));
-  if (columns.kept) parts.push(padToWidth('Kept', KEPT_WIDTH));
+  parts.push(fitColumn('Outcome', OUTCOME_WIDTH, OUTCOME_ALIGN));
+  if (columns.kept) parts.push(fitColumn('Kept', KEPT_WIDTH, KEPT_ALIGN));
   return parts.join(COLUMN_GAP);
 }
 
@@ -655,36 +724,94 @@ export function entryCells(
     fitColumn(
       `${marker}${truncate(entry.hypothesis_id, ID_WIDTH - displayWidth(marker))}`,
       ID_WIDTH,
+      ID_ALIGN,
     ),
-    fitColumn(formatRounds(entry), ROUNDS_WIDTH),
+    fitColumn(formatRounds(entry), ROUNDS_WIDTH, ROUNDS_ALIGN),
   ];
   if (columns.claim) {
     leading.push(
       fitColumn(
-        sentenceCase(entry.title ?? entry.claim ?? entry.action ?? '—'),
+        sentenceCase(entry.title ?? entry.claim ?? entry.action ?? PLACEHOLDER),
         columns.claimWidth,
+        CLAIM_ALIGN,
       ),
     );
   }
-  if (columns.measured) leading.push(fitColumn(formatMeasured(entry), MEASURED_WIDTH));
+  if (columns.measured) {
+    leading.push(fitColumn(formatMeasured(entry), MEASURED_WIDTH, MEASURED_ALIGN));
+  }
   return {
     leading: leading.join(COLUMN_GAP),
     // These are separate renderables so outcome can carry semantic color.
     // Put gutters on the following segment rather than relying on trailing
     // padding surviving across renderable boundaries.
-    outcome: `${COLUMN_GAP}${fitColumn(outcomeLabel(entry), OUTCOME_WIDTH)}`,
+    outcome: `${COLUMN_GAP}${fitColumn(outcomeLabel(entry), OUTCOME_WIDTH, OUTCOME_ALIGN)}`,
     trailing: columns.kept
       ? `${COLUMN_GAP}${fitColumn(
-          entry.kept === true ? 'Yes' : entry.kept === false ? 'No' : '—',
+          entry.kept === true ? 'Yes' : entry.kept === false ? 'No' : PLACEHOLDER,
           KEPT_WIDTH,
+          KEPT_ALIGN,
         )}`
       : '',
   };
 }
 
-/** Exactly `width` cells: truncated if over, space-padded if under. */
-function fitColumn(value: string, width: number): string {
-  return padToWidth(truncate(value, width), width);
+/**
+ * The unowned-round row's cells, laid out on the exact same column grid
+ * `entryCells` uses: same widths, same gap, same two-character marker slot.
+ * A round with agent turns but no owning hypothesis is the common landing
+ * state (a task profiles before proposing its first hypothesis), not an edge
+ * case, so it has to read as a row under the same headers, not as one string
+ * spanning all of them. The round number and "recorded agent turns" are real;
+ * everything the round genuinely does not have yet (hypothesis, measurement,
+ * outcome, kept) renders as `PLACEHOLDER`, not an invented value.
+ */
+export function unownedRoundCells(
+  roundNumber: number,
+  columns: Columns,
+  isSelected = false,
+): EntryCells {
+  // No active-hypothesis glyph applies to a round with no hypothesis, but the
+  // marker still reserves the same two columns `entryLeadingMarker` does, so
+  // the identity text starts at the same offset as a hypothesis row's.
+  const marker = `${selectionCaret(isSelected)} `;
+  const leading = [
+    fitColumn(
+      `${marker}${truncate(NO_HYPOTHESIS_LABEL, ID_WIDTH - displayWidth(marker))}`,
+      ID_WIDTH,
+      ID_ALIGN,
+    ),
+    fitColumn(String(roundNumber), ROUNDS_WIDTH, ROUNDS_ALIGN),
+  ];
+  if (columns.claim) leading.push(fitColumn(RECORDED_TURNS_LABEL, columns.claimWidth, CLAIM_ALIGN));
+  if (columns.measured) leading.push(fitColumn(PLACEHOLDER, MEASURED_WIDTH, MEASURED_ALIGN));
+  return {
+    leading: leading.join(COLUMN_GAP),
+    outcome: `${COLUMN_GAP}${fitColumn(PLACEHOLDER, OUTCOME_WIDTH, OUTCOME_ALIGN)}`,
+    trailing: columns.kept ? `${COLUMN_GAP}${fitColumn(PLACEHOLDER, KEPT_WIDTH, KEPT_ALIGN)}` : '',
+  };
+}
+
+export function unownedRoundRow(roundNumber: number, columns: Columns, isSelected = false): string {
+  const cells = unownedRoundCells(roundNumber, columns, isSelected);
+  return `${cells.leading}${cells.outcome}${cells.trailing}`;
+}
+
+const NO_HYPOTHESIS_LABEL = '(no hypothesis)';
+const RECORDED_TURNS_LABEL = 'recorded agent turns';
+
+/**
+ * Pads (or right-pads) `value` to `width` after truncating it, so every
+ * caller shares one place that decides how a column fits. `align: 'right'`
+ * is the smallest addition this needed: same truncation, same width budget,
+ * padding placed before the value instead of after. Left is the default so
+ * the many existing left-aligned calls are unchanged. Both directions measure
+ * in cells via `displayWidth`, not code units, so CJK content still lines up.
+ */
+function fitColumn(value: string, width: number, align: Align = 'left'): string {
+  const fitted = truncate(value, width);
+  if (align === 'left') return padToWidth(fitted, width);
+  return ' '.repeat(Math.max(0, width - displayWidth(fitted))) + fitted;
 }
 
 export function entryRow(entry: HypothesisEntry, columns: Columns, isSelected = false): string {
@@ -713,7 +840,7 @@ export function outcomeLabel(entry: HypothesisEntry): string {
   if (entry.active === true) return 'Active';
   if (entry.resolved_outcome === 'proven') return 'Accepted';
   if (entry.resolved_outcome === 'disproven') return 'Rejected';
-  return sentenceCase(entry.resolved_outcome ?? '—');
+  return sentenceCase(entry.resolved_outcome ?? PLACEHOLDER);
 }
 
 /** Capitalises a wire value for display without touching the rest of it. */
@@ -745,7 +872,7 @@ export function formatMeasured(entry: HypothesisEntry): string {
     const marker = entry.perf_delta_reason === 'baseline_unresolved' ? '? ' : '';
     return `${marker}${trimNumber(entry.perf_metric)}${entry.perf_unit ? ` ${entry.perf_unit}` : ''}`;
   }
-  return '—';
+  return PLACEHOLDER;
 }
 
 function formatDelta(delta: number): string {
