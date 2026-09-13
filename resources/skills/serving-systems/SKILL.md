@@ -129,6 +129,8 @@ Written against NVIDIA-first upstream trees; ROCm paths exist in vLLM and SGLang
 
 - [`references/tooling/performance-modeling.md`](references/tooling/performance-modeling.md) — Analytical serving-performance modeling — roofline, Amdahl bounds, end-to-end time accounting, architecture ceilings, profiler calibration, and plateau-driven hypothesis selection.
 
+- [`references/tooling/performance-modeling-freshness.md`](references/tooling/performance-modeling-freshness.md) — When to recalibrate a performance model after a scheduler, cache, kernel, precision, or graphing change, plus worked examples of a model going wrong for a specific, non-obvious reason.
+
 - [`references/tooling/profiler.md`](references/tooling/profiler.md) — Profiling discipline and altitudes. The contract is portable; the concrete toolchain is per-platform.
 
 - [`references/tooling/serving-benchmark.md`](references/tooling/serving-benchmark.md) — Benchmark an LLM serving endpoint — TTFT, TPOT, ITL, end-to-end latency, throughput, p50/p95/p99 across concurrency and ISL/OSL sweeps.

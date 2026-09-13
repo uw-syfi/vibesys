@@ -240,6 +240,18 @@ Practice: report both pooled-quantile numbers, across all reps and across the st
 
 Scope: any engine, backend-independent. Status: observed twice, cause unknown (measured; root cause of the stall itself unresolved in either occurrence). Stamp: sglang-v0.5.18 fork, benchmark_version 4, 2026-09-12, jobs 633512 (82 s) and 633800 (14 s).
 
+### Confirm an environment-variable experiment actually changed behavior before reading the numbers
+
+A variable reaching the server process is not the same as it changing what the process does. After any environment-variable A/B test, grep the boot log for a rejection, a "not supported" warning, or any other line naming the variable, and confirm the setting moved something observable, before comparing the two sides' numbers. A test that only checks `/proc/<pid>/environ` can pass while the two sides run functionally identical configurations; see [`frameworks/pytorch.md`](../frameworks/pytorch.md) for a worked case where this happened with an accepted-but-rejected allocator flag.
+
+Scope: any engine and backend, any env-var-driven A/B test. Status: verified (mechanism plus one measured case). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
+
+### A stochastic failure needs enough reps and a mechanism signal, not just a count
+
+Two byte-identical boots of the same configuration on the same node produced 3 of 5 versus 0 of 5 tail-latency episodes for a failure whose per-repetition rate is around 30 percent: run-to-run variance alone can produce a 3-vs-0 split with no treatment difference at all. At that base rate, 5 reps per side cannot distinguish a real effect from noise; treat a rep count that low as descriptive, not as evidence of a difference between two sides. Before reading a difference in episode count as a finding, use at least 10 reps per side and pair it with an independent mechanism signal (a log line, a counter, a trace) that actually names what changed, not only the outcome count.
+
+Scope: any engine and backend, any comparison of a stochastic per-rep failure or collapse rate. Status: verified (measured: 3/5 vs 0/5 across two identical configurations). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
+
 ## Reading a benchmark report (skeptically)
 
 Checklist before trusting someone's numbers:

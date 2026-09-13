@@ -307,27 +307,57 @@ Symptom: at uncapped (unbounded) concurrency around 48 sessions, a
          sessions, while rep wall-clock duration and the accuracy gate
          are unaffected; one affected rep measured mean TPOT about
          43 ms and p95 TTFT about 5.6 s against about 19 ms and 0.4 s
-         in a clean rep.
-Cause:   not yet diagnosed. It reproduces on both sides of a paired
-         kernel comparison under otherwise-identical harness defaults,
-         so it is independent of whatever change is under test; a
-         slower kernel makes it more frequent and more severe (each
-         decode round stays busier, letting the admission burst back
-         up further before it drains), but the underlying mechanism is
-         still being characterized.
+         in a clean rep. At the mechanism level the signature is one
+         ordinary prefill batch running at 20x to 300x lower input
+         throughput than same-size batches elsewhere in the same run, a
+         queue backlog building behind it, with tail episodes
+         clustering inside about 30 second windows.
+Cause:   not fully diagnosed. Six candidates checked, five refuted: KV
+         or Mamba pool pressure (no memory, OOM, or page-reclaim signal
+         in any log); TunableOp online tuning (tuning is hard-disabled
+         at serving time, zero tuning output logged, the table is
+         read-only and unchanged); plain prefill saturation (the
+         scheduler's own instrumented throughput field reports 15x to
+         300x lower tok/s for the slow batch than same-size batches
+         moments earlier in the identical run); allocator refill after
+         a cache flush, by timing (slow batches start 14 to 183 s after
+         the preceding flush, not on the first post-flush batch, and
+         recur several times within one flush); Triton autotune (every
+         autotune key reachable from this model's prefill path is
+         pinned to a fixed value, and the on-disk autotune cache shows
+         zero writes inside any blackout window). One is not fully
+         resolved either way: an aiter tuned-shape-table miss versus a
+         hit does not discriminate the slow batch (a first-occurrence
+         shape is no more likely to be slow than a repeat shape: 5 to
+         12 percent of first-occurrence batches are slow versus 0 to 7
+         percent of no-miss batches, and 4 of 10 actual slow batches
+         carry no shape miss at all), which also refutes first-touch
+         shape cost as the main cause. Live candidate: a silent
+         caching-allocator retry inside the untuned GEMM fallback path;
+         testable only by logging `torch.cuda.memory_stats()` counters
+         (retry counts and similar), since no endpoint or log line
+         exposes them today.
 Fix:     none yet. Exclude affected reps symmetrically (same rule both
          sides of a paired comparison) and report both the raw and the
          collapse-excluded numbers rather than averaging over it
          silently; do not rely on `wait_for_idle` to catch it, since it
-         reports the server idle before every rep regardless.
+         reports the server idle before every rep regardless. Harness
+         note: the rep-boundary cache-flush call itself costs the first
+         request afterward about 6x a no-flush repeat (about 2.3 s at
+         1024 tokens); this is unexplained and specific to this
+         harness's rep-boundary flush, separate from the collapse
+         mechanism above.
 Scope:   sglang, uncapped concurrency around 48 sessions; not observed
          under a 16-session admission cap. Engine behavior, not
-         platform-specific.
+         platform-specific; see [`platforms/`](../platforms/) for the
+         platform-specific detail behind each refuted candidate.
 Status:  candidate (recurs across multiple separate jobs at this
-         concurrency; root-cause mechanism not yet identified). What
-         would verify it: a scheduler-side trace of an affected rep
-         that names the specific queueing mechanism, reproduced against
-         a fix. sglang-v0.5.18-rocm700-mi30x, 2026-09-13.
+         concurrency; root-cause mechanism not yet identified, five of
+         six checked candidates refuted). What would verify it: a
+         `torch.cuda.memory_stats()` trace of an affected rep showing a
+         retry counter move at the collapse boundary, reproduced
+         against a fix. sglang-v0.5.18-rocm700-mi30x, 2026-09-13,
+         job-verified.
 ```
 
 ## See also
