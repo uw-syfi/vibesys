@@ -66,7 +66,7 @@ Decode-step decomposition (torch profiler, 16 decode steps at batch size 15), re
 
 The MoE kernel is the largest single term but not the whole story: the untuned dense-GEMM fallback path (see the tuned-GEMM pitfall below) is close behind it. GPU idle time during the step was under 1 percent, so this is a compute/kernel-selection problem, not a scheduling gap.
 
-Scope: rocm, gfx942, `sglang-v0.5.18-rocm700-mi30x` with aiter bundled. Status: verified (reproduced in 2 jobs). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, jobs 631857 and 631900.
+Scope: rocm, gfx942, `sglang-v0.5.18-rocm700-mi30x` with aiter bundled. Status: verified (reproduced in 2 jobs). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job-verified across two runs.
 
 ### aiter's CK fused MoE kernels on gfx942 (not MXFP4, but faster)
 
@@ -79,7 +79,7 @@ aiter's Composable Kernel fused-MoE kernels are not gated to gfx950 the way the 
 
 Both are several times faster than the production MXFP4 Triton kernel at the same shapes. The catch is memory, not speed: fp8 experts held resident would need about 97 GB per device (388 GB across the 4-device node) against roughly 430 GB free, so a full resident fp8 swap does not fit. See [`models/qwen3-5.md`](../../models/qwen3-5.md) for the resident/dequant hybrid design this motivates.
 
-Scope: rocm, gfx942, aiter `d9e5ef7ce0`. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, jobs 631892 and 631902.
+Scope: rocm, gfx942, aiter `d9e5ef7ce0`. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job-verified across two runs.
 
 ### No shipped kernel consumes MXFP4 weights directly on gfx942
 
@@ -113,7 +113,7 @@ A HIP kernel that decodes e2m1 (MXFP4) nibbles via a 16-entry LUT plus an expone
 
 Env var: `SGLANG_MXFP4_MOE_HIP=1` selects this kernel over the Triton fallback above; see [`floor.md`](floor.md).
 
-Scope: rocm, gfx942, sglang-v0.5.18 fork (`moe/mxfp4-fused`, PR #19). Status: verified (reproduced across the single-tile microbenchmark, the grouped-kernel checkpoint-weight validation, and the end-to-end benchmark). Stamp: `sglang-v0.5.18-rocm700-mi30x`, rocm 7.0, 2026-09-11, jobs 632237, 632241/2, 632253, 632489.
+Scope: rocm, gfx942, sglang-v0.5.18 fork (`moe/mxfp4-fused`, PR #19). Status: verified (reproduced across the single-tile microbenchmark, the grouped-kernel checkpoint-weight validation, and the end-to-end benchmark). Stamp: `sglang-v0.5.18-rocm700-mi30x`, rocm 7.0, 2026-09-11, job-verified across all three runs.
 
 ### Stage1 dispatch by sorted-block count closes a scaffold-vs-templated gap at low M
 
@@ -121,7 +121,7 @@ Stage1 (gate_up) of the fused kernel above dispatches per launch by sorted-block
 
 Stage1 time, old dispatch to new: M=16 0.4022 to 0.3042 ms, M=32 0.6497 to 0.5209 ms, M=48 0.8817 to 0.6997 ms, M=64 1.0292 to 0.8341 ms, M=256 1.4314 to 1.2867 ms, M=1024 unchanged (already on the templated side of the threshold). Total per layer: M=16 minus 18 percent (0.5412 to 0.4414 ms), M=64 minus 14 percent, M=256 minus 8 percent. Same kernels, dispatch decision only, so correctness is unchanged: rel L2 2.3 to 2.5e-3 against an fp32 reference at every M tested, and CUDA-graph replay is bit-exact.
 
-Scope: rocm, gfx942, sglang-v0.5.18 fork (`moe/stage1-small-m`, PR #40). Status: verified (measured on real layer-30 rank-0 weights across the production M range; 11 unit tests pass). Stamp: `sglang-v0.5.18-rocm700-mi30x`, rocm 7.0, 2026-09-11, job 632917.
+Scope: rocm, gfx942, sglang-v0.5.18 fork (`moe/stage1-small-m`, PR #40). Status: verified (measured on real layer-30 rank-0 weights across the production M range; 11 unit tests pass). Stamp: `sglang-v0.5.18-rocm700-mi30x`, rocm 7.0, 2026-09-11, job-verified.
 
 ### Prefill-M microbenchmark: floor gap confirmed at higher M, dispatch threshold refined
 
@@ -129,7 +129,7 @@ A one-device microbenchmark (uniform and popularity-skewed top-10 routing, M=16 
 
 The scaffold-vs-templated dispatch threshold above is measurably conservative: the wall-clock crossover is about 741 to 743 sorted blocks (M~417-420), not the shipped 1024. This affects only M~420-868, worth 2.9 to 4.7 percent of a single stage1 call there (an estimated 0.4 percent of pooled TTFT, below this campaign's own measurement noise floor). Both of this campaign's own measured extend lengths already sit on the correct side of the shipped threshold either way, so lowering it to about 750 is a candidate, zero-new-code change worth bundling with unrelated MoE work rather than shipping alone.
 
-Scope: rocm, gfx942, this fork's `mxfp4_fused` stage1/stage2 kernel. Status: verified (one-device microbenchmark, 8 M points x 2 routings, bf16-rounding-level correctness against an fp32 reference at every point). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, job 633851.
+Scope: rocm, gfx942, this fork's `mxfp4_fused` stage1/stage2 kernel. Status: verified (one-device microbenchmark, 8 M points x 2 routings, bf16-rounding-level correctness against an fp32 reference at every point). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, job-verified.
 
 ### Dequant-to-bf16-scratch at prefill M: refuted
 
@@ -137,7 +137,7 @@ A one-device microbenchmark tested dequantising a layer's routed MXFP4 expert we
 
 Mechanism: the fused kernel decodes MXFP4 weight bytes directly into the MFMA operand as it consumes them, paying the dequant cost once per byte read. A two-pass scratch scheme pays it twice: once to write the dequantised scratch, once to read it back for the GEMM, doubling total bytes moved relative to the fused path's single weight-bandwidth pass. That doubling only pays for itself if the dequant kernel is itself close to memory-bandwidth-bound, so the extra pass is nearly free; measured here, even the best dequant kernel found reaches only about 18 percent of HBM peak (it is a nibble-unpack-plus-exponent-add kernel, not a straight copy), so the scratch write alone already costs more than the fused kernel's entire per-layer time at M=337 and M=512. Even a hypothetical bandwidth-efficient dequant (about 0.7 ms per layer, not achieved by any kernel measured here) would only tie the fused kernel at M=337 and win about 25 percent at M=919, below this campaign's acceptance bar.
 
-Scope: rocm, gfx942, this fork's `mxfp4_fused` stage1/stage2 kernel, TP=4 per-rank shapes (E=512, top-10, K=4096, per-rank N=256). Status: verified (refuted; numbers cross-checked across three job submissions to within about 2-3 percent). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, job 633874.
+Scope: rocm, gfx942, this fork's `mxfp4_fused` stage1/stage2 kernel, TP=4 per-rank shapes (E=512, top-10, K=4096, per-rank N=256). Status: verified (refuted; numbers cross-checked across three job submissions to within about 2-3 percent). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, job-verified.
 
 ### Routing bookkeeping is a fixed per-layer cost, independent of batch size
 
@@ -155,7 +155,7 @@ Under the real multi-turn benchmark, stacking this kernel (`SGLANG_SKINNY_GEMM=1
 
 Env var: `SGLANG_SKINNY_GEMM=1`, routed for M <= 16; see [`floor.md`](floor.md).
 
-Scope: rocm, gfx942, MI300A (228 CU), rocm 7.0. Status: verified (single-kernel microbenchmark reproduced across the M=16 sweep and the M=1 comparison; end-to-end effect reproduced in the three-side paired benchmark). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, jobs 632226, 632230/632233, 632238, 632503.
+Scope: rocm, gfx942, MI300A (228 CU), rocm 7.0. Status: verified (single-kernel microbenchmark reproduced across the M=16 sweep and the M=1 comparison; end-to-end effect reproduced in the three-side paired benchmark). Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11, job-verified across the M=16 sweep, the M=1 comparison, and the three-side paired benchmark.
 
 ## JIT cache
 
@@ -253,7 +253,7 @@ Cause:   AITER builds kernel variants lazily on first use, even with a
 Fix:     set SGLANG_HEALTH_CHECK_TIMEOUT=1800; treat the first request
          after boot as warmup, not as a measurement.
 Scope:   rocm, gfx942, sglang-v0.5.18-rocm700-mi30x with aiter bundled.
-Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job 623402.
+Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job-verified.
 ```
 
 ### First-touch tuned-MoE config lock inflates the first profiled iteration after boot
@@ -315,8 +315,8 @@ Scope:   rocm, gfx942, triton 3.4.0, sglang-v0.5.18-rocm700.
 Status:  verified as a pattern (3 kernels, reproduced across 2 jobs);
          candidate on the precise microarchitectural root cause (VALU
          latency is the confirmed symptom, not yet isolated to a specific
-         instruction mix). sglang-v0.5.18-rocm700-mi30x, 2026-09-11, jobs
-         631877 and 631890.
+         instruction mix). sglang-v0.5.18-rocm700-mi30x, 2026-09-11,
+         job-verified across two runs.
 ```
 
 ### aiter's tuned-GEMM table misses every dense projection on MI300A
@@ -358,10 +358,10 @@ Scope:   rocm, gfx942, MI300A (228 CU), aiter d9e5ef7ce0; host-cost
          M=44-80.
 Status:  verified (mechanism read from the lookup key, plus measured
          per-shape throughput). sglang-v0.5.18-rocm700-mi30x, 2026-09-11,
-         job 631888. Host-cost-only finding at M=44-80 also verified
+         job-verified. Host-cost-only finding at M=44-80 also verified
          (bit-identical output measured); the in-graph kernel-time
-         question is open. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job
-         633740.
+         question is open. sglang-v0.5.18-rocm700-mi30x, 2026-09-12,
+         job-verified.
 ```
 
 ### PyTorch TunableOp: accepted for the dense projections and LM head
@@ -372,7 +372,7 @@ This is **accepted** as the default on top of NEXTN k=3 speculative decoding wit
 
 Env vars: `PYTORCH_TUNABLEOP_ENABLED=1`, `PYTORCH_TUNABLEOP_TUNING=0`, one read-only tuned table per device ordinal; see [`floor.md`](floor.md).
 
-Scope: rocm, gfx942, MI300A, this image's stack (PyTorch 2.9.0a0, ROCm 7.0.0.0-38-9428210, hipBLASLt 100000-976b9c4a87), TP=4 per-rank shapes of this checkpoint and its MTP draft. Status: accepted. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, jobs 633793 (tuning), 633839 (48 sessions), 633841 (16-session cap).
+Scope: rocm, gfx942, MI300A, this image's stack (PyTorch 2.9.0a0, ROCm 7.0.0.0-38-9428210, hipBLASLt 100000-976b9c4a87), TP=4 per-rank shapes of this checkpoint and its MTP draft. Status: accepted. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-12, job-verified across the tuning, 48-session, and 16-session-cap runs.
 
 ### Cold dense-GEMM shape resolution is milliseconds, not the cause of multi-second stalls
 
@@ -404,7 +404,7 @@ Fix:     rule this mechanism out before chasing it further; the actual
          cache on exact M, not a bucket, a nearby unaligned M does not
          reuse a bucketed neighbor's warmed selection.
 Scope:   gfx942, aiter d9e5ef7ce0, hipBLASLt in rocm 7.0.
-Status:  verified (measured, reproduced in two jobs). sglang-v0.5.18-rocm700-mi30x, 2026-09-11, jobs 632902, 632911.
+Status:  verified (measured, reproduced in two jobs). sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job-verified across two runs.
 ```
 
 ### First-touch dense-GEMM shape cost, measured live, and a candidate padding fix
@@ -423,7 +423,7 @@ Scope: rocm, gfx942, aiter d9e5ef7ce0, this model's prefill dense projections. S
 
 At decode M=16 the fused kernel (`SGLANG_MXFP4_MOE_HIP=1`) profiles at 13 to 27 percent of HBM peak bandwidth, well below memory-bound territory, but is issue-latency-bound on the per-K-step scattered activation gather (MemUnitStalled near zero, VALUBusy under 50 percent), not on ALU work or bandwidth. Seven kernel-design alternatives (persistent grid, register prefetch, LDS staging at three ring sizes, K-split accumulators, and two skinny-GEMV variants) were tried and refuted; none closes the gap. Full phase timing, mechanism, and the refuted-alternatives detail: see [`aiter-mxfp4-moe.md`](aiter-mxfp4-moe.md).
 
-Scope: rocm, gfx942, this kernel (mxfp4_fused_moe stage1/stage2) at decode M=16. Status: verified (phase timing), refuted fixes listed. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11 to 2026-09-12, jobs 633024, 633006/633013/633019, 633018/633021, 633174, 633180, 633173/633179/633182/633183, 633546.
+Scope: rocm, gfx942, this kernel (mxfp4_fused_moe stage1/stage2) at decode M=16. Status: verified (phase timing), refuted fixes listed. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-11 to 2026-09-12, job-verified across the phase-timing run and each refuted-fix run.
 
 ### Prefill collectives: swapping the all-reduce implementation is refuted; the bucket's real cost tracks inter-rank arrival skew (candidate)
 
@@ -461,7 +461,7 @@ Scope:   rocm, gfx942, any custom kernel dispatch that reads a
          data-dependent count on the host inside the decode path.
 Status:  verified (crash reproduced, then fixed and confirmed graph-safe
          by a capture-vs-eager check). sglang-v0.5.18-rocm700-mi30x,
-         2026-09-12, job 633183.
+         2026-09-12, job-verified.
 ```
 
 ### Graph capture by phase, this fork

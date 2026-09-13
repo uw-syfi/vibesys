@@ -40,8 +40,8 @@ Fix:     decompose with device-timed spans (bracket the forward with a
 Scope:   any engine with an overlap/async scheduler (backend-
          independent).
 Status:  verified (mechanism read in source, consistent with the
-         measured gap). sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job
-         633542.
+         measured gap). sglang-v0.5.18-rocm700-mi30x, 2026-09-12,
+         job-verified.
 ```
 
 ## Open-loop vs closed-loop
@@ -151,7 +151,7 @@ An offline replay of the benchmark client (real per-token pacing, real chunk siz
 
 Check: do not read client TTFT minus `wait_queue_entry_time` as either "client overhead" or "server queue wait" on its own; both readings mistake a scheduler-poll-granularity artifact for something else. To separate the client's actual contribution, boot with `--enable-metrics` so the tokenizer-manager's own dispatch/receive timestamps propagate into `meta_info`, and take the client-to-tokenizer-manager span as the client's share.
 
-Scope: any benchmark client and any engine with a request-admission busy loop (backend-independent). Status: verified (offline replay measured; field correlation measured). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633542.
+Scope: any benchmark client and any engine with a request-admission busy loop (backend-independent). Status: verified (offline replay measured; field correlation measured). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
 
 ### Node-to-node noise on clusters
 
@@ -163,7 +163,7 @@ Status: verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05 to 2026-09-10.
 
 The cross-node gap can be larger than the same-node figures above: the identical configuration and workload, run on two nodes of the same SKU, gave median TPOT within 2 percent (21.36 vs 21.74 ms) but pooled p95 TTFT turn-2+ 26 percent apart (338 vs 455 ms). Treat this as confirmation that p95 TTFT comparisons must be paired on one node; TPOT is robust across nodes of the same SKU, tail latency is not.
 
-Status: verified. Stamp: sglang-v0.5.18 fork, benchmark_version 4, 2026-09-11, job 632990 (cross-node link to job 632958).
+Status: verified. Stamp: sglang-v0.5.18 fork, benchmark_version 4, 2026-09-11, job-verified (cross-node link to the four-side-matrix job).
 
 ### Repeated reps against one held server are not independent samples
 
@@ -177,7 +177,7 @@ Contract: the flush must reset every cache the workload reuses, not only the pri
 
 TPOT is not affected by contamination the way TTFT is: even unflushed, it stayed within about 3 percent across three reps (108.0 / 106.6 / 104.7 ms), because it isn't sensitive to prefix-hit position. Prefer TPOT over TTFT when a held-server protocol can't flush between reps.
 
-Scope: any backend and engine with prefix caching enabled (backend-independent); observed on `sglang-v0.5.18-rocm700-mi30x` (aiter attention backend), fix verified on a hybrid (attention + SSM) MoE model. Status: verified (mechanism plus measured). Stamp: sglang-v0.5.18 fork, 2026-09-11, job 632232 (fix measured, 39 percent to 8-18 percent spread); baseline and mechanism from `sglang-v0.5.18-rocm700-mi30x`, 2026-09-10, job 631854.
+Scope: any backend and engine with prefix caching enabled (backend-independent); observed on `sglang-v0.5.18-rocm700-mi30x` (aiter attention backend), fix verified on a hybrid (attention + SSM) MoE model. Status: verified (mechanism plus measured). Stamp: sglang-v0.5.18 fork, 2026-09-11, job-verified (fix measured, 39 percent to 8-18 percent spread); baseline and mechanism from `sglang-v0.5.18-rocm700-mi30x`, 2026-09-10, job-verified.
 
 ### Scheduled pacing decouples offered load from server speed
 
@@ -192,7 +192,7 @@ This is the design working as intended: it agrees with closed-loop pacing when n
 
 Caveat: p95 TTFT over one rep's roughly 200 turns is noisy regardless of pacing mode (25.7 percent spread across 3 reps under scheduled pacing at the reference speed, 11.2 percent under closed, both 3-rep samples). Use pooled per-turn distributions across reps rather than a single rep's percentile, and prefer TPOT (per-rep spread under 1 percent) when its delta already resolves the comparison.
 
-Scope: any engine, backend-independent (the schedule and the per-rep noise are properties of the benchmark client, not the server under test). Status: verified (mechanism plus measured at two server speeds). Stamp: sglang-v0.5.18 fork, benchmark_version 2, 2026-09-11, jobs 632483 (reference speed, schedule_bound_fraction 13.5 percent pooled) and 632503 (1.7x throughput, schedule_bound_fraction 35 to 39 percent).
+Scope: any engine, backend-independent (the schedule and the per-rep noise are properties of the benchmark client, not the server under test). Status: verified (mechanism plus measured at two server speeds). Stamp: sglang-v0.5.18 fork, benchmark_version 2, 2026-09-11, job-verified at both the reference-speed run (schedule_bound_fraction 13.5 percent pooled) and the 1.7x-throughput run (schedule_bound_fraction 35 to 39 percent).
 
 ### Residual load coupling under fixed-schedule pacing: admission delay is not modeled
 
@@ -202,9 +202,9 @@ Cause: the benchmark client holds a per-session admission-concurrency semaphore 
 
 Fix: derive each session's scheduled start time from a simulated admission queue at the reference speed, rather than assuming immediate admission; or make the schedule's first-turn time admission-aware directly. Comparisons made without this fix carry residual load coupling between sides running at different speeds, a faster side's own turns arrive faster, inflating its own tail, which is exactly the effect scheduled pacing was built to remove.
 
-Fixed in benchmark_version 3: the schedule derives each session's start time from a simulated admission queue at the reference speed. Measured on a four-side matrix at different server speeds (job 632958): `schedule_bound_fraction` reached 0.99 to 1.00 on every side fast enough to keep up with the schedule, and `offered_turn_rate_per_s` landed within about 3 percent across all four sides regardless of server speed, closing the coupling this pitfall describes.
+Fixed in benchmark_version 3: the schedule derives each session's start time from a simulated admission queue at the reference speed. Measured on a four-side matrix at different server speeds (the four-side-matrix job): `schedule_bound_fraction` reached 0.99 to 1.00 on every side fast enough to keep up with the schedule, and `offered_turn_rate_per_s` landed within about 3 percent across all four sides regardless of server speed, closing the coupling this pitfall describes.
 
-Scope: any engine, backend-independent (property of the benchmark client's session-admission and scheduling logic, not the server under test). Status: fixed, verified in benchmark_version 3 (mechanism plus measured at two protocol versions). Stamp: sglang-v0.5.18 fork, benchmark_version 2 (bug, job 632584) / benchmark_version 3 (fix, job 632958), 2026-09-11.
+Scope: any engine, backend-independent (property of the benchmark client's session-admission and scheduling logic, not the server under test). Status: fixed, verified in benchmark_version 3 (mechanism plus measured at two protocol versions). Stamp: sglang-v0.5.18 fork, benchmark_version 2 (bug, job-verified) / benchmark_version 3 (fix, the four-side-matrix job), 2026-09-11.
 
 ### Concurrency cap is a workload parameter of the open-loop schedule
 
@@ -222,7 +222,7 @@ Scope: any engine and backend with a batch-size- or shape-keyed kernel dispatch 
 
 Once the schedule binds (`schedule_bound_fraction` near 1.0), throughput converges to the rate the schedule offers, not to the server's own capacity: on a four-side matrix at fixed pacing, throughput varied under 2 percent across sides whose TPOT differed by 5x. Throughput is not a useful differentiator between configurations measured this way; use TPOT and TTFT percentiles instead.
 
-Scope: any engine, backend-independent. Status: verified (measured). Stamp: sglang-v0.5.18 fork, benchmark_version 3, 2026-09-11, job 632958.
+Scope: any engine, backend-independent. Status: verified (measured). Stamp: sglang-v0.5.18 fork, benchmark_version 3, 2026-09-11, job-verified.
 
 ### Metric of record: pool per-turn quantiles across reps, not per-rep percentiles
 
@@ -230,7 +230,7 @@ A single rep's server-side stall (a few seconds, affecting a handful of concurre
 
 Use pooled per-turn quantiles (computed across all reps' turns together) as the gating statistic, and report per-rep spread alongside so a single-rep event is visible as a flagged outlier rather than averaged into "high variance."
 
-Scope: any engine, backend-independent. Status: verified (measured). Stamp: sglang-v0.5.18 fork, benchmark_version 2, 2026-09-11, job 632584.
+Scope: any engine, backend-independent. Status: verified (measured). Stamp: sglang-v0.5.18 fork, benchmark_version 2, 2026-09-11, job-verified.
 
 ### An unexplained single-rep stall: report pooled quantiles with and without it, gate on the steady-state reps
 
@@ -238,7 +238,7 @@ A reference side can show a one-rep server-side stall with no established cause:
 
 Practice: report both pooled-quantile numbers, across all reps and across the steady-state reps only, and use the steady-state figure as the reference for any accept/reject rule. Do not drop the stalled rep from the record: a rep that still passes its own correctness gate despite a latency stall is real signal, not noise to discard, and averaging it into the accept/reject numbers would hide a real event rather than surface it.
 
-Scope: any engine, backend-independent. Status: observed twice, cause unknown (measured; root cause of the stall itself unresolved in either occurrence). Stamp: sglang-v0.5.18 fork, benchmark_version 4, 2026-09-12, jobs 633512 (82 s) and 633800 (14 s).
+Scope: any engine, backend-independent. Status: observed twice, cause unknown (measured; root cause of the stall itself unresolved in either occurrence). Stamp: sglang-v0.5.18 fork, benchmark_version 4, 2026-09-12, job-verified across the 82-second-stall run and the 14-second-stall run.
 
 ### Confirm an environment-variable experiment actually changed behavior before reading the numbers
 
@@ -336,8 +336,8 @@ If the report misses these, the numbers are suggestive, not authoritative.
 - **Running multiple benchmarks without restart.** Memory-pool state carries over; results drift.
 - **Expressing throughput in requests/sec instead of tokens/sec.** Different OSL distributions give different req/s for the same tok/s; always report both.
 - **Comparing under-saturated vs saturated.** At low concurrency, server throughput is bounded by request arrivals, not server capacity. Sweep concurrency until saturation.
-- **First request after boot.** It can trigger lazy kernel compilation and contaminates turn-1 TTFT by an order of magnitude; discard it as warmup, separate from the steady-state warmup window above. Scope: any backend with JIT/lazy kernel builds. Status: verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job 623402.
-- **A decode-only speedup regresses p95 TTFT in a closed-loop multi-turn benchmark.** Symptom: a change that only speeds up decode (TPOT down 20 percent, throughput up 22 percent, correctness gates pass) raises p95 TTFT for turn 2+ by 17 percent. Cause: a closed-loop client (each session sends its next turn as soon as the previous answer completes, plus think time) turns a decode speedup into higher offered load, because nothing paces the aggregate turn-arrival rate independently of how fast the server answers: prefill arrivals rose 21.6 percent, co-batched prefills roughly doubled (2.0 to 3.8 percent), and a new turn more often waits behind another session's in-flight prefill. The metric moved because offered load shifted, not because the server got slower. Fix: pace turns on a fixed schedule derived from a reference server speed (send turn k at the later of the scheduled time and the previous completion plus think time), so offered load is independent of the server under test; report throughput next to latency; keep per-turn records so tail attribution is possible. Scope: any engine, backend-independent. Status: verified (mechanism plus measured). Stamp: sglang-v0.5.18 fork, 2026-09-11, job 632238.
+- **First request after boot.** It can trigger lazy kernel compilation and contaminates turn-1 TTFT by an order of magnitude; discard it as warmup, separate from the steady-state warmup window above. Scope: any backend with JIT/lazy kernel builds. Status: verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job-verified.
+- **A decode-only speedup regresses p95 TTFT in a closed-loop multi-turn benchmark.** Symptom: a change that only speeds up decode (TPOT down 20 percent, throughput up 22 percent, correctness gates pass) raises p95 TTFT for turn 2+ by 17 percent. Cause: a closed-loop client (each session sends its next turn as soon as the previous answer completes, plus think time) turns a decode speedup into higher offered load, because nothing paces the aggregate turn-arrival rate independently of how fast the server answers: prefill arrivals rose 21.6 percent, co-batched prefills roughly doubled (2.0 to 3.8 percent), and a new turn more often waits behind another session's in-flight prefill. The metric moved because offered load shifted, not because the server got slower. Fix: pace turns on a fixed schedule derived from a reference server speed (send turn k at the later of the scheduled time and the previous completion plus think time), so offered load is independent of the server under test; report throughput next to latency; keep per-turn records so tail attribution is possible. Scope: any engine, backend-independent. Status: verified (mechanism plus measured). Stamp: sglang-v0.5.18 fork, 2026-09-11, job-verified.
 
 ## See also
 

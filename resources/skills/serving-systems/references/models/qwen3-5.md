@@ -31,7 +31,7 @@ Status: verified. Source: fork (uw-syfi/sglang, branch vibesys-task-v3 @ f05b786
 
 The MXFP4 checkpoint (amd/Qwen3.5-397B-A17B-MXFP4) is 239 GB on disk. At TP=4 it keeps about 212 GB resident (roughly 53 GB per device). It does not fit on fewer than three 128 GB devices.
 
-Status: verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job 623402.
+Status: verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, job-verified.
 
 ### Hybrid cache state
 
@@ -43,7 +43,7 @@ The checkpoint ships its own MTP draft head: `mtp.fc.weight` plus a full 512-exp
 
 Mechanism: decode-step time here is latency-bound on the MoE kernel's per-step activation gather, not on raw arithmetic (see "Decode-step time..." below), and that per-step cost grows only sublinearly with the number of rows verified together (about 26 ms at 16 rows, calibrated exponent ~0.31, so M rows cost roughly `26*(M/16)^0.31` ms; see [`../tooling/performance-modeling.md`](../tooling/performance-modeling.md) for the padding-floor mechanism behind this scaling). Verifying k+1 rows per session per step is therefore nearly free next to running k+1 separate decode steps, and every accepted draft token amortizes that one verify step over more emitted tokens. Speculative decoding lowers the per-token time floor; it does not change bandwidth efficiency or the measured-time-over-roofline ratio recorded elsewhere in this file.
 
-Status: verified (accepted at two concurrencies; mechanism explained by the calibrated sublinear-scaling exponent, itself flagged low-confidence in the source memo). Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633511 (uncapped), 633512 (16-session cap).
+Status: verified (accepted at two concurrencies; mechanism explained by the calibrated sublinear-scaling exponent, itself flagged low-confidence in the source memo). Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, job-verified at both the uncapped and the 16-session-cap runs.
 
 ## Pitfalls
 
@@ -100,7 +100,7 @@ Accepted config: `SGLANG_MXFP4_MOE_HIP=1`, `SGLANG_SKINNY_GEMM=1`, plus mixed ch
 
 A later chunk-size sweep on top of the accepted stack (NEXTN k=3, breakable prefill CUDA graph) confirmed 1024 as the best of the three sizes tested: 512 regressed pooled p95 TTFT turn2+ 19 percent (a co-batching-rate side effect, see [`../algorithms/chunked-prefill.md`](../algorithms/chunked-prefill.md)'s pitfall), 2048 showed no material change (smaller than its own rep spread), and 1024 reproduced the reference numbers within noise. Keep 1024 on this stack. Status: verified (3 reps per side, one boot). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
-Four-side pooled per-turn TTFT quantiles under the admission-aware open-loop schedule (job 632958, 5 reps per side pooled; see [`../tooling/serving-benchmark.md`](../tooling/serving-benchmark.md) for why pooled quantiles, not per-rep percentiles, are the metric of record here), p50 / p90 / p95 / p99, plus each side's median mean TPOT and `schedule_bound_fraction` range across its 5 reps:
+Four-side pooled per-turn TTFT quantiles under the admission-aware open-loop schedule (this section's four-side-matrix job, 5 reps per side pooled; see [`../tooling/serving-benchmark.md`](../tooling/serving-benchmark.md) for why pooled quantiles, not per-rep percentiles, are the metric of record here), p50 / p90 / p95 / p99, plus each side's median mean TPOT and `schedule_bound_fraction` range across its 5 reps:
 
 | Side | p50 | p90 | p95 | p99 | Median mean TPOT | schedule_bound_fraction |
 |:--|:--|:--|:--|:--|:--|:--|
@@ -115,15 +115,15 @@ Under fixed pacing, TPOT reflects offered load as well as kernel speed: a server
 
 The custom skinny GEMM kernel alone (without mixed chunked prefill) was found at n=5 to raise p95 TTFT turn-2+ about 38 percent versus fused-only rather than leave it unchanged (an earlier n=3 result had shown the opposite ranking, which does not reproduce). Mixed chunked prefill on top of skinny GEMM reverses that regression, landing close to (about 12 percent above) fused-only's p95 while keeping the full TPOT win. This is a benchmark_version 2 finding: the benchmark_version 3 four-side matrix above has no skinny-GEMM-alone side, so treat it as provisional pending a v3 rerun.
 
-Status: verified (four-side benchmark_version 3 matrix, 5 reps per side pooled); skinny-GEMM-alone reversal is a benchmark_version 2 finding, not yet rerun under v3. Stamp: sglang-v0.5.18 fork (`moe/mxfp4-fused` + `gemm/skinny` + `bench/admission-schedule`), benchmark_version 3, 2026-09-11, job 632958.
+Status: verified (four-side benchmark_version 3 matrix, 5 reps per side pooled); skinny-GEMM-alone reversal is a benchmark_version 2 finding, not yet rerun under v3. Stamp: sglang-v0.5.18 fork (`moe/mxfp4-fused` + `gemm/skinny` + `bench/admission-schedule`), benchmark_version 3, 2026-09-11, job-verified.
 
 ### Load dependence
 
-At unlimited concurrency (48 sessions, benchmark_version 4, the 16-slot admission cap lifted, job 632990), the accepted configuration holds the schedule (`schedule_bound_fraction` 1.00): it paces 1.17 turns per second with pooled p95 TTFT turn-2+ 535 ms and mean TPOT 61 ms at 218 tok/s. The all-off baseline cannot hold the schedule at this load (`schedule_bound_fraction` 0, every rep): it degenerates to a closed-loop capacity measurement, 175 ms TPOT, 168 tok/s, pooled p95 TTFT turn-2+ 922 ms. The same accepted configuration at a 16-session cap on the same node holds pooled p95 TTFT turn-2+ at 338 ms and TPOT at 21.4 ms.
+At unlimited concurrency (48 sessions, benchmark_version 4, the 16-slot admission cap lifted, job-verified), the accepted configuration holds the schedule (`schedule_bound_fraction` 1.00): it paces 1.17 turns per second with pooled p95 TTFT turn-2+ 535 ms and mean TPOT 61 ms at 218 tok/s. The all-off baseline cannot hold the schedule at this load (`schedule_bound_fraction` 0, every rep): it degenerates to a closed-loop capacity measurement, 175 ms TPOT, 168 tok/s, pooled p95 TTFT turn-2+ 922 ms. The same accepted configuration at a 16-session cap on the same node holds pooled p95 TTFT turn-2+ at 338 ms and TPOT at 21.4 ms.
 
 TPOT and p95 TTFT are both functions of offered load and the concurrency cap, not of kernel speed alone: compare rows only across sides measured at equal load and cap. See [`../tooling/serving-benchmark.md`](../tooling/serving-benchmark.md).
 
-Status: verified. Stamp: sglang-v0.5.18 fork, benchmark_version 4, 2026-09-11, job 632990.
+Status: verified. Stamp: sglang-v0.5.18 fork, benchmark_version 4, 2026-09-11, job-verified.
 
 Decode-step time is dominated by the MoE expert FFN, not by the mixer or the collectives: MoE work accounts for roughly three-fifths of decode-step device time, with most of the remainder in the model's other dense (non-expert) GEMMs; collective and mixer time is small by comparison. This was confirmed by a kernel-level profile, reproduced twice. The specific kernel names and per-component percentages are implementation details of the selected backend's MoE and GEMM kernel choice; see [`platforms/`](../platforms/) for the selected backend's kernel notes, not repeated here. With the fused HIP MoE kernel in place, MoE is still the largest decode-step term. A counter-level profile alone could not localize the limiter (neither bandwidth- nor ALU-bound by its counters); in-kernel phase timing then showed it is latency-bound on the per-step scattered activation gather inside mostly-padded 16-row expert blocks, with the MFMA instructions issuing at their native rate, not on the decode arithmetic that feeds them; see [`platforms/`](../platforms/) for the phase breakdown and the counters that separate the two.
 
@@ -184,7 +184,7 @@ The 16-session-cap p95 TTFT row uses the steady-state reference reps for the bas
 
 Boot cost: 2.6 to 2.8x longer than the non-speculative boot (about 800 to 900 s versus about 300 s), because the draft head loads from the unsharded checkpoint and boot captures extra decode graphs for the draft path. A deployment-time cost only; it does not affect the serving-time numbers above.
 
-Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633511 (uncapped), 633512 (16-session cap).
+Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, job-verified at both the uncapped and the 16-session-cap runs.
 
 ### Overlap scheduler off, on top of NEXTN k=3, measured
 
@@ -197,7 +197,7 @@ Paired against the NEXTN k=3 configuration above with the overlap scheduler on, 
 
 Accepted for TTFT-weighted multi-turn workloads; keep the overlap scheduler on for throughput-weighted ones. See [`platforms/`](../platforms/) for the mechanism (the overlap scheduler's one-iteration publish lag) and the trade-off rule.
 
-Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633754 (uncapped), 633755 (16-session cap).
+Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, job-verified at both the uncapped and the 16-session-cap runs.
 
 ### PyTorch TunableOp tuned dense GEMM, on top of NEXTN k=3 + overlap off, measured
 
@@ -210,7 +210,7 @@ Paired against the NEXTN k=3 + `--disable-overlap-schedule` configuration above 
 
 Accepted as the default on top of the base configuration above. p95 TTFT is unchanged at both concurrencies (well within each side's own rep-to-rep spread) because prefill runs eagerly outside CUDA-graph capture and almost never lands on one of the tuned exact-M shapes, so the tuned table cannot touch the term that dominates p95 TTFT either way. See [`platforms/`](../platforms/) for the tuning recipe, the per-device filename pitfall the first acceptance attempt hit, and the mechanism behind why the TPOT gain exceeds a single-forward prediction.
 
-Status: accepted. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633839 (uncapped), 633841 (16-session cap).
+Status: accepted. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, job-verified at both the uncapped and the 16-session-cap runs.
 
 Raising k from 3 to 4 (5 draft tokens, its own TunableOp table) was probed and refuted: accept_len rose +8.9% (2.85 to 3.10) but median TPOT regressed +6.9% (22.43 to 23.97 ms) because the per-slot accept rate fell 0.618 to 0.527, so k=3 remains the accepted draft length; see [`platforms/`](../platforms/) for the full comparison.
 
@@ -322,7 +322,7 @@ With the overlap scheduler off (previous section), a five-bucket, request-joined
 
 See [`../engines/sglang.md`](../engines/sglang.md) for what the receipt-to-queue-arrival term measures, and [`../tooling/performance-modeling.md`](../tooling/performance-modeling.md) for the decomposition method.
 
-Status: verified (request-joined, 100 percent match rate both concurrencies, residual near logging precision). Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, job 633804.
+Status: verified (request-joined, 100 percent match rate both concurrencies, residual near logging precision). Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, job-verified.
 
 **Refinement at concurrency 1 (no queueing), on top of the accepted breakable prefill CUDA graph.** The bucket table above was measured under load (c48/c16) with the overlap scheduler off, before the breakable prefill graph landed. A later, exact-rid-joined decomposition at concurrency 1 isolates the "receipt to queue arrival" term's own sub-costs from any queueing effect: scheduler pickup and `ForwardBatch` build are both under 2 ms combined at every size tested, `ModelRunner.sample()` is under 0.2 ms (a much larger profiler-based estimate for this stage does not reproduce with a low-overhead measurement, see [`../tooling/profiler.md`](../tooling/profiler.md)), NEXTN draft-extend-for-prefill is a real 4-7 ms on the critical path, and result processing plus send to detokenizer is 2.5-5 ms. Upstream of the scheduler entirely (in `TokenizerManager`, not stamped by the load-mode table above), chat-template render is a flat 0.4 ms regardless of conversation length, tokenize costs about 0.003 ms per total prompt token and dominates because it re-tokenizes the whole rendered conversation from scratch every turn (not just the new suffix), and IPC (pickle plus ZMQ send) is 3-6 ms and grows with the token-id array size. Summing every stage this job measured (excluding the forward itself) accounts for essentially all of a 17-33 ms residual an earlier pass had left unattributed, closing it to 2-6 ms per size. See [`../engines/sglang.md`](../engines/sglang.md) for the full per-size table and [`../tooling/serving-benchmark.md`](../tooling/serving-benchmark.md) for the low-overhead host-stamp method.
 
@@ -340,7 +340,7 @@ A single-request (bs=1) turn-2+ prefill+draft-extend forward is compute-bound at
 
 Routed MoE dominates and grows fastest with extend length; dense GEMM is nearly flat (weight-read-bound, not compute-bound, at this token range). See [`platforms/`](../platforms/) for the MoE kernel this measures and its own floor comparison.
 
-Status: verified (kernel-named torch-profiler capture, cross-validated against the bucket decomposition above to within a few ms). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633822.
+Status: verified (kernel-named torch-profiler capture, cross-validated against the bucket decomposition above to within a few ms). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
 
 **Post-permute re-profile.** GPU kernel time by block (mean across ranks, two independent boots, reproduced consistently in both):
 
@@ -360,7 +360,7 @@ The gather-dequant hybrid design (keep MXFP4 weights resident, gather-dequant on
 
 Both hybrid targets are superseded by the from-scratch fused HIP MoE kernel (see the Measured table above and [`platforms/`](../platforms/) for the kernel), which computes exact bf16-rounding-level numbers and wins outright rather than trading TTFT against TPOT.
 
-Scope: rocm, gfx942, aiter d9e5ef7ce0. Status: refuted as a serving candidate (bf16: exact but not a net win; fp8: excluded by the exact-only numerics policy). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job 632232.
+Scope: rocm, gfx942, aiter d9e5ef7ce0. Status: refuted as a serving candidate (bf16: exact but not a net win; fp8: excluded by the exact-only numerics policy). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-11, job-verified.
 
 ## See also
 

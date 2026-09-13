@@ -33,7 +33,7 @@ k=3 was chosen over k=2 by the lower-median-TPOT rule after both cleared gates a
 
 Gates 13/13 on every rep at both concurrencies. Boot cost without the draft-only sharded artifact: 2.6 to 2.8x longer than the non-speculative boot (about 800 to 900 s versus about 300 s), because the draft head loads from the unsharded checkpoint and boot captures extra decode graphs for the draft path. With the draft-only sharded artifact (see [`weight-loading.md`](weight-loading.md)), boot drops to about 365 s. Either way this is a deployment-time cost only, not a serving-time one: TPOT, p95 TTFT, and accept_len are unaffected by which draft load path was used.
 
-Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, jobs 633511 (uncapped), 633512 (16-session cap).
+Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, job-verified at both the uncapped and the 16-session-cap runs.
 
 ## Accepted: disable the overlap scheduler for TTFT-weighted multi-turn workloads
 
@@ -45,7 +45,7 @@ Rule: for TTFT-weighted multi-turn workloads with spec decode, turn the overlap 
 
 - `--disable-overlap-schedule`: add to the argv above when the deployment is TTFT-weighted.
 
-Status: accepted. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs 633754 (48 sessions uncapped) and 633755 (16-session cap), 5 reps per side each, gates 13/13 every rep.
+Status: accepted. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified at both the 48-session-uncapped and the 16-session-cap runs, 5 reps per side each, gates 13/13 every rep.
 
 ## Interaction: PyTorch TunableOp tuned dense GEMM
 
@@ -108,9 +108,9 @@ Scope:   rocm, this checkpoint's TP-sharded fast-path artifact. The
          missing auto-default entry is an engine-wide allowlist gap, not
          rocm-specific, but is recorded here because the sharded-artifact
          mechanics that make it bite are this fork's ROCm load path.
-Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633510
-         (original-checkpoint fallback); fast path verified in jobs
-         633762/633763 (draft-only sharded artifact).
+Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified
+         (original-checkpoint fallback); fast path verified across two
+         further runs (draft-only sharded artifact).
 ```
 
 ## See also

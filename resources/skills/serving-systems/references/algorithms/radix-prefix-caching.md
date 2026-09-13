@@ -146,8 +146,8 @@ Scope:   chat templates that render the last assistant turn differently
          from history turns (checked: Qwen3.5-style templates with a
          `loop.index0 > last_query_index` branch); portable mechanism,
          not tied to one engine or backend.
-Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs
-         633542, 633710.
+Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12,
+         job-verified across two runs.
 ```
 
 - **Cache invalidation boundaries.** A generated token is not shareable until committed. Don't cache output KV prematurely.

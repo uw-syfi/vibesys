@@ -26,7 +26,7 @@ Conditions: 239 GB MXFP4 checkpoint (amd/Qwen3.5-397B-A17B-MXFP4), TP=4, 4x128 G
 
 Recommended flags: `--weight-loader-disable-mmap` and `--model-loader-extra-config '{"num_threads": 2}'`, no drop-cache flag.
 
-Scope: MI300A, `sglang-v0.5.18-rocm700-mi30x`, TP=4, 239 GB MXFP4 checkpoint. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-05, jobs 623402, 623405, 623406, 623408, 623409.
+Scope: MI300A, `sglang-v0.5.18-rocm700-mi30x`, TP=4, 239 GB MXFP4 checkpoint. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-05, job-verified across five runs.
 
 `--weight-loader-prefetch-checkpoints` hoards page cache and recreates the same contention; rejected on this platform. Scope: MI300A. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-05.
 
@@ -56,7 +56,7 @@ Not enough GPU memory for hybrid (mamba/linear-attention) state cache
 
 (`max_mamba_cache_size` computed negative), because the pool must cover resident weights plus the mandatory Mamba state cache. The save step also needs `max_running_requests=8` and `disable_cuda_graph=True`; non-weight files (config, tokenizer, etc.) are copied separately and are not part of the sharded artifact. See [`weight-loading.md`](weight-loading.md) for the artifact layout and the load-side fast path.
 
-Scope: MI300A, aiter attention backend, Qwen3.5-397B-A17B (hybrid attention/Mamba model). Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, job 631025, 2026-09-10.
+Scope: MI300A, aiter attention backend, Qwen3.5-397B-A17B (hybrid attention/Mamba model). Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, job-verified, 2026-09-10.
 
 ## Pitfalls
 
@@ -74,8 +74,8 @@ Fix:     use --weight-loader-disable-mmap with
          drop-cache flag (218 s load, ~185 GB free after load).
 Scope:   MI300A, sglang-v0.5.18-rocm700-mi30x, TP=4, 239 GB MXFP4
          checkpoint.
-Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05, jobs
-         623402, 623405, 623406, 623408, 623409.
+Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-05,
+         job-verified across five runs.
 ```
 
 ### Sharded-artifact save needs mem-fraction 0.85
@@ -106,11 +106,12 @@ Scope:   MI300A, aiter attention backend, sglang-v0.5.18-rocm700-mi30x,
          copy of every shard instead of sharing mmap'd pages across
          ranks; see [`weight-loading.md`](weight-loading.md)'s matching
          pitfall for the mechanism and fix.
-Status:  verified. sglang-v0.5.18-rocm700-mi30x, job 631025, 2026-09-10
-         (0.85 required, target loads from the HF checkpoint); jobs
-         633543 and 633650, 2026-09-12 (host OOM in the direct-Engine
-         draft save, cause: `weight_loader_disable_mmap=True`; fixed and
-         confirmed in job 633711).
+Status:  verified. sglang-v0.5.18-rocm700-mi30x, job-verified, 2026-09-10
+         (0.85 required, target loads from the HF checkpoint);
+         job-verified across two further runs, 2026-09-12 (host OOM in
+         the direct-Engine draft save, cause:
+         `weight_loader_disable_mmap=True`; fixed and confirmed in a
+         later job).
 ```
 
 ### KV-pool size drifts across otherwise-identical boots

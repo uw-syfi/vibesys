@@ -52,9 +52,10 @@ Scope:   rocm, sglang-v0.5.18-rocm700-mi30x, Qwen3.5-397B-A17B-MXFP4
          is recorded here because it is this platform's draft-boot
          cost.
 Status:  verified cause (log timing); fix (1) verified end to end.
-         sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs 633510
-         (boot-phase timing), 633511 (spec_k3_c48 boot), 633762/633763
-         (sharded draft artifact save + validation).
+         sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified
+         (boot-phase timing), job-verified (spec_k3_c48 boot),
+         job-verified across two runs (sharded draft artifact save +
+         validation).
 ```
 
 ### A direct `Engine()` save script with `weight_loader_disable_mmap=True` OOM-kills a rank on the host side
@@ -91,10 +92,10 @@ Scope:   rocm, MI300A (unified memory: host-side OOM), a direct
          `Engine()` construction that loads a draft model from the raw
          HF checkpoint while the target loads from an already-sharded
          artifact.
-Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs
-         633543, 633650 (OOM at mem_fraction_static 0.85 and 0.72 with
-         the flag on); fix confirmed in job 633711 (flag off, save
-         completed), and again in job 633762 (draft-only sharded
+Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified
+         across two runs (OOM at mem_fraction_static 0.85 and 0.72 with
+         the flag on); fix confirmed in a later job (flag off, save
+         completed), and again in a further job (draft-only sharded
          artifact save, same default setting).
 ```
 
@@ -137,10 +138,10 @@ Scope:   any container image that ships its own baked-in engine
          install at a fixed import path; independent of backend and of
          which call is involved. Not platform-specific; recorded here
          because it surfaced on this platform's draft-model save path.
-Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs
-         633711, 633733, 633762, 633763. Fix confirmed end to end: job
-         633762 (rerun with `PYTHONPATH` exported to the staged bundle)
-         produced the sharded draft artifact below, and its self-check
+Status:  verified. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified
+         across four runs. Fix confirmed end to end: a later run (rerun
+         with `PYTHONPATH` exported to the staged bundle) produced the
+         sharded draft artifact below, and its self-check
          (`_check_sglang_is_the_staged_bundle()`) is what would have
          caught the two prior failures in under a second instead of
          after a full boot.
@@ -160,7 +161,7 @@ Effect: the draft's own load-weight phase drops from about 498 s to about 9.7 s;
 
 Producing this artifact hit the OOM (disable_mmap) and stock-engine-import (PYTHONPATH) pitfalls above; both fixes are confirmed by the jobs that produced and validated this artifact.
 
-Scope: rocm, sglang-v0.5.18-rocm700-mi30x, Qwen3.5-397B-A17B-MXFP4 NEXTN/MTP draft head, TP=4. Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs 633762 (save), 633763 (validation).
+Scope: rocm, sglang-v0.5.18-rocm700-mi30x, Qwen3.5-397B-A17B-MXFP4 NEXTN/MTP draft head, TP=4. Status: verified. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified at both the save and the validation runs.
 
 ## Pre-sharded artifact: sharded_state save
 
@@ -171,7 +172,7 @@ Scope: rocm, sglang-v0.5.18-rocm700-mi30x, Qwen3.5-397B-A17B-MXFP4 NEXTN/MTP dra
 
 Fork commit 369c69502e (uw-syfi/sglang) makes the task harness boot from this artifact when it exists (load path, `--load-format sharded_state`); the save itself is a one-time operator step.
 
-Scope: rocm, MI300A (the mem-fraction constraint is MI300A/unified-memory-specific; the part layout and save-step flags apply to the rocm/aiter combination generally). Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, job 631025, 2026-09-10.
+Scope: rocm, MI300A (the mem-fraction constraint is MI300A/unified-memory-specific; the part layout and save-step flags apply to the rocm/aiter combination generally). Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, job-verified, 2026-09-10.
 
 ## ShardedStateLoader: avoid mmap over a network filesystem
 
@@ -181,7 +182,7 @@ Fork fix (uw-syfi/sglang commits 13891c001a, 24b5f21055): read without mmap (120
 
 Instrumentation showed device copies at about 30 GB/s and reads at 0.4 to 0.56 GB/s per stream: the remaining time is the storage read cap, not the copy. Striping the artifact 8-way evened per-rank completion time but did not raise the aggregate cap.
 
-Scope: rocm, any network filesystem (site-independent). Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, jobs 631192, 631193.
+Scope: rocm, any network filesystem (site-independent). Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, job-verified across two runs.
 
 ## The TP-sharded loader has no layout check; EP boots from the unsharded checkpoint and OOMs
 
@@ -215,7 +216,7 @@ Scope:   rocm, MI300A (unified memory, the same host-loader path this
          prediction, not yet measured: roughly 6 to 14 percent TPOT
          improvement at batch 16 versus the accepted TP=4 layout.
 Status:  blocked (boot-time OOM, reproduced on 2 nodes; not refuted).
-         sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job 633509.
+         sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
 ```
 
 ## Boot-time breakdown
@@ -234,7 +235,7 @@ From the sharded artifact, single node, checkout staged in node-local tmpfs (see
 
 Compare: about 430 to 500 s from the HF-checkpoint path; about 9 min for the original (pre-fork) recipe. A boot overlapping another node's load on the same shared filesystem measured 324 s.
 
-Scope: rocm, MI300A, `sglang-v0.5.18-rocm700-mi30x`, sharded_state artifact, TP=4. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-10 (composes the loader-level measurements from jobs 631192/631193 and 631025).
+Scope: rocm, MI300A, `sglang-v0.5.18-rocm700-mi30x`, sharded_state artifact, TP=4. Status: verified. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-09-10 (composes the loader-level measurements from those runs).
 
 ## Stage the checkout in node-local tmpfs
 

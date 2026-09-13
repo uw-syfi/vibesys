@@ -39,7 +39,7 @@ Fix:     the microbenchmark baseline must be the production dispatch
          kernel trace of the server before integrating.
 Scope:   any kernel-variant comparison feeding an integration decision,
          backend-independent.
-Status:  verified. 2026-09-12, job 633183.
+Status:  verified. 2026-09-12, job-verified.
 ```
 
 ### A lossy-format change is only worth its accuracy cost if it attacks the live bound

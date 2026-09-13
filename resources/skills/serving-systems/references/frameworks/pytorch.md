@@ -79,7 +79,7 @@ Scope:   PyTorch TunableOp on any multi-device process; engine- and
 Status:  verified (reproduced across two multi-rank jobs with the wrong
          file layout; substitution rule and unconditional at-exit rewrite
          read from PyTorch's TunableOp source). Stamp: torch 2.9.0a0,
-         2026-09-12, jobs 633800 and 633801 (observed on an
+         2026-09-12, job-verified across two runs (observed on an
          sglang-v0.5.18-rocm700-mi30x server; the mechanism itself is
          PyTorch-internal, not sglang- or rocm-specific).
 ```

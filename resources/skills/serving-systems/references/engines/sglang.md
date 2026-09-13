@@ -176,7 +176,7 @@ A per-request-joined decomposition of turn-2+ TTFT (client timestamp joined to t
 
 See [`../tooling/performance-modeling.md`](../tooling/performance-modeling.md) for the general bucket-decomposition method this uses, and [`../models/qwen3-5.md`](../models/qwen3-5.md) for the full bucket table.
 
-Scope: sglang, any backend (scheduler behavior, not platform-specific). Status: verified (measured via a request-id join, residual near logging precision; mechanism read from the recv-loop/`PrefillAdder` gating in `managers/scheduler.py`). Stamp: sglang fork at `b6f3d5d6c8`, 2026-09-12, job 633804.
+Scope: sglang, any backend (scheduler behavior, not platform-specific). Status: verified (measured via a request-id join, residual near logging precision; mechanism read from the recv-loop/`PrefillAdder` gating in `managers/scheduler.py`). Stamp: sglang fork at `b6f3d5d6c8`, 2026-09-12, job-verified.
 
 ### Host-side cost model, concurrency-1 (no queueing)
 
@@ -330,7 +330,7 @@ Scope:   sglang, any backend (engine behavior, not platform-specific).
          through the same EAGLE-family hook.
 Status:  verified (mechanism read in source; a paired boot confirmed
          prefill and decode running as separate batches). sglang fork
-         at b6f3d5d6c8, 2026-09-12, job 633542.
+         at b6f3d5d6c8, 2026-09-12, job-verified.
 ```
 
 ### The overlap scheduler's one-iteration publish lag can cost more than it saves once steps are long and TTFT-bound
@@ -368,9 +368,9 @@ Scope:   sglang, any backend (scheduler behavior, not platform-
          configuration at two concurrencies; the publish-lag mechanism
          itself is general to the overlap scheduler, not specific to
          speculative decoding.
-Status:  accepted. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, jobs 633754
-         (48 sessions uncapped, 5 reps per side) and 633755 (16-session
-         cap, 5 reps per side), gates 13/13 every rep.
+Status:  accepted. sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified
+         at both the 48-sessions-uncapped run (5 reps per side) and the
+         16-session-cap run (5 reps per side), gates 13/13 every rep.
 ```
 
 ### Where the per-round host time goes with the overlap scheduler off
