@@ -293,7 +293,6 @@ export function roundAgentElapsedMs(round: RoundSummary, now: Date): number {
   return activeTimingElapsedMs(round, now);
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 function applyPhaseEvent(state: RunMapState, event: RunEvent): AgentPhase[] {
   const kind = event.agent_kind;
   if (!kind) return state.phases;
@@ -303,9 +302,9 @@ function applyPhaseEvent(state: RunMapState, event: RunEvent): AgentPhase[] {
   if (roundNumber !== null && roles !== null) {
     phases = seedExpectedPhases(roles, phases, roundNumber);
   }
-  const started = event.type === 'agent_execution_started' || event.type === 'phase_started';
-  const finished = event.type === 'agent_execution_finished' || event.type === 'phase_finished';
-  if (!started && !finished) return ensurePhase(phases, kind, roundNumber);
+  const transition = phaseTransition(event);
+  if (transition === null) return ensurePhase(phases, kind, roundNumber);
+  const started = transition === 'started';
   const executionId = event.execution_id ?? event.invocation_id ?? undefined;
   const data = event.data;
   const runtime =
@@ -321,6 +320,14 @@ function applyPhaseEvent(state: RunMapState, event: RunEvent): AgentPhase[] {
     ...(started ? {startedAt: event.timestamp} : {finishedAt: event.timestamp}),
     ...runtime,
   });
+}
+
+function phaseTransition(event: RunEvent): 'started' | 'finished' | null {
+  if (event.type === 'agent_execution_started' || event.type === 'phase_started') return 'started';
+  if (event.type === 'agent_execution_finished' || event.type === 'phase_finished') {
+    return 'finished';
+  }
+  return null;
 }
 
 function terminalPhaseStatus(status: RunEvent['status']): AgentPhaseStatus {
