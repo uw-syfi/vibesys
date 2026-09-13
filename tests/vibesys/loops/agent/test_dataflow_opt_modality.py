@@ -26,7 +26,7 @@ from vibesys.schemas import (
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
 _DOMAIN_DIR = PROMPTS_DIR / "domains" / "database"
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
-_BUNDLE = _PROJECT_ROOT / "examples" / "differential-dataflow-cpu-bench"
+_BUNDLE = _PROJECT_ROOT / "examples" / "database" / "differential-dataflow"
 
 _PINNED_COMMIT = "4f05cbb61775a45844a0905de9dacfee1e91dd80"
 

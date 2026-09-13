@@ -1,6 +1,6 @@
 """Tests for the callgrind attribution parser (example profiler capability).
 
-``examples/differential-dataflow-cpu-bench/profiler/attribute_cpu.py`` turns
+``examples/database/differential-dataflow/profiler/attribute_cpu.py`` turns
 ``callgrind_annotate`` output into a ranked, fixed-vocabulary component list that
 drives the loop's bottleneck walk. The heavy part — running valgrind — is not
 exercised here; instead we feed a captured, trimmed real ``callgrind_annotate``
@@ -20,7 +20,9 @@ from pathlib import Path
 import pytest
 
 _REPO = Path(__file__).resolve().parents[4]
-_ATTR_PY = _REPO / "examples" / "differential-dataflow-cpu-bench" / "profiler" / "attribute_cpu.py"
+_ATTR_PY = (
+    _REPO / "examples" / "database" / "differential-dataflow" / "profiler" / "attribute_cpu.py"
+)
 _SAMPLE = Path(__file__).with_name("fixtures") / "callgrind_annotate_sample.txt"
 
 
