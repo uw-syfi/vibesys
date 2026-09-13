@@ -415,62 +415,7 @@ that every architecture-dependent statement still describes the production
 path. Record a candidate commit or equivalent architecture fingerprint and the
 exact artifacts used for calibration.
 
-Before using the model to rank another optimization, require all of:
-
-1. Numerical FLOPs and byte assumptions for the relevant prefill/decode regime.
-2. Usable device compute and bandwidth ranges with their source or discount.
-3. A hardware/workload ceiling distinct from the current implementation knee.
-4. A prediction for at least one retained operating point, its observed value,
-   calibration error, and the residual the model does not explain.
-5. TTFT, TPOT, end-to-end latency, failures, and accuracy treated as constraints
-   rather than inferred from throughput.
-
-Reject the model as stale when it names a removed bottleneck, contradicts
-activation telemetry, cannot reproduce any retained measurement, or reports a
-measured saturation point as though it were the hardware roofline.
-
-### A kernel variant wins its microbenchmark and regresses the serving metric
-
-```
-Symptom: a kernel variant wins its microbenchmark by 1.2 to 1.3x and
-         regresses the serving metric by 17 percent end to end.
-Cause:   the microbenchmark baseline was a different kernel from the one
-         production dispatches (a scaffold path vs the templated path
-         chosen at the production dispatch threshold).
-Fix:     the microbenchmark baseline must be the production dispatch
-         path at the production shapes; confirm by name against a
-         kernel trace of the server before integrating.
-Scope:   any kernel-variant comparison feeding an integration decision,
-         backend-independent.
-Status:  verified. 2026-09-12, job 633183.
-```
-
-### A lossy-format change is only worth its accuracy cost if it attacks the live bound
-
-```
-Symptom: a lower-precision kernel design promises fewer arithmetic
-         instructions per element, but the exact kernel it would
-         replace is already close to a different bound (a byte-
-         movement floor), not an instruction-issue ceiling.
-Cause:   a lossy format change only pays off against the bound it
-         actually moves. A narrower activation format can cut matrix-
-         instruction issue count without touching the weight bytes a
-         byte-bandwidth floor is built from; if the exact kernel is
-         already close to that floor, cutting issue count further
-         cannot close the remaining gap.
-Fix:     name which bound (compute, byte movement, launch/latency) the
-         format change attacks, then check the exact kernel's distance
-         from that specific bound, not an aggregate wall-clock or ALU-
-         utilization number, before spending accuracy budget on it.
-Scope:   any lossy numerics change proposed against a kernel with an
-         existing exact implementation, backend- and engine-agnostic.
-Status:  verified (an fp8-activation MoE kernel design predicted an 8x
-         cut in matrix-instruction issue count, but the exact kernel it
-         would replace was already within 1.0 to 1.2x of the weight-
-         byte floor the format change does not touch, so the design
-         was closed before implementation). Stamp: sglang-v0.5.18-
-         rocm700-mi30x, 2026-09-13, job-verified.
-```
+See [`performance-modeling-freshness.md`](performance-modeling-freshness.md) for the full recalibration checklist and for worked pitfall examples: a kernel-variant microbenchmark measured against the wrong dispatch path, a lossy-format change that targets a bound the exact kernel isn't near, and a kernel that matches its own byte count exactly while still being far from its bandwidth floor because it launches as many small grids instead of one.
 
 ## Pitfalls
 
@@ -493,6 +438,7 @@ Status:  verified (an fp8-activation MoE kernel design predicted an 8x
 ## See also
 
 - [`../../OVERVIEW.md`](../../OVERVIEW.md) — roofline and prefill/decode foundations.
+- [`performance-modeling-freshness.md`](performance-modeling-freshness.md): recalibration checklist and worked pitfall examples.
 - [`profiler.md`](profiler.md) — collect system timelines and kernel roofline evidence.
 - [`serving-benchmark.md`](serving-benchmark.md) — measure comparable end-to-end serving metrics.
 - [`../platforms/`](../platforms/) — select the platform hardware notes for the target backend.

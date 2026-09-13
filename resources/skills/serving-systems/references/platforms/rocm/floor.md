@@ -96,6 +96,8 @@ On top of the dword-wide-loads stack above: `STAGE1_SCAFFOLD_BLOCK_THRESHOLD` mo
 
 **Current state of the fused MXFP4 MoE kernel, after this stack:** a final re-profile puts MoE routed total at 1.19x its own floor at decode N=16 and 1.01x (essentially at the floor) at N=32, down from 2.19x and 2.30x before H-A and H-C; the round wall is 2.02x its own floor at N=16, down from 2.80x. The remaining round-level gap is now spread across five non-MoE terms (dense GEMM, gated-delta-net, collectives, CPU-only gap, attention), none individually above about 15 percent of the round: further kernel-level work on the MoE decode path has reached diminishing returns, and the next optimization-loop iteration on this workload should target the round-level terms, not this kernel. An analytically-designed fp8-activation variant of this kernel was closed without a build for the same reason (see [`aiter-fp8-moe.md`](aiter-fp8-moe.md)). See [`aiter-mxfp4-moe-kernel-iterations.md`](aiter-mxfp4-moe-kernel-iterations.md#state-after-iteration-4-final-re-profile-on-the-accepted-stack-h-a--h-c-job-verified) for the full re-profile and [`../../models/qwen3-5.md`](../../models/qwen3-5.md) for the decode-round breakdown.
 
+An audit of the two gated-delta-net decode kernels found one already at its byte floor with no further lever, and one launch-granularity-bound with a concrete, not-yet-built fix estimated at about 1.0 to 1.05 ms/round. See [`gated-delta-net.md`](gated-delta-net.md) for the kernel-level detail and [`speculative-decoding.md`](speculative-decoding.md) for where it fits the replayssm-spec recipe.
+
 Environment (serving):
 
 - `PYTORCH_TUNABLEOP_ENABLED=1`
@@ -151,3 +153,4 @@ One line per known pitfall; detail lives at the link.
 - [`boot-costs.md`](boot-costs.md): one-time boot/warmup costs and the HIP extension cache staleness pitfall
 - [`profiler.md`](profiler.md): rocprofv3 / rocprof-compute
 - [`speculative-decoding.md`](speculative-decoding.md): NEXTN/MTP recipe, k-choice, and load-path pitfalls
+- [`gated-delta-net.md`](gated-delta-net.md): kernel-level audit of the replayssm-spec decode kernels
