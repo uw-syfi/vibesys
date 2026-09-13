@@ -10,6 +10,7 @@ import {
   relativeLuminance,
   resolveTheme,
   scrim,
+  shadowColor,
   THEME_NAMES,
   type Theme,
 } from './theme.js';
@@ -316,6 +317,42 @@ describe('modal scrim', () => {
     for (const theme of themes) {
       expect(scrim(theme).strength).toBeGreaterThan(0.3);
       expect(scrim(theme).strength).toBeLessThan(0.85);
+    }
+  });
+});
+
+describe('drop shadow colour', () => {
+  const themes = listThemes();
+
+  it.each(
+    THEME_NAMES.map(name => [name] as const),
+  )('%s gives its drop shadow a colour distinct from its canvas', (name: string) => {
+    const theme = resolveTheme(name);
+    expect(shadowColor(theme)).not.toBe(theme.canvas);
+  });
+
+  it('darkens the canvas in every theme but High Contrast Dark, whose canvas is already black', () => {
+    for (const theme of themes) {
+      const shadow = shadowColor(theme);
+      if (theme.name === 'high-contrast-dark') {
+        // Nothing is darker than #000000: the shadow instead borrows
+        // `surface`, which reads lighter, not darker, than the canvas.
+        expect(shadow).toBe(theme.surface);
+        expect(relativeLuminance(shadow)).toBeGreaterThan(relativeLuminance(theme.canvas));
+      } else {
+        expect(relativeLuminance(shadow)).toBeLessThan(relativeLuminance(theme.canvas));
+      }
+    }
+  });
+
+  it('solves a different shadow for each distinct canvas rather than one fixed hex', () => {
+    // Three themes share the pure-white canvas (Light, Catppuccin Latte, High
+    // Contrast Light) and so share a shadow too: the property is "derived from
+    // the canvas", not "unique per theme name".
+    const byCanvas = new Map(themes.map(theme => [theme.canvas, shadowColor(theme)]));
+    expect(byCanvas.size).toBeGreaterThan(1);
+    for (const theme of themes) {
+      expect(shadowColor(theme)).toBe(byCanvas.get(theme.canvas) ?? '');
     }
   });
 });

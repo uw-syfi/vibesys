@@ -188,6 +188,78 @@ export function layoutAgentGraph(
   return {nodes, cells, width, height: tallest};
 }
 
+export interface ShadowCell {
+  x: number;
+  y: number;
+  /** Which glyph a renderer draws here: `▌` for the column, `▀` for the row. */
+  edge: 'right' | 'bottom';
+}
+
+/**
+ * The room a renderer actually has to draw in: not `AgentGraph.width` and
+ * `.height`, which are only the footprint the nodes and edges themselves need
+ * and, for the last stage's column and for the tallest column's own row, end
+ * exactly where a shadow would begin. `agent-map.ts` hands in the canvas's
+ * real available size, the same numbers it already computed to lay the graph
+ * out and to window it into the pane's row budget.
+ */
+export interface CanvasBounds {
+  width: number;
+  height: number;
+}
+
+/**
+ * Drop-shadow cells for a selected node: a column immediately to its right
+ * (from its second row through one row below its bottom border) and a row
+ * immediately below it (from its second column through one past its right
+ * border). The two ranges share one corner cell; it is returned once, tagged
+ * `bottom`.
+ *
+ * A candidate cell is left out, rather than overwritten, when it already
+ * carries an edge or an arrowhead (`graph.cells`), sits inside another node's
+ * own rectangle, or falls outside `bounds`. That last check stands in for the
+ * pane border. The last stage's column has no gutter reserved past it
+ * (`graph.width` ends exactly at its nodes' own right edge), so its right
+ * column is omitted whenever `bounds` has no slack past the graph's own
+ * width; a `bounds` wider than the graph draws it in full.
+ */
+export function shadowCells(
+  graph: AgentGraph,
+  node: GraphNode,
+  bounds: CanvasBounds,
+): ShadowCell[] {
+  const occupied = new Set(graph.cells.map(cell => `${cell.x},${cell.y}`));
+  const onAnotherNode = (x: number, y: number): boolean =>
+    graph.nodes.some(
+      other =>
+        other !== node &&
+        x >= other.x &&
+        x < other.x + other.width &&
+        y >= other.y &&
+        y < other.y + NODE_HEIGHT,
+    );
+  const safe = (x: number, y: number): boolean =>
+    x >= 0 &&
+    x < bounds.width &&
+    y >= 0 &&
+    y < bounds.height &&
+    !occupied.has(`${x},${y}`) &&
+    !onAnotherNode(x, y);
+
+  const cells = new Map<string, ShadowCell>();
+  const rightX = node.x + node.width;
+  for (let y = node.y + 1; y <= node.y + NODE_HEIGHT; y += 1) {
+    if (safe(rightX, y)) cells.set(`${rightX},${y}`, {x: rightX, y, edge: 'right'});
+  }
+  const bottomY = node.y + NODE_HEIGHT;
+  for (let x = node.x + 1; x <= node.x + node.width; x += 1) {
+    // Runs after the column above, so it overwrites the shared corner
+    // (rightX, bottomY) with `edge: 'bottom'` rather than leaving both.
+    if (safe(x, bottomY)) cells.set(`${x},${bottomY}`, {x, y: bottomY, edge: 'bottom'});
+  }
+  return [...cells.values()];
+}
+
 function columnHeight(count: number): number {
   return count === 0 ? 0 : count * NODE_HEIGHT + (count - 1) * ROW_GAP;
 }

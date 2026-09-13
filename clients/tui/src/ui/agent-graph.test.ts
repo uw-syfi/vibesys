@@ -1,6 +1,15 @@
 import {describe, expect, test} from 'bun:test';
 import type {AgentPhase} from '@vibesys/core-state';
-import {graphPaneBounds, layoutAgentGraph, NODE_HEIGHT, stageKinds} from './agent-graph.js';
+import {
+  type AgentGraph,
+  type GraphCell,
+  type GraphNode,
+  graphPaneBounds,
+  layoutAgentGraph,
+  NODE_HEIGHT,
+  shadowCells,
+  stageKinds,
+} from './agent-graph.js';
 
 function phase(kind: string, status: AgentPhase['status'], roundNumber = 1): AgentPhase {
   return {kind, status, roundNumber, roundLabel: `round-${roundNumber}-${kind}`};
@@ -255,5 +264,164 @@ describe('a round with many agents', () => {
     const graph = layoutAgentGraph(many, graphPaneBounds(many).max - 4);
     const junctions = graph.cells.filter(cell => '┼├┤┬┴'.includes(cell.glyph));
     expect(junctions.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The drop shadow the round view draws for the selected node
+ * (`agent-map.ts#renderGraph`). Pure geometry, like the rest of this module:
+ * colour and glyph choice belong to the renderer.
+ */
+describe('shadowCells', () => {
+  function graphOf(
+    nodes: GraphNode[],
+    cells: GraphCell[],
+    width: number,
+    height: number,
+  ): AgentGraph {
+    return {nodes, cells, width, height};
+  }
+
+  /** Bounds with slack on every side: the common case, nothing clipped. */
+  const ROOMY = {width: 100, height: 100};
+
+  test('draws the right column and the bottom row, sharing one corner cell', () => {
+    const node: GraphNode = {phase: phase('implementer', 'active'), x: 0, y: 0, width: 10};
+    const graph = graphOf([node], [], 30, 30);
+    const cells = shadowCells(graph, node, ROOMY);
+
+    // Right column: x = 10 (one past the border), rows 1..NODE_HEIGHT.
+    for (let y = 1; y < NODE_HEIGHT; y += 1) {
+      expect(cells).toContainEqual({x: 10, y, edge: 'right'});
+    }
+    // Bottom row: y = NODE_HEIGHT (one past the border), columns 1..width.
+    for (let x = 1; x < 10; x += 1) {
+      expect(cells).toContainEqual({x, y: NODE_HEIGHT, edge: 'bottom'});
+    }
+    // The shared corner, (10, NODE_HEIGHT), reads `bottom` and appears once.
+    const corner = cells.filter(cell => cell.x === 10 && cell.y === NODE_HEIGHT);
+    expect(corner).toEqual([{x: 10, y: NODE_HEIGHT, edge: 'bottom'}]);
+    // NODE_HEIGHT - 1 plain right-column cells, plus the whole bottom row
+    // (node.width cells, corner included).
+    expect(cells).toHaveLength(NODE_HEIGHT - 1 + 10);
+  });
+
+  test('skips a cell already carrying an edge or an arrowhead', () => {
+    const node: GraphNode = {phase: phase('implementer', 'active'), x: 0, y: 0, width: 10};
+    const edgeCell: GraphCell = {x: 10, y: 1, glyph: '─', tone: 'idle'};
+    const arrowCell: GraphCell = {x: 10, y: 3, glyph: '▶', tone: 'idle'};
+    const graph = graphOf([node], [edgeCell, arrowCell], 30, 30);
+    const cells = shadowCells(graph, node, ROOMY);
+
+    expect(cells.some(cell => cell.x === 10 && cell.y === 1)).toBe(false);
+    expect(cells.some(cell => cell.x === 10 && cell.y === 3)).toBe(false);
+    // An untouched row in the same column still draws.
+    expect(cells.some(cell => cell.x === 10 && cell.y === 2)).toBe(true);
+  });
+
+  test('skips a cell that sits inside another node', () => {
+    const node: GraphNode = {phase: phase('implementer', 'active'), x: 0, y: 0, width: 10};
+    const neighbor: GraphNode = {phase: phase('judge', 'pending'), x: 10, y: 1, width: 8};
+    const graph = graphOf([node, neighbor], [], 30, 30);
+    const cells = shadowCells(graph, node, ROOMY);
+
+    // (10, 1) is the shadow's own departure-row cell and sits inside
+    // `neighbor`'s rectangle; it must not draw a shadow over it.
+    expect(cells.some(cell => cell.x === 10 && cell.y === 1)).toBe(false);
+  });
+
+  test('skips a cell past the bounds the caller hands in, standing in for the pane border', () => {
+    const node: GraphNode = {phase: phase('judge', 'pending'), x: 0, y: 0, width: 10};
+    const graph = graphOf([node], [], 30, 30);
+    // Exactly the node's own footprint: nothing reserved past it, on either
+    // side, for a shadow to land in.
+    const cells = shadowCells(graph, node, {width: 10, height: NODE_HEIGHT});
+
+    expect(cells).toEqual([]);
+  });
+
+  test('draws in full once bounds give it room, even against a graph sized tight to its nodes', () => {
+    // `graph.width`/`.height` alone are not the safety bound (that is the
+    // point of this test): a graph exactly the size of its one node still
+    // gets a full shadow once `bounds` has slack past it.
+    const node: GraphNode = {phase: phase('judge', 'pending'), x: 0, y: 0, width: 10};
+    const graph = graphOf([node], [], 10, NODE_HEIGHT);
+    const cells = shadowCells(graph, node, ROOMY);
+
+    expect(cells.some(cell => cell.edge === 'right')).toBe(true);
+    expect(cells.some(cell => cell.edge === 'bottom')).toBe(true);
+  });
+
+  test('the last stage of a real layout has no gutter past it, so no shadow without slack', () => {
+    const graph = layoutAgentGraph(CHAIN, graphPaneBounds(CHAIN).max - 4);
+    const last = graph.nodes.at(-1) as GraphNode;
+    // Bounds sized to exactly what the graph itself needs, on every side: the
+    // pane is drawn at its floor, no bigger than the graph requires. Neither
+    // the right column (no gutter past the last stage) nor the bottom row
+    // (this chain's one row is already the tallest column) has anywhere left
+    // to draw.
+    const tight = shadowCells(graph, last, {width: graph.width, height: graph.height});
+    expect(tight).toEqual([]);
+
+    // The same node, given a pane with slack past the graph on both axes,
+    // gets the full shadow: this is a property of the room on hand, not of
+    // being the last stage.
+    const roomy = shadowCells(graph, last, ROOMY);
+    expect(roomy.some(cell => cell.edge === 'right')).toBe(true);
+    expect(roomy.some(cell => cell.edge === 'bottom')).toBe(true);
+  });
+
+  test("a middle stage of a real layout loses only its edge's departure cell", () => {
+    const graph = layoutAgentGraph(CHAIN, graphPaneBounds(CHAIN).max - 4);
+    const middle = graph.nodes[1] as GraphNode; // 'implementer': fed and feeding.
+    const cells = shadowCells(graph, middle, ROOMY);
+    const rightX = middle.x + middle.width;
+    const departureRow = middle.y + 1;
+
+    expect(graph.cells.some(cell => cell.x === rightX && cell.y === departureRow)).toBe(true);
+    expect(cells.some(cell => cell.x === rightX && cell.y === departureRow)).toBe(false);
+    for (let y = middle.y + 2; y <= middle.y + NODE_HEIGHT; y += 1) {
+      expect(cells.some(cell => cell.x === rightX && cell.y === y)).toBe(true);
+    }
+  });
+});
+
+/**
+ * A regression guard for the drop-shadow change: `shadowCells` is additive,
+ * and neither `layoutAgentGraph` nor `routeEdges` changed alongside it, so a
+ * small graph's node bounds and edge cells must still match what they were
+ * before that change. Captured from this same call against the pre-shadow
+ * code.
+ */
+describe('layout stability under the drop-shadow addition', () => {
+  test('node bounds and edge cells for a 4-node graph are unchanged', () => {
+    const four = [...CHAIN, phase('profiler', 'pending')];
+    const graph = layoutAgentGraph(four, graphPaneBounds(four).max - 4);
+
+    expect(graph.nodes.map(node => ({x: node.x, y: node.y, width: node.width}))).toEqual([
+      {x: 0, y: 0, width: 18},
+      {x: 23, y: 0, width: 18},
+      {x: 46, y: 0, width: 18},
+      {x: 69, y: 0, width: 18},
+    ]);
+    expect(graph.width).toBe(87);
+    expect(graph.height).toBe(5);
+    expect(graph.cells).toEqual([
+      {x: 18, y: 1, glyph: '─', tone: 'live'},
+      {x: 19, y: 1, glyph: '─', tone: 'live'},
+      {x: 20, y: 1, glyph: '─', tone: 'live'},
+      {x: 21, y: 1, glyph: '─', tone: 'live'},
+      {x: 22, y: 1, glyph: '▶', tone: 'live'},
+      {x: 41, y: 1, glyph: '─', tone: 'live'},
+      {x: 42, y: 1, glyph: '─', tone: 'live'},
+      {x: 43, y: 1, glyph: '─', tone: 'live'},
+      {x: 44, y: 1, glyph: '─', tone: 'live'},
+      {x: 45, y: 1, glyph: '▶', tone: 'live'},
+      {x: 64, y: 1, glyph: '─', tone: 'idle'},
+      {x: 65, y: 1, glyph: '─', tone: 'idle'},
+      {x: 66, y: 1, glyph: '─', tone: 'idle'},
+      {x: 67, y: 1, glyph: '─', tone: 'idle'},
+      {x: 68, y: 1, glyph: '▶', tone: 'idle'},
+    ]);
   });
 });
