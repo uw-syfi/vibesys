@@ -88,6 +88,8 @@ job-verified.
 
 ## Measured
 
+**Current accepted numbers, this stack (gemm-pad-m plus breakable prefill CUDA graph plus TunableOp plus NEXTN k=3 plus overlap off), plain default launch, no manual env or extra server args:** pooled p95 TTFT turn2+ at 48 uncapped sessions runs about 256 to 321 ms depending on which rep set is pooled (single-boot pooled: 256.0 ms, n=498, 3 reps; a separate 5-rep paired-acceptance pool: 321.1 ms; a single-rep wiring check: 282.81 ms), median TPOT about 11 ms (10.76-11.50 ms across the same rep sets); at a 16-session cap, p95 TTFT turn2+ is about 206 ms (199.02-206.7 ms) and TPOT about 9.3 ms (9.25-9.37 ms). These are not one precise number because they come from different rep counts and pooling methods across several jobs on the same accepted stack, not from a regression; treat the ranges, not any single figure, as the reference. Status: job-verified (a default-launch wiring check, a TTFT-decomposition rep, and the chunk-sweep base side). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
+
 | Metric | Pre-kernel baseline (baseline_v1cfg) | Accepted config: fused MoE + skinny GEMM + mixed chunked prefill (defaults) | Scope |
 |:--|:--|:--|:--|
 | Mean TPOT | 106.8 ms | 21.7 ms | 4x MI300A, TP=4, 48 concurrent multi-turn sessions, admission-aware open-loop schedule (benchmark_version 3) |
@@ -95,6 +97,8 @@ job-verified.
 | Throughput | ~102 tok/s | ~104 tok/s | same; throughput is fixed by the open-loop schedule's offered rate (every side in the matrix below lands within about 2 percent of the others), so it is not a useful differentiator at this load |
 
 Accepted config: `SGLANG_MXFP4_MOE_HIP=1`, `SGLANG_SKINNY_GEMM=1`, plus mixed chunked prefill (`--enable-mixed-chunk --chunked-prefill-size 1024`); see [`platforms/`](../platforms/) for the backend-specific kernels and [`../algorithms/chunked-prefill.md`](../algorithms/chunked-prefill.md) for the chunked-prefill contract. Baseline: Triton MXFP4 MoE fallback kernel with hipBLASLt default dense GEMMs, all three off/unset.
+
+A later chunk-size sweep on top of the accepted stack (NEXTN k=3, breakable prefill CUDA graph) confirmed 1024 as the best of the three sizes tested: 512 regressed pooled p95 TTFT turn2+ 19 percent (a co-batching-rate side effect, see [`../algorithms/chunked-prefill.md`](../algorithms/chunked-prefill.md)'s pitfall), 2048 showed no material change (smaller than its own rep spread), and 1024 reproduced the reference numbers within noise. Keep 1024 on this stack. Status: verified (3 reps per side, one boot). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
 Four-side pooled per-turn TTFT quantiles under the admission-aware open-loop schedule (job 632958, 5 reps per side pooled; see [`../tooling/serving-benchmark.md`](../tooling/serving-benchmark.md) for why pooled quantiles, not per-rep percentiles, are the metric of record here), p50 / p90 / p95 / p99, plus each side's median mean TPOT and `schedule_bound_fraction` range across its 5 reps:
 
@@ -319,6 +323,10 @@ With the overlap scheduler off (previous section), a five-bucket, request-joined
 See [`../engines/sglang.md`](../engines/sglang.md) for what the receipt-to-queue-arrival term measures, and [`../tooling/performance-modeling.md`](../tooling/performance-modeling.md) for the decomposition method.
 
 Status: verified (request-joined, 100 percent match rate both concurrencies, residual near logging precision). Stamp: sglang-v0.5.18-rocm700-mi30x, benchmark_version 4, 2026-09-12, job 633804.
+
+**Refinement at concurrency 1 (no queueing), on top of the accepted breakable prefill CUDA graph.** The bucket table above was measured under load (c48/c16) with the overlap scheduler off, before the breakable prefill graph landed. A later, exact-rid-joined decomposition at concurrency 1 isolates the "receipt to queue arrival" term's own sub-costs from any queueing effect: scheduler pickup and `ForwardBatch` build are both under 2 ms combined at every size tested, `ModelRunner.sample()` is under 0.2 ms (a much larger profiler-based estimate for this stage does not reproduce with a low-overhead measurement, see [`../tooling/profiler.md`](../tooling/profiler.md)), NEXTN draft-extend-for-prefill is a real 4-7 ms on the critical path, and result processing plus send to detokenizer is 2.5-5 ms. Upstream of the scheduler entirely (in `TokenizerManager`, not stamped by the load-mode table above), chat-template render is a flat 0.4 ms regardless of conversation length, tokenize costs about 0.003 ms per total prompt token and dominates because it re-tokenizes the whole rendered conversation from scratch every turn (not just the new suffix), and IPC (pickle plus ZMQ send) is 3-6 ms and grows with the token-id array size. Summing every stage this job measured (excluding the forward itself) accounts for essentially all of a 17-33 ms residual an earlier pass had left unattributed, closing it to 2-6 ms per size. See [`../engines/sglang.md`](../engines/sglang.md) for the full per-size table and [`../tooling/serving-benchmark.md`](../tooling/serving-benchmark.md) for the low-overhead host-stamp method.
+
+Status: verified (exact-rid join at concurrency 1, monotonic stamps, stage sum reconstructs the measured total to within 1-2 ms). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
 ### Turn-2+ prefill forward, kernel breakdown, measured
 
