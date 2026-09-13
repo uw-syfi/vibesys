@@ -78,6 +78,7 @@ export class ConversationView {
   readonly #onFocusRequest: (() => void) | undefined;
   #renderedConversation: ConversationEntry[] = [];
   #renderedCards: BoxRenderable[] = [];
+  /** The selection the cards in `#renderedCards` currently depict. */
   #renderedSelection: string | null = null;
   #selectedId: string | null = null;
   /** First visible entry the window renders; 0 once it covers everything. */
@@ -146,14 +147,7 @@ export class ConversationView {
   }
 
   render(state: SessionState): void {
-    const selection = this.#selectionFor(state);
-    if (selection !== this.#renderedSelection) {
-      // The cursor is drawn into the cards, so a change has to redraw them even
-      // when the entries are identical.
-      this.#renderedConversation = [];
-      this.#renderedSelection = selection;
-    }
-    this.#selectedId = selection;
+    this.#selectedId = this.#selectionFor(state);
     this.#renderConversation(this.#selectConversation(state));
   }
 
@@ -252,8 +246,30 @@ export class ConversationView {
     return entries.slice(this.#windowStart);
   }
 
+  /**
+   * Redraws the cards a selection move touches. The cursor is drawn into the
+   * cards, but only into the two it moves between: every other card renders
+   * identically under either selection, so the move costs two card
+   * replacements instead of the full-window rebuild it used to force. This
+   * runs before the structural comparison so the rendered cards agree with
+   * `#selectedId` again, which is the invariant every incremental path below
+   * assumes; an endpoint that is not rendered yet (it sits in history the
+   * window is about to reveal, or in entries about to be appended) is built by
+   * whichever path materializes it, since they all draw with `#selectedId`.
+   */
+  #syncSelectionCards(): void {
+    if (this.#selectedId === this.#renderedSelection) return;
+    for (const id of [this.#renderedSelection, this.#selectedId]) {
+      if (id === null) continue;
+      const index = this.#renderedConversation.findIndex(entry => entry.id === id);
+      if (index !== -1) this.#replaceCard(index, this.#renderedConversation);
+    }
+    this.#renderedSelection = this.#selectedId;
+  }
+
   #renderConversation(conversation: ConversationEntry[]): void {
     const entries = this.#windowed(conversation);
+    this.#syncSelectionCards();
     if (
       sameEntries(entries, this.#renderedConversation) &&
       (entries.length > 0 || this.output.getChildren().length > 0)

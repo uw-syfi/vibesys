@@ -403,6 +403,13 @@ class EventBatchMessage(ProtocolModel):  # noqa: D101  # tracked: #288
     events: list[RunEvent]
     through_sequence: int = Field(default=0, ge=0)
     active_executions: list[ActiveAgentExecution] = Field(default_factory=list)
+    # Names the event store these sequences number. A run attaches its durable
+    # log after clients subscribe, and sequences are only comparable within one
+    # store, so a batch whose id differs from the previous one supersedes what
+    # the client folded rather than extending it. Empty means the server does
+    # not report store identity, leaving the client on watermark comparison
+    # alone, which is what it had before this field existed.
+    store_id: str = ""
     # "Every event in this stream's history has sequence > this." 0 means the
     # full history was delivered, which is the default and today's behavior.
     # Carried on every batch of the subscription, live ones included.

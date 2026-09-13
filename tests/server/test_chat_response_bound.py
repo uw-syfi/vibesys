@@ -10,6 +10,7 @@ import pytest
 from tests.server.support import build_server_parts
 
 from server.api.protocol import ChatQuery
+from server.chat.manager import ChatAnswer
 from server.events import EventType
 
 if TYPE_CHECKING:
@@ -21,10 +22,10 @@ def test_chat_response_excludes_concurrent_run_events(tmp_path: Path) -> None:
     handler_started = threading.Event()
     release_handler = threading.Event()
 
-    def handler(_question: str) -> str:
+    def handler(_question: str) -> ChatAnswer:
         handler_started.set()
         assert release_handler.wait(timeout=2)
-        return "bounded answer"
+        return ChatAnswer(text="bounded answer", invocation_id="exec-bounded")
 
     parts.chat.install_default_handler(handler)
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
@@ -60,7 +61,7 @@ def test_unknown_thread_chat_response_has_no_events(tmp_path: Path) -> None:
 def test_chat_event_capture_is_cleared_after_handler_error(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
 
-    def fail(_question: str) -> str:
+    def fail(_question: str) -> ChatAnswer:
         raise RuntimeError
 
     parts.chat.install_default_handler(fail)
@@ -74,12 +75,12 @@ def test_nested_chat_captures_keep_each_terminal_event_separate(tmp_path: Path) 
     parts = build_server_parts(tmp_path)
     nested_event_text: list[str] = []
 
-    def handler(question: str) -> str:
+    def handler(question: str) -> ChatAnswer:
         if question == "outer":
             _answer, nested_event = parts.chat.chat_with_event("inner")
             assert nested_event is not None
             nested_event_text.append(nested_event.text)
-        return f"answer to {question}"
+        return ChatAnswer(text=f"answer to {question}", invocation_id=f"exec-{question}")
 
     parts.chat.install_default_handler(handler)
     answer, event = parts.chat.chat_with_event("outer")

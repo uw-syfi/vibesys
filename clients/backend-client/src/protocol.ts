@@ -3,6 +3,10 @@ import type {ProtocolDocument} from './generated/protocol.generated.js';
 export type ProtocolRequest = ProtocolDocument['request'];
 export type ProtocolResponse = ProtocolDocument['response'];
 export type RunEvent = ProtocolDocument['event'];
+/** Structured status carried by streamed agent output and tool calls. */
+export type AgentStatusData = NonNullable<
+  Extract<NonNullable<RunEvent['data']>, {channel: unknown}>['status']
+>;
 export type RunSnapshot = ProtocolDocument['snapshot'];
 /** Run lifecycle statuses the backend reports. Source: `RunStatus` in `src/server/run_lifecycle.py`. */
 export type RunStatus = RunSnapshot['status'];
