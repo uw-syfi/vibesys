@@ -298,6 +298,38 @@ own baked-in copy shadowing a staged checkout. This is general to
 `sys.path` resolution, not backend-specific; see [platforms/](../platforms/)
 for a worked example and fix.
 
+### Admission-queueing collapse recurs at uncapped 48-session concurrency
+
+```
+Symptom: at uncapped (unbounded) concurrency around 48 sessions, a
+         minority of reps show turn-1 (and occasionally turn-2) TTFTs
+         spiking into the 3-15 second range for a growing subset of
+         sessions, while rep wall-clock duration and the accuracy gate
+         are unaffected; one affected rep measured mean TPOT about
+         43 ms and p95 TTFT about 5.6 s against about 19 ms and 0.4 s
+         in a clean rep.
+Cause:   not yet diagnosed. It reproduces on both sides of a paired
+         kernel comparison under otherwise-identical harness defaults,
+         so it is independent of whatever change is under test; a
+         slower kernel makes it more frequent and more severe (each
+         decode round stays busier, letting the admission burst back
+         up further before it drains), but the underlying mechanism is
+         still being characterized.
+Fix:     none yet. Exclude affected reps symmetrically (same rule both
+         sides of a paired comparison) and report both the raw and the
+         collapse-excluded numbers rather than averaging over it
+         silently; do not rely on `wait_for_idle` to catch it, since it
+         reports the server idle before every rep regardless.
+Scope:   sglang, uncapped concurrency around 48 sessions; not observed
+         under a 16-session admission cap. Engine behavior, not
+         platform-specific.
+Status:  candidate (recurs across multiple separate jobs at this
+         concurrency; root-cause mechanism not yet identified). What
+         would verify it: a scheduler-side trace of an affected rep
+         that names the specific queueing mechanism, reproduced against
+         a fix. sglang-v0.5.18-rocm700-mi30x, 2026-09-13.
+```
+
 ## See also
 
 - `engines/vllm/`, `engines/trtllm/`

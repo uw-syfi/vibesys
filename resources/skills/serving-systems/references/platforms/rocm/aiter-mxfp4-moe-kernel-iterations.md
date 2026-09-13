@@ -2,7 +2,7 @@
 
 Follow-up file for [`aiter-mxfp4-moe.md`](aiter-mxfp4-moe.md)'s permute-based `decode16` fix (job-verified, accepted as the default). That section's own "Remaining known inefficiency" note flagged that the compiler still splits the 16-byte packed-weight load into eight 2-byte loads (0.41 loads per element where 0.19 is possible). This file covers the next optimization-loop iteration that targets exactly that gap, one refuted alternative tried alongside it, and a dispatch-threshold retune the permute fix's own speedup made necessary.
 
-**End-to-end status: acceptance in progress.** Everything below is a kernel microbenchmark and ISA-level result, not a paired multi-turn serving measurement; no TTFT or TPOT numbers are claimed here.
+**End-to-end status: H-A (dword-wide packed-weight loads) is job-verified and accepted as the default.** H-B (shared activation fragment) is refuted. H-C (dispatch threshold retune) remains microbench-verified only, not yet shipped. See each hypothesis's own status line below for the numbers.
 
 ## Discriminator flip: no longer issue-bound, now latency-bound on load shape
 
@@ -18,9 +18,19 @@ ISA: loads per element drop 0.41 to 0.19 on the scaffold loop, exactly as predic
 
 Microbenchmark, stage1+stage2 speedup versus the permute-fix kernel: 1.82x at M=16, 1.89x at M=64, 1.52x at M=337, 2.04x at both M=919 and M=2048. The wall-clock magnitude is 6 to 15 times larger than the static instruction-count reduction alone would predict, consistent with the kernel being latency-bound as well as issue-bound at this altitude: each removed 2-byte load also removes its own address computation and wait-count slot, not just one instruction's worth of stall.
 
-Recommendation: promoted to a paired end-to-end acceptance test (in progress). Recommended alone, not combined with H-B below.
+Paired end-to-end acceptance (branch `moe-iter3-a`, draft PR #86 against the accepted stack, one node per concurrency, 5 reps per side per job, identical harness-default flags both sides otherwise, gates 13/13 on every rep of every side, 20/20 reps total):
 
-Status: microbench-verified (exactness check, ISA cross-check, and microbenchmark all confirm the mechanism; end-to-end acceptance not yet run). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, microbench-verified.
+| Concurrency | median TPOT | pooled p95 TTFT turn2+ | accept length |
+|:--|--:|--:|--:|
+| Uncapped, 48 sessions, collapse-affected reps excluded | 18.82 -> 13.17 ms (-30.0%) | 423.9 -> 331.4 ms (-21.8%) | 2.886 vs 2.849 |
+| Uncapped, 48 sessions, raw (all 5 reps/side) | 21.79 -> 13.23 ms (-39.3%) | 504.5 -> 333.6 ms (-33.9%) | -- |
+| 16-session cap | 11.37 -> 9.44 ms (-17.0%) | 288.5 -> 298.3 ms (+3.4%, inside the 10% budget) | 2.84 vs 2.85 |
+
+The 48-session job's raw numbers include a minority of reps hit by an admission-queueing collapse on both sides (see the pitfall this is filed under in [`../../engines/sglang.md`](../../engines/sglang.md), candidate status, cause not yet diagnosed); excluding those reps gives a clean, non-overlapping TPOT comparison (base range 18.10-21.79 ms, cand range 12.69-14.98 ms) larger than either side's own clean rep-to-rep spread (19.6% and 17.4%). The 16-session job saw zero collapse-affected reps at any point and its ranges are non-overlapping on their own (base 11.13-11.54 ms, cand 9.29-9.67 ms). Both concurrencies clear the acceptance rule (gates 5/5 both sides, TPOT improvement exceeds rep spread, p95 TTFT regression within 10%).
+
+Recommendation: accepted as the default fused MXFP4 MoE weight-load path, on top of the permute-based `decode16` fix and the rest of the accepted stack. Accepted alone, not combined with H-B below.
+
+Status: job-verified (bit-exact by construction and by the prior microbenchmark, and a real non-noise TPOT improvement confirmed end to end at both concurrencies tested). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
 ## H-B: one K loop sharing the activation fragment between gate and up (refuted)
 

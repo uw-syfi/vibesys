@@ -39,7 +39,7 @@ Each Gated-DeltaNet layer carries a per-request conv state (kernel 4) and an SSM
 
 ### Speculative decoding
 
-The checkpoint ships its own MTP draft head: `mtp.fc.weight` plus a full 512-expert MoE at `mtp.layers.0` (`mtp_num_hidden_layers` 1), matching a target layer's width and expert count. No separate draft model is needed. NEXTN (MTP) speculative decoding with this head, k=3 draft steps (4 verify tokens), `eagle-topk` 1, greedy verify, and the linear-replay SSM fast path for the hybrid Gated-DeltaNet layers is accepted at both an uncapped and a 16-session concurrency cap; see the Measured section below for the numbers and [`platforms/`](../platforms/) for the accepted launch flags and the checkpoint's load-path pitfalls (the draft head is absent from this model's TP-sharded fast-path artifact). The accepted stack on top of this (PyTorch TunableOp-tuned dense GEMMs, and a register byte-permute rewrite of the fused MXFP4 MoE kernel's decode16 lookup) is in the Measured section below.
+The checkpoint ships its own MTP draft head: `mtp.fc.weight` plus a full 512-expert MoE at `mtp.layers.0` (`mtp_num_hidden_layers` 1), matching a target layer's width and expert count. No separate draft model is needed. NEXTN (MTP) speculative decoding with this head, k=3 draft steps (4 verify tokens), `eagle-topk` 1, greedy verify, and the linear-replay SSM fast path for the hybrid Gated-DeltaNet layers is accepted at both an uncapped and a 16-session concurrency cap; see the Measured section below for the numbers and [`platforms/`](../platforms/) for the accepted launch flags and the checkpoint's load-path pitfalls (the draft head is absent from this model's TP-sharded fast-path artifact). The accepted stack on top of this (PyTorch TunableOp-tuned dense GEMMs, a register byte-permute rewrite of the fused MXFP4 MoE kernel's decode16 lookup, and dword-wide packed-weight loads in that same kernel) is in the Measured section below.
 
 Mechanism: decode-step time here is latency-bound on the MoE kernel's per-step activation gather, not on raw arithmetic (see "Decode-step time..." below), and that per-step cost grows only sublinearly with the number of rows verified together (about 26 ms at 16 rows, calibrated exponent ~0.31, so M rows cost roughly `26*(M/16)^0.31` ms; see [`../tooling/performance-modeling.md`](../tooling/performance-modeling.md) for the padding-floor mechanism behind this scaling). Verifying k+1 rows per session per step is therefore nearly free next to running k+1 separate decode steps, and every accepted draft token amortizes that one verify step over more emitted tokens. Speculative decoding lowers the per-token time floor; it does not change bandwidth efficiency or the measured-time-over-roofline ratio recorded elsewhere in this file.
 
@@ -205,6 +205,23 @@ Both concurrencies' TPOT improvement exceeds each side's own rep-to-rep spread (
 Accepted as the default fused MXFP4 MoE decode path, on top of the base configuration and the TunableOp stack above.
 
 Status: accepted. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-12, job-verified.
+
+### Dword-wide packed-weight loads in the fused MXFP4 MoE kernel, on top of the permute-decode stack above, measured
+
+A further source-level change to the same kernel's `decode16` step reads its 16-byte packed weight block as whole dwords instead of the compiler-split eight 2-byte loads the permute fix above still left in place (no new flag; see [`platforms/`](../platforms/) for the design and ISA detail). Paired end to end against the permute-decode stack above, one node per concurrency, 5 reps per side per job, identical harness-default flags otherwise, gates 13/13 on every rep of every side (20/20 reps total):
+
+| Concurrency | median TPOT | pooled p95 TTFT turn2+ | accept length |
+|:--|--:|--:|--:|
+| Uncapped, 48 sessions, collapse-affected reps excluded | 18.82 -> 13.17 ms (-30.0%) | 423.9 -> 331.4 ms (-21.8%) | 2.886 vs 2.849 |
+| 16-session cap | 11.37 -> 9.44 ms (-17.0%) | 288.5 -> 298.3 ms (+3.4%, inside the 10% budget) | 2.84 vs 2.85 |
+
+The 48-session job's raw 5-rep-per-side numbers (median TPOT 21.79 to 13.23 ms, -39.3%; pooled p95 TTFT turn2+ 504.5 to 333.6 ms, -33.9%) are directionally identical but inflated on both sides by a minority of reps hit by an admission-queueing collapse, more severe on the slower base kernel; see [`../engines/sglang.md`](../engines/sglang.md) for that pitfall (candidate status, cause not yet diagnosed). Excluding those reps gives non-overlapping per-rep TPOT ranges (base 18.10-21.79 ms, cand 12.69-14.98 ms) larger than either side's own clean spread (19.6%, 17.4%). The 16-session job had zero collapse-affected reps and its own ranges are non-overlapping on their own (base 11.13-11.54 ms, cand 9.29-9.67 ms). Both concurrencies clear the acceptance rule (gates 5/5 both sides, TPOT improvement exceeds rep spread, p95 TTFT regression within 10%).
+
+Cumulative for the stack: median TPOT at 48 sessions has moved from about 38 ms (the NEXTN speculative-decoding acceptance point above) to 13.2 ms, about 2.4x the roughly 5.5 ms weight-bandwidth floor for this kernel at decode batch sizes; per layer at decode M the MoE kernel now runs at about 1.5x its own floor.
+
+Accepted as the default fused MXFP4 MoE weight-load path, on top of the permute-decode stack above.
+
+Status: accepted. Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
 
 ### Turn-2+ TTFT decomposition, overlap scheduler off, measured
 
