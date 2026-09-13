@@ -14,6 +14,7 @@ import {
   visiblePhases,
   visibleRoundNumber,
 } from '../session-model.js';
+import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {
   type AgentGraph,
   type EdgeTone,
@@ -63,9 +64,21 @@ function statusColor(theme: Theme, status: AgentPhase['status']): string {
  * only border, background, and text color, invisible on a low-contrast
  * terminal. Follows the '›' precedent in theme-picker.ts and the hypothesis
  * drill-down (`experiment-log.ts#renderDetail`).
+ *
+ * An active phase draws the current spinner frame in the marker's cell
+ * instead of the static `●`, so a phase that is actually running looks like
+ * it: same cell, same width (every `SPINNER_FRAMES` glyph is one column, like
+ * every other `STATUS_MARKER`), one glyph animating in place of another.
+ * `spinnerFrame` defaults to the frame every view starts on.
  */
-export function nodeLabel(phase: AgentPhase, selected: boolean): string {
-  return `${selected ? '› ' : ''}${STATUS_MARKER[phase.status]} ${phase.kind}`;
+export function nodeLabel(phase: AgentPhase, selected: boolean, spinnerFrame = 0): string {
+  const marker =
+    phase.status === 'active'
+      ? (SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length] ??
+        SPINNER_FRAMES[0] ??
+        STATUS_MARKER.active)
+      : STATUS_MARKER[phase.status];
+  return `${selected ? '› ' : ''}${marker} ${phase.kind}`;
 }
 
 function edgeColor(theme: Theme, tone: EdgeTone): string {
@@ -119,6 +132,15 @@ export class AgentMapView {
   #renderedRows = 0;
   #elapsedTimer: ReturnType<typeof setInterval> | null = null;
   #runningRound: {round: RoundSummary; text: TextRenderable} | null = null;
+  #spinnerFrame = 0;
+  #spinnerTimer: ReturnType<typeof setInterval> | null = null;
+  /** Every active node's marker cell, refreshed in place on the spinner tick. */
+  #spinnerNodes: Array<{
+    phase: AgentPhase;
+    selected: boolean;
+    text: TextRenderable;
+    inner: number | null;
+  }> = [];
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -262,10 +284,12 @@ export class AgentMapView {
       );
     }
     this.#syncElapsedTimer();
+    this.#syncSpinnerTimer();
   }
 
   destroy(): void {
     this.#stopElapsedTimer();
+    this.#stopSpinnerTimer();
   }
 
   /**
@@ -371,13 +395,13 @@ export class AgentMapView {
     // painting the ring the edges arrive at (tui-conventions.md).
     if (selected) fillLayer(box, `agent-${phase.kind}-${node.y}-fill`, this.#theme.selectedSurface);
     const inner = node.width - 2;
-    box.add(
-      new TextRenderable(this.renderer, {
-        content: truncate(nodeLabel(phase, selected), inner),
-        fg: selected ? this.#theme.textStrong : color,
-        width: '100%',
-      }),
-    );
+    const label = new TextRenderable(this.renderer, {
+      content: truncate(nodeLabel(phase, selected, this.#spinnerFrame), inner),
+      fg: selected ? this.#theme.textStrong : color,
+      width: '100%',
+    });
+    box.add(label);
+    if (phase.status === 'active') this.#spinnerNodes.push({phase, selected, text: label, inner});
     box.add(
       new TextRenderable(this.renderer, {
         content: truncate(phase.status, inner),
@@ -437,13 +461,14 @@ export class AgentMapView {
     });
     if (selected) fillLayer(row, `agent-${phase.kind}-fill`, this.#theme.selectedSurface);
     const color = statusColor(this.#theme, phase.status);
-    row.add(
-      new TextRenderable(this.renderer, {
-        content: nodeLabel(phase, selected),
-        fg: selected ? this.#theme.textStrong : color,
-        width: '100%',
-      }),
-    );
+    const label = new TextRenderable(this.renderer, {
+      content: nodeLabel(phase, selected, this.#spinnerFrame),
+      fg: selected ? this.#theme.textStrong : color,
+      width: '100%',
+    });
+    row.add(label);
+    if (phase.status === 'active')
+      this.#spinnerNodes.push({phase, selected, text: label, inner: null});
     row.add(
       new TextRenderable(this.renderer, {
         content: phase.status,
@@ -488,9 +513,38 @@ export class AgentMapView {
     this.#elapsedTimer = null;
   }
 
+  /**
+   * Mutates every active node's marker cell in place, the same idiom as
+   * `#syncElapsedTimer`, so a running phase animates without the 120ms tick
+   * ever calling `render()` and rebuilding the graph eight times a second.
+   * Started only while a phase is active, stopped the moment none is.
+   */
+  #syncSpinnerTimer(): void {
+    if (this.#spinnerNodes.length === 0) {
+      this.#stopSpinnerTimer();
+      return;
+    }
+    if (this.#spinnerTimer !== null) return;
+    this.#spinnerTimer = setInterval(() => {
+      this.#spinnerFrame = (this.#spinnerFrame + 1) % SPINNER_FRAMES.length;
+      for (const node of this.#spinnerNodes) {
+        const label = nodeLabel(node.phase, node.selected, this.#spinnerFrame);
+        node.text.content = node.inner === null ? label : truncate(label, node.inner);
+      }
+    }, SPINNER_INTERVAL_MS);
+  }
+
+  #stopSpinnerTimer(): void {
+    if (this.#spinnerTimer === null) return;
+    clearInterval(this.#spinnerTimer);
+    this.#spinnerTimer = null;
+  }
+
   #clear(): void {
     this.#runningRound = null;
     this.#stopElapsedTimer();
+    this.#spinnerNodes = [];
+    this.#stopSpinnerTimer();
     for (const child of [...this.#content.getChildren()]) {
       this.#content.remove(child);
       child.destroyRecursively();

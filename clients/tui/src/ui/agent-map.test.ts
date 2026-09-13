@@ -3,8 +3,12 @@ import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing'
 import type {AgentPhase} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {SPINNER_FRAMES} from './activity-bar.js';
 import {AgentMapView, agentPaneWidth, STACKED_WIDTH, TRANSCRIPT_MIN} from './agent-map.js';
 import {resolveTheme} from './theme.js';
+
+/** The active-node marker: `nodeLabel` draws the spinner's frame 0 here first. */
+const activeMarker = SPINNER_FRAMES[0];
 
 /** A round with one agent per kind, in order. */
 function round(...kinds: string[]): AgentPhase[] {
@@ -112,7 +116,8 @@ describe('agent graph row budget', () => {
     await testRenderer.renderOnce();
     const frame = testRenderer.captureCharFrame();
     // Every node draws its kind on its first row, so the markers count nodes.
-    const nodes = (frame.match(/[●!] implementer/g) ?? []).length;
+    // The active attempt draws the spinner's frame 0, not the static `●`.
+    const nodes = (frame.match(new RegExp(`[${activeMarker}!] implementer`, 'g')) ?? []).length;
     return {frame, nodes};
   }
 
@@ -178,7 +183,7 @@ describe('agent graph row budget', () => {
 
     expect(frame).not.toContain('▶');
     expect(frame).toContain('› ✓ orchestrator');
-    expect(frame).toContain('● implementer');
+    expect(frame).toContain(`${activeMarker} implementer`);
     expect(frame).toContain('○ judge');
     expect(frame).not.toContain('…');
   });

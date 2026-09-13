@@ -3,6 +3,7 @@ import {createTestRenderer} from '@opentui/core/testing';
 import type {AgentPhase} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {SPINNER_FRAMES} from './activity-bar.js';
 import {AgentMapView, nodeLabel} from './agent-map.js';
 import {resolveTheme} from './theme.js';
 
@@ -21,8 +22,10 @@ describe('nodeLabel', () => {
   }
 
   it('prefixes a caret only when selected, independent of the status marker', () => {
-    expect(nodeLabel(phase('active'), false)).toBe('● implementer');
-    expect(nodeLabel(phase('active'), true)).toBe('› ● implementer');
+    // Active draws the shared spinner's frame 0 rather than a static marker;
+    // see the `nodeLabel spinner frame` suite in agent-map-spinner.test.ts.
+    expect(nodeLabel(phase('active'), false)).toBe(`${SPINNER_FRAMES[0]} implementer`);
+    expect(nodeLabel(phase('active'), true)).toBe(`› ${SPINNER_FRAMES[0]} implementer`);
     expect(nodeLabel(phase('pending'), false)).toBe('○ implementer');
     expect(nodeLabel(phase('pending'), true)).toBe('› ○ implementer');
     expect(nodeLabel(phase('completed'), true)).toBe('› ✓ implementer');
@@ -67,7 +70,7 @@ describe('agent node rendered selection glyph', () => {
     await testRenderer.renderOnce();
     const frame = testRenderer.captureCharFrame();
 
-    expect(frame).toContain('› ● implementer');
+    expect(frame).toContain(`› ${SPINNER_FRAMES[0]} implementer`);
     expect(frame).toContain('○ judge');
     expect(frame).not.toContain('› ○ judge');
   });
