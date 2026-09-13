@@ -1884,7 +1884,6 @@ export function clearInputError(state: SessionState): SessionState {
  * `detail`/`hint`, so it belongs on the command input's own hint row instead
  * of the shared error surface (see `command-input.ts`).
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 export function reportError(
   state: SessionState,
   message: string,
@@ -1893,10 +1892,21 @@ export function reportError(
   if (report.scope === 'input') {
     return {...state, inputError: message};
   }
+
+  const banner = errorBannerFromReport(message, report);
+  const existing = state.errorBanner;
+  if (existing === null || !equivalentError(existing, banner)) {
+    return {...state, errorBanner: banner};
+  }
+  return {...state, errorBanner: mergeEquivalentError(existing, banner)};
+}
+
+/** Normalize the report boundary into the complete state consumed by the banner view. */
+function errorBannerFromReport(message: string, report: ErrorReport): ErrorBannerState {
   const diagnostic = report.diagnostic ?? null;
   const scope = diagnostic?.scope ?? report.scope;
   const severity = diagnosticSeverity(diagnostic?.severity) ?? report.severity ?? 'recoverable';
-  const banner: ErrorBannerState = {
+  return {
     title: report.title ?? errorTitle(scope),
     message: diagnostic?.summary || message || 'An unknown error occurred.',
     detail: diagnostic?.detail ?? report.detail ?? null,
@@ -1909,27 +1919,28 @@ export function reportError(
     invocationId: report.invocationId ?? null,
     count: 1,
   };
-  const existing = state.errorBanner;
-  if (existing === null || !equivalentError(existing, banner)) {
-    return {...state, errorBanner: banner};
-  }
-  const promoted = existing.severity === 'fatal' || severity === 'fatal' ? 'fatal' : 'recoverable';
+}
+
+/** Fold a repeated report into the standing banner without losing established identity. */
+function mergeEquivalentError(
+  existing: ErrorBannerState,
+  incoming: ErrorBannerState,
+): ErrorBannerState {
+  const promoted =
+    existing.severity === 'fatal' || incoming.severity === 'fatal' ? 'fatal' : 'recoverable';
   return {
-    ...state,
-    errorBanner: {
-      ...existing,
-      message: moreInformativeMessage(existing.message, banner.message),
-      detail: moreInformativeMessage(existing.detail ?? '', banner.detail ?? '') || null,
-      hint: moreInformativeMessage(existing.hint ?? '', banner.hint ?? '') || null,
-      severity: promoted,
-      title: promoted === 'fatal' ? banner.title : existing.title,
-      scope: promoted === 'fatal' ? banner.scope : existing.scope,
-      diagnosticId: existing.diagnosticId ?? banner.diagnosticId,
-      agentKind: existing.agentKind ?? banner.agentKind,
-      roundLabel: existing.roundLabel ?? banner.roundLabel,
-      invocationId: existing.invocationId ?? banner.invocationId,
-      count: existing.count + 1,
-    },
+    ...existing,
+    message: moreInformativeMessage(existing.message, incoming.message),
+    detail: moreInformativeMessage(existing.detail ?? '', incoming.detail ?? '') || null,
+    hint: moreInformativeMessage(existing.hint ?? '', incoming.hint ?? '') || null,
+    severity: promoted,
+    title: promoted === 'fatal' ? incoming.title : existing.title,
+    scope: promoted === 'fatal' ? incoming.scope : existing.scope,
+    diagnosticId: existing.diagnosticId ?? incoming.diagnosticId,
+    agentKind: existing.agentKind ?? incoming.agentKind,
+    roundLabel: existing.roundLabel ?? incoming.roundLabel,
+    invocationId: existing.invocationId ?? incoming.invocationId,
+    count: existing.count + 1,
   };
 }
 

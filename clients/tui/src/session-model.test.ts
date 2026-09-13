@@ -91,6 +91,87 @@ describe('input errors', () => {
   });
 });
 
+describe('error report normalization', () => {
+  it('lets a structured diagnostic define the banner payload while preserving report context', () => {
+    const state = reportError(initialSessionState(), 'legacy message', {
+      scope: 'request',
+      severity: 'recoverable',
+      diagnostic: {
+        id: 'diagnostic-1',
+        code: 'agent_failed',
+        summary: 'The worker failed.',
+        detail: 'Exit code: 2',
+        hint: 'Inspect the worker log.',
+        scope: 'invocation',
+        severity: 'fatal',
+        retryability: 'manual',
+      },
+      agentKind: 'implementer',
+      invocationId: 'invocation-1',
+    });
+
+    expect(state.errorBanner).toEqual({
+      title: 'Invocation failed',
+      message: 'The worker failed.',
+      detail: 'Exit code: 2',
+      hint: 'Inspect the worker log.',
+      diagnosticId: 'diagnostic-1',
+      severity: 'fatal',
+      scope: 'invocation',
+      agentKind: 'implementer',
+      roundLabel: null,
+      invocationId: 'invocation-1',
+      count: 1,
+    });
+  });
+
+  it('normalizes an empty unstructured report to stable defaults', () => {
+    const state = reportError(initialSessionState(), '', {
+      scope: 'transport',
+      diagnostic: null,
+    });
+
+    expect(state.errorBanner).toEqual({
+      title: 'Connection lost',
+      message: 'An unknown error occurred.',
+      detail: null,
+      hint: null,
+      diagnosticId: null,
+      severity: 'recoverable',
+      scope: 'transport',
+      agentKind: null,
+      roundLabel: null,
+      invocationId: null,
+      count: 1,
+    });
+  });
+
+  it('merges matching identities, promotes fatal context, and increments one banner', () => {
+    const first = reportError(initialSessionState(), 'The worker failed.', {
+      scope: 'invocation',
+      diagnosticId: 'diagnostic-1',
+      invocationId: 'invocation-1',
+    });
+    const merged = reportError(first, 'The worker failed.\nExit code: 2', {
+      scope: 'run',
+      severity: 'fatal',
+      diagnosticId: 'diagnostic-1',
+      detail: 'Exit code: 2',
+    });
+
+    expect(merged.errorBanner).toMatchObject({
+      title: 'Run failed',
+      message: 'The worker failed.\nExit code: 2',
+      detail: 'Exit code: 2',
+      diagnosticId: 'diagnostic-1',
+      invocationId: 'invocation-1',
+      severity: 'fatal',
+      scope: 'run',
+      count: 2,
+    });
+  });
+});
+
 describe('event batch projection', () => {
   it('keeps the existing banner while resumed history ends in a running session', () => {
     const before = reportError(initialSessionState(), 'Local protocol problem', {
