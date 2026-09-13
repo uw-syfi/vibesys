@@ -751,6 +751,77 @@ describe('core state projection', () => {
     ]);
   });
 
+  it('prefers a structured diagnostic over a conflicting legacy failure envelope', () => {
+    const state = reduceEvent(initialCoreState(), {
+      ...baseEvent(3, 'configuration_failed'),
+      data: {
+        kind: 'configuration_failed',
+        code: 'legacy_code',
+        message: 'Legacy summary',
+        stage: 'configuration',
+        exit_code: 2,
+      },
+      diagnostic: {
+        id: 'diag-structured',
+        code: 'structured_code',
+        summary: 'Structured summary',
+        detail: 'Structured detail',
+        hint: null,
+        scope: 'run',
+        severity: 'error',
+        retryability: 'manual',
+        cause_id: null,
+        debug_ref: null,
+      },
+    });
+
+    expect(state.diagnostics).toMatchObject([
+      {
+        id: 'diag-structured',
+        code: 'structured_code',
+        summary: 'Structured summary',
+        detail: 'Structured detail',
+        scope: 'run',
+        severity: 'error',
+      },
+    ]);
+  });
+
+  it('classifies legacy invocation and run failure envelopes by scope', () => {
+    const invocation = reduceEvent(initialCoreState(), {
+      ...baseEvent(4, 'invocation_finished'),
+      status: 'failed',
+      data: {
+        kind: 'invocation_finished',
+        error: null,
+        result: null,
+      },
+    });
+    const failed = reduceEvent(initialCoreState(), {
+      ...baseEvent(5, 'run_failed'),
+      text: 'worker exited',
+    });
+    const interrupted = reduceEvent(initialCoreState(), {
+      ...baseEvent(6, 'run_interrupted'),
+      data: {kind: 'run_interrupted', reason: 'launcher_terminated', signal: 'SIGTERM'},
+    });
+
+    expect(invocation.diagnostics).toMatchObject([
+      {scope: 'invocation', severity: 'error', summary: 'Agent invocation failed.'},
+    ]);
+    expect(failed.diagnostics).toMatchObject([
+      {scope: 'run', failureKind: 'run', severity: 'fatal', summary: 'worker exited'},
+    ]);
+    expect(interrupted.diagnostics).toMatchObject([
+      {
+        scope: 'run',
+        failureKind: 'run_interruption',
+        severity: 'fatal',
+        summary: 'launcher_terminated (SIGTERM)',
+      },
+    ]);
+  });
+
   it('promotes a repeated diagnostic id with richer terminal detail', () => {
     const initialFailure = reduceEvent(
       initialCoreState(),

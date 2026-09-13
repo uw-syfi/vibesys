@@ -1168,48 +1168,70 @@ function diagnosticSeverityRank(severity: CoreDiagnostic['severity']): number {
   return 0;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 function diagnosticFromEvent(event: RunEvent): CoreDiagnostic | null {
   const diagnostic = event.diagnostic;
   if (diagnostic !== null && diagnostic !== undefined) {
     return fromProtocolDiagnostic(event, diagnostic);
   }
+  const fallback = fallbackDiagnosticFromEvent(event);
+  return fallback === null
+    ? null
+    : fallbackDiagnostic(event, fallback.summary, fallback.scope, fallback.severity, fallback.code);
+}
+
+interface FallbackDiagnostic {
+  summary: string;
+  scope: Diagnostic['scope'];
+  severity: CoreDiagnostic['severity'];
+  code?: string | null;
+}
+
+/** Classifies legacy failure envelopes that predate structured diagnostics. */
+function fallbackDiagnosticFromEvent(event: RunEvent): FallbackDiagnostic | null {
   const data = event.data;
   if (data?.kind === 'configuration_failed') {
-    return fallbackDiagnostic(
-      event,
-      configurationFailureContent(data),
-      'configuration',
-      'fatal',
-      data.code,
-    );
+    return {
+      summary: configurationFailureContent(data),
+      scope: 'configuration',
+      severity: 'fatal',
+      code: data.code,
+    };
   }
+  const invocation = invocationFallbackDiagnostic(event);
+  if (invocation !== null) return invocation;
+  return runFallbackDiagnostic(event);
+}
+
+function invocationFallbackDiagnostic(event: RunEvent): FallbackDiagnostic | null {
+  const data = event.data;
   if (
-    data?.kind === 'invocation_finished' &&
-    ((data.error !== null && data.error !== undefined) || event.status === 'failed')
+    data?.kind !== 'invocation_finished' ||
+    ((data.error === null || data.error === undefined) && event.status !== 'failed')
   ) {
-    return fallbackDiagnostic(
-      event,
-      data.error || event.text || 'Agent invocation failed.',
-      'invocation',
-      'error',
-    );
+    return null;
   }
-  if (event.type === 'run_failed' || event.type === 'run_interrupted') {
-    const interruption =
-      data?.kind === 'run_interrupted'
-        ? `${data.reason}${data.signal === null ? '' : ` (${data.signal})`}`
-        : '';
-    return fallbackDiagnostic(
-      event,
+  return {
+    summary: data.error || event.text || 'Agent invocation failed.',
+    scope: 'invocation',
+    severity: 'error',
+  };
+}
+
+function runFallbackDiagnostic(event: RunEvent): FallbackDiagnostic | null {
+  if (event.type !== 'run_failed' && event.type !== 'run_interrupted') return null;
+  const data = event.data;
+  const interruption =
+    data?.kind === 'run_interrupted'
+      ? `${data.reason}${data.signal === null ? '' : ` (${data.signal})`}`
+      : '';
+  return {
+    summary:
       event.text ||
-        interruption ||
-        (event.type === 'run_failed' ? 'Run failed.' : 'Run interrupted.'),
-      'run',
-      'fatal',
-    );
-  }
-  return null;
+      interruption ||
+      (event.type === 'run_failed' ? 'Run failed.' : 'Run interrupted.'),
+    scope: 'run',
+    severity: 'fatal',
+  };
 }
 
 function fromProtocolDiagnostic(event: RunEvent, diagnostic: Diagnostic): CoreDiagnostic {
