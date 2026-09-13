@@ -405,6 +405,18 @@
           ],
           "default": null,
           "title": "Thread Title"
+        },
+        "invocation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Invocation Id"
         }
       },
       "required": [
@@ -1146,6 +1158,11 @@
           },
           "title": "Active Executions",
           "type": "array"
+        },
+        "store_id": {
+          "default": "",
+          "title": "Store Id",
+          "type": "string"
         },
         "history_after_sequence": {
           "default": 0,

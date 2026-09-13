@@ -24,10 +24,13 @@ from server.events import (
     AgentExecutionStartedData,
     EventStatus,
     EventType,
+    GateFinishedData,
+    GateKind,
     JudgeResultData,
     PhaseData,
     RoundFinishedData,
     RunEvent,
+    make_event,
 )
 
 
@@ -81,6 +84,37 @@ def test_bootstrap_events_join_durable_history(tmp_path):  # noqa: ANN001, ANN20
     assert [event["type"] for event in _events(tmp_path / "durable/run-events.jsonl")] == [
         event.value for event in expected
     ]
+
+
+def test_attach_renumbering_bootstrap_events_starts_a_new_sequence_space(tmp_path):  # noqa: ANN001, ANN201
+    durable = build_server_parts(tmp_path / "durable")
+    durable.journal.record(EventType.RUN_FINISHED, status=EventStatus.COMPLETED)
+
+    current = build_server_parts(tmp_path / "bootstrap")
+    bootstrap_store = current.journal.store_id_locked()
+    folded = current.journal.read()
+    current.attach(tmp_path / "durable")
+    attached = current.journal.read()[: len(folded)]
+
+    # The bootstrap events were re-appended onto the durable log's tail, so the
+    # sequences a subscriber already folded now name different events. That is
+    # a different sequence space and the identity has to say so.
+    assert current.journal.store_id_locked() != bootstrap_store
+    assert [event.sequence for event in attached] == [event.sequence for event in folded]
+    assert attached != folded
+
+
+def test_attach_into_an_empty_log_keeps_the_sequence_space(tmp_path):  # noqa: ANN001, ANN201
+    current = build_server_parts(tmp_path / "bootstrap")
+    bootstrap_store = current.journal.store_id_locked()
+    before = [(event.sequence, event.type) for event in current.journal.read()]
+
+    current.attach(tmp_path / "durable")
+
+    # Nothing was renumbered, so every folded sequence still names the same
+    # event and a subscriber has nothing to re-fold.
+    assert current.journal.store_id_locked() == bootstrap_store
+    assert [(event.sequence, event.type) for event in current.journal.read()] == before
 
 
 def test_phase_only_legacy_replay_translates_in_place(tmp_path):  # noqa: ANN001, ANN201
@@ -200,6 +234,7 @@ def test_invocation_and_terminal_failure_share_diagnostic_identity(tmp_path):  #
     [
         EventType.CONFIGURATION_FAILED,
         EventType.INVOCATION_FINISHED,
+        EventType.AGENT_EXECUTION_FINISHED,
         EventType.PHASE_FINISHED,
         EventType.RUN_FAILED,
         EventType.RUN_INTERRUPTED,
@@ -212,6 +247,22 @@ def test_operational_failure_events_require_diagnostics(
     for status in (EventStatus.FAILED, "failed"):
         with pytest.raises(ValueError, match="must include a diagnostic"):
             parts.journal.record(event_type, status=status)
+    with pytest.raises(ValueError, match="must include a diagnostic"):
+        parts.journal.append(make_event(event_type, "boom", status=EventStatus.FAILED))
+
+
+def test_append_accepts_failed_gate_outcomes_without_diagnostics(tmp_path):  # noqa: ANN001, ANN201
+    # A failed gate is an expected semantic outcome, not an operational fault,
+    # so the append invariant must leave it diagnostic-less.
+    parts = build_server_parts(tmp_path)
+    gate = parts.journal.append(
+        make_event(
+            EventType.GATE_FINISHED,
+            status=EventStatus.FAILED,
+            data=GateFinishedData(gate=GateKind.ACCURACY, output_tail="mismatch"),
+        )
+    )
+    assert gate.diagnostic is None
 
 
 def test_semantic_failure_events_do_not_require_diagnostics(tmp_path):  # noqa: ANN001, ANN201

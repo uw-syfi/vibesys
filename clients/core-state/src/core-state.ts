@@ -1,5 +1,14 @@
 import type {Diagnostic, RunEvent, RunSnapshot, RunStatus} from '@vibesys/backend-client';
 import {
+  applyExecutionStatus,
+  applyExecutionStatusUsage,
+  type ExecutionStatus,
+  mergeExecutionStatusesPrefix,
+  mergeExecutionStatusUsagePrefix,
+  reconcileExecutionStatuses,
+  removeExecutionStatus,
+} from './execution-status.js';
+import {
   type AgentPhase,
   applyRunMapEvent,
   mergePhaseLists,
@@ -181,6 +190,8 @@ export interface CoreState {
   /** Run lifetime boundaries retained from the replayed event stream. */
   runLifetimeBoundaries: readonly RunLifetimeBoundary[];
   activeExecutions: Record<string, ActiveAgentExecution>;
+  /** Freshest structured status for each active or not-yet-checkpointed execution. */
+  executionStatuses: Record<string, ExecutionStatus>;
   transcript: TranscriptEntry[];
   /** The default thread's transcript; equals `chatTranscripts[DEFAULT_CHAT_THREAD_ID]`. */
   chatTranscript: TranscriptEntry[];
@@ -222,6 +233,7 @@ export function initialCoreState(): CoreState {
     lastRunMapSequence: 0,
     runLifetimeBoundaries: [],
     activeExecutions: {},
+    executionStatuses: {},
     transcript: [],
     chatTranscript: [],
     chatTranscripts: {[DEFAULT_CHAT_THREAD_ID]: []},
@@ -300,13 +312,13 @@ export function reduceSnapshot(state: CoreState, snapshot: RunSnapshot): CoreSta
   // has seen the run end, a snapshot no newer than the fold cannot un-end it;
   // a genuinely newer one (a resumed run) still applies.
   if (hasRunEnded(registered) && snapshot.sequence <= registered.sequence) return registered;
-  return {
-    ...registered,
+  const next = cloneCoreStateWith(registered, {
     status: snapshot.status,
     agentKind: snapshot.agent_kind ?? null,
     roundLabel: snapshot.round_label ?? null,
     activeExecutions: activeExecutionsFromCheckpoint(snapshot.active_executions ?? []),
-  };
+  });
+  return next;
 }
 
 export type ActiveExecutionCheckpoint = NonNullable<RunSnapshot['active_executions']>;
@@ -318,7 +330,10 @@ export function reconcileActiveExecutions(
   throughSequence?: number,
 ): CoreState {
   if (throughSequence !== undefined && throughSequence < state.sequence) return state;
-  return {...state, activeExecutions: activeExecutionsFromCheckpoint(executions)};
+  const next = cloneCoreStateWith(state, {
+    activeExecutions: activeExecutionsFromCheckpoint(executions),
+  });
+  return next;
 }
 
 /**
@@ -445,12 +460,27 @@ export function reduceEventPrefix(
     ),
     // Liveness comes from the backend checkpoint, never from replayed history.
     activeExecutions: state.activeExecutions,
+    executionStatuses: mergeExecutionStatusesPrefix(
+      older.executionStatuses,
+      state.executionStatuses,
+      state.activeExecutions,
+    ),
     transcript: mergeTranscriptPrefix(older.transcript, state.transcript),
     chatTranscripts,
     chatTranscript: chatTranscripts[DEFAULT_CHAT_THREAD_ID] ?? [],
     chatThreads: mergeChatThreadsPrefix(older.chatThreads, state.chatThreads),
     todos: mergeTodosPrefix(older.todos, state.todos),
-    usage: state.usage ?? older.usage,
+    usage: mergeExecutionStatusUsagePrefix(
+      state.usage ?? older.usage,
+      mergeExecutionStatusesPrefix(
+        older.executionStatuses,
+        state.executionStatuses,
+        state.activeExecutions,
+      ),
+      older.executionStatuses,
+      events,
+      older.usage,
+    ),
     // Sorted rather than concatenated for the same reason the transcript is
     // merged: a tail batch can carry events from below its own floor.
     benchmarks: [...older.benchmarks, ...state.benchmarks].sort(
@@ -513,10 +543,12 @@ function mergeTranscriptPrefix(
     const entry = source === older ? older[left++] : newer[right++];
     if (entry === undefined) continue;
     // A terminal chat answer carries no turn id and, in replay, folds over its
-    // own still-open streamed turn through `foldChatAnswer`. When the turn's
-    // chunks sit below the history floor and the answer above it, the two
-    // arrive from opposite lists, so reconcile them here as replay would; a
-    // second entry would otherwise survive. Anything else takes the normal step.
+    // own still-open streamed turn through `foldChatAnswer` (which matches the
+    // answer's invocation id, so an abandoned turn's stream is never claimed).
+    // When the turn's chunks sit below the history floor and the answer above
+    // it, the two arrive from opposite lists, so reconcile them here as replay
+    // would; a second entry would otherwise survive. Anything else takes the
+    // normal step.
     if (
       entry.kind === 'assistant' &&
       entry.turnId === undefined &&
@@ -673,6 +705,7 @@ function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder |
   let next: CoreState = {...state, sequence: Math.max(state.sequence, sequence)};
   next = applyDiagnosticEvent(next, event);
   next = applyAgentExecutionEvent(next, event);
+  next = applyAgentStatusEvent(next, event);
   if (event.agent_kind === 'chat') return applyChatEvent(next, event, folder);
   if (event.agent_kind) next.agentKind = event.agent_kind;
   if (event.round_label) next.roundLabel = event.round_label;
@@ -782,6 +815,19 @@ function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder |
   return next;
 }
 
+function cloneCoreState(state: CoreState): CoreState {
+  return Object.create(
+    Object.getPrototypeOf(state),
+    Object.getOwnPropertyDescriptors(state),
+  ) as CoreState;
+}
+
+function cloneCoreStateWith(state: CoreState, patch: Partial<CoreState>): CoreState {
+  const next = cloneCoreState(state);
+  Object.assign(next, patch);
+  return next;
+}
+
 /** Returns the one diagnostic added or updated by a reducer transition. */
 export function latestDiagnosticChange(
   previous: CoreState,
@@ -881,6 +927,37 @@ function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState 
     return {...state, activeExecutions: remaining};
   }
   return state;
+}
+
+function applyAgentStatusEvent(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  const executionId = event.execution_id;
+  let executionStatuses =
+    Object.keys(state.activeExecutions).length === 0
+      ? state.executionStatuses
+      : reconcileExecutionStatuses(state.executionStatuses, state.activeExecutions);
+  if (data?.kind === 'agent_execution_started') {
+    executionStatuses = reconcileExecutionStatuses(executionStatuses, state.activeExecutions);
+  } else if (data?.kind === 'agent_execution_finished' && executionId != null) {
+    executionStatuses = removeExecutionStatus(executionStatuses, executionId);
+  } else if (
+    event.type === 'run_finished' ||
+    event.type === 'run_failed' ||
+    event.type === 'run_interrupted'
+  ) {
+    executionStatuses = {};
+  } else {
+    executionStatuses = applyExecutionStatus(executionStatuses, event);
+  }
+  const usage = applyExecutionStatusUsage(
+    state.usage,
+    state.executionStatuses,
+    executionStatuses,
+    state.activeExecutions,
+    event,
+  );
+  if (executionStatuses === state.executionStatuses && usage === state.usage) return state;
+  return cloneCoreStateWith(state, {executionStatuses, usage});
 }
 
 function updateTodos(previous: ExecutionTodos[], event: RunEvent): ExecutionTodos[] {
@@ -1014,10 +1091,19 @@ function appendChatTranscript(
  * dropped because the turn is over: neither a later chunk nor a later answer
  * may fold into it. Returns false when there is no open streamed turn, in
  * which case the answer appends as its own entry.
+ *
+ * An answer stamped with an invocation id owns exactly the turn that streamed
+ * under that id: a mismatch means the open turn was abandoned (its invocation
+ * failed before a terminal answer was recorded), so the answer appends and
+ * the abandoned turn stays as it streamed. Answers from journals written
+ * before the id existed carry none and keep the last-open-turn fold.
  */
 function foldChatAnswer(entries: TranscriptEntry[], incoming: TranscriptEntry): boolean {
   const last = entries.at(-1);
   if (last === undefined || last.kind !== 'assistant' || last.turnId === undefined) return false;
+  if (incoming.invocationId !== undefined && incoming.invocationId !== last.invocationId) {
+    return false;
+  }
   const {turnId: _closed, ...merged} = {...last, ...incoming, id: last.id};
   entries[entries.length - 1] = merged;
   return true;
@@ -1183,6 +1269,11 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
     };
   }
   if (data?.kind === 'chat') {
+    // The invocation id names the turn this answer closes: the same id the
+    // turn's streamed chunks carried. `foldChatAnswer` matches on it so the
+    // answer can never fold over a different turn's abandoned stream. Records
+    // written before the field existed carry none.
+    const invocationId = data.invocation_id ?? undefined;
     return {
       id,
       kind: 'assistant',
@@ -1190,6 +1281,7 @@ function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
       label: 'Answer',
       ...agentFields,
       ...roundFields,
+      ...(invocationId === undefined ? {} : {invocationId}),
     };
   }
   if (data?.kind === 'agent_output_chunk') {

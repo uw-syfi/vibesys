@@ -67,6 +67,13 @@ export class ChatPaneView {
   readonly #composer: ChatComposerView;
   #theme: Theme;
   #renderedConversation: ConversationEntry[] | null = null;
+  /**
+   * The thread on screen while the pane is visible, `null` while it is hidden.
+   * Comparing it against the state says which renders are the pane appearing
+   * or a thread switch, the moments that jump to the tail; every other render
+   * leaves the scroll position to stickyScroll.
+   */
+  #visibleThreadId: string | null = null;
 
   constructor(
     renderer: CliRenderer,
@@ -125,7 +132,13 @@ export class ChatPaneView {
     this.#composer = new ChatComposerView(
       renderer,
       draft,
-      value => void controller.submitChat(value),
+      value => {
+        // The operator's own message belongs at the tail even when they had
+        // scrolled into history to write it; landing at the bottom also
+        // re-arms sticky-bottom, so the answer streams into view.
+        this.#scrollToTail();
+        void controller.submitChat(value);
+      },
       theme,
       'chat-dock',
       () => controller.focusPane('chat'),
@@ -180,6 +193,8 @@ export class ChatPaneView {
     // hidden still has to stop the composer's spinner.
     this.#composer.syncPending(state.chatPending, visible);
     if (!visible) {
+      // Forgotten while hidden, so the pane reappears on the tail.
+      this.#visibleThreadId = null;
       return;
     }
     this.output.width = width;
@@ -193,9 +208,23 @@ export class ChatPaneView {
     applyPaneFocus(this.output, this.#theme, chatThreadHeading(state), focused);
     this.#composer.activate(Math.max(1, width - 4), focused, state.chatPending);
     this.#composer.renderMenu(state);
-    if (state.chatConversation === this.#renderedConversation) return;
-    this.#renderedConversation = state.chatConversation;
-    this.#conversation.render(state);
+    if (state.chatConversation !== this.#renderedConversation) {
+      this.#renderedConversation = state.chatConversation;
+      this.#conversation.render(state);
+    }
+    // Tailing is stickyScroll's job: it follows appended entries and releases
+    // when the operator scrolls up. The explicit jump is reserved for the
+    // moments the operator asked for the tail, the pane appearing and
+    // switching threads; jumping on every conversation change instead
+    // cancelled a manual scroll-up as soon as an answer streamed in.
+    if (this.#visibleThreadId !== state.activeChatThreadId) {
+      this.#visibleThreadId = state.activeChatThreadId;
+      this.#scrollToTail();
+    }
+  }
+
+  /** Lands the viewport at the bottom, which also re-arms sticky-bottom. */
+  #scrollToTail(): void {
     this.#scroll.scrollTo(this.#scroll.scrollHeight);
   }
 }

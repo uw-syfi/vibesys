@@ -320,12 +320,12 @@ def test_checkpoint_parses_only_tail_and_spine(tmp_path):  # noqa: ANN001, ANN20
     assert store is not None
     parsed_at_attach = store.parsed_record_count
 
-    through, events, _active = parts.api.subscription_checkpoint(count - 500, bootstrap_spine=True)
+    checkpoint = parts.api.subscription_checkpoint(count - 500, bootstrap_spine=True)
 
     assert store.parsed_record_count <= (parsed_at_attach + 500 + _spine_records(count - 500))
     assert store.parsed_record_count < count
-    assert through >= count
-    assert len(events) < count
+    assert checkpoint.through_sequence >= count
+    assert len(checkpoint.events) < count
 
 
 def test_events_query_is_half_open_and_backfills_without_gaps(tmp_path):  # noqa: ANN001, ANN201
@@ -380,6 +380,81 @@ def test_late_attach_rebootstraps_at_fresh_tail_with_spine(tmp_path):  # noqa: A
         "round_finished" for _ in range(floor // _ROUND_EVERY)
     ]
     assert len(batch["events"]) <= 40 + _spine_records(floor)
+
+
+def test_late_attach_rebootstraps_a_run_log_shorter_than_the_tail(tmp_path):  # noqa: ANN001, ANN201
+    # The watermark check alone cannot see this attach: the whole run log fits
+    # inside the tail, so ``latest_sequence - cursor`` never exceeds it. Without
+    # the store's identity on the batch, the durable events at or below the
+    # client's pre-attach cursor are dropped by its out-of-order guard, and the
+    # floor stays 0, so backfill has no reason to fetch the prefix either.
+    parts = build_server_parts(tmp_path / "server")
+    tail = 1_000
+
+    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=tail)) as read:
+        assert read()["type"] == "subscribed"
+        bootstrap = read()
+        parts.attach(_write_log(tmp_path / "logs", _round_log(200)))
+        batch = read()
+
+    latest = parts.api.snapshot().sequence
+    assert latest < tail
+    assert batch["store_id"] != bootstrap["store_id"]
+    assert batch["history_after_sequence"] == 0
+    assert batch["through_sequence"] == latest
+    # A whole-log replay, so the client re-folds to exactly what the durable
+    # store holds, starting at the ``run_started`` the stale cursor covered.
+    assert [event["sequence"] for event in batch["events"]] == list(range(1, latest + 1))
+    assert batch["events"][0]["type"] == "run_started"
+
+
+def test_attach_into_an_empty_log_keeps_the_subscription_streaming(tmp_path):  # noqa: ANN001, ANN201
+    # A fresh run's attach re-appends the bootstrap events into an empty log,
+    # which preserves every sequence. The client's fold is still correct, so
+    # the store keeps its identity and the stream stays incremental.
+    parts = build_server_parts(tmp_path / "server")
+
+    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
+        assert read()["type"] == "subscribed"
+        bootstrap = read()
+        parts.attach(tmp_path / "logs")
+        parts.journal.publish_output("stdout", "first line of the run")
+        batch = read()
+
+    assert batch["store_id"] == bootstrap["store_id"]
+    assert [event["type"] for event in batch["events"]] == ["output"]
+    assert batch["events"][0]["sequence"] == bootstrap["through_sequence"] + 1
+
+
+def test_live_batches_carry_the_store_they_were_read_from(tmp_path):  # noqa: ANN001, ANN201
+    parts = _attach(tmp_path, _round_log(50))
+
+    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
+        read()
+        bootstrap = read()
+        parts.journal.publish_output("stdout", "one more line")
+        batch = read()
+
+    store_id = parts.journal.store_id_locked()
+    assert store_id != ""
+    assert bootstrap["store_id"] == store_id
+    assert batch["store_id"] == store_id
+
+
+def test_checkpoint_reads_nothing_from_a_store_the_cursor_predates(tmp_path):  # noqa: ANN001, ANN201
+    parts = build_server_parts(tmp_path / "server")
+    bootstrap_store = parts.journal.store_id_locked()
+    cursor = parts.api.latest_sequence
+    parts.attach(_write_log(tmp_path / "logs", _round_log(200)))
+
+    stale = parts.api.subscription_checkpoint(cursor, store_id=bootstrap_store)
+    current = parts.api.subscription_checkpoint(cursor)
+
+    assert stale.store_id == parts.journal.store_id_locked() != bootstrap_store
+    assert stale.events == []
+    # Without the guard the same cursor reads the replacement log's suffix,
+    # which is exactly the batch that used to reach the client unannounced.
+    assert current.events != []
 
 
 def test_late_attach_does_not_parse_skipped_history(tmp_path):  # noqa: ANN001, ANN201

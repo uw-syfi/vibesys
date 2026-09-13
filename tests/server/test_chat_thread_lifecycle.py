@@ -12,7 +12,7 @@ import pytest
 from tests.server.support import ServerParts, build_server_parts
 
 from server.chat.factory import ChatAgentResources, ExperimentChatFactory
-from server.chat.manager import ChatThreadHandle
+from server.chat.manager import ChatAnswer, ChatThreadHandle
 from server.chat.options import ChatRunSettings
 from server.events import ChatThreadCreatedData, EventType, make_event
 from vibesys.run.integration import AgentSelection
@@ -67,7 +67,12 @@ def test_concurrent_restore_is_single_flight(tmp_path: Path) -> None:
         calls.append(thread_id)
         construction_started.set()
         assert release_construction.wait(timeout=2)
-        return ChatThreadHandle(spec=spec, handler=lambda question: f"answer: {question}")
+        return ChatThreadHandle(
+            spec=spec,
+            handler=lambda question: ChatAnswer(
+                text=f"answer: {question}", invocation_id=f"exec-{question}"
+            ),
+        )
 
     parts.chat.set_thread_factory(factory)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
@@ -170,14 +175,14 @@ def test_thread_turns_serialize_and_shutdown_drains_queued_borrowers(tmp_path: P
     resource_closed = threading.Event()
     invocations: list[str] = []
 
-    def handler(question: str) -> str:
+    def handler(question: str) -> ChatAnswer:
         assert not resource_closed.is_set()
         invocations.append(question)
         if question == "first":
             first_started.set()
             assert release_first.wait(timeout=2)
         assert not resource_closed.is_set()
-        return f"answer: {question}"
+        return ChatAnswer(text=f"answer: {question}", invocation_id=f"exec-{question}")
 
     def factory(
         thread_id: str,
@@ -238,10 +243,10 @@ def test_restoration_finishing_during_shutdown_is_closed_without_invocation(
         nonlocal resource_closed
         resource_closed += 1
 
-    def handler(_question: str) -> str:
+    def handler(_question: str) -> ChatAnswer:
         nonlocal invocations
         invocations += 1
-        return "should not run"
+        return ChatAnswer(text="should not run", invocation_id="exec-unused")
 
     def factory(
         _thread_id: str,
@@ -300,7 +305,7 @@ def test_thread_creation_finishing_during_shutdown_is_closed_without_publish(
                 model=model or "gpt-test",
                 created_at=datetime.now(UTC),
             ),
-            handler=lambda _question: "unused",
+            handler=lambda _question: ChatAnswer(text="unused", invocation_id="exec-unused"),
             close=close,
         )
 

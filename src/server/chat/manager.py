@@ -33,10 +33,24 @@ def _noop_thread_close() -> None:
 
 
 @dataclass(frozen=True)
+class ChatAnswer:
+    """One answered chat turn and the invocation identity that produced it.
+
+    ``invocation_id`` matches the id the turn's streamed chunks carried, which
+    is what lets clients fold the terminal answer over exactly that turn. An
+    answer produced without an agent invocation (the read-only fallback) takes
+    a fresh identity so it can never claim another turn's streamed output.
+    """
+
+    text: str
+    invocation_id: str
+
+
+@dataclass(frozen=True)
 class TerminalChatResource:
     """Chat handler and resources retained while the terminal client is open."""
 
-    handler: Callable[[str], str]
+    handler: Callable[[str], ChatAnswer]
     close: Callable[[], None]
 
 
@@ -45,7 +59,7 @@ class ChatThreadHandle:
     """Resolved thread settings and its answering handler."""
 
     spec: ChatThreadCreatedData
-    handler: Callable[[str], str]
+    handler: Callable[[str], ChatAnswer]
     close: Callable[[], None] = _noop_thread_close
 
 
@@ -56,7 +70,7 @@ ChatThreadFactory = Callable[[str, str | None, str | None, str | None], ChatThre
 class _ThreadRoute:
     """One installed handler and the lock serializing its turns."""
 
-    handler: Callable[[str], str]
+    handler: Callable[[str], ChatAnswer]
     turn_lock: threading.Lock
 
 
@@ -64,10 +78,10 @@ class _ThreadRoute:
 class _ThreadLease:
     """A callable route whose turn lock and teardown lease are held."""
 
-    handler: Callable[[str], str]
+    handler: Callable[[str], ChatAnswer]
     turn_lock: threading.Lock
 
-    def __call__(self, text: str) -> str:
+    def __call__(self, text: str) -> ChatAnswer:
         """Invoke the leased route."""
         return self.handler(text)
 
@@ -95,7 +109,7 @@ class ChatManager:
         self._run_status = run_status
         self._chat_response_local = _ChatResponseLocal()
         self._fallback_answer: Callable[[str], str] | None = None
-        self._default_handler: Callable[[str], str] | None = None
+        self._default_handler: Callable[[str], ChatAnswer] | None = None
         self._thread_factory: ChatThreadFactory | None = None
         self._thread_handlers: dict[str, _ThreadRoute] = {}
         self._thread_restorations: dict[str, _ThreadRestoration] = {}
@@ -160,10 +174,13 @@ class ChatManager:
                     if self._fallback_answer
                     else "No recorded summary is available."
                 )
-                answer = (
-                    "The experiment chat agent is not available for this run"
-                    f" ({self._unavailable_reason()}), so this is a read-only"
-                    " summary from the recorded events rather than an answer.\n\n" + fallback
+                answer = ChatAnswer(
+                    text=(
+                        "The experiment chat agent is not available for this run"
+                        f" ({self._unavailable_reason()}), so this is a read-only"
+                        " summary from the recorded events rather than an answer.\n\n" + fallback
+                    ),
+                    invocation_id=uuid.uuid4().hex,
                 )
             else:
                 answer = handler(text)
@@ -173,9 +190,9 @@ class ChatManager:
                 status=EventStatus.ANSWERED,
                 agent_kind="chat",
                 round_label="experiment-chat",
-                data=ChatData(answer=answer),
+                data=ChatData(answer=answer.text, invocation_id=answer.invocation_id),
             )
-            return answer
+            return answer.text
         finally:
             if handler is not None:
                 self._release_default_call()
@@ -261,7 +278,7 @@ class ChatManager:
         with self._condition:
             return self._run_settings
 
-    def install_default_handler(self, handler: Callable[[str], str] | None) -> None:
+    def install_default_handler(self, handler: Callable[[str], ChatAnswer] | None) -> None:
         """Install or remove the handler for the default chat route."""
         with self._condition:
             self._default_handler = handler
@@ -333,9 +350,13 @@ class ChatManager:
                 agent_kind="chat",
                 round_label="experiment-chat",
                 chat_thread_id=thread_id,
-                data=ChatData(answer=answer, thread_title=thread_title),
+                data=ChatData(
+                    answer=answer.text,
+                    thread_title=thread_title,
+                    invocation_id=answer.invocation_id,
+                ),
             )
-            return answer
+            return answer.text
         finally:
             handler.turn_lock.release()
             self._release_thread_call()
