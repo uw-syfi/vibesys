@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Never, Protocol, cast
+from typing import Literal, Never, Protocol, cast
 from urllib.parse import quote, urlencode
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +28,7 @@ HARD_DENIED_PATHS = frozenset(
     }
 )
 Runner = Callable[..., subprocess.CompletedProcess[str]]
+RepositoryRole = Literal["triage", "write", "maintain", "admin"]
 
 
 class MergeRefusalError(RuntimeError):
@@ -290,8 +291,12 @@ def authorize_event(event: Event, policy: Policy) -> None:
         _refuse(f"the exact command is {policy.command}")
 
 
-def authorize_membership(policy: Policy, *, actor: str, required: frozenset[str]) -> None:
-    """Require membership in every capability selected by the diff."""
+def authorize_membership(
+    policy: Policy, *, actor: str, role: RepositoryRole, required: frozenset[str]
+) -> None:
+    """Require membership in every selected capability unless the caller is an admin."""
+    if role == "admin":
+        return
     login = actor.casefold()
     missing = sorted(
         capability_name
@@ -302,13 +307,15 @@ def authorize_membership(policy: Policy, *, actor: str, required: frozenset[str]
         _refuse(f"@{actor} is not a member of required capabilities: {missing}")
 
 
-def authorize_repository_access(permission: object, *, actor: str) -> None:
-    """Require the command issuer to retain live repository access."""
+def authorize_repository_access(permission: object, *, actor: str) -> RepositoryRole:
+    """Return the command issuer's validated live repository role."""
     document = _mapping(permission, "repository permission")
     # GitHub's legacy ``permission`` field collapses Triage into ``read`` and
     # Maintain into ``write``. ``role_name`` preserves the actual role.
-    if document.get("role_name") not in {"triage", "write", "maintain", "admin"}:
+    role = document.get("role_name")
+    if role not in {"triage", "write", "maintain", "admin"}:
         _refuse(f"@{actor} no longer has Triage or higher repository access")
+    return cast("RepositoryRole", role)
 
 
 def authorize_pull_request(
@@ -422,7 +429,7 @@ def run(event_path: Path, *, api: GitHubClient) -> str:
     repository = quote(policy.repository, safe="/")
     pull_endpoint = f"repos/{repository}/pulls/{event.number}"
     actor = quote(event.actor, safe="")
-    authorize_repository_access(
+    role = authorize_repository_access(
         api.get(f"repos/{repository}/collaborators/{actor}/permission"),
         actor=event.actor,
     )
@@ -434,7 +441,7 @@ def run(event_path: Path, *, api: GitHubClient) -> str:
         changed_files=changed_files,
         policy=policy,
     )
-    authorize_membership(policy, actor=event.actor, required=required_capabilities)
+    authorize_membership(policy, actor=event.actor, role=role, required=required_capabilities)
     query = urlencode({"head_sha": head_sha, "event": "pull_request", "per_page": 100})
     for check_id in sorted(required_checks):
         check = policy.checks[check_id]

@@ -194,10 +194,23 @@ def test_membership_is_case_insensitive_and_requires_every_capability(tmp_path: 
     policy = load_policy(policy_path)
     assert all(capability.members == {"maintainer"} for capability in policy.capabilities.values())
 
-    authorize_membership(policy, actor="MainTainer", required=frozenset({"tui", "server"}))
-    for actor in ["stranger", "admin"]:
+    authorize_membership(
+        policy,
+        actor="MainTainer",
+        role="triage",
+        required=frozenset({"tui", "server"}),
+    )
+    authorize_membership(
+        policy, actor="unlisted-admin", role="admin", required=frozenset({"tui", "server"})
+    )
+    for role in ["triage", "write", "maintain"]:
         with pytest.raises(MergeRefusalError, match="not a member"):
-            authorize_membership(policy, actor=actor, required=frozenset({"server"}))
+            authorize_membership(
+                policy,
+                actor="unlisted-user",
+                role=role,
+                required=frozenset({"server"}),
+            )
 
 
 @pytest.mark.parametrize(
@@ -227,7 +240,13 @@ def test_policy_rejects_invalid_capability_members(
 
 
 def test_repository_access_is_checked_live() -> None:
-    authorize_repository_access({"permission": "read", "role_name": "triage"}, actor="maintainer")
+    for role in ["triage", "write", "maintain", "admin"]:
+        assert (
+            authorize_repository_access(
+                {"permission": "read", "role_name": role}, actor="maintainer"
+            )
+            == role
+        )
     with pytest.raises(MergeRefusalError, match="no longer has Triage"):
         authorize_repository_access({"permission": "read", "role_name": "read"}, actor="maintainer")
 

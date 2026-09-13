@@ -15,8 +15,10 @@ a section implicitly requires membership in that capability. Every changed
 path must match at least one section. For renames, both the old and new path are
 evaluated. When a path or diff matches several capability sections, the broker
 requires the caller to be a member of all matching capabilities and requires
-the union of their checks. There is no implicit administrator bypass. Empty
-member lists are valid and grant nobody access.
+the union of their checks. Repository administrators bypass only capability
+membership. They must still issue the exact command and pass the path, rename,
+named-CI, PR-state, base, cleanliness, live-role, and head-SHA checks. Empty
+member lists are valid and grant no non-admin user access.
 
 Membership is source-controlled and changes through the normal maintainer path.
 For example:
