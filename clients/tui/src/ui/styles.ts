@@ -27,7 +27,7 @@ type MarkdownRenderNode = NonNullable<MarkdownOptions['renderNode']>;
 /** What a transcript markdown block is built with, minus its per-entry parts. */
 export type MarkdownBlockOptions = Omit<MarkdownOptions, 'content' | 'streaming'>;
 
-interface CodeSurface {
+export interface CodeSurface {
   fg: string;
   bg: string;
 }
@@ -42,7 +42,7 @@ interface CodeSurface {
  * and take their colors from the syntax style. Naming the pair twice lets a
  * fence change color depending on where it sits.
  */
-function codeSurface({markdown}: Theme): CodeSurface {
+export function codeSurface({markdown}: Theme): CodeSurface {
   return {fg: markdown.code, bg: markdown.codeBackground};
 }
 
@@ -321,8 +321,15 @@ function warnIfHighlightSignalsTrouble(block: CodeRenderable): void {
   });
 }
 
-/** Puts one block the renderer already built on the code surface. */
-function drawOnCodeSurface(block: CodeRenderable, {fg, bg}: CodeSurface): void {
+/**
+ * Puts one block on the code surface, whether the renderer built it from a
+ * markdown fence or it was constructed standalone (an entry's gate command,
+ * in `conversation.ts`'s generic entry branch). Either way a
+ * `CodeRenderable` without a bundled grammar (`GRAMMAR_FILETYPES`) has no
+ * `filetype`, so this always takes the flat `drawUnstyledText` path for it:
+ * the code background and a flat code foreground, no per-token colour.
+ */
+export function drawOnCodeSurface(block: CodeRenderable, {fg, bg}: CodeSurface): void {
   block.bg = bg;
   const {filetype} = block;
   const hasGrammar = filetype !== undefined && GRAMMAR_FILETYPES.has(filetype);

@@ -2,6 +2,7 @@ import {
   BoxRenderable,
   bold,
   type CliRenderer,
+  CodeRenderable,
   fg,
   MarkdownRenderable,
   StyledText,
@@ -17,7 +18,9 @@ import type {ConversationEntry, SessionState} from '../session-model.js';
 import {visibleConversation} from '../session-model.js';
 import {promptPreview, toolCallPreview, toolResultPreview} from './previews.js';
 import {
+  codeSurface,
   createMarkdownBlockOptions,
+  drawOnCodeSurface,
   type EntryPalette,
   entryPalette,
   type MarkdownBlockOptions,
@@ -537,6 +540,26 @@ export class ConversationView {
           wrapMode: 'word',
         }),
       );
+      if (entry.command !== undefined) {
+        // A gate's command (from the typed `gate_started` event, or, for
+        // recorded/legacy prose, core-state's `splitFrameworkValidationCommand`)
+        // gets code treatment instead of word-wrapping it like a sentence.
+        // `char` wrap is the point: a command's spaces are argument
+        // separators, not soft-wrap points, so it must break anywhere rather
+        // than at one.
+        const commandBlock = new CodeRenderable(this.renderer, {
+          content: entry.command,
+          // No bash grammar ships today (GRAMMAR_FILETYPES in styles.ts), so
+          // this still takes the flat drawUnstyledText path below; tagging it
+          // now means it lights up automatically once a bash grammar lands.
+          filetype: 'bash',
+          syntaxStyle: this.#markdownBlockOptions.syntaxStyle,
+          width: '100%',
+          wrapMode: 'char',
+        });
+        drawOnCodeSurface(commandBlock, codeSurface(this.#theme));
+        card.add(commandBlock);
+      }
       if (output?.collapsible) {
         const hidden =
           output.hiddenLines > 0
