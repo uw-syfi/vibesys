@@ -55,6 +55,17 @@ describe('renderPerformanceCurve', () => {
     expect(chart.match(/●/g)).toHaveLength(1);
   });
 
+  it('uses the last measurement recorded for a round', () => {
+    const chart = renderPerformanceCurve(
+      [performance(1, 500)],
+      [benchmark(1, 1, 1000), benchmarkGate(2, 1, 2000)],
+    );
+
+    expect(chart).toContain('best r1 2k ops/s');
+    expect(chart).toContain('latest r1 2k ops/s');
+    expect(chart.match(/●/g)).toHaveLength(1);
+  });
+
   it('ignores failed and measurement-free benchmark gates', () => {
     const failed: RunEvent = {...benchmarkGate(1, 1, 1000), status: 'failed'};
     const bare = benchmarkGate(2, 2, 1000);
