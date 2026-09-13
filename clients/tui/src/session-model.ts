@@ -906,20 +906,14 @@ export function selectExperimentActivity(state: SessionState): SessionState {
  * Advances the experiment navigation by one level: index to hypothesis
  * summary, then hypothesis summary to its selected round trajectory.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 export function enterExperimentDrilldown(state: SessionState): SessionState {
   if (state.hypothesisDetail !== null) {
     const roundNumber = state.hypothesisDetail.selectedRound;
     return roundNumber === null ? state : (enterExperimentRound(state, roundNumber) ?? state);
   }
-  const activity = hypothesisPlanningActivity(state);
-  if (
-    activity !== null &&
-    (state.experimentLog?.selectedActivity === true ||
-      (state.experimentLog?.entries.length === 0 &&
-        (state.experimentLog?.selectedUnownedRound ?? null) === null))
-  ) {
-    return enterUnownedExperimentRound(state, activity.roundNumber) ?? state;
+  const activityRound = selectedPlanningActivityRound(state);
+  if (activityRound !== null) {
+    return enterUnownedExperimentRound(state, activityRound) ?? state;
   }
   const selectedRound =
     state.experimentLog?.selectedUnownedRound ??
@@ -930,6 +924,16 @@ export function enterExperimentDrilldown(state: SessionState): SessionState {
   const entry = selectedExperiment(state);
   if (entry === null || state.hypothesisScope !== null) return state;
   return openHypothesisDetail(state);
+}
+
+/** The live planning round when it is the selected, or only, index item. */
+function selectedPlanningActivityRound(state: SessionState): number | null {
+  const activity = hypothesisPlanningActivity(state);
+  if (activity === null) return null;
+  const log = state.experimentLog;
+  const selected = log?.selectedActivity === true;
+  const onlyItem = log?.entries.length === 0 && (log.selectedUnownedRound ?? null) === null;
+  return selected || onlyItem ? activity.roundNumber : null;
 }
 
 /** Leaves a trajectory for its hypothesis summary, preserving the round cursor. */
