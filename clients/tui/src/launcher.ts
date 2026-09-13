@@ -191,7 +191,12 @@ async function watchBackendStartup(socketPath: string, backend: ChildProcess): P
   return false;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+type MonitorAction =
+  | {kind: 'return'; code: number}
+  | {kind: 'wait-backend'; frontendCode: number}
+  | {kind: 'wait-frontend'; backendCode: number}
+  | {kind: 'continue'};
+
 async function monitor(
   frontend: ChildProcess,
   backend: ChildProcess,
@@ -200,41 +205,58 @@ async function monitor(
   while (true) {
     const frontendCode = exitStatus(frontend);
     const backendCode = exitStatus(backend);
-    if (frontendCode !== undefined) {
-      if (releaseSmokeMode && frontendCode === 0) return 0;
-      if (backendCode === undefined) {
-        const gracefulBackendCode = await waitForExit(backend, BACKEND_EXIT_GRACE_MS);
-        if (gracefulBackendCode === undefined) {
-          await terminateBackend(backend);
-          return frontendCode === 0 ? 0 : normalizeFrontendExit(frontendCode);
-        }
-        return frontendCode === 0 ? gracefulBackendCode : normalizeFrontendExit(frontendCode);
-      }
-      return frontendCode === 0 ? backendCode : normalizeFrontendExit(frontendCode);
+    const action = monitorAction(frontendCode, backendCode, releaseSmokeMode);
+    if (action.kind === 'return') return action.code;
+    if (action.kind === 'wait-backend') {
+      const gracefulBackendCode = await waitForExit(backend, BACKEND_EXIT_GRACE_MS);
+      return resolveFrontendExit(backend, action.frontendCode, gracefulBackendCode);
     }
-    if (backendCode !== undefined) {
-      // The backend never legitimately exits while the frontend is attached
-      // (it stays alive for post-run chat until the frontend ends the
-      // session), so this is always an unexpected backend death. Give the
-      // frontend a moment to exit on its own, then terminate it so the
-      // launcher's cleanup can run.
-      //
-      // This branch's safety depends on the backend never tearing down
-      // while a subscription is active or about to redial. Today
-      // `_client_disconnected` in `unix_jsonl.py` latches on the first
-      // mid-run drop and never unsticks on reconnect, so the backend can
-      // exit under a live client, violating that contract. Fixed by the
-      // reconnect-aware SubscriptionTracker in #588 (PR #602).
+    if (action.kind === 'wait-frontend') {
       const gracefulFrontendCode = await waitForExit(frontend, FRONTEND_EXIT_GRACE_MS);
-      if (gracefulFrontendCode === undefined) {
-        frontend.kill('SIGTERM');
-        await waitOrKill(frontend);
-        return backendCode;
-      }
-      return gracefulFrontendCode === 0 ? backendCode : normalizeFrontendExit(gracefulFrontendCode);
+      return resolveBackendExit(frontend, action.backendCode, gracefulFrontendCode);
     }
     await sleep(50);
   }
+}
+
+function monitorAction(
+  frontendCode: number | undefined,
+  backendCode: number | undefined,
+  releaseSmokeMode: boolean,
+): MonitorAction {
+  if (frontendCode !== undefined) {
+    if (releaseSmokeMode && frontendCode === 0) return {kind: 'return', code: 0};
+    if (backendCode === undefined) return {kind: 'wait-backend', frontendCode};
+    return {kind: 'return', code: combineExitCodes(frontendCode, backendCode)};
+  }
+  if (backendCode !== undefined) return {kind: 'wait-frontend', backendCode};
+  return {kind: 'continue'};
+}
+
+async function resolveFrontendExit(
+  backend: ChildProcess,
+  frontendCode: number,
+  gracefulBackendCode: number | undefined,
+): Promise<number> {
+  if (gracefulBackendCode !== undefined) return combineExitCodes(frontendCode, gracefulBackendCode);
+  await terminateBackend(backend);
+  return normalizeFrontendExit(frontendCode);
+}
+
+async function resolveBackendExit(
+  frontend: ChildProcess,
+  backendCode: number,
+  gracefulFrontendCode: number | undefined,
+): Promise<number> {
+  if (gracefulFrontendCode !== undefined)
+    return gracefulFrontendCode === 0 ? backendCode : normalizeFrontendExit(gracefulFrontendCode);
+  frontend.kill('SIGTERM');
+  await waitOrKill(frontend);
+  return backendCode;
+}
+
+function combineExitCodes(frontendCode: number, backendCode: number): number {
+  return frontendCode === 0 ? backendCode : normalizeFrontendExit(frontendCode);
 }
 
 async function terminateBackend(backend: ChildProcess): Promise<void> {
