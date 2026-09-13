@@ -53,6 +53,18 @@ Scope: rocm, gfx942, `sglang-v0.5.18-rocm700-mi30x`. Status: verified. Stamp: `s
 
 A related counter-altitude ambiguity: `VALUBusy` sitting well under 100 percent (for example 30 to 46 percent) does not by itself mean the kernel has ALU headroom to spare. It only rules out full ALU saturation; a kernel can still be instruction-issue-bound if its per-element instruction count is far above the minimal sequence the work needs, even while achieved HBM fetch rate is also well under peak. Descend to an ISA-level instruction audit (count real instructions per unit of useful work, separating genuine memory operations from ones a smarter code path could keep register-resident) rather than concluding "neither bandwidth- nor ALU-bound" means the kernel is already near-optimal. See [`aiter-mxfp4-moe.md`](aiter-mxfp4-moe.md) for a worked example where this distinguished an instruction-issue-bound decode step from the memory-bandwidth or occupancy fixes that were tried and failed first, and where a follow-up fix that moved the lookup into a plain runtime-indexed register array (rather than a hardware byte-permute) regressed further for the same instruction-issue reason.
 
+## Low-overhead event timing inside a captured segment, measured
+
+`torch.cuda.Event(enable_timing=True)` markers work on HIP the same way they do on CUDA (the API is backend-agnostic; see [`tooling/profiler.md`](../../tooling/profiler.md) for the general method and the profiler-overhead pitfall this replaces). On this stack, bracketing a breakable-prefill CUDA-graph forward at every one of its 61 graph-break segments, plus forward entry/exit, with a fixed overhead of exactly one host synchronize per forward, gives:
+
+- Forward wall time versus extend tokens (OLS, n=15, 5 reps x 3 sizes pooled): `wall_ms = 65.0 + 0.113 x extend_tokens`, R^2 = 0.987.
+- GPU-busy fraction of that wall time: 85.1 percent at 256 tokens, 87.9 percent at 512, 88.3 percent at 1024, reconstructed exactly from `pre_first_kernel + sum(segment_gpu) + sum(inter_segment_gap) + post_last_kernel` at every size (internal consistency check, not an estimate).
+- Inter-segment gaps: 10.6-17.1 ms summed across the 60 breaks, about 0.18-0.29 ms per break, at or below what a rougher torch-profiler-based estimate had predicted.
+
+This bracket-and-reconstruct method is far cleaner than a `torch.profiler(record_shapes=True)` capture of the same forward (R^2 0.737, an intercept 3x higher): the profiler was inflating the fixed cost it was meant to measure, not just adding noise on top of a correct number. When selecting which event record to attribute to a given client request (for example a decode-phase verify forward reusing the same instrumented runner class as the real prefill), take the earliest matching role record at or after the request's own send timestamp; summing every record inside a wide time window around the request pulls in unrelated forwards and inflates the segment count by several times.
+
+Scope: rocm, gfx942, this fork's breakable prefill CUDA-graph runner. Status: verified (n=15, R^2 0.987; internal reconstruction exact to rounding). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
+
 ## Pitfalls
 
 ### rocprof-compute fails its own dependency check on this image; rocprofv3 works

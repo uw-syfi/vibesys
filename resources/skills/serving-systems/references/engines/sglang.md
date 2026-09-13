@@ -178,6 +178,28 @@ See [`../tooling/performance-modeling.md`](../tooling/performance-modeling.md) f
 
 Scope: sglang, any backend (scheduler behavior, not platform-specific). Status: verified (measured via a request-id join, residual near logging precision; mechanism read from the recv-loop/`PrefillAdder` gating in `managers/scheduler.py`). Stamp: sglang fork at `b6f3d5d6c8`, 2026-09-12, job 633804.
 
+### Host-side cost model, concurrency-1 (no queueing)
+
+A finer, exact-rid-joined decomposition at concurrency 1 (idle server, no admission queueing, so every millisecond measured is a genuine per-request cost rather than a queueing artifact) attributes the scheduler-to-detokenizer chain, plus the `TokenizerManager` stages upstream of it, stage by stage:
+
+| Stage | Cost | Notes |
+|:--|:--|:--|
+| Scheduler pickup (`recv -> schedule_chosen`) | under 1 ms | `IdleSleeper`'s `zmq.Poller.poll(1000)` is genuinely event-driven: pickup cost stays under 1 ms whether or not the scheduler had been idle beforehand, whether idle 9 ms or several seconds |
+| `ForwardBatch` build | 1-2 ms | padding and slot-index construction |
+| Target forward | dominant term | see [`../platforms/`](../platforms/) for the GPU-side split |
+| `ModelRunner.sample()` | under 0.2 ms | greedy argmax at bs=1 is near-instant; a much larger profiler-based estimate for this stage does not reproduce here |
+| NEXTN draft-extend-for-prefill | 4-7 ms | the largest real host-side lever: a synchronous forward on the critical path before the first token can be sent |
+| Result processing + send to detokenizer | 2.5-5 ms | D2H sync, `next_token_ids.tolist()`, finish-state checks, ZMQ send |
+| Chat-template render (`TokenizerManager`) | about 0.4 ms, flat | independent of conversation length |
+| Tokenize (`TokenizerManager`) | about 0.003 ms per prompt token | re-tokenizes the entire rendered conversation from scratch every turn, including already-tokenized history, so this term grows with total conversation length, not with the new-token count alone |
+| IPC (pickle + ZMQ send to scheduler) | 3-6 ms | grows with the token-id array size; above what a first estimate assumed |
+
+Under load (c48), the same seven stages preserve their ranking and every stage's own p95 widens versus its median from GPU contention across concurrent sessions, but `recv -> schedule_chosen` stays flat and small regardless of the scheduler's own idle fraction, confirming the idle-poll finding holds under load too.
+
+This refines the receipt-to-queue-arrival term above: at concurrency 1 (so isolated from admission-queueing entirely), that term's own order of magnitude is dominated by `TokenizerManager`-side tokenization of the whole conversation-so-far plus IPC, not by anything inside the scheduler loop itself. See [`../models/qwen3-5.md`](../models/qwen3-5.md) for the full stage table and per-size numbers, and [`../tooling/serving-benchmark.md`](../tooling/serving-benchmark.md) for the low-overhead host-stamp method this uses instead of a profiler.
+
+Scope: sglang, any backend (`TokenizerManager` and scheduler behavior, not platform-specific); measured on this hybrid GDN+MoE model under NEXTN k=3 speculative decode with the breakable prefill CUDA graph. Status: verified (exact-rid join at concurrency 1, monotonic stamps confirmed, stage sum reconstructs the measured total to within 1-2 ms). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
+
 ## Per-phase prefill CUDA graph: breakable backend accepted
 
 `--cuda-graph-config` selects a capture backend independently per phase

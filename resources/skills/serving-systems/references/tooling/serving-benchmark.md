@@ -279,6 +279,40 @@ boots on one node. Status: verified (measured: one config pair's off-target
 delta exceeded its on-target delta). Stamp: sglang-v0.5.18-rocm700-mi30x,
 2026-09-13, job-verified.
 
+### A synthetic session driver's own text length can flip which padded bucket a rep lands in
+
+```
+Symptom: two reps of a nominally-identical A/B comparison (same nominal
+         target token count) show a roughly 10 ms swing in per-forward
+         GPU time or TTFT that reproduces even between two boots of the
+         exact same configuration on the same side.
+Cause:   a session driver that generates word-soup filler text lands the
+         real extend-token length within about 10 tokens of the nominal
+         target, not exactly on it. When the server pads prefill M to a
+         fixed bucket ladder, a handful of tokens either side of a bucket
+         edge (e.g. 256 vs 320, 512 vs 576) is enough to land the forward
+         in a different bucket, and adjacent buckets can differ enough in
+         M to swing GPU time by about 10 ms, with nothing to do with
+         whatever the A/B is testing.
+Fix:     read each rep's own server-measured extend length (not the
+         nominal target) and group or filter by actual landed bucket
+         before comparing an A/B delta at a nominal size close to a bucket
+         edge, or fix the driver's extend length exactly instead of
+         letting it vary.
+Scope:   any A/B comparison using a word-soup-based session driver on a
+         server that pads to a fixed shape bucket, engine- and
+         backend-agnostic.
+Status:  verified (reproduced identically across three boots of the exact
+         same configuration). Stamp: sglang-v0.5.18-rocm700-mi30x,
+         2026-09-13, job-verified.
+```
+
+### Decompose TTFT past the forward with cheap host stamps once a profiler's own overhead exceeds the gap
+
+Once a system-level profile has isolated the forward itself, the remaining gap between client TTFT and the forward's own wall time is usually tens of milliseconds, an order profilers with per-op detail (e.g. `record_shapes=True`) are too heavy to measure: that flag alone can add 200-420 ms of CPU overhead per request, several times larger than the gap under investigation, and it cannot be subtracted out because the profiler perturbs exactly the host-dispatch timing the decomposition needs. Bracket each remaining handoff (scheduler pickup, batch build, sample, any draft-extend step, result processing, and upstream of the scheduler: chat-template render, tokenize, IPC dispatch) with plain `time.perf_counter()` stamps behind an env-gated flag instead, and confirm the stamps are monotonic and that their sum reconstructs the measured total end to end before trusting any individual stage. See [`profiler.md`](profiler.md) for the matching CUDA/HIP-event method for the forward's own internal segments.
+
+Scope: any engine, backend-independent (the profiler-overhead-versus-signal-size argument, not the specific stage names). Status: verified (measured: `record_shapes=True` overhead 200-420 ms/request against a 17-33 ms TTFT residual it was meant to explain; a perf_counter-stamped decomposition closed the residual to within 1-2 ms per stage instead). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
+
 ## Reading a benchmark report (skeptically)
 
 Checklist before trusting someone's numbers:

@@ -202,6 +202,29 @@ The engine source maps in [`engines/`](../../engines/) are written against NVIDI
 - **Porting CUDA head-dim or block-size assumptions.** Tile shapes are tuned for CDNA; re-tune rather than inheriting Hopper-era constants.
 - **Treating a fallback as a hardware result.** Confirm the kernel first.
 
+### A fresh private JIT dir can hang 30+ minutes on one kernel, on any node
+
+```
+Symptom: a fresh, never-before-built AITER_JIT_DIR hangs inside aiter's
+         own multi-process file-baton lock cold-JIT-compiling one kernel
+         variant; a watchdog kills the process before the build finishes.
+         Reproduced on three separate, otherwise-healthy nodes.
+Cause:   that kernel's cold build genuinely takes longer than a typical
+         watchdog timeout from an empty cache; not a node-specific issue.
+Fix:     never boot a fresh AITER_JIT_DIR cold on the serving path. Seed
+         it from a known-good prior build's .so files first; build_module
+         (aiter/jit/core.py) skips the compile step and imports directly
+         whenever the target .so already exists, confirmed by zero
+         "start build" lines in server.log once seeded. Different fix
+         from the stale-lock pitfall above (that recovers a killed build
+         sharing a warm cache; this avoids starting the cold build at all).
+Scope:   rocm, gfx942, sglang-v0.5.18-rocm700-mi30x with aiter bundled;
+         general to any fresh, unseeded AITER_JIT_DIR on the serving path.
+Status:  verified (reproduced on three distinct nodes; zero JIT-build
+         lines confirmed after seeding). sglang-v0.5.18-rocm700-mi30x,
+         2026-09-13, job-verified.
+```
+
 ### Stale JIT lock after a killed launch
 
 ```
