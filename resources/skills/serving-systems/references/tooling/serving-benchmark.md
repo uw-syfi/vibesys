@@ -317,6 +317,32 @@ Scope: same as above. Status: verified (three-job counterbalanced design,
 one held-server pair per job). Stamp: sglang-v0.5.18-rocm700-mi30x,
 2026-09-13, job-verified.
 
+**Follow-on: the combined candidate (this suffix lever plus the send-ids
+lever from `../engines/sglang.md`) was accepted as a judgment call, with a
+real median-latency improvement.** The
+two levers interact (the suffix lever changes what `prompt_ids` is before
+the send-ids lever decides whether to forward it as-is), so the combined
+path needed its own offline exactness check before any server job: 0 of
+253 turns mismatched end to end, matching each lever's own single-lever
+check. Three paired server jobs (two c48 boot orders, one c16 cap) then
+reran the same counterbalanced design this section already established
+was necessary: pooled p50 TTFT turn2+ improved a consistent 3.5 to 4.5
+percent (4.0 to 5.7 ms) in every one of the three jobs regardless of boot
+order or concurrency, landing inside the pre-registered prediction band,
+while the pooled p95 tail delta again proved order-dependent (-0.8 percent
+one c48 order, -17.7 percent the reversed order), staying below this
+campaign's own detectable delta in both orders. No metric regressed on either
+concurrency, and median TPOT was flat to slightly improved everywhere.
+Both switches are now on by default for the MI300A platform through the
+task's platform config (env defaults, so a caller can still export 0 to
+turn either off), while the engine-level defaults stay off. See
+[`../engines/sglang.md`](../engines/sglang.md) for the
+send-ids lever's own mechanism and numbers.
+
+Scope: same as above. Status: accepted (combined exactness check plus a
+three-job counterbalanced design, one held-server pair per job). Stamp:
+sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
+
 ### A synthetic session driver's own text length can flip which padded bucket a rep lands in
 
 ```
@@ -350,6 +376,70 @@ Status:  verified (reproduced identically across three boots of the exact
 Once a system-level profile has isolated the forward itself, the remaining gap between client TTFT and the forward's own wall time is usually tens of milliseconds, an order profilers with per-op detail (e.g. `record_shapes=True`) are too heavy to measure: that flag alone can add 200-420 ms of CPU overhead per request, several times larger than the gap under investigation, and it cannot be subtracted out because the profiler perturbs exactly the host-dispatch timing the decomposition needs. Bracket each remaining handoff (scheduler pickup, batch build, sample, any draft-extend step, result processing, and upstream of the scheduler: chat-template render, tokenize, IPC dispatch) with plain `time.perf_counter()` stamps behind an env-gated flag instead, and confirm the stamps are monotonic and that their sum reconstructs the measured total end to end before trusting any individual stage. See [`profiler.md`](profiler.md) for the matching CUDA/HIP-event method for the forward's own internal segments.
 
 Scope: any engine, backend-independent (the profiler-overhead-versus-signal-size argument, not the specific stage names). Status: verified (measured: `record_shapes=True` overhead 200-420 ms/request against a 17-33 ms TTFT residual it was meant to explain; a perf_counter-stamped decomposition closed the residual to within 1-2 ms per stage instead). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-13, job-verified.
+
+## Default-launch validation
+
+A paired acceptance job usually stages its candidate by hand (copying a
+tuned artifact into place, exporting an env var on top of an otherwise
+unmodified checkout). That proves the mechanism works; it does not prove
+that a fresh checkout of the accepted commit, booted the plain way with no
+manual staging, actually picks up the same behavior from committed config
+alone. Run this check periodically, after every stack change that lands,
+not only once:
+
+1. Fresh `git archive` (or equivalent) of the accepted head; no manual
+   copy-in-place of any tuned artifact.
+2. Boot with harness defaults only: no extra env, no extra argv beyond
+   the checked-in recipe.
+3. Hard-check every mechanism the accepted stack depends on, each with a
+   check that fails the job if missing, not a log grep for a single
+   "success" line (a clean load line and a silent failure can coexist;
+   see the CRLF pitfall in
+   [`../frameworks/pytorch.md`](../frameworks/pytorch.md)):
+   - the committed artifact matches the expected shape (line count, row
+     count, byte content) at its committed path, not only after staging;
+   - the staged, per-rank copies match too;
+   - a positive load-verify signal AND a corresponding failure-signal
+     check (zero of the known failure mode's own log lines), since
+     either alone cannot distinguish "loaded correctly" from "failed
+     silently";
+   - every warmup or capture step the stack depends on completes at its
+     expected count (N of N buckets, N of N ranks);
+   - the correctness gate, before and after the measured reps, not only
+     around them.
+4. One measured rep per concurrency of interest -- this is a wiring
+   check, not a re-run of the paired effect-size study -- compared
+   against the accepted study's own rep range, not a single point
+   estimate; a rep landing near but outside that range is ordinary
+   single-rep noise unless it also fails a hard check.
+5. Where cheap, run one confirmatory diagnostic beyond the benchmark
+   numbers (for example a kernel-name audit against a tuned table) even
+   when not required for acceptance: a validation pass is a low-cost
+   place to catch a real mechanism divergence that a benchmark number
+   alone would only hint at.
+
+Scope: any campaign, any backend. Status: verified (methodology reproduced
+across multiple prior instances on this campaign). Stamp:
+sglang-v0.5.18-rocm700-mi30x, 2026-09-14, job-verified.
+
+**A default-launch validation surfaced a real, unresolved discrepancy that
+a benchmark number alone would have missed.** Re-running a kernel-name
+audit (see [`../platforms/`](../platforms/) for the ROCm TunableOp
+instance) on a freshly committed head found 345 of 345 dense-GEMM launches
+matching a tuned kernel name, the opposite of an earlier job's 0 of 345 on
+byte-identical CSV content staged by hand onto an older bundle.
+Re-parsing the earlier job's own trace at the corrected M bucket still
+shows 0 of 345: the difference is real, not a labeling artifact, and is
+not yet explained (candidate causes: the different bundle head, or
+committed-path staging via the harness's own loader versus a manual
+copy-in-place). Flagged as an open follow-up, not resolved by this
+validation pass. Practical lesson: run a validation pass even when
+nothing changed on purpose, since "gates pass and the number is in the
+right range" does not by itself prove the same kernel path the original
+study measured is what is now running.
+
+Status: verified (measured; both jobs' traces cross-checked at the same M
+bucket). Stamp: sglang-v0.5.18-rocm700-mi30x, 2026-09-14, job-verified.
 
 ## Reading a benchmark report (skeptically)
 
