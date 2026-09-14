@@ -793,7 +793,7 @@ class _BaseRunConfiguration(BaseModel):
 class AgentRunConfiguration(_BaseRunConfiguration):
     """Sanitized settings that define an agent-loop run."""
 
-    outer_loop: Literal["agent"]
+    outer_loop: Literal["agent", "profile-guided"]
     inner_loop: PortableText
     interface: PortableText
     max_rounds: Annotated[int, Field(gt=0)]

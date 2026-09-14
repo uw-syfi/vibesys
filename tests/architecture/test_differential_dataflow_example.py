@@ -48,6 +48,18 @@ def test_differential_dataflow_bundle_is_a_runnable_database_input() -> None:
     assert bundle.benchmark_result is not None
     assert bundle.benchmark_result.json_argument == "--output-json"
     assert bundle.benchmark_result.metric == "cpu_seconds"
+    profile_guided = bundle.manifest.profile_guided
+    assert profile_guided is not None
+    assert profile_guided.command == (
+        "uv",
+        "run",
+        "python",
+        "profiler/attribute_cpu.py",
+    )
+    assert profile_guided.timeout_seconds == 1800
+    assert profile_guided.result_protocol == 1
+    assert profile_guided.min_measured_rounds == 2
+    assert profile_guided.min_relative_improvement == 0.02
 
     assert [(source.name, source.dest) for source in bundle.workspace_sources] == [
         ("engine", "engine"),
@@ -137,13 +149,22 @@ def test_attribution_cli_defaults_to_the_materialized_candidate(
             "file:function\n100 (100.00%) differential-dataflow/src/consolidation.rs:f\n",
         ),
     )
-    monkeypatch.setattr(sys, "argv", ["attribute_cpu.py", "--output-json", str(output)])
+    monkeypatch.setattr(sys, "argv", ["attribute_cpu.py", "--vs-output", str(output)])
 
     assert profiler.main() == 0
     assert observed["binary"] == shutil.which("true")
-    assert json.loads(output.read_text(encoding="utf-8"))["components"][0]["component"] == (
-        "consolidation"
-    )
+    assert json.loads(output.read_text(encoding="utf-8")) == {
+        "version": 1,
+        "cost_unit": "instructions",
+        "components": [
+            {
+                "name": "consolidation",
+                "cost": 100,
+                "share": 1.0,
+                "evidence": ["consolidation.rs:f"],
+            }
+        ],
+    }
 
 
 @pytest.mark.parametrize("gate", ["equivalence", "differential-fuzz"])

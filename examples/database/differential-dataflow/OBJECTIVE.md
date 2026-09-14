@@ -94,3 +94,8 @@ also emits **`cpu_reduction_ratio = baseline_cpu_seconds / candidate_cpu_seconds
 (higher is better; `> 1` means real cycles shaved; round 0 ≈ 1.0). The baseline is
 round 0 itself, captured once on this box in `benchmark/baseline.json` by
 `benchmark/capture_baseline.py`.
+
+The `profile-guided` outer loop runs the manifest-declared Callgrind attribution
+command when it needs a new component focus. That diagnostic ranks components;
+it does not replace the trusted `cpu_seconds` benchmark or its objective
+direction.

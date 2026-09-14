@@ -26,8 +26,12 @@ from vibesys.context import create_run_context
 from vibesys.domains.base import DomainDefinition, DomainName, DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
-from vibesys.input_manifest import BenchmarkResult, WorkspaceSource  # noqa: TC001  # tracked: #288
-from vibesys.loops.agent import bottleneck_ledger, issue_board
+from vibesys.input_manifest import (  # noqa: TC001  # tracked: #288
+    BenchmarkResult,
+    ProfileGuidedInput,
+    WorkspaceSource,
+)
+from vibesys.loops.agent import issue_board
 from vibesys.loops.agent.attempt import (
     JudgeOutcome,
     JudgeReviewed,
@@ -39,15 +43,20 @@ from vibesys.loops.agent.attempt import (
 from vibesys.loops.agent.hypotheses import (
     ResolutionEvidence,
     adopt_metric_space,
-    append_round,
     apply_strategy_updates,
     metric_baseline,
     record_metric_value,
     resolve_hypothesis_outcome,
     scalar_candidate_retained,
-    start_hypothesis,
     trusted_perf_provenance,
     update_active_hypothesis,
+)
+from vibesys.loops.agent.hypothesis_controller import (
+    HypothesisEngine,
+    ProfileGuidanceOutcome,
+    ProfileGuidanceView,
+    persist_active_hypothesis,
+    persist_agent_run_state,
 )
 from vibesys.loops.agent.model import (
     AgentRunState,
@@ -174,32 +183,6 @@ _FAILED_HYPOTHESIS_OUTCOMES = (
 ) | {"rejected"}
 _MAX_CONTINUATION_ROUNDS_WITHOUT_DESIGN_REVIEW = 2
 _PARETO_ARCHIVE_PENDING_CLAIM_LIMIT = 8
-
-
-def _persist_agent_run_state(
-    ctx: LoopContext,
-    store: AgentRunStateStore,
-    state: AgentRunState,
-    *,
-    label: str,
-) -> None:
-    """Persist only authoritative agent state without staging candidate edits."""
-    store.save(state)
-    ctx.state.commit(label, store.namespace)
-
-
-def _persist_active_hypothesis(
-    ctx: LoopContext,
-    store: AgentRunStateStore,
-    state: AgentRunState,
-    hypothesis: Hypothesis,
-    *,
-    label: str,
-) -> AgentRunState:
-    """Replace and persist the active hypothesis inside its owning aggregate."""
-    updated = update_active_hypothesis(state, hypothesis)
-    _persist_agent_run_state(ctx, store, updated, label=label)
-    return updated
 
 
 def _implementation_requests_continuation(
@@ -938,7 +921,6 @@ def _run_pre_round_decision(  # noqa: PLR0913  # tracked: #288
     progress_path: Path,
     progress_location: str,
     has_history: bool = True,
-    bottleneck_walk_active: bool = False,
 ) -> PreRoundDecision:
     system_prompt = render_template(
         "orchestrator_pre_round_prompt.j2",
@@ -951,7 +933,6 @@ def _run_pre_round_decision(  # noqa: PLR0913  # tracked: #288
         profiler_kind=ctx.profiler_kind.value,
         profile_execution=ctx.run_environment_view.profile_execution,
         has_history=has_history,
-        bottleneck_walk_active=bottleneck_walk_active,
     )
     decision = _invoke_read_only_role(
         ctx,
@@ -1155,7 +1136,7 @@ def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
     official_eval_every: int = 3,
     provisional_candidates: int = 0,
     official_eval_cadence_due: bool = False,
-    bottleneck_walk: bottleneck_ledger.BottleneckWalk | None = None,
+    profile_guidance: ProfileGuidanceView | None = None,
 ) -> OrchestratorPlan:
     domain_orchestrator = render_domain_section(
         domain_definition,
@@ -1181,7 +1162,7 @@ def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
         official_eval_every=official_eval_every,
         provisional_candidates=provisional_candidates,
         official_eval_cadence_due=official_eval_cadence_due,
-        **(bottleneck_walk.plan_prompt_context() if bottleneck_walk else {}),
+        **(profile_guidance.plan_prompt_context() if profile_guidance else {}),
     )
     # One corrective reprompt: a plan that fails lifecycle validation (for
     # example a hypothesis_id already used in this run) is a recoverable agent
@@ -1406,7 +1387,7 @@ def _run_implementer(  # noqa: PLR0913  # tracked: #288
     official_evaluation_due: bool = False,
     official_evaluation_reason: str | None = None,
     prior_attempt_artifact_locations: tuple[str, ...] = (),
-    bottleneck_walk: bottleneck_ledger.BottleneckWalk | None = None,
+    profile_guidance: ProfileGuidanceView | None = None,
 ) -> _ImplementerAttempt:
     plan.recommended_skills, resolved_skills = _validate_skill_selections(
         ctx, plan.recommended_skills
@@ -1464,7 +1445,7 @@ def _run_implementer(  # noqa: PLR0913  # tracked: #288
         official_evaluation_reason=official_evaluation_reason,
         recommended_skills=resolved_skills,
         prior_attempt_artifact_locations=prior_attempt_artifact_locations,
-        **(bottleneck_walk.implementer_prompt_context() if bottleneck_walk else {}),
+        **(profile_guidance.implementer_prompt_context() if profile_guidance else {}),
     )
     # Make this attempt number durable before the turn starts. A process killed
     # mid-invoke writes no completed artifact, so a resume that counted only
@@ -2324,6 +2305,8 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     remote_repo: str | None = None,
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
     integration: RunIntegration | None = None,
+    outer_loop: Literal["agent", "profile-guided"] = "agent",
+    profile_guided: ProfileGuidedInput | None = None,
 ) -> bool:
     """Run the orchestrator-driven build loop.
 
@@ -2371,6 +2354,8 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         raise ValueError(f"Unknown interface {interface!r}; choose from {', '.join(_INTERFACES)}")  # noqa: TRY003  # tracked: #288
     if domain is None:
         raise ValueError("domain is required; declare [agent].domain in vibesys.input.toml")  # noqa: TRY003  # tracked: #288
+    if outer_loop == "profile-guided" and profile_guided is None:
+        raise ValueError("profile-guided runs require profile guidance settings")  # noqa: TRY003
     # Resolve the registered domain once (fail fast on an unknown name). The
     # per-role files carry language, tooling, and use-case-specific contracts.
     domain_definition = resolve_domain(domain)
@@ -2400,7 +2385,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         else agent_backend or normalized_config.agent.backend or DEFAULT_AGENT_BACKEND
     )
     project_configuration = AgentRunConfiguration(
-        outer_loop="agent",
+        outer_loop=outer_loop,
         run_environment=run_environment_record(run_environment),
         inner_loop=inner_loop,
         interface=interface,
@@ -2536,7 +2521,10 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     # rounds. The first round has no prior profile to feed forward.
     last_single_agent_response: SingleAgentRoundResponse | None = None
     last_profile_focus: str = "general latency hotspots on /v1/completions"
-    walk = bottleneck_ledger.BottleneckWalk.create(ctx, modality)
+    engine = HypothesisEngine.create(
+        agent_run_state,
+        config=profile_guided if outer_loop == "profile-guided" else None,
+    )
     try:
         while round_number <= max_rounds:
             ctx.switch_log_file(f"round{round_number:03d}")
@@ -2553,6 +2541,17 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                 profiler_summary: ProfilerSummary | None = None
                 pre_decision: PreRoundDecision | None = None
                 if active_hypothesis is None:
+                    if profile_guided is not None and outer_loop == "profile-guided":
+                        engine = engine.replace_state(agent_run_state).prepare_profile(
+                            ctx, profile_guided, round_number=round_number
+                        )
+                        agent_run_state = engine.state
+                        persist_agent_run_state(
+                            ctx,
+                            state_store,
+                            agent_run_state,
+                            label=f"profile-guided: prepare round {round_number}",
+                        )
                     if inner_loop == "multi-agent":
                         # Round 1 used to skip this decision, which also skipped
                         # the profiler nested under it: the round holding the
@@ -2568,7 +2567,6 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                             progress_path=progress_path,
                             progress_location=progress_location,
                             has_history=not _is_fresh_cold_start(round_number, records),
-                            bottleneck_walk_active=(modality == "dataflow_opt"),
                         )
                         if pre_decision.need_profile and ctx.profiler_kind is not ProfilerKind.NONE:
                             profiler_summary = _run_profiler(
@@ -2609,10 +2607,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         official_eval_cadence_due=(
                             provisional_candidates + 1 >= official_eval_every
                         ),
-                        bottleneck_walk=walk.prepare_round(
-                            round_number=round_number,
-                            override=pre_decision.active_component if pre_decision else None,
-                        ),
+                        profile_guidance=engine.controller.guidance,
                     )
                     parent_round = (
                         plan.revert_to_round
@@ -2629,8 +2624,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         ),
                         None,
                     )
-                    agent_run_state = start_hypothesis(
-                        agent_run_state,
+                    engine = engine.replace_state(agent_run_state).start(
                         plan,
                         started_round=round_number,
                         parent_round=parent_round,
@@ -2640,10 +2634,11 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                             else ctx.git.current_sha()
                         ),
                     )
+                    agent_run_state = engine.state
                     active_hypothesis = agent_run_state.active_hypothesis
                     assert active_hypothesis is not None  # noqa: S101  # started above
                     plan = active_hypothesis.plan
-                    _persist_agent_run_state(
+                    persist_agent_run_state(
                         ctx,
                         state_store,
                         agent_run_state,
@@ -2673,8 +2668,11 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                     requested=plan.request_official_evaluation,
                     candidate_ready=True,
                 )
-                # No early stop: the loop always consumes the full max_rounds
-                # budget. Previously OrchestratorPlan had a ``done`` field that
+                if outer_loop == "profile-guided" and engine.controller.guidance.active_component:
+                    planned_official_reason = (
+                        planned_official_reason or "profile-guided component measurement"
+                    )
+                # No early stop. Previously OrchestratorPlan had a ``done`` field that
                 # could halt the loop; it was removed because the orchestrator
                 # can't reliably tell when the objective is "fully met" and
                 # early-stopping masks further optimization opportunities.
@@ -2715,7 +2713,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                             active_hypothesis.revert_applied = True
                             active_hypothesis.revert_commit = rollback_commit
                             active_hypothesis.parent_commit = rollback_commit
-                            agent_run_state = _persist_active_hypothesis(
+                            agent_run_state = persist_active_hypothesis(
                                 ctx,
                                 state_store,
                                 agent_run_state,
@@ -2817,7 +2815,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                             official_evaluation_due=(planned_official_reason is not None),
                             official_evaluation_reason=planned_official_reason,
                             prior_attempt_artifact_locations=prior_attempt_artifact_locations,
-                            bottleneck_walk=walk,
+                            profile_guidance=engine.controller.guidance,
                         )
                         implementation = attempt.response
                         if attempt.synthesized:
@@ -2937,7 +2935,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                             if validation_feedback is not None:
                                 feedback = validation_feedback
                                 active_hypothesis.feedback = feedback
-                                agent_run_state = _persist_active_hypothesis(
+                                agent_run_state = persist_active_hypothesis(
                                     ctx,
                                     state_store,
                                     agent_run_state,
@@ -2964,7 +2962,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                                 active_hypothesis.gate_approved_candidate_retention_reason = (
                                     implementation.candidate_retention_reason
                                 )
-                                agent_run_state = _persist_active_hypothesis(
+                                agent_run_state = persist_active_hypothesis(
                                     ctx,
                                     state_store,
                                     agent_run_state,
@@ -3016,7 +3014,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                                 active_hypothesis.gate_approved_evaluation_artifact = (
                                     implementation.evaluation_artifact
                                 )
-                                agent_run_state = _persist_active_hypothesis(
+                                agent_run_state = persist_active_hypothesis(
                                     ctx,
                                     state_store,
                                     agent_run_state,
@@ -3069,7 +3067,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                             active_hypothesis.gate_candidate_commit = candidate_commit
                             active_hypothesis.gate_accuracy_passed = accuracy_passed
                             active_hypothesis.feedback = feedback
-                            agent_run_state = _persist_active_hypothesis(
+                            agent_run_state = persist_active_hypothesis(
                                 ctx,
                                 state_store,
                                 agent_run_state,
@@ -3079,7 +3077,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                             continue
                         feedback = verdict.feedback
                         active_hypothesis.feedback = feedback
-                        agent_run_state = _persist_active_hypothesis(
+                        agent_run_state = persist_active_hypothesis(
                             ctx,
                             state_store,
                             agent_run_state,
@@ -3181,7 +3179,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                             active_hypothesis.gate_candidate_commit = candidate_commit
                             active_hypothesis.gate_accuracy_passed = accuracy_passed
                             active_hypothesis.feedback = feedback
-                            agent_run_state = _persist_active_hypothesis(
+                            agent_run_state = persist_active_hypothesis(
                                 ctx,
                                 state_store,
                                 agent_run_state,
@@ -3191,7 +3189,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                             continue
                         feedback = single_agent_response.feedback
                         active_hypothesis.feedback = feedback
-                        agent_run_state = _persist_active_hypothesis(
+                        agent_run_state = persist_active_hypothesis(
                             ctx,
                             state_store,
                             agent_run_state,
@@ -3590,16 +3588,19 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                     next_active_hypothesis.next_step = (
                         implementation.next_step if implementation is not None else None
                     )
-                state_before_round = (
-                    update_active_hypothesis(agent_run_state, next_active_hypothesis)
-                    if next_active_hypothesis is not None
-                    else agent_run_state
+                profile_outcome = (
+                    ProfileGuidanceOutcome.from_round(
+                        round_number, passed, official_evaluation, perf_delta_pct
+                    )
+                    if outer_loop == "profile-guided"
+                    else None
                 )
-                next_agent_run_state = append_round(
-                    state_before_round,
+                engine = engine.replace_state(agent_run_state).complete_round(
                     completed_record,
-                    keep_active=next_active_hypothesis is not None,
+                    next_active=next_active_hypothesis,
+                    profile_outcome=profile_outcome,
                 )
+                next_agent_run_state = engine.state
                 state_transition = state_store.transition(next_agent_run_state)
                 ctx.begin_completed_round(
                     round_number,
@@ -3664,7 +3665,6 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                 # a rejected review keeps the same claim plus reviewer feedback
                 # so the implementer can address it on the next round.
                 ctx.persist_completed_round()
-                walk.advance_round(round_number, (passed, official_metric, baseline_metric))
                 agent_run_state = next_agent_run_state
                 active_hypothesis = agent_run_state.active_hypothesis
                 ctx.events.emit(

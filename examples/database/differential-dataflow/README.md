@@ -101,22 +101,22 @@ uv run python benchmark/capture_baseline.py
 `profiler/attribute_cpu.py` runs the built `bfs` binary under
 `valgrind --tool=callgrind --cache-sim=no`, parses `callgrind_annotate`, and folds
 self-`Ir` into a fixed component vocabulary to rank which engine component to
-attack next. It writes a ranked JSON attribution to `--output-json`; it ranks, it
-does not score (the score stays `cpu_seconds`). This task-owned profiler is a
-manual diagnostic; the ordinary `database` domain does not invoke it
-automatically:
+attack next. It writes profile-guided result protocol v1 to `--vs-output`; it
+ranks, it does not score (the score stays `cpu_seconds`). The manifest declares
+this task-owned command to the `profile-guided` outer loop, which invokes it when
+selecting a new component focus:
 
 ```bash
 uv run python profiler/attribute_cpu.py \
   --engine-cmd engine/target/release/examples/bfs \
-  --output-json /tmp/attribution.json
+  --vs-output /tmp/attribution.json
 ```
 
 ## Run
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
-vibesys --headless --outer-loop agent \
+vibesys --headless --outer-loop profile-guided \
   --input examples/database/differential-dataflow \
   --runs-dir /work/vibesys-runs --local \
   --exp-name dd-superopt \
@@ -124,10 +124,10 @@ vibesys --headless --outer-loop agent \
   --max-rounds 3
 ```
 
-The example runs through the existing `database` domain declared in
-`vibesys.input.toml`; it does not require a `dataflow_opt` modality or any other
-core integration. `--runs-dir` is required because VibeSys must provision the
-two pinned workspace sources before starting the loop. Replace
+The example runs through the existing `database` domain and the manifest-declared
+profile-guided command. It does not require a task-specific modality. `--runs-dir`
+is required because VibeSys must provision the two pinned workspace sources
+before starting the loop. Replace
 `/work/vibesys-runs` with any writable absolute path.
 
 The agent may edit only the paths listed in `OBJECTIVE.md`. In particular,
@@ -147,7 +147,7 @@ contract from the copied project root:
 
 ```
 examples/database/differential-dataflow/
-├── vibesys.input.toml               # manifest: database domain, strict checker/benchmark commands, 2 workspace sources
+├── vibesys.input.toml               # manifest: database domain, checker/benchmark/profile commands, 2 workspace sources
 ├── objectives.toml                  # metric direction (cpu_seconds, min) + pareto noise
 ├── OBJECTIVE.md                     # target spec (read by the orchestrator)
 ├── README.md
@@ -167,5 +167,5 @@ examples/database/differential-dataflow/
 │   ├── capture_baseline.py          # regenerates baseline.json from pristine _ref_engine/
 │   └── baseline.json
 └── profiler/
-    └── attribute_cpu.py             # callgrind attribution → ranked component JSON
+    └── attribute_cpu.py             # callgrind attribution → profile-guided protocol v1
 ```
