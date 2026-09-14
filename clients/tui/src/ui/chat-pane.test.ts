@@ -1,5 +1,12 @@
 import {describe, expect, it} from 'bun:test';
-import {chatDockFits, chatPaneWidth, MIN_DOCK_WIDTH} from './chat-pane.js';
+import {
+  CHAT_PANE_MAX,
+  chatDockFits,
+  chatPaneWidth,
+  chatPaneWidthWithOverride,
+  clampChatWidthOverride,
+  MIN_DOCK_WIDTH,
+} from './chat-pane.js';
 import {LOG_CLAIM_PANEL_WIDTH, LOG_COMPACT_PANEL_WIDTH} from './experiment-log.js';
 
 describe('chat dock thresholds', () => {
@@ -50,5 +57,51 @@ describe('chat dock sizing', () => {
 
   it('narrows itself rather than the table when a visualization opens', () => {
     expect(chatPaneWidth(200, 84)).toBeLessThan(chatPaneWidth(200));
+  });
+});
+
+/**
+ * The range a `<`/`>` override is clamped to. Deliberately asymmetric with
+ * automatic sizing: the low bound is the same `CHAT_PANE_MIN` automatic sizing
+ * never crosses, but the high bound is whatever the log's own compact floor
+ * leaves over, not `CHAT_PANE_MAX`. Asking for more than automatic sizing
+ * would ever pick is the point of overriding it.
+ */
+describe('clampChatWidthOverride', () => {
+  it('holds the override between CHAT_PANE_MIN and what the log floor leaves over', () => {
+    const width = 300; // room = 233, far past CHAT_PANE_MAX.
+    expect(clampChatWidthOverride(-1000, width, 0)).toBe(25);
+    expect(clampChatWidthOverride(1000, width, 0)).toBe(width - LOG_COMPACT_PANEL_WIDTH);
+    expect(clampChatWidthOverride(60, width, 0)).toBe(60);
+  });
+
+  it('is allowed past CHAT_PANE_MAX, unlike automatic sizing', () => {
+    const width = 300;
+    const overridden = clampChatWidthOverride(1000, width, 0);
+    expect(overridden).toBeGreaterThan(CHAT_PANE_MAX);
+    // The log still keeps its compact floor: the extra columns come out of
+    // the chat's own ceiling, never out of the log's.
+    expect(width - overridden).toBeGreaterThanOrEqual(LOG_COMPACT_PANEL_WIDTH);
+  });
+
+  it('takes the same columns off a visualization split that automatic sizing does', () => {
+    const width = 300;
+    const right = 84;
+    expect(clampChatWidthOverride(1000, width, right)).toBe(
+      width - right - LOG_COMPACT_PANEL_WIDTH,
+    );
+  });
+});
+
+describe('chatPaneWidthWithOverride', () => {
+  it('with no override, matches automatic sizing exactly', () => {
+    for (const width of [92, 100, 140, 160, 300]) {
+      expect(chatPaneWidthWithOverride(width, 0, null)).toBe(chatPaneWidth(width, 0));
+    }
+  });
+
+  it('with an override, matches the clamp exactly', () => {
+    expect(chatPaneWidthWithOverride(300, 0, 1000)).toBe(clampChatWidthOverride(1000, 300, 0));
+    expect(chatPaneWidthWithOverride(300, 0, -1000)).toBe(clampChatWidthOverride(-1000, 300, 0));
   });
 });
