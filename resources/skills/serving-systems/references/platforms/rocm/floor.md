@@ -1,10 +1,10 @@
 # ROCm (AMD Instinct) optimization floor
 
-Scope: backend `rocm`. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-08-25 to 2026-09-13.
+Scope: backend `rocm`. Stamp: `sglang-v0.5.18-rocm700-mi30x`, 2026-08-25 to 2026-09-14.
 
 CDNA shares the accelerator model with CUDA (dynamic shapes, per-kernel launch cost, and on discrete parts a separate device memory), so the *shape* of the floor matches NVIDIA's even though the libraries differ. MI300A is the exception on memory: host and device share one pool, see [`unified-memory.md`](unified-memory.md). Where a technique is identical apart from the library name, this file says so rather than restating it.
 
-**Verified on:** MI300A, `sglang-v0.5.18-rocm700-mi30x` image, 2026-08-25 to 2026-09-13, Qwen3.5-397B-A17B-MXFP4 at TP=4. The launch recipe and pitfalls index below are scoped to gfx942 (MI300A); confirm against your ROCm and library versions before extending to gfx950.
+**Verified on:** MI300A, `sglang-v0.5.18-rocm700-mi30x` image, 2026-08-25 to 2026-09-14, Qwen3.5-397B-A17B-MXFP4 at TP=4. The launch recipe and pitfalls index below are scoped to gfx942 (MI300A); confirm against your ROCm and library versions before extending to gfx950.
 
 ## 1. Continuous batching
 
@@ -41,7 +41,7 @@ Capture decode, keep prefill eager or bucketed. The shape-stability and address-
 
 ## Validated launch recipe (SGLang, MI300A, MXFP4 MoE)
 
-A working configuration for Qwen3.5-397B-A17B-MXFP4 on 4x MI300A, TP=4. Verified as a working set; not individually ablated unless noted. Rationale for each line lives in the file it links to, not here.
+A working configuration for Qwen3.5-397B-A17B-MXFP4 on 4x MI300A, TP=4. Verified as a working set; not individually ablated unless noted. Rationale for each line lives in the file it links to, not here. Periodically validate that this recipe survives from committed config alone with no manual staging: see the default-launch validation procedure in [`../../tooling/serving-benchmark.md`](../../tooling/serving-benchmark.md#default-launch-validation).
 
 Environment:
 
@@ -98,6 +98,8 @@ On top of the dword-wide-loads stack above: `STAGE1_SCAFFOLD_BLOCK_THRESHOLD` mo
 
 An audit of the two gated-delta-net decode kernels found one already at its byte floor with no further lever, and one launch-granularity-bound. Its concrete fix (packing the layer axis into one launch) is confirmed correct in mechanism, exact and matching the predicted speedup in an isolated build, but blocked from the production call site by an architectural dependency (each layer's own forward feeds the next layer's residual stream); the alternative lever tried (widening the launch's own grid instead of reducing launch count) measured strictly slower at every batch. The GDN update-kernel bucket is closed at the kernel-microbenchmark level. See [`gated-delta-net.md`](gated-delta-net.md) for the kernel-level detail and [`speculative-decoding.md`](speculative-decoding.md) for where it fits the replayssm-spec recipe.
 
+**GDN prefill capture (folding the chunked-scan kernels into the breakable prefill CUDA graph, instead of breaking it once per layer) was investigated as a further TTFT lever and rejected as designed**: capture and break-count reduction work, but the design corrupts output under concurrency and its own worst-case-padding cost roughly halves the achievable saving even if that were fixed. See [`gated-delta-net.md`](gated-delta-net.md#rejected-wiring-the-static-shape-kernels-into-the-breakable-prefill-cuda-graph-corrupts-output-under-concurrency) for the full account and [`../../models/qwen3-5.md`](../../models/qwen3-5.md) for the campaign's closing TTFT numbers.
+
 Environment (serving):
 
 - `PYTORCH_TUNABLEOP_ENABLED=1`
@@ -129,6 +131,7 @@ One line per known pitfall; detail lives at the link.
 - Custom HIP extensions rebuild from source on every fresh boot despite a persistent build-cache directory. [`boot-costs.md#the-hip-extension-loader-keys-staleness-on-path-and-mtime-not-content`](boot-costs.md#the-hip-extension-loader-keys-staleness-on-path-and-mtime-not-content)
 - `rocprof-compute` exits during its own startup dependency check. [`profiler.md#rocprof-compute-fails-its-own-dependency-check-on-this-image-rocprofv3-works`](profiler.md#rocprof-compute-fails-its-own-dependency-check-on-this-image-rocprofv3-works)
 - A `--pmc` counter report's numbers disagree with a hand-reaggregation of the same raw CSV once more than one counter was requested in the same pass. [`profiler.md#a---pmc-counter-report-averages-across-counters-not-just-across-dispatches-when-it-doesnt-group-by-counter_name`](profiler.md#a---pmc-counter-report-averages-across-counters-not-just-across-dispatches-when-it-doesnt-group-by-counter_name)
+- A prefill graph-capture design that pads per-forward state to a fixed worst-case bound corrupts model output under concurrency, with every gate and unit test passing; the per-forward refresh was gated on a raw Python `id()` comparison that can alias under request churn. [`gated-delta-net.md#rejected-wiring-the-static-shape-kernels-into-the-breakable-prefill-cuda-graph-corrupts-output-under-concurrency`](gated-delta-net.md#rejected-wiring-the-static-shape-kernels-into-the-breakable-prefill-cuda-graph-corrupts-output-under-concurrency)
 - Server crashes at boot during decode graph capture with "operation not permitted when stream is capturing". [`aiter.md#a-host-sync-in-a-custom-kernels-dispatch-crashes-decode-graph-capture-at-boot`](aiter.md#a-host-sync-in-a-custom-kernels-dispatch-crashes-decode-graph-capture-at-boot)
 - Speculative decoding's draft model doesn't find MTP weights unless pointed explicitly at the original checkpoint, with an explicit draft load format too. [`speculative-decoding.md#the-draft-head-has-no-sharded-fast-path-artifact-point-the-draft-at-the-original-checkpoint`](speculative-decoding.md#the-draft-head-has-no-sharded-fast-path-artifact-point-the-draft-at-the-original-checkpoint)
 - Booting expert parallelism from the unsharded checkpoint OOM-kills a rank's scheduler during initialization. [`weight-loading.md#the-tp-sharded-loader-has-no-layout-check-ep-boots-from-the-unsharded-checkpoint-and-ooms`](weight-loading.md#the-tp-sharded-loader-has-no-layout-check-ep-boots-from-the-unsharded-checkpoint-and-ooms)
