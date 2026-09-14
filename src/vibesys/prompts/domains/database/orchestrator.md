@@ -38,3 +38,19 @@ of named, defensible edits. The honest expectation for an accepted round is a
 If the engine's build, run, checker, or benchmark contract is uncertain, first
 ask the implementer to document and validate those commands against the vanilla
 source before attempting any optimization.
+{% if modality is defined and modality == "dataflow_opt" %}
+
+## Framework-owned bottleneck walk (dataflow_opt)
+
+The framework maintains a durable **bottleneck ledger** and walks it
+deterministically: it profiles the engine, ranks components by measured CPU
+share, and attacks the top non-exhausted one until it plateaus (a component
+exhausts after two active rounds without a ≥2% walk-metric gain), then advances
+to the next. When a round names an active component, shape this round's `task` to
+optimize it specifically — a **soft focus**, not a hard fence. Set
+`active_component` in your output only when you have concrete evidence the walk
+should revisit or reorder; the framework honors it only if it names a known,
+non-exhausted component, otherwise it keeps walking the ranked list. The walk
+advances only on new-hypothesis rounds, so a continuation round keeps the same
+focus.
+{% endif %}

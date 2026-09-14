@@ -88,6 +88,7 @@ _MODALITIES = (
     "speech_to_text",
     "realtime_audio",
     "kv_store",
+    "dataflow_opt",
 )
 
 _DEFAULT_CONFIG_TEXT = '[model]\nname = "gpt-5.4"\n'
@@ -131,7 +132,6 @@ _RUN_ENVIRONMENT_OPTION_CLI_FIELDS: dict[str, str] = {
     "modal_model_volume": "model_volume",
     "modal_app": "app",
 }
-
 _AGENT_RESUME_CLI_FIELDS: dict[str, str] = {
     "inner_loop": "inner_loop",
     "interface": "interface",
