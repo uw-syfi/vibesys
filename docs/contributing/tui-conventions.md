@@ -98,6 +98,62 @@ as its own contents, so `F4` over it leaves the layout alone.
 focus to the left column. It never quits the application. This is CUA, and it is
 the one movement rule the current bindings already keep.
 
+### A resize moves columns, and only columns
+
+`<` and `>` change the Agents pane's width by whole columns
+(`GRAPH_WIDTH_STEP`), the way a window resize does in vim and LazyVim. Not a
+ratio: a share of the terminal that a floor then rounds away is a key press
+that did nothing, and the width the operator sees is what they are aiming at.
+
+An explicit width is sticky, so `=` gives it back, the way `<C-w>=` does in vim.
+Without it one press would cost the pane its automatic sizing for the life of
+the process: it would stop following the terminal, stop widening as agent names
+get longer, and keep cutting names automatic sizing promises never to cut. A
+resize pair with no way home is a trap, not a feature. `=` shares the guards
+that decide whether the keys belong to the Agents pane at all (an empty command
+input, no zoom, the pane on screen), but alone among the three it is not also
+gated on the pane being resizable: it is the way out, and a terminal or a round
+where `<` and `>` do nothing is exactly where an override left over from a wider
+terminal has to be clearable.
+
+A resize key also never swaps a pane's contents for a different presentation.
+The Agents pane's stacked list is an automatic fallback for a terminal too
+narrow to draw a graph, not the next step down from the narrowest graph: it
+cannot draw a node with in-degree above one, so reaching it by pressing `<`
+would lose edges the operator was resizing in order to see. `<` stops at
+`agentGraphMinWidth`, the narrowest pane an override may ask for, and `>` stops
+at `agentPaneCeiling`, past which the extra columns are padding rather than
+name.
+
+The stacked list is therefore a floor `<` cannot cross in either direction. From
+it `>` opens the narrowest graph, because asking for the graph is the only thing
+`>` can mean there, while `<` stays put: it is already at the narrowest the pane
+goes, and the gap up to `agentGraphMinWidth` is not a step a shrink key may take
+(26 columns at three stages, 7 at two, none at all at one).
+
+That last case generalizes, and the general rule is the one the code keeps: a
+press that would not change the rendered width stores nothing. A round with no
+phases yet, a round of one short-named stage, and a terminal wide enough that
+automatic sizing already sits at the ceiling each leave `<` or `>` with nowhere
+to go, and a press that stored an override anyway would arm one the operator
+cannot see and pin every later round in the session to it. A terminal too narrow
+for any graph is the same rule reached through the terminal instead of the
+round.
+
+Storing nothing means storing nothing, not storing the bound the press ran into,
+so an explicit width outlives a narrowing. A pane set to 64 columns on a wide
+terminal renders at whatever a narrower one allows, and a dead press there
+leaves the stored 64 alone, so widening back restores 64 rather than the
+narrowed width. That also keeps a dead press on one round from overwriting the
+width the operator chose on a round of a different shape.
+
+Automatic sizing keeps its own rule, that no agent name is ever cut. Truncation
+is what an explicit override buys, and it buys only that: `agentGraphMinWidth`
+keeps the same `STACKED_WIDTH` floor `agentPaneFloor` does, so an override
+narrows the agent names and never the round heading or the empty-round
+placeholder. An operator who asks for a narrower pane than the names need has
+said which of the two they want.
+
 ### Nothing moves that does not have to
 
 Reserve space for anything that appears conditionally: focus markers, status
