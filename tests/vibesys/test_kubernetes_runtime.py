@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import signal
+import socket
 import subprocess
 import sys
+import threading
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, cast
@@ -442,6 +444,47 @@ def test_control_server_reports_action_failure(tmp_path: Path) -> None:
         pytest.raises(RuntimeError, match="scale failed"),
     ):
         request_action(socket_path, "stop")
+
+
+def test_control_server_ignores_peer_closed_after_completed_action(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    socket_path = tmp_path / "control.sock"
+    action_started = threading.Event()
+    finish_action = threading.Event()
+
+    def action() -> None:
+        action_started.set()
+        finish_action.wait(timeout=1)
+
+    with LifecycleControlServer(socket_path, {"stop": action}):
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.connect(str(socket_path))
+        client.sendall(b'{"action":"stop"}\n')
+        assert action_started.wait(timeout=1)
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b"\1\0\0\0\0\0\0\0")
+        client.close()
+        finish_action.set()
+
+    assert "BrokenPipeError" not in capsys.readouterr().err
+
+
+def test_control_server_shutdown_is_bounded_for_incomplete_request(tmp_path: Path) -> None:
+    socket_path = tmp_path / "control.sock"
+    server = LifecycleControlServer(socket_path, {})
+    server.__enter__()
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.connect(str(socket_path))
+    client.sendall(b'{"action":"stop"')
+    stopped = threading.Event()
+    shutdown = threading.Thread(target=lambda: (server.__exit__(), stopped.set()), daemon=True)
+    shutdown.start()
+
+    completed_without_peer_close = stopped.wait(timeout=2)
+    client.close()
+    shutdown.join(timeout=2)
+
+    assert completed_without_peer_close
 
 
 def test_cli_renders_managed_lifecycle_control_commands(tmp_path: Path) -> None:
