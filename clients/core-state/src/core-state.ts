@@ -743,8 +743,6 @@ export function reduceEvent(state: CoreState, event: RunEvent): CoreState {
   return foldEvent(state, event, null);
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
 function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder | null): CoreState {
   const sequence = event.sequence ?? 0;
   if (sequence > 0 && sequence <= state.sequence) return state;
@@ -755,9 +753,21 @@ function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder |
   if (event.agent_kind === 'chat') return applyChatEvent(next, event, folder);
   if (event.agent_kind) next.agentKind = event.agent_kind;
   if (event.round_label) next.roundLabel = event.round_label;
+  next = applyRunMapProjection(next, state, event, sequence);
+  next = applyRunFacts(next, event, sequence);
+  next = applyRunTranscript(next, event, folder);
+  return applyRunLifecycle(next, event);
+}
+
+function applyRunMapProjection(
+  next: CoreState,
+  previous: CoreState,
+  event: RunEvent,
+  sequence: number,
+): CoreState {
   const boundary =
     event.type === 'run_started' && event.sequence !== undefined
-      ? boundaryFor(state.runLifetimeBoundaries, event, state)
+      ? boundaryFor(previous.runLifetimeBoundaries, event, previous)
       : isRunLifetimeBoundary(event)
         ? {event, closeout: null}
         : null;
@@ -781,84 +791,95 @@ function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder |
   if (boundary !== null) {
     next.runLifetimeBoundaries = mergeRunLifetimeBoundaries(next.runLifetimeBoundaries, [boundary]);
   }
+  return next;
+}
 
+function applyRunFacts(state: CoreState, event: RunEvent, sequence: number): CoreState {
   const data = event.data;
-  // The run map owns a round's status and timing; the carried-forward flag is
-  // a round fact folded here, like benchmarks, so it lands on the summary the
-  // run map just settled.
   if (data?.kind === 'round_finished' && data.profile_skipped === true) {
     const finishedRound = roundNumberFromLabel(event.round_label);
-    next.rounds = next.rounds.map(round =>
+    state.rounds = state.rounds.map(round =>
       round.number === finishedRound ? {...round, profileSkipped: true} : round,
     );
   }
-  if (data?.kind === 'tool_call' || data?.kind === 'tool_result') next.typedToolEvents = true;
-  if (data?.kind === 'todo_update') next.todos = updateTodos(next.todos, event);
+  if (data?.kind === 'tool_call' || data?.kind === 'tool_result') state.typedToolEvents = true;
+  if (data?.kind === 'todo_update') state.todos = updateTodos(state.todos, event);
   if (data?.kind === 'usage_update') {
-    next.usage = {
+    state.usage = {
       inputTokens: data.input_tokens,
       contextWindow: data.context_window ?? null,
       model: data.model ?? null,
     };
   }
+  const benchmark = benchmarkFromEvent(event, sequence);
+  if (benchmark !== null) state.benchmarks = [...state.benchmarks, benchmark];
+  if (data?.kind === 'experiments_changed') state.experimentsRevision = sequence;
+  // The backend owns the run's lifecycle and publishes every move through it,
+  // so the projection folds the status it is told rather than inferring one.
+  if (data?.kind === 'run_status_changed') return applyRunStatus(state, data.status);
+  return state;
+}
+
+function benchmarkFromEvent(event: RunEvent, sequence: number): BenchmarkRecord | null {
+  const data = event.data;
   if (data?.kind === 'benchmark_result') {
-    next.benchmarks = [
-      ...next.benchmarks,
-      {
-        sequence,
-        roundNumber: roundNumberFromLabel(event.round_label),
-        metric: data.metric,
-        value: data.value,
-        unit: data.unit,
-      },
-    ];
+    return {
+      sequence,
+      roundNumber: roundNumberFromLabel(event.round_label),
+      metric: data.metric,
+      value: data.value,
+      unit: data.unit,
+    };
   }
   // A completed benchmark gate carries the measurement `benchmark_result`
   // used to, so it feeds the same fold; old journals have only the legacy
   // kind and new journals only this one (#692).
   if (
-    data?.kind === 'gate_finished' &&
-    data.gate === 'benchmark' &&
-    event.status !== 'failed' &&
-    data.metric != null &&
-    data.value != null
+    data?.kind !== 'gate_finished' ||
+    data.gate !== 'benchmark' ||
+    event.status === 'failed' ||
+    data.metric == null ||
+    data.value == null
   ) {
-    next.benchmarks = [
-      ...next.benchmarks,
-      {
-        sequence,
-        roundNumber: roundNumberFromLabel(event.round_label),
-        metric: data.metric,
-        value: data.value,
-        unit: data.unit ?? data.metric,
-      },
-    ];
+    return null;
   }
-  if (data?.kind === 'experiments_changed') next.experimentsRevision = sequence;
-  // The backend owns the run's lifecycle and publishes every move through it,
-  // so the projection folds the status it is told rather than inferring one.
-  if (data?.kind === 'run_status_changed') next = applyRunStatus(next, data.status);
+  return {
+    sequence,
+    roundNumber: roundNumberFromLabel(event.round_label),
+    metric: data.metric,
+    value: data.value,
+    unit: data.unit ?? data.metric,
+  };
+}
 
+function applyRunTranscript(
+  state: CoreState,
+  event: RunEvent,
+  folder: TranscriptFolder | null,
+): CoreState {
+  const data = event.data;
   const legacyToolChunk =
-    data?.kind === 'agent_output_chunk' && data.channel === 'tool' && next.typedToolEvents;
-  if (!legacyToolChunk) {
-    const entry = eventToTranscriptEntry(event);
-    if (entry !== null) {
-      if (folder === null) next.transcript = appendTranscript(next.transcript, entry);
-      else folder.buffer(RUN_TRANSCRIPT, next.transcript).append(entry);
-    }
-  }
+    data?.kind === 'agent_output_chunk' && data.channel === 'tool' && state.typedToolEvents;
+  if (legacyToolChunk) return state;
+  const entry = eventToTranscriptEntry(event);
+  if (entry === null) return state;
+  if (folder === null) state.transcript = appendTranscript(state.transcript, entry);
+  else folder.buffer(RUN_TRANSCRIPT, state.transcript).append(entry);
+  return state;
+}
 
+function applyRunLifecycle(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
   if (event.type === 'run_started') {
-    next.status = 'running';
-    if (data?.kind === 'run_started') next.maxRounds = data.max_rounds;
+    state.status = 'running';
+    if (data?.kind === 'run_started') state.maxRounds = data.max_rounds;
   }
-  if (event.type === 'configuration_failed') return terminate(next, 'failed');
-  if (event.type === 'run_finished') return terminate(next, 'completed');
+  if (event.type === 'configuration_failed') return terminate(state, 'failed');
+  if (event.type === 'run_finished') return terminate(state, 'completed');
   if (event.type === 'run_failed' || event.type === 'run_interrupted') {
-    return terminate(next, 'failed');
+    return terminate(state, 'failed');
   }
-  return next;
+  return state;
 }
 
 function cloneCoreState(state: CoreState): CoreState {
