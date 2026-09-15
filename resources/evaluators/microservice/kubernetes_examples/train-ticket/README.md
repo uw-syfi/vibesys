@@ -1,6 +1,6 @@
 # Train Ticket Kubernetes assets
 
-This package deploys the six read-only Train Ticket services exercised by the
+This package deploys the six Train Ticket services exercised by the
 ServiceBench workload, plus their MongoDB dependencies.
 Every evaluation builds the six Java modules from the assembled candidate
 checkout. The trusted multi-stage Dockerfile runs Maven inside the build and
