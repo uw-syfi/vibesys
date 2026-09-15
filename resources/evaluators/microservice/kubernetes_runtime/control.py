@@ -6,11 +6,28 @@ import json
 import socket
 import socketserver
 import threading
-from typing import TYPE_CHECKING, Any
+from contextlib import suppress
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+
+_MAX_REQUEST_BYTES = 64 * 1024
+_REQUEST_TIMEOUT_SECONDS = 0.5
+
+
+class _Readable(Protocol):
+    def readline(self, limit: int = -1, /) -> bytes: ...
+
+
+def _read_frame(stream: _Readable) -> tuple[bytes | None, str | None]:
+    frame = stream.readline(_MAX_REQUEST_BYTES + 1)
+    if not frame.endswith(b"\n"):
+        return None, "incomplete Kubernetes lifecycle request"
+    if len(frame) > _MAX_REQUEST_BYTES:
+        return None, "Kubernetes lifecycle request is too large"
+    return frame, None
 
 
 class _ControlServer(socketserver.UnixStreamServer):
@@ -27,20 +44,26 @@ class _ControlHandler(socketserver.StreamRequestHandler):
         if not isinstance(server, _ControlServer):
             return
         try:
-            request = json.loads(self.rfile.readline())
-            action = request.get("action") if isinstance(request, dict) else None
-            callback = server.actions.get(action) if isinstance(action, str) else None
-            if callback is None:
-                response: dict[str, Any] = {
-                    "ok": False,
-                    "error": f"unknown Kubernetes lifecycle action: {action!r}",
-                }
+            self.connection.settimeout(_REQUEST_TIMEOUT_SECONDS)
+            frame, error = _read_frame(self.rfile)
+            if frame is None:
+                response: dict[str, Any] = {"ok": False, "error": error or "invalid request"}
             else:
-                callback()
-                response = {"ok": True}
+                request = json.loads(frame)
+                action = request.get("action") if isinstance(request, dict) else None
+                callback = server.actions.get(action) if isinstance(action, str) else None
+                if callback is not None:
+                    callback()
+                    response = {"ok": True}
+                else:
+                    response = {
+                        "ok": False,
+                        "error": f"unknown Kubernetes lifecycle action: {action!r}",
+                    }
         except Exception as error:  # noqa: BLE001
             response = {"ok": False, "error": str(error)}
-        self.wfile.write(json.dumps(response).encode() + b"\n")
+        with suppress(BrokenPipeError, ConnectionResetError):
+            self.wfile.write(json.dumps(response).encode() + b"\n")
 
 
 class LifecycleControlServer:
