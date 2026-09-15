@@ -5,6 +5,8 @@ protocol_version = 1
 toolchains = ["go"]
 
 [entrypoints]
+python = ["${PYTHON}"]
 servicebench = ["go", "-C", "${PACKAGE_ROOT}", "run", "./cmd/servicebench"]
+kubernetes-runtime = ["${PYTHON}", "${PACKAGE_ROOT}/kubernetes_runtime/cli.py"]
 otelinject = ["go", "-C", "${PACKAGE_ROOT}", "run", "./cmd/otelinject"]
 otelcapture = ["go", "-C", "${PACKAGE_ROOT}", "run", "./cmd/otelcapture"]

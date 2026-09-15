@@ -206,7 +206,7 @@ roots = ["src", "libs", "scripts", "sdk"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests", "libs/vs-loop-state/src", "libs/vs-loop-state/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
+src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests", "libs/vs-loop-state/src", "libs/vs-loop-state/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
 # resources/skills/ vendors reference code (submodule checkouts and copied
 # reference material) that VibeSys does not own and does not hold to repo
 # lint standards; see the UP040/UP046/UP047 note below.
@@ -283,6 +283,7 @@ root = [
     ".",
     "src",
     "tests",
+    "resources/evaluators/microservice",
     "libs/vs-evaluator-protocol/src",
     "libs/vs-feature-flags/src",
     "libs/vs-github/src",
@@ -301,6 +302,7 @@ root = [
 include = [
     "src",
     "tests",
+    "resources/evaluators/microservice/kubernetes_runtime",
     "libs/vs-evaluator-protocol/src",
     "libs/vs-evaluator-protocol/tests",
     "libs/vs-feature-flags/src",
