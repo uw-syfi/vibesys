@@ -1,0 +1,63 @@
+context: kind-vibesys-k8s-social
+namespace_prefix: vibesys-social
+kind_cluster: vibesys-k8s-social
+timeout_seconds: 600
+manifests:
+  - manifest.yaml
+image_builds:
+  - name: candidate
+    image: vibesys-social-${NAMESPACE}:latest
+    context: deathstarbench/socialNetwork
+    dockerfile: deathstarbench/socialNetwork/Dockerfile
+image_overrides:
+  - {resource: deployment/compose-post-service, container: compose-post-service, image: "${IMAGE:candidate}"}
+  - {resource: deployment/home-timeline-service, container: home-timeline-service, image: "${IMAGE:candidate}"}
+  - {resource: deployment/media-service, container: media-service, image: "${IMAGE:candidate}"}
+  - {resource: deployment/post-storage-service, container: post-storage-service, image: "${IMAGE:candidate}"}
+  - {resource: deployment/social-graph-service, container: social-graph-service, image: "${IMAGE:candidate}"}
+  - {resource: deployment/text-service, container: text-service, image: "${IMAGE:candidate}"}
+  - {resource: deployment/unique-id-service, container: unique-id-service, image: "${IMAGE:candidate}"}
+  - {resource: deployment/url-shorten-service, container: url-shorten-service, image: "${IMAGE:candidate}"}
+  - {resource: deployment/user-mention-service, container: user-mention-service, image: "${IMAGE:candidate}"}
+  - {resource: deployment/user-service, container: user-service, image: "${IMAGE:candidate}"}
+  - {resource: deployment/user-timeline-service, container: user-timeline-service, image: "${IMAGE:candidate}"}
+rollouts:
+  - deployment/compose-post-service
+  - deployment/home-timeline-redis
+  - deployment/home-timeline-service
+  - deployment/jaeger
+  - deployment/media-memcached
+  - deployment/media-mongodb
+  - deployment/media-service
+  - deployment/nginx-thrift
+  - deployment/post-storage-memcached
+  - deployment/post-storage-mongodb
+  - deployment/post-storage-service
+  - deployment/social-graph-mongodb
+  - deployment/social-graph-redis
+  - deployment/social-graph-service
+  - deployment/text-service
+  - deployment/unique-id-service
+  - deployment/url-shorten-memcached
+  - deployment/url-shorten-mongodb
+  - deployment/url-shorten-service
+  - deployment/user-memcached
+  - deployment/user-mention-service
+  - deployment/user-mongodb
+  - deployment/user-service
+  - deployment/user-timeline-mongodb
+  - deployment/user-timeline-redis
+  - deployment/user-timeline-service
+restart_deployments:
+  - name: nginx-thrift
+    pod_selector: service=nginx-thrift
+forwards:
+  - name: gateway
+    resource: service/nginx-thrift
+    remote_port: 8080
+    local_port: 18080
+primary_endpoint: gateway
+http_probes:
+  - endpoint: gateway
+    path: /
+    status: 200
