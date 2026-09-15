@@ -3,6 +3,7 @@
 from vibesys.evaluators.packages import (
     PACKAGE_ROOT_TOKEN,
     PROJECT_ROOT_TOKEN,
+    PYTHON_TOKEN,
     TOOL_TOKEN_PREFIX,
     CargoGitToolSpec,
     EvaluatorPackageError,
@@ -29,6 +30,7 @@ from vibesys.evaluators.tools import (
 __all__ = [
     "PACKAGE_ROOT_TOKEN",
     "PROJECT_ROOT_TOKEN",
+    "PYTHON_TOKEN",
     "TOOL_TOKEN_PREFIX",
     "CargoGitToolSpec",
     "EvaluatorPackageError",
