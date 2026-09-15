@@ -7,7 +7,8 @@ revision instead of an unpinned fork branch. The
 runtime builds `socialNetwork/Dockerfile` from the current candidate and
 overrides every C++ application Deployment with that run-specific image before
 rollout readiness. MongoDB, Redis, Memcached, Jaeger, and the two OpenResty
-frontends remain pinned chart dependencies. The media upload frontend is
+frontends retain the chart dependency image tags. Some tags are floating, so
+the source revision pin does not pin every container image digest. The media upload frontend is
 excluded because ServiceBench exercises user registration, follows, post
 composition, and user/home timeline reads through `nginx-thrift`; post
 composition still exercises the media service itself.

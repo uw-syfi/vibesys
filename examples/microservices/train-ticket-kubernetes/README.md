@@ -29,3 +29,7 @@ until Kubernetes telemetry capture is available.
 This input supports the local run environment. Its evaluator invokes host
 `kubectl`, Docker, and kind and reads the host Kubernetes context. Container and
 Modal evaluator environments and Kubernetes profiling are not supported.
+
+These assets have configuration and packaging tests. This port has not yet run
+a live Kubernetes accuracy or benchmark campaign for this scenario. Dependency
+image tags are not all pinned by digest.
