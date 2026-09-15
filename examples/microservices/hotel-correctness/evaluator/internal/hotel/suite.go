@@ -603,8 +603,7 @@ func (a *Application) verifyCrashRecovery(
 	}
 	start := reservationDate(seed).AddDate(0, 0, 730)
 	dates := [2]string{start.Format(time.DateOnly), start.AddDate(0, 0, 1).Format(time.DateOnly)}
-	anchor := a.catalog[hotelID]
-	return a.verifyHotelProgram(ctx, c, accuracy.Program[differentialAction]{
+	program := accuracy.Program[differentialAction]{
 		SchemaVersion: accuracy.ProgramSchemaVersion,
 		ID:            "hotel-crash-recovery",
 		Steps: []accuracy.Step[differentialAction]{
@@ -622,12 +621,18 @@ func (a *Application) verifyCrashRecovery(
 					hotelID, dates, 1, "crash-recovery-probe", username, password,
 				),
 			}),
-			callStep("crash-recovery-search", differentialAction{
-				Kind:  actionSearch,
-				Query: searchQuery(dates, anchor, true),
-			}),
 		},
-	}, crash, startCandidate)
+	}
+	// Upstream restores reservation capacity from MongoDB after cache loss, but
+	// its search miss path does not restore cached availability. Keep that
+	// stronger guarantee opt-in, as in verifyDurableState.
+	if a.strict.DurableAvailability {
+		program.Steps = append(program.Steps, callStep("crash-recovery-search", differentialAction{
+			Kind:  actionSearch,
+			Query: searchQuery(dates, a.catalog[hotelID], true),
+		}))
+	}
+	return a.verifyHotelProgram(ctx, c, program, crash, startCandidate)
 }
 
 func reservationDate(seed int64) time.Time {

@@ -1,0 +1,6527 @@
+---
+# Source: social-network/charts/compose-post-service/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: compose-post-service
+  labels:
+    socialnetwork/service: compose-post-service
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/home-timeline-redis/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: home-timeline-redis
+  labels:
+    socialnetwork/service: home-timeline-redis
+data:
+  redis.conf: |
+    io-threads 8
+    io-threads-do-reads yes
+    port 6379
+    tls-port 0
+
+    tls-cert-file /keys/server.crt
+    tls-key-file /keys/server.key
+
+    tls-auth-clients no
+
+---
+# Source: social-network/charts/home-timeline-service/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: home-timeline-service
+  labels:
+    socialnetwork/service: home-timeline-service
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/jaeger/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger
+  labels:
+    socialnetwork/service: jaeger
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/media-memcached/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: media-memcached
+  labels:
+    socialnetwork/service: media-memcached
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/media-mongodb/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: media-mongodb
+  labels:
+    socialnetwork/service: media-mongodb
+data:
+  mongod.conf: |
+    net:
+      tls:
+        mode: disabled
+
+---
+# Source: social-network/charts/media-service/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: media-service
+  labels:
+    socialnetwork/service: media-service
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/nginx-thrift/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-thrift
+  labels:
+    socialnetwork/service: nginx-thrift
+data:
+  jaeger-config.json: |
+    {
+      "service_name": "nginx-web-server",
+      "disabled": false,
+      "reporter": {
+        "logSpans": false,
+        "localAgentHostPort": "jaeger:6831",
+        "queueSize": 1000000,
+        "bufferFlushInterval": 10
+      },
+      "sampler": {
+        "type": "probabilistic",
+        "param": 0.1
+      }
+    }
+  nginx.conf: |
+    # Load the OpenTracing dynamic module.
+    load_module modules/ngx_http_opentracing_module.so;
+
+    # Checklist: Make sure that worker_processes == #cores you gave to
+    # nginx process
+    worker_processes  1;
+
+    # error_log  logs/error.log;
+
+    # Checklist: Make sure that worker_connections * worker_processes
+    # is greater than the total connections between the client and Nginx.
+    events {
+      use epoll;
+      worker_connections  1024;
+    }
+
+    env fqdn_suffix;
+
+    http {
+      # Load a vendor tracer
+      opentracing on;
+      opentracing_load_tracer /usr/local/lib/libjaegertracing_plugin.so /usr/local/openresty/nginx/jaeger-config.json;
+
+      include       mime.types;
+      default_type  application/octet-stream;
+
+      proxy_read_timeout 5000;
+      proxy_connect_timeout 5000;
+      proxy_send_timeout 5000;
+
+      log_format main '$remote_addr - $remote_user [$time_local] "$request"'
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+      # access_log  logs/access.log  main;
+
+      sendfile        on;
+      tcp_nopush      on;
+      tcp_nodelay     on;
+
+      # Checklist: Make sure the keepalive_timeout is greateer than
+      # the duration of your experiment and keepalive_requests
+      # is greateer than the total number of requests sent from
+      # the workload generator
+      keepalive_timeout  120s;
+      keepalive_requests 100000;
+
+      # Docker default hostname resolver. Set valid timeout to prevent unlimited
+      # ttl for resolver caching.
+      # resolver 127.0.0.11 valid=10s ipv6=off;
+      resolver kube-dns.kube-system.svc.cluster.local valid=10s ipv6=off;
+
+      lua_package_path '/usr/local/openresty/nginx/lua-scripts/?.lua;/usr/local/openresty/luajit/share/lua/5.1/?.lua;;';
+
+      lua_shared_dict config 32k;
+
+      init_by_lua_block {
+        local bridge_tracer = require "opentracing_bridge_tracer"
+        local GenericObjectPool = require "GenericObjectPool"
+        local ngx = ngx
+        local jwt = require "resty.jwt"
+        local cjson = require 'cjson'
+
+        local social_network_UserTimelineService = require 'social_network_UserTimelineService'
+        local UserTimelineServiceClient = social_network_UserTimelineService.social_network_UserTimelineService
+        local social_network_SocialGraphService = require 'social_network_SocialGraphService'
+        local SocialGraphServiceClient = social_network_SocialGraphService.SocialGraphServiceClient
+        local social_network_ComposePostService = require 'social_network_ComposePostService'
+        local ComposePostServiceClient = social_network_ComposePostService.ComposePostServiceClient
+        local social_network_UserService = require 'social_network_UserService'
+        local UserServiceClient = social_network_UserService.UserServiceClient
+
+
+        local config = ngx.shared.config;
+        config:set("secret", "secret")
+        config:set("cookie_ttl", 3600 * 24)
+        config:set("ssl", false)
+      }
+
+      server {
+
+        # Checklist: Set up the port that nginx listens to.
+        listen       8080 reuseport;
+        server_name  localhost;
+
+        # Checklist: Turn of the access_log and error_log if you
+        # don't need them.
+        access_log  off;
+        # error_log off;
+
+        lua_need_request_body on;
+
+        # Used when SSL enabled
+        lua_ssl_trusted_certificate /keys/CA.pem;
+        lua_ssl_ciphers ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH;
+
+        # Checklist: Make sure that the location here is consistent
+        # with the location you specified in wrk2.
+        location /api/user/register {
+              if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Max-Age' 1728000;
+                add_header 'Content-Type' 'text/plain; charset=utf-8';
+                add_header 'Content-Length' 0;
+                return 204;
+              }
+              if ($request_method = 'POST') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+              if ($request_method = 'GET') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+          content_by_lua '
+              local client = require "api/user/register"
+              client.RegisterUser();
+          ';
+        }
+
+        location /api/user/follow {
+              if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Max-Age' 1728000;
+                add_header 'Content-Type' 'text/plain; charset=utf-8';
+                add_header 'Content-Length' 0;
+                return 204;
+              }
+              if ($request_method = 'POST') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+              if ($request_method = 'GET') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+          content_by_lua '
+              local client = require "api/user/follow"
+              client.Follow();
+          ';
+        }
+
+        location /api/user/unfollow {
+              if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Max-Age' 1728000;
+                add_header 'Content-Type' 'text/plain; charset=utf-8';
+                add_header 'Content-Length' 0;
+                return 204;
+              }
+              if ($request_method = 'POST') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+              if ($request_method = 'GET') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+          content_by_lua '
+              local client = require "api/user/unfollow"
+              client.Unfollow();
+          ';
+        }
+
+        location /api/user/login {
+              if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Max-Age' 1728000;
+                add_header 'Content-Type' 'text/plain; charset=utf-8';
+                add_header 'Content-Length' 0;
+                return 204;
+              }
+              if ($request_method = 'POST') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+              if ($request_method = 'GET') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+          content_by_lua '
+              local client = require "api/user/login"
+              client.Login();
+          ';
+        }
+
+        location /api/post/compose {
+              if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Max-Age' 1728000;
+                add_header 'Content-Type' 'text/plain; charset=utf-8';
+                add_header 'Content-Length' 0;
+                return 204;
+              }
+              if ($request_method = 'POST') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+              if ($request_method = 'GET') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+          content_by_lua '
+              local client = require "api/post/compose"
+              client.ComposePost();
+          ';
+        }
+
+        location /api/user-timeline/read {
+              if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Max-Age' 1728000;
+                add_header 'Content-Type' 'text/plain; charset=utf-8';
+                add_header 'Content-Length' 0;
+                return 204;
+              }
+              if ($request_method = 'POST') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+              if ($request_method = 'GET') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+          content_by_lua '
+              local client = require "api/user-timeline/read"
+              client.ReadUserTimeline();
+          ';
+        }
+
+        location /api/home-timeline/read {
+                if ($request_method = 'OPTIONS') {
+                  add_header 'Access-Control-Allow-Origin' '*';
+                  add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                  add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                  add_header 'Access-Control-Max-Age' 1728000;
+                  add_header 'Content-Type' 'text/plain; charset=utf-8';
+                  add_header 'Content-Length' 0;
+                  return 204;
+                }
+                if ($request_method = 'POST') {
+                  add_header 'Access-Control-Allow-Origin' '*';
+                  add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                  add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                  add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+                }
+                if ($request_method = 'GET') {
+                  add_header 'Access-Control-Allow-Origin' '*';
+                  add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                  add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                  add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+                }
+          content_by_lua '
+              local client = require "api/home-timeline/read"
+              client.ReadHomeTimeline();
+          ';
+        }
+
+        # # get userinfo lua
+        # location /api/user/user_info {
+        #       if ($request_method = 'OPTIONS') {
+        #         add_header 'Access-Control-Allow-Origin' '*';
+        #         add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+        #         add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+        #         add_header 'Access-Control-Max-Age' 1728000;
+        #         add_header 'Content-Type' 'text/plain; charset=utf-8';
+        #         add_header 'Content-Length' 0;
+        #         return 204;
+        #       }
+        #       if ($request_method = 'POST') {
+        #         add_header 'Access-Control-Allow-Origin' '*';
+        #         add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+        #         add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+        #         add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+        #       }
+        #       if ($request_method = 'GET') {
+        #         add_header 'Access-Control-Allow-Origin' '*';
+        #         add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+        #         add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+        #         add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+        #       }
+        #   content_by_lua '
+        #       local client = require "api/user/user_info"
+        #       client.UserInfo();
+        #   ';
+        # }
+        # get follower lua
+        location /api/user/get_follower {
+              if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Max-Age' 1728000;
+                add_header 'Content-Type' 'text/plain; charset=utf-8';
+                add_header 'Content-Length' 0;
+                return 204;
+              }
+              if ($request_method = 'POST') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+              if ($request_method = 'GET') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+          content_by_lua '
+              local client = require "api/user/get_follower"
+              client.GetFollower();
+          ';
+        }
+
+        # get followee lua
+        location /api/user/get_followee {
+              if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Max-Age' 1728000;
+                add_header 'Content-Type' 'text/plain; charset=utf-8';
+                add_header 'Content-Length' 0;
+                return 204;
+              }
+              if ($request_method = 'POST') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+              if ($request_method = 'GET') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+                add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+              }
+          content_by_lua '
+              local client = require "api/user/get_followee"
+              client.GetFollowee();
+          ';
+        }
+        location / {
+          if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+            add_header 'Access-Control-Max-Age' 1728000;
+            add_header 'Content-Type' 'text/plain; charset=utf-8';
+            add_header 'Content-Length' 0;
+            return 204;
+          }
+          if ($request_method = 'POST') {
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+            add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+          }
+          if ($request_method = 'GET') {
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+            add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
+          }
+          root pages;
+        }
+
+        location /wrk2-api/home-timeline/read {
+          content_by_lua '
+              local client = require "wrk2-api/home-timeline/read"
+              client.ReadHomeTimeline();
+          ';
+        }
+
+        location /wrk2-api/user-timeline/read {
+          content_by_lua '
+              local client = require "wrk2-api/user-timeline/read"
+              client.ReadUserTimeline();
+          ';
+        }
+
+        location /wrk2-api/post/compose {
+          content_by_lua '
+              local client = require "wrk2-api/post/compose"
+              client.ComposePost();
+          ';
+        }
+
+        location /wrk2-api/user/register {
+          content_by_lua '
+              local client = require "wrk2-api/user/register"
+              client.RegisterUser();
+          ';
+        }
+
+        location /wrk2-api/user/follow {
+          content_by_lua '
+              local client = require "wrk2-api/user/follow"
+              client.Follow();
+          ';
+        }
+
+        location /wrk2-api/user/unfollow {
+          content_by_lua '
+              local client = require "wrk2-api/user/unfollow"
+              client.Unfollow();
+          ';
+        }
+
+      }
+    }
+
+---
+# Source: social-network/charts/post-storage-memcached/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: post-storage-memcached
+  labels:
+    socialnetwork/service: post-storage-memcached
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/post-storage-mongodb/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: post-storage-mongodb
+  labels:
+    socialnetwork/service: post-storage-mongodb
+data:
+  mongod.conf: |
+    net:
+      tls:
+        mode: disabled
+
+---
+# Source: social-network/charts/post-storage-service/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: post-storage-service
+  labels:
+    socialnetwork/service: post-storage-service
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/social-graph-mongodb/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: social-graph-mongodb
+  labels:
+    socialnetwork/service: social-graph-mongodb
+data:
+  mongod.conf: |
+    net:
+      tls:
+        mode: disabled
+
+---
+# Source: social-network/charts/social-graph-redis/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: social-graph-redis
+  labels:
+    socialnetwork/service: social-graph-redis
+data:
+  redis.conf: |
+    io-threads 8
+    io-threads-do-reads yes
+    port 6379
+    tls-port 0
+
+    tls-cert-file /keys/server.crt
+    tls-key-file /keys/server.key
+
+    tls-auth-clients no
+
+---
+# Source: social-network/charts/social-graph-service/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: social-graph-service
+  labels:
+    socialnetwork/service: social-graph-service
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/text-service/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: text-service
+  labels:
+    socialnetwork/service: text-service
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/unique-id-service/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: unique-id-service
+  labels:
+    socialnetwork/service: unique-id-service
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/url-shorten-memcached/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: url-shorten-memcached
+  labels:
+    socialnetwork/service: url-shorten-memcached
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/url-shorten-mongodb/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: url-shorten-mongodb
+  labels:
+    socialnetwork/service: url-shorten-mongodb
+data:
+  mongod.conf: |
+    net:
+      tls:
+        mode: disabled
+
+---
+# Source: social-network/charts/url-shorten-service/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: url-shorten-service
+  labels:
+    socialnetwork/service: url-shorten-service
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/user-memcached/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-memcached
+  labels:
+    socialnetwork/service: user-memcached
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/user-mention-service/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-mention-service
+  labels:
+    socialnetwork/service: user-mention-service
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/user-mongodb/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-mongodb
+  labels:
+    socialnetwork/service: user-mongodb
+data:
+  mongod.conf: |
+    net:
+      tls:
+        mode: disabled
+
+---
+# Source: social-network/charts/user-service/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-service
+  labels:
+    socialnetwork/service: user-service
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/user-timeline-mongodb/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-timeline-mongodb
+  labels:
+    socialnetwork/service: user-timeline-mongodb
+data:
+  mongod.conf: |
+    net:
+      tls:
+        mode: disabled
+
+---
+# Source: social-network/charts/user-timeline-redis/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-timeline-redis
+  labels:
+    socialnetwork/service: user-timeline-redis
+data:
+  redis.conf: |
+    io-threads 8
+    io-threads-do-reads yes
+    port 6379
+    tls-port 0
+
+    tls-cert-file /keys/server.crt
+    tls-key-file /keys/server.key
+
+    tls-auth-clients no
+
+---
+# Source: social-network/charts/user-timeline-service/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-timeline-service
+  labels:
+    socialnetwork/service: user-timeline-service
+data:
+  jaeger-config.yml: |
+    disabled: false
+    reporter:
+      logSpans: false
+      localAgentHostPort: "jaeger:6831"
+      queueSize: 1000000
+      bufferFlushInterval: 10
+    sampler:
+      type: "probabilistic"
+      param: 0.1
+  service-config.json: |
+    {
+        "secret": "secret",
+        "social-graph-service": {
+          "addr": "social-graph-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-mongodb": {
+          "addr": "social-graph-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "social-graph-redis": {
+          "addr": "social-graph-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "write-home-timeline-service": {
+          "addr": "write-home-timeline-service",
+          "port": 9090,
+          "workers": 32,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "write-home-timeline-rabbitmq": {
+          "addr": "write-home-timeline-rabbitmq",
+          "port": 5672,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-redis": {
+          "addr": "home-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "compose-post-service": {
+          "addr": "compose-post-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "compose-post-redis": {
+          "addr": "compose-post-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "user-timeline-service": {
+          "addr": "user-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-mongodb": {
+          "addr": "user-timeline-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-timeline-redis": {
+          "addr": "user-timeline-redis",
+          "port": 6379,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "use_cluster": 0,
+          "use_replica": 0
+        },
+        "post-storage-service": {
+          "addr": "post-storage-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-mongodb": {
+          "addr": "post-storage-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "post-storage-memcached": {
+          "addr": "post-storage-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "unique-id-service": {
+          "addr": "unique-id-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "media-service": {
+          "addr": "media-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-mongodb": {
+          "addr": "media-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "media-memcached": {
+          "addr": "media-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "media-frontend": {
+          "addr": "media-frontend",
+          "port": 8081,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "text-service": {
+          "addr": "text-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-mention-service": {
+          "addr": "user-mention-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-service": {
+          "addr": "url-shorten-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "url-shorten-memcached": {
+          "addr": "url-shorten-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "url-shorten-mongodb": {
+          "addr": "url-shorten-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "user-service": {
+          "addr": "user-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "netif": "eth0"
+        },
+        "user-memcached": {
+          "addr": "user-memcached",
+          "port": 11211,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000,
+          "binary_protocol": 1
+        },
+        "user-mongodb": {
+          "addr": "user-mongodb",
+          "port": 27017,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "home-timeline-service": {
+          "addr": "home-timeline-service",
+          "port": 9090,
+          "connections": 512,
+          "timeout_ms": 10000,
+          "keepalive_ms": 10000
+        },
+        "ssl": {
+          "enabled": false,
+          "caPath": "/keys/CA.pem",
+          "ciphers": "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH",
+          "serverKeyPath": "/keys/server.key",
+          "serverCertPath": "/keys/server.crt"
+        },
+        "redis-primary": {
+          "keepalive_ms": 10000,
+          "addr": "redis-master",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        },
+        "redis-replica": {
+          "keepalive_ms": 10000,
+          "addr": "redis-replicas",
+          "timeout_ms": 10000,
+          "port": 6379,
+          "connections": 512
+        }
+      }
+
+---
+# Source: social-network/charts/compose-post-service/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: compose-post-service
+spec:
+  type: ClusterIP
+  ports:
+  - name: "9090"
+    port: 9090
+    targetPort: 9090
+  selector:
+    service: compose-post-service
+
+---
+# Source: social-network/charts/home-timeline-redis/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: home-timeline-redis
+spec:
+  type: ClusterIP
+  ports:
+  - name: "6379"
+    port: 6379
+    targetPort: 6379
+  selector:
+    service: home-timeline-redis
+
+---
+# Source: social-network/charts/home-timeline-service/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: home-timeline-service
+spec:
+  type: ClusterIP
+  ports:
+  - name: "9090"
+    port: 9090
+    targetPort: 9090
+  selector:
+    service: home-timeline-service
+
+---
+# Source: social-network/charts/jaeger/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+spec:
+  type: ClusterIP
+  ports:
+  - name: "5775"
+    port: 5775
+    protocol: UDP
+    targetPort: 5775
+  - name: "6831"
+    port: 6831
+    protocol: UDP
+    targetPort: 6831
+  - name: "6832"
+    port: 6832
+    protocol: UDP
+    targetPort: 6832
+  - name: "5778"
+    port: 5778
+    targetPort: 5778
+  - name: "16686"
+    port: 16686
+    targetPort: 16686
+  - name: "14268"
+    port: 14268
+    targetPort: 14268
+  - name: "9411"
+    port: 9411
+    targetPort: 9411
+  selector:
+    service: jaeger
+
+---
+# Source: social-network/charts/media-memcached/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: media-memcached
+spec:
+  type: ClusterIP
+  ports:
+  - name: "11211"
+    port: 11211
+    targetPort: 11211
+  selector:
+    service: media-memcached
+
+---
+# Source: social-network/charts/media-mongodb/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: media-mongodb
+spec:
+  type: ClusterIP
+  ports:
+  - name: "27017"
+    port: 27017
+    targetPort: 27017
+  selector:
+    service: media-mongodb
+
+---
+# Source: social-network/charts/media-service/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: media-service
+spec:
+  type: ClusterIP
+  ports:
+  - name: "9090"
+    port: 9090
+    targetPort: 9090
+  selector:
+    service: media-service
+
+---
+# Source: social-network/charts/nginx-thrift/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-thrift
+spec:
+  type: ClusterIP
+  ports:
+  - name: "8080"
+    port: 8080
+    targetPort: 8080
+  selector:
+    service: nginx-thrift
+
+---
+# Source: social-network/charts/post-storage-memcached/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: post-storage-memcached
+spec:
+  type: ClusterIP
+  ports:
+  - name: "11211"
+    port: 11211
+    targetPort: 11211
+  selector:
+    service: post-storage-memcached
+
+---
+# Source: social-network/charts/post-storage-mongodb/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: post-storage-mongodb
+spec:
+  type: ClusterIP
+  ports:
+  - name: "27017"
+    port: 27017
+    targetPort: 27017
+  selector:
+    service: post-storage-mongodb
+
+---
+# Source: social-network/charts/post-storage-service/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: post-storage-service
+spec:
+  type: ClusterIP
+  ports:
+  - name: "9090"
+    port: 9090
+    targetPort: 9090
+  selector:
+    service: post-storage-service
+
+---
+# Source: social-network/charts/social-graph-mongodb/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: social-graph-mongodb
+spec:
+  type: ClusterIP
+  ports:
+  - name: "27017"
+    port: 27017
+    targetPort: 27017
+  selector:
+    service: social-graph-mongodb
+
+---
+# Source: social-network/charts/social-graph-redis/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: social-graph-redis
+spec:
+  type: ClusterIP
+  ports:
+  - name: "6379"
+    port: 6379
+    targetPort: 6379
+  selector:
+    service: social-graph-redis
+
+---
+# Source: social-network/charts/social-graph-service/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: social-graph-service
+spec:
+  type: ClusterIP
+  ports:
+  - name: "9090"
+    port: 9090
+    targetPort: 9090
+  selector:
+    service: social-graph-service
+
+---
+# Source: social-network/charts/text-service/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: text-service
+spec:
+  type: ClusterIP
+  ports:
+  - name: "9090"
+    port: 9090
+    targetPort: 9090
+  selector:
+    service: text-service
+
+---
+# Source: social-network/charts/unique-id-service/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: unique-id-service
+spec:
+  type: ClusterIP
+  ports:
+  - name: "9090"
+    port: 9090
+    targetPort: 9090
+  selector:
+    service: unique-id-service
+
+---
+# Source: social-network/charts/url-shorten-memcached/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: url-shorten-memcached
+spec:
+  type: ClusterIP
+  ports:
+  - name: "11211"
+    port: 11211
+    targetPort: 11211
+  selector:
+    service: url-shorten-memcached
+
+---
+# Source: social-network/charts/url-shorten-mongodb/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: url-shorten-mongodb
+spec:
+  type: ClusterIP
+  ports:
+  - name: "27017"
+    port: 27017
+    targetPort: 27017
+  selector:
+    service: url-shorten-mongodb
+
+---
+# Source: social-network/charts/url-shorten-service/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: url-shorten-service
+spec:
+  type: ClusterIP
+  ports:
+  - name: "9090"
+    port: 9090
+    targetPort: 9090
+  selector:
+    service: url-shorten-service
+
+---
+# Source: social-network/charts/user-memcached/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-memcached
+spec:
+  type: ClusterIP
+  ports:
+  - name: "11211"
+    port: 11211
+    targetPort: 11211
+  selector:
+    service: user-memcached
+
+---
+# Source: social-network/charts/user-mention-service/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-mention-service
+spec:
+  type: ClusterIP
+  ports:
+  - name: "9090"
+    port: 9090
+    targetPort: 9090
+  selector:
+    service: user-mention-service
+
+---
+# Source: social-network/charts/user-mongodb/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-mongodb
+spec:
+  type: ClusterIP
+  ports:
+  - name: "27017"
+    port: 27017
+    targetPort: 27017
+  selector:
+    service: user-mongodb
+
+---
+# Source: social-network/charts/user-service/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+spec:
+  type: ClusterIP
+  ports:
+  - name: "9090"
+    port: 9090
+    targetPort: 9090
+  selector:
+    service: user-service
+
+---
+# Source: social-network/charts/user-timeline-mongodb/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-timeline-mongodb
+spec:
+  type: ClusterIP
+  ports:
+  - name: "27017"
+    port: 27017
+    targetPort: 27017
+  selector:
+    service: user-timeline-mongodb
+
+---
+# Source: social-network/charts/user-timeline-redis/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-timeline-redis
+spec:
+  type: ClusterIP
+  ports:
+  - name: "6379"
+    port: 6379
+    targetPort: 6379
+  selector:
+    service: user-timeline-redis
+
+---
+# Source: social-network/charts/user-timeline-service/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-timeline-service
+spec:
+  type: ClusterIP
+  ports:
+  - name: "9090"
+    port: 9090
+    targetPort: 9090
+  selector:
+    service: user-timeline-service
+
+---
+# Source: social-network/charts/compose-post-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: compose-post-service
+  name: compose-post-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: compose-post-service
+  template:
+    metadata:
+      labels:
+        service: compose-post-service
+        app: compose-post-service
+    spec:
+      containers:
+      - name: "compose-post-service"
+        image: docker.io/deathstarbench/social-network-microservices:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+        readinessProbe:
+          tcpSocket:
+            port: 9090
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          timeoutSeconds: 1
+          failureThreshold: 90
+        command:
+        - ComposePostService
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: compose-post-service-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: compose-post-service-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: compose-post-service-config
+        configMap:
+          name: compose-post-service
+      hostname: compose-post-service
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/home-timeline-redis/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: home-timeline-redis
+  name: home-timeline-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: home-timeline-redis
+  template:
+    metadata:
+      labels:
+        service: home-timeline-redis
+        app: home-timeline-redis
+    spec:
+      containers:
+      - name: "home-timeline-redis"
+        image: docker.io/library/redis:6.2.4
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 6379
+        args:
+        - /social-network-microservices/config/redis.conf
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: home-timeline-redis-config
+          mountPath: /social-network-microservices/config/redis.conf
+          subPath: redis.conf
+      volumes:
+      - name: home-timeline-redis-config
+        configMap:
+          name: home-timeline-redis
+      hostname: home-timeline-redis
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/home-timeline-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: home-timeline-service
+  name: home-timeline-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: home-timeline-service
+  template:
+    metadata:
+      labels:
+        service: home-timeline-service
+        app: home-timeline-service
+    spec:
+      containers:
+      - name: "home-timeline-service"
+        image: docker.io/deathstarbench/social-network-microservices:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+        readinessProbe:
+          tcpSocket:
+            port: 9090
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          timeoutSeconds: 1
+          failureThreshold: 90
+        command:
+        - HomeTimelineService
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: home-timeline-service-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: home-timeline-service-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: home-timeline-service-config
+        configMap:
+          name: home-timeline-service
+      hostname: home-timeline-service
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/jaeger/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: jaeger
+  name: jaeger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: jaeger
+  template:
+    metadata:
+      labels:
+        service: jaeger
+        app: jaeger
+    spec:
+      containers:
+      - name: "jaeger"
+        image: docker.io/jaegertracing/all-in-one:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5775
+        - containerPort: 6831
+        - containerPort: 6832
+        - containerPort: 5778
+        - containerPort: 16686
+        - containerPort: 14268
+        - containerPort: 9411
+        env:
+        - name: COLLECTOR_ZIPKIN_HTTP_PORT
+          value: "9411"
+
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: jaeger-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: jaeger-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: jaeger-config
+        configMap:
+          name: jaeger
+      hostname: jaeger
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/media-memcached/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: media-memcached
+  name: media-memcached
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: media-memcached
+  template:
+    metadata:
+      labels:
+        service: media-memcached
+        app: media-memcached
+    spec:
+      containers:
+      - name: "media-memcached"
+        image: docker.io/library/memcached:1.6.7
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 11211
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: media-memcached-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: media-memcached-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: media-memcached-config
+        configMap:
+          name: media-memcached
+      hostname: media-memcached
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/media-mongodb/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: media-mongodb
+  name: media-mongodb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: media-mongodb
+  template:
+    metadata:
+      labels:
+        service: media-mongodb
+        app: media-mongodb
+    spec:
+      containers:
+      - name: "media-mongodb"
+        image: docker.io/library/mongo:4.4.6
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 27017
+        args:
+        - --config
+        - /social-network-microservices/config/mongod.conf
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: media-mongodb-config
+          mountPath: /social-network-microservices/config/mongod.conf
+          subPath: mongod.conf
+      volumes:
+      - name: media-mongodb-config
+        configMap:
+          name: media-mongodb
+      hostname: media-mongodb
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/media-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: media-service
+  name: media-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: media-service
+  template:
+    metadata:
+      labels:
+        service: media-service
+        app: media-service
+    spec:
+      containers:
+      - name: "media-service"
+        image: docker.io/deathstarbench/social-network-microservices:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+        readinessProbe:
+          tcpSocket:
+            port: 9090
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          timeoutSeconds: 1
+          failureThreshold: 90
+        command:
+        - MediaService
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: media-service-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: media-service-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: media-service-config
+        configMap:
+          name: media-service
+      hostname: media-service
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/nginx-thrift/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: nginx-thrift
+  name: nginx-thrift
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: nginx-thrift
+  template:
+    metadata:
+      labels:
+        service: nginx-thrift
+        app: nginx-thrift
+    spec:
+      containers:
+      - name: "nginx-thrift"
+        image: docker.io/yg397/openresty-thrift:xenial
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+        env:
+        - name: fqdn_suffix
+          value: ".${NAMESPACE}.svc.cluster.local"
+
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: nginx-thrift-config
+          mountPath: /usr/local/openresty/nginx/jaeger-config.json
+          subPath: jaeger-config.json
+        - name: nginx-thrift-config
+          mountPath: /usr/local/openresty/nginx/conf/nginx.conf
+          subPath: nginx.conf
+        - name: lua-scripts
+          mountPath: /usr/local/openresty/nginx/lua-scripts
+        - name: lua-thrift
+          mountPath: /usr/local/openresty/lualib/thrift
+        - name: pages
+          mountPath: /usr/local/openresty/nginx/pages
+        - name: gen-lua
+          mountPath: /gen-lua
+        - name: keys
+          mountPath: /keys
+
+      initContainers:
+      - name: "alpine-container"
+        image: docker.io/alpine/git:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/sh
+        resources:
+          limits:
+            cpu: 100m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        args:
+        - -c
+        - git init /DeathStarBench && git -C /DeathStarBench remote add origin https://github.com/vibesys-playground/DeathStarBench.git && git -C /DeathStarBench fetch --depth=1 origin 867806e575e1f7fb24437ae969910ddb17a76121 && git -C /DeathStarBench checkout --detach FETCH_HEAD && cp -r /DeathStarBench/socialNetwork/gen-lua/* /gen-lua/ && cp -r /DeathStarBench/socialNetwork/docker/openresty-thrift/lua-thrift/* /lua-thrift/ && cp -r /DeathStarBench/socialNetwork/nginx-web-server/lua-scripts/* /lua-scripts/ && cp -r /DeathStarBench/socialNetwork/nginx-web-server/pages/* /pages/ && cp /DeathStarBench/socialNetwork/keys/* /keys/
+        volumeMounts:
+        - name: lua-scripts
+          mountPath: /lua-scripts
+        - name: lua-thrift
+          mountPath: /lua-thrift
+        - name: pages
+          mountPath: /pages
+        - name: gen-lua
+          mountPath: /gen-lua
+        - name: keys
+          mountPath: /keys
+      volumes:
+      - name: nginx-thrift-config
+        configMap:
+          name: nginx-thrift
+      - name: lua-scripts
+        emptyDir: {}
+      - name: pages
+        emptyDir: {}
+      - name: gen-lua
+        emptyDir: {}
+      - name: lua-thrift
+        emptyDir: {}
+      - name: keys
+        emptyDir: {}
+      hostname: nginx-thrift
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/post-storage-memcached/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: post-storage-memcached
+  name: post-storage-memcached
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: post-storage-memcached
+  template:
+    metadata:
+      labels:
+        service: post-storage-memcached
+        app: post-storage-memcached
+    spec:
+      containers:
+      - name: "post-storage-memcached"
+        image: docker.io/library/memcached:1.6.7
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 11211
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: post-storage-memcached-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: post-storage-memcached-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: post-storage-memcached-config
+        configMap:
+          name: post-storage-memcached
+      hostname: post-storage-memcached
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/post-storage-mongodb/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: post-storage-mongodb
+  name: post-storage-mongodb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: post-storage-mongodb
+  template:
+    metadata:
+      labels:
+        service: post-storage-mongodb
+        app: post-storage-mongodb
+    spec:
+      containers:
+      - name: "post-storage-mongodb"
+        image: docker.io/library/mongo:4.4.6
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 27017
+        args:
+        - --config
+        - /social-network-microservices/config/mongod.conf
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: post-storage-mongodb-config
+          mountPath: /social-network-microservices/config/mongod.conf
+          subPath: mongod.conf
+      volumes:
+      - name: post-storage-mongodb-config
+        configMap:
+          name: post-storage-mongodb
+      hostname: post-storage-mongodb
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/post-storage-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: post-storage-service
+  name: post-storage-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: post-storage-service
+  template:
+    metadata:
+      labels:
+        service: post-storage-service
+        app: post-storage-service
+    spec:
+      containers:
+      - name: "post-storage-service"
+        image: docker.io/deathstarbench/social-network-microservices:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+        readinessProbe:
+          tcpSocket:
+            port: 9090
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          timeoutSeconds: 1
+          failureThreshold: 90
+        command:
+        - PostStorageService
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: post-storage-service-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: post-storage-service-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: post-storage-service-config
+        configMap:
+          name: post-storage-service
+      hostname: post-storage-service
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/social-graph-mongodb/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: social-graph-mongodb
+  name: social-graph-mongodb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: social-graph-mongodb
+  template:
+    metadata:
+      labels:
+        service: social-graph-mongodb
+        app: social-graph-mongodb
+    spec:
+      containers:
+      - name: "social-graph-mongodb"
+        image: docker.io/library/mongo:4.4.6
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 27017
+        args:
+        - --config
+        - /social-network-microservices/config/mongod.conf
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: social-graph-mongodb-config
+          mountPath: /social-network-microservices/config/mongod.conf
+          subPath: mongod.conf
+      volumes:
+      - name: social-graph-mongodb-config
+        configMap:
+          name: social-graph-mongodb
+      hostname: social-graph-mongodb
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/social-graph-redis/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: social-graph-redis
+  name: social-graph-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: social-graph-redis
+  template:
+    metadata:
+      labels:
+        service: social-graph-redis
+        app: social-graph-redis
+    spec:
+      containers:
+      - name: "social-graph-redis"
+        image: docker.io/library/redis:6.2.4
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 6379
+        args:
+        - /social-network-microservices/config/redis.conf
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: social-graph-redis-config
+          mountPath: /social-network-microservices/config/redis.conf
+          subPath: redis.conf
+      volumes:
+      - name: social-graph-redis-config
+        configMap:
+          name: social-graph-redis
+      hostname: social-graph-redis
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/social-graph-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: social-graph-service
+  name: social-graph-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: social-graph-service
+  template:
+    metadata:
+      labels:
+        service: social-graph-service
+        app: social-graph-service
+    spec:
+      containers:
+      - name: "social-graph-service"
+        image: docker.io/deathstarbench/social-network-microservices:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+        readinessProbe:
+          tcpSocket:
+            port: 9090
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          timeoutSeconds: 1
+          failureThreshold: 90
+        command:
+        - SocialGraphService
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: social-graph-service-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: social-graph-service-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: social-graph-service-config
+        configMap:
+          name: social-graph-service
+      hostname: social-graph-service
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/text-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: text-service
+  name: text-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: text-service
+  template:
+    metadata:
+      labels:
+        service: text-service
+        app: text-service
+    spec:
+      containers:
+      - name: "text-service"
+        image: docker.io/deathstarbench/social-network-microservices:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+        readinessProbe:
+          tcpSocket:
+            port: 9090
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          timeoutSeconds: 1
+          failureThreshold: 90
+        command:
+        - TextService
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: text-service-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: text-service-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: text-service-config
+        configMap:
+          name: text-service
+      hostname: text-service
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/unique-id-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: unique-id-service
+  name: unique-id-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: unique-id-service
+  template:
+    metadata:
+      labels:
+        service: unique-id-service
+        app: unique-id-service
+    spec:
+      containers:
+      - name: "unique-id-service"
+        image: docker.io/deathstarbench/social-network-microservices:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+        readinessProbe:
+          tcpSocket:
+            port: 9090
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          timeoutSeconds: 1
+          failureThreshold: 90
+        command:
+        - UniqueIdService
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: unique-id-service-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: unique-id-service-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: unique-id-service-config
+        configMap:
+          name: unique-id-service
+      hostname: unique-id-service
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/url-shorten-memcached/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: url-shorten-memcached
+  name: url-shorten-memcached
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: url-shorten-memcached
+  template:
+    metadata:
+      labels:
+        service: url-shorten-memcached
+        app: url-shorten-memcached
+    spec:
+      containers:
+      - name: "url-shorten-memcached"
+        image: docker.io/library/memcached:1.6.7
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 11211
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: url-shorten-memcached-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: url-shorten-memcached-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: url-shorten-memcached-config
+        configMap:
+          name: url-shorten-memcached
+      hostname: url-shorten-memcached
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/url-shorten-mongodb/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: url-shorten-mongodb
+  name: url-shorten-mongodb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: url-shorten-mongodb
+  template:
+    metadata:
+      labels:
+        service: url-shorten-mongodb
+        app: url-shorten-mongodb
+    spec:
+      containers:
+      - name: "url-shorten-mongodb"
+        image: docker.io/library/mongo:4.4.6
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 27017
+        args:
+        - --config
+        - /social-network-microservices/config/mongod.conf
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: url-shorten-mongodb-config
+          mountPath: /social-network-microservices/config/mongod.conf
+          subPath: mongod.conf
+      volumes:
+      - name: url-shorten-mongodb-config
+        configMap:
+          name: url-shorten-mongodb
+      hostname: url-shorten-mongodb
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/url-shorten-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: url-shorten-service
+  name: url-shorten-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: url-shorten-service
+  template:
+    metadata:
+      labels:
+        service: url-shorten-service
+        app: url-shorten-service
+    spec:
+      containers:
+      - name: "url-shorten-service"
+        image: docker.io/deathstarbench/social-network-microservices:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+        readinessProbe:
+          tcpSocket:
+            port: 9090
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          timeoutSeconds: 1
+          failureThreshold: 90
+        command:
+        - UrlShortenService
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: url-shorten-service-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: url-shorten-service-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: url-shorten-service-config
+        configMap:
+          name: url-shorten-service
+      hostname: url-shorten-service
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/user-memcached/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: user-memcached
+  name: user-memcached
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: user-memcached
+  template:
+    metadata:
+      labels:
+        service: user-memcached
+        app: user-memcached
+    spec:
+      containers:
+      - name: "user-memcached"
+        image: docker.io/library/memcached:1.6.7
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 11211
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: user-memcached-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: user-memcached-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: user-memcached-config
+        configMap:
+          name: user-memcached
+      hostname: user-memcached
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/user-mention-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: user-mention-service
+  name: user-mention-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: user-mention-service
+  template:
+    metadata:
+      labels:
+        service: user-mention-service
+        app: user-mention-service
+    spec:
+      containers:
+      - name: "user-mention-service"
+        image: docker.io/deathstarbench/social-network-microservices:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+        readinessProbe:
+          tcpSocket:
+            port: 9090
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          timeoutSeconds: 1
+          failureThreshold: 90
+        command:
+        - UserMentionService
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: user-mention-service-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: user-mention-service-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: user-mention-service-config
+        configMap:
+          name: user-mention-service
+      hostname: user-mention-service
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/user-mongodb/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: user-mongodb
+  name: user-mongodb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: user-mongodb
+  template:
+    metadata:
+      labels:
+        service: user-mongodb
+        app: user-mongodb
+    spec:
+      containers:
+      - name: "user-mongodb"
+        image: docker.io/library/mongo:4.4.6
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 27017
+        args:
+        - --config
+        - /social-network-microservices/config/mongod.conf
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: user-mongodb-config
+          mountPath: /social-network-microservices/config/mongod.conf
+          subPath: mongod.conf
+      volumes:
+      - name: user-mongodb-config
+        configMap:
+          name: user-mongodb
+      hostname: user-mongodb
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/user-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: user-service
+  name: user-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: user-service
+  template:
+    metadata:
+      labels:
+        service: user-service
+        app: user-service
+    spec:
+      containers:
+      - name: "user-service"
+        image: docker.io/deathstarbench/social-network-microservices:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+        readinessProbe:
+          tcpSocket:
+            port: 9090
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          timeoutSeconds: 1
+          failureThreshold: 90
+        command:
+        - UserService
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: user-service-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: user-service-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: user-service-config
+        configMap:
+          name: user-service
+      hostname: user-service
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/user-timeline-mongodb/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: user-timeline-mongodb
+  name: user-timeline-mongodb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: user-timeline-mongodb
+  template:
+    metadata:
+      labels:
+        service: user-timeline-mongodb
+        app: user-timeline-mongodb
+    spec:
+      containers:
+      - name: "user-timeline-mongodb"
+        image: docker.io/library/mongo:4.4.6
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 27017
+        args:
+        - --config
+        - /social-network-microservices/config/mongod.conf
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: user-timeline-mongodb-config
+          mountPath: /social-network-microservices/config/mongod.conf
+          subPath: mongod.conf
+      volumes:
+      - name: user-timeline-mongodb-config
+        configMap:
+          name: user-timeline-mongodb
+      hostname: user-timeline-mongodb
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/user-timeline-redis/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: user-timeline-redis
+  name: user-timeline-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: user-timeline-redis
+  template:
+    metadata:
+      labels:
+        service: user-timeline-redis
+        app: user-timeline-redis
+    spec:
+      containers:
+      - name: "user-timeline-redis"
+        image: docker.io/library/redis:6.2.4
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 6379
+        args:
+        - /social-network-microservices/config/redis.conf
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: user-timeline-redis-config
+          mountPath: /social-network-microservices/config/redis.conf
+          subPath: redis.conf
+      volumes:
+      - name: user-timeline-redis-config
+        configMap:
+          name: user-timeline-redis
+      hostname: user-timeline-redis
+      restartPolicy: Always
+
+
+
+---
+# Source: social-network/charts/user-timeline-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    service: user-timeline-service
+  name: user-timeline-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: user-timeline-service
+  template:
+    metadata:
+      labels:
+        service: user-timeline-service
+        app: user-timeline-service
+    spec:
+      containers:
+      - name: "user-timeline-service"
+        image: docker.io/deathstarbench/social-network-microservices:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+        readinessProbe:
+          tcpSocket:
+            port: 9090
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          timeoutSeconds: 1
+          failureThreshold: 90
+        command:
+        - UserTimelineService
+        resources:
+          limits:
+            cpu: "1"
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: user-timeline-service-config
+          mountPath: /social-network-microservices/config/jaeger-config.yml
+          subPath: jaeger-config.yml
+        - name: user-timeline-service-config
+          mountPath: /social-network-microservices/config/service-config.json
+          subPath: service-config.json
+      volumes:
+      - name: user-timeline-service-config
+        configMap:
+          name: user-timeline-service
+      hostname: user-timeline-service
+      restartPolicy: Always

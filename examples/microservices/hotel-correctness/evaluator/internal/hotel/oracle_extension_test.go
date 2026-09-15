@@ -342,6 +342,33 @@ func TestCrashRecoveryUsesLifecycleProgramAndCanonicalOracle(t *testing.T) {
 	}
 }
 
+func TestCrashRecoveryHonorsDurableAvailabilityStrictness(t *testing.T) {
+	for _, strict := range []bool{false, true} {
+		t.Run(strconv.FormatBool(strict), func(t *testing.T) {
+			application, service, c := newFakeApplication(t)
+			application.strict.DurableAvailability = strict
+			service.cacheOnlyAvailability = true
+			checks, err := application.verifyCrashRecovery(
+				context.Background(), c, 31, testRandom(7), service.crash, service.start,
+			)
+			if !strict {
+				if err != nil {
+					t.Fatalf("default compatibility check rejected durable capacity: %v", err)
+				}
+				if checks != 2 {
+					t.Fatalf("default checked %d calls, want write and capacity readback", checks)
+				}
+				return
+			}
+			counterexample := requireProgramCounterexample(t, err)
+			if counterexample.Step != 4 || checks != 3 ||
+				counterexample.Program.Steps[4].Call.ID != "crash-recovery-search" {
+				t.Fatalf("strict check did not reject post-restart search: %+v", counterexample)
+			}
+		})
+	}
+}
+
 // sharedCapacityService rewrites every reservation onto one hotel, modeling a
 // candidate whose optimization collapsed per-hotel capacity into one counter.
 type sharedCapacityService struct{ *fakeService }

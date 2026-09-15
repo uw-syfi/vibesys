@@ -107,23 +107,24 @@ def test_train_ticket_accuracy_uses_source_evaluator() -> None:
 
 
 def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() -> None:
-    bundle = load_input_bundle(HOTEL_CORRECTNESS_ROOT)
+    project = Project.open(HOTEL_CORRECTNESS_ROOT)
+    task = next(task for task in project.discover_tasks() if task.name.value == "compose")
+    bundle = load_project_task(project, task)
     accuracy_pairs = _adjacent_pairs(bundle.accuracy_command)
     benchmark_pairs = _adjacent_pairs(bundle.benchmark_command)
-    assert bundle.evaluator_path == (PROJECT_ROOT / "resources" / "evaluators" / "microservice")
-    assert bundle.evaluator_package_digest is None
-    assert bundle.accuracy_command[:6] == (
-        "go",
-        "-C",
-        "evaluator",
-        "run",
-        "-modfile=runtime.mod",
-        "./cmd/hotel-correctness",
+    package = PROJECT_ROOT / "resources" / "evaluators" / "microservice"
+    assert bundle.evaluator_path is None
+    assert bundle.evaluator_package_digest is not None
+    assert bundle.accuracy_command[:4] == (
+        "${PYTHON}",
+        "${PROJECT_ROOT}/evaluator/run.py",
+        "--package-root",
+        str(package),
     )
     assert bundle.benchmark_command[:5] == (
         "go",
         "-C",
-        "_evaluator/microservice",
+        str(package),
         "run",
         "./cmd/servicebench",
     )
@@ -168,7 +169,7 @@ def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() ->
     run_argv = json.loads(run_command)
     assert run_argv[:2] == ["sh", "-c"]
     assert 'go -C "$1" run ./cmd/otelinject' in run_argv[2]
-    assert run_argv[4] == "_evaluator/microservice"
+    assert run_argv[4] == str(package)
     assert run_argv[5] == (
         f"{PROJECT_ROOT_TOKEN}/deathstarbench/hotelReservation/docker-compose.yml"
     )

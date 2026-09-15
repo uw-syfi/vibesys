@@ -1,0 +1,47 @@
+version = 1
+
+[agent]
+domain = "microservices"
+
+[evaluator]
+name = "vibesys-evaluator-microservice"
+version = "0.1.0"
+
+[accuracy]
+entrypoint = "kubernetes-runtime"
+args = [
+  "--config", "${PACKAGE_ROOT}/kubernetes_examples/social-network/runtime.yaml",
+  "--candidate-dir", "${PROJECT_ROOT}",
+  "--",
+  "go", "-C", "${PACKAGE_ROOT}", "run", "./cmd/servicebench",
+  "--workload", "${PACKAGE_ROOT}/kubernetes_examples/social-network/workload.toml",
+  "--base-url", "${BASE_URL}",
+  "--profile", "light",
+  "--seed", "random",
+  "--fixture-seed", "random",
+]
+timeout_seconds = 900
+
+[benchmark]
+entrypoint = "kubernetes-runtime"
+args = [
+  "--config", "${PACKAGE_ROOT}/kubernetes_examples/social-network/runtime.yaml",
+  "--candidate-dir", "${PROJECT_ROOT}",
+  "--",
+  "go", "-C", "${PACKAGE_ROOT}", "run", "./cmd/servicebench",
+  "--workload", "${PACKAGE_ROOT}/kubernetes_examples/social-network/workload.toml",
+  "--base-url", "${BASE_URL}",
+  "--seed", "random",
+  "--fixture-seed", "random",
+]
+timeout_seconds = 1200
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "primary_value"
+
+[[workspace.sources]]
+name = "deathstarbench"
+repo = "https://github.com/vibesys-playground/DeathStarBench.git"
+commit = "867806e575e1f7fb24437ae969910ddb17a76121"
+dest = "deathstarbench"
