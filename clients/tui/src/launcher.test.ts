@@ -499,9 +499,49 @@ process.exit(0);
   });
 
   it('returns the backend argument error for an explicitly empty runs directory', async () => {
+    // The Python side (rejecting an empty --runs-dir and streaming
+    // configuration_failed) is covered by tests/entrypoints/test_headless.py
+    // and tests/server/test_runtime.py. This test only needs a backend that
+    // behaves that way, so it uses a fake one instead of the developer's
+    // .venv interpreter.
     tempDir = await mkdtemp(join(tmpdir(), 'vibesys-launcher-'));
     const frontendMarker = join(tempDir, 'frontend-started');
     const failureMarker = join(tempDir, 'configuration-failure.json');
+    const backendArgs = join(tempDir, 'backend-args.json');
+    const backend = await writeExecutable(
+      'failing-backend.mjs',
+      `
+import {writeFileSync} from 'node:fs';
+import {createServer} from 'node:net';
+
+writeFileSync(${JSON.stringify(backendArgs)}, JSON.stringify(process.argv.slice(2)));
+const socketPath = process.argv[process.argv.indexOf('--control-socket') + 1];
+const server = createServer(socket => {
+  socket.once('data', data => {
+    const request = JSON.parse(data.toString().split('\\n')[0]);
+    const event = {
+      sequence: 1,
+      type: 'configuration_failed',
+      data: {
+        code: 'invalid_arguments',
+        stage: 'argument_parsing',
+        message: 'argument --runs-dir: must not be empty',
+      },
+    };
+    socket.write(JSON.stringify({
+      protocol_version: 1,
+      request_id: request.request_id,
+      timestamp: '1970-01-01T00:00:00Z',
+      type: 'event',
+      event,
+    }) + '\\n');
+    // Exit once the client has read the failure and hung up.
+    socket.once('close', () => process.exit(2));
+  });
+});
+server.listen(socketPath);
+`,
+    );
     const frontend = await writeExecutable(
       'unused-frontend.mjs',
       `
@@ -526,15 +566,8 @@ socket.on('data', chunk => {
     const newline = buffer.indexOf('\\n');
     const message = JSON.parse(buffer.slice(0, newline));
     buffer = buffer.slice(newline + 1);
-    const events = message.type === 'event' ? [message.event] :
-      message.type === 'event_batch' ? message.events : [];
-    const failure = events.find(event => event.type === 'configuration_failed');
-    if (failure) {
-      writeFileSync(${JSON.stringify(failureMarker)}, JSON.stringify(failure));
-      socket.end();
-      return;
-    }
-    if (events.some(event => event.type === 'run_finished' || event.type === 'run_failed')) {
+    if (message.type === 'event' && message.event.type === 'configuration_failed') {
+      writeFileSync(${JSON.stringify(failureMarker)}, JSON.stringify(message.event));
       socket.end();
       return;
     }
@@ -559,9 +592,7 @@ async function connectWithRetry(path) {
 }
 `,
     );
-    const python = join(dirname(fileURLToPath(import.meta.url)), '../../../.venv/bin/python');
-    process.chdir(tempDir);
-    process.env['VIBESYS_PYTHON'] = python;
+    process.env['VIBESYS_PYTHON'] = backend;
     process.env['VIBESYS_TUI_RUNTIME'] = process.execPath;
     process.env['VIBESYS_TUI_ENTRYPOINT'] = frontend;
 
@@ -569,13 +600,15 @@ async function connectWithRetry(path) {
       launch(['--stub-agent', '--local', '--max-rounds', '0', '--runs-dir=']),
     ).resolves.toBe(2);
     await access(frontendMarker);
+    // The launcher forwards the explicitly empty value untouched.
+    const forwarded = JSON.parse(await readFile(backendArgs, 'utf8')) as string[];
+    expect(forwarded).toContain('--runs-dir=');
     const failure = JSON.parse(await readFile(failureMarker, 'utf8')) as {
       data: {code: string; stage: string; message: string};
     };
     expect(failure.data.code).toBe('invalid_arguments');
     expect(failure.data.stage).toBe('argument_parsing');
     expect(failure.data.message).toContain('argument --runs-dir: must not be empty');
-    await expect(access(join(tempDir, 'exp_env'))).rejects.toThrow();
   }, 15_000);
 });
 

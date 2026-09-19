@@ -78,12 +78,16 @@ async function removeScratchDirectory(directory: string): Promise<void> {
   while (true) {
     try {
       rmSync(directory, {recursive: true, force: true});
-      return;
     } catch (error) {
       const code = (error as {code?: unknown}).code;
       if ((code !== 'EBUSY' && code !== 'ENOTEMPTY') || Date.now() >= deadline) throw error;
-      await delay(25);
     }
+    // Returning without throwing does not prove the directory is gone: on NFS
+    // rmSync can succeed and still leave the emptied directory behind. Success
+    // is the directory being absent.
+    if (!existsSync(directory)) return;
+    if (Date.now() >= deadline) throw new Error(`could not remove ${directory}`);
+    await delay(25);
   }
 }
 
