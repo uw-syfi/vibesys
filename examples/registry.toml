@@ -21,7 +21,7 @@ version = 1
 
 [[example]]
 path = "examples/data-structures/kvstore-default"
-layout = "legacy"
+layout = "task"
 requires = []
 status = "validated"
 
@@ -63,7 +63,7 @@ status = "validated"
 
 [[example]]
 path = "examples/kv-store"
-layout = "legacy"
+layout = "task"
 requires = []
 status = "validated"
 
@@ -71,10 +71,8 @@ status = "validated"
 path = "examples/microservices/hotel-correctness"
 layout = "task"
 requires = ["docker", "kubernetes"]
-status = "known-failing"
-reason = "benchmark/ and evaluator/ sit outside .vibesys/tasks, so the agent can edit files its own commands run"
-tracking = "https://github.com/uw-syfi/vibesys/pull/771"
-failing_checks = ["trust-policy"]
+status = "live-only"
+reason = "needs docker compose and a Kubernetes cluster"
 
 [[example]]
 path = "examples/microservices/repositories/deathstarbench"
