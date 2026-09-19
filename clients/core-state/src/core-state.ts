@@ -530,26 +530,64 @@ export function reduceEventPrefix(
  *   malformed producer emits, diverge.
  */
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 function mergeTranscriptPrefix(
   older: readonly TranscriptEntry[],
   newer: readonly TranscriptEntry[],
 ): TranscriptEntry[] {
-  const entries: TranscriptEntry[] = [];
-  const index = new OpenToolCallIndex();
-  let left = 0;
-  let right = 0;
-  while (left < older.length || right < newer.length) {
-    const source =
-      left >= older.length
-        ? newer
-        : right >= newer.length
-          ? older
-          : entryOrder(newer[right]) < entryOrder(older[left])
-            ? newer
-            : older;
-    const entry = source === older ? older[left++] : newer[right++];
-    if (entry === undefined) continue;
+  const replay = new TranscriptPrefixReplay();
+  const ordered = new ReplayOrderedTranscriptEntries(older, newer);
+  for (let entry = ordered.next(); entry !== undefined; entry = ordered.next()) {
+    replay.append(entry);
+  }
+  return replay.entries;
+}
+
+/**
+ * Aligns two already ordered transcript projections into replay order.
+ *
+ * Entries with the same sequence retain the older projection first. That is
+ * the original event order at the prefix boundary and lets the newer entry
+ * update or extend it through the normal transcript fold.
+ */
+class ReplayOrderedTranscriptEntries {
+  readonly #older: readonly TranscriptEntry[];
+  readonly #newer: readonly TranscriptEntry[];
+  #olderAt = 0;
+  #newerAt = 0;
+
+  constructor(older: readonly TranscriptEntry[], newer: readonly TranscriptEntry[]) {
+    this.#older = older;
+    this.#newer = newer;
+  }
+
+  next(): TranscriptEntry | undefined {
+    if (this.#olderAt >= this.#older.length) return this.#takeNewer();
+    if (this.#newerAt >= this.#newer.length) return this.#takeOlder();
+    if (entryOrder(this.#newer[this.#newerAt]) < entryOrder(this.#older[this.#olderAt])) {
+      return this.#takeNewer();
+    }
+    return this.#takeOlder();
+  }
+
+  #takeOlder(): TranscriptEntry | undefined {
+    const entry = this.#older[this.#olderAt];
+    this.#olderAt += 1;
+    return entry;
+  }
+
+  #takeNewer(): TranscriptEntry | undefined {
+    const entry = this.#newer[this.#newerAt];
+    this.#newerAt += 1;
+    return entry;
+  }
+}
+
+/** Applies ordinary transcript folding to entries selected for prefix replay. */
+class TranscriptPrefixReplay {
+  readonly entries: TranscriptEntry[] = [];
+  readonly #openTools = new OpenToolCallIndex();
+
+  append(entry: TranscriptEntry): void {
     // A terminal chat answer carries no turn id and, in replay, folds over its
     // own still-open streamed turn through `foldChatAnswer` (which matches the
     // answer's invocation id, so an abandoned turn's stream is never claimed).
@@ -557,16 +595,14 @@ function mergeTranscriptPrefix(
     // it, the two arrive from opposite lists, so reconcile them here as replay
     // would; a second entry would otherwise survive. Anything else takes the
     // normal step.
-    if (
-      entry.kind === 'assistant' &&
-      entry.turnId === undefined &&
-      foldChatAnswer(entries, entry)
-    ) {
-      continue;
-    }
-    foldTranscriptEntry(entries, entry, index);
+    if (isTerminalChatAnswer(entry) && foldChatAnswer(this.entries, entry)) return;
+    foldTranscriptEntry(this.entries, entry, this.#openTools);
   }
-  return entries;
+}
+
+/** Whether `entry` is eligible to close a streamed chat turn during replay. */
+function isTerminalChatAnswer(entry: TranscriptEntry): boolean {
+  return entry.kind === 'assistant' && entry.turnId === undefined;
 }
 
 /**
