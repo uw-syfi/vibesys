@@ -23,12 +23,16 @@ class RunStatus(StrEnum):
     ``PAUSING`` and ``PAUSED`` are distinct because a pause is only applied at
     an invocation boundary: ``/pause`` records the request, and the run keeps
     executing the call already in flight until it reaches that boundary.
+    ``STOPPING`` and ``STOPPED`` split the same way for ``/stop``, whose
+    boundary is where the run ends instead of where it parks.
     """
 
     STARTING = "starting"
     RUNNING = "running"
     PAUSING = "pausing"
     PAUSED = "paused"
+    STOPPING = "stopping"
+    STOPPED = "stopped"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -36,9 +40,15 @@ class RunStatus(StrEnum):
     def has_ended(self) -> bool:
         """Whether the run has settled into a status it never leaves."""
         match self:
-            case RunStatus.COMPLETED | RunStatus.FAILED:
+            case RunStatus.COMPLETED | RunStatus.FAILED | RunStatus.STOPPED:
                 return True
-            case RunStatus.STARTING | RunStatus.RUNNING | RunStatus.PAUSING | RunStatus.PAUSED:
+            case (
+                RunStatus.STARTING
+                | RunStatus.RUNNING
+                | RunStatus.PAUSING
+                | RunStatus.PAUSED
+                | RunStatus.STOPPING
+            ):
                 return False
 
 
@@ -64,7 +74,10 @@ class RunTrigger(StrEnum):
     """A controlled invocation reached its boundary."""
 
     RESUMED = "resumed"
-    """An operator asked to resume, cancelling any pending pause."""
+    """An operator asked to resume, cancelling any pending pause or stop."""
+
+    STOP_REQUESTED = "stop_requested"
+    """An operator asked to end the run at the next invocation boundary."""
 
     COMPLETED = "completed"
     """The run finished its work."""
@@ -94,20 +107,35 @@ _TRANSITIONS: Final[MappingProxyType[tuple[RunStatus, RunTrigger], RunStatus]] =
         (RunStatus.RUNNING, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSING,
         (RunStatus.RUNNING, RunTrigger.INVOCATION_FINISHED): RunStatus.RUNNING,
         (RunStatus.RUNNING, RunTrigger.RESUMED): RunStatus.RUNNING,
+        (RunStatus.RUNNING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
         (RunStatus.RUNNING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
         (RunStatus.RUNNING, RunTrigger.FAILED): RunStatus.FAILED,
         (RunStatus.PAUSING, RunTrigger.ATTACHED): RunStatus.PAUSING,
         (RunStatus.PAUSING, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSING,
         (RunStatus.PAUSING, RunTrigger.INVOCATION_FINISHED): RunStatus.PAUSED,
         (RunStatus.PAUSING, RunTrigger.RESUMED): RunStatus.RUNNING,
+        # A stop supersedes the pause pending at the same boundary.
+        (RunStatus.PAUSING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
         (RunStatus.PAUSING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
         (RunStatus.PAUSING, RunTrigger.FAILED): RunStatus.FAILED,
         (RunStatus.PAUSED, RunTrigger.ATTACHED): RunStatus.PAUSED,
         (RunStatus.PAUSED, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSED,
         (RunStatus.PAUSED, RunTrigger.INVOCATION_FINISHED): RunStatus.PAUSED,
         (RunStatus.PAUSED, RunTrigger.RESUMED): RunStatus.RUNNING,
+        # Leaving PAUSED releases the thread parked at the pause wait, which
+        # then lands the stop at the boundary it is already standing on.
+        (RunStatus.PAUSED, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
         (RunStatus.PAUSED, RunTrigger.COMPLETED): RunStatus.COMPLETED,
         (RunStatus.PAUSED, RunTrigger.FAILED): RunStatus.FAILED,
+        (RunStatus.STOPPING, RunTrigger.ATTACHED): RunStatus.STOPPING,
+        # A pause cannot downgrade a stop already pending at the boundary.
+        (RunStatus.STOPPING, RunTrigger.PAUSE_REQUESTED): RunStatus.STOPPING,
+        (RunStatus.STOPPING, RunTrigger.INVOCATION_FINISHED): RunStatus.STOPPED,
+        # A resume that beats the boundary cancels the stop, like a pause.
+        (RunStatus.STOPPING, RunTrigger.RESUMED): RunStatus.RUNNING,
+        (RunStatus.STOPPING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
+        (RunStatus.STOPPING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
+        (RunStatus.STOPPING, RunTrigger.FAILED): RunStatus.FAILED,
     }
 )
 """Every legal move out of a status that has not ended, as data.

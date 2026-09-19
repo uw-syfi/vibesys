@@ -1,11 +1,13 @@
-"""Pause, steering, and terminal-state tests for the run controller."""
+"""Pause, stop, steering, and terminal-state tests for the run controller."""
 
 import threading
 import time
 
+import pytest
 from tests.server.support import ServerParts, build_server_parts
 
-from server.api.protocol import PauseCommand, ResumeCommand, SteerCommand
+from server.api.protocol import PauseCommand, ResumeCommand, SteerCommand, StopCommand
+from server.controller import RunStopped
 from server.events import (
     AgentExecutionStartedData,
     EventStatus,
@@ -241,6 +243,150 @@ def test_snapshot_status_agrees_with_the_fold_at_the_terminal_event(tmp_path):  
     # The run ended once: the later `finish` from the runtime adds nothing.
     parts.controller.finish()
     assert [event.type for event in parts.journal.read()].count(EventType.RUN_FINISHED) == 1
+
+
+def test_stop_is_pending_until_the_invocation_boundary(tmp_path):  # noqa: ANN001, ANN201
+    """`/stop` is a request: the call in flight keeps running until it ends."""
+    parts = build_server_parts(tmp_path)
+    execution = parts.controller.start_agent_execution("implementer", "round 1", "work")
+
+    stop = parts.api.execute(StopCommand())
+
+    assert stop.ack is not None
+    assert (stop.ack.action, stop.ack.status) == ("stop", "pending")
+    assert parts.api.snapshot().status is RunStatus.STOPPING
+    parts.controller.after_agent("implementer", "round 1", execution_id=execution.execution_id)
+    assert parts.api.snapshot().status is RunStatus.STOPPED
+    assert _status_changes(parts) == [
+        (RunStatus.STARTING, RunStatus.RUNNING),
+        (RunStatus.RUNNING, RunStatus.STOPPING),
+        (RunStatus.STOPPING, RunStatus.STOPPED),
+    ]
+    controls = [
+        (event.text, event.status)
+        for event in parts.journal.read()
+        if event.type is EventType.CONTROL
+    ]
+    assert controls == [
+        ("/stop", EventStatus.PENDING),
+        ("/stop", EventStatus.CONSUMED),
+    ]
+
+
+def test_stopped_run_refuses_the_next_controlled_invocation(tmp_path):  # noqa: ANN001, ANN201
+    """After the stop lands, entering the next boundary unwinds the run."""
+    parts = build_server_parts(tmp_path)
+    execution = parts.controller.start_agent_execution("implementer", "round 1", "work")
+    parts.controller.stop_after_call()
+    parts.controller.after_agent("implementer", "round 1", execution_id=execution.execution_id)
+
+    with pytest.raises(RunStopped):
+        parts.controller.before_agent("judge", "round 1", "review")
+
+
+def test_stop_requested_between_invocations_starts_no_further_call(tmp_path):  # noqa: ANN001, ANN201
+    """The entry side of the boundary is a boundary: nothing else starts."""
+    parts = build_server_parts(tmp_path)
+    parts.controller.stop_after_call()
+
+    with pytest.raises(RunStopped):
+        parts.controller.before_agent("implementer", "round 1", "work")
+
+    assert parts.api.snapshot().status is RunStatus.STOPPED
+    assert _status_changes(parts)[-1] == (RunStatus.STOPPING, RunStatus.STOPPED)
+    assert not any(
+        event.type is EventType.AGENT_EXECUTION_STARTED for event in parts.journal.read()
+    )
+
+
+def test_stop_releases_the_pause_wait_and_ends_the_run(tmp_path):  # noqa: ANN001, ANN201
+    """A stop from `paused` wakes the parked thread and ends without a call."""
+    parts = build_server_parts(tmp_path)
+    execution = parts.controller.start_agent_execution("implementer", "round 1", "work")
+    parts.controller.pause_after_call()
+    parts.controller.after_agent("implementer", "round 1", execution_id=execution.execution_id)
+    assert parts.api.snapshot().status is RunStatus.PAUSED
+
+    raised: list[BaseException] = []
+
+    def wait_at_boundary() -> None:
+        try:
+            parts.controller.before_agent("judge", "round 1", "review")
+        except BaseException as error:  # noqa: BLE001  # The unwind signal is the assertion.
+            raised.append(error)
+
+    waiter = threading.Thread(target=wait_at_boundary)
+    waiter.start()
+    time.sleep(0.02)
+    assert waiter.is_alive()
+
+    parts.controller.stop_after_call()
+
+    waiter.join(timeout=1)
+    assert not waiter.is_alive()
+    assert [type(error) for error in raised] == [RunStopped]
+    assert parts.api.snapshot().status is RunStatus.STOPPED
+    assert _status_changes(parts)[-2:] == [
+        (RunStatus.PAUSED, RunStatus.STOPPING),
+        (RunStatus.STOPPING, RunStatus.STOPPED),
+    ]
+
+
+def test_resume_before_the_boundary_cancels_the_pending_stop(tmp_path):  # noqa: ANN001, ANN201
+    """A resume that beats the stop boundary keeps the run going."""
+    parts = build_server_parts(tmp_path)
+    execution = parts.controller.start_agent_execution("implementer", "round 1", "work")
+    parts.controller.stop_after_call()
+    parts.controller.resume()
+    parts.controller.after_agent("implementer", "round 1", execution_id=execution.execution_id)
+
+    assert parts.api.snapshot().status is RunStatus.RUNNING
+    assert parts.controller.before_agent("judge", "round 1", "review") == "review"
+
+
+def test_finish_after_a_landed_stop_records_no_terminal_event(tmp_path):  # noqa: ANN001, ANN201
+    """The terminal status change is the stop's terminal record."""
+    parts = build_server_parts(tmp_path)
+    parts.controller.stop_after_call()
+    with pytest.raises(RunStopped):
+        parts.controller.before_agent("implementer", "round 1", "work")
+
+    parts.controller.finish()
+
+    assert not any(
+        event.type in (EventType.RUN_FINISHED, EventType.RUN_FAILED)
+        for event in parts.journal.read()
+    )
+    assert _status_changes(parts)[-1] == (RunStatus.STOPPING, RunStatus.STOPPED)
+    assert parts.api.snapshot().status is RunStatus.STOPPED
+
+
+def test_stop_does_not_block_presentation_only_chat(tmp_path):  # noqa: ANN001, ANN201
+    """Chat stays available on a stopped run, exactly as on a finished one."""
+    parts = build_server_parts(tmp_path)
+    parts.controller.stop_after_call()
+    with pytest.raises(RunStopped):
+        parts.controller.before_agent("implementer", "round 1", "work")
+
+    execution = parts.controller.start_agent_execution(
+        "chat",
+        "experiment-chat",
+        "what happened?",
+        participates_in_run_control=False,
+    )
+    parts.controller.after_agent(
+        "chat", "experiment-chat", result="answer", execution_id=execution.execution_id
+    )
+
+    finished = [
+        event
+        for event in parts.journal.read()
+        if event.type is EventType.AGENT_EXECUTION_FINISHED
+        and event.execution_id == execution.execution_id
+    ]
+    assert len(finished) == 1
+    assert finished[0].status is EventStatus.COMPLETED
+    assert parts.api.snapshot().status is RunStatus.STOPPED
 
 
 def test_finish_does_not_interrupt_presentation_only_chat(tmp_path):  # noqa: ANN001, ANN201

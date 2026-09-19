@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.api.service import RunApi
 from server.chat.manager import ChatManager
-from server.controller import RunController
+from server.controller import RunController, RunStopped
 from server.diagnostics import (
     Diagnostic,
     DiagnosticRetryability,
@@ -109,36 +109,19 @@ class ServerRuntime:
                 try:
                     value = run()
                 except KeyboardInterrupt:
-                    launcher_error = RuntimeError("launcher_terminated (SIGTERM)")
-                    event_diagnostic = exception_to_diagnostic(
-                        launcher_error,
-                        scope=DiagnosticScope.RUN,
-                        operation="Run",
-                        summary="Run interrupted",
-                        code="interrupted",
-                        severity=DiagnosticSeverity.FATAL,
-                        retryability=DiagnosticRetryability.NEVER,
-                    )
-                    terminal_recorded = self._terminal_recorded_after(terminal_cursor)
-                    # End the run before its terminal event is recorded, so no
-                    # snapshot can report `running` at a sequence that already
-                    # contains that event.
-                    self.controller.finish(
-                        launcher_error,
-                        record_event=False,
-                        diagnostic=event_diagnostic,
-                    )
-                    if not terminal_recorded:
-                        self.journal.record(
-                            EventType.RUN_INTERRUPTED,
-                            status=EventStatus.FAILED,
-                            data=RunInterruptedData(
-                                reason="launcher_terminated",
-                                signal="SIGTERM",
-                            ),
-                            diagnostic=event_diagnostic,
-                        )
+                    self._finish_after_launcher_interrupt(terminal_cursor)
                     raise
+                except RunStopped:
+                    # The stop already landed: the controller is STOPPED and
+                    # the journal ends with that terminal status change, so
+                    # there is no terminal event to add. ``finish`` is
+                    # absorbed by the ended status; it is called so the
+                    # journal cannot end on a live status even if a stop ever
+                    # unwinds before landing. Returning, not re-raising, is
+                    # what makes an operator stop a clean backend exit.
+                    self.controller.finish(record_event=False)
+                    transport.wait_for_subscriber_disconnect()
+                    return None
                 except ConfigurationError as exc:
                     configuration_diagnostic = exc.diagnostic
                     event_diagnostic = Diagnostic(
@@ -207,6 +190,38 @@ class ServerRuntime:
                         )
             finally:
                 signal.signal(signal.SIGTERM, previous_sigterm)
+
+    def _finish_after_launcher_interrupt(self, terminal_cursor: int) -> None:
+        """End a run the launcher terminated, recording the interruption once."""
+        launcher_error = RuntimeError("launcher_terminated (SIGTERM)")
+        event_diagnostic = exception_to_diagnostic(
+            launcher_error,
+            scope=DiagnosticScope.RUN,
+            operation="Run",
+            summary="Run interrupted",
+            code="interrupted",
+            severity=DiagnosticSeverity.FATAL,
+            retryability=DiagnosticRetryability.NEVER,
+        )
+        terminal_recorded = self._terminal_recorded_after(terminal_cursor)
+        # End the run before its terminal event is recorded, so no
+        # snapshot can report `running` at a sequence that already
+        # contains that event.
+        self.controller.finish(
+            launcher_error,
+            record_event=False,
+            diagnostic=event_diagnostic,
+        )
+        if not terminal_recorded:
+            self.journal.record(
+                EventType.RUN_INTERRUPTED,
+                status=EventStatus.FAILED,
+                data=RunInterruptedData(
+                    reason="launcher_terminated",
+                    signal="SIGTERM",
+                ),
+                diagnostic=event_diagnostic,
+            )
 
     def _terminal_recorded_after(self, sequence: int) -> bool:
         """Return whether the run callback already emitted its terminal event."""

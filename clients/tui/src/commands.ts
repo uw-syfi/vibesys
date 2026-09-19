@@ -16,6 +16,7 @@ export type CommandId =
   | 'chat'
   | 'pause'
   | 'resume'
+  | 'stop'
   | 'steer'
   | 'open-round'
   | 'perf'
@@ -146,6 +147,15 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
     surfaces: BOTH,
     section: 'run',
     parse: () => ({kind: 'request', request: {type: 'command.resume'}}),
+  },
+  {
+    id: 'stop',
+    name: '/stop',
+    description: 'Stop the run after the current agent call',
+    args: 'none',
+    surfaces: BOTH,
+    section: 'run',
+    parse: () => ({kind: 'request', request: {type: 'command.stop'}}),
   },
   {
     id: 'steer',

@@ -2032,10 +2032,14 @@ export function runStatusLabel(status: CoreRunStatus): string {
     case 'pausing':
       // Requested, but the call already in flight has to finish first.
       return 'pausing…';
+    case 'stopping':
+      // Same shape as pausing: the stop lands at the next boundary.
+      return 'stopping…';
     case 'connecting':
     case 'starting':
     case 'running':
     case 'paused':
+    case 'stopped':
     case 'completed':
     case 'failed':
       return status;

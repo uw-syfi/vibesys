@@ -636,6 +636,11 @@ function main(): void {
           writeLine(socket, ok(id, responseBody(type)));
           return;
         }
+        case 'command.stop': {
+          replay.pause();
+          writeLine(socket, ok(id, responseBody(type)));
+          return;
+        }
         case 'command.steer': {
           writeLine(socket, ok(id, responseBody(type)));
           return;

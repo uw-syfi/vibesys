@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from server.api.protocol import SubscribeRequest
+from server.api.protocol import StopCommand, SubscribeRequest
 from server.api.service import RunApi
 from server.chat.manager import ChatManager
 from server.controller import RunController
@@ -120,6 +120,50 @@ def test_runtime_waits_for_reconnected_subscriber_before_teardown(tmp_path: Path
     assert value == "ran"
     assert not clients.is_alive()
     assert returned_while_attached == [False]
+    assert not socket_path.exists()
+
+
+def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path):  # noqa: ANN001, ANN201
+    """An in-band `/stop` ends the backend without a failure record.
+
+    The journal's terminal record is the `stopped` status change; no
+    `run_finished`, `run_failed`, or `run_interrupted` event follows it.
+    """
+    socket_path = tmp_path / "control.sock"
+    runtime = ServerRuntime(socket_path=socket_path)
+    received: list[dict] = []
+
+    def collect_until_stopped() -> None:
+        _await_socket(socket_path)
+        with _subscription(socket_path) as read:
+            while True:
+                events = read().get("events", [])
+                received.extend(events)
+                if any(
+                    event["type"] == "run_status_changed" and event["data"]["status"] == "stopped"
+                    for event in events
+                ):
+                    return
+
+    subscriber = threading.Thread(target=collect_until_stopped)
+    subscriber.start()
+
+    def run() -> str:
+        runtime.api.execute(StopCommand())
+        runtime.controller.before_agent("implementer", "round 1", "work")
+        return "unreachable"
+
+    value = runtime.run(run)
+
+    subscriber.join(timeout=5)
+    assert value is None
+    assert not subscriber.is_alive()
+    terminal = ("run_finished", "run_failed", "run_interrupted")
+    assert not any(event["type"] in terminal for event in received)
+    statuses = [
+        event["data"]["status"] for event in received if event["type"] == "run_status_changed"
+    ]
+    assert statuses[-2:] == ["stopping", "stopped"]
     assert not socket_path.exists()
 
 

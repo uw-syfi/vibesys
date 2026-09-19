@@ -43,6 +43,7 @@ from server.api.protocol import (
     RunSnapshot,
     SnapshotQuery,
     SteerCommand,
+    StopCommand,
     TuiDefaultsQuery,
 )
 from server.api.workspace_git import WorkspacePatchReader
@@ -155,7 +156,7 @@ class RunApi:
 
     def execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911
         """Execute one typed request and return its protocol response."""
-        if isinstance(request, (PauseCommand, ResumeCommand, SteerCommand)):
+        if isinstance(request, (PauseCommand, ResumeCommand, SteerCommand, StopCommand)):
             return self._execute_command(request)
         if isinstance(request, ChatQuery):
             return self._execute_chat(request)
@@ -218,13 +219,18 @@ class RunApi:
             f"Unsupported protocol request: {type(request).__name__}"
         )
 
-    def _execute_command(self, request: PauseCommand | ResumeCommand | SteerCommand) -> Response:
+    def _execute_command(
+        self, request: PauseCommand | ResumeCommand | SteerCommand | StopCommand
+    ) -> Response:
         if isinstance(request, PauseCommand):
             self._controller.pause_after_call()
             ack = CommandAck(action="pause", status="pending")
         elif isinstance(request, ResumeCommand):
             self._controller.resume()
             ack = CommandAck(action="resume", status="consumed")
+        elif isinstance(request, StopCommand):
+            self._controller.stop_after_call()
+            ack = CommandAck(action="stop", status="pending")
         else:
             self._controller.steer(request.text)
             ack = CommandAck(action="steer", status="pending")

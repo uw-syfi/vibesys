@@ -4,6 +4,7 @@ export type Request =
   | PauseCommand
   | ResumeCommand
   | SteerCommand
+  | StopCommand
   | SnapshotQuery
   | ChatQuery
   | ChatThreadCreateQuery
@@ -33,72 +34,77 @@ export type Text = string;
 export type ProtocolVersion3 = 1;
 export type RequestId3 = string;
 export type Timestamp3 = string;
-export type Type3 = "query.snapshot";
+export type Type3 = "command.stop";
+export type Mode1 = "after_current_agent_call";
 export type ProtocolVersion4 = 1;
 export type RequestId4 = string;
 export type Timestamp4 = string;
-export type Type4 = "query.chat";
-export type Text1 = string;
-export type ThreadId = string | null;
+export type Type4 = "query.snapshot";
 export type ProtocolVersion5 = 1;
 export type RequestId5 = string;
 export type Timestamp5 = string;
-export type Type5 = "query.chat_thread_create";
+export type Type5 = "query.chat";
+export type Text1 = string;
+export type ThreadId = string | null;
+export type ProtocolVersion6 = 1;
+export type RequestId6 = string;
+export type Timestamp6 = string;
+export type Type6 = "query.chat_thread_create";
 export type Driver = ("agentshim" | "omnigent") | null;
 export type Provider = string | null;
 export type Model = string | null;
 export type Title = string | null;
-export type ProtocolVersion6 = 1;
-export type RequestId6 = string;
-export type Timestamp6 = string;
-export type Type6 = "query.chat_options";
 export type ProtocolVersion7 = 1;
 export type RequestId7 = string;
 export type Timestamp7 = string;
-export type Type7 = "query.tui_defaults";
+export type Type7 = "query.chat_options";
 export type ProtocolVersion8 = 1;
 export type RequestId8 = string;
 export type Timestamp8 = string;
-export type Type8 = "query.history";
+export type Type8 = "query.tui_defaults";
 export type ProtocolVersion9 = 1;
 export type RequestId9 = string;
 export type Timestamp9 = string;
-export type Type9 = "query.performance";
+export type Type9 = "query.history";
 export type ProtocolVersion10 = 1;
 export type RequestId10 = string;
 export type Timestamp10 = string;
-export type Type10 = "query.experiments";
-export type RunId = string;
-export type ProjectionId = string;
-export type Revision = number;
+export type Type10 = "query.performance";
 export type ProtocolVersion11 = 1;
 export type RequestId11 = string;
 export type Timestamp11 = string;
-export type Type11 = "query.design";
+export type Type11 = "query.experiments";
+export type RunId = string;
+export type ProjectionId = string;
+export type Revision = number;
 export type ProtocolVersion12 = 1;
 export type RequestId12 = string;
 export type Timestamp12 = string;
-export type Type12 = "query.design_patch";
-export type Base = string;
-export type Head = string;
-export type Path = string;
+export type Type12 = "query.design";
 export type ProtocolVersion13 = 1;
 export type RequestId13 = string;
 export type Timestamp13 = string;
-export type Type13 = "query.events";
-export type AfterSequence = number;
-export type BeforeSequence = number | null;
-export type TimeoutMs = number;
+export type Type13 = "query.design_patch";
+export type Base = string;
+export type Head = string;
+export type Path = string;
 export type ProtocolVersion14 = 1;
 export type RequestId14 = string;
 export type Timestamp14 = string;
-export type Type14 = "subscribe";
-export type AfterSequence1 = number;
-export type Tail = number | null;
-export type StoreId = string;
+export type Type14 = "query.events";
+export type AfterSequence = number;
+export type BeforeSequence = number | null;
+export type TimeoutMs = number;
 export type ProtocolVersion15 = 1;
 export type RequestId15 = string;
 export type Timestamp15 = string;
+export type Type15 = "subscribe";
+export type AfterSequence1 = number;
+export type Tail = number | null;
+export type StoreId = string;
+export type ProtocolVersion16 = 1;
+export type RequestId16 = string;
+export type Timestamp16 = string;
 export type Ok = boolean;
 export type Error = string | null;
 export type Id = string;
@@ -121,7 +127,7 @@ export type DiagnosticRetryability = "automatic" | "manual" | "never" | "unknown
 export type CauseId = string | null;
 export type DebugRef = string | null;
 export type Source = string | null;
-export type Action = "pause" | "resume" | "steer";
+export type Action = "pause" | "resume" | "steer" | "stop";
 export type Status = "pending" | "consumed";
 export type Question = string;
 export type Answer = string;
@@ -159,7 +165,7 @@ export type TuiTheme =
   | "catppuccin-latte"
   | "high-contrast-dark"
   | "high-contrast-light";
-export type ProtocolVersion16 = 1;
+export type ProtocolVersion17 = 1;
 export type RunId1 = string;
 export type Sequence = number;
 /**
@@ -172,8 +178,10 @@ export type Sequence = number;
  * ``PAUSING`` and ``PAUSED`` are distinct because a pause is only applied at
  * an invocation boundary: ``/pause`` records the request, and the run keeps
  * executing the call already in flight until it reaches that boundary.
+ * ``STOPPING`` and ``STOPPED`` split the same way for ``/stop``, whose
+ * boundary is where the run ends instead of where it parks.
  */
-export type RunStatus = "starting" | "running" | "pausing" | "paused" | "completed" | "failed";
+export type RunStatus = "starting" | "running" | "pausing" | "paused" | "stopping" | "stopped" | "completed" | "failed";
 export type AgentKind = string | null;
 export type RoundLabel = string | null;
 export type ExecutionId = string;
@@ -184,7 +192,7 @@ export type Attempt = number | null;
 export type Assignment = string;
 export type StartedAt = string;
 export type Kind = "agent_execution_activity_changed";
-export type Mode1 = "thinking" | "responding" | "tool" | "waiting";
+export type Mode2 = "thinking" | "responding" | "tool" | "waiting";
 export type Summary1 = string;
 export type Tool = string | null;
 export type Driver2 = string | null;
@@ -192,10 +200,10 @@ export type Provider3 = string | null;
 export type Model3 = string | null;
 export type ActiveExecutions = ActiveAgentExecution[];
 export type ChatThreads = ChatThreadInfo[];
-export type ProtocolVersion17 = 1;
+export type ProtocolVersion18 = 1;
 export type Sequence1 = number;
 export type RunId2 = string;
-export type Timestamp16 = string;
+export type Timestamp17 = string;
 export type EventType =
   | "server_started"
   | "server_ready"
@@ -540,19 +548,19 @@ export type RenamedFrom1 = string | null;
 export type Patch = string | null;
 export type Truncated = boolean;
 export type ServerMessage = SubscribedMessage | EventMessage | EventBatchMessage | ProtocolErrorMessage;
-export type Type15 = "subscribed";
-export type RequestId16 = string;
+export type Type16 = "subscribed";
+export type RequestId17 = string;
 export type RunId4 = string;
 export type LatestSequence = number;
-export type Type16 = "event";
-export type Type17 = "event_batch";
+export type Type17 = "event";
+export type Type18 = "event_batch";
 export type Events1 = RunEvent[];
 export type ThroughSequence = number;
 export type ActiveExecutions1 = ActiveAgentExecution[];
 export type StoreId1 = string;
 export type HistoryAfterSequence = number;
-export type Type18 = "protocol_error";
-export type RequestId17 = string | null;
+export type Type19 = "protocol_error";
+export type RequestId18 = string | null;
 export type Code2 = string;
 export type Message1 = string;
 
@@ -584,17 +592,24 @@ export interface SteerCommand {
   type?: Type2;
   text: Text;
 }
-export interface SnapshotQuery {
+export interface StopCommand {
   protocol_version?: ProtocolVersion3;
   request_id?: RequestId3;
   timestamp?: Timestamp3;
   type?: Type3;
+  mode?: Mode1;
 }
-export interface ChatQuery {
+export interface SnapshotQuery {
   protocol_version?: ProtocolVersion4;
   request_id?: RequestId4;
   timestamp?: Timestamp4;
   type?: Type4;
+}
+export interface ChatQuery {
+  protocol_version?: ProtocolVersion5;
+  request_id?: RequestId5;
+  timestamp?: Timestamp5;
+  type?: Type5;
   text: Text1;
   thread_id?: ThreadId;
 }
@@ -608,10 +623,10 @@ export interface ChatQuery {
  * thread inherits the run's.
  */
 export interface ChatThreadCreateQuery {
-  protocol_version?: ProtocolVersion5;
-  request_id?: RequestId5;
-  timestamp?: Timestamp5;
-  type?: Type5;
+  protocol_version?: ProtocolVersion6;
+  request_id?: RequestId6;
+  timestamp?: Timestamp6;
+  type?: Type6;
   driver?: Driver;
   provider?: Provider;
   model?: Model;
@@ -621,10 +636,10 @@ export interface ChatThreadCreateQuery {
  * Request the agent selections this run's experiment chat offers.
  */
 export interface ChatOptionsQuery {
-  protocol_version?: ProtocolVersion6;
-  request_id?: RequestId6;
-  timestamp?: Timestamp6;
-  type?: Type6;
+  protocol_version?: ProtocolVersion7;
+  request_id?: RequestId7;
+  timestamp?: Timestamp7;
+  type?: Type7;
 }
 /**
  * Request the launch-directory configuration defaults a TUI applies.
@@ -634,31 +649,31 @@ export interface ChatOptionsQuery {
  * launcher an extra Python process on the boot path.
  */
 export interface TuiDefaultsQuery {
-  protocol_version?: ProtocolVersion7;
-  request_id?: RequestId7;
-  timestamp?: Timestamp7;
-  type?: Type7;
-}
-export interface HistoryQuery {
   protocol_version?: ProtocolVersion8;
   request_id?: RequestId8;
   timestamp?: Timestamp8;
   type?: Type8;
 }
-export interface PerformanceQuery {
+export interface HistoryQuery {
   protocol_version?: ProtocolVersion9;
   request_id?: RequestId9;
   timestamp?: Timestamp9;
   type?: Type9;
 }
-/**
- * Request the hypothesis-level experiment log for the attached run.
- */
-export interface ExperimentQuery {
+export interface PerformanceQuery {
   protocol_version?: ProtocolVersion10;
   request_id?: RequestId10;
   timestamp?: Timestamp10;
   type?: Type10;
+}
+/**
+ * Request the hypothesis-level experiment log for the attached run.
+ */
+export interface ExperimentQuery {
+  protocol_version?: ProtocolVersion11;
+  request_id?: RequestId11;
+  timestamp?: Timestamp11;
+  type?: Type11;
   after?: ExperimentCursor | null;
 }
 /**
@@ -677,10 +692,10 @@ export interface ExperimentCursor {
  * of the round concluded.
  */
 export interface DesignQuery {
-  protocol_version?: ProtocolVersion11;
-  request_id?: RequestId11;
-  timestamp?: Timestamp11;
-  type?: Type11;
+  protocol_version?: ProtocolVersion12;
+  request_id?: RequestId12;
+  timestamp?: Timestamp12;
+  type?: Type12;
 }
 /**
  * Request one file's unified patch from a round's commit range.
@@ -692,36 +707,36 @@ export interface DesignQuery {
  * paths the design log filtered out.
  */
 export interface DesignPatchQuery {
-  protocol_version?: ProtocolVersion12;
-  request_id?: RequestId12;
-  timestamp?: Timestamp12;
-  type?: Type12;
+  protocol_version?: ProtocolVersion13;
+  request_id?: RequestId13;
+  timestamp?: Timestamp13;
+  type?: Type13;
   base: Base;
   head: Head;
   path: Path;
 }
 export interface EventsQuery {
-  protocol_version?: ProtocolVersion13;
-  request_id?: RequestId13;
-  timestamp?: Timestamp13;
-  type?: Type13;
+  protocol_version?: ProtocolVersion14;
+  request_id?: RequestId14;
+  timestamp?: Timestamp14;
+  type?: Type14;
   after_sequence?: AfterSequence;
   before_sequence?: BeforeSequence;
   timeout_ms?: TimeoutMs;
 }
 export interface SubscribeRequest {
-  protocol_version?: ProtocolVersion14;
-  request_id?: RequestId14;
-  timestamp?: Timestamp14;
-  type?: Type14;
+  protocol_version?: ProtocolVersion15;
+  request_id?: RequestId15;
+  timestamp?: Timestamp15;
+  type?: Type15;
   after_sequence?: AfterSequence1;
   tail?: Tail;
   store_id?: StoreId;
 }
 export interface Response {
-  protocol_version?: ProtocolVersion15;
-  request_id: RequestId15;
-  timestamp?: Timestamp15;
+  protocol_version?: ProtocolVersion16;
+  request_id: RequestId16;
+  timestamp?: Timestamp16;
   ok?: Ok;
   error?: Error;
   diagnostic?: Diagnostic | null;
@@ -814,7 +829,7 @@ export interface InteractiveSetupDefaults {
   theme: TuiTheme;
 }
 export interface RunSnapshot {
-  protocol_version?: ProtocolVersion16;
+  protocol_version?: ProtocolVersion17;
   run_id: RunId1;
   sequence: Sequence;
   status: RunStatus;
@@ -844,7 +859,7 @@ export interface ActiveAgentExecution {
  */
 export interface AgentExecutionActivityData {
   kind?: Kind;
-  mode: Mode1;
+  mode: Mode2;
   summary: Summary1;
   tool?: Tool;
   [k: string]: unknown;
@@ -857,10 +872,10 @@ export interface AgentExecutionActivityData {
  * object, which lets ``EventStore`` replay history without copying it.
  */
 export interface RunEvent {
-  protocol_version?: ProtocolVersion17;
+  protocol_version?: ProtocolVersion18;
   sequence?: Sequence1;
   run_id?: RunId2;
-  timestamp: Timestamp16;
+  timestamp: Timestamp17;
   type: EventType;
   text?: Text2;
   diagnostic?: Diagnostic | null;
@@ -1333,17 +1348,17 @@ export interface DesignPatch {
   truncated?: Truncated;
 }
 export interface SubscribedMessage {
-  type?: Type15;
-  request_id: RequestId16;
+  type?: Type16;
+  request_id: RequestId17;
   run_id: RunId4;
   latest_sequence: LatestSequence;
 }
 export interface EventMessage {
-  type?: Type16;
+  type?: Type17;
   event: RunEvent;
 }
 export interface EventBatchMessage {
-  type?: Type17;
+  type?: Type18;
   events: Events1;
   through_sequence?: ThroughSequence;
   active_executions?: ActiveExecutions1;
@@ -1351,8 +1366,8 @@ export interface EventBatchMessage {
   history_after_sequence?: HistoryAfterSequence;
 }
 export interface ProtocolErrorMessage {
-  type?: Type18;
-  request_id?: RequestId17;
+  type?: Type19;
+  request_id?: RequestId18;
   code: Code2;
   message: Message1;
   diagnostic?: Diagnostic | null;

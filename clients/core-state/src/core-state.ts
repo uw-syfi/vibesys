@@ -164,7 +164,7 @@ function isRunLifetimeBoundary(event: RunEvent): boolean {
 export type CoreRunStatus = RunStatus | 'connecting';
 
 /** The statuses a run never leaves. Named once; `terminate` writes only these. */
-export type EndedRunStatus = Extract<CoreRunStatus, 'completed' | 'failed'>;
+export type EndedRunStatus = Extract<CoreRunStatus, 'completed' | 'failed' | 'stopped'>;
 
 export interface CoreState {
   sequence: number;
@@ -270,12 +270,14 @@ function endedRunStatus(status: CoreRunStatus): EndedRunStatus | null {
   switch (status) {
     case 'completed':
     case 'failed':
+    case 'stopped':
       return status;
     case 'connecting':
     case 'starting':
     case 'running':
     case 'pausing':
     case 'paused':
+    case 'stopping':
       return null;
     default: {
       const unhandled: never = status;

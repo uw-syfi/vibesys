@@ -45,6 +45,11 @@ class SteerCommand(Request):  # noqa: D101  # tracked: #288
     text: str = Field(min_length=1)
 
 
+class StopCommand(Request):  # noqa: D101  # tracked: #288
+    type: Literal["command.stop"] = "command.stop"
+    mode: Literal["after_current_agent_call"] = "after_current_agent_call"
+
+
 class SnapshotQuery(Request):  # noqa: D101  # tracked: #288
     type: Literal["query.snapshot"] = "query.snapshot"
 
@@ -174,6 +179,7 @@ ProtocolRequest = Annotated[
     PauseCommand
     | ResumeCommand
     | SteerCommand
+    | StopCommand
     | SnapshotQuery
     | ChatQuery
     | ChatThreadCreateQuery
@@ -215,7 +221,7 @@ class RunSnapshot(ProtocolModel):  # noqa: D101  # tracked: #288
 
 
 class CommandAck(ProtocolModel):  # noqa: D101  # tracked: #288
-    action: Literal["pause", "resume", "steer"]
+    action: Literal["pause", "resume", "steer", "stop"]
     status: Literal["pending", "consumed"]
 
 

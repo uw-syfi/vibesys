@@ -32,6 +32,7 @@ report the same errors.
 | | Every command below works in the chat too, and does the same thing as in the command bar. |
 | `/pause` | Pause after the current agent call finishes. |
 | `/resume` | Resume a paused run. Works from the command bar and the chat. |
+| `/stop` | Stop the run after the current agent call. |
 | `/steer <message>` | Queue an instruction that is appended to the next agent invocation's prompt. |
 | `/open-round` | Open the rounds behind the selected hypothesis. |
 | `/open-round --N` | Open round N, inside whichever hypothesis owns it. |

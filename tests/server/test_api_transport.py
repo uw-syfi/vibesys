@@ -12,10 +12,12 @@ from server.api.protocol import (
     ChatQuery,
     EventsQuery,
     SnapshotQuery,
+    StopCommand,
     SubscribeRequest,
 )
 from server.chat.manager import ChatAnswer
 from server.events import EventType
+from server.run_lifecycle import RunStatus
 from server.transport.unix_jsonl import UnixJsonlServer
 from vibesys.unix_socket import (
     MAX_SOCKET_PATH_BYTES,
@@ -60,6 +62,19 @@ def test_api_fallback_explains_agent_availability(tmp_path):  # noqa: ANN001, AN
 
     parts.controller.finish()
     assert "the run has finished" in parts.chat.chat("what happened?")
+
+
+def test_transport_round_trips_the_stop_command(tmp_path):  # noqa: ANN001, ANN201
+    """`command.stop` parses off the wire, dispatches, and acks as pending."""
+    parts = build_server_parts(tmp_path / "logs")
+    socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"  # noqa: S108
+
+    with UnixJsonlServer(socket_path, parts.api):
+        response = _request(socket_path, StopCommand())
+
+    assert response["ok"] is True
+    assert response["ack"] == {"action": "stop", "status": "pending"}
+    assert parts.controller.run_status() is RunStatus.STOPPING
 
 
 def test_transport_supports_multiple_clients_and_replay(tmp_path):  # noqa: ANN001, ANN201

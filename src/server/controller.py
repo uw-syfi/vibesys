@@ -18,6 +18,17 @@ if TYPE_CHECKING:
     from vs_project import Project, StateSnapshot
 
 
+class RunStopped(BaseException):
+    """The operator's ``/stop`` landed: unwind the run callable.
+
+    Raised on the run's own thread at the invocation boundary where the stop
+    lands, after the controller has already reached ``STOPPED`` and journaled
+    the terminal status change. Derives from ``BaseException``, like
+    ``KeyboardInterrupt``, so an ``except Exception`` inside loop code cannot
+    absorb the unwind on its way to :meth:`server.runtime.ServerRuntime.run`.
+    """
+
+
 @dataclass(frozen=True)
 class ProjectRunState:
     """Typed access to one attached canonical project run."""
@@ -114,8 +125,14 @@ class RunController:
             self._apply_locked(RunTrigger.PAUSE_REQUESTED)
             self._journal.record(EventType.CONTROL, "/pause", status=EventStatus.PENDING)
 
+    def stop_after_call(self) -> None:
+        """Request a stop at the next controlled invocation boundary."""
+        with self._condition:
+            self._apply_locked(RunTrigger.STOP_REQUESTED)
+            self._journal.record(EventType.CONTROL, "/stop", status=EventStatus.PENDING)
+
     def resume(self) -> None:
-        """Resume controlled invocations and clear a pending pause."""
+        """Resume controlled invocations and clear a pending pause or stop."""
         with self._condition:
             self._apply_locked(RunTrigger.RESUMED)
             self._journal.record(EventType.CONTROL, "/resume", status=EventStatus.CONSUMED)
@@ -140,10 +157,12 @@ class RunController:
         provider: str | None = None,
         model: str | None = None,
     ) -> ExecutionHandle:
-        """Enter one invocation boundary, applying pause and steering state."""
+        """Enter one invocation boundary, applying pause, stop, and steering state."""
         with self._condition:
             while participates_in_run_control and self._status is RunStatus.PAUSED:
                 self._condition.wait()
+            if participates_in_run_control:
+                self._land_stop_at_entry_locked()
             steering = (
                 self._pending_steer if consume_steering and participates_in_run_control else []
             )
@@ -195,9 +214,9 @@ class RunController:
         if resolved_id is None:
             # A finish with no execution to match: the compatibility boundary
             # was never entered on this thread. It is still an invocation
-            # boundary, so a pending pause lands here like anywhere else.
+            # boundary, so a pending pause or stop lands here like anywhere else.
             with self._condition:
-                self._reach_pause_boundary_locked()
+                self._reach_invocation_boundary_locked()
             return
         with self._condition:
             active, controlled = self._executions.finish_locked(
@@ -206,37 +225,57 @@ class RunController:
             if active is None:
                 return
             if controlled:
-                self._reach_pause_boundary_locked(
+                self._reach_invocation_boundary_locked(
                     agent_kind=active.agent_kind,
                     round_label=active.round_label,
                     execution_id=resolved_id,
                 )
         self._executions.clear_legacy(resolved_id)
 
-    def _reach_pause_boundary_locked(
+    def _reach_invocation_boundary_locked(
         self,
         *,
         agent_kind: str | None = None,
         round_label: str | None = None,
         execution_id: str | None = None,
     ) -> None:
-        """Apply the invocation boundary, pausing only if one was requested."""
+        """Apply the invocation boundary, landing a pending pause or stop.
+
+        A stop that lands here does not raise: ``after_agent`` runs while the
+        invocation is still finalizing, so the unwind is deferred to the next
+        ``start_agent_execution`` entry, which finds ``STOPPED`` and raises.
+        """
         reached = self._apply_locked(
             RunTrigger.INVOCATION_FINISHED,
             agent_kind=agent_kind,
             round_label=round_label,
             execution_id=execution_id,
         )
-        if reached is not RunStatus.PAUSED:
+        if reached not in (RunStatus.PAUSED, RunStatus.STOPPED):
             return
         self._journal.record(
             EventType.CONTROL,
-            "/pause",
+            "/pause" if reached is RunStatus.PAUSED else "/stop",
             status=EventStatus.CONSUMED,
             agent_kind=agent_kind,
             round_label=round_label,
             execution_id=execution_id,
         )
+
+    def _land_stop_at_entry_locked(self) -> None:
+        """Land a pending stop at the entry side of the invocation boundary.
+
+        A stop requested while the run was paused, or between invocations,
+        has no controlled call in flight to finish, so the entry to the next
+        one is the boundary where it lands: no further agent call starts.
+        Raising :class:`RunStopped` on the run's own thread is what unwinds
+        the run callable to ``ServerRuntime.run`` without touching loop code.
+        """
+        if self._status is RunStatus.STOPPING:
+            self._apply_locked(RunTrigger.INVOCATION_FINISHED)
+            self._journal.record(EventType.CONTROL, "/stop", status=EventStatus.CONSUMED)
+        if self._status is RunStatus.STOPPED:
+            raise RunStopped
 
     def status(self) -> str:
         """Return a compact human-readable run status."""

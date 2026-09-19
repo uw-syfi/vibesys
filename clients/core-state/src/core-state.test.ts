@@ -993,11 +993,13 @@ describe('whether a run has ended', () => {
   it('classifies every run status the projection can hold', () => {
     expect(hasRunEnded(withStatus('completed'))).toBe(true);
     expect(hasRunEnded(withStatus('failed'))).toBe(true);
+    expect(hasRunEnded(withStatus('stopped'))).toBe(true);
     expect(hasRunEnded(withStatus('connecting'))).toBe(false);
     expect(hasRunEnded(withStatus('starting'))).toBe(false);
     expect(hasRunEnded(withStatus('running'))).toBe(false);
     expect(hasRunEnded(withStatus('pausing'))).toBe(false);
     expect(hasRunEnded(withStatus('paused'))).toBe(false);
+    expect(hasRunEnded(withStatus('stopping'))).toBe(false);
   });
 
   it('reads an ended run from a bootstrapped snapshot', () => {
@@ -1046,6 +1048,39 @@ describe('the run lifecycle', () => {
     const resumed = reduceEvent(paused, statusEvent(3, 'running', 'paused'));
     expect(resumed.status).toBe('running');
     expect(hasRunEnded(resumed)).toBe(false);
+  });
+
+  it('folds a stop request as live until its boundary ends the run', () => {
+    const requested = reduceEvent(initialCoreState(), statusEvent(1, 'stopping', 'running'));
+    expect(requested.status).toBe('stopping');
+    expect(hasRunEnded(requested)).toBe(false);
+
+    const stopped = reduceEvent(requested, statusEvent(2, 'stopped', 'stopping'));
+    expect(stopped.status).toBe('stopped');
+    expect(hasRunEnded(stopped)).toBe(true);
+  });
+
+  it('keeps a run live when a resume cancels the pending stop', () => {
+    const state = reduceEventBatch(initialCoreState(), [
+      statusEvent(1, 'stopping', 'running'),
+      statusEvent(2, 'running', 'stopping'),
+    ]);
+
+    expect(state.status).toBe('running');
+    expect(hasRunEnded(state)).toBe(false);
+  });
+
+  it('drops the active executions of an operator-stopped run', () => {
+    const running = reduceSnapshot(initialCoreState(), {
+      run_id: 'run',
+      status: 'stopping',
+      sequence: 1,
+      active_executions: [checkpoint('exec-1')],
+    } satisfies RunSnapshot);
+
+    const state = reduceEvent(running, statusEvent(2, 'stopped', 'stopping'));
+
+    expect(state.activeExecutions).toEqual({});
   });
 
   it('ends a run that was paused when it stopped', () => {

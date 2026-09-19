@@ -345,11 +345,17 @@ export function headerSpanStyle(theme: Theme, span: HeaderSpan): HeaderSpanStyle
  * `pausing` shares the warning of `paused` rather than getting a tone of its
  * own: it is the same verdict, and the word is what says the pause has not
  * landed yet. A colour the operator has to learn would say it less clearly.
+ * `stopping` and `stopped` take the same warning: an operator stop is a
+ * deliberate end, neither the success of `completed` nor the failure of
+ * `failed`.
  */
 function stateColor(theme: Theme, state: string): string {
   if (state === runStatusLabel('completed')) return theme.success;
   if (state === runStatusLabel('failed')) return theme.error;
   if (state === runStatusLabel('pausing') || state === runStatusLabel('paused')) {
+    return theme.warning;
+  }
+  if (state === runStatusLabel('stopping') || state === runStatusLabel('stopped')) {
     return theme.warning;
   }
   if (state === DISCONNECTED) return theme.warning;

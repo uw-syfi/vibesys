@@ -1605,6 +1605,8 @@ describe('session event model', () => {
     expect(runStatusLabel('running')).toBe('running');
     expect(runStatusLabel('pausing')).toBe('pausing…');
     expect(runStatusLabel('paused')).toBe('paused');
+    expect(runStatusLabel('stopping')).toBe('stopping…');
+    expect(runStatusLabel('stopped')).toBe('stopped');
     expect(runStatusLabel('completed')).toBe('completed');
   });
 

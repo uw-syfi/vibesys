@@ -23,6 +23,7 @@ const SHARED = [
   '/help',
   '/pause',
   '/resume',
+  '/stop',
   '/steer look at the cache',
   '/open-round',
   '/perf',
@@ -37,6 +38,7 @@ describe('parseCommand', () => {
     expect(onCommand('/help')).toEqual({kind: 'help'});
     expect(onCommand('/pause')).toEqual({kind: 'request', request: {type: 'command.pause'}});
     expect(onCommand('/resume')).toEqual({kind: 'request', request: {type: 'command.resume'}});
+    expect(onCommand('/stop')).toEqual({kind: 'request', request: {type: 'command.stop'}});
     expect(onCommand('/steer prioritize the KV cache path')).toEqual({
       kind: 'request',
       request: {type: 'command.steer', text: 'prioritize the KV cache path'},
@@ -110,6 +112,7 @@ describe('argument-contract enforcement', () => {
     expect(onCommand('/perf extra')).toEqual({kind: 'error', error: 'Usage: /perf'});
     expect(onCommand('/help ignored')).toEqual({kind: 'error', error: 'Usage: /help'});
     expect(onCommand('/resume now')).toEqual({kind: 'error', error: 'Usage: /resume'});
+    expect(onCommand('/stop now')).toEqual({kind: 'error', error: 'Usage: /stop'});
     expect(onCommand('/design later')).toEqual({kind: 'error', error: 'Usage: /design'});
   });
 
@@ -275,6 +278,7 @@ describe('suggestions filtered by surface', () => {
       '/chat',
       '/pause',
       '/resume',
+      '/stop',
       '/steer',
       '/open-round',
       '/perf',

@@ -774,7 +774,8 @@
           "enum": [
             "pause",
             "resume",
-            "steer"
+            "steer",
+            "stop"
           ],
           "title": "Action",
           "type": "string"
@@ -3490,12 +3491,14 @@
       "type": "object"
     },
     "RunStatus": {
-      "description": "Lifecycle status of one run, as frontends observe it.\n\nThis is the authoritative closed set for the ``status`` field of\n``RunSnapshot`` and of ``RunStatusChangedData``; the generated TypeScript\nprotocol types derive their union from it.\n\n``PAUSING`` and ``PAUSED`` are distinct because a pause is only applied at\nan invocation boundary: ``/pause`` records the request, and the run keeps\nexecuting the call already in flight until it reaches that boundary.",
+      "description": "Lifecycle status of one run, as frontends observe it.\n\nThis is the authoritative closed set for the ``status`` field of\n``RunSnapshot`` and of ``RunStatusChangedData``; the generated TypeScript\nprotocol types derive their union from it.\n\n``PAUSING`` and ``PAUSED`` are distinct because a pause is only applied at\nan invocation boundary: ``/pause`` records the request, and the run keeps\nexecuting the call already in flight until it reaches that boundary.\n``STOPPING`` and ``STOPPED`` split the same way for ``/stop``, whose\nboundary is where the run ends instead of where it parks.",
       "enum": [
         "starting",
         "running",
         "pausing",
         "paused",
+        "stopping",
+        "stopped",
         "completed",
         "failed"
       ],
@@ -3605,6 +3608,40 @@
         "text"
       ],
       "title": "SteerCommand",
+      "type": "object"
+    },
+    "StopCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "command.stop",
+          "default": "command.stop",
+          "title": "Type",
+          "type": "string"
+        },
+        "mode": {
+          "const": "after_current_agent_call",
+          "default": "after_current_agent_call",
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "title": "StopCommand",
       "type": "object"
     },
     "SubprocessOutputData": {
@@ -4027,6 +4064,7 @@
           "command.pause": "#/$defs/PauseCommand",
           "command.resume": "#/$defs/ResumeCommand",
           "command.steer": "#/$defs/SteerCommand",
+          "command.stop": "#/$defs/StopCommand",
           "query.chat": "#/$defs/ChatQuery",
           "query.chat_options": "#/$defs/ChatOptionsQuery",
           "query.chat_thread_create": "#/$defs/ChatThreadCreateQuery",
@@ -4051,6 +4089,9 @@
         },
         {
           "$ref": "#/$defs/SteerCommand"
+        },
+        {
+          "$ref": "#/$defs/StopCommand"
         },
         {
           "$ref": "#/$defs/SnapshotQuery"

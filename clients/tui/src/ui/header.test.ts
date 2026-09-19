@@ -346,6 +346,19 @@ describe('run state', () => {
     expect(line(pausing, false, WIDE)).toContain('pausing…');
   });
 
+  it('spells out a stop the backend has requested but not yet landed', () => {
+    // `/stop` lands at the next invocation boundary the way `/pause` does, so
+    // the header reads `stopping…` until the backend says the run ended.
+    const stopping = stateWith({}, {status: 'stopping'});
+    expect(runStateText(stopping)).toBe('stopping…');
+    const stopped = stateWith({}, {status: 'stopped'});
+    expect(runStateText(stopped)).toBe('stopped');
+    // A stopped run whose socket closed is finished, not disconnected.
+    expect(runStateText(stateWith({eventStreamAvailable: false}, {status: 'stopped'}))).toBe(
+      'stopped',
+    );
+  });
+
   it('shows a lost event stream while the run is still going', () => {
     const dropped = stateWith({eventStreamAvailable: false}, {status: 'running'});
     expect(runStateText(dropped)).toBe('disconnected');
@@ -393,7 +406,17 @@ const SPAN_ROLES: readonly HeaderSpanRole[] = [
  */
 const RUN_STATES = [
   ...(
-    ['starting', 'running', 'pausing', 'paused', 'completed', 'failed', 'connecting'] as const
+    [
+      'starting',
+      'running',
+      'pausing',
+      'paused',
+      'stopping',
+      'stopped',
+      'completed',
+      'failed',
+      'connecting',
+    ] as const
   ).map(runStatusLabel),
   'disconnected',
   // A status the backend adds after this was written, which has no verdict here.
@@ -463,6 +486,10 @@ describe('header hierarchy', () => {
     // The label, not the status: `pausing` is on the line as `pausing…`.
     expect(tone(runStatusLabel('pausing'))).toBe(theme.warning);
     expect(tone('pausing')).toBe(theme.textPrimary);
+    // An operator stop is a deliberate end: a warning, not a failure.
+    expect(tone('stopped')).toBe(theme.warning);
+    expect(tone(runStatusLabel('stopping'))).toBe(theme.warning);
+    expect(tone('stopping')).toBe(theme.textPrimary);
     expect(tone('disconnected')).toBe(theme.warning);
     // Not verdicts. Bold is what sets these apart, and the word is spelled out.
     expect(tone('running')).toBe(theme.textPrimary);
@@ -486,6 +513,9 @@ describe('header hierarchy', () => {
     // against.
     expect(stateTone(stateWith({}, {status: 'pausing'}))).toBe(theme.warning);
     expect(stateTone(stateWith({}, {status: 'paused'}))).toBe(theme.warning);
+    // A stop before and after it lands, rendered as `stopping…` then `stopped`.
+    expect(stateTone(stateWith({}, {status: 'stopping'}))).toBe(theme.warning);
+    expect(stateTone(stateWith({}, {status: 'stopped'}))).toBe(theme.warning);
     // A lost stream, over a status that still says the run is going.
     expect(stateTone(stateWith({eventStreamAvailable: false}, {status: 'running'}))).toBe(
       theme.warning,
