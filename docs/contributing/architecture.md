@@ -57,13 +57,11 @@ graph TD
     vibesys --> vibesys.sandbox
     vibesys.agents --> vibesys
     vibesys.agents --> vibesys.render
-    vibesys.agents --> vibesys.run
     vibesys.backends --> vibesys
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
     vibesys.prompts --> vibesys
     vibesys.render --> vibesys
-    vibesys.render --> vibesys.run
     vibesys.run --> vibesys
     vibesys.run --> vibesys.agents
     vibesys.run --> vibesys.backends
@@ -138,6 +136,7 @@ graph TD
     server.integration --> server.journal
     server.integration --> server.read_model
     server.integration --> server.run_lifecycle
+    server.integration --> vibesys
     server.integration --> vibesys.agents
     server.integration --> vibesys.render
     server.integration --> vibesys.run
@@ -174,7 +173,6 @@ graph TD
     vibesys --> vs_sandbox
     vibesys.agents --> vibesys
     vibesys.agents --> vibesys.render
-    vibesys.agents --> vibesys.run
     vibesys.agents --> vs_project
     vibesys.agents --> vs_sandbox
     vibesys.backends --> vibesys
@@ -197,7 +195,6 @@ graph TD
     vibesys.prompts --> vibesys
     vibesys.prompts --> vs_prompts
     vibesys.render --> vibesys
-    vibesys.render --> vibesys.run
     vibesys.run --> vibesys
     vibesys.run --> vibesys.agents
     vibesys.run --> vibesys.backends
