@@ -13,6 +13,16 @@ import {
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
 import type {ChatOptions, HypothesisEntry} from '@vibesys/backend-client';
 import {type CoreRunStatus, DEFAULT_CHAT_THREAD_ID} from '@vibesys/core-state';
+import {
+  chatMenuCustomModel,
+  closeChatMenu,
+  moveChatMenuSelection,
+  openChatModelMenu,
+  openChatResumeMenu,
+  selectedChatMenuRow,
+  setChatMenuCustomModel,
+  setChatModelMenuOptions,
+} from '../chat-menu.js';
 import {chatHelpText, parseCommand} from '../commands.js';
 import {
   closeDiffViewer,
@@ -25,11 +35,9 @@ import type {SessionController} from '../session-controller.js';
 import {
   activeChatThreadSettings,
   type ChatThreadSettings,
-  chatMenuCustomModel,
   clearAgentSelection,
   clearEntrySelection,
   clearInputError,
-  closeChatMenu,
   closeOverlays,
   closePane,
   closeThemePicker,
@@ -43,14 +51,11 @@ import {
   initialSessionState,
   leaveExperimentDrilldown,
   leaveHypothesisDetail,
-  moveChatMenuSelection,
   moveExperimentSelection,
   moveHypothesisRoundSelection,
   moveThemeSelection,
   normalizeFocus,
   openChat,
-  openChatModelMenu,
-  openChatResumeMenu,
   openExperimentLog,
   openHypothesisDetail,
   openPane,
@@ -61,14 +66,11 @@ import {
   type SessionState,
   selectAgent,
   selectExperimentActivity,
-  selectedChatMenuRow,
   selectNextEntry,
   selectNextRound,
   selectNextTodo,
   selectPreviousRound,
   setChatDockFits,
-  setChatMenuCustomModel,
-  setChatModelMenuOptions,
   setExperiments,
   setPaneContent,
   setTheme,
