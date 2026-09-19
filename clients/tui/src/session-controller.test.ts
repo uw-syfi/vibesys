@@ -2,18 +2,24 @@ import {create, type MessageInitShape} from '@bufbuild/protobuf';
 import {describe, expect, it} from 'bun:test';
 import {
   type EventSubscription,
-  type ProtocolResponse,
   AgentOutputChannel,
-  type ChatResult,
   ChatModelSource,
   ChatOptionsSchema,
+  ChatResultSchema,
+  DesignChange,
   type DesignRound,
+  DesignRoundSchema,
+  DiagnosticRetryability,
+  DiagnosticSchema,
+  DiagnosticScope,
+  DiagnosticSeverity,
   EventType,
+  ExecutionActivityMode,
   type ExperimentUpdateSchema,
   ExperimentsChangeReason,
   type HypothesisEntry,
   HypothesisEntrySchema,
-  type PerformanceRound,
+  PerformanceRoundSchema,
   PROTOCOL_VERSION,
   type ProtocolResponse,
   type RequestBody,
@@ -22,12 +28,13 @@ import {
   RunEventSchema,
   RunStatus,
   RoundJudgeVerdict,
+  RoundReviewVerdict,
   ServerError,
   type ServerMessage,
   ServerMessageSchema,
   type SubscribeOptions,
 } from '@vibesys/backend-client';
-import {makeEvent, makeEventBatch, makeSnapshot, timestampOf} from '@vibesys/backend-client/testing';
+import {makeEvent, makeEventBatch, timestampOf} from '@vibesys/backend-client/testing';
 import {resolveStartupTrace} from './boot-trace.js';
 import {fuzzyMatchCommands} from './commands.js';
 import {type ServerTransport, SocketSessionController} from './session-controller.js';
@@ -119,7 +126,7 @@ describe('session controller', () => {
     const started: string[] = [];
     const pending: Array<() => void> = [];
     const transport: ServerTransport = {
-      request(input: RequestInput): Promise<ProtocolResponse> {
+      request(input: RequestBody): Promise<ProtocolResponse> {
         started.push(input.case);
         return new Promise(resolve => {
           pending.push(() =>
@@ -157,35 +164,28 @@ describe('session controller', () => {
     const controller = new SocketSessionController(transport);
     await controller.start();
 
-    transport.emit({
-      type: 'event_batch',
-      events: [
-        {
-          sequence: 1,
-          timestamp: '2026-01-01T00:00:00Z',
-          type: 'agent_execution_started',
-          executionId: 'stale-execution',
-          agentKind: 'implementer',
-          roundLabel: 'round-1-implementer',
-          data: {
-            kind: 'agent_execution_started',
-            stage: 'implementation',
-            attempt: 1,
-            system_prompt: '',
-            user_prompt: 'Implement the queue',
-            activity: {
-              kind: 'agent_execution_activity_changed',
-              mode: 'thinking',
-              summary: 'Inspecting the queue',
-              tool: null,
-            },
+    transport.emit(makeEventBatch([
+        makeEvent(EventType.AGENT_EXECUTION_STARTED, {
+      sequence: 1,
+      executionId: 'stale-execution',
+      agentKind: 'implementer',
+      roundLabel: 'round-1-implementer',
+      data: {
+        case: 'agentExecutionStarted',
+        value: {
+          stage: 'implementation',
+          attempt: 1,
+          systemPrompt: '',
+          userPrompt: 'Implement the queue',
+          activity: {
+            mode: ExecutionActivityMode.THINKING,
+            summary: 'Inspecting the queue',
           },
         },
+      },
+    }),
         event(2, EventType.AGENT_OUTPUT_CHUNK, 'persisted output\n'),
-      ],
-      through_sequence: 2,
-      active_executions: [],
-    });
+      ], 2));
 
     expect(controller.state.core.sequence).toBe(2);
     expect(controller.state.core.transcript.at(-1)?.content).toBe('persisted output\n');
@@ -197,27 +197,16 @@ describe('session controller', () => {
     const controller = new SocketSessionController(transport);
     await controller.start();
 
-    transport.emit({
-      type: 'event_batch',
-      events: [
-        {
-          ...event(1, EventType.RUN_FAILED),
-          diagnostic: {
+    transport.emit(makeEventBatch([
+        makeEvent(EventType.RUN_FAILED, {sequence: 1, diagnostic: {
             code: 'interrupted',
             summary: 'A previous process was interrupted.',
-            scope: 'run',
-            severity: 'fatal',
-            retryability: 'never',
-          },
-        },
-        {
-          ...event(2, EventType.RUN_STARTED),
-          data: {kind: 'run_started', outer_loop: 'agent', input: '.', max_rounds: 3},
-        },
-      ],
-      through_sequence: 2,
-      active_executions: [],
-    });
+            scope: DiagnosticScope.RUN,
+            severity: DiagnosticSeverity.FATAL,
+            retryability: DiagnosticRetryability.NEVER,
+          }}),
+        makeEvent(EventType.RUN_STARTED, {sequence: 2, data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}}}),
+      ], 2));
 
     expect(controller.state.core.status).toBe('running');
     expect(controller.state.errorBanner).toBeNull();
@@ -228,23 +217,15 @@ describe('session controller', () => {
     const controller = new SocketSessionController(transport);
     await controller.start();
 
-    transport.emit({
-      type: 'event_batch',
-      events: [
-        {
-          ...event(1, EventType.RUN_FAILED),
-          diagnostic: {
+    transport.emit(makeEventBatch([
+        makeEvent(EventType.RUN_FAILED, {sequence: 1, diagnostic: {
             code: 'run_failed',
             summary: 'The current run failed.',
-            scope: 'run',
-            severity: 'fatal',
-            retryability: 'never',
-          },
-        },
-      ],
-      through_sequence: 1,
-      active_executions: [],
-    });
+            scope: DiagnosticScope.RUN,
+            severity: DiagnosticSeverity.FATAL,
+            retryability: DiagnosticRetryability.NEVER,
+          }}),
+      ], 1));
 
     expect(controller.state.core.status).toBe('failed');
     expect(controller.state.errorBanner).toMatchObject({message: 'The current run failed.'});
@@ -268,30 +249,25 @@ describe('session controller', () => {
     // itself, not the reconnect that would otherwise follow.
     const controller = new SocketSessionController(transport, undefined, undefined, []);
     await controller.start();
-    transport.emit({
-      type: 'event',
-      event: {
-        sequence: 1,
-        timestamp: '2026-01-01T00:00:00Z',
-        type: 'agent_execution_started',
-        executionId: 'impl-1',
-        agentKind: 'implementer',
-        roundLabel: 'round-1-implementer',
-        data: {
-          kind: 'agent_execution_started',
+    transport.emit(eventMessage(makeEvent(EventType.AGENT_EXECUTION_STARTED, {
+      sequence: 1,
+      executionId: 'impl-1',
+      agentKind: 'implementer',
+      roundLabel: 'round-1-implementer',
+      data: {
+        case: 'agentExecutionStarted',
+        value: {
           stage: 'implementation',
           attempt: 1,
-          system_prompt: '',
-          user_prompt: 'Implement the queue',
+          systemPrompt: '',
+          userPrompt: 'Implement the queue',
           activity: {
-            kind: 'agent_execution_activity_changed',
-            mode: 'thinking',
+            mode: ExecutionActivityMode.THINKING,
             summary: 'Inspecting the queue',
-            tool: null,
           },
         },
       },
-    });
+    })));
     expect(controller.state.core.activeExecutions['impl-1']).toBeDefined();
 
     transport.disconnect(new Error('Server event stream disconnected'));
@@ -308,15 +284,15 @@ describe('session controller', () => {
       summary: 'The requested operation was rejected.',
       detail: 'PermissionError: missing capability.',
       hint: 'Request the required capability.',
-      scope: 'request' as const,
-      severity: 'error' as const,
-      retryability: 'manual' as const,
+      scope: DiagnosticScope.REQUEST,
+      severity: DiagnosticSeverity.ERROR,
+      retryability: DiagnosticRetryability.MANUAL,
     };
     const transport = new FakeTransport(
       [],
       [],
       undefined,
-      new ServerError('legacy request message', diagnostic),
+      new ServerError('legacy request message', create(DiagnosticSchema, diagnostic)),
     );
     const controller = new SocketSessionController(transport);
 
@@ -333,12 +309,23 @@ describe('session controller', () => {
     const protocolTransport = new FakeTransport();
     const protocolController = new SocketSessionController(protocolTransport);
     await protocolController.start();
-    protocolTransport.emit({
-      type: 'protocol_error',
-      code: 'unknown_protocol_code',
-      message: 'legacy protocol message',
-      diagnostic: {...diagnostic, id: 'protocol-1', scope: 'protocol', severity: 'warning'},
-    });
+    protocolTransport.emit(
+      create(ServerMessageSchema, {
+        body: {
+          case: 'protocolError',
+          value: {
+            code: 'unknown_protocol_code',
+            message: 'legacy protocol message',
+            diagnostic: {
+              ...diagnostic,
+              id: 'protocol-1',
+              scope: DiagnosticScope.PROTOCOL,
+              severity: DiagnosticSeverity.WARNING,
+            },
+          },
+        },
+      }),
+    );
 
     expect(protocolController.state.errorBanner).toMatchObject({
       message: diagnostic.summary,
@@ -392,27 +379,20 @@ describe('session controller', () => {
     const transport = new FakeTransport(
       [
         chatEvent(1, EventType.AGENT_OUTPUT_CHUNK, {
-          kind: 'agent_output_chunk',
-          channel: 'analysis',
-          content: 'Reading progress.md',
+          case: 'agentOutputChunk',
+          value: {channel: AgentOutputChannel.ANALYSIS, content: 'Reading progress.md'},
         }),
         chatEvent(2, EventType.TOOL_CALL, {
-          kind: 'tool_call',
-          tool: 'read_file',
-          args: {path: 'progress.md'},
-          status: null,
+          case: 'toolCall',
+          value: {tool: 'read_file', args: {path: 'progress.md'}},
         }),
-        chatEvent(3, EventType.CHAT, {
-          kind: 'chat',
-          answer: 'Round 2 improved throughput.',
-        }),
+        chatEvent(3, EventType.CHAT, {case: 'chat', value: {answer: 'Round 2 improved throughput.'}}),
       ],
       [],
       {
         question: 'what changed?',
         answer: 'Round 2 improved throughput.',
-        effect: 'none',
-      },
+              },
     );
     const controller = new SocketSessionController(transport);
 
@@ -537,8 +517,7 @@ describe('session controller', () => {
     const transport = new FakeTransport([], [], {
       question: 'why?',
       answer: 'Because the configuration failed.',
-      effect: 'none',
-    });
+          });
     const controller = new SocketSessionController(transport);
 
     await controller.submitCommand('/chat why?');
@@ -865,7 +844,7 @@ describe('session controller', () => {
     });
     await new Promise<void>(resolve => setTimeout(resolve, 0));
 
-    expect(controller.state.experimentLog?.entries[0]?.last_round).toBe(3);
+    expect(controller.state.experimentLog?.entries[0]?.lastRound).toBe(3);
     expect(transport.experimentInputs).toHaveLength(3);
   });
 
@@ -991,7 +970,7 @@ describe('session controller', () => {
 
   it('loads the design log with the experiments so the drill-down can annotate rounds', async () => {
     const transport = new FakeTransport();
-    transport.design = [{round: 1, files: [{path: 'src/ring.rs', change: 'added'}]}];
+    transport.design = designRounds([{round: 1, files: {changes: [{path: 'src/ring.rs', change: DesignChange.ADDED}]}}]);
     const controller = new SocketSessionController(transport);
 
     await controller.start();
@@ -1016,18 +995,18 @@ describe('session controller', () => {
     transport.experiments = [
       entry('H-01', 1, 1, {
         title: 'Pad the ring indices',
-        rounds: [{round: 1, passed: true, reviewed: true, judge_verdict: 'pass'}],
+        rounds: [{round: 1, passed: true, reviewed: true, judgeVerdict: RoundReviewVerdict.PASS}],
       }),
     ];
-    transport.design = [
+    transport.design = designRounds([
       {
         round: 1,
-        files: [
-          {path: 'src/ring.rs', change: 'added'},
-          {path: 'src/lib.rs', change: 'modified'},
-        ],
+        files: {changes: [
+          {path: 'src/ring.rs', change: DesignChange.ADDED},
+          {path: 'src/lib.rs', change: DesignChange.MODIFIED},
+        ]},
       },
-    ];
+    ]);
     const controller = new SocketSessionController(transport);
     await controller.start();
     await new Promise<void>(resolve => setTimeout(resolve, 0));
@@ -1060,19 +1039,19 @@ describe('session controller', () => {
 
   it('opens the newest diffable round and fetches only the file on screen', async () => {
     const transport = new FakeTransport();
-    transport.design = [
+    transport.design = designRounds([
       {
         round: 1,
         base: 'aaa1111',
         commit: 'bbb2222',
-        files: [
-          {path: 'src/ring.rs', change: 'modified'},
-          {path: 'src/lib.rs', change: 'modified'},
-        ],
+        files: {changes: [
+          {path: 'src/ring.rs', change: DesignChange.MODIFIED},
+          {path: 'src/lib.rs', change: DesignChange.MODIFIED},
+        ]},
       },
       // Newer but not diffable: the opener walks back to round 1.
-      {round: 2, base: 'bbb2222', commit: 'ccc3333', files: []},
-    ];
+      {round: 2, base: 'bbb2222', commit: 'ccc3333', files: {changes: []}},
+    ]);
     transport.designPatchText = '@@ -1 +1 @@\n-old\n+new\n';
     const controller = new SocketSessionController(transport);
     await controller.start();
@@ -1103,7 +1082,7 @@ describe('session controller', () => {
     controller.moveDiffFile(-1);
     await new Promise<void>(resolve => setTimeout(resolve, 0));
     expect(patchRequests(transport)).toHaveLength(2);
-    expect(patchRequests(transport).at(-1)).toMatchObject({path: 'src/lib.rs'});
+    expect(patchRequests(transport).at(-1)).toMatchObject({value: {path: 'src/lib.rs'}});
   });
 
   it("diffs the drill-down's selected round rather than the newest one", async () => {
@@ -1116,10 +1095,10 @@ describe('session controller', () => {
         ],
       }),
     ];
-    transport.design = [
-      {round: 1, base: 'aaa1111', commit: 'bbb2222', files: [{path: 'src/a.rs', change: 'added'}]},
-      {round: 2, base: 'bbb2222', commit: 'ccc3333', files: [{path: 'src/b.rs', change: 'added'}]},
-    ];
+    transport.design = designRounds([
+      {round: 1, base: 'aaa1111', commit: 'bbb2222', files: {changes: [{path: 'src/a.rs', change: DesignChange.ADDED}]}},
+      {round: 2, base: 'bbb2222', commit: 'ccc3333', files: {changes: [{path: 'src/b.rs', change: DesignChange.ADDED}]}},
+    ]);
     transport.designPatchText = '@@ -0,0 +1 @@\n+fn main() {}\n';
     const controller = new SocketSessionController(transport);
     await controller.start();
@@ -1140,9 +1119,9 @@ describe('session controller', () => {
 
   it('parks a failed patch query on the file, never the shared banner', async () => {
     const transport = new FakeTransport();
-    transport.design = [
-      {round: 1, base: 'aaa1111', commit: 'bbb2222', files: [{path: 'src/a.rs', change: 'added'}]},
-    ];
+    transport.design = designRounds([
+      {round: 1, base: 'aaa1111', commit: 'bbb2222', files: {changes: [{path: 'src/a.rs', change: DesignChange.ADDED}]}},
+    ]);
     transport.designPatchError = new ServerError('base does not name a commit');
     const controller = new SocketSessionController(transport);
     await controller.start();
@@ -1169,7 +1148,7 @@ describe('session controller', () => {
     expect(controller.state.overlay?.content).toContain('No design rounds have loaded yet');
 
     // With a log whose rounds recorded no changes, the wording is per round.
-    transport.design = [{round: 1, base: 'aaa1111', commit: 'bbb2222', files: []}];
+    transport.design = designRounds([{round: 1, base: 'aaa1111', commit: 'bbb2222', files: {changes: []}}]);
     transport.designReady = true;
     await controller.submitCommand('/design');
     controller.openRoundDiff(1);
@@ -1294,10 +1273,7 @@ describe('session controller', () => {
     await controller.start();
     const before = transport.requests.length;
 
-    transport.emit({
-      type: 'event_batch',
-      events: [event(1, EventType.EXPERIMENTS_CHANGED), event(2, EventType.EXPERIMENTS_CHANGED)],
-    });
+    transport.emit(makeEventBatch([event(1, EventType.EXPERIMENTS_CHANGED), event(2, EventType.EXPERIMENTS_CHANGED)]));
     await Promise.resolve();
     await Promise.resolve();
 
@@ -1382,10 +1358,7 @@ describe('session controller', () => {
     const controller = new SocketSessionController(transport);
     await controller.start();
 
-    transport.emit({
-      type: 'event',
-      event: {...event(1, EventType.PHASE_STARTED), agentKind: 'orchestrator', roundLabel: 'round-9-pre'},
-    });
+    transport.emit(eventMessage(makeEvent(EventType.PHASE_STARTED, {sequence: 1, agentKind: 'orchestrator', roundLabel: 'round-9-pre'})));
 
     await controller.submitCommand('/open-round --9');
 
@@ -1397,10 +1370,7 @@ describe('session controller', () => {
     const transport = new FakeTransport();
     const controller = new SocketSessionController(transport);
     await controller.start();
-    transport.emit({
-      type: 'event',
-      event: {...event(1, EventType.PHASE_STARTED), agentKind: 'orchestrator', roundLabel: 'round-1-pre'},
-    });
+    transport.emit(eventMessage(makeEvent(EventType.PHASE_STARTED, {sequence: 1, agentKind: 'orchestrator', roundLabel: 'round-1-pre'})));
 
     controller.enterExperimentDrilldown();
 
@@ -1538,8 +1508,7 @@ describe('session controller', () => {
     const transport = new FakeTransport([], [], {
       question: 'why?',
       answer: 'Round 2 regressed.',
-      effect: 'none',
-    });
+          });
     const controller = new SocketSessionController(transport);
     await controller.start();
     await controller.sendChat('why?');
@@ -1577,8 +1546,7 @@ describe('session controller', () => {
     const transport = new FakeTransport([], [], {
       question: 'what regressed?',
       answer: 'The sampler reorder.',
-      effect: 'none',
-    });
+          });
     const controller = new SocketSessionController(transport);
     await controller.start();
     await controller.submitCommand('/perf');
@@ -1634,16 +1602,12 @@ describe('session controller', () => {
     const transport = new FakeTransport([], [], {
       question: 'what changed in a/b testing?',
       answer: 'Nothing yet.',
-      effect: 'none',
-    });
+          });
     const controller = new SocketSessionController(transport);
 
     await controller.submitChat('what changed in a/b testing?');
 
-    expect(transport.requests.at(-1)).toEqual({
-      type: 'query.chat',
-      text: 'what changed in a/b testing?',
-    });
+    expect(transport.requests.at(-1)).toEqual({case: 'chat', value: {text: 'what changed in a/b testing?'}});
     expect(controller.state.chatConversation.at(-1)?.content).toBe('Nothing yet.');
   });
 
@@ -1682,11 +1646,7 @@ describe('session controller', () => {
     controller.moveChatMenuSelection(1);
     await controller.confirmChatMenu();
 
-    expect(transport.requests.at(-1)).toEqual({
-      type: 'query.chat_thread_create',
-      provider: 'codex',
-      model: 'gpt-5.6-sol',
-    });
+    expect(transport.requests.at(-1)).toEqual({case: 'chatThreadCreate', value: {provider: 'codex', model: 'gpt-5.6-sol'}});
     expect(controller.state.chatMenu).toBeNull();
     // The thread record comes from the replayed backend event, and the
     // client switches the chat surfaces to it.
@@ -1714,11 +1674,7 @@ describe('session controller', () => {
     controller.typeChatMenuCustomModel('5');
     await controller.confirmChatMenu();
 
-    expect(transport.requests.at(-1)).toEqual({
-      type: 'query.chat_thread_create',
-      provider: 'claude',
-      model: 'claude-sonnet-5',
-    });
+    expect(transport.requests.at(-1)).toEqual({case: 'chatThreadCreate', value: {provider: 'claude', model: 'claude-sonnet-5'}});
     expect(controller.state.activeChatThreadId).toBe('thread-1');
   });
 
@@ -1759,11 +1715,7 @@ describe('session controller', () => {
     await controller.submitChat('/clear');
 
     // Same harness and model, a new thread, and the old one still listed.
-    expect(transport.requests.at(-1)).toEqual({
-      type: 'query.chat_thread_create',
-      provider: 'codex',
-      model: 'gpt-5.6-sol',
-    });
+    expect(transport.requests.at(-1)).toEqual({case: 'chatThreadCreate', value: {provider: 'codex', model: 'gpt-5.6-sol'}});
     expect(controller.state.activeChatThreadId).toBe('thread-2');
     expect(controller.state.core.chatThreads.map(thread => thread.id)).toEqual([
       'default',
@@ -1822,11 +1774,7 @@ describe('session controller', () => {
 
     await controller.sendChat('which kernel changed?');
 
-    expect(transport.requests.at(-1)).toEqual({
-      type: 'query.chat',
-      text: 'which kernel changed?',
-      threadId: 'thread-1',
-    });
+    expect(transport.requests.at(-1)).toEqual({case: 'chat', value: {text: 'which kernel changed?', threadId: 'thread-1'}});
     expect(controller.state.chatConversations['thread-1']?.map(entry => entry.content)).toEqual([
       'which kernel changed?',
       'Thread answer.',
@@ -1837,10 +1785,7 @@ describe('session controller', () => {
     controller.switchChatThread('default');
     expect(controller.state.chatConversation).toEqual([]);
     await controller.sendChat('and the default thread?');
-    expect(transport.requests.at(-1)).toEqual({
-      type: 'query.chat',
-      text: 'and the default thread?',
-    });
+    expect(transport.requests.at(-1)).toEqual({case: 'chat', value: {text: 'and the default thread?'}});
     controller.switchChatThread('thread-1');
     expect(controller.state.chatConversation.map(entry => entry.content)).toEqual([
       'which kernel changed?',
@@ -2109,10 +2054,7 @@ describe('session controller', () => {
 describe('a stream that re-bootstraps at a raised floor', () => {
   /** The run log, whose last event is the pre-attach one carried into it. */
   const runLog: RunEvent[] = [
-    {
-      ...event(1, EventType.RUN_STARTED),
-      data: {kind: 'run_started', outer_loop: 'agent', input: '.', max_rounds: 3},
-    },
+    makeEvent(EventType.RUN_STARTED, {sequence: 1, data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}}}),
     event(2, EventType.AGENT_OUTPUT_CHUNK, 'two\n'),
     roundFinished(3, 1),
     event(4, EventType.AGENT_OUTPUT_CHUNK, 'four\n'),
@@ -2175,11 +2117,7 @@ describe('a stream that re-bootstraps at a raised floor', () => {
     transport.emit(makeEventBatch(preAttach, undefined, {historyAfterSequence: 0}));
     const before = transport.requests.length;
 
-    transport.emit({
-      type: 'event_batch',
-      events: [...rebootstrap, event(7, EventType.EXPERIMENTS_CHANGED)],
-      history_after_sequence: 4,
-    });
+    transport.emit(makeEventBatch([...rebootstrap, event(7, EventType.EXPERIMENTS_CHANGED)], undefined, {historyAfterSequence: 4}));
     await Promise.resolve();
     await Promise.resolve();
 
@@ -2198,10 +2136,7 @@ describe('a stream that re-bootstraps at a raised floor', () => {
  */
 describe('a stream that re-bootstraps into a log shorter than the tail', () => {
   const runLog: RunEvent[] = [
-    {
-      ...event(1, EventType.RUN_STARTED),
-      data: {kind: 'run_started', outer_loop: 'agent', input: '.', max_rounds: 3},
-    },
+    makeEvent(EventType.RUN_STARTED, {sequence: 1, data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}}}),
     event(2, EventType.AGENT_OUTPUT_CHUNK, 'two\n'),
     roundFinished(3, 1),
     event(4, EventType.AGENT_OUTPUT_CHUNK, 'four\n'),
@@ -2325,10 +2260,7 @@ describe('stream reconnect', () => {
     // is `run_started`, not the output the client folded at 1 in the old store.
     transport.emitBatch(
       [
-        {
-          ...event(1, EventType.RUN_STARTED),
-          data: {kind: 'run_started', outer_loop: 'agent', input: '.', max_rounds: 3},
-        },
+        makeEvent(EventType.RUN_STARTED, {sequence: 1, data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}}}),
         event(2, EventType.AGENT_OUTPUT_CHUNK, 'two\n'),
       ],
       0,
@@ -2350,10 +2282,7 @@ describe('stream reconnect', () => {
     await controller.start();
     transport.emitBatch(
       [
-        {
-          ...event(1, EventType.RUN_STARTED),
-          data: {kind: 'run_started', outer_loop: 'agent', input: '.', max_rounds: 3},
-        },
+        makeEvent(EventType.RUN_STARTED, {sequence: 1, data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}}}),
       ],
       0,
       'run-store',
@@ -2377,10 +2306,7 @@ describe('stream reconnect', () => {
     const controller = new SocketSessionController(transport, undefined, undefined, [0, 0]);
     await controller.start();
     transport.emitBatch([
-      {
-        ...event(1, EventType.RUN_STARTED),
-        data: {kind: 'run_started', outer_loop: 'agent', input: '.', max_rounds: 3},
-      },
+      makeEvent(EventType.RUN_STARTED, {sequence: 1, data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}}}),
     ]);
 
     transport.sever();
@@ -2398,529 +2324,654 @@ describe('stream reconnect', () => {
   });
 });
 
-const CHANNELS = [
-  AgentOutputChannel.ASSISTANT,
-  AgentOutputChannel.ASSISTANT,
-  AgentOutputChannel.ASSISTANT,
-  AgentOutputChannel.ANALYSIS,
-  AgentOutputChannel.PROMPT,
-] as const;
+const NOW = timestampOf('2026-01-01T00:00:00Z');
 
-type EventInit = NonNullable<Parameters<typeof makeEvent>[1]>;
+type ResponseInit = MessageInitShape<typeof ResponseSchema>;
 
-/**
- * A synthetic run log shaped like a real one: rounds of agent executions with
- * streamed output, paired tool calls, todo and usage updates, per-round judge
- * and benchmark results, and chat traffic across several threads.
- *
- * `typedTools` picks the producer flavor: typed `tool_call`/`tool_result`
- * events, or the legacy `tool`-channel chunks a driver without structured tool
- * reporting emits. One log carries one flavor, because the reducer's
- * typed-tool latch makes a log carrying both order-dependent (see the mixed
- * producer test).
- *
- * Sized well under MAX_TRANSCRIPT_ENTRIES so cap eviction, which replay and
- * backfill are not required to agree on, never enters the comparison.
- */
-
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
-function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds = 5): RunEvent[] {
-  const rng = new Rng(seed);
-  const events: RunEvent[] = [];
-  const threadIds = ['thread-a', 'thread-b', 'thread-c'];
-  let clock = 0;
-
-  const emit = (type: EventType, init: EventInit = {}): void => {
-    clock += rng.int(5, 400);
-    events.push(makeEvent(type, {...init, sequence: events.length + 1, timestamp: isoAt(clock)}));
-  };
-
-  emit(EventType.SERVER_STARTED, {status: EventStatus.ACTIVE});
-  emit(EventType.SERVER_READY, {data: {case: 'serverReady', value: {}}});
-  emit(EventType.RUN_STARTED, {
-    status: EventStatus.ACTIVE,
-    data: {
-      case: 'runStarted',
-      value: {
-        outerLoop: 'agent',
-        input: '/synthetic/target',
-        maxRounds: rounds,
-        expectedRoles: [...AGENT_KINDS],
-      },
-    },
-  });
-
-  for (let round = 1; round <= rounds; round += 1) {
-    const roundLabel = `round-${round}`;
-    for (const kind of AGENT_KINDS) {
-      const executionId = `exec-${round}-${kind}`;
-      const prompt = words(rng, 5, 20);
-      const context = {agentKind: kind, roundLabel, executionId};
-      emit(EventType.AGENT_EXECUTION_STARTED, {
-        ...context,
-        status: EventStatus.ACTIVE,
-        data: {
-          case: 'agentExecutionStarted',
-          value: {
-            stage: kind,
-            systemPrompt: prompt,
-            userPrompt: prompt,
-            activity: {mode: ExecutionActivityMode.THINKING, summary: 'Thinking'},
-            driver: 'agentshim',
-            provider: 'anthropic',
-            model: 'claude-sonnet',
-          },
-        },
-      });
-      emit(EventType.PHASE_STARTED, {
-        ...context,
-        status: EventStatus.ACTIVE,
-        data: {case: 'phase', value: {phase: kind}},
-      });
-      emit(EventType.INVOCATION_STARTED, {
-        ...context,
-        status: EventStatus.ACTIVE,
-        data: {case: 'invocationStarted', value: {systemPrompt: prompt, userPrompt: prompt}},
-      });
-
-      const turns = rng.int(4, 12);
-      for (let turn = 0; turn < turns; turn += 1) {
-        emit(EventType.AGENT_OUTPUT_CHUNK, {
-          ...context,
-          data: {
-            case: 'agentOutputChunk',
-            value: {channel: rng.pick(CHANNELS), content: words(rng, 3, 25)},
-          },
-        });
-        if (rng.float() < 0.35) {
-          const callId = `${executionId}-call-${turn}`;
-          const tool = rng.pick(TOOLS);
-          if (options.typedTools) {
-            emit(EventType.TOOL_CALL, {
-              ...context,
-              data: {case: 'toolCall', value: {tool, callId, args: {pattern: words(rng, 2, 5)}}},
-            });
-            emit(EventType.TOOL_RESULT, {
-              ...context,
-              data: {
-                case: 'toolResult',
-                value: {
-                  tool,
-                  callId,
-                  content: words(rng, 5, 40),
-                  isError: rng.float() < 0.05,
-                },
-              },
-            });
-          } else {
-            emit(EventType.AGENT_OUTPUT_CHUNK, {
-              ...context,
-              data: {
-                case: 'agentOutputChunk',
-                value: {
-                  channel: AgentOutputChannel.TOOL,
-                  content: `→ ${tool} ${words(rng, 2, 5)}`,
-                },
-              },
-            });
-            emit(EventType.AGENT_OUTPUT_CHUNK, {
-              ...context,
-              data: {
-                case: 'agentOutputChunk',
-                value: {channel: AgentOutputChannel.TOOL, content: words(rng, 5, 40)},
-              },
-            });
-          }
-        }
-        if (rng.float() < 0.1) {
-          emit(EventType.TODO_UPDATE, {
-            ...context,
-            data: {
-              case: 'todoUpdate',
-              value: {
-                todos: ['completed', 'in_progress', 'pending'].map(status => ({
-                  content: words(rng, 2, 6),
-                  status,
-                })),
-              },
-            },
-          });
-        }
-        if (rng.float() < 0.15) {
-          emit(EventType.USAGE_UPDATE, {
-            ...context,
-            data: {
-              case: 'usageUpdate',
-              value: {
-                inputTokens: rng.int(2000, 180000),
-                contextWindow: 200000,
-                model: 'claude-sonnet',
-              },
-            },
-          });
-        }
-      }
-
-      emit(EventType.AGENT_EXECUTION_FINISHED, {
-        ...context,
-        status: EventStatus.COMPLETED,
-        data: {case: 'agentExecutionFinished', value: {}},
-      });
-      emit(EventType.INVOCATION_FINISHED, {
-        ...context,
-        status: EventStatus.COMPLETED,
-        data: {case: 'invocationFinished', value: {}},
-      });
-      emit(EventType.PHASE_FINISHED, {
-        ...context,
-        status: EventStatus.COMPLETED,
-        data: {case: 'phase', value: {phase: kind}},
-      });
-    }
-
-    emit(EventType.JUDGE_RESULT, {
-      roundLabel,
-      data: {
-        case: 'judgeResult',
-        value: {
-          verdict: rng.float() < 0.7 ? JudgeVerdict.PASS : JudgeVerdict.FAIL,
-          feedback: words(rng, 5, 20),
-          attempt: 1,
-        },
-      },
-    });
-    emit(EventType.BENCHMARK_RESULT, {
-      roundLabel,
-      data: {
-        case: 'benchmarkResult',
-        value: {metric: 'throughput', value: rng.int(100000, 5000000), unit: 'ops/s'},
-      },
-    });
-    emit(EventType.ROUND_FINISHED, {
-      roundLabel,
-      status: EventStatus.COMPLETED,
-      data: {
-        case: 'roundFinished',
-        value: {
-          attempts: 1,
-          judgeVerdict: rng.float() < 0.7 ? RoundJudgeVerdict.PASS : RoundJudgeVerdict.FAIL,
-          perfMetric: rng.int(100000, 5000000),
-          perfUnit: 'ops/s',
-        },
-      },
-    });
-    if (rng.float() < 0.3) {
-      emit(EventType.EXPERIMENTS_CHANGED, {
-        data: {
-          case: 'experimentsChanged',
-          value: {reason: ExperimentsChangeReason.ROUND_PERSISTED},
-        },
-      });
-    }
-    if (rng.float() < 0.5) {
-      // A thread the operator opens mid-run, titled only on a later turn, and
-      // occasionally the implicit default thread with no id at all.
-      const threadId = rng.float() < 0.2 ? undefined : rng.pick(threadIds);
-      const chatContext = {
-        agentKind: 'chat',
-        roundLabel: 'experiment-chat',
-        ...(threadId === undefined ? {} : {chatThreadId: threadId}),
-      };
-      if (threadId !== undefined) {
-        emit(EventType.CHAT_THREAD_CREATED, {
-          ...chatContext,
-          data: {
-            case: 'chatThreadCreated',
-            value: {
-              threadId,
-              title: '',
-              driver: 'agentshim',
-              provider: 'anthropic',
-              model: 'claude-sonnet',
-              createdAt: isoAt(clock),
-            },
-          },
-        });
-      }
-      // Most turns stream their answer before the terminal record. A streamed
-      // turn is sometimes abandoned (its invocation failed before recording an
-      // answer), and an unstreamed answer is sometimes a legacy id-less record
-      // from before answers carried their invocation.
-      const invocationId = `chat-${events.length}`;
-      const streamed = rng.float() < 0.6;
-      if (streamed) {
-        for (let chunk = rng.int(1, 3); chunk > 0; chunk -= 1) {
-          emit(EventType.AGENT_OUTPUT_CHUNK, {
-            ...chatContext,
-            executionId: invocationId,
-            data: {
-              case: 'agentOutputChunk',
-              value: {channel: AgentOutputChannel.ASSISTANT, content: `${words(rng, 2, 6)} `},
-            },
-          });
-        }
-      }
-      const abandoned = streamed && rng.float() < 0.25;
-      if (!abandoned) {
-        emit(EventType.CHAT, {
-          ...chatContext,
-          status: EventStatus.ANSWERED,
-          data: {
-            case: 'chat',
-            value: {
-              answer: words(rng, 5, 30),
-              ...(rng.float() < 0.5 ? {threadTitle: words(rng, 2, 4)} : {}),
-              ...(streamed || rng.float() < 0.5 ? {invocationId} : {}),
-            },
-          },
-        });
-      }
-    }
-  }
-
-  emit(EventType.RUN_FINISHED, {status: EventStatus.COMPLETED});
-  return events;
-}
-
-function words(rng: Rng, min: number, max: number): string {
-  const count = rng.int(min, max);
-  const chosen: string[] = [];
-  for (let at = 0; at < count; at += 1) chosen.push(rng.pick(WORDS));
-  return chosen.join(' ');
-}
-
-function isoAt(millis: number): Timestamp {
-  return timestampOf(new Date(Date.UTC(2026, 7, 20) + millis));
-}
-
-/** The wire timestamp of event `sequence`. */
-function timestamp(sequence: number): Timestamp {
-  return timestampOf(`2026-01-01T00:00:0${sequence}Z`);
-}
-
-/** The ISO string core-state derives from `timestamp(sequence)`. */
-function iso(sequence: number): string {
-  return `2026-01-01T00:00:0${sequence}.000Z`;
-}
-
-function baseEvent(sequence: number, type: EventType, init: EventInit = {}): RunEvent {
-  return makeEvent(type, {
-    sequence,
-    timestamp: timestamp(sequence),
-    agentKind: 'implementer',
-    roundLabel: 'round-1-implementer',
+/** A successful response with test defaults; `init` overrides any field. */
+function respond(init: ResponseInit = {}): ProtocolResponse {
+  return create(ResponseSchema, {
+    protocolVersion: PROTOCOL_VERSION,
+    requestId: 'request',
+    timestamp: NOW,
+    ok: true,
     ...init,
   });
 }
 
-function chunkEvent(sequence: number, content = `entry ${sequence}`): RunEvent {
-  return baseEvent(sequence, EventType.AGENT_OUTPUT_CHUNK, {
-    executionId: 'turn',
-    data: {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content}},
-  });
+function runningSnapshot(sequence: number): ResponseInit['snapshot'] {
+  return {runId: 'run', status: RunStatus.RUNNING, sequence};
 }
 
-function executionStatusEvent(
-  sequence: number,
-  executionId: string,
-  kind: 'agent_output_chunk' | 'tool_call',
-  status: {
-    progress?: string;
-    agentLabel?: string;
-    elapsedSeconds?: number;
-    inputTokens?: number;
-    contextWindow?: number;
-  },
-): RunEvent {
-  return baseEvent(
-    sequence,
-    kind === 'agent_output_chunk' ? EventType.AGENT_OUTPUT_CHUNK : EventType.TOOL_CALL,
-    {
-      executionId,
-      data:
-        kind === 'agent_output_chunk'
+function designRounds(inits: MessageInitShape<typeof DesignRoundSchema>[]): DesignRound[] {
+  return inits.map(init => create(DesignRoundSchema, init));
+}
+
+function eventMessage(runEvent: RunEvent): ServerMessage {
+  return create(ServerMessageSchema, {body: {case: 'event', value: runEvent}});
+}
+
+class FakeTransport implements ServerTransport {
+  closed = false;
+  /** Mutable so a test can change what a refetch returns mid-run. */
+  experiments: HypothesisEntry[] = [];
+  experimentsReady = true;
+  design: DesignRound[] = [];
+  designReady = true;
+  /** Patch text `design_patch` echoes back; null omits the field. */
+  designPatchText: string | null = null;
+  designPatchTruncated = false;
+  /** When set, only `design_patch` requests fail with it. */
+  designPatchError: Error | null = null;
+  readonly requests: RequestBody[] = [];
+  #message: ((message: ServerMessage) => void) | null = null;
+  #disconnect: ((error: Error) => void) | null = null;
+
+  constructor(
+    private readonly responseEvents: RunEvent[] = [],
+    private readonly responsePerformance: MessageInitShape<typeof PerformanceRoundSchema>[] = [],
+    private readonly responseChat?: MessageInitShape<typeof ChatResultSchema>,
+    private readonly responseError?: Error,
+  ) {}
+
+  request(input: RequestBody): Promise<ProtocolResponse> {
+    this.requests.push(input);
+    if (this.responseError) return Promise.reject(this.responseError);
+    if (input.case === 'designPatch' && this.designPatchError) {
+      return Promise.reject(this.designPatchError);
+    }
+    return Promise.resolve(
+      respond({
+        events: this.responseEvents,
+        performance: this.responsePerformance,
+        experiments: this.experiments,
+        experimentsReady: this.experimentsReady,
+        design: this.design,
+        designReady: this.designReady,
+        ...(input.case === 'chat'
           ? {
-              case: 'agentOutputChunk',
-              value: {
-                channel: AgentOutputChannel.ANALYSIS,
-                content: status.progress ?? '',
-                status,
+              chat: this.responseChat ?? {
+                question: input.value.text ?? '',
+                answer: 'The implementer is running.',
               },
             }
-          : {case: 'toolCall', value: {tool: 'Bash', callId: `call-${sequence}`, args: {}, status}},
-    },
+          : {}),
+        // Echoing the request triple is what the real server does, so tests
+        // only choose the text; a null text is a detached server's answer.
+        ...(input.case === 'designPatch' && this.designPatchText !== null
+          ? {
+              designPatch: {
+                base: input.value.base ?? '',
+                head: input.value.head ?? '',
+                path: input.value.path ?? '',
+                patch: this.designPatchText,
+                truncated: this.designPatchTruncated,
+              },
+            }
+          : {}),
+        snapshot: runningSnapshot(12),
+      }),
+    );
+  }
+
+  subscribe(
+    _afterSequence: number,
+    onMessage: (message: ServerMessage) => void,
+    onDisconnect: (error: Error) => void,
+  ): Promise<EventSubscription> {
+    this.#message = onMessage;
+    this.#disconnect = onDisconnect;
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  close(): Promise<void> {
+    this.closed = true;
+    return Promise.resolve();
+  }
+
+  emit(message: ServerMessage): void {
+    this.#message?.(message);
+  }
+
+  disconnect(error: Error): void {
+    this.#disconnect?.(error);
+  }
+}
+
+/**
+ * A backend whose stream a test can sever and whose dials it can refuse:
+ * everything the reconnect path needs in order to be observed.
+ */
+class ReconnectTransport implements ServerTransport {
+  readonly requests: RequestBody[] = [];
+  /** Every subscribe: the cursor, tail, and store it carried, in order. */
+  readonly subscribeCalls: Array<{
+    afterSequence: number;
+    tail: number | undefined;
+    storeId: string | undefined;
+  }> = [];
+  /** How many upcoming subscribes to reject before letting one through. */
+  refuseSubscribes = 0;
+  #message: ((message: ServerMessage) => void) | null = null;
+  #disconnect: ((error: Error) => void) | null = null;
+
+  request(input: RequestBody): Promise<ProtocolResponse> {
+    this.requests.push(input);
+    return Promise.resolve(
+      respond(input.case === 'experiments' ? {experiments: [], experimentsReady: true} : {}),
+    );
+  }
+
+  subscribe(
+    afterSequence: number,
+    onMessage: (message: ServerMessage) => void,
+    onDisconnect: (error: Error) => void,
+    options?: SubscribeOptions,
+  ): Promise<EventSubscription> {
+    this.subscribeCalls.push({afterSequence, tail: options?.tail, storeId: options?.storeId});
+    if (this.refuseSubscribes > 0) {
+      this.refuseSubscribes -= 1;
+      return Promise.reject(new Error('connection refused'));
+    }
+    this.#message = onMessage;
+    this.#disconnect = onDisconnect;
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  emitBatch(events: readonly RunEvent[], historyAfterSequence = 0, storeId?: string): void {
+    this.#message?.(
+      makeEventBatch(events, events.at(-1)?.sequence ?? 0, {
+        historyAfterSequence,
+        ...(storeId === undefined ? {} : {storeId}),
+      }),
+    );
+  }
+
+  sever(message = 'Server event stream disconnected'): void {
+    this.#disconnect?.(new Error(message));
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+class DeferredExperimentsTransport implements ServerTransport {
+  experimentRequests = 0;
+  readonly #pending: Array<(response: ProtocolResponse) => void> = [];
+  #message: ((message: ServerMessage) => void) | null = null;
+
+  request(input: RequestBody): Promise<ProtocolResponse> {
+    if (input.case === 'snapshot') {
+      return Promise.resolve(respond({snapshot: runningSnapshot(0)}));
+    }
+    if (input.case !== 'experiments') return Promise.resolve(respond());
+    this.experimentRequests += 1;
+    if (this.experimentRequests === 1) {
+      return Promise.resolve(respond({experiments: [], experimentsReady: true}));
+    }
+    return new Promise(resolve => this.#pending.push(resolve));
+  }
+
+  resolveExperiment(experiments: HypothesisEntry[]): void {
+    const resolve = this.#pending.shift();
+    if (!resolve) throw new Error('No pending experiment request');
+    resolve(respond({experiments, experimentsReady: true}));
+  }
+
+  subscribe(
+    _afterSequence: number,
+    onMessage: (message: ServerMessage) => void,
+    _onDisconnect: (error: Error) => void,
+  ): Promise<EventSubscription> {
+    this.#message = onMessage;
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  emit(runEvent: RunEvent): void {
+    this.#message?.(eventMessage(runEvent));
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+class RevisionedExperimentsTransport implements ServerTransport {
+  readonly experimentInputs: RequestBody[] = [];
+  readonly #pending: Array<(response: ProtocolResponse) => void> = [];
+  #message: ((message: ServerMessage) => void) | null = null;
+
+  constructor(private readonly initial: HypothesisEntry[]) {}
+
+  request(input: RequestBody): Promise<ProtocolResponse> {
+    if (input.case === 'snapshot') {
+      return Promise.resolve(respond({snapshot: runningSnapshot(0)}));
+    }
+    if (input.case !== 'experiments') return Promise.resolve(respond());
+    this.experimentInputs.push(input);
+    if (this.experimentInputs.length === 1) {
+      return Promise.resolve(
+        respond({
+          experiments: this.initial,
+          experimentsReady: true,
+          experimentUpdate: {
+            runId: 'run',
+            projectionId: 'projection',
+            throughRevision: 1,
+            reset: true,
+          },
+        }),
+      );
+    }
+    return new Promise(resolve => this.#pending.push(resolve));
+  }
+
+  resolveExperiment(
+    experiments: HypothesisEntry[],
+    update: MessageInitShape<typeof ExperimentUpdateSchema>,
+  ): void {
+    const resolve = this.#pending.shift();
+    if (!resolve) throw new Error('No pending experiment request');
+    resolve(respond({experiments, experimentsReady: true, experimentUpdate: update}));
+  }
+
+  subscribe(
+    _afterSequence: number,
+    onMessage: (message: ServerMessage) => void,
+    _onDisconnect: (error: Error) => void,
+  ): Promise<EventSubscription> {
+    this.#message = onMessage;
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  emitExperimentChange(sequence: number, revision: number): void {
+    this.#message?.(
+      eventMessage(
+        makeEvent(EventType.EXPERIMENTS_CHANGED, {
+          sequence,
+          data: {
+            case: 'experimentsChanged',
+            value: {reason: ExperimentsChangeReason.ROUND_PERSISTED, revision},
+          },
+        }),
+      ),
+    );
+  }
+
+  emitProjectAttached(sequence: number): void {
+    this.#message?.(
+      eventMessage(
+        makeEvent(EventType.EXPERIMENTS_CHANGED, {
+          sequence,
+          data: {
+            case: 'experimentsChanged',
+            value: {reason: ExperimentsChangeReason.PROJECT_ATTACHED},
+          },
+        }),
+      ),
+    );
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+/**
+ * A backend whose design query the test holds open, so a slow /design can
+ * overlap the next pane command the way the live git-backed query does.
+ * Everything else answers immediately, including the perf query.
+ */
+class DeferredDesignTransport implements ServerTransport {
+  readonly requests: RequestBody[] = [];
+  /** Holds `design` answers until the test releases them. */
+  deferDesign = false;
+  readonly #pendingDesign: Array<() => void> = [];
+  #message: ((message: ServerMessage) => void) | null = null;
+
+  request(input: RequestBody): Promise<ProtocolResponse> {
+    this.requests.push(input);
+    if (input.case === 'snapshot') {
+      return Promise.resolve(respond({snapshot: runningSnapshot(0)}));
+    }
+    if (input.case === 'experiments') {
+      return Promise.resolve(respond({experiments: [], experimentsReady: true}));
+    }
+    if (input.case === 'performance') {
+      return Promise.resolve(
+        respond({
+          performance: [
+            {
+              round: 1,
+              perfMetric: 1200,
+              perfUnit: 'total_ops_per_sec',
+              passed: true,
+              profileSkipped: false,
+            },
+            {
+              round: 2,
+              perfMetric: 2400,
+              perfUnit: 'total_ops_per_sec',
+              passed: true,
+              profileSkipped: false,
+            },
+          ],
+          events: [],
+        }),
+      );
+    }
+    if (input.case === 'design') {
+      const response = respond({design: [], designReady: true});
+      if (!this.deferDesign) return Promise.resolve(response);
+      return new Promise(resolve => this.#pendingDesign.push(() => resolve(response)));
+    }
+    return Promise.resolve(respond());
+  }
+
+  releaseDesign(): void {
+    const pending = this.#pendingDesign.shift();
+    if (!pending) throw new Error('No pending design request');
+    pending();
+  }
+
+  subscribe(
+    _afterSequence: number,
+    onMessage: (message: ServerMessage) => void,
+    _onDisconnect: (error: Error) => void,
+  ): Promise<EventSubscription> {
+    this.#message = onMessage;
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  emit(runEvent: RunEvent): void {
+    this.#message?.(eventMessage(runEvent));
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+class DeferredChatTransport implements ServerTransport {
+  readonly requests: RequestBody[] = [];
+  readonly #pending: Array<(response: ProtocolResponse) => void> = [];
+
+  request(input: RequestBody): Promise<ProtocolResponse> {
+    this.requests.push(input);
+    return new Promise(resolve => this.#pending.push(resolve));
+  }
+
+  resolveNext(answer: string): void {
+    const resolve = this.#pending.shift();
+    if (!resolve) throw new Error('No pending chat request');
+    resolve(respond({chat: {question: '', answer}}));
+  }
+
+  subscribe(
+    _afterSequence: number,
+    _onMessage: (message: ServerMessage) => void,
+    _onDisconnect: (error: Error) => void,
+  ): Promise<EventSubscription> {
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+/** A backend that creates one thread and answers threaded chat. */
+class ThreadTransport implements ServerTransport {
+  readonly requests: RequestBody[] = [];
+  #sequence = 0;
+  #threads = 0;
+  /** Providers and models the backend says this run offers. */
+  chatOptions: MessageInitShape<typeof ChatOptionsSchema> | null = {
+    providers: [
+      {
+        provider: 'codex',
+        models: [
+          {model: 'gpt-run', source: ChatModelSource.RUN, default: true},
+          {model: 'gpt-5.6-sol', source: ChatModelSource.SUGGESTED, default: false},
+        ],
+      },
+      {
+        provider: 'claude',
+        models: [{model: 'claude-opus-5', source: ChatModelSource.SUGGESTED, default: false}],
+      },
+    ],
+  };
+
+  request(input: RequestBody): Promise<ProtocolResponse> {
+    this.requests.push(input);
+    if (input.case === 'snapshot') {
+      return Promise.resolve(respond({snapshot: runningSnapshot(0)}));
+    }
+    if (input.case === 'experiments') {
+      return Promise.resolve(respond({experiments: [], experimentsReady: true}));
+    }
+    if (input.case === 'chatOptions') {
+      return Promise.resolve(
+        respond(this.chatOptions === null ? {} : {chatOptions: this.chatOptions}),
+      );
+    }
+    if (input.case === 'chatThreadCreate') {
+      const threadId = `thread-${++this.#threads}`;
+      // The backend resolves the run's own driver; the client never sends one.
+      const settings = {
+        driver: 'agentshim',
+        provider: input.value.provider ?? 'codex',
+        model: input.value.model ?? 'gpt-run',
+      };
+      return Promise.resolve(
+        respond({
+          chatThread: {threadId, title: '', ...settings},
+          events: [
+            makeEvent(EventType.CHAT_THREAD_CREATED, {
+              sequence: ++this.#sequence,
+              timestamp: timestampOf('2026-01-01T00:00:01Z'),
+              agentKind: 'chat',
+              roundLabel: 'experiment-chat',
+              chatThreadId: threadId,
+              data: {
+                case: 'chatThreadCreated',
+                value: {
+                  threadId,
+                  title: '',
+                  ...settings,
+                  createdAt: timestampOf('2026-01-01T00:00:01Z'),
+                },
+              },
+            }),
+          ],
+        }),
+      );
+    }
+    if (input.case === 'chat') {
+      const threadId = input.value.threadId;
+      return Promise.resolve(
+        respond({
+          chat: {question: input.value.text ?? '', answer: 'Thread answer.'},
+          events: [
+            makeEvent(EventType.CHAT, {
+              sequence: ++this.#sequence,
+              timestamp: timestampOf('2026-01-01T00:00:02Z'),
+              agentKind: 'chat',
+              roundLabel: 'experiment-chat',
+              text: input.value.text ?? '',
+              ...(threadId === undefined ? {} : {chatThreadId: threadId}),
+              data: {case: 'chat', value: {answer: 'Thread answer.'}},
+            }),
+          ],
+        }),
+      );
+    }
+    return Promise.resolve(respond());
+  }
+
+  subscribe(
+    _afterSequence: number,
+    _onMessage: (message: ServerMessage) => void,
+    _onDisconnect: (error: Error) => void,
+  ): Promise<EventSubscription> {
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+/**
+ * A tail-capable backend holding one run's whole history. The subscription
+ * delivers whatever a test emits, and the events query answers out of the same
+ * history, so a backfill returns exactly the range the controller asked for.
+ */
+class HistoryTransport implements ServerTransport {
+  readonly requests: RequestBody[] = [];
+  /** The `tail` each subscribe carried, in order; `undefined` for a plain one. */
+  readonly subscribeTails: Array<number | undefined> = [];
+  /** Rejects a subscribe carrying `tail`, the way a server without the field does. */
+  rejectTail = false;
+  /** Fails every subscribe, tail or not. */
+  subscribeError: Error | null = null;
+  /** Fails the events query instead of answering it. */
+  eventsError: Error | null = null;
+  /** Holds events answers until the test releases them. */
+  deferEvents = false;
+  readonly #pendingEvents: Array<() => void> = [];
+  #message: ((message: ServerMessage) => void) | null = null;
+
+  constructor(private readonly history: readonly RunEvent[] = []) {}
+
+  request(input: RequestBody): Promise<ProtocolResponse> {
+    this.requests.push(input);
+    if (input.case !== 'events') return Promise.resolve(respond());
+    if (this.eventsError !== null) return Promise.reject(this.eventsError);
+    const after = input.value.afterSequence ?? 0;
+    const before = input.value.beforeSequence ?? Number.MAX_SAFE_INTEGER;
+    const response = respond({
+      events: this.history.filter(item => item.sequence > after && item.sequence < before),
+    });
+    if (!this.deferEvents) return Promise.resolve(response);
+    return new Promise(resolve => this.#pendingEvents.push(() => resolve(response)));
+  }
+
+  subscribe(
+    _afterSequence: number,
+    onMessage: (message: ServerMessage) => void,
+    _onDisconnect: (error: Error) => void,
+    options?: SubscribeOptions,
+  ): Promise<EventSubscription> {
+    this.subscribeTails.push(options?.tail);
+    if (this.subscribeError !== null) return Promise.reject(this.subscribeError);
+    if (this.rejectTail && options?.tail !== undefined) {
+      return Promise.reject(new ServerError('Extra inputs are not permitted: tail'));
+    }
+    this.#message = onMessage;
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  /** One bootstrap batch: the spine below the floor, then the tail. */
+  emitBatch(events: readonly RunEvent[], historyAfterSequence: number, storeId?: string): void {
+    this.#message?.(
+      makeEventBatch(events, events.at(-1)?.sequence ?? 0, {
+        historyAfterSequence,
+        // Omitted rather than empty when a test does not care, so the default
+        // path stays what a server that reports no store identity sends.
+        ...(storeId === undefined ? {} : {storeId}),
+      }),
+    );
+  }
+
+  releaseEvents(): void {
+    const pending = this.#pendingEvents.shift();
+    if (!pending) throw new Error('No pending events request');
+    pending();
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+function eventsQueries(transport: HistoryTransport): RequestBody[] {
+  return transport.requests.filter(request => request.case === 'events');
+}
+
+function longHistory(length: number): RunEvent[] {
+  return Array.from({length}, (_, index) =>
+    event(index + 1, EventType.AGENT_OUTPUT_CHUNK, `event ${index + 1}\n`),
   );
 }
 
-function toolCallEvent(sequence: number, callId: string): RunEvent {
-  return baseEvent(sequence, EventType.TOOL_CALL, {
-    executionId: 'turn',
-    data: {case: 'toolCall', value: {tool: 'Bash', callId, args: {command: callId}}},
-  });
-}
-
-function toolResultEvent(sequence: number, callId: string, content: string): RunEvent {
-  return baseEvent(sequence, EventType.TOOL_RESULT, {
-    executionId: 'turn',
-    data: {case: 'toolResult', value: {tool: 'Bash', callId, content, isError: false}},
-  });
-}
-
-function legacyToolChunkEvent(sequence: number, content: string): RunEvent {
-  return baseEvent(sequence, EventType.AGENT_OUTPUT_CHUNK, {
-    executionId: 'legacy-turn',
-    data: {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content}},
-  });
-}
-
-function runStartedEvent(sequence: number): RunEvent {
-  return makeEvent(EventType.RUN_STARTED, {
-    sequence,
-    timestamp: timestamp(sequence),
-    status: EventStatus.ACTIVE,
-    data: {case: 'runStarted', value: {outerLoop: 'plain', input: '/target', maxRounds: 3}},
-  });
-}
-
-function roundFinishedEvent(sequence: number, extra: {profileSkipped?: boolean} = {}): RunEvent {
+function roundFinished(sequence: number, round: number): RunEvent {
   return makeEvent(EventType.ROUND_FINISHED, {
     sequence,
-    timestamp: timestamp(sequence),
-    status: EventStatus.COMPLETED,
-    roundLabel: 'round-1',
+    roundLabel: `round-${round}`,
     data: {
       case: 'roundFinished',
-      value: {attempts: 1, judgeVerdict: RoundJudgeVerdict.PASS, ...extra},
+      value: {attempts: 1, judgeVerdict: RoundJudgeVerdict.PASS},
     },
   });
 }
 
-function executionStartedEvent(sequence: number, executionId: string): RunEvent {
-  return baseEvent(sequence, EventType.AGENT_EXECUTION_STARTED, {
-    roundLabel: 'round-1',
-    executionId,
-    status: EventStatus.ACTIVE,
-    data: {
-      case: 'agentExecutionStarted',
-      value: {
-        stage: 'implementation',
-        systemPrompt: '',
-        userPrompt: 'Implement the queue',
-        activity: {mode: ExecutionActivityMode.THINKING, summary: 'Starting'},
-      },
-    },
-  });
+function perfRequests(transport: FakeTransport): number {
+  return transport.requests.filter(request => request.case === 'performance').length;
 }
 
-function executionFinishedEvent(sequence: number, executionId: string): RunEvent {
-  return baseEvent(sequence, EventType.AGENT_EXECUTION_FINISHED, {
-    roundLabel: 'round-1',
-    executionId,
-    status: EventStatus.COMPLETED,
-    data: {case: 'agentExecutionFinished', value: {}},
-  });
+function patchRequests(transport: FakeTransport): RequestBody[] {
+  return transport.requests.filter(request => request.case === 'designPatch');
 }
 
-function phaseFinishedEvent(sequence: number, executionId: string): RunEvent {
-  return baseEvent(sequence, EventType.PHASE_FINISHED, {
-    roundLabel: 'round-1',
-    executionId,
-    status: EventStatus.COMPLETED,
-    data: {case: 'phase', value: {phase: 'implementer'}},
-  });
+function designQueries(transport: DeferredDesignTransport): number {
+  return transport.requests.filter(request => request.case === 'design').length;
 }
 
-function legacyExecutionEvent(
-  sequence: number,
-  type: 'agent_execution_started' | 'agent_execution_finished',
-): RunEvent {
-  const event =
-    type === 'agent_execution_started'
-      ? executionStartedEvent(sequence, 'discarded')
-      : executionFinishedEvent(sequence, 'discarded');
-  return {...event, executionId: undefined};
-}
-
-function threadCreatedEvent(sequence: number, threadId: string): RunEvent {
-  return baseEvent(sequence, EventType.CHAT_THREAD_CREATED, {
-    agentKind: 'chat',
-    roundLabel: 'experiment-chat',
-    chatThreadId: threadId,
-    data: {
-      case: 'chatThreadCreated',
-      value: {
-        threadId,
-        title: '',
-        driver: 'agentshim',
-        provider: 'anthropic',
-        model: 'opus',
-        createdAt: timestamp(sequence),
-      },
-    },
-  });
-}
-
-function chatEvent(
-  sequence: number,
-  threadId: string,
-  answer: string,
-  title?: string,
-  invocationId?: string,
-): RunEvent {
-  return baseEvent(sequence, EventType.CHAT, {
-    agentKind: 'chat',
-    roundLabel: 'experiment-chat',
-    chatThreadId: threadId,
-    status: EventStatus.ANSWERED,
-    data: {case: 'chat', value: {answer, threadTitle: title, invocationId}},
-  });
-}
-
-function chatChunkEvent(
-  sequence: number,
-  threadId: string,
-  content: string,
-  invocationId?: string,
-): RunEvent {
-  return baseEvent(sequence, EventType.AGENT_OUTPUT_CHUNK, {
-    agentKind: 'chat',
-    roundLabel: 'experiment-chat',
-    chatThreadId: threadId,
-    executionId: invocationId ?? `${threadId}-turn`,
-    data: {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content}},
-  });
-}
-
-function todoEvent(sequence: number, executionId: string, content: string): RunEvent {
-  return baseEvent(sequence, EventType.TODO_UPDATE, {
-    executionId,
-    data: {case: 'todoUpdate', value: {todos: [{content, status: 'in_progress'}]}},
-  });
-}
-
-function diagnosticEvent(
-  sequence: number,
+function entry(
   id: string,
-  severity: DiagnosticSeverity,
-  summary: string,
-  detail: string | undefined,
-): RunEvent {
-  return baseEvent(sequence, EventType.INVOCATION_FINISHED, {
-    executionId: 'turn',
-    diagnostic: {
-      id,
-      code: 'agent_failed',
-      summary,
-      detail,
-      scope: DiagnosticScope.INVOCATION,
-      severity,
-      retryability: DiagnosticRetryability.MANUAL,
-    },
+  firstRound: number,
+  lastRound: number,
+  overrides: MessageInitShape<typeof HypothesisEntrySchema> = {},
+): HypothesisEntry {
+  return create(HypothesisEntrySchema, {
+    hypothesisId: id,
+    identified: true,
+    firstRound,
+    lastRound,
+    rounds: [],
+    kept: false,
+    active: false,
+    ...overrides,
   });
 }
 
-const TERMINAL_TYPES = {
-  run_failed: EventType.RUN_FAILED,
-  run_interrupted: EventType.RUN_INTERRUPTED,
-  run_finished: EventType.RUN_FINISHED,
-} as const;
+function event(sequence: number, type: EventType, content?: string): RunEvent {
+  return makeEvent(type, {
+    sequence,
+    ...(content === undefined
+      ? {}
+      : {
+          data: {
+            case: 'agentOutputChunk',
+            value: {channel: AgentOutputChannel.ASSISTANT, content},
+          },
+        }),
+  });
+}
+
+type EventData = Exclude<
+  NonNullable<MessageInitShape<typeof RunEventSchema>['data']>,
+  {case: undefined}
+>;
+
+function chatEvent(sequence: number, type: EventType, data: EventData): RunEvent {
+  return makeEvent(type, {
+    sequence,
+    agentKind: 'chat',
+    roundLabel: 'experiment-chat',
+    executionId: 'chat-1',
+    data,
+  });
+}
