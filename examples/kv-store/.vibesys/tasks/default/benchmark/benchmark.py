@@ -1,7 +1,7 @@
 """YCSB throughput benchmark against an already-running candidate server.
 
-Requires: Java 8+. Downloads the pinned YCSB 0.17.0 Redis binding to ./ycsb/
-on first run if it is not already present.
+Requires: Java 8+. Downloads the pinned YCSB 0.17.0 Redis binding to
+~/.cache/vibesys/kv-store/ycsb/ (override: KV_STORE_YCSB_HOME) on first run if it is not already present.
 
 Reports steady-state throughput so the number reflects the server, not JVM/JIT
 warmup: one discarded warmup run primes the JVM/JIT/connections, then several
@@ -22,6 +22,7 @@ Usage:
 
 import argparse
 import json
+import os
 import shutil
 import statistics
 import subprocess
@@ -36,7 +37,11 @@ YCSB_URL = (
     f"https://github.com/brianfrankcooper/YCSB/releases/download/"
     f"{YCSB_VERSION}/ycsb-redis-binding-{YCSB_VERSION}.tar.gz"
 )
-YCSB_HOME = Path(__file__).resolve().parent / "ycsb"
+# The task directory is read-only during a run, so the download lives in a user
+# cache (override with KV_STORE_YCSB_HOME) instead of next to this script.
+YCSB_HOME = Path(
+    os.environ.get("KV_STORE_YCSB_HOME") or Path.home() / ".cache" / "vibesys" / "kv-store" / "ycsb"
+)
 
 WORKLOADS = {"a": "workloads/workloada", "b": "workloads/workloadb", "c": "workloads/workloadc"}
 

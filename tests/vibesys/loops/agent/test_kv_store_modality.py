@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from entrypoints.headless import _MODALITIES
-from vibesys.input_manifest import load_input_bundle
+from vibesys.input_manifest import load_project_task
 from vibesys.prompts import PROMPTS_DIR, render_template
+from vs_project import Project
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -17,7 +18,8 @@ def test_kv_store_is_a_registered_modality():  # noqa: ANN201  # tracked: #288
 
 
 def test_kv_store_input_bundle_loads():  # noqa: ANN201  # tracked: #288
-    bundle = load_input_bundle(_PROJECT_ROOT / "examples" / "kv-store")
+    project = Project.open(_PROJECT_ROOT / "examples" / "kv-store")
+    bundle = load_project_task(project, project.select_task("default"))
     assert bundle.domain.value == "generic"
     assert bundle.benchmark_result is not None
     assert bundle.benchmark_result.metric == "throughput_ops_per_sec"
