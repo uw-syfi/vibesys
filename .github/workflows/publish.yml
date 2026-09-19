@@ -3,12 +3,12 @@ name: Build and publish release wheels
 on:
   pull_request:
     branches: [main]
-    # This matrix builds and clean-room-verifies four release wheels, two of
-    # them on paid macOS runners, and `macos-x86_64` alone takes 4.5-7 minutes.
-    # That is the wall-clock long pole of a pull request (issue #474), and
-    # almost none of it is about the diff: a wheel is a copy of tracked files
-    # plus a bundled TUI payload, so only a change to the packaging machinery,
-    # its metadata, or the bundle's own inputs can change the verdict.
+    # This matrix builds and clean-room-verifies three release wheels, one of
+    # them on a paid macOS runner. That is the wall-clock long pole of a pull
+    # request (issue #474), and almost none of it is about the diff: a wheel
+    # is a copy of tracked files plus a bundled TUI payload, so only a change
+    # to the packaging machinery, its metadata, or the bundle's own inputs can
+    # change the verdict.
     #
     # Listed positively rather than as `paths-ignore`, because the safe default
     # for a new path is "does not affect the wheel". A `release` event ignores
@@ -106,7 +106,10 @@ jobs:
 
   build:
     name: Build ${{ matrix.target }}
-    needs: release-context
+    # Not gated on release-context: that job only sanity-checks version
+    # metadata and shares no output the build steps consume, so making the
+    # (much longer) per-platform builds wait on it is pure serialization.
+    # aggregate below still requires both to succeed.
     permissions:
       contents: read
     strategy:
@@ -117,8 +120,6 @@ jobs:
             runner: ubuntu-24.04
           - target: linux-aarch64
             runner: ubuntu-24.04-arm
-          - target: macos-x86_64
-            runner: macos-15-intel
           - target: macos-arm64
             runner: macos-14
     runs-on: ${{ matrix.runner }}
@@ -153,8 +154,41 @@ jobs:
           corepack enable
           corepack install --global pnpm@11.11.0
 
+      # Resolved after pnpm exists rather than hardcoded: the store location
+      # is pnpm's to choose, and a wrong path caches an empty directory
+      # silently. Same pattern as the `tui` job in test.yml.
+      - name: Locate the pnpm store
+        run: echo "PNPM_STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+
+      - name: Cache the pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.PNPM_STORE_PATH }}
+          # Keyed on matrix.target, not runner.os: linux-x86_64 and
+          # linux-aarch64 share an OS but not an architecture, and OpenTUI's
+          # native optional dependencies differ per architecture.
+          key: pnpm-store-${{ matrix.target }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ matrix.target }}-
+
       - name: Install Python dependencies
         run: uv sync --dev
+
+      # `uv tool install` below installs from a bare wheel file, so it has no
+      # lockfile to read: it re-resolves every dependency fresh against
+      # PyPI's latest at that moment, floating past whatever uv.lock pinned.
+      # That drift has real cost, not just a correctness gap: it can land on
+      # a version with no prebuilt wheel for this platform and fall back to
+      # compiling from source. Observed on macos-x86_64: an unconstrained
+      # resolve picked cryptography 49.0.0, which has no prebuilt wheel here
+      # and took 4m17s to build from source, while uv.lock's pinned 46.0.5
+      # installs from a prebuilt wheel in seconds. Export uv.lock's own
+      # resolution as a constraints file so the verification step targets
+      # the same, already-known-good versions instead of floating.
+      - name: Export dependency constraints for release verification
+        run: |
+          uv export --no-dev --no-editable --no-emit-project --no-hashes \
+            --no-header --no-annotate \
+            -o "$RUNNER_TEMP/release-verify-constraints.txt"
 
       - name: Fetch verified Bun 1.3.9
         env:
@@ -209,6 +243,7 @@ jobs:
             UV_CACHE_DIR="$runtime_root/uv-cache" UV_PYTHON_DOWNLOADS=never \
             UV_TOOL_BIN_DIR="$tool_bin" UV_TOOL_DIR="$tool_root" \
             "$bootstrap_bin/uv" tool install --no-cache --no-config \
+              --constraints "$RUNNER_TEMP/release-verify-constraints.txt" \
               --python "$python_path" "$install_wheel"
           rm "$install_wheel"
           cd "$runtime_root"
@@ -313,10 +348,10 @@ jobs:
           name: release-dist
           path: dist/release
 
-      - name: Require exactly four wheels and no sdist
+      - name: Require exactly three wheels and no sdist
         run: |
-          test "$(find dist/release -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 4
-          test "$(find dist/release -maxdepth 1 -type f -name '*.whl' | wc -l | tr -d ' ')" -eq 4
+          test "$(find dist/release -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 3
+          test "$(find dist/release -maxdepth 1 -type f -name '*.whl' | wc -l | tr -d ' ')" -eq 3
 
       - name: Publish with PyPI Trusted Publishing
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

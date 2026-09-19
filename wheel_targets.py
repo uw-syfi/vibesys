@@ -62,15 +62,6 @@ TARGETS: dict[str, WheelTarget] = {
         bun_asset="bun-linux-aarch64.zip",
         bun_sha256="a2c2862bcc1fd1c0b3a8dcdc8c7efb5e2acd871eb20ed2f17617884ede81c844",
     ),
-    "macos-x86_64": WheelTarget(
-        key="macos-x86_64",
-        system="Darwin",
-        machine="x86_64",
-        wheel_platform="macosx_13_0_x86_64",
-        opentui_package="@opentui/core-darwin-x64",
-        bun_asset="bun-darwin-x64-baseline.zip",
-        bun_sha256="a6e15821aa60795f541ce18fce16bca9f2a94e193068b77f6f33330f4d0a3ad5",
-    ),
     "macos-arm64": WheelTarget(
         key="macos-arm64",
         system="Darwin",
