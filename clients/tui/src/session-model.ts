@@ -53,6 +53,11 @@ export interface SessionState {
    */
   roundFocus: RoundFocus;
   overlay: OverlayPanel | null;
+  /**
+   * The modal per-round diff viewer, layered over the overlay in the key
+   * ladder so its Escape closes only the viewer. Null while closed.
+   */
+  diffViewer: DiffViewerState | null;
   chatOpen: boolean;
   /** The thread the chat surfaces show and the composer submits to. */
   activeChatThreadId: string;
@@ -66,6 +71,27 @@ export interface SessionState {
   /** Non-null while the composer's inline command menu is open. */
   chatMenu: ChatMenu | null;
   todosExpanded: boolean;
+  /**
+   * Explicit column width for the Agents pane, set and stepped by `<`/`>` and
+   * cleared by `=`. `null` means automatic: `agent-map.ts#agentPaneWidth`
+   * decides, exactly as it always has, including its no-truncation floor and
+   * the stacked-list fallback on a narrow terminal. Once set it is sticky, so
+   * the pane stops following the terminal and stops growing with longer agent
+   * names until `=` hands it back; an explicit width that drifted would not be
+   * one, and `=` is what keeps that from being a trap. Session-only view state:
+   * it carries no `agent.toml` key and does not persist past this process.
+   */
+  graphWidthOverride: number | null;
+  /**
+   * Explicit column width for the docked chat pane on the home page, set and
+   * stepped by `<`/`>` and cleared by `=`. `null` means automatic:
+   * `chat-pane.ts#chatPaneWidth` decides, exactly as it always has. Mirrors
+   * `graphWidthOverride` above in shape and in the reason it exists: an
+   * explicit width is sticky, and `=` is what keeps that from being a trap.
+   * Session-only view state: it carries no `agent.toml` key and does not
+   * persist past this process.
+   */
+  chatWidthOverride: number | null;
   themeName: ThemeName;
   experimentLog: ExperimentLogState | null;
   /**
@@ -270,6 +296,38 @@ export interface OverlayPanel {
   content: string;
 }
 
+/**
+ * One file's patch as the diff viewer holds it. `patch: null` is the server
+ * reporting that the workspace repository could not produce text, which is a
+ * different fact from an empty patch, so the viewer explains the absence
+ * instead of rendering nothing.
+ */
+export type DiffPatchSlot =
+  | {kind: 'loading'}
+  | {kind: 'loaded'; patch: string | null; truncated: boolean}
+  | {kind: 'error'; message: string};
+
+/**
+ * The modal per-round diff viewer. One file is on screen at a time; `files`
+ * is the round's change list exactly as the design log published it, so the
+ * viewer can only ask the server for paths that list already carries. Patches
+ * load lazily as files are visited and stay cached for the life of the
+ * viewer; the reducers live in `diff-viewer.ts`.
+ */
+export interface DiffViewerState {
+  round: number;
+  /** The commit range the design log recorded for the round. */
+  base: string;
+  head: string;
+  files: readonly DesignFileChange[];
+  /** Index into `files` of the file on screen. */
+  index: number;
+  /** Index of the hunk the arrow keys are on within the file's patch. */
+  hunk: number;
+  /** Fetched patches by path; a present slot doubles as the in-flight guard. */
+  patches: Readonly<Record<string, DiffPatchSlot>>;
+}
+
 export interface ConversationEntry {
   id: string;
   kind:
@@ -316,6 +374,7 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     selectedTodoIndex: null,
     roundFocus: 'transcript',
     overlay: null,
+    diffViewer: null,
     chatOpen: false,
     activeChatThreadId: DEFAULT_CHAT_THREAD_ID,
     chatConversation: [],
@@ -324,6 +383,8 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     chatPendingThreads: {},
     chatMenu: null,
     todosExpanded: false,
+    graphWidthOverride: null,
+    chatWidthOverride: null,
     themeName,
     // The experiment log is the landing view: a run's history reads as a short
     // list of claims before it reads as a long list of rounds.
@@ -1426,10 +1487,18 @@ function normalizeRoundFocus(state: SessionState): SessionState {
 
 /** Escape from a round view: close whatever is layered over it, all of it. */
 export function closeOverlays(state: SessionState): SessionState {
-  if (state.layout.right === null && !state.chatOpen && state.overlay === null) return state;
+  if (
+    state.layout.right === null &&
+    !state.chatOpen &&
+    state.overlay === null &&
+    state.diffViewer === null
+  ) {
+    return state;
+  }
   return {
     ...state,
     overlay: null,
+    diffViewer: null,
     chatOpen: false,
     layout: {right: null, focus: 'left', zoomedPane: null},
   };
@@ -2074,6 +2143,7 @@ export function showLive(state: SessionState): SessionState {
   return {
     ...state,
     overlay: null,
+    diffViewer: null,
     chatOpen: false,
     hypothesisDetail: null,
     hypothesisScope: null,
@@ -2139,6 +2209,26 @@ export function visiblePhases(state: SessionState): AgentPhase[] {
 
 export function toggleTodos(state: SessionState): SessionState {
   return {...state, todosExpanded: !state.todosExpanded};
+}
+
+/**
+ * `<`/`>`: sets the Agents pane's explicit column width. `=`: clears it back
+ * to automatic (`null`). The value handed in is already clamped by the caller
+ * (`agent-map.ts#clampGraphWidthOverride`), which needs the terminal width and
+ * the visible phases to do that; this reducer only applies it.
+ */
+export function setGraphWidthOverride(state: SessionState, width: number | null): SessionState {
+  return state.graphWidthOverride === width ? state : {...state, graphWidthOverride: width};
+}
+
+/**
+ * `<`/`>`: sets the docked chat pane's explicit column width. `=`: clears it
+ * back to automatic (`null`). The value handed in is already clamped by the
+ * caller (`chat-pane.ts#clampChatWidthOverride`), which needs the terminal
+ * width and the right pane's width to do that; this reducer only applies it.
+ */
+export function setChatWidthOverride(state: SessionState, width: number | null): SessionState {
+  return state.chatWidthOverride === width ? state : {...state, chatWidthOverride: width};
 }
 
 /**

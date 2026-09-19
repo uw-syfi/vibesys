@@ -356,7 +356,7 @@ export class ExperimentLogView {
     }
     this.#renderRoundDesign(state, selectedRound);
     this.#footerLine.content =
-      '↑↓: select round · Enter or click: open trajectory · Esc: hypotheses';
+      '↑↓: select round · Enter or click: open trajectory · d: diff · Esc: hypotheses';
   }
 
   /**

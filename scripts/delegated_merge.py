@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
 import tomllib
-from collections.abc import Callable, Mapping, Sequence
-from contextlib import suppress
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Never, Protocol, cast
@@ -19,7 +20,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = REPO_ROOT / ".github" / "delegated-merge.toml"
 MAX_CHANGED_FILES = 3_000
 MAX_GITHUB_LOGIN_LENGTH = 39
+MAX_GRAPHQL_ERROR_TYPES = 5
 API_TIMEOUT_SECONDS = 30
+LANDING_TOKEN_ENV = "LANDING_GH_TOKEN"  # noqa: S105  # env var name, not a secret
 HARD_DENIED_PATHS = frozenset(
     {
         ".github/delegated-merge.toml",
@@ -36,27 +39,38 @@ class MergeRefusalError(RuntimeError):
 
 
 class GitHubAPIError(RuntimeError):
-    """A sanitized GitHub API failure."""
+    """A sanitized GitHub API failure.
+
+    ``step`` names the policy step that made the call and ``detail`` holds only
+    allow-listed facts (HTTP status code, GraphQL error type names). Neither
+    ever carries tokens, response bodies, or GitHub-provided free text.
+    """
+
+    def __init__(self, message: str, *, detail: str = "") -> None:
+        """Record the sanitized message and allow-listed detail."""
+        super().__init__(message)
+        self.detail = detail
+        self.step = ""
 
     @classmethod
     def unavailable(cls) -> GitHubAPIError:
         """Build an error for a missing GitHub CLI."""
-        return cls("GitHub CLI is unavailable")
+        return cls("GitHub CLI is unavailable", detail="gh not found")
 
     @classmethod
-    def request_failed(cls, operation: str) -> GitHubAPIError:
+    def request_failed(cls, operation: str, *, detail: str = "") -> GitHubAPIError:
         """Build an error for a failed API operation."""
-        return cls(f"GitHub API could not {operation}")
+        return cls(f"GitHub API could not {operation}", detail=detail)
 
     @classmethod
-    def graphql_failed(cls) -> GitHubAPIError:
+    def graphql_failed(cls, *, detail: str = "") -> GitHubAPIError:
         """Build an error for a GraphQL operation that reported errors."""
-        return cls("GitHub GraphQL reported an error")
+        return cls("GitHub GraphQL reported an error", detail=detail)
 
     @classmethod
     def malformed_json(cls) -> GitHubAPIError:
         """Build an error for a malformed API response."""
-        return cls("GitHub API returned malformed JSON")
+        return cls("GitHub API returned malformed JSON", detail="malformed JSON")
 
 
 class GitHubClient(Protocol):
@@ -107,7 +121,7 @@ class LandingRequest:
 class LandingStrategy(Protocol):
     """Lands a validated pull request, or raises ``MergeRefusalError``."""
 
-    def land(self, request: LandingRequest) -> Merged | Enqueued:
+    def land(self, request: LandingRequest) -> LandOutcome:
         """Merge or enqueue the request."""
 
 
@@ -170,6 +184,7 @@ class GitHubAPI:
     """Small, injectable adapter for authenticated ``gh api`` calls."""
 
     _runner: Runner = field(default=subprocess.run, repr=False, compare=False)
+    _token: str | None = field(default=None, repr=False, compare=False)
 
     def get(self, endpoint: str, *, paginate: bool = False) -> object:
         """Read and decode one endpoint."""
@@ -196,10 +211,12 @@ class GitHubAPI:
         )
         root = _mapping(document, "GraphQL response")
         if root.get("errors"):
-            raise GitHubAPIError.graphql_failed()
+            raise GitHubAPIError.graphql_failed(detail=_graphql_error_detail(root))
         return root.get("data")
 
     def _run_json(self, command: Sequence[str], *, operation: str, **kwargs: object) -> object:
+        if self._token is not None:
+            kwargs["env"] = {**os.environ, "GH_TOKEN": self._token}
         try:
             result = self._runner(
                 command,
@@ -211,13 +228,74 @@ class GitHubAPI:
         except FileNotFoundError as exc:
             raise GitHubAPIError.unavailable() from exc
         except subprocess.TimeoutExpired as exc:
-            raise GitHubAPIError.request_failed(operation) from exc
+            raise GitHubAPIError.request_failed(operation, detail="timeout") from exc
         if result.returncode != 0:
-            raise GitHubAPIError.request_failed(operation)
+            raise GitHubAPIError.request_failed(operation, detail=_failure_detail(result))
         try:
             return json.loads(result.stdout)
         except json.JSONDecodeError as exc:
             raise GitHubAPIError.malformed_json() from exc
+
+
+def landing_client(environ: Mapping[str, str] = os.environ) -> GitHubAPI | None:
+    """Build the write client for landing from ``LANDING_GH_TOKEN``, or None if unset.
+
+    The landing token is a GitHub App installation token: pull requests
+    enqueued with ``GITHUB_TOKEN`` do not start the merge queue's CI. It is
+    never derived from, or replaced by, the read token.
+    """
+    token = environ.get(LANDING_TOKEN_ENV, "").strip()
+    return GitHubAPI(_token=token) if token else None
+
+
+def _graphql_error_detail(document: object) -> str:
+    """Return only allow-listed GraphQL error type names, never messages."""
+    if not isinstance(document, dict):
+        return ""
+    errors = document.get("errors")
+    if not isinstance(errors, list):
+        return ""
+    types: list[str] = []
+    for error in errors:
+        error_type = error.get("type") if isinstance(error, dict) else None
+        if (
+            isinstance(error_type, str)
+            and re.fullmatch(r"[A-Z][A-Z_]{0,39}", error_type)
+            and error_type not in types
+        ):
+            types.append(error_type)
+    return "GraphQL " + ", ".join(types[:MAX_GRAPHQL_ERROR_TYPES]) if types else ""
+
+
+def _failure_detail(result: subprocess.CompletedProcess[str]) -> str:
+    """Summarize a failed ``gh api`` call as an HTTP status and GraphQL error types."""
+    parts: list[str] = []
+    status = re.search(r"\(HTTP (\d{3})\)", result.stderr or "")
+    if status:
+        parts.append(f"HTTP {status.group(1)}")
+    with suppress(json.JSONDecodeError, TypeError):
+        graphql = _graphql_error_detail(json.loads(result.stdout))
+        if graphql:
+            parts.append(graphql)
+    return "; ".join(parts) or f"exit code {result.returncode}"
+
+
+@contextmanager
+def _step(name: str) -> Iterator[None]:
+    """Label any GitHub API failure inside the block with the failing policy step."""
+    try:
+        yield
+    except GitHubAPIError as exc:
+        exc.step = exc.step or name
+        raise
+
+
+def api_failure_message(exc: GitHubAPIError) -> str:
+    """Build the fail-closed refusal message from sanitized failure facts."""
+    step = f"step: {exc.step}" if exc.step else ""
+    facts = "; ".join(fact for fact in (step, exc.detail) if fact)
+    suffix = f" ({facts})" if facts else ""
+    return f"Scoped merge refused: validation could not be completed safely{suffix}."
 
 
 def load_policy(path: Path = POLICY_PATH) -> Policy:
@@ -541,14 +619,13 @@ class DirectMerge:
     def land(self, request: LandingRequest) -> Merged:
         """Squash-merge atomically against the validated head SHA."""
         repository = quote(request.repository, safe="/")
-        response = _mapping(
-            self.api.write(
+        with _step("merge request"):
+            written = self.api.write(
                 f"repos/{repository}/pulls/{request.number}/merge",
                 method="PUT",
                 payload={"sha": request.head_sha, "merge_method": request.merge_method},
-            ),
-            "merge response",
-        )
+            )
+        response = _mapping(written, "merge response")
         if response.get("merged") is not True:
             _refuse("GitHub refused the merge")
         return Merged(_string(response.get("sha"), "merge response SHA"))
@@ -562,43 +639,112 @@ class QueueEnqueue:
 
     def land(self, request: LandingRequest) -> Enqueued:
         """Enqueue, letting GitHub reject the request if the head moved."""
-        data = _mapping(
-            self.api.graphql(
+        with _step("enqueue request"):
+            answer = self.api.graphql(
                 ENQUEUE_MUTATION, {"id": request.node_id, "sha": request.head_sha}
-            ),
-            "GraphQL data",
-        )
+            )
+        data = _mapping(answer, "GraphQL data")
         payload = _mapping(data.get("enqueuePullRequest"), "enqueue response")
         entry = _mapping(payload.get("mergeQueueEntry"), "merge queue entry")
         _string(entry.get("id"), "merge queue entry id")
         return Enqueued()
 
 
-def choose_strategy(state: QueueState, api: GitHubClient) -> LandingStrategy:
-    """Pick the landing mode from the observed queue state."""
-    return QueueEnqueue(api) if state.queue_required else DirectMerge(api)
+@dataclass(frozen=True)
+class StackedQueueEnqueue:
+    """Enqueue a pull request that is the bottom of a native GitHub stack.
+
+    GitHub rejects the ``enqueuePullRequest`` mutation for stack members and
+    requires the asynchronous merge REST API. That API merges every pull request
+    in the stack up to and including the requested one, so ``select_strategy``
+    only routes the bottom pull request (position 1) here: the one pull request
+    whose scope was validated is then the only one landed.
+    """
+
+    api: GitHubClient
+
+    def land(self, request: LandingRequest) -> Enqueued | AlreadyQueued:
+        """Request an asynchronous merge-queue entry pinned to the validated head."""
+        repository = quote(request.repository, safe="/")
+        with _step("async enqueue request"):
+            written = self.api.write(
+                f"repos/{repository}/pulls/{request.number}/merge-async",
+                method="PUT",
+                payload={
+                    "sha": request.head_sha,
+                    "merge_method": request.merge_method,
+                    "merge_action": "merge_queue",
+                },
+            )
+        response = _mapping(written, "async merge response")
+        details = _mapping(response.get("details"), "async merge details")
+        status = response.get("status")
+        if status == "enqueued":
+            return AlreadyQueued()
+        if status != "pending":
+            _refuse("GitHub did not accept the asynchronous merge request")
+        _string(details.get("uuid"), "async merge request id")
+        if details.get("expected_head_sha") != request.head_sha:
+            _refuse("GitHub pinned the asynchronous merge to a different head")
+        if details.get("merge_action") not in {"default", "merge_queue"}:
+            _refuse("GitHub selected a direct merge for the asynchronous request")
+        return Enqueued()
 
 
-def run(event_path: Path, *, api: GitHubClient) -> LandOutcome:
-    """Validate every gate, then land through the strategy the base branch needs."""
+def read_stack_position(pull: object) -> int | None:
+    """Return this pull request's one-based stack position, or None if unstacked.
+
+    A present but unreadable ``stack`` object fails closed rather than being
+    treated as unstacked, since the wrong strategy would merge unvalidated work.
+    """
+    raw = _mapping(pull, "pull request").get("stack")
+    if raw is None:
+        return None
+    stack = _mapping(raw, "pull request stack")
+    return _positive_int(stack.get("position"), "pull request stack position")
+
+
+def choose_strategy(
+    state: QueueState, api: GitHubClient, *, stack_position: int | None = None
+) -> LandingStrategy:
+    """Pick the landing mode from the observed queue state and stack membership."""
+    if stack_position is None:
+        return QueueEnqueue(api) if state.queue_required else DirectMerge(api)
+    if stack_position != 1:
+        _refuse("only the bottom pull request of a stack can be merged; land the lower ones first")
+    if not state.queue_required:
+        _refuse("stacked pull requests are only supported when the base branch has a merge queue")
+    return StackedQueueEnqueue(api)
+
+
+def run(event_path: Path, *, api: GitHubClient, landing_api: GitHubClient | None) -> LandOutcome:
+    """Validate every gate, then land through the strategy the base branch needs.
+
+    ``api`` performs every read and the audit comment. ``landing_api`` performs
+    only the landing writes. Without it the command is refused after
+    authorization and before any landing write; there is no fallback to ``api``.
+    """
     policy = load_policy()
     event = parse_event(json.loads(event_path.read_text()))
     authorize_event(event, policy)
     repository = quote(policy.repository, safe="/")
     pull_endpoint = f"repos/{repository}/pulls/{event.number}"
     actor = quote(event.actor, safe="")
-    role = authorize_repository_access(
-        api.get(f"repos/{repository}/collaborators/{actor}/permission"),
-        actor=event.actor,
-    )
-    queue = read_queue_state(api, policy=policy, number=event.number)
+    with _step("role check"):
+        permission = api.get(f"repos/{repository}/collaborators/{actor}/permission")
+    role = authorize_repository_access(permission, actor=event.actor)
+    with _step("queue state read"):
+        queue = read_queue_state(api, policy=policy, number=event.number)
     if queue.in_queue:
         return AlreadyQueued()
-    pull = api.get(pull_endpoint)
+    with _step("PR fetch"):
+        pull = api.get(pull_endpoint)
     head_sha = authorize_pull_request(pull, policy=policy, expected_number=event.number)
     changed_files = _mapping(pull, "pull request").get("changed_files")
+    with _step("changed files read"):
+        files = api.get(f"{pull_endpoint}/files?per_page=100", paginate=True)
     required_capabilities, required_checks = authorize_files(
-        api.get(f"{pull_endpoint}/files?per_page=100", paginate=True),
+        files,
         changed_files=changed_files,
         policy=policy,
     )
@@ -607,21 +753,30 @@ def run(event_path: Path, *, api: GitHubClient) -> LandOutcome:
     for check_id in sorted(required_checks):
         check = policy.checks[check_id]
         workflow = quote(check.workflow_file, safe="")
-        run_id = select_workflow_run(
-            api.get(f"repos/{repository}/actions/workflows/{workflow}/runs?{query}"),
-            head_sha=head_sha,
-            check_id=check_id,
-        )
+        with _step("check-run lookup"):
+            runs = api.get(f"repos/{repository}/actions/workflows/{workflow}/runs?{query}")
+        run_id = select_workflow_run(runs, head_sha=head_sha, check_id=check_id)
+        with _step("check-job read"):
+            jobs = api.get(
+                f"repos/{repository}/actions/runs/{run_id}/jobs?per_page=100", paginate=True
+            )
         authorize_check_job(
-            api.get(f"repos/{repository}/actions/runs/{run_id}/jobs?per_page=100", paginate=True),
+            jobs,
             check_id=check_id,
             job_name=check.job_name,
         )
-    refreshed = api.get(pull_endpoint)
+    with _step("PR refresh"):
+        refreshed = api.get(pull_endpoint)
     refreshed_sha = authorize_pull_request(refreshed, policy=policy, expected_number=event.number)
     if refreshed_sha != head_sha:
         _refuse("the pull request changed during validation; rerun the command")
-    return choose_strategy(queue, api).land(
+    if landing_api is None:
+        _refuse(
+            f"the landing token is not configured ({LANDING_TOKEN_ENV} is empty); "
+            "see .github/delegated-merge.md, Setup"
+        )
+    strategy = choose_strategy(queue, landing_api, stack_position=read_stack_position(refreshed))
+    return strategy.land(
         LandingRequest(
             repository=policy.repository,
             number=event.number,
@@ -736,15 +891,18 @@ def main() -> int:
     """Run the merge command and leave one audit comment."""
     args = _parse_args()
     api = GitHubAPI()
+    landing_api = landing_client()
     event: Event | None = None
     try:
         event = parse_event(json.loads(args.event.read_text()))
         if event.body.strip() != load_policy().command:
             return 0
-        outcome = run(args.event, api=api)
+        outcome = run(args.event, api=api, landing_api=landing_api)
     except MergeRefusalError as exc:
         message = f"Scoped merge refused: {exc}."
-    except (GitHubAPIError, OSError, json.JSONDecodeError, tomllib.TOMLDecodeError):
+    except GitHubAPIError as exc:
+        message = api_failure_message(exc)
+    except (OSError, json.JSONDecodeError, tomllib.TOMLDecodeError):
         message = "Scoped merge refused: validation could not be completed safely."
     else:
         if isinstance(outcome, AlreadyQueued):

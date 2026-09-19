@@ -16,11 +16,11 @@ import {
   visibleRoundNumber,
 } from '../session-model.js';
 import {ActivityBarView} from './activity-bar.js';
-import {AgentMapView} from './agent-map.js';
+import {AgentMapView, agentsPaneVisible} from './agent-map.js';
 import {fillLayer} from './box-fill.js';
 import {createChatDraft} from './chat-composer.js';
 import {ChatOverlayView} from './chat-overlay.js';
-import {ChatPaneView, chatDockFits, chatPaneWidth} from './chat-pane.js';
+import {ChatPaneView, chatDockFits, chatPaneWidthWithOverride} from './chat-pane.js';
 import {RendererSelectionClipboard, type SelectionClipboard} from './clipboard.js';
 import {createCommandInputPanel} from './command-input.js';
 import {ConversationView} from './conversation.js';
@@ -50,12 +50,27 @@ export interface OpenTuiApp {
 /** Which of the client's editors currently holds the cursor. */
 type FocusTarget = 'command' | 'chat' | 'modal';
 
-const KEY_HELP = `←→: agents/transcript · ↑↓: within · Tab: complete · [/] or click: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
-const SCOPED_KEY_HELP = `←→: agents/transcript · ↑↓: within · Tab: complete · [/] or click: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
+// `help` is one row and clips rather than wraps, so a hint added here costs the
+// hints behind it on a narrow terminal, which is exactly where the resize keys
+// matter most. All three ride one token, and the round tabs gave up `or click`
+// to pay for it: a tab is the most clickable-looking thing on the screen, while
+// `<>=` is advertised nowhere else.
+const KEY_HELP = `←→: agents/transcript · ↑↓: within · [/]: round · <>=: width · Tab: complete · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
+const SCOPED_KEY_HELP = `←→: agents/transcript · ↑↓: within · [/]: round · <>=: width · Tab: complete · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
 const LOG_KEY_HELP = `↑↓ or scroll: select · Enter/click: open hypothesis · Tab: complete · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
-const LOG_CHAT_KEY_HELP = `↑↓: select · Enter/click: hypothesis · Tab: complete · Ctrl+W: chat · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
+// The resize keys are guarded by `chatPaneVisible(state)` (`keybindings.ts`),
+// which is false in every state `LOG_KEY_HELP` covers, so `<>=: width` goes
+// only on this line, the one state where the keys can actually fire.
+// Advertising a binding that cannot fire is worse than not advertising it at
+// all: tui/conventions.md's "Bindings are visible" is about a person not
+// having to already know a binding, and a dead one on the help line breaks
+// that trust the same way a false error would break the banner's (#635).
+//
+// This line is one row and clips rather than wraps (see `KEY_HELP` above), so
+// the new token costs the tokens behind it on a narrow terminal.
+const LOG_CHAT_KEY_HELP = `↑↓: select · Enter/click: hypothesis · <>=: width · Tab: complete · Ctrl+W: chat · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
 const HYPOTHESIS_KEY_HELP =
-  '↑↓: select round · Enter/click: trajectory · Tab: complete · PgUp/PgDn: scroll · Esc: hypotheses';
+  '↑↓: select round · Enter/click: trajectory · d: diff · Tab: complete · PgUp/PgDn: scroll · Esc: hypotheses';
 /** Bezel, one content row, bezel. See the header frame below. */
 const HEADER_FRAME_HEIGHT = 3;
 
@@ -408,7 +423,7 @@ export function createOpenTuiApp(
     const chatWidth = showChatPane
       ? zoomedPane === 'chat'
         ? renderer.terminalWidth
-        : chatPaneWidth(renderer.terminalWidth, rightWidth)
+        : chatPaneWidthWithOverride(renderer.terminalWidth, rightWidth, state.chatWidthOverride)
       : 0;
     const showExperimentLog = showLog && (zoomedPane === null || zoomedPane === 'experiments');
     paintHeader(renderHeader(state, showLog, renderer.terminalWidth - HEADER_CHROME));
@@ -428,8 +443,10 @@ export function createOpenTuiApp(
           : SCOPED_KEY_HELP;
     help.content = transientStatus ?? renderedKeyHelp;
     // The round tabs and agent map are per-round detail. They belong to a
-    // hypothesis trajectory, not to the list of claims.
-    const showAgents = !showLog && (zoomedPane === null ? !showSplit : zoomedPane === 'agents');
+    // hypothesis trajectory, not to the list of claims. `agentsPaneVisible` is
+    // this same decision, shared with the `<`/`>` resize keys so a layout
+    // change cannot leave the render and the keybinding guard disagreeing.
+    const showAgents = agentsPaneVisible(state, renderer.terminalWidth);
     const showTranscript = !showLog && (zoomedPane === null || zoomedPane === 'transcript');
     // The tabs head the whole round view, so they give way wherever it is not
     // on screen whole: a zoomed pane, or a split that takes the row's right side.
@@ -545,7 +562,12 @@ export function createOpenTuiApp(
     experimentLog.output.visible = showExperimentLog;
     rightPane.render(state, showRightPane, rightWidth);
     overlay.render(state, paneFallback);
-    overlay.renderScrim(state.overlay !== null || state.chatOpen || state.themePicker !== null);
+    overlay.renderScrim(
+      state.overlay !== null ||
+        state.diffViewer !== null ||
+        state.chatOpen ||
+        state.themePicker !== null,
+    );
     themePicker.render(state);
     chat.render(state);
     conversationActivityBar.render(state, !showLog);
@@ -598,6 +620,8 @@ export function createOpenTuiApp(
     selectNextRound: () => controller.selectNextRound(),
     selectPreviousRound: () => controller.selectPreviousRound(),
     toggleTodos: () => controller.toggleTodos(),
+    setGraphWidthOverride: width => controller.setGraphWidthOverride(width),
+    setChatWidthOverride: width => controller.setChatWidthOverride(width),
     scrollRightPane: delta => rightPane.scrollBy(delta),
     scrollChatPane: delta => chatPane.scrollBy(delta),
     scrollExperimentDetail: delta => experimentLog.scrollBy(delta),

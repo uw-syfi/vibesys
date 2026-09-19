@@ -25,6 +25,8 @@ from server.api.protocol import (
     ChatThreadCreateQuery,
     ChatThreadInfo,
     CommandAck,
+    DesignPatch,
+    DesignPatchQuery,
     DesignQuery,
     DesignRound,
     EventsQuery,
@@ -43,6 +45,7 @@ from server.api.protocol import (
     SteerCommand,
     TuiDefaultsQuery,
 )
+from server.api.workspace_git import WorkspacePatchReader
 from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent
 from vibesys.loops.agent.hypotheses import reproject_run_evidence
@@ -96,12 +99,12 @@ class SubscriptionCheckpoint:
 
 
 class _DesignLogGitEvents(NullGitTrackerEvents):
-    """Forward design-projection tracker warnings to a journal sink.
+    """Forward design-projection git warnings to a journal sink.
 
-    The design tracker is read-only (``diff_name_status`` only), so the
-    snapshot observations never fire and inherit the null no-ops. Warnings
-    are formatted here, at the wiring layer, into the tagged text the run
-    journal shows.
+    The design projection's git access is read-only (``diff_name_status``
+    and the patch reader), so the snapshot observations never fire and
+    inherit the null no-ops. Warnings are formatted here, at the wiring
+    layer, into the tagged text the run journal shows.
     """
 
     def __init__(self, publish: Callable[[str], None]) -> None:
@@ -192,6 +195,14 @@ class RunApi:
                 request_id=request.request_id,
                 design=self.design_rounds() if ready else [],
                 design_ready=ready,
+            )
+        if isinstance(request, DesignPatchQuery):
+            # Deliberately not journaled as a STATUS_QUERY: a diff viewer
+            # issues one of these per file navigated, and that cadence would
+            # spam the run journal without recording anything about the run.
+            return Response(
+                request_id=request.request_id,
+                design_patch=self.design_patch(request.base, request.head, request.path),
             )
         if isinstance(request, SnapshotQuery):
             return Response(request_id=request.request_id, snapshot=self.snapshot())
@@ -397,6 +408,14 @@ class RunApi:
         manifest = project_run.project.state.load_run(project_run.run_id)
         return design.rounds(state, baseline=manifest.trusted_input_baseline)
 
+    def design_patch(self, base: str, head: str, path: str) -> DesignPatch | None:
+        """Read one file's patch for a published design range, None unattached."""
+        project_run = self._controller.project_run
+        if project_run is None:
+            return None
+        design = self._design_log(project_run.project.root, project_run.run_id)
+        return design.patch(base, head, path)
+
     def _design_log(self, workspace: Path, run_id: str) -> DesignLog:
         """Return the design projection for one run, building it once.
 
@@ -409,12 +428,14 @@ class RunApi:
             cached = self._design
             if cached is not None and cached[0] == (workspace, run_id):
                 return cached[1]
-            tracker = GitTracker(
-                workspace,
-                run_id=run_id,
-                events=_DesignLogGitEvents(self._publish_git_diagnostic()),
+            events = _DesignLogGitEvents(self._publish_git_diagnostic())
+            tracker = GitTracker(workspace, run_id=run_id, events=events)
+            reader = WorkspacePatchReader(workspace, warning=events.warning)
+            design = DesignLog(
+                workspace=workspace,
+                diff=tracker.diff_name_status,
+                patch=reader.diff_patch,
             )
-            design = DesignLog(workspace=workspace, diff=tracker.diff_name_status)
             self._design = ((workspace, run_id), design)
             return design
 

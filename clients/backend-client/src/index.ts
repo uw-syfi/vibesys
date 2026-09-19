@@ -18,6 +18,7 @@ export type {
   ChatOptions,
   ChatProviderOptions,
   DesignFileChange,
+  DesignPatch,
   DesignRound,
   Diagnostic,
   ExperimentCursor,
