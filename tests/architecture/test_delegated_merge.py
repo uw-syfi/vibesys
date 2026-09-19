@@ -31,6 +31,7 @@ from scripts.delegated_merge import (
     QueueEnqueue,
     QueueState,
     RepositoryRole,
+    api_failure_message,
     authorize_check_job,
     authorize_event,
     authorize_files,
@@ -793,6 +794,145 @@ def test_queue_lookup_failure_never_merges_or_enqueues(
     with pytest.raises(GitHubAPIError):
         run(event_path, api=api)
     assert api.writes == []
+
+
+class _FailingAPI(FakeGitHubAPI):
+    """Fail one call, chosen by endpoint fragment or GraphQL operation."""
+
+    def __init__(self, *, fail_on: str, error: GitHubAPIError, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.fail_on = fail_on
+        self.error = error
+
+    def get(self, endpoint: str, *, paginate: bool = False) -> object:
+        if self.fail_on in endpoint:
+            raise self.error
+        return super().get(endpoint, paginate=paginate)
+
+    def graphql(self, query: str, variables: Mapping[str, object]) -> object:
+        if self.fail_on in query:
+            raise self.error
+        return super().graphql(query, variables)
+
+
+@pytest.mark.parametrize(
+    ("fail_on", "step", "queue"),
+    [
+        ("/permission", "role check", None),
+        ("mergeQueue(", "queue state read", None),
+        ("/pulls/42", "PR fetch", None),
+        ("/files?", "changed files read", None),
+        ("/workflows/test.yml/runs", "check-run lookup", None),
+        ("/jobs?", "check-job read", None),
+        ("enqueuePullRequest", "enqueue request", {"id": "Q"}),
+    ],
+)
+def test_api_failure_names_the_failing_step_and_still_refuses(  # noqa: PLR0913
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fail_on: str,
+    step: str,
+    queue: object,
+) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    _use_test_policy(monkeypatch)
+    monkeypatch.setattr("sys.argv", ["delegated_merge", "--event", str(event_path)])
+    error = GitHubAPIError.request_failed("read GitHub state", detail="HTTP 403")
+    api = _FailingAPI(fail_on=fail_on, error=error, queue=queue)
+    monkeypatch.setattr(delegated_merge, "GitHubAPI", lambda: api)
+
+    code = delegated_merge.main()
+
+    assert code == 1
+    message = capsys.readouterr().err.strip()
+    assert message == (
+        f"Scoped merge refused: validation could not be completed safely (step: {step}; HTTP 403)."
+    )
+    assert not any(endpoint.endswith("/merge") for endpoint, _, _ in api.writes)
+    if step != "enqueue request":
+        assert not any("enqueuePullRequest" in query for query, _ in api.graphql_calls)
+
+
+def test_pull_request_refresh_failure_is_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    error = GitHubAPIError.request_failed("read GitHub state")
+
+    class RefreshFails(FakeGitHubAPI):
+        def get(self, endpoint: str, *, paginate: bool = False) -> object:
+            if endpoint == "repos/uw-syfi/vibesys/pulls/42" and self.pull_reads == 1:
+                raise error
+            return super().get(endpoint, paginate=paginate)
+
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    _use_test_policy(monkeypatch)
+    api = RefreshFails(queue={"id": "Q"})
+
+    with pytest.raises(GitHubAPIError) as caught:
+        run(event_path, api=api)
+    assert caught.value.step == "PR refresh"
+    assert api.writes == []
+
+
+def test_gh_failures_expose_only_http_status_and_graphql_error_types() -> None:
+    secret = "ghs_SECRETTOKEN0123"  # noqa: S105
+    body = json.dumps(
+        {
+            "data": None,
+            "errors": [
+                {"type": "FORBIDDEN", "message": f"private {secret}"},
+                {"type": "FORBIDDEN"},
+                {"type": "not a type", "message": secret},
+                {"message": secret},
+            ],
+        }
+    )
+
+    def failing(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            ["gh"], 1, stdout=body, stderr=f"gh: {secret} (HTTP 403)\n"
+        )
+
+    with pytest.raises(GitHubAPIError) as caught:
+        GitHubAPI(_runner=failing).graphql("query", {})
+    assert caught.value.detail == "HTTP 403; GraphQL FORBIDDEN"
+    assert secret not in api_failure_message(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("result", "detail"),
+    [
+        (subprocess.CompletedProcess(["gh"], 1, stdout="", stderr="boom"), "exit code 1"),
+        (
+            subprocess.CompletedProcess(["gh"], 1, stdout="<html>", stderr="x (HTTP 502)"),
+            "HTTP 502",
+        ),
+        (
+            subprocess.CompletedProcess(
+                ["gh"], 0, stdout='{"errors":[{"type":"NOT_FOUND"}]}', stderr=""
+            ),
+            None,
+        ),
+    ],
+)
+def test_failure_detail_is_allow_listed(
+    result: subprocess.CompletedProcess[str], detail: str | None
+) -> None:
+    def runner(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return result
+
+    api = GitHubAPI(_runner=runner)
+    if detail is None:
+        with pytest.raises(GitHubAPIError) as caught:
+            api.graphql("query", {})
+        assert caught.value.detail == "GraphQL NOT_FOUND"
+        return
+    with pytest.raises(GitHubAPIError) as caught:
+        api.get("repos/x/y")
+    assert caught.value.detail == detail
 
 
 def test_main_reports_enqueue_distinctly_from_merge(
