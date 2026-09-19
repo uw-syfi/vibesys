@@ -36,7 +36,10 @@ flowchart LR
 The dependency direction is deliberate:
 
 ```text
-cmd -> concrete applications and drivers
+task/example command -> task correctness, composition, and servicebenchcli
+cmd/servicebench -> legacy bundled registrations and servicebenchcli
+servicebenchcli -> shared runners and command mechanics
+composition -> api and registry only
 engine -> api interfaces only
 drivers -> api protocol payloads only
 applications -> api protocol payloads only
@@ -45,8 +48,10 @@ statistics/results -> common observations only
 
 The engine never branches on an application or protocol name. A new protocol
 implements `api.Driver` and `api.Client`; a new application implements
-`api.Application`. The command registers concrete implementations at startup,
-and the workload selects them by name.
+`api.Application`. An executable composition root registers concrete
+implementations at startup, and the workload selects them by name. New
+task-specific correctness implementations and their composition roots belong
+with the task or example, not in the generic `cmd/servicebench` command.
 
 When an application implements `api.PreflightApplication`, benchmark and
 accuracy execution use the same readiness and protocol-probe plans before
@@ -172,15 +177,16 @@ retains one observation per measured logical operation for diagnosis.
 | Directory | Responsibility |
 | --- | --- |
 | [`api/`](api/) | Shared workload, extension, and observation contracts |
-| [`accuracy/`](accuracy/) | Accuracy orchestration and fail-closed validation primitives |
-| [`accuracyapps/`](accuracyapps/) | Independent application-specific accuracy oracles |
+| [`accuracy/`](accuracy/) | Replayable correctness programs, reference-model verification, orchestration, and fail-closed validation primitives |
+| [`accuracyapps/`](accuracyapps/) | Legacy bundled compatibility accuracy adapters |
 | [`appsupport/`](appsupport/) | Mode-neutral topology, preflight, input, and authentication grammars |
 | [`apps/`](apps/) | Application-adapter extension layer |
 | [`apps/declarative/`](apps/declarative/) | Declarative HTTP request and response adapter |
 | [`apps/hotel/`](apps/hotel/) | Typed DeathStarBench Hotel Reservation adapter |
 | [`apps/socialnetwork/`](apps/socialnetwork/) | Typed DeathStarBench Social Network adapter |
 | [`cmd/`](cmd/) | Executable composition roots |
-| [`cmd/servicebench/`](cmd/servicebench/) | Benchmark and accuracy CLI |
+| [`cmd/servicebench/`](cmd/servicebench/) | Thin CLI with legacy bundled registrations |
+| [`composition/`](composition/) | Generic typed registry registration helpers |
 | [`config/`](config/) | Strict TOML decoding, defaults, profiles, and canonical serialization |
 | [`drivers/`](drivers/) | Protocol-driver extension layer |
 | [`drivers/httpdriver/`](drivers/httpdriver/) | HTTP transport and connection policy |
@@ -188,6 +194,7 @@ retains one observation per measured logical operation for diagnosis.
 | [`probing/`](probing/) | Shared readiness and protocol-preflight execution |
 | [`registry/`](registry/) | Driver and application registration |
 | [`sampling/`](sampling/) | Shared deterministic case-volume sampling |
+| [`servicebenchcli/`](servicebenchcli/) | Reusable benchmark and accuracy CLI orchestration |
 | [`telemetry/`](telemetry/) | Measurement-window and normalized internal-latency contracts |
 | [`transport/`](transport/) | Shared target runtime used by benchmark and accuracy modes |
 | [`wire/httpjson/`](wire/httpjson/) | Canonical JSON-over-HTTP request construction |
@@ -197,6 +204,20 @@ guidance.
 
 More detailed ownership rules and measurement semantics are recorded in
 [`DESIGN.md`](DESIGN.md).
+
+## Extending servicebench
+
+Task-owned commands call `servicebenchcli.Run(args, version, registrations...)` and use
+`composition.Driver`, `composition.Application`, and
+`composition.AccuracyApplication` to select their concrete extensions. The
+composition package is intentionally empty by default: it does not discover
+plugins or import application packages. This keeps task correctness out of the
+shared command and makes the executable dependency graph explicit.
+
+The bundled `cmd/servicebench` command preserves the existing general benchmark
+adapters and legacy Train Ticket accuracy adapter. It is not a registration
+list for new task-specific correctness implementations. A task that owns an
+accuracy oracle should own the small command that imports and registers it.
 
 ## Workload model
 
@@ -216,6 +237,7 @@ configuration is accepted only by the selected adapter.
 
 See the checked-in workloads for complete examples:
 
+- `examples/microservices/hotel-correctness/benchmark/workload.toml`
 - `examples/microservices/train-ticket/benchmark/workload.toml`
 - `examples/microservices/repositories/deathstarbench/.vibesys/tasks/social-network-read-timeline/benchmark/workload.toml`
 - `examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml`

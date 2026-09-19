@@ -190,6 +190,8 @@ const BACKFILL_CHUNK = 1_000;
  * outage gets the full schedule again.
  */
 const RECONNECT_DELAYS_MS: readonly number[] = [500, 1_000, 2_000, 4_000, 8_000];
+type EventBatchMessage = Extract<ServerMessage, {events: RunEvent[]}>;
+type ProtocolErrorMessage = Extract<ServerMessage, {message: string}>;
 
 export class SocketSessionController implements SessionController {
   #state: SessionState;
@@ -1058,87 +1060,97 @@ export class SocketSessionController implements SessionController {
   }
 
   #onMessage(message: ServerMessage, resumed: boolean): void {
-    if (message.type === 'event') {
+    const events = this.#dispatchMessage(message, resumed);
+    if (events === null) return;
+    this.#refreshExperimentsFor(events);
+    this.#refreshPaneFor(events);
+  }
+
+  #dispatchMessage(message: ServerMessage, resumed: boolean): readonly RunEvent[] | null {
+    if ('event' in message) {
       this.#setState(applyEvent(this.#state, message.event));
-      this.#refreshExperimentsFor([message.event]);
-      this.#refreshPaneFor([message.event]);
+      return [message.event];
     }
-    if (message.type === 'event_batch') {
-      if (resumed) {
-        const store = message.store_id ?? '';
-        const knownStoreChanged = Boolean(this.#storeId && store && store !== this.#storeId);
-        if (knownStoreChanged) {
-          // The run swapped its durable log while the stream was severed. The
-          // resume named the store we last folded, so the server dropped our
-          // cursor and replayed the live store from its floor: this batch
-          // supersedes the fold rather than extending it, exactly as a
-          // mid-stream swap does on the boot dial.
-          const declared = message.history_after_sequence ?? 0;
-          this.#storeId = store;
-          this.#declaredFloor = declared;
-          this.#setState(
-            applyEventRebootstrap(
-              this.#state,
-              message.events,
-              message.active_executions,
-              message.through_sequence,
-              this.#resetHistoryFloor(declared),
-            ),
-          );
-          this.#recordSpine(message.events, declared);
-        } else {
-          if (store) this.#storeId = store;
-          // A resumed subscription replays exactly the events after the
-          // client's own cursor and declares no history floor of its own
-          // (`history_after_sequence` 0 on every batch). Taking that literally
-          // would mark history complete and quietly break scroll-back, so the
-          // floor bookkeeping keeps the boot subscription's answers and the
-          // batch folds at the floor already in state.
-          this.#setState(
-            applyEventBatch(
-              this.#state,
-              message.events,
-              message.active_executions,
-              message.through_sequence,
-              this.#state.core.historyAfterSequence,
-            ),
-          );
-        }
-      } else {
-        const declared = message.history_after_sequence ?? 0;
-        const store = message.store_id ?? '';
-        const rebootstrap =
-          (this.#storeId !== null && store !== this.#storeId) ||
-          (this.#declaredFloor !== null && declared > this.#declaredFloor);
-        this.#storeId = store;
-        this.#declaredFloor = declared;
-        const floor = rebootstrap
-          ? this.#resetHistoryFloor(declared)
-          : this.#lowerHistoryFloor(declared);
-        const apply = rebootstrap ? applyEventRebootstrap : applyEventBatch;
-        this.#setState(
-          apply(
-            this.#state,
-            message.events,
-            message.active_executions,
-            message.through_sequence,
-            floor,
-          ),
-        );
-        this.#recordSpine(message.events, declared);
-      }
-      this.#refreshExperimentsFor(message.events);
-      this.#refreshPaneFor(message.events);
+    if ('events' in message) {
+      this.#reconcileBatch(message, resumed);
+      return message.events;
     }
-    if (message.type === 'protocol_error') {
-      this.#streamProtocolError = true;
+    if (!('message' in message)) return null;
+    const protocolError = message as ProtocolErrorMessage;
+    this.#streamProtocolError = true;
+    this.#setState(
+      reportError(markEventStreamUnavailable(this.#state), protocolError.message, {
+        scope: 'protocol',
+        diagnostic: protocolError.diagnostic ?? null,
+      }),
+    );
+    return null;
+  }
+
+  #reconcileBatch(message: EventBatchMessage, resumed: boolean): void {
+    if (resumed) {
+      this.#reconcileResumedBatch(message);
+      return;
+    }
+    this.#reconcileFreshBatch(message);
+  }
+
+  #reconcileResumedBatch(message: EventBatchMessage): void {
+    const store = message.store_id ?? '';
+    const knownStoreChanged = Boolean(this.#storeId && store && store !== this.#storeId);
+    if (knownStoreChanged) {
+      // A changed store invalidates the cursor and its folded state. The
+      // resumed batch is therefore a fresh bootstrap, including spine tracking.
+      const declared = message.history_after_sequence ?? 0;
+      this.#storeId = store;
+      this.#declaredFloor = declared;
       this.#setState(
-        reportError(markEventStreamUnavailable(this.#state), message.message, {
-          scope: 'protocol',
-          diagnostic: message.diagnostic ?? null,
-        }),
+        applyEventRebootstrap(
+          this.#state,
+          message.events,
+          message.active_executions,
+          message.through_sequence,
+          this.#resetHistoryFloor(declared),
+        ),
       );
+      this.#recordSpine(message.events, declared);
+      return;
     }
+    if (store) this.#storeId = store;
+    // Resumed batches declare no new floor. Keep the current floor so
+    // scrollback remains available after reconnecting.
+    this.#setState(
+      applyEventBatch(
+        this.#state,
+        message.events,
+        message.active_executions,
+        message.through_sequence,
+        this.#state.core.historyAfterSequence,
+      ),
+    );
+  }
+
+  #reconcileFreshBatch(message: EventBatchMessage): void {
+    const declared = message.history_after_sequence ?? 0;
+    const store = message.store_id ?? '';
+    const rebootstrap =
+      (this.#storeId !== null && store !== this.#storeId) ||
+      (this.#declaredFloor !== null && declared > this.#declaredFloor);
+    this.#storeId = store;
+    this.#declaredFloor = declared;
+    const floor = rebootstrap
+      ? this.#resetHistoryFloor(declared)
+      : this.#lowerHistoryFloor(declared);
+    this.#setState(
+      (rebootstrap ? applyEventRebootstrap : applyEventBatch)(
+        this.#state,
+        message.events,
+        message.active_executions,
+        message.through_sequence,
+        floor,
+      ),
+    );
+    this.#recordSpine(message.events, declared);
   }
 
   /**

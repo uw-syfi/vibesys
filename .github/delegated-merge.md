@@ -59,6 +59,10 @@ the command issuer to retain at least Triage access. The complete file list is
 validated before the broker passes the validated head SHA to GitHub's merge
 API. Missing or malformed policy fails closed.
 
+This broker merges through the pull request merge API, which GitHub refuses
+for a branch that requires a merge queue. Do not enable the merge queue for
+`main` until `/merge-scoped` is changed to enqueue the pull request instead.
+
 GitHub suppresses most workflow events caused by `GITHUB_TOKEN`. The PR test
 workflow has already passed before the merge, but the resulting update to
 `main` does not start workflows configured only for `push`.

@@ -1,0 +1,4 @@
+github.com/BurntSushi/toml v1.4.0 h1:kuoIxZQy2WRRk1pttg9asf+WVv6tWQuBNVmK8+nqPr0=
+github.com/BurntSushi/toml v1.4.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
+github.com/uw-syfi/vibesys/sdk/vs-evaluator/vseval v0.2.0 h1:RKi6fBUJNYM0f72GCp0AUwpPXPb2OmuPFdF8Mb6ZM8w=
+github.com/uw-syfi/vibesys/sdk/vs-evaluator/vseval v0.2.0/go.mod h1:F1FaSrDktADJ2IlwTmBeWmCeQwS7DST8rrwHHr0qXII=

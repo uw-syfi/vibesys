@@ -93,6 +93,38 @@ describe('prefix backfill equivalence', () => {
 });
 
 describe('prefix merges across the chunk boundary', () => {
+  it('replays an equal-sequence prefix entry before the suffix entry', () => {
+    const suffixEntry = {
+      id: '1',
+      kind: 'assistant' as const,
+      content: 'suffix',
+      turnId: 'turn',
+      invocationId: 'turn',
+    };
+    const suffix = {
+      ...initialCoreState(),
+      sequence: 1,
+      transcript: [suffixEntry],
+      historyAfterSequence: 1,
+    };
+
+    const merged = reduceEventPrefix(suffix, [chunkEvent(1, 'prefix ')], 0);
+
+    expect(merged.transcript).toEqual([
+      {
+        id: '1',
+        kind: 'assistant',
+        content: 'prefix suffix',
+        label: 'implementer · round-1-implementer',
+        agentKind: 'implementer',
+        roundLabel: 'round-1-implementer',
+        roundNumber: 1,
+        turnId: 'turn',
+        invocationId: 'turn',
+      },
+    ]);
+  });
+
   it('keeps the newest per-execution status across tail replay and prefix backfill', () => {
     const events = [
       executionStartedEvent(1, 'active'),
@@ -503,6 +535,14 @@ describe('prefix merges across the chunk boundary', () => {
 
     expect(merged).toEqual(reduceEventBatch(initialCoreState(), events));
     expect(merged.transcript).toHaveLength(2);
+    expect(merged.transcript[0]).toMatchObject({
+      id: '1',
+      kind: 'tool',
+      toolName: 'Bash',
+      toolCallId: 'call-a',
+      toolArguments: {command: 'call-a'},
+      toolResult: {call_id: 'call-a', content: 'first result'},
+    });
     expect(merged.transcript.map(entry => entry.toolResult?.content)).toEqual([
       'first result',
       'second result',
@@ -567,9 +607,12 @@ describe('prefix merges across the chunk boundary', () => {
     const merged = foldAsPrefix(events, 3);
 
     expect(merged).toEqual(reduceEventBatch(initialCoreState(), events));
-    expect(merged.chatTranscripts['thread-a']?.map(entry => entry.content)).toEqual([
-      'complete answer',
-    ]);
+    expect(merged.chatTranscripts['thread-a']).toHaveLength(1);
+    expect(merged.chatTranscripts['thread-a']?.[0]).toMatchObject({
+      id: '2',
+      content: 'complete answer',
+      invocationId: 'thread-a-turn',
+    });
   });
 
   it('keeps an abandoned streamed turn distinct from the tail answer after it', () => {
@@ -917,6 +960,8 @@ const CHANNELS = ['assistant', 'assistant', 'assistant', 'analysis', 'prompt'] a
  * Sized well under MAX_TRANSCRIPT_ENTRIES so cap eviction, which replay and
  * backfill are not required to agree on, never enters the comparison.
  */
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds = 5): RunEvent[] {
   const rng = new Rng(seed);
   const events: RunEvent[] = [];

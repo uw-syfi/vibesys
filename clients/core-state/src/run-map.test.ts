@@ -32,6 +32,16 @@ describe('run map projection', () => {
     expect(roundAgentElapsedMs(round, new Date('2026-01-01T00:00:05Z'))).toBe(2000);
   });
 
+  it('tracks compatibility phase events when canonical execution events are absent', () => {
+    let state = emptyRunMap();
+    state = applyRunMapEvent(state, execution(1, 'phase_started', 'a'));
+    state = applyRunMapEvent(state, execution(4, 'phase_finished', 'a'));
+
+    const round = requiredRound(state);
+    expect(roundAgentElapsedMs(round, new Date('2026-01-01T00:00:10Z'))).toBe(3000);
+    expect(hasActiveAgentTiming(round)).toBe(false);
+  });
+
   it('captures the agent runtime identity on start and keeps it after finish', () => {
     let state = applyRunMapEvent(emptyRunMap(), {
       ...execution(1, 'agent_execution_started', 'a'),

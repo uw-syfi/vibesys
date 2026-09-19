@@ -12,6 +12,10 @@ on:
       - '.github/workflows/website.yml'
   pull_request:
     branches: [main]
+  # GitHub merge queue: Required PR CI must report on the queue's temporary
+  # gh-readonly-queue/... branch or the queue waits for it until timeout.
+  merge_group:
+    types: [checks_requested]
 
 env:
   # Wall-clock budget for a whole run, enforced as a warning by `ci-budget`
@@ -38,6 +42,8 @@ jobs:
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
+          # merge_group is handled natively by paths-filter (diffs the queue
+          # branch head_sha against the group's base_sha).
           filters: |
             # What `python-checks` actually reads: `ruff`/`lint-imports`'s
             # source roots (`[tool.ruff] src` in pyproject.toml), the dirs
@@ -146,6 +152,13 @@ jobs:
 
       - name: Check Python lint
         run: ./scripts/check_lint.sh
+
+      # Ruff bounds individual functions (C901, PL) but not module size, so a
+      # file can grow without bound while every function in it stays legal.
+      # Ratchets against the allowlist in [tool.vibesys.file_length]; the
+      # TypeScript counterpart rides `pnpm check:ts` in the `tui` job.
+      - name: Check Python file length
+        run: uv run python scripts/check_file_length.py
 
       - name: Check Python package boundaries
         run: uv run lint-imports
@@ -455,6 +468,8 @@ jobs:
           go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/repositories/deathstarbench/.vibesys/tasks/social-network-read-timeline/benchmark/workload.toml" --validate-only
           go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml" --telemetry-command-json '["go","run","./cmd/otelcapture","--input-json","/tmp/vibesys-hotel-traces.otlp.ndjson","--settle-seconds","5"]' --telemetry-output /tmp/vibesys-hotel-telemetry.json --telemetry-timeout 60 --validate-only
           go run ./cmd/servicebench --mode accuracy --workload "$GITHUB_WORKSPACE/examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml" --validate-only
+          go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/hotel-correctness/benchmark/workload.toml" --telemetry-command-json '["go","run","./cmd/otelcapture","--input-json","/tmp/vibesys-hotel-traces.otlp.ndjson","--settle-seconds","5"]' --telemetry-output /tmp/vibesys-hotel-telemetry.json --telemetry-timeout 60 --validate-only
+          go -C "$GITHUB_WORKSPACE/examples/microservices/hotel-correctness/evaluator" run ./cmd/hotel-correctness --mode accuracy --workload "$GITHUB_WORKSPACE/examples/microservices/hotel-correctness/benchmark/workload.toml" --validate-only
 
   # Builds the CPU agent image for real and runs every shipped CLI inside it
   # as the non-root `agent` user (issue #675). ubuntu-latest ships Docker, so

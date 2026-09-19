@@ -181,66 +181,114 @@ export function mergeAgentTimingPrefix(
   older: RoundTimingState,
   newer: RoundTimingState,
 ): RoundTimingState {
-  const taggedIntervals: TaggedInterval[] = [];
+  const fixedIntervals: TaggedInterval[] = [];
   const operations: TimingOperation[] = [];
-  collectTimingFacts(older, timingProvenance(older), taggedIntervals, operations);
-  collectTimingFacts(newer, timingProvenance(newer), taggedIntervals, operations);
-  operations.sort(compareTimingOperations);
+  collectTimingFacts(older, timingProvenance(older), fixedIntervals, operations);
+  collectTimingFacts(newer, timingProvenance(newer), fixedIntervals, operations);
+  const replay = replayTimingOperations(operations, fixedIntervals);
+  return projectTimingReplay(older, newer, replay);
+}
 
-  const active = new Map<string, TimingStart>();
+interface TimingReplay {
+  taggedIntervals: TaggedInterval[];
+  active: Map<string, TimingStart>;
+  unmatchedFinishes: TimingFinish[];
+}
+
+/** Replays provenance-bearing facts in event order into completed and active timings. */
+function replayTimingOperations(
+  operations: TimingOperation[],
+  fixedIntervals: TaggedInterval[],
+): TimingReplay {
+  operations.sort(compareTimingOperations);
+  const replay: TimingReplay = {
+    taggedIntervals: [...fixedIntervals],
+    active: new Map(),
+    unmatchedFinishes: [],
+  };
   const completed = new Set<string>();
-  const unmatchedFinishes: TimingFinish[] = [];
   for (const operation of operations) {
-    if (operation.kind === 'start') {
-      if (operation.start.compatibility && active.has(operation.start.key)) continue;
-      active.set(operation.start.key, operation.start);
-      completed.delete(operation.start.key);
-      continue;
-    }
-    if (operation.kind === 'closeout') {
-      for (const [startKey, start] of active) {
-        taggedIntervals.push({
-          interval: {startedAt: start.startedAt, finishedAt: operation.closeout.finishedAt},
-          provenance: {
-            startKey,
-            startSequence: start.sequence,
-            startCompatibility: start.compatibility,
-            finishKey: startKey,
-            agentKind: start.agentKind,
-            finishSequence: operation.closeout.sequence,
-            finishCompatibility: false,
-          },
-        });
-      }
-      active.clear();
-      continue;
-    }
-    const finish = operation.finish;
-    if (finish.compatibility && completed.has(finish.key)) continue;
-    const startKey = findReplayTimingKey(active, finish);
-    if (startKey === null) {
-      unmatchedFinishes.push(finish);
-      completed.add(finish.key);
-      continue;
-    }
-    const start = active.get(startKey) as TimingStart;
-    active.delete(startKey);
-    taggedIntervals.push({
-      interval: {startedAt: start.startedAt, finishedAt: finish.finishedAt},
+    applyTimingOperation(replay, completed, operation);
+  }
+  replay.taggedIntervals.sort(compareTaggedIntervals);
+  return replay;
+}
+
+/** Applies one ordered timing fact while enforcing compatibility-event deduplication. */
+function applyTimingOperation(
+  replay: TimingReplay,
+  completed: Set<string>,
+  operation: TimingOperation,
+): void {
+  if (operation.kind === 'start') {
+    if (operation.start.compatibility && replay.active.has(operation.start.key)) return;
+    replay.active.set(operation.start.key, operation.start);
+    completed.delete(operation.start.key);
+    return;
+  }
+  if (operation.kind === 'closeout') {
+    closeReplayTimings(replay, operation.closeout);
+    return;
+  }
+  finishReplayTiming(replay, completed, operation.finish);
+}
+
+/** Closes every active timing at a run- or round-level terminal event. */
+function closeReplayTimings(replay: TimingReplay, closeout: TimingCloseout): void {
+  for (const [startKey, start] of replay.active) {
+    replay.taggedIntervals.push({
+      interval: {startedAt: start.startedAt, finishedAt: closeout.finishedAt},
       provenance: {
         startKey,
         startSequence: start.sequence,
         startCompatibility: start.compatibility,
-        finishKey: finish.key,
-        agentKind: finish.agentKind,
-        finishSequence: finish.sequence,
-        finishCompatibility: finish.compatibility,
+        finishKey: startKey,
+        agentKind: start.agentKind,
+        finishSequence: closeout.sequence,
+        finishCompatibility: false,
       },
     });
-    completed.add(finish.key);
   }
+  replay.active.clear();
+}
 
-  taggedIntervals.sort(compareTaggedIntervals);
+/** Matches a finish to its exact start or the oldest active start of the same role. */
+function finishReplayTiming(
+  replay: TimingReplay,
+  completed: Set<string>,
+  finish: TimingFinish,
+): void {
+  if (finish.compatibility && completed.has(finish.key)) return;
+  const startKey = findReplayTimingKey(replay.active, finish);
+  if (startKey === null) {
+    replay.unmatchedFinishes.push(finish);
+    completed.add(finish.key);
+    return;
+  }
+  const start = replay.active.get(startKey) as TimingStart;
+  replay.active.delete(startKey);
+  replay.taggedIntervals.push({
+    interval: {startedAt: start.startedAt, finishedAt: finish.finishedAt},
+    provenance: {
+      startKey,
+      startSequence: start.sequence,
+      startCompatibility: start.compatibility,
+      finishKey: finish.key,
+      agentKind: finish.agentKind,
+      finishSequence: finish.sequence,
+      finishCompatibility: finish.compatibility,
+    },
+  });
+  completed.add(finish.key);
+}
+
+/** Projects replay results while attaching the provenance needed by later prefix merges. */
+function projectTimingReplay(
+  older: RoundTimingState,
+  newer: RoundTimingState,
+  replay: TimingReplay,
+): RoundTimingState {
+  const {active, taggedIntervals, unmatchedFinishes} = replay;
   const activeAgentStarts = Object.fromEntries(
     [...active].map(([key, start]) => [key, start.startedAt]),
   );

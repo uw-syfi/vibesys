@@ -29,6 +29,7 @@ from vs_project import (
     StateFile,
     StateModelNotFoundError,
     StateSnapshot,
+    compare_resume_configurations,
     generate_run_id,
     is_project_state_path,
     serialize_round,
@@ -276,6 +277,49 @@ def test_run_configuration_discriminates_outer_loop(
     assert type(parsed) is expected_type
     with pytest.raises(ValidationError, match="frozen"):
         parsed.agent_backend = "stub"
+
+
+def test_profile_guided_run_configuration_round_trips_as_agent_configuration() -> None:
+    payload = _configuration().model_dump()
+    payload["outer_loop"] = "profile-guided"
+
+    parsed = RUN_CONFIGURATION_ADAPTER.validate_python(
+        payload,
+        strict=True,
+    )
+
+    assert type(parsed) is AgentRunConfiguration
+    assert parsed.model_dump() == payload
+
+
+def test_run_configurations_declare_resume_limits() -> None:
+    agent = compare_resume_configurations(_configuration(), _configuration())
+    plain = compare_resume_configurations(_plain_configuration(), _plain_configuration())
+    evolve = compare_resume_configurations(_evolve_configuration(), _evolve_configuration())
+
+    assert (agent.limit_field, agent.recorded_limit) == ("max_rounds", 10)
+    assert (plain.limit_field, plain.recorded_limit) == ("max_rounds", 5)
+    assert (evolve.limit_field, evolve.recorded_limit) == ("max_generations", 8)
+
+
+def test_resume_comparison_requires_matching_outer_loops() -> None:
+    with pytest.raises(ValueError, match="outer loops must match"):
+        compare_resume_configurations(_configuration(), _plain_configuration())
+
+
+def test_agent_resume_comparison_adopts_only_omitted_legacy_objectives() -> None:
+    requested = _configuration().model_copy(update={"objectives": ("throughput:max",)})
+    legacy_payload = requested.model_dump(exclude={"objectives"})
+    recorded = AgentRunConfiguration.model_validate(legacy_payload)
+
+    comparison = compare_resume_configurations(recorded, requested)
+    assert comparison.migration_required
+    assert comparison.changed_fields == ()
+
+    explicit = recorded.model_copy(update={"objectives": ()})
+    comparison = compare_resume_configurations(explicit, requested)
+    assert not comparison.migration_required
+    assert comparison.changed_fields == ("objectives",)
 
 
 @pytest.mark.parametrize("outer_loop", [None, "unknown"])

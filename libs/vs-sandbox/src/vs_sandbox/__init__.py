@@ -13,6 +13,7 @@ from vs_sandbox.project_paths import ProjectPathPolicy, ProjectPathPolicyError
 
 if TYPE_CHECKING:
     from vs_sandbox.docker_sandbox import AGENT_HOME, DockerSandbox
+    from vs_sandbox.execution import SandboxExecutionResult
     from vs_sandbox.host_resources import (
         HostResource,
         HostResourceAccess,
@@ -52,6 +53,7 @@ __all__ = [
     "LinuxBackend",
     "ProjectPathPolicy",
     "ProjectPathPolicyError",
+    "SandboxExecutionResult",
     "SandboxLifecycle",
     "SandboxLifecycleError",
     "SandboxLifecycleHooks",
@@ -64,7 +66,11 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str) -> Any:  # noqa: ANN401  # tracked: #288
+def __getattr__(name: str) -> Any:  # noqa: ANN401, PLR0911  # tracked: #288
+    if name == "SandboxExecutionResult":
+        from vs_sandbox.execution import SandboxExecutionResult  # noqa: PLC0415
+
+        return SandboxExecutionResult
     if name in {"AGENT_HOME", "DockerSandbox"}:
         from vs_sandbox import docker_sandbox  # noqa: PLC0415  # tracked: #288
 

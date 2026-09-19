@@ -45,7 +45,7 @@ from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
-from vs_project import ProjectStateError
+from vs_project import AgentRunConfiguration, ProjectStateError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -353,7 +353,7 @@ class RunApi:
         if project_run is None:
             return None
         manifest = project_run.project.state.load_run(project_run.run_id)
-        if manifest.configuration.outer_loop != "agent":
+        if not isinstance(manifest.configuration, AgentRunConfiguration):
             return None
         return build_performance_context(
             self._agent_run_state(),
@@ -454,7 +454,7 @@ class RunApi:
         if project_run is None:
             return None
         manifest = project_run.project.state.load_run(project_run.run_id)
-        if manifest.configuration.outer_loop != "agent":
+        if not isinstance(manifest.configuration, AgentRunConfiguration):
             return None
         portable = project_run.project.state.portable_namespace(project_run.run_id, "agent")
         store = AgentRunStateStore(portable)

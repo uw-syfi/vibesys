@@ -1,0 +1,74 @@
+version = 1
+
+[agent]
+domain = "microservices"
+
+[evaluator]
+name = "vibesys-evaluator-microservice"
+version = "0.1.0"
+
+[accuracy]
+entrypoint = "kubernetes-runtime"
+args = [
+  "--config",
+  "${PROJECT_ROOT}/.vibesys/tasks/kubernetes/runtime.yaml",
+  "--candidate-dir",
+  "${PROJECT_ROOT}",
+  "--",
+  "python3",
+  "${PROJECT_ROOT}/evaluator/run.py",
+  "--package-root",
+  "${PACKAGE_ROOT}",
+  "--",
+  "--mode",
+  "accuracy",
+  "--workload",
+  "${PROJECT_ROOT}/benchmark/workload.toml",
+  "--base-url",
+  "${BASE_URL}",
+  "--seed",
+  "random",
+  "--candidate-dir",
+  "${PROJECT_ROOT}/deathstarbench/hotelReservation",
+  "--stop-command-json",
+  "${KUBERNETES_STOP_COMMAND_JSON}",
+  "--run-command-json",
+  "${KUBERNETES_START_COMMAND_JSON}",
+  "--startup-timeout",
+  "180",
+]
+timeout_seconds = 1200
+
+[benchmark]
+entrypoint = "kubernetes-runtime"
+args = [
+  "--config",
+  "${PROJECT_ROOT}/.vibesys/tasks/kubernetes/runtime.yaml",
+  "--candidate-dir",
+  "${PROJECT_ROOT}",
+  "--",
+  "go",
+  "-C",
+  "${PACKAGE_ROOT}",
+  "run",
+  "./cmd/servicebench",
+  "--workload",
+  "${PROJECT_ROOT}/benchmark/workload.toml",
+  "--base-url",
+  "${BASE_URL}",
+  "--seed",
+  "random",
+  "--fixture-seed",
+  "random",
+]
+timeout_seconds = 1200
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "primary_value"
+
+[[workspace.sources]]
+name = "deathstarbench"
+repo = "https://github.com/vibesys-playground/DeathStarBench.git"
+commit = "867806e575e1f7fb24437ae969910ddb17a76121"
+dest = "deathstarbench"

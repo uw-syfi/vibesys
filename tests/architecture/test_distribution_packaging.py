@@ -284,6 +284,9 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path:
 
     assert "resources/evaluators/queue/vibesys.evaluator.toml" in members
     assert "resources/evaluators/microservice/vibesys.evaluator.toml" in members
+    assert "resources/evaluators/microservice/kubernetes_runtime/cli.py" in members
+    assert "resources/evaluators/microservice/kubernetes_runtime/control.py" in members
+    assert "resources/evaluators/microservice/kubernetes_runtime/runtime.py" in members
     assert "clients/backend-client/src/index.ts" in members
     assert "clients/core-state/src/index.ts" in members
     assert "clients/tui/src/index.ts" in members
