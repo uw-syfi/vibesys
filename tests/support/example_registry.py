@@ -189,7 +189,4 @@ def suggested_entry(path: str) -> str:
     """Return the registry entry to paste for an unregistered example."""
     layout = Layout.TASK if (REPO_ROOT / path / ".vibesys" / "tasks").is_dir() else Layout.LEGACY
     requires = '["overlay"]' if path in submodule_example_paths() else "[]"
-    return (
-        f'[[example]]\npath = "{path}"\nlayout = "{layout}"\n'
-        f"requires = {requires}"
-    )
+    return f'[[example]]\npath = "{path}"\nlayout = "{layout}"\nrequires = {requires}'
