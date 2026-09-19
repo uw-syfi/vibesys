@@ -298,7 +298,7 @@ const server = createServer(socket => {
     if (!buffer.includes('\\n')) return;
     const request = JSON.parse(buffer.split('\\n')[0]);
     socket.end(JSON.stringify({
-      protocol_version: 1,
+      protocol_version: 2,
       request_id: request.request_id,
       timestamp: new Date().toISOString(),
       ok: true,
@@ -424,7 +424,7 @@ const server = createServer(socket => {
   socket.once('data', data => {
     const request = JSON.parse(data.toString().split('\\n')[0]);
     socket.end(JSON.stringify({
-      protocol_version: 1,
+      protocol_version: 2,
       request_id: request.request_id,
       timestamp: new Date().toISOString(),
       ok: true,
@@ -513,11 +513,10 @@ writeFileSync(${JSON.stringify(frontendMarker)}, 'started');
 const socket = await connectWithRetry(process.env.VIBESYS_CONTROL_SOCKET);
 let buffer = '';
 socket.write(JSON.stringify({
-  protocol_version: 1,
+  protocol_version: 2,
   request_id: 'launcher-empty-runs-dir',
   timestamp: '1970-01-01T00:00:00Z',
-  type: 'subscribe',
-  after_sequence: 0,
+  subscribe: {after_sequence: 0},
 }) + '\\n');
 socket.setEncoding('utf8');
 socket.on('data', chunk => {
@@ -526,15 +525,15 @@ socket.on('data', chunk => {
     const newline = buffer.indexOf('\\n');
     const message = JSON.parse(buffer.slice(0, newline));
     buffer = buffer.slice(newline + 1);
-    const events = message.type === 'event' ? [message.event] :
-      message.type === 'event_batch' ? message.events : [];
-    const failure = events.find(event => event.type === 'configuration_failed');
+    const events = message.event ? [message.event] :
+      message.event_batch ? (message.event_batch.events ?? []) : [];
+    const failure = events.find(event => event.type === 'EVENT_TYPE_CONFIGURATION_FAILED');
     if (failure) {
       writeFileSync(${JSON.stringify(failureMarker)}, JSON.stringify(failure));
       socket.end();
       return;
     }
-    if (events.some(event => event.type === 'run_finished' || event.type === 'run_failed')) {
+    if (events.some(event => event.type === 'EVENT_TYPE_RUN_FINISHED' || event.type === 'EVENT_TYPE_RUN_FAILED')) {
       socket.end();
       return;
     }
@@ -570,11 +569,13 @@ async function connectWithRetry(path) {
     ).resolves.toBe(2);
     await access(frontendMarker);
     const failure = JSON.parse(await readFile(failureMarker, 'utf8')) as {
-      data: {code: string; stage: string; message: string};
+      configuration_failed: {code: string; stage: string; message: string};
     };
-    expect(failure.data.code).toBe('invalid_arguments');
-    expect(failure.data.stage).toBe('argument_parsing');
-    expect(failure.data.message).toContain('argument --runs-dir: must not be empty');
+    expect(failure.configuration_failed.code).toBe('invalid_arguments');
+    expect(failure.configuration_failed.stage).toBe('argument_parsing');
+    expect(failure.configuration_failed.message).toContain(
+      'argument --runs-dir: must not be empty',
+    );
     await expect(access(join(tempDir, 'exp_env'))).rejects.toThrow();
   }, 15_000);
 });

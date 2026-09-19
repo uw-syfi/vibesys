@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
+import {create} from '@bufbuild/protobuf';
 import {rgbToHex, type TextRenderable} from '@opentui/core';
 import {createTestRenderer} from '@opentui/core/testing';
-import {create} from '@bufbuild/protobuf';
 import {
   HypothesisEntrySchema,
   type HypothesisRound,

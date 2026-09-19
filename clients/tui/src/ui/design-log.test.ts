@@ -5,8 +5,8 @@ import {
   DesignChange,
   type DesignFileChange,
   DesignFileChangeSchema,
-  type HypothesisRound,
   HypothesisOutcome,
+  type HypothesisRound,
   HypothesisRoundSchema,
   RoundReviewVerdict,
 } from '@vibesys/backend-client';
@@ -45,9 +45,9 @@ describe('file change formatting', () => {
   });
 
   it('names the old path of a rename and only that', () => {
-    expect(
-      formatFileChange(fileChange('src/lib.rs', DesignChange.RENAMED, 'src/queue.rs')),
-    ).toBe('→ src/lib.rs (was src/queue.rs)');
+    expect(formatFileChange(fileChange('src/lib.rs', DesignChange.RENAMED, 'src/queue.rs'))).toBe(
+      '→ src/lib.rs (was src/queue.rs)',
+    );
     expect(formatFileChange(fileChange('src/ring.rs', DesignChange.ADDED))).toBe('+ src/ring.rs');
     expect(formatFileChange(fileChange('src/ffi.rs', DesignChange.DELETED))).toBe('- src/ffi.rs');
   });

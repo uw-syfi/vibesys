@@ -33,13 +33,7 @@ import {readFileSync, unlinkSync} from 'node:fs';
 import {createServer, type Socket} from 'node:net';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {
-  create,
-  fromJson,
-  fromJsonString,
-  type JsonObject,
-  toJsonString,
-} from '@bufbuild/protobuf';
+import {create, fromJson, fromJsonString, type JsonObject, toJsonString} from '@bufbuild/protobuf';
 import {timestampFromDate, timestampMs} from '@bufbuild/protobuf/wkt';
 import {
   type ActiveAgentExecution,
@@ -291,7 +285,9 @@ function loadExperiments(fixturePath: string): HypothesisEntry[] {
     return [];
   }
   // The sidecar is kept in the version 1 shape, like the fixtures.
-  return records.map(record => fromJson(HypothesisEntrySchema, upgradeRecord(HypothesisEntrySchema, record)));
+  return records.map(record =>
+    fromJson(HypothesisEntrySchema, upgradeRecord(HypothesisEntrySchema, record)),
+  );
 }
 
 /** Milliseconds to wait before `next`, from the recorded timestamps. */
@@ -512,7 +508,9 @@ function snakeCase(name: string): string {
 /** The `TuiTheme` a `VIBESYS_THEME` name (`solarized-dark`) selects, if it names one. */
 function themeFromName(name: string): TuiTheme | undefined {
   const key = name.toUpperCase().replaceAll('-', '_');
-  return key in TuiTheme && key !== 'UNSPECIFIED' ? TuiTheme[key as keyof typeof TuiTheme] : undefined;
+  return key in TuiTheme && key !== 'UNSPECIFIED'
+    ? TuiTheme[key as keyof typeof TuiTheme]
+    : undefined;
 }
 
 /** Answers a request that has a static body, with the reply `mock-responses.json` holds. */
@@ -539,8 +537,6 @@ function snapshotResponse(requestId: string, replay: Replay): ProtocolResponse {
   return response;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
 function handleRequest(
   socket: Socket,
   request: ProtocolRequest,
@@ -656,7 +652,6 @@ function handleRequest(
   }
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
 function main(): void {
   const options = parseOptions(process.argv.slice(2));
   options.fixture = resolveFixture(options.fixture);
@@ -672,7 +667,6 @@ function main(): void {
       `${options.startPaused ? ' (paused; /resume in the TUI to start)' : ''}\n`,
   );
 
-  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
   const server = createServer(socket => {
     readLines(socket, line => {
       handleRequest(socket, fromJsonString(RequestSchema, line), replay, experiments);

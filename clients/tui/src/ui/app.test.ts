@@ -1,4 +1,6 @@
 import {afterEach, describe, expect, it} from 'bun:test';
+import {create, fromJson, type MessageInitShape} from '@bufbuild/protobuf';
+import {ValueSchema} from '@bufbuild/protobuf/wkt';
 import {
   BoxRenderable,
   CliRenderEvents,
@@ -11,7 +13,18 @@ import {
   TextRenderable,
 } from '@opentui/core';
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
-import type {ChatOptions, HypothesisEntry} from '@vibesys/backend-client';
+import {
+  ChatModelSource,
+  type ChatOptions,
+  ChatOptionsSchema,
+  DesignChange,
+  DesignFileChangeSchema,
+  DesignRoundSchema,
+  type HypothesisEntry,
+  HypothesisEntrySchema,
+  JudgeVerdict,
+  ToolResultDataSchema,
+} from '@vibesys/backend-client';
 import {type CoreRunStatus, DEFAULT_CHAT_THREAD_ID} from '@vibesys/core-state';
 import {
   chatMenuCustomModel,
@@ -1512,8 +1525,8 @@ describe('OpenTUI presentation', () => {
         entries: [
           logEntry('H-01', 1, 2, {
             rounds: [
-              {round: 1, passed: true, reviewed: true, perf_delta_pct: -3.5},
-              {round: 2, passed: true, reviewed: true, perf_delta_pct: 12.4},
+              {round: 1, passed: true, reviewed: true, perfDeltaPct: -3.5},
+              {round: 2, passed: true, reviewed: true, perfDeltaPct: 12.4},
             ],
           }),
         ],
@@ -2535,7 +2548,7 @@ describe('OpenTUI presentation', () => {
             content: '2 passed',
             toolName: 'Bash',
             toolArguments: {command: 'pytest'},
-            toolResult: {kind: 'tool_result', tool: 'Bash', content: '2 passed'},
+            toolResult: create(ToolResultDataSchema, {tool: 'Bash', content: '2 passed'}),
           },
         ],
       },
@@ -2572,18 +2585,14 @@ describe('OpenTUI presentation', () => {
             content: '1 failed',
             toolName: 'Bash',
             toolArguments: {command: 'pytest'},
-            toolResult: {
-              kind: 'tool_result',
+            toolResult: create(ToolResultDataSchema, {
               tool: 'Bash',
               content: '1 failed',
               payload: {
-                kind: 'command',
-                stdout: '1 failed',
-                stderr: 'assertion error',
-                exit_code: 1,
-                duration: 0.4,
+                case: 'command',
+                value: {stdout: '1 failed', stderr: 'assertion error', exitCode: 1, duration: 0.4},
               },
-            },
+            }),
           },
         ],
       },
@@ -2646,18 +2655,19 @@ describe('OpenTUI presentation', () => {
         toolName: 'execute',
         toolArguments: {command: 'cargo build'},
         content: stdout,
-        toolResult: {
-          kind: 'tool_result',
+        toolResult: create(ToolResultDataSchema, {
           tool: 'execute',
           content: stdout,
           payload: {
-            kind: 'command',
-            stdout,
-            stderr: 'error: could not compile\n',
-            exit_code: 101,
-            duration: 12.5,
+            case: 'command',
+            value: {
+              stdout: stdout,
+              stderr: 'error: could not compile\n',
+              exitCode: 101,
+              duration: 12.5,
+            },
           },
-        },
+        }),
       }),
     );
     const app = createOpenTuiApp(testRenderer.renderer, controller);
@@ -2677,12 +2687,11 @@ describe('OpenTUI presentation', () => {
         toolName: 'Read',
         toolArguments: {path: 'run-state.json'},
         content: 'irrelevant',
-        toolResult: {
-          kind: 'tool_result',
+        toolResult: create(ToolResultDataSchema, {
           tool: 'Read',
           content: 'irrelevant',
-          payload: {kind: 'json', value},
-        },
+          payload: {case: 'json', value: {value: fromJson(ValueSchema, value)}},
+        }),
       }),
     );
     const app = createOpenTuiApp(testRenderer.renderer, controller);
@@ -2774,7 +2783,7 @@ describe('OpenTUI presentation', () => {
             content: response,
             toolName: 'Read',
             toolArguments: {path: 'run-state.json'},
-            toolResult: {kind: 'tool_result', tool: 'Read', content: response},
+            toolResult: create(ToolResultDataSchema, {tool: 'Read', content: response}),
           },
         ],
       },
@@ -2832,7 +2841,7 @@ describe('OpenTUI presentation', () => {
             content: response,
             toolName: 'Read',
             toolArguments: {path: 'run-state.json'},
-            toolResult: {kind: 'tool_result', tool: 'Read', content: response},
+            toolResult: create(ToolResultDataSchema, {tool: 'Read', content: response}),
           },
         ],
       },
@@ -3823,8 +3832,8 @@ describe('theming', () => {
     controller.experiments = [
       logEntry('H-07', 41, 41, {
         claim: 'batch the prefill step',
-        resolved_outcome: 'proven',
-        judge_verdict: 'pass',
+        resolvedOutcome: 'proven',
+        judgeVerdict: JudgeVerdict.PASS,
         rounds: [{round: 41, passed: true, reviewed: true}],
       }),
     ];
@@ -3883,7 +3892,7 @@ describe('theming', () => {
     controller.experiments = [
       logEntry('H-08', 42, 42, {
         claim: 'increase kv cache block',
-        resolved_outcome: 'proven',
+        resolvedOutcome: 'proven',
         rounds: [{round: 42, passed: true, reviewed: true}],
       }),
     ];
@@ -3939,13 +3948,13 @@ describe('theming', () => {
     controller.experiments = [
       logEntry('H-07', 41, 41, {
         claim: 'batch the prefill step',
-        resolved_outcome: 'proven',
+        resolvedOutcome: 'proven',
         rounds: [{round: 41, passed: true, reviewed: true}],
       }),
       logEntry('H-08', 42, 43, {
         claim:
           'Increasing the KV cache block should reduce allocator synchronization across producer and consumer operations without changing queue ordering.',
-        resolved_outcome: 'rejected',
+        resolvedOutcome: 'rejected',
         rounds: [
           {round: 42, passed: false, reviewed: false},
           {round: 43, passed: false, reviewed: true},
@@ -4009,7 +4018,7 @@ describe('theming', () => {
     controller.experiments = [
       logEntry('H-07', 41, 41, {
         claim: 'batch the prefill step',
-        resolved_outcome: 'proven',
+        resolvedOutcome: 'proven',
         rounds: [{round: 41, passed: true, reviewed: true}],
       }),
     ];
@@ -4038,7 +4047,7 @@ describe('theming', () => {
     controller.experiments = [
       logEntry('H-07', 41, 41, {
         claim: 'batch the prefill step',
-        resolved_outcome: 'proven',
+        resolvedOutcome: 'proven',
         rounds: [{round: 41, passed: true, reviewed: true}],
       }),
     ];
@@ -4117,11 +4126,11 @@ describe('theming', () => {
       const testRenderer = await createTestRenderer({width: 120, height: 18});
       const controller = new FakeController(initialSessionState(name));
       controller.experiments = [
-        logEntry('H-07', 41, 41, {claim: 'batch the prefill step', resolved_outcome: 'proven'}),
-        logEntry('H-08', 42, 43, {claim: 'bigger KV cache block', resolved_outcome: 'disproven'}),
+        logEntry('H-07', 41, 41, {claim: 'batch the prefill step', resolvedOutcome: 'proven'}),
+        logEntry('H-08', 42, 43, {claim: 'bigger KV cache block', resolvedOutcome: 'disproven'}),
         logEntry('H-09', 44, 44, {
           claim: 'retry with tuning',
-          resolved_outcome: null,
+          resolvedOutcome: null,
           active: true,
         }),
       ];
@@ -4143,7 +4152,7 @@ describe('theming', () => {
     const controller = new FakeController(initialSessionState());
     controller.experiments = Array.from({length: 120}, (_, index) =>
       logEntry(`H-${String(index + 1).padStart(3, '0')}`, index + 1, index + 1, {
-        resolved_outcome: index % 2 === 0 ? 'proven' : 'rejected',
+        resolvedOutcome: index % 2 === 0 ? 'proven' : 'rejected',
       }),
     );
     const app = createOpenTuiApp(testRenderer.renderer, controller);
@@ -4166,7 +4175,7 @@ describe('theming', () => {
     const controller = new FakeController(initialSessionState());
     controller.experiments = Array.from({length: 60}, (_, index) =>
       logEntry(`H-${String(index + 1).padStart(3, '0')}`, index + 1, index + 1, {
-        resolved_outcome: 'proven',
+        resolvedOutcome: 'proven',
       }),
     );
     const app = createOpenTuiApp(testRenderer.renderer, controller);
@@ -5216,8 +5225,8 @@ describe('theming', () => {
     const testRenderer = await createTestRenderer({width: 140, height: 20});
     const controller = logController();
     controller.experiments = [
-      logEntry('H-07', 41, 41, {claim: 'batch the prefill step', resolved_outcome: 'proven'}),
-      logEntry('H-08', 42, 42, {claim: 'bigger KV cache block', resolved_outcome: 'disproven'}),
+      logEntry('H-07', 41, 41, {claim: 'batch the prefill step', resolvedOutcome: 'proven'}),
+      logEntry('H-08', 42, 42, {claim: 'bigger KV cache block', resolvedOutcome: 'disproven'}),
     ];
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
@@ -5326,8 +5335,8 @@ describe('theming', () => {
     const testRenderer = await createTestRenderer({width: 160, height: 22});
     const controller = logController();
     controller.experiments = [
-      logEntry('H-07', 41, 41, {claim: 'batch the prefill step', resolved_outcome: 'disproven'}),
-      logEntry('H-08', 42, 42, {claim: 'bigger KV cache block', resolved_outcome: 'proven'}),
+      logEntry('H-07', 41, 41, {claim: 'batch the prefill step', resolvedOutcome: 'disproven'}),
+      logEntry('H-08', 42, 42, {claim: 'bigger KV cache block', resolvedOutcome: 'proven'}),
     ];
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
@@ -5549,7 +5558,12 @@ describe('theming', () => {
     controller.paneContent = renderDesignSummary(
       Array.from({length: 10}, (_, index) => ({
         round: index + 1,
-        files: [{path: `src/round-${index + 1}.rs`, change: 'modified' as const}],
+        files: [
+          create(DesignFileChangeSchema, {
+            path: `src/round-${index + 1}.rs`,
+            change: DesignChange.MODIFIED,
+          }),
+        ],
         hypothesisId: 'H-07',
         title: 'Batch the prefill step',
         record: null,
@@ -5597,15 +5611,17 @@ describe('theming', () => {
     controller.publish({
       ...controller.state,
       designLog: [
-        {
+        create(DesignRoundSchema, {
           round: 41,
           commit: 'abcdef1234567890',
-          files: [
-            {path: 'src/ring.rs', change: 'added'},
-            {path: 'src/lib.rs', change: 'renamed', renamed_from: 'src/queue.rs'},
-            {path: 'src/ffi.rs', change: 'deleted'},
-          ],
-        },
+          files: {
+            changes: [
+              {path: 'src/ring.rs', change: DesignChange.ADDED},
+              {path: 'src/lib.rs', change: DesignChange.RENAMED, renamedFrom: 'src/queue.rs'},
+              {path: 'src/ffi.rs', change: DesignChange.DELETED},
+            ],
+          },
+        }),
       ],
     });
 
@@ -5627,15 +5643,17 @@ describe('theming', () => {
       ...controller.state,
       hypothesisDetail: {entryKey: 'H-07', selectedRound: 41},
       designLog: [
-        {
+        create(DesignRoundSchema, {
           round: 41,
           base: 'aaa1111',
           commit: 'bbb2222',
-          files: [
-            {path: 'src/ring.rs', change: 'added'},
-            {path: 'src/lib.rs', change: 'modified'},
-          ],
-        },
+          files: {
+            changes: [
+              {path: 'src/ring.rs', change: DesignChange.ADDED},
+              {path: 'src/lib.rs', change: DesignChange.MODIFIED},
+            ],
+          },
+        }),
       ],
     });
     await testRenderer.waitForFrame(value => value.includes('Hypothesis H-07'));
@@ -5668,12 +5686,12 @@ describe('theming', () => {
     controller.publish({
       ...controller.state,
       designLog: [
-        {
+        create(DesignRoundSchema, {
           round: 41,
           base: 'aaa1111',
           commit: 'bbb2222',
-          files: [{path: 'src/ring.rs', change: 'added'}],
-        },
+          files: {changes: [{path: 'src/ring.rs', change: DesignChange.ADDED}]},
+        }),
       ],
     });
     await controller.openPane('design');
@@ -5880,7 +5898,7 @@ describe('theming', () => {
     const controller = new FakeController(initialSessionState());
     controller.publish({...controller.state, experimentLog: initialSessionState().experimentLog});
     controller.experiments = [
-      logEntry('H-07', 41, 41, {claim: 'batch the prefill step', resolved_outcome: 'proven'}),
+      logEntry('H-07', 41, 41, {claim: 'batch the prefill step', resolvedOutcome: 'proven'}),
     ];
     controller.paneContent = 'Performance · tok_s\nbest r41 1135 tok_s';
     const app = createOpenTuiApp(testRenderer.renderer, controller);
@@ -5973,7 +5991,7 @@ describe('theming', () => {
     const testRenderer = await createTestRenderer({width: 120, height: 16});
     const controller = new FakeController(initialSessionState());
     controller.experiments = [
-      logEntry('(unidentified)', 1, 1, {identified: false, claim: null, resolved_outcome: null}),
+      logEntry('(unidentified)', 1, 1, {identified: false, claim: null, resolvedOutcome: null}),
     ];
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
@@ -6582,8 +6600,8 @@ function logController(): FakeController {
   controller.experiments = [
     logEntry('H-07', 41, 41, {
       claim: 'batch the prefill step',
-      resolved_outcome: 'proven',
-      judge_verdict: 'pass',
+      resolvedOutcome: 'proven',
+      judgeVerdict: JudgeVerdict.PASS,
       rounds: [{round: 41, passed: true, reviewed: true}],
     }),
   ];
@@ -6676,19 +6694,30 @@ function logEntry(
   id: string,
   firstRound: number,
   lastRound: number,
-  overrides: Partial<HypothesisEntry> = {},
+  overrides: LogEntryOverrides = {},
 ): HypothesisEntry {
-  return {
-    hypothesis_id: id,
+  const init: Record<string, unknown> = {
+    hypothesisId: id,
     identified: true,
-    first_round: firstRound,
-    last_round: lastRound,
+    firstRound,
+    lastRound,
     rounds: [],
     kept: false,
     active: false,
     ...overrides,
   };
+  for (const [key, value] of Object.entries(init)) {
+    if (value === null) delete init[key];
+  }
+  return create(HypothesisEntrySchema, init);
 }
+
+/** Field overrides for `logEntry`: `null` clears a default, leaving the field unset. */
+type LogEntryOverrides = {
+  [K in keyof MessageInitShape<typeof HypothesisEntrySchema>]?:
+    | MessageInitShape<typeof HypothesisEntrySchema>[K]
+    | null;
+};
 
 /**
  * Every titled box on screen, as its rendered title and border colour. The
@@ -7523,12 +7552,12 @@ describe('command palette', () => {
     controller.publish({
       ...controller.state,
       designLog: [
-        {
+        create(DesignRoundSchema, {
           round: 41,
           base: 'aaa1111',
           commit: 'bbb2222',
-          files: [{path: 'src/ring.rs', change: 'added'}],
-        },
+          files: {changes: [{path: 'src/ring.rs', change: DesignChange.ADDED}]},
+        }),
       ],
     });
     await controller.openPane('design');
@@ -7558,12 +7587,12 @@ describe('command palette', () => {
     controller.publish({
       ...controller.state,
       designLog: [
-        {
+        create(DesignRoundSchema, {
           round: 41,
           base: 'aaa1111',
           commit: 'bbb2222',
-          files: [{path: 'src/ring.rs', change: 'added'}],
-        },
+          files: {changes: [{path: 'src/ring.rs', change: DesignChange.ADDED}]},
+        }),
       ],
     });
     // The focused design pane is exactly where a bare d would open the diff
@@ -7808,18 +7837,21 @@ class FakeController implements SessionController {
   readonly createdThreads: ChatThreadSettings[] = [];
   readonly clearedSettings: (ChatThreadSettings | null)[] = [];
   /** Stands in for the backend's `query.chat_options` response. */
-  chatOptions: ChatOptions = {
+  chatOptions: ChatOptions = create(ChatOptionsSchema, {
     providers: [
       {
         provider: 'codex',
         models: [
-          {model: 'gpt-run', source: 'run', default: true},
-          {model: 'gpt-5.6-sol', source: 'suggested', default: false},
+          {model: 'gpt-run', source: ChatModelSource.RUN, default: true},
+          {model: 'gpt-5.6-sol', source: ChatModelSource.SUGGESTED, default: false},
         ],
       },
-      {provider: 'claude', models: [{model: 'claude-opus-5', source: 'suggested', default: false}]},
+      {
+        provider: 'claude',
+        models: [{model: 'claude-opus-5', source: ChatModelSource.SUGGESTED, default: false}],
+      },
     ],
-  };
+  });
   liveCalls = 0;
   /** How many times the reveal path asked for history the client does not hold. */
   historyLoads = 0;

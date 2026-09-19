@@ -1,11 +1,10 @@
-import {create, type MessageInitShape} from '@bufbuild/protobuf';
 import {describe, expect, it} from 'bun:test';
+import {create, type MessageInitShape} from '@bufbuild/protobuf';
 import {
-  type EventSubscription,
   AgentOutputChannel,
   ChatModelSource,
-  ChatOptionsSchema,
-  ChatResultSchema,
+  type ChatOptionsSchema,
+  type ChatResultSchema,
   DesignChange,
   type DesignRound,
   DesignRoundSchema,
@@ -13,22 +12,23 @@ import {
   DiagnosticSchema,
   DiagnosticScope,
   DiagnosticSeverity,
+  type EventSubscription,
   EventType,
   ExecutionActivityMode,
-  type ExperimentUpdateSchema,
   ExperimentsChangeReason,
+  type ExperimentUpdateSchema,
   type HypothesisEntry,
   HypothesisEntrySchema,
-  PerformanceRoundSchema,
+  type PerformanceRoundSchema,
   PROTOCOL_VERSION,
   type ProtocolResponse,
   type RequestBody,
   ResponseSchema,
-  type RunEvent,
-  RunEventSchema,
-  RunStatus,
   RoundJudgeVerdict,
   RoundReviewVerdict,
+  type RunEvent,
+  type RunEventSchema,
+  RunStatus,
   ServerError,
   type ServerMessage,
   ServerMessageSchema,
@@ -129,9 +129,7 @@ describe('session controller', () => {
       request(input: RequestBody): Promise<ProtocolResponse> {
         started.push(input.case);
         return new Promise(resolve => {
-          pending.push(() =>
-            resolve(respond()),
-          );
+          pending.push(() => resolve(respond()));
         });
       },
       subscribe(): Promise<EventSubscription> {
@@ -164,28 +162,33 @@ describe('session controller', () => {
     const controller = new SocketSessionController(transport);
     await controller.start();
 
-    transport.emit(makeEventBatch([
-        makeEvent(EventType.AGENT_EXECUTION_STARTED, {
-      sequence: 1,
-      executionId: 'stale-execution',
-      agentKind: 'implementer',
-      roundLabel: 'round-1-implementer',
-      data: {
-        case: 'agentExecutionStarted',
-        value: {
-          stage: 'implementation',
-          attempt: 1,
-          systemPrompt: '',
-          userPrompt: 'Implement the queue',
-          activity: {
-            mode: ExecutionActivityMode.THINKING,
-            summary: 'Inspecting the queue',
-          },
-        },
-      },
-    }),
-        event(2, EventType.AGENT_OUTPUT_CHUNK, 'persisted output\n'),
-      ], 2));
+    transport.emit(
+      makeEventBatch(
+        [
+          makeEvent(EventType.AGENT_EXECUTION_STARTED, {
+            sequence: 1,
+            executionId: 'stale-execution',
+            agentKind: 'implementer',
+            roundLabel: 'round-1-implementer',
+            data: {
+              case: 'agentExecutionStarted',
+              value: {
+                stage: 'implementation',
+                attempt: 1,
+                systemPrompt: '',
+                userPrompt: 'Implement the queue',
+                activity: {
+                  mode: ExecutionActivityMode.THINKING,
+                  summary: 'Inspecting the queue',
+                },
+              },
+            },
+          }),
+          event(2, EventType.AGENT_OUTPUT_CHUNK, 'persisted output\n'),
+        ],
+        2,
+      ),
+    );
 
     expect(controller.state.core.sequence).toBe(2);
     expect(controller.state.core.transcript.at(-1)?.content).toBe('persisted output\n');
@@ -197,16 +200,27 @@ describe('session controller', () => {
     const controller = new SocketSessionController(transport);
     await controller.start();
 
-    transport.emit(makeEventBatch([
-        makeEvent(EventType.RUN_FAILED, {sequence: 1, diagnostic: {
-            code: 'interrupted',
-            summary: 'A previous process was interrupted.',
-            scope: DiagnosticScope.RUN,
-            severity: DiagnosticSeverity.FATAL,
-            retryability: DiagnosticRetryability.NEVER,
-          }}),
-        makeEvent(EventType.RUN_STARTED, {sequence: 2, data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}}}),
-      ], 2));
+    transport.emit(
+      makeEventBatch(
+        [
+          makeEvent(EventType.RUN_FAILED, {
+            sequence: 1,
+            diagnostic: {
+              code: 'interrupted',
+              summary: 'A previous process was interrupted.',
+              scope: DiagnosticScope.RUN,
+              severity: DiagnosticSeverity.FATAL,
+              retryability: DiagnosticRetryability.NEVER,
+            },
+          }),
+          makeEvent(EventType.RUN_STARTED, {
+            sequence: 2,
+            data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}},
+          }),
+        ],
+        2,
+      ),
+    );
 
     expect(controller.state.core.status).toBe('running');
     expect(controller.state.errorBanner).toBeNull();
@@ -217,15 +231,23 @@ describe('session controller', () => {
     const controller = new SocketSessionController(transport);
     await controller.start();
 
-    transport.emit(makeEventBatch([
-        makeEvent(EventType.RUN_FAILED, {sequence: 1, diagnostic: {
-            code: 'run_failed',
-            summary: 'The current run failed.',
-            scope: DiagnosticScope.RUN,
-            severity: DiagnosticSeverity.FATAL,
-            retryability: DiagnosticRetryability.NEVER,
-          }}),
-      ], 1));
+    transport.emit(
+      makeEventBatch(
+        [
+          makeEvent(EventType.RUN_FAILED, {
+            sequence: 1,
+            diagnostic: {
+              code: 'run_failed',
+              summary: 'The current run failed.',
+              scope: DiagnosticScope.RUN,
+              severity: DiagnosticSeverity.FATAL,
+              retryability: DiagnosticRetryability.NEVER,
+            },
+          }),
+        ],
+        1,
+      ),
+    );
 
     expect(controller.state.core.status).toBe('failed');
     expect(controller.state.errorBanner).toMatchObject({message: 'The current run failed.'});
@@ -249,25 +271,29 @@ describe('session controller', () => {
     // itself, not the reconnect that would otherwise follow.
     const controller = new SocketSessionController(transport, undefined, undefined, []);
     await controller.start();
-    transport.emit(eventMessage(makeEvent(EventType.AGENT_EXECUTION_STARTED, {
-      sequence: 1,
-      executionId: 'impl-1',
-      agentKind: 'implementer',
-      roundLabel: 'round-1-implementer',
-      data: {
-        case: 'agentExecutionStarted',
-        value: {
-          stage: 'implementation',
-          attempt: 1,
-          systemPrompt: '',
-          userPrompt: 'Implement the queue',
-          activity: {
-            mode: ExecutionActivityMode.THINKING,
-            summary: 'Inspecting the queue',
+    transport.emit(
+      eventMessage(
+        makeEvent(EventType.AGENT_EXECUTION_STARTED, {
+          sequence: 1,
+          executionId: 'impl-1',
+          agentKind: 'implementer',
+          roundLabel: 'round-1-implementer',
+          data: {
+            case: 'agentExecutionStarted',
+            value: {
+              stage: 'implementation',
+              attempt: 1,
+              systemPrompt: '',
+              userPrompt: 'Implement the queue',
+              activity: {
+                mode: ExecutionActivityMode.THINKING,
+                summary: 'Inspecting the queue',
+              },
+            },
           },
-        },
-      },
-    })));
+        }),
+      ),
+    );
     expect(controller.state.core.activeExecutions['impl-1']).toBeDefined();
 
     transport.disconnect(new Error('Server event stream disconnected'));
@@ -386,13 +412,16 @@ describe('session controller', () => {
           case: 'toolCall',
           value: {tool: 'read_file', args: {path: 'progress.md'}},
         }),
-        chatEvent(3, EventType.CHAT, {case: 'chat', value: {answer: 'Round 2 improved throughput.'}}),
+        chatEvent(3, EventType.CHAT, {
+          case: 'chat',
+          value: {answer: 'Round 2 improved throughput.'},
+        }),
       ],
       [],
       {
         question: 'what changed?',
         answer: 'Round 2 improved throughput.',
-              },
+      },
     );
     const controller = new SocketSessionController(transport);
 
@@ -517,7 +546,7 @@ describe('session controller', () => {
     const transport = new FakeTransport([], [], {
       question: 'why?',
       answer: 'Because the configuration failed.',
-          });
+    });
     const controller = new SocketSessionController(transport);
 
     await controller.submitCommand('/chat why?');
@@ -970,7 +999,9 @@ describe('session controller', () => {
 
   it('loads the design log with the experiments so the drill-down can annotate rounds', async () => {
     const transport = new FakeTransport();
-    transport.design = designRounds([{round: 1, files: {changes: [{path: 'src/ring.rs', change: DesignChange.ADDED}]}}]);
+    transport.design = designRounds([
+      {round: 1, files: {changes: [{path: 'src/ring.rs', change: DesignChange.ADDED}]}},
+    ]);
     const controller = new SocketSessionController(transport);
 
     await controller.start();
@@ -1001,10 +1032,12 @@ describe('session controller', () => {
     transport.design = designRounds([
       {
         round: 1,
-        files: {changes: [
-          {path: 'src/ring.rs', change: DesignChange.ADDED},
-          {path: 'src/lib.rs', change: DesignChange.MODIFIED},
-        ]},
+        files: {
+          changes: [
+            {path: 'src/ring.rs', change: DesignChange.ADDED},
+            {path: 'src/lib.rs', change: DesignChange.MODIFIED},
+          ],
+        },
       },
     ]);
     const controller = new SocketSessionController(transport);
@@ -1044,10 +1077,12 @@ describe('session controller', () => {
         round: 1,
         base: 'aaa1111',
         commit: 'bbb2222',
-        files: {changes: [
-          {path: 'src/ring.rs', change: DesignChange.MODIFIED},
-          {path: 'src/lib.rs', change: DesignChange.MODIFIED},
-        ]},
+        files: {
+          changes: [
+            {path: 'src/ring.rs', change: DesignChange.MODIFIED},
+            {path: 'src/lib.rs', change: DesignChange.MODIFIED},
+          ],
+        },
       },
       // Newer but not diffable: the opener walks back to round 1.
       {round: 2, base: 'bbb2222', commit: 'ccc3333', files: {changes: []}},
@@ -1096,8 +1131,18 @@ describe('session controller', () => {
       }),
     ];
     transport.design = designRounds([
-      {round: 1, base: 'aaa1111', commit: 'bbb2222', files: {changes: [{path: 'src/a.rs', change: DesignChange.ADDED}]}},
-      {round: 2, base: 'bbb2222', commit: 'ccc3333', files: {changes: [{path: 'src/b.rs', change: DesignChange.ADDED}]}},
+      {
+        round: 1,
+        base: 'aaa1111',
+        commit: 'bbb2222',
+        files: {changes: [{path: 'src/a.rs', change: DesignChange.ADDED}]},
+      },
+      {
+        round: 2,
+        base: 'bbb2222',
+        commit: 'ccc3333',
+        files: {changes: [{path: 'src/b.rs', change: DesignChange.ADDED}]},
+      },
     ]);
     transport.designPatchText = '@@ -0,0 +1 @@\n+fn main() {}\n';
     const controller = new SocketSessionController(transport);
@@ -1120,7 +1165,12 @@ describe('session controller', () => {
   it('parks a failed patch query on the file, never the shared banner', async () => {
     const transport = new FakeTransport();
     transport.design = designRounds([
-      {round: 1, base: 'aaa1111', commit: 'bbb2222', files: {changes: [{path: 'src/a.rs', change: DesignChange.ADDED}]}},
+      {
+        round: 1,
+        base: 'aaa1111',
+        commit: 'bbb2222',
+        files: {changes: [{path: 'src/a.rs', change: DesignChange.ADDED}]},
+      },
     ]);
     transport.designPatchError = new ServerError('base does not name a commit');
     const controller = new SocketSessionController(transport);
@@ -1148,7 +1198,9 @@ describe('session controller', () => {
     expect(controller.state.overlay?.content).toContain('No design rounds have loaded yet');
 
     // With a log whose rounds recorded no changes, the wording is per round.
-    transport.design = designRounds([{round: 1, base: 'aaa1111', commit: 'bbb2222', files: {changes: []}}]);
+    transport.design = designRounds([
+      {round: 1, base: 'aaa1111', commit: 'bbb2222', files: {changes: []}},
+    ]);
     transport.designReady = true;
     await controller.submitCommand('/design');
     controller.openRoundDiff(1);
@@ -1273,7 +1325,12 @@ describe('session controller', () => {
     await controller.start();
     const before = transport.requests.length;
 
-    transport.emit(makeEventBatch([event(1, EventType.EXPERIMENTS_CHANGED), event(2, EventType.EXPERIMENTS_CHANGED)]));
+    transport.emit(
+      makeEventBatch([
+        event(1, EventType.EXPERIMENTS_CHANGED),
+        event(2, EventType.EXPERIMENTS_CHANGED),
+      ]),
+    );
     await Promise.resolve();
     await Promise.resolve();
 
@@ -1358,7 +1415,15 @@ describe('session controller', () => {
     const controller = new SocketSessionController(transport);
     await controller.start();
 
-    transport.emit(eventMessage(makeEvent(EventType.PHASE_STARTED, {sequence: 1, agentKind: 'orchestrator', roundLabel: 'round-9-pre'})));
+    transport.emit(
+      eventMessage(
+        makeEvent(EventType.PHASE_STARTED, {
+          sequence: 1,
+          agentKind: 'orchestrator',
+          roundLabel: 'round-9-pre',
+        }),
+      ),
+    );
 
     await controller.submitCommand('/open-round --9');
 
@@ -1370,7 +1435,15 @@ describe('session controller', () => {
     const transport = new FakeTransport();
     const controller = new SocketSessionController(transport);
     await controller.start();
-    transport.emit(eventMessage(makeEvent(EventType.PHASE_STARTED, {sequence: 1, agentKind: 'orchestrator', roundLabel: 'round-1-pre'})));
+    transport.emit(
+      eventMessage(
+        makeEvent(EventType.PHASE_STARTED, {
+          sequence: 1,
+          agentKind: 'orchestrator',
+          roundLabel: 'round-1-pre',
+        }),
+      ),
+    );
 
     controller.enterExperimentDrilldown();
 
@@ -1447,17 +1520,13 @@ describe('session controller', () => {
     // swallowed by the design query still in flight.
     expect(controller.state.layout.right?.view).toBe('perf');
     expect(controller.state.layout.right?.pending).toBe(true);
-    expect(transport.requests.filter(request => request.case === 'performance')).toHaveLength(
-      0,
-    );
+    expect(transport.requests.filter(request => request.case === 'performance')).toHaveLength(0);
 
     transport.releaseDesign();
     await Promise.all([designOpen, perfOpen]);
     await new Promise<void>(resolve => setTimeout(resolve, 0));
 
-    expect(transport.requests.filter(request => request.case === 'performance')).toHaveLength(
-      1,
-    );
+    expect(transport.requests.filter(request => request.case === 'performance')).toHaveLength(1);
     expect(controller.state.layout.right?.view).toBe('perf');
     expect(controller.state.layout.right?.pending).toBe(false);
     expect(controller.state.layout.right?.content).toContain('Performance · total_ops_per_sec');
@@ -1508,7 +1577,7 @@ describe('session controller', () => {
     const transport = new FakeTransport([], [], {
       question: 'why?',
       answer: 'Round 2 regressed.',
-          });
+    });
     const controller = new SocketSessionController(transport);
     await controller.start();
     await controller.sendChat('why?');
@@ -1546,7 +1615,7 @@ describe('session controller', () => {
     const transport = new FakeTransport([], [], {
       question: 'what regressed?',
       answer: 'The sampler reorder.',
-          });
+    });
     const controller = new SocketSessionController(transport);
     await controller.start();
     await controller.submitCommand('/perf');
@@ -1602,12 +1671,15 @@ describe('session controller', () => {
     const transport = new FakeTransport([], [], {
       question: 'what changed in a/b testing?',
       answer: 'Nothing yet.',
-          });
+    });
     const controller = new SocketSessionController(transport);
 
     await controller.submitChat('what changed in a/b testing?');
 
-    expect(transport.requests.at(-1)).toEqual({case: 'chat', value: {text: 'what changed in a/b testing?'}});
+    expect(transport.requests.at(-1)).toEqual({
+      case: 'chat',
+      value: {text: 'what changed in a/b testing?'},
+    });
     expect(controller.state.chatConversation.at(-1)?.content).toBe('Nothing yet.');
   });
 
@@ -1646,7 +1718,10 @@ describe('session controller', () => {
     controller.moveChatMenuSelection(1);
     await controller.confirmChatMenu();
 
-    expect(transport.requests.at(-1)).toEqual({case: 'chatThreadCreate', value: {provider: 'codex', model: 'gpt-5.6-sol'}});
+    expect(transport.requests.at(-1)).toEqual({
+      case: 'chatThreadCreate',
+      value: {provider: 'codex', model: 'gpt-5.6-sol'},
+    });
     expect(controller.state.chatMenu).toBeNull();
     // The thread record comes from the replayed backend event, and the
     // client switches the chat surfaces to it.
@@ -1674,7 +1749,10 @@ describe('session controller', () => {
     controller.typeChatMenuCustomModel('5');
     await controller.confirmChatMenu();
 
-    expect(transport.requests.at(-1)).toEqual({case: 'chatThreadCreate', value: {provider: 'claude', model: 'claude-sonnet-5'}});
+    expect(transport.requests.at(-1)).toEqual({
+      case: 'chatThreadCreate',
+      value: {provider: 'claude', model: 'claude-sonnet-5'},
+    });
     expect(controller.state.activeChatThreadId).toBe('thread-1');
   });
 
@@ -1715,7 +1793,10 @@ describe('session controller', () => {
     await controller.submitChat('/clear');
 
     // Same harness and model, a new thread, and the old one still listed.
-    expect(transport.requests.at(-1)).toEqual({case: 'chatThreadCreate', value: {provider: 'codex', model: 'gpt-5.6-sol'}});
+    expect(transport.requests.at(-1)).toEqual({
+      case: 'chatThreadCreate',
+      value: {provider: 'codex', model: 'gpt-5.6-sol'},
+    });
     expect(controller.state.activeChatThreadId).toBe('thread-2');
     expect(controller.state.core.chatThreads.map(thread => thread.id)).toEqual([
       'default',
@@ -1774,7 +1855,10 @@ describe('session controller', () => {
 
     await controller.sendChat('which kernel changed?');
 
-    expect(transport.requests.at(-1)).toEqual({case: 'chat', value: {text: 'which kernel changed?', threadId: 'thread-1'}});
+    expect(transport.requests.at(-1)).toEqual({
+      case: 'chat',
+      value: {text: 'which kernel changed?', threadId: 'thread-1'},
+    });
     expect(controller.state.chatConversations['thread-1']?.map(entry => entry.content)).toEqual([
       'which kernel changed?',
       'Thread answer.',
@@ -1785,7 +1869,10 @@ describe('session controller', () => {
     controller.switchChatThread('default');
     expect(controller.state.chatConversation).toEqual([]);
     await controller.sendChat('and the default thread?');
-    expect(transport.requests.at(-1)).toEqual({case: 'chat', value: {text: 'and the default thread?'}});
+    expect(transport.requests.at(-1)).toEqual({
+      case: 'chat',
+      value: {text: 'and the default thread?'},
+    });
     controller.switchChatThread('thread-1');
     expect(controller.state.chatConversation.map(entry => entry.content)).toEqual([
       'which kernel changed?',
@@ -2054,7 +2141,10 @@ describe('session controller', () => {
 describe('a stream that re-bootstraps at a raised floor', () => {
   /** The run log, whose last event is the pre-attach one carried into it. */
   const runLog: RunEvent[] = [
-    makeEvent(EventType.RUN_STARTED, {sequence: 1, data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}}}),
+    makeEvent(EventType.RUN_STARTED, {
+      sequence: 1,
+      data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}},
+    }),
     event(2, EventType.AGENT_OUTPUT_CHUNK, 'two\n'),
     roundFinished(3, 1),
     event(4, EventType.AGENT_OUTPUT_CHUNK, 'four\n'),
@@ -2117,7 +2207,11 @@ describe('a stream that re-bootstraps at a raised floor', () => {
     transport.emit(makeEventBatch(preAttach, undefined, {historyAfterSequence: 0}));
     const before = transport.requests.length;
 
-    transport.emit(makeEventBatch([...rebootstrap, event(7, EventType.EXPERIMENTS_CHANGED)], undefined, {historyAfterSequence: 4}));
+    transport.emit(
+      makeEventBatch([...rebootstrap, event(7, EventType.EXPERIMENTS_CHANGED)], undefined, {
+        historyAfterSequence: 4,
+      }),
+    );
     await Promise.resolve();
     await Promise.resolve();
 
@@ -2136,7 +2230,10 @@ describe('a stream that re-bootstraps at a raised floor', () => {
  */
 describe('a stream that re-bootstraps into a log shorter than the tail', () => {
   const runLog: RunEvent[] = [
-    makeEvent(EventType.RUN_STARTED, {sequence: 1, data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}}}),
+    makeEvent(EventType.RUN_STARTED, {
+      sequence: 1,
+      data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}},
+    }),
     event(2, EventType.AGENT_OUTPUT_CHUNK, 'two\n'),
     roundFinished(3, 1),
     event(4, EventType.AGENT_OUTPUT_CHUNK, 'four\n'),
@@ -2260,7 +2357,10 @@ describe('stream reconnect', () => {
     // is `run_started`, not the output the client folded at 1 in the old store.
     transport.emitBatch(
       [
-        makeEvent(EventType.RUN_STARTED, {sequence: 1, data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}}}),
+        makeEvent(EventType.RUN_STARTED, {
+          sequence: 1,
+          data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}},
+        }),
         event(2, EventType.AGENT_OUTPUT_CHUNK, 'two\n'),
       ],
       0,
@@ -2282,7 +2382,10 @@ describe('stream reconnect', () => {
     await controller.start();
     transport.emitBatch(
       [
-        makeEvent(EventType.RUN_STARTED, {sequence: 1, data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}}}),
+        makeEvent(EventType.RUN_STARTED, {
+          sequence: 1,
+          data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}},
+        }),
       ],
       0,
       'run-store',
@@ -2306,7 +2409,10 @@ describe('stream reconnect', () => {
     const controller = new SocketSessionController(transport, undefined, undefined, [0, 0]);
     await controller.start();
     transport.emitBatch([
-      makeEvent(EventType.RUN_STARTED, {sequence: 1, data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}}}),
+      makeEvent(EventType.RUN_STARTED, {
+        sequence: 1,
+        data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}},
+      }),
     ]);
 
     transport.sever();

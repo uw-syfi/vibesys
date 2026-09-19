@@ -4,26 +4,30 @@
 // @generated from file server/wire/v2/snapshot.proto (package server.wire.v2, syntax proto3)
 /* eslint-disable */
 
-import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Timestamp } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
-import type { RunStatus } from "./common_pb.js";
-import { file_server_wire_v2_common } from "./common_pb.js";
-import type { Message } from "@bufbuild/protobuf";
+import type {Message} from '@bufbuild/protobuf';
+import type {GenEnum, GenFile, GenMessage} from '@bufbuild/protobuf/codegenv2';
+import {enumDesc, fileDesc, messageDesc} from '@bufbuild/protobuf/codegenv2';
+import type {Timestamp} from '@bufbuild/protobuf/wkt';
+import {file_google_protobuf_timestamp} from '@bufbuild/protobuf/wkt';
+import type {RunStatus} from './common_pb.js';
+import {file_server_wire_v2_common} from './common_pb.js';
 
 /**
  * Describes the file server/wire/v2/snapshot.proto.
  */
-export const file_server_wire_v2_snapshot: GenFile = /*@__PURE__*/
-  fileDesc("Ch1zZXJ2ZXIvd2lyZS92Mi9zbmFwc2hvdC5wcm90bxIOc2VydmVyLndpcmUudjIifgoaQWdlbnRFeGVjdXRpb25BY3Rpdml0eURhdGESMwoEbW9kZRgBIAEoDjIlLnNlcnZlci53aXJlLnYyLkV4ZWN1dGlvbkFjdGl2aXR5TW9kZRIPCgdzdW1tYXJ5GAIgASgJEhEKBHRvb2wYAyABKAlIAIgBAUIHCgVfdG9vbCLqAgoUQWN0aXZlQWdlbnRFeGVjdXRpb24SFAoMZXhlY3V0aW9uX2lkGAEgASgJEhIKCmFnZW50X2tpbmQYAiABKAkSEwoLcm91bmRfbGFiZWwYAyABKAkSDQoFc3RhZ2UYBCABKAkSFAoHYXR0ZW1wdBgFIAEoDUgAiAEBEhIKCmFzc2lnbm1lbnQYBiABKAkSLgoKc3RhcnRlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASPAoIYWN0aXZpdHkYCCABKAsyKi5zZXJ2ZXIud2lyZS52Mi5BZ2VudEV4ZWN1dGlvbkFjdGl2aXR5RGF0YRITCgZkcml2ZXIYCSABKAlIAYgBARIVCghwcm92aWRlchgKIAEoCUgCiAEBEhIKBW1vZGVsGAsgASgJSAOIAQFCCgoIX2F0dGVtcHRCCQoHX2RyaXZlckILCglfcHJvdmlkZXJCCAoGX21vZGVsImMKDkNoYXRUaHJlYWRJbmZvEhEKCXRocmVhZF9pZBgBIAEoCRINCgV0aXRsZRgCIAEoCRIOCgZkcml2ZXIYAyABKAkSEAoIcHJvdmlkZXIYBCABKAkSDQoFbW9kZWwYBSABKAkivQIKC1J1blNuYXBzaG90EhgKEHByb3RvY29sX3ZlcnNpb24YASABKA0SDgoGcnVuX2lkGAIgASgJEhAKCHNlcXVlbmNlGAMgASgNEikKBnN0YXR1cxgEIAEoDjIZLnNlcnZlci53aXJlLnYyLlJ1blN0YXR1cxIXCgphZ2VudF9raW5kGAUgASgJSACIAQESGAoLcm91bmRfbGFiZWwYBiABKAlIAYgBARI/ChFhY3RpdmVfZXhlY3V0aW9ucxgHIAMoCzIkLnNlcnZlci53aXJlLnYyLkFjdGl2ZUFnZW50RXhlY3V0aW9uEjQKDGNoYXRfdGhyZWFkcxgIIAMoCzIeLnNlcnZlci53aXJlLnYyLkNoYXRUaHJlYWRJbmZvQg0KC19hZ2VudF9raW5kQg4KDF9yb3VuZF9sYWJlbCrVAQoVRXhlY3V0aW9uQWN0aXZpdHlNb2RlEicKI0VYRUNVVElPTl9BQ1RJVklUWV9NT0RFX1VOU1BFQ0lGSUVEEAASJAogRVhFQ1VUSU9OX0FDVElWSVRZX01PREVfVEhJTktJTkcQARImCiJFWEVDVVRJT05fQUNUSVZJVFlfTU9ERV9SRVNQT05ESU5HEAISIAocRVhFQ1VUSU9OX0FDVElWSVRZX01PREVfVE9PTBADEiMKH0VYRUNVVElPTl9BQ1RJVklUWV9NT0RFX1dBSVRJTkcQBGIGcHJvdG8z", [file_google_protobuf_timestamp, file_server_wire_v2_common]);
+export const file_server_wire_v2_snapshot: GenFile =
+  /*@__PURE__*/
+  fileDesc(
+    'Ch1zZXJ2ZXIvd2lyZS92Mi9zbmFwc2hvdC5wcm90bxIOc2VydmVyLndpcmUudjIifgoaQWdlbnRFeGVjdXRpb25BY3Rpdml0eURhdGESMwoEbW9kZRgBIAEoDjIlLnNlcnZlci53aXJlLnYyLkV4ZWN1dGlvbkFjdGl2aXR5TW9kZRIPCgdzdW1tYXJ5GAIgASgJEhEKBHRvb2wYAyABKAlIAIgBAUIHCgVfdG9vbCLqAgoUQWN0aXZlQWdlbnRFeGVjdXRpb24SFAoMZXhlY3V0aW9uX2lkGAEgASgJEhIKCmFnZW50X2tpbmQYAiABKAkSEwoLcm91bmRfbGFiZWwYAyABKAkSDQoFc3RhZ2UYBCABKAkSFAoHYXR0ZW1wdBgFIAEoDUgAiAEBEhIKCmFzc2lnbm1lbnQYBiABKAkSLgoKc3RhcnRlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASPAoIYWN0aXZpdHkYCCABKAsyKi5zZXJ2ZXIud2lyZS52Mi5BZ2VudEV4ZWN1dGlvbkFjdGl2aXR5RGF0YRITCgZkcml2ZXIYCSABKAlIAYgBARIVCghwcm92aWRlchgKIAEoCUgCiAEBEhIKBW1vZGVsGAsgASgJSAOIAQFCCgoIX2F0dGVtcHRCCQoHX2RyaXZlckILCglfcHJvdmlkZXJCCAoGX21vZGVsImMKDkNoYXRUaHJlYWRJbmZvEhEKCXRocmVhZF9pZBgBIAEoCRINCgV0aXRsZRgCIAEoCRIOCgZkcml2ZXIYAyABKAkSEAoIcHJvdmlkZXIYBCABKAkSDQoFbW9kZWwYBSABKAkivQIKC1J1blNuYXBzaG90EhgKEHByb3RvY29sX3ZlcnNpb24YASABKA0SDgoGcnVuX2lkGAIgASgJEhAKCHNlcXVlbmNlGAMgASgNEikKBnN0YXR1cxgEIAEoDjIZLnNlcnZlci53aXJlLnYyLlJ1blN0YXR1cxIXCgphZ2VudF9raW5kGAUgASgJSACIAQESGAoLcm91bmRfbGFiZWwYBiABKAlIAYgBARI/ChFhY3RpdmVfZXhlY3V0aW9ucxgHIAMoCzIkLnNlcnZlci53aXJlLnYyLkFjdGl2ZUFnZW50RXhlY3V0aW9uEjQKDGNoYXRfdGhyZWFkcxgIIAMoCzIeLnNlcnZlci53aXJlLnYyLkNoYXRUaHJlYWRJbmZvQg0KC19hZ2VudF9raW5kQg4KDF9yb3VuZF9sYWJlbCrVAQoVRXhlY3V0aW9uQWN0aXZpdHlNb2RlEicKI0VYRUNVVElPTl9BQ1RJVklUWV9NT0RFX1VOU1BFQ0lGSUVEEAASJAogRVhFQ1VUSU9OX0FDVElWSVRZX01PREVfVEhJTktJTkcQARImCiJFWEVDVVRJT05fQUNUSVZJVFlfTU9ERV9SRVNQT05ESU5HEAISIAocRVhFQ1VUSU9OX0FDVElWSVRZX01PREVfVE9PTBADEiMKH0VYRUNVVElPTl9BQ1RJVklUWV9NT0RFX1dBSVRJTkcQBGIGcHJvdG8z',
+    [file_google_protobuf_timestamp, file_server_wire_v2_common],
+  );
 
 /**
  * Complete current activity for an active agent execution.
  *
  * @generated from message server.wire.v2.AgentExecutionActivityData
  */
-export type AgentExecutionActivityData = Message<"server.wire.v2.AgentExecutionActivityData"> & {
+export type AgentExecutionActivityData = Message<'server.wire.v2.AgentExecutionActivityData'> & {
   /**
    * @generated from field: server.wire.v2.ExecutionActivityMode mode = 1;
    */
@@ -44,7 +48,8 @@ export type AgentExecutionActivityData = Message<"server.wire.v2.AgentExecutionA
  * Describes the message server.wire.v2.AgentExecutionActivityData.
  * Use `create(AgentExecutionActivityDataSchema)` to create a new message.
  */
-export const AgentExecutionActivityDataSchema: GenMessage<AgentExecutionActivityData> = /*@__PURE__*/
+export const AgentExecutionActivityDataSchema: GenMessage<AgentExecutionActivityData> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_snapshot, 0);
 
 /**
@@ -52,7 +57,7 @@ export const AgentExecutionActivityDataSchema: GenMessage<AgentExecutionActivity
  *
  * @generated from message server.wire.v2.ActiveAgentExecution
  */
-export type ActiveAgentExecution = Message<"server.wire.v2.ActiveAgentExecution"> & {
+export type ActiveAgentExecution = Message<'server.wire.v2.ActiveAgentExecution'> & {
   /**
    * @generated from field: string execution_id = 1;
    */
@@ -113,7 +118,8 @@ export type ActiveAgentExecution = Message<"server.wire.v2.ActiveAgentExecution"
  * Describes the message server.wire.v2.ActiveAgentExecution.
  * Use `create(ActiveAgentExecutionSchema)` to create a new message.
  */
-export const ActiveAgentExecutionSchema: GenMessage<ActiveAgentExecution> = /*@__PURE__*/
+export const ActiveAgentExecutionSchema: GenMessage<ActiveAgentExecution> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_snapshot, 1);
 
 /**
@@ -121,7 +127,7 @@ export const ActiveAgentExecutionSchema: GenMessage<ActiveAgentExecution> = /*@_
  *
  * @generated from message server.wire.v2.ChatThreadInfo
  */
-export type ChatThreadInfo = Message<"server.wire.v2.ChatThreadInfo"> & {
+export type ChatThreadInfo = Message<'server.wire.v2.ChatThreadInfo'> & {
   /**
    * @generated from field: string thread_id = 1;
    */
@@ -152,7 +158,8 @@ export type ChatThreadInfo = Message<"server.wire.v2.ChatThreadInfo"> & {
  * Describes the message server.wire.v2.ChatThreadInfo.
  * Use `create(ChatThreadInfoSchema)` to create a new message.
  */
-export const ChatThreadInfoSchema: GenMessage<ChatThreadInfo> = /*@__PURE__*/
+export const ChatThreadInfoSchema: GenMessage<ChatThreadInfo> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_snapshot, 2);
 
 /**
@@ -160,7 +167,7 @@ export const ChatThreadInfoSchema: GenMessage<ChatThreadInfo> = /*@__PURE__*/
  *
  * @generated from message server.wire.v2.RunSnapshot
  */
-export type RunSnapshot = Message<"server.wire.v2.RunSnapshot"> & {
+export type RunSnapshot = Message<'server.wire.v2.RunSnapshot'> & {
   /**
    * @generated from field: uint32 protocol_version = 1;
    */
@@ -209,7 +216,8 @@ export type RunSnapshot = Message<"server.wire.v2.RunSnapshot"> & {
  * Describes the message server.wire.v2.RunSnapshot.
  * Use `create(RunSnapshotSchema)` to create a new message.
  */
-export const RunSnapshotSchema: GenMessage<RunSnapshot> = /*@__PURE__*/
+export const RunSnapshotSchema: GenMessage<RunSnapshot> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_snapshot, 3);
 
 /**
@@ -247,6 +255,6 @@ export enum ExecutionActivityMode {
 /**
  * Describes the enum server.wire.v2.ExecutionActivityMode.
  */
-export const ExecutionActivityModeSchema: GenEnum<ExecutionActivityMode> = /*@__PURE__*/
+export const ExecutionActivityModeSchema: GenEnum<ExecutionActivityMode> =
+  /*@__PURE__*/
   enumDesc(file_server_wire_v2_snapshot, 0);
-

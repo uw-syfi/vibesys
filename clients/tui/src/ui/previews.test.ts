@@ -1,10 +1,10 @@
+import {describe, expect, it} from 'bun:test';
 import {create, fromJson, type JsonValue} from '@bufbuild/protobuf';
 import {ValueSchema} from '@bufbuild/protobuf/wkt';
-import {describe, expect, it} from 'bun:test';
 import {
   type CommandResultPayload,
-  ToolResultDataSchema,
   type ToolResultData,
+  ToolResultDataSchema,
 } from '@vibesys/backend-client';
 import {
   elapsedLabel,
@@ -22,7 +22,9 @@ function jsonPayload(value: JsonValue): ToolResultData['payload'] {
   }).payload;
 }
 
-function commandPayload(init: Partial<Omit<CommandResultPayload, '$typeName'>>): ToolResultData['payload'] {
+function commandPayload(
+  init: Partial<Omit<CommandResultPayload, '$typeName'>>,
+): ToolResultData['payload'] {
   return create(ToolResultDataSchema, {
     payload: {case: 'command', value: {stdout: '', stderr: '', ...init}},
   }).payload;
@@ -93,7 +95,15 @@ describe('typed tool result previews', () => {
   });
 
   it('lays out a command payload as stdout, labeled stderr, and exit code', () => {
-    const preview = toolResultPreview('build output\n', commandPayload({stdout: 'build output\n', stderr: 'warning: deprecated\n', exitCode: 2, duration: 1.5}));
+    const preview = toolResultPreview(
+      'build output\n',
+      commandPayload({
+        stdout: 'build output\n',
+        stderr: 'warning: deprecated\n',
+        exitCode: 2,
+        duration: 1.5,
+      }),
+    );
 
     // A blank line before the label so stderr reads as its own section.
     expect(preview.content).toBe('build output\n\nstderr:\nwarning: deprecated\nexit code: 2');
@@ -254,7 +264,12 @@ describe('collapsed typed result summaries', () => {
 
   it('separates stdout and stderr and names the exit code when expanded', () => {
     const stdout = `${Array.from({length: 8}, (_, index) => `out ${index}`).join('\n')}\n`;
-    const payload = commandPayload({stdout: stdout, stderr: 'thread panicked\n', exitCode: 101, duration: 2});
+    const payload = commandPayload({
+      stdout: stdout,
+      stderr: 'thread panicked\n',
+      exitCode: 101,
+      duration: 2,
+    });
 
     const expanded = toolResultPreview('irrelevant', payload, true);
 
@@ -277,9 +292,7 @@ describe('collapsed typed result summaries', () => {
 
     expect(collapsed.content).toBe('{keys: k0, k1, k2, k3, +5 more}');
     expect(collapsed.collapsible).toBe(true);
-    expect(toolResultPreview('irrelevant', jsonPayload(value), true).content).toContain(
-      '"k8": 8',
-    );
+    expect(toolResultPreview('irrelevant', jsonPayload(value), true).content).toContain('"k8": 8');
   });
 
   it('shows an array json result as its length', () => {

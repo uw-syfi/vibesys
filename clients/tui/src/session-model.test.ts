@@ -9,15 +9,15 @@ import {
   DiagnosticSeverity,
   EventStatus,
   EventType,
+  ExecutionActivityMode,
+  FrameworkSource,
   type HypothesisEntry,
   HypothesisEntrySchema,
   HypothesisRoundSchema,
-  type RunEvent,
-  RunEventSchema,
-  ExecutionActivityMode,
-  FrameworkSource,
   JudgeVerdict,
   RoundJudgeVerdict,
+  type RunEvent,
+  type RunEventSchema,
   RunStatus,
 } from '@vibesys/backend-client';
 import {makeEvent, timestampOf} from '@vibesys/backend-client/testing';
@@ -264,7 +264,11 @@ describe('event batch projection', () => {
       {
         ...event(3, EventType.FRAMEWORK_WARNING, {
           case: 'frameworkWarning',
-          value: {summary: 'profiler failed', detail: 'nsys exited 1', source: FrameworkSource.LOOP},
+          value: {
+            summary: 'profiler failed',
+            detail: 'nsys exited 1',
+            source: FrameworkSource.LOOP,
+          },
         }),
         diagnostic: create(DiagnosticSchema, {
           id: 'warn-1',
@@ -542,15 +546,16 @@ describe('experiment refresh reconciliation', () => {
     id: string,
     round: number,
     active = false,
-  ): Parameters<typeof setExperiments>[1][number] => (hyp({
-    hypothesisId: id,
-    identified: true,
-    firstRound: round,
-    lastRound: round,
-    rounds: [{round, passed: true, reviewed: true}],
-    kept: false,
-    active,
-  }));
+  ): Parameters<typeof setExperiments>[1][number] =>
+    hyp({
+      hypothesisId: id,
+      identified: true,
+      firstRound: round,
+      lastRound: round,
+      rounds: [{round, passed: true, reviewed: true}],
+      kept: false,
+      active,
+    });
 
   it('keeps the current hypothesis selected across response reordering', () => {
     const current = setExperiments(initialSessionState(), [entry('H-01', 1), entry('H-02', 2)]);
@@ -840,7 +845,14 @@ describe('session event model', () => {
         'implementer',
       ),
     );
-    const interrupted = applyEvent(active, makeEvent(EventType.RUN_INTERRUPTED, {sequence: 2, timestamp: timestampOf('2026-01-01T00:00:01Z'), data: {case: 'runInterrupted', value: {reason: 'SIGINT', signal: 'SIGINT'}}}));
+    const interrupted = applyEvent(
+      active,
+      makeEvent(EventType.RUN_INTERRUPTED, {
+        sequence: 2,
+        timestamp: timestampOf('2026-01-01T00:00:01Z'),
+        data: {case: 'runInterrupted', value: {reason: 'SIGINT', signal: 'SIGINT'}},
+      }),
+    );
 
     expect(interrupted.core.activeExecutions).toEqual({});
   });
@@ -1228,7 +1240,10 @@ describe('session event model', () => {
       event(
         1,
         EventType.AGENT_OUTPUT_CHUNK,
-        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content: 'hello '}},
+        {
+          case: 'agentOutputChunk',
+          value: {channel: AgentOutputChannel.ASSISTANT, content: 'hello '},
+        },
         'invocation-1',
       ),
     );
@@ -1237,7 +1252,10 @@ describe('session event model', () => {
       event(
         2,
         EventType.AGENT_OUTPUT_CHUNK,
-        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content: 'world'}},
+        {
+          case: 'agentOutputChunk',
+          value: {channel: AgentOutputChannel.ASSISTANT, content: 'world'},
+        },
         'invocation-1',
       ),
     );
@@ -1246,7 +1264,10 @@ describe('session event model', () => {
       event(
         3,
         EventType.AGENT_OUTPUT_CHUNK,
-        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: '→ Bash(command="first")\n'}},
+        {
+          case: 'agentOutputChunk',
+          value: {channel: AgentOutputChannel.TOOL, content: '→ Bash(command="first")\n'},
+        },
         'invocation-1',
       ),
     );
@@ -1255,7 +1276,10 @@ describe('session event model', () => {
       event(
         4,
         EventType.AGENT_OUTPUT_CHUNK,
-        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: 'first result'}},
+        {
+          case: 'agentOutputChunk',
+          value: {channel: AgentOutputChannel.TOOL, content: 'first result'},
+        },
         'invocation-1',
       ),
     );
@@ -1264,7 +1288,10 @@ describe('session event model', () => {
       event(
         5,
         EventType.AGENT_OUTPUT_CHUNK,
-        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: '→ Bash(command="second")\n'}},
+        {
+          case: 'agentOutputChunk',
+          value: {channel: AgentOutputChannel.TOOL, content: '→ Bash(command="second")\n'},
+        },
         'invocation-1',
       ),
     );
@@ -1273,7 +1300,10 @@ describe('session event model', () => {
       event(
         6,
         EventType.AGENT_OUTPUT_CHUNK,
-        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: 'second result'}},
+        {
+          case: 'agentOutputChunk',
+          value: {channel: AgentOutputChannel.TOOL, content: 'second result'},
+        },
         'invocation-1',
       ),
     );
@@ -1416,7 +1446,10 @@ describe('session event model', () => {
       event(
         2,
         EventType.AGENT_OUTPUT_CHUNK,
-        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: '→ Bash(command="ls")\n'}},
+        {
+          case: 'agentOutputChunk',
+          value: {channel: AgentOutputChannel.TOOL, content: '→ Bash(command="ls")\n'},
+        },
         'inv-1',
       ),
     );
@@ -1456,15 +1489,45 @@ describe('session event model', () => {
 
   it('keeps each phase’s todo list separate so agents never clobber each other', () => {
     let state = initialSessionState();
-    state = applyEvent(state, makeEvent(EventType.TODO_UPDATE, {sequence: 1, timestamp: timestampOf('2026-01-01T00:00:00Z'), agentKind: 'implementer',
-      roundLabel: 'round-1',
-      data: {case: 'todoUpdate', value: {todos: [{content: 'Edit files', status: 'in_progress'}]}}}));
-    state = applyEvent(state, makeEvent(EventType.TODO_UPDATE, {sequence: 2, timestamp: timestampOf('2026-01-01T00:01:00Z'), agentKind: 'judge',
-      roundLabel: 'round-1',
-      data: {case: 'todoUpdate', value: {todos: [{content: 'Check behavior', status: 'pending'}]}}}));
-    state = applyEvent(state, makeEvent(EventType.TODO_UPDATE, {sequence: 3, timestamp: timestampOf('2026-01-01T00:02:00Z'), agentKind: 'implementer',
-      roundLabel: 'round-2',
-      data: {case: 'todoUpdate', value: {todos: [{content: 'Fix regression', status: 'pending'}]}}}));
+    state = applyEvent(
+      state,
+      makeEvent(EventType.TODO_UPDATE, {
+        sequence: 1,
+        timestamp: timestampOf('2026-01-01T00:00:00Z'),
+        agentKind: 'implementer',
+        roundLabel: 'round-1',
+        data: {
+          case: 'todoUpdate',
+          value: {todos: [{content: 'Edit files', status: 'in_progress'}]},
+        },
+      }),
+    );
+    state = applyEvent(
+      state,
+      makeEvent(EventType.TODO_UPDATE, {
+        sequence: 2,
+        timestamp: timestampOf('2026-01-01T00:01:00Z'),
+        agentKind: 'judge',
+        roundLabel: 'round-1',
+        data: {
+          case: 'todoUpdate',
+          value: {todos: [{content: 'Check behavior', status: 'pending'}]},
+        },
+      }),
+    );
+    state = applyEvent(
+      state,
+      makeEvent(EventType.TODO_UPDATE, {
+        sequence: 3,
+        timestamp: timestampOf('2026-01-01T00:02:00Z'),
+        agentKind: 'implementer',
+        roundLabel: 'round-2',
+        data: {
+          case: 'todoUpdate',
+          value: {todos: [{content: 'Fix regression', status: 'pending'}]},
+        },
+      }),
+    );
 
     // Live view follows the currently active agent (round-2 implementer).
     expect(visibleTodos(state)).toEqual([{content: 'Fix regression', status: 'pending'}]);
@@ -1514,13 +1577,27 @@ describe('session event model', () => {
 
   it('hides todos when the active phase has not emitted any', () => {
     let state = initialSessionState();
-    state = applyEvent(state, makeEvent(EventType.TODO_UPDATE, {sequence: 1, timestamp: timestampOf('2026-01-01T00:00:00Z'), agentKind: 'implementer',
-      roundLabel: 'round-1',
-      data: {case: 'todoUpdate', value: {todos: [{content: 'Edit files', status: 'completed'}]}}}));
+    state = applyEvent(
+      state,
+      makeEvent(EventType.TODO_UPDATE, {
+        sequence: 1,
+        timestamp: timestampOf('2026-01-01T00:00:00Z'),
+        agentKind: 'implementer',
+        roundLabel: 'round-1',
+        data: {case: 'todoUpdate', value: {todos: [{content: 'Edit files', status: 'completed'}]}},
+      }),
+    );
     // The judge phase starts without emitting todos; the implementer's
     // leftovers must not linger in the live view.
-    state = applyEvent(state, makeEvent(EventType.PHASE_STARTED, {sequence: 2, timestamp: timestampOf('2026-01-01T00:01:00Z'), agentKind: 'judge',
-      roundLabel: 'round-1'}));
+    state = applyEvent(
+      state,
+      makeEvent(EventType.PHASE_STARTED, {
+        sequence: 2,
+        timestamp: timestampOf('2026-01-01T00:01:00Z'),
+        agentKind: 'judge',
+        roundLabel: 'round-1',
+      }),
+    );
 
     expect(visibleTodos(state)).toEqual([]);
   });
@@ -1563,7 +1640,10 @@ describe('session event model', () => {
         value: {status, previous},
       });
 
-    let state = applyEvent(initialSessionState(), statusChange(1, RunStatus.PAUSING, RunStatus.RUNNING));
+    let state = applyEvent(
+      initialSessionState(),
+      statusChange(1, RunStatus.PAUSING, RunStatus.RUNNING),
+    );
     expect(runStateText(state)).toBe('pausing…');
     state = applyEvent(state, statusChange(2, RunStatus.PAUSED, RunStatus.PAUSING));
     expect(runStateText(state)).toBe('paused');
@@ -1598,7 +1678,10 @@ describe('session event model', () => {
       event(
         1,
         EventType.AGENT_OUTPUT_CHUNK,
-        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.PROMPT, content: '# Task\n\nUse `pytest`.'}},
+        {
+          case: 'agentOutputChunk',
+          value: {channel: AgentOutputChannel.PROMPT, content: '# Task\n\nUse `pytest`.'},
+        },
         'invocation-1',
       ),
     );
@@ -1658,7 +1741,10 @@ describe('session event model', () => {
       event(
         1,
         EventType.AGENT_OUTPUT_CHUNK,
-        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content: 'judge output'}},
+        {
+          case: 'agentOutputChunk',
+          value: {channel: AgentOutputChannel.ASSISTANT, content: 'judge output'},
+        },
         'judge-1',
       ),
     );
@@ -1666,7 +1752,10 @@ describe('session event model', () => {
       ...event(
         2,
         EventType.AGENT_OUTPUT_CHUNK,
-        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content: 'profiler output'}},
+        {
+          case: 'agentOutputChunk',
+          value: {channel: AgentOutputChannel.ASSISTANT, content: 'profiler output'},
+        },
         'profiler-1',
       ),
       agentKind: 'profiler',
@@ -2074,13 +2163,23 @@ describe('a long run', () => {
     // Two hundred rounds of chatter: far past any per-entry cap.
     for (let round = 1; round <= 200; round += 1) {
       for (let turn = 0; turn < 30; turn += 1) {
-        state = applyEvent(state, makeEvent(EventType.AGENT_OUTPUT_CHUNK, {sequence: round * 100 + turn, timestamp: timestampOf('2026-01-01T00:00:00Z'), agentKind: 'implementer',
-          roundLabel: `round-${round}-implementer`,
-          executionId: `impl-${round}-${turn}`,
-          data: {
-            case: 'agentOutputChunk',
-            value: {channel: AgentOutputChannel.ASSISTANT, content: `round ${round} turn ${turn}`},
-          }}));
+        state = applyEvent(
+          state,
+          makeEvent(EventType.AGENT_OUTPUT_CHUNK, {
+            sequence: round * 100 + turn,
+            timestamp: timestampOf('2026-01-01T00:00:00Z'),
+            agentKind: 'implementer',
+            roundLabel: `round-${round}-implementer`,
+            executionId: `impl-${round}-${turn}`,
+            data: {
+              case: 'agentOutputChunk',
+              value: {
+                channel: AgentOutputChannel.ASSISTANT,
+                content: `round ${round} turn ${turn}`,
+              },
+            },
+          }),
+        );
       }
     }
 

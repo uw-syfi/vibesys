@@ -1,6 +1,13 @@
 import {afterEach, describe, expect, it} from 'bun:test';
+import {create, type MessageInitShape} from '@bufbuild/protobuf';
 import {createTestRenderer} from '@opentui/core/testing';
-import type {HypothesisEntry} from '@vibesys/backend-client';
+import {
+  type HypothesisEntry,
+  HypothesisEntrySchema,
+  JudgeVerdict,
+  ObjectiveDirection,
+  PerfDeltaReason,
+} from '@vibesys/backend-client';
 import type {SessionController} from '../session-controller.js';
 import {
   entryKey,
@@ -34,22 +41,33 @@ import {resolveTheme, THEME_NAMES} from './theme.js';
 const WIDE = 120;
 const NARROW = 44;
 
-function entry(overrides: Partial<HypothesisEntry> = {}): HypothesisEntry {
-  return {
-    hypothesis_id: 'H-07',
+/** Field overrides for `entry`: `null` clears a default, leaving the field unset. */
+type EntryOverrides = {
+  [K in keyof MessageInitShape<typeof HypothesisEntrySchema>]?:
+    | MessageInitShape<typeof HypothesisEntrySchema>[K]
+    | null;
+};
+
+function entry(overrides: EntryOverrides = {}): HypothesisEntry {
+  const init: Record<string, unknown> = {
+    hypothesisId: 'H-07',
     identified: true,
     claim: 'batch the prefill step',
     action: 'batch prefill',
-    first_round: 41,
-    last_round: 41,
+    firstRound: 41,
+    lastRound: 41,
     rounds: [],
-    resolved_outcome: 'proven',
-    judge_verdict: 'pass',
-    perf_delta_pct: 12,
+    resolvedOutcome: 'proven',
+    judgeVerdict: JudgeVerdict.PASS,
+    perfDeltaPct: 12,
     kept: true,
     active: false,
     ...overrides,
   };
+  for (const [key, value] of Object.entries(init)) {
+    if (value === null) delete init[key];
+  }
+  return create(HypothesisEntrySchema, init);
 }
 
 function logState(entries: HypothesisEntry[]): SessionState {
@@ -85,11 +103,11 @@ describe('experiment log rows', () => {
     const columns = resolveColumns(WIDE);
 
     const disproven = entryRow(
-      entry({judge_verdict: 'pass', resolved_outcome: 'disproven'}),
+      entry({judgeVerdict: JudgeVerdict.PASS, resolvedOutcome: 'disproven'}),
       columns,
     );
     const rejected = entryRow(
-      entry({judge_verdict: 'fail', resolved_outcome: 'rejected'}),
+      entry({judgeVerdict: JudgeVerdict.FAIL, resolvedOutcome: 'rejected'}),
       columns,
     );
 
@@ -112,13 +130,13 @@ describe('experiment log rows', () => {
   });
 
   it('shows a round range for a hypothesis spanning continuations', () => {
-    expect(formatRounds(entry({first_round: 42, last_round: 43}))).toBe('42-43');
-    expect(formatRounds(entry({first_round: 44, last_round: 44}))).toBe('44');
+    expect(formatRounds(entry({firstRound: 42, lastRound: 43}))).toBe('42-43');
+    expect(formatRounds(entry({firstRound: 44, lastRound: 44}))).toBe('44');
   });
 
   it('marks the active hypothesis and leaves its outcome open', () => {
     const row = entryRow(
-      entry({active: true, resolved_outcome: null, judge_verdict: null, perf_delta_pct: null}),
+      entry({active: true, resolvedOutcome: null, judgeVerdict: null, perfDeltaPct: null}),
       resolveColumns(WIDE),
     );
 
@@ -131,39 +149,43 @@ describe('experiment log rows', () => {
   });
 
   it('falls back from a delta to an absolute metric and then to a placeholder', () => {
-    expect(formatMeasured(entry({perf_delta_pct: -2}))).toBe('-2.0%');
-    expect(formatMeasured(entry({perf_delta_pct: null, perf_metric: 2412.5}))).toBe('2412.5');
-    expect(formatMeasured(entry({perf_delta_pct: null, perf_metric: null}))).toBe('—');
+    expect(formatMeasured(entry({perfDeltaPct: -2}))).toBe('-2.0%');
+    expect(formatMeasured(entry({perfDeltaPct: null, perfMetric: 2412.5}))).toBe('2412.5');
+    expect(formatMeasured(entry({perfDeltaPct: null, perfMetric: null}))).toBe('—');
   });
 
   it('labels an absolute metric with its unit and keeps the delta unitless', () => {
     expect(
-      formatMeasured(entry({perf_delta_pct: null, perf_metric: 55434.2, perf_unit: 'ops/s'})),
+      formatMeasured(entry({perfDeltaPct: null, perfMetric: 55434.2, perfUnit: 'ops/s'})),
     ).toBe('55434.2 ops/s');
-    expect(formatMeasured(entry({perf_delta_pct: -2, perf_unit: 'ops/s'}))).toBe('-2.0%');
+    expect(formatMeasured(entry({perfDeltaPct: -2, perfUnit: 'ops/s'}))).toBe('-2.0%');
   });
 
   it('renders the three no-delta reasons and a zero delta as four distinct cells', () => {
     const noBaselineYet = formatMeasured(
       entry({
-        perf_delta_pct: null,
-        perf_metric: 101,
-        perf_unit: 'ops/s',
-        perf_delta_reason: 'no_baseline_yet',
+        perfDeltaPct: null,
+        perfMetric: 101,
+        perfUnit: 'ops/s',
+        perfDeltaReason: PerfDeltaReason.NO_BASELINE_YET,
       }),
     );
     const baselineUnresolved = formatMeasured(
       entry({
-        perf_delta_pct: null,
-        perf_metric: 102,
-        perf_unit: 'ops/s',
-        perf_delta_reason: 'baseline_unresolved',
+        perfDeltaPct: null,
+        perfMetric: 102,
+        perfUnit: 'ops/s',
+        perfDeltaReason: PerfDeltaReason.BASELINE_UNRESOLVED,
       }),
     );
     const selfReported = formatMeasured(
-      entry({perf_delta_pct: null, perf_metric: null, perf_delta_reason: 'not_framework_measured'}),
+      entry({
+        perfDeltaPct: null,
+        perfMetric: null,
+        perfDeltaReason: PerfDeltaReason.NOT_FRAMEWORK_MEASURED,
+      }),
     );
-    const zeroDelta = formatMeasured(entry({perf_delta_pct: 0}));
+    const zeroDelta = formatMeasured(entry({perfDeltaPct: 0}));
 
     expect(noBaselineYet).toBe('101 ops/s');
     expect(baselineUnresolved).toBe('? 102 ops/s');
@@ -173,11 +195,11 @@ describe('experiment log rows', () => {
   });
 
   it('renders a legacy entry with no delta_reason as a bare value and leaves a delta unaffected', () => {
-    const legacy = entry({perf_delta_pct: null, perf_metric: 2412.5, perf_unit: 'ops/s'});
-    expect(legacy.perf_delta_reason).toBeUndefined();
+    const legacy = entry({perfDeltaPct: null, perfMetric: 2412.5, perfUnit: 'ops/s'});
+    expect(legacy.perfDeltaReason).toBeUndefined();
     expect(formatMeasured(legacy)).toBe('2412.5 ops/s');
 
-    expect(formatMeasured(entry({perf_delta_pct: 5.9}))).toBe('+5.9%');
+    expect(formatMeasured(entry({perfDeltaPct: 5.9}))).toBe('+5.9%');
   });
 
   it('points the header the way improvement goes when the log agrees on one', () => {
@@ -189,22 +211,27 @@ describe('experiment log rows', () => {
   });
 
   it('finds the direction shared by every measured entry', () => {
-    expect(measuredDirection([entry(), entry({perf_direction: 'max'})])).toBe('max');
+    expect(measuredDirection([entry(), entry({perfDirection: ObjectiveDirection.MAX})])).toBe(
+      'max',
+    );
     expect(measuredDirection([entry()])).toBe(null);
     expect(
-      measuredDirection([entry({perf_direction: 'max'}), entry({perf_direction: 'min'})]),
+      measuredDirection([
+        entry({perfDirection: ObjectiveDirection.MAX}),
+        entry({perfDirection: ObjectiveDirection.MIN}),
+      ]),
     ).toBe(null);
   });
 
   it('spells out the measurement in the drill-down metadata', () => {
     const metadata = hypothesisMetadata(
       entry({
-        perf_metric: 55434.2,
-        perf_unit: 'total_ops_per_sec',
-        perf_metric_name: 'total_ops_per_sec',
-        perf_direction: 'max',
-        perf_baseline_value: 52340.1,
-        perf_delta_pct: 5.9,
+        perfMetric: 55434.2,
+        perfUnit: 'total_ops_per_sec',
+        perfMetricName: 'total_ops_per_sec',
+        perfDirection: ObjectiveDirection.MAX,
+        perfBaselineValue: 52340.1,
+        perfDeltaPct: 5.9,
       }),
     );
 
@@ -220,11 +247,11 @@ describe('experiment log rows', () => {
   it('keeps a distinct unit next to the numbers in the metadata', () => {
     const metadata = hypothesisMetadata(
       entry({
-        perf_metric: 2412.5,
-        perf_unit: 'ops/s',
-        perf_metric_name: 'throughput',
-        perf_direction: 'min',
-        perf_delta_pct: null,
+        perfMetric: 2412.5,
+        perfUnit: 'ops/s',
+        perfMetricName: 'throughput',
+        perfDirection: ObjectiveDirection.MIN,
+        perfDeltaPct: null,
       }),
     );
 
@@ -233,22 +260,22 @@ describe('experiment log rows', () => {
   });
 
   it('shows a measurement direction even when the metric name is absent', () => {
-    expect(hypothesisMetadata(entry({perf_metric_name: null, perf_direction: 'max'}))).toContain(
-      'Direction maximize',
-    );
-    expect(hypothesisMetadata(entry({perf_metric_name: null, perf_direction: 'min'}))).toContain(
-      'Direction minimize',
-    );
+    expect(
+      hypothesisMetadata(entry({perfMetricName: null, perfDirection: ObjectiveDirection.MAX})),
+    ).toContain('Direction maximize');
+    expect(
+      hypothesisMetadata(entry({perfMetricName: null, perfDirection: ObjectiveDirection.MIN})),
+    ).toContain('Direction minimize');
   });
 
   it('spells out the baseline identity in the drill-down metadata', () => {
     const metadata = hypothesisMetadata(
       entry({
-        perf_metric: 55434.2,
-        perf_baseline_value: 52340.1,
-        perf_baseline_round: 3,
-        perf_baseline_commit: 'abc1234deadbeef',
-        perf_delta_pct: 5.9,
+        perfMetric: 55434.2,
+        perfBaselineValue: 52340.1,
+        perfBaselineRound: 3,
+        perfBaselineCommit: 'abc1234deadbeef',
+        perfDeltaPct: 5.9,
       }),
     );
 
@@ -258,17 +285,21 @@ describe('experiment log rows', () => {
 
   it('spells out each no-delta reason in the drill-down metadata', () => {
     expect(
-      hypothesisMetadata(entry({perf_delta_pct: null, perf_delta_reason: 'no_baseline_yet'})),
+      hypothesisMetadata(
+        entry({perfDeltaPct: null, perfDeltaReason: PerfDeltaReason.NO_BASELINE_YET}),
+      ),
     ).toContain('No baseline existed yet');
     expect(
-      hypothesisMetadata(entry({perf_delta_pct: null, perf_delta_reason: 'baseline_unresolved'})),
+      hypothesisMetadata(
+        entry({perfDeltaPct: null, perfDeltaReason: PerfDeltaReason.BASELINE_UNRESOLVED}),
+      ),
     ).toContain('No trusted baseline resolved');
     expect(
       hypothesisMetadata(
         entry({
-          perf_delta_pct: null,
-          perf_metric: null,
-          perf_delta_reason: 'not_framework_measured',
+          perfDeltaPct: null,
+          perfMetric: null,
+          perfDeltaReason: PerfDeltaReason.NOT_FRAMEWORK_MEASURED,
         }),
       ),
     ).toContain('Self-reported, not framework-measured');
@@ -277,12 +308,12 @@ describe('experiment log rows', () => {
   it('renders a record with no hypothesis id as an explicit placeholder', () => {
     const row = entryRow(
       entry({
-        hypothesis_id: '(unidentified)',
+        hypothesisId: '(unidentified)',
         identified: false,
         claim: null,
         action: null,
-        resolved_outcome: null,
-        perf_delta_pct: null,
+        resolvedOutcome: null,
+        perfDeltaPct: null,
       }),
       resolveColumns(WIDE),
     );
@@ -297,7 +328,7 @@ describe('experiment log rows', () => {
   it('keeps an explicit gutter after a hypothesis id that fills its column', () => {
     const columns = resolveColumns(WIDE);
     const header = headerRow(columns);
-    const row = entryRow(entry({hypothesis_id: 'm1-preallocated-spsc-ring'}), columns);
+    const row = entryRow(entry({hypothesisId: 'm1-preallocated-spsc-ring'}), columns);
     const roundsStart = header.indexOf('Rounds');
     const claimStart = header.indexOf('Implementation Details');
 
@@ -316,10 +347,10 @@ describe('experiment log rows', () => {
     expect(columns.measured).toBe(true);
     const row = entryRow(
       entry({
-        perf_delta_pct: null,
-        perf_metric: 55434.2,
-        perf_unit: 'total_operations_per_second_sustained',
-        perf_delta_reason: 'baseline_unresolved',
+        perfDeltaPct: null,
+        perfMetric: 55434.2,
+        perfUnit: 'total_operations_per_second_sustained',
+        perfDeltaReason: PerfDeltaReason.BASELINE_UNRESOLVED,
       }),
       columns,
     );
@@ -402,7 +433,7 @@ describe('experiment log CJK column alignment', () => {
   it('truncates a CJK hypothesis id by cells so the rounds column stays put', () => {
     const columns = resolveColumns(WIDE);
     const ascii = entryRow(entry(), columns);
-    const cjk = entryRow(entry({hypothesis_id: '缓存优化假设编号很长'}), columns);
+    const cjk = entryRow(entry({hypothesisId: '缓存优化假设编号很长'}), columns);
 
     expect(cjk).toContain('缓存优化假设…');
     expect(columnOf(cjk, '41')).toBe(columnOf(ascii, '41'));
@@ -423,13 +454,13 @@ describe('unownedRoundCells', () => {
     // M1-superlinear-elimination, round 1, 562.9504 total_ms, from
     // ~/dev/vibesys-runs/bad-cpp/.../agent/rounds/0001.json.
     const recorded = entry({
-      hypothesis_id: 'M1-superlinear-elimination',
-      first_round: 1,
-      last_round: 1,
-      perf_metric: 562.9504,
-      perf_unit: 'total_ms',
-      perf_delta_pct: null,
-      resolved_outcome: 'proven',
+      hypothesisId: 'M1-superlinear-elimination',
+      firstRound: 1,
+      lastRound: 1,
+      perfMetric: 562.9504,
+      perfUnit: 'total_ms',
+      perfDeltaPct: null,
+      resolvedOutcome: 'proven',
     });
     for (const width of [120, 104, 103, 90, 89, 72, 62, 61, 54, 40]) {
       const columns = resolveColumns(width);
@@ -478,16 +509,16 @@ describe('right-aligned numeric columns', () => {
     const columns = resolveColumns(NARROW);
     expect(columns.claim).toBe(false);
     expect(columns.measured).toBe(false);
-    const short = entryCells(entry({first_round: 2, last_round: 2}), columns);
-    const long = entryCells(entry({first_round: 10, last_round: 99}), columns);
+    const short = entryCells(entry({firstRound: 2, lastRound: 2}), columns);
+    const long = entryCells(entry({firstRound: 10, lastRound: 99}), columns);
     expect(short.leading.endsWith('2')).toBe(true);
     expect(long.leading.endsWith('10-99')).toBe(true);
   });
 
   it('right-aligns Measured so it ends flush at the column boundary regardless of value length', () => {
     const columns = resolveColumns(WIDE);
-    const short = entry({perf_delta_pct: null, perf_metric: 5});
-    const long = entry({perf_delta_pct: null, perf_metric: 123456.78, perf_unit: 'tokens/s'});
+    const short = entry({perfDeltaPct: null, perfMetric: 5});
+    const long = entry({perfDeltaPct: null, perfMetric: 123456.78, perfUnit: 'tokens/s'});
     expect(entryCells(short, columns).leading.endsWith(formatMeasured(short))).toBe(true);
     expect(entryCells(long, columns).leading.endsWith(formatMeasured(long))).toBe(true);
   });
@@ -513,7 +544,7 @@ describe('header alignment follows its column', () => {
   it('right-aligns the Rounds header so it ends where its right-aligned values end', () => {
     const columns = resolveColumns(WIDE);
     const header = headerRow(columns);
-    const row = entryRow(entry({first_round: 10, last_round: 99}), columns);
+    const row = entryRow(entry({firstRound: 10, lastRound: 99}), columns);
 
     const headerEnd = header.indexOf('Rounds') + 'Rounds'.length;
     const valueEnd = row.indexOf('10-99') + '10-99'.length;
@@ -590,8 +621,8 @@ describe('entryLeadingMarker', () => {
 describe('entryCells and entryRow with selection', () => {
   it('shows the caret only on the selected row, at the same column as an unselected row', () => {
     const columns = resolveColumns(WIDE);
-    const selected = entryRow(entry({hypothesis_id: 'H-01'}), columns, true);
-    const unselected = entryRow(entry({hypothesis_id: 'H-01'}), columns, false);
+    const selected = entryRow(entry({hypothesisId: 'H-01'}), columns, true);
+    const unselected = entryRow(entry({hypothesisId: 'H-01'}), columns, false);
 
     expect(selected.startsWith('›')).toBe(true);
     expect(unselected.startsWith(' ')).toBe(true);
@@ -623,22 +654,22 @@ describe('experiment log outcome color', () => {
   it('reads green for a hypothesis that held and red for one that did not', () => {
     const theme = resolveTheme('dark');
 
-    expect(outcomeColor(theme, entry({resolved_outcome: 'proven'}))).toBe(theme.success);
-    expect(outcomeColor(theme, entry({resolved_outcome: 'disproven'}))).toBe(theme.error);
-    expect(outcomeColor(theme, entry({resolved_outcome: 'rejected'}))).toBe(theme.error);
+    expect(outcomeColor(theme, entry({resolvedOutcome: 'proven'}))).toBe(theme.success);
+    expect(outcomeColor(theme, entry({resolvedOutcome: 'disproven'}))).toBe(theme.error);
+    expect(outcomeColor(theme, entry({resolvedOutcome: 'rejected'}))).toBe(theme.error);
   });
 
   it('leaves outcomes with no verdict reading in body text', () => {
     const theme = resolveTheme('dark');
 
-    expect(outcomeColor(theme, entry({resolved_outcome: 'continue'}))).toBe(theme.textPrimary);
-    expect(outcomeColor(theme, entry({resolved_outcome: 'inconclusive'}))).toBe(theme.textPrimary);
-    expect(outcomeColor(theme, entry({resolved_outcome: null}))).toBe(theme.textPrimary);
+    expect(outcomeColor(theme, entry({resolvedOutcome: 'continue'}))).toBe(theme.textPrimary);
+    expect(outcomeColor(theme, entry({resolvedOutcome: 'inconclusive'}))).toBe(theme.textPrimary);
+    expect(outcomeColor(theme, entry({resolvedOutcome: null}))).toBe(theme.textPrimary);
   });
 
   it('uses the active accent while a hypothesis is still open', () => {
     const theme = resolveTheme('dark');
-    const open = entry({active: true, resolved_outcome: null});
+    const open = entry({active: true, resolvedOutcome: null});
 
     expect(outcomeColor(theme, open)).toBe(theme.warning);
   });
@@ -646,18 +677,18 @@ describe('experiment log outcome color', () => {
   it('takes every color from the selected theme, never a literal', () => {
     for (const name of THEME_NAMES) {
       const theme = resolveTheme(name);
-      expect(outcomeColor(theme, entry({resolved_outcome: 'proven'}))).toBe(theme.success);
-      expect(outcomeColor(theme, entry({resolved_outcome: 'disproven'}))).toBe(theme.error);
+      expect(outcomeColor(theme, entry({resolvedOutcome: 'proven'}))).toBe(theme.success);
+      expect(outcomeColor(theme, entry({resolvedOutcome: 'disproven'}))).toBe(theme.error);
     }
   });
 
   it('maps backend resolutions to operator-facing acceptance labels', () => {
     const columns = resolveColumns(WIDE);
 
-    expect(entryRow(entry({resolved_outcome: 'proven'}), columns)).toContain('Accepted');
-    expect(entryRow(entry({resolved_outcome: 'disproven'}), columns)).toContain('Rejected');
-    expect(outcomeLabel(entry({resolved_outcome: 'rejected'}))).toBe('Rejected');
-    expect(outcomeLabel(entry({resolved_outcome: 'inconclusive'}))).toBe('Inconclusive');
+    expect(entryRow(entry({resolvedOutcome: 'proven'}), columns)).toContain('Accepted');
+    expect(entryRow(entry({resolvedOutcome: 'disproven'}), columns)).toContain('Rejected');
+    expect(outcomeLabel(entry({resolvedOutcome: 'rejected'}))).toBe('Rejected');
+    expect(outcomeLabel(entry({resolvedOutcome: 'inconclusive'}))).toBe('Inconclusive');
   });
 });
 
@@ -674,8 +705,8 @@ describe('sentenceCase', () => {
 describe('experiment log selection', () => {
   it('keys placeholder rows by round so duplicates stay distinct', () => {
     const rows = [
-      entry({hypothesis_id: '(unidentified)', identified: false, first_round: 1, last_round: 1}),
-      entry({hypothesis_id: '(unidentified)', identified: false, first_round: 2, last_round: 2}),
+      entry({hypothesisId: '(unidentified)', identified: false, firstRound: 1, lastRound: 1}),
+      entry({hypothesisId: '(unidentified)', identified: false, firstRound: 2, lastRound: 2}),
     ];
 
     expect(rows.map(entryKey)).toEqual(['(unidentified)#1', '(unidentified)#2']);
@@ -683,8 +714,8 @@ describe('experiment log selection', () => {
 
   it('starts on the active hypothesis and clamps at both ends', () => {
     let state = logState([
-      entry({hypothesis_id: 'H-01', first_round: 1, last_round: 1}),
-      entry({hypothesis_id: 'H-02', first_round: 2, last_round: 2, active: true}),
+      entry({hypothesisId: 'H-01', firstRound: 1, lastRound: 1}),
+      entry({hypothesisId: 'H-02', firstRound: 2, lastRound: 2, active: true}),
     ]);
     expect(state.experimentLog?.selectedId).toBe('H-02');
 
@@ -696,9 +727,9 @@ describe('experiment log selection', () => {
   });
 
   it('drops a selection whose hypothesis disappears from the log', () => {
-    const first = logState([entry({hypothesis_id: 'H-01', first_round: 1, last_round: 1})]);
+    const first = logState([entry({hypothesisId: 'H-01', firstRound: 1, lastRound: 1})]);
     const replaced = setExperiments(first, [
-      entry({hypothesis_id: 'H-99', first_round: 9, last_round: 9}),
+      entry({hypothesisId: 'H-99', firstRound: 9, lastRound: 9}),
     ]);
 
     expect(replaced.experimentLog?.selectedId).toBe('H-99');
@@ -745,8 +776,8 @@ describe('experiment log rendered rows', () => {
 
   it('puts the caret at the same column on the selected row as the blank it replaces elsewhere', async () => {
     const initial = logState([
-      entry({hypothesis_id: 'H-01', first_round: 1, last_round: 1}),
-      entry({hypothesis_id: 'H-02', first_round: 2, last_round: 2}),
+      entry({hypothesisId: 'H-01', firstRound: 1, lastRound: 1}),
+      entry({hypothesisId: 'H-02', firstRound: 2, lastRound: 2}),
     ]);
     expect(initial.experimentLog?.selectedId).toBe('H-01');
 
@@ -780,8 +811,8 @@ describe('experiment log rendered rows', () => {
     const frame = (
       await renderLog(
         logState([
-          entry({hypothesis_id: 'H-01', first_round: 1, last_round: 1}),
-          entry({hypothesis_id: 'H-02', first_round: 2, last_round: 2, title: '缓存优化提升吞吐'}),
+          entry({hypothesisId: 'H-01', firstRound: 1, lastRound: 1}),
+          entry({hypothesisId: 'H-02', firstRound: 2, lastRound: 2, title: '缓存优化提升吞吐'}),
         ]),
       )
     ).split('\n');
@@ -840,7 +871,7 @@ describe('experiment log rendered rows', () => {
         ...initialSessionState(),
         core: {...initialSessionState().core, rounds: [{number: 5, status: 'completed'}]},
       }),
-      [entry({hypothesis_id: 'H-01', first_round: 1, last_round: 1})],
+      [entry({hypothesisId: 'H-01', firstRound: 1, lastRound: 1})],
     );
     const frame = (await renderLog(state)).split('\n');
     const hypothesisLine = frame.find(line => line.includes('H-01'));

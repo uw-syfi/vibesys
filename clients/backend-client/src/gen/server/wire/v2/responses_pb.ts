@@ -4,28 +4,37 @@
 // @generated from file server/wire/v2/responses.proto (package server.wire.v2, syntax proto3)
 /* eslint-disable */
 
-import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Timestamp } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
-import type { Diagnostic } from "./common_pb.js";
-import { file_server_wire_v2_common } from "./common_pb.js";
-import type { JudgeVerdict, RunEvent } from "./events_pb.js";
-import { file_server_wire_v2_events } from "./events_pb.js";
-import type { ChatThreadInfo, RunSnapshot } from "./snapshot_pb.js";
-import { file_server_wire_v2_snapshot } from "./snapshot_pb.js";
-import type { Message } from "@bufbuild/protobuf";
+import type {Message} from '@bufbuild/protobuf';
+import type {GenEnum, GenFile, GenMessage} from '@bufbuild/protobuf/codegenv2';
+import {enumDesc, fileDesc, messageDesc} from '@bufbuild/protobuf/codegenv2';
+import type {Timestamp} from '@bufbuild/protobuf/wkt';
+import {file_google_protobuf_timestamp} from '@bufbuild/protobuf/wkt';
+import type {Diagnostic} from './common_pb.js';
+import {file_server_wire_v2_common} from './common_pb.js';
+import type {JudgeVerdict, RunEvent} from './events_pb.js';
+import {file_server_wire_v2_events} from './events_pb.js';
+import type {ChatThreadInfo, RunSnapshot} from './snapshot_pb.js';
+import {file_server_wire_v2_snapshot} from './snapshot_pb.js';
 
 /**
  * Describes the file server/wire/v2/responses.proto.
  */
-export const file_server_wire_v2_responses: GenFile = /*@__PURE__*/
-  fileDesc("Ch5zZXJ2ZXIvd2lyZS92Mi9yZXNwb25zZXMucHJvdG8SDnNlcnZlci53aXJlLnYyIm0KCkNvbW1hbmRBY2sSLQoGYWN0aW9uGAEgASgOMh0uc2VydmVyLndpcmUudjIuQ29tbWFuZEFjdGlvbhIwCgZzdGF0dXMYAiABKA4yIC5zZXJ2ZXIud2lyZS52Mi5Db21tYW5kQWNrU3RhdHVzIlQKCkNoYXRSZXN1bHQSEAoIcXVlc3Rpb24YASABKAkSDgoGYW5zd2VyGAIgASgJEhYKCXRocmVhZF9pZBgDIAEoCUgAiAEBQgwKCl90aHJlYWRfaWQicgoQUGVyZm9ybWFuY2VSb3VuZBINCgVyb3VuZBgBIAEoDRITCgtwZXJmX21ldHJpYxgCIAEoARIRCglwZXJmX3VuaXQYAyABKAkSDgoGcGFzc2VkGAQgASgIEhcKD3Byb2ZpbGVfc2tpcHBlZBgFIAEoCCLiAwoSUGVyZm9ybWFuY2VDb250ZXh0Eh0KEG9iamVjdGl2ZV9tZXRyaWMYASABKAlIAIgBARIbCg5vYmplY3RpdmVfdW5pdBgCIAEoCUgBiAEBEkQKE29iamVjdGl2ZV9kaXJlY3Rpb24YAyABKA4yIi5zZXJ2ZXIud2lyZS52Mi5PYmplY3RpdmVEaXJlY3Rpb25IAogBARIlChhvYmplY3RpdmVfYmFzZWxpbmVfdmFsdWUYBCABKAFIA4gBARIlChhvYmplY3RpdmVfYmFzZWxpbmVfcm91bmQYBSABKA1IBIgBARImChlvYmplY3RpdmVfYmFzZWxpbmVfY29tbWl0GAYgASgJSAWIAQESIgoVb2JqZWN0aXZlX2Rlc2NyaXB0aW9uGAcgASgJSAaIAQFCEwoRX29iamVjdGl2ZV9tZXRyaWNCEQoPX29iamVjdGl2ZV91bml0QhYKFF9vYmplY3RpdmVfZGlyZWN0aW9uQhsKGV9vYmplY3RpdmVfYmFzZWxpbmVfdmFsdWVCGwoZX29iamVjdGl2ZV9iYXNlbGluZV9yb3VuZEIcChpfb2JqZWN0aXZlX2Jhc2VsaW5lX2NvbW1pdEIYChZfb2JqZWN0aXZlX2Rlc2NyaXB0aW9uIpAECg9IeXBvdGhlc2lzUm91bmQSDQoFcm91bmQYASABKA0SDgoGcGFzc2VkGAIgASgIEhAKCHJldmlld2VkGAMgASgIEkIKEmh5cG90aGVzaXNfb3V0Y29tZRgEIAEoDjIhLnNlcnZlci53aXJlLnYyLkh5cG90aGVzaXNPdXRjb21lSACIAQESPgoNanVkZ2VfdmVyZGljdBgFIAEoDjIiLnNlcnZlci53aXJlLnYyLlJvdW5kUmV2aWV3VmVyZGljdEgBiAEBEhgKC3BlcmZfbWV0cmljGAYgASgBSAKIAQESFgoJcGVyZl91bml0GAcgASgJSAOIAQESGwoOcGVyZl9kZWx0YV9wY3QYCCABKAFIBIgBARITCgZjb21taXQYCSABKAlIBYgBARIbChNvZmZpY2lhbF9ldmFsdWF0aW9uGAogASgIEkgKFWNhbmRpZGF0ZV9kaXNwb3NpdGlvbhgLIAEoDjIkLnNlcnZlci53aXJlLnYyLkNhbmRpZGF0ZURpc3Bvc2l0aW9uSAaIAQFCFQoTX2h5cG90aGVzaXNfb3V0Y29tZUIQCg5fanVkZ2VfdmVyZGljdEIOCgxfcGVyZl9tZXRyaWNCDAoKX3BlcmZfdW5pdEIRCg9fcGVyZl9kZWx0YV9wY3RCCQoHX2NvbW1pdEIYChZfY2FuZGlkYXRlX2Rpc3Bvc2l0aW9uIsAICg9IeXBvdGhlc2lzRW50cnkSFQoNaHlwb3RoZXNpc19pZBgBIAEoCRISCgppZGVudGlmaWVkGAIgASgIEhIKBXRpdGxlGAMgASgJSACIAQESEgoFY2xhaW0YBCABKAlIAYgBARITCgZhY3Rpb24YBSABKAlIAogBARITCgtmaXJzdF9yb3VuZBgGIAEoDRISCgpsYXN0X3JvdW5kGAcgASgNEi8KBnJvdW5kcxgIIAMoCzIfLnNlcnZlci53aXJlLnYyLkh5cG90aGVzaXNSb3VuZBIdChByZXNvbHZlZF9vdXRjb21lGAkgASgJSAOIAQESOAoNanVkZ2VfdmVyZGljdBgKIAEoDjIcLnNlcnZlci53aXJlLnYyLkp1ZGdlVmVyZGljdEgEiAEBEhgKC3BlcmZfbWV0cmljGAsgASgBSAWIAQESFgoJcGVyZl91bml0GAwgASgJSAaIAQESGwoOcGVyZl9kZWx0YV9wY3QYDSABKAFIB4gBARIdChBwZXJmX21ldHJpY19uYW1lGA4gASgJSAiIAQESPwoOcGVyZl9kaXJlY3Rpb24YDyABKA4yIi5zZXJ2ZXIud2lyZS52Mi5PYmplY3RpdmVEaXJlY3Rpb25ICYgBARIgChNwZXJmX2Jhc2VsaW5lX3ZhbHVlGBAgASgBSAqIAQESIAoTcGVyZl9iYXNlbGluZV9yb3VuZBgRIAEoDUgLiAEBEiEKFHBlcmZfYmFzZWxpbmVfY29tbWl0GBIgASgJSAyIAQESPwoRcGVyZl9kZWx0YV9yZWFzb24YEyABKA4yHy5zZXJ2ZXIud2lyZS52Mi5QZXJmRGVsdGFSZWFzb25IDYgBARIRCgRrZXB0GBQgASgISA6IAQESRgoUc3RyYXRlZ3lfZGlzcG9zaXRpb24YFSABKA4yIy5zZXJ2ZXIud2lyZS52Mi5TdHJhdGVneURpc3Bvc2l0aW9uSA+IAQESHAoPc3RyYXRlZ3lfcmVhc29uGBYgASgJSBCIAQESDgoGYWN0aXZlGBcgASgIQggKBl90aXRsZUIICgZfY2xhaW1CCQoHX2FjdGlvbkITChFfcmVzb2x2ZWRfb3V0Y29tZUIQCg5fanVkZ2VfdmVyZGljdEIOCgxfcGVyZl9tZXRyaWNCDAoKX3BlcmZfdW5pdEIRCg9fcGVyZl9kZWx0YV9wY3RCEwoRX3BlcmZfbWV0cmljX25hbWVCEQoPX3BlcmZfZGlyZWN0aW9uQhYKFF9wZXJmX2Jhc2VsaW5lX3ZhbHVlQhYKFF9wZXJmX2Jhc2VsaW5lX3JvdW5kQhcKFV9wZXJmX2Jhc2VsaW5lX2NvbW1pdEIUChJfcGVyZl9kZWx0YV9yZWFzb25CBwoFX2tlcHRCFwoVX3N0cmF0ZWd5X2Rpc3Bvc2l0aW9uQhIKEF9zdHJhdGVneV9yZWFzb24isAEKEEV4cGVyaW1lbnRVcGRhdGUSDgoGcnVuX2lkGAEgASgJEhUKDXByb2plY3Rpb25faWQYAiABKAkSGgoNZnJvbV9yZXZpc2lvbhgDIAEoDUgAiAEBEhgKEHRocm91Z2hfcmV2aXNpb24YBCABKA0SDQoFcmVzZXQYBSABKAgSHgoWcmVtb3ZlZF9oeXBvdGhlc2lzX2lkcxgGIAMoCUIQCg5fZnJvbV9yZXZpc2lvbiJ6ChBEZXNpZ25GaWxlQ2hhbmdlEgwKBHBhdGgYASABKAkSLAoGY2hhbmdlGAIgASgOMhwuc2VydmVyLndpcmUudjIuRGVzaWduQ2hhbmdlEhkKDHJlbmFtZWRfZnJvbRgDIAEoCUgAiAEBQg8KDV9yZW5hbWVkX2Zyb20ikwEKC0Rlc2lnblJvdW5kEg0KBXJvdW5kGAEgASgNEhMKBmNvbW1pdBgCIAEoCUgAiAEBEhEKBGJhc2UYAyABKAlIAYgBARIvCgVmaWxlcxgEIAEoCzIbLnNlcnZlci53aXJlLnYyLkRlc2lnbkZpbGVzSAKIAQFCCQoHX2NvbW1pdEIHCgVfYmFzZUIICgZfZmlsZXMiQAoLRGVzaWduRmlsZXMSMQoHY2hhbmdlcxgBIAMoCzIgLnNlcnZlci53aXJlLnYyLkRlc2lnbkZpbGVDaGFuZ2UilAEKC0Rlc2lnblBhdGNoEgwKBGJhc2UYASABKAkSDAoEaGVhZBgCIAEoCRIMCgRwYXRoGAMgASgJEhkKDHJlbmFtZWRfZnJvbRgEIAEoCUgAiAEBEhIKBXBhdGNoGAUgASgJSAGIAQESEQoJdHJ1bmNhdGVkGAYgASgIQg8KDV9yZW5hbWVkX2Zyb21CCAoGX3BhdGNoImIKD0NoYXRNb2RlbE9wdGlvbhINCgVtb2RlbBgBIAEoCRIvCgZzb3VyY2UYAiABKA4yHy5zZXJ2ZXIud2lyZS52Mi5DaGF0TW9kZWxTb3VyY2USDwoHZGVmYXVsdBgDIAEoCCJYChNDaGF0UHJvdmlkZXJPcHRpb25zEhAKCHByb3ZpZGVyGAEgASgJEi8KBm1vZGVscxgCIAMoCzIfLnNlcnZlci53aXJlLnYyLkNoYXRNb2RlbE9wdGlvbiJFCgtDaGF0T3B0aW9ucxI2Cglwcm92aWRlcnMYASADKAsyIy5zZXJ2ZXIud2lyZS52Mi5DaGF0UHJvdmlkZXJPcHRpb25zIvwBCgtUdWlEZWZhdWx0cxIQCghydW5zX2RpchgBIAEoCRISCgppbnB1dF9wYXRoGAIgASgJEhcKD2V4cGVyaW1lbnRfbmFtZRgDIAEoCRIdChByZXBvc2l0b3J5X293bmVyGAQgASgJSACIAQESFwoPcmVwb3NpdG9yeV9uYW1lGAUgASgJEjgKCnZpc2liaWxpdHkYBiABKA4yJC5zZXJ2ZXIud2lyZS52Mi5SZXBvc2l0b3J5VmlzaWJpbGl0eRInCgV0aGVtZRgHIAEoDjIYLnNlcnZlci53aXJlLnYyLlR1aVRoZW1lQhMKEV9yZXBvc2l0b3J5X293bmVyIoUJCghSZXNwb25zZRIYChBwcm90b2NvbF92ZXJzaW9uGAEgASgNEhIKCnJlcXVlc3RfaWQYAiABKAkSLQoJdGltZXN0YW1wGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIKCgJvaxgEIAEoCBISCgVlcnJvchgFIAEoCUgAiAEBEjMKCmRpYWdub3N0aWMYBiABKAsyGi5zZXJ2ZXIud2lyZS52Mi5EaWFnbm9zdGljSAGIAQESLAoDYWNrGAcgASgLMhouc2VydmVyLndpcmUudjIuQ29tbWFuZEFja0gCiAEBEi0KBGNoYXQYCCABKAsyGi5zZXJ2ZXIud2lyZS52Mi5DaGF0UmVzdWx0SAOIAQESOAoLY2hhdF90aHJlYWQYCSABKAsyHi5zZXJ2ZXIud2lyZS52Mi5DaGF0VGhyZWFkSW5mb0gEiAEBEjYKDGNoYXRfb3B0aW9ucxgKIAEoCzIbLnNlcnZlci53aXJlLnYyLkNoYXRPcHRpb25zSAWIAQESNgoMdHVpX2RlZmF1bHRzGAsgASgLMhsuc2VydmVyLndpcmUudjIuVHVpRGVmYXVsdHNIBogBARIyCghzbmFwc2hvdBgMIAEoCzIbLnNlcnZlci53aXJlLnYyLlJ1blNuYXBzaG90SAeIAQESKAoGZXZlbnRzGA0gAygLMhguc2VydmVyLndpcmUudjIuUnVuRXZlbnQSNQoLcGVyZm9ybWFuY2UYDiADKAsyIC5zZXJ2ZXIud2lyZS52Mi5QZXJmb3JtYW5jZVJvdW5kEkQKE3BlcmZvcm1hbmNlX2NvbnRleHQYDyABKAsyIi5zZXJ2ZXIud2lyZS52Mi5QZXJmb3JtYW5jZUNvbnRleHRICIgBARI0CgtleHBlcmltZW50cxgQIAMoCzIfLnNlcnZlci53aXJlLnYyLkh5cG90aGVzaXNFbnRyeRJAChFleHBlcmltZW50X3VwZGF0ZRgRIAEoCzIgLnNlcnZlci53aXJlLnYyLkV4cGVyaW1lbnRVcGRhdGVICYgBARIeChFleHBlcmltZW50c19yZWFkeRgSIAEoCEgKiAEBEisKBmRlc2lnbhgTIAMoCzIbLnNlcnZlci53aXJlLnYyLkRlc2lnblJvdW5kEhkKDGRlc2lnbl9yZWFkeRgUIAEoCEgLiAEBEjYKDGRlc2lnbl9wYXRjaBgVIAEoCzIbLnNlcnZlci53aXJlLnYyLkRlc2lnblBhdGNoSAyIAQFCCAoGX2Vycm9yQg0KC19kaWFnbm9zdGljQgYKBF9hY2tCBwoFX2NoYXRCDgoMX2NoYXRfdGhyZWFkQg8KDV9jaGF0X29wdGlvbnNCDwoNX3R1aV9kZWZhdWx0c0ILCglfc25hcHNob3RCFgoUX3BlcmZvcm1hbmNlX2NvbnRleHRCFAoSX2V4cGVyaW1lbnRfdXBkYXRlQhQKEl9leHBlcmltZW50c19yZWFkeUIPCg1fZGVzaWduX3JlYWR5Qg8KDV9kZXNpZ25fcGF0Y2gqlwEKDUNvbW1hbmRBY3Rpb24SHgoaQ09NTUFORF9BQ1RJT05fVU5TUEVDSUZJRUQQABIYChRDT01NQU5EX0FDVElPTl9QQVVTRRABEhkKFUNPTU1BTkRfQUNUSU9OX1JFU1VNRRACEhgKFENPTU1BTkRfQUNUSU9OX1NURUVSEAMSFwoTQ09NTUFORF9BQ1RJT05fU1RPUBAEKncKEENvbW1hbmRBY2tTdGF0dXMSIgoeQ09NTUFORF9BQ0tfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHgoaQ09NTUFORF9BQ0tfU1RBVFVTX1BFTkRJTkcQARIfChtDT01NQU5EX0FDS19TVEFUVVNfQ09OU1VNRUQQAipzChJPYmplY3RpdmVEaXJlY3Rpb24SIwofT0JKRUNUSVZFX0RJUkVDVElPTl9VTlNQRUNJRklFRBAAEhsKF09CSkVDVElWRV9ESVJFQ1RJT05fTUFYEAESGwoXT0JKRUNUSVZFX0RJUkVDVElPTl9NSU4QAiqUAwoRSHlwb3RoZXNpc091dGNvbWUSIgoeSFlQT1RIRVNJU19PVVRDT01FX1VOU1BFQ0lGSUVEEAASHwobSFlQT1RIRVNJU19PVVRDT01FX0NPTlRJTlVFEAESIAocSFlQT1RIRVNJU19PVVRDT01FX1NVUFBPUlRFRBACEiAKHEhZUE9USEVTSVNfT1VUQ09NRV9OT01JTkFURUQQAxIgChxIWVBPVEhFU0lTX09VVENPTUVfRElTUFJPVkVOEAQSLAooSFlQT1RIRVNJU19PVVRDT01FX0lNUExFTUVOVEFUSU9OX0ZBSUxFRBAFEiMKH0hZUE9USEVTSVNfT1VUQ09NRV9JTkNPTkNMVVNJVkUQBhIeChpIWVBPVEhFU0lTX09VVENPTUVfQkxPQ0tFRBAHEh0KGUhZUE9USEVTSVNfT1VUQ09NRV9QUk9WRU4QCBIfChtIWVBPVEhFU0lTX09VVENPTUVfUkVKRUNURUQQCRIhCh1IWVBPVEhFU0lTX09VVENPTUVfVU5NRUFTVVJFRBAKKpsBChJSb3VuZFJldmlld1ZlcmRpY3QSJAogUk9VTkRfUkVWSUVXX1ZFUkRJQ1RfVU5TUEVDSUZJRUQQABIdChlST1VORF9SRVZJRVdfVkVSRElDVF9QQVNTEAESHQoZUk9VTkRfUkVWSUVXX1ZFUkRJQ1RfRkFJTBACEiEKHVJPVU5EX1JFVklFV19WRVJESUNUX0RFRkVSUkVEEAMq2QEKFENhbmRpZGF0ZURpc3Bvc2l0aW9uEiUKIUNBTkRJREFURV9ESVNQT1NJVElPTl9VTlNQRUNJRklFRBAAEiQKIENBTkRJREFURV9ESVNQT1NJVElPTl9VTkFTU0VTU0VEEAESIQodQ0FORElEQVRFX0RJU1BPU0lUSU9OX0RJU0NBUkQQAhImCiJDQU5ESURBVEVfRElTUE9TSVRJT05fUFJFUkVRVUlTSVRFEAMSKQolQ0FORElEQVRFX0RJU1BPU0lUSU9OX1BBUkVUT19GUk9OVElFUhAEKrQBCg9QZXJmRGVsdGFSZWFzb24SIQodUEVSRl9ERUxUQV9SRUFTT05fVU5TUEVDSUZJRUQQABIlCiFQRVJGX0RFTFRBX1JFQVNPTl9OT19CQVNFTElORV9ZRVQQARIpCiVQRVJGX0RFTFRBX1JFQVNPTl9CQVNFTElORV9VTlJFU09MVkVEEAISLAooUEVSRl9ERUxUQV9SRUFTT05fTk9UX0ZSQU1FV09SS19NRUFTVVJFRBADKqQBChNTdHJhdGVneURpc3Bvc2l0aW9uEiQKIFNUUkFURUdZX0RJU1BPU0lUSU9OX1VOU1BFQ0lGSUVEEAASIgoeU1RSQVRFR1lfRElTUE9TSVRJT05fQVZBSUxBQkxFEAESHwobU1RSQVRFR1lfRElTUE9TSVRJT05fUEFSS0VEEAISIgoeU1RSQVRFR1lfRElTUE9TSVRJT05fQUJBTkRPTkVEEAMqmAEKDERlc2lnbkNoYW5nZRIdChlERVNJR05fQ0hBTkdFX1VOU1BFQ0lGSUVEEAASFwoTREVTSUdOX0NIQU5HRV9BRERFRBABEhoKFkRFU0lHTl9DSEFOR0VfTU9ESUZJRUQQAhIZChVERVNJR05fQ0hBTkdFX0RFTEVURUQQAxIZChVERVNJR05fQ0hBTkdFX1JFTkFNRUQQBCqMAQoPQ2hhdE1vZGVsU291cmNlEiEKHUNIQVRfTU9ERUxfU09VUkNFX1VOU1BFQ0lGSUVEEAASGQoVQ0hBVF9NT0RFTF9TT1VSQ0VfUlVOEAESGgoWQ0hBVF9NT0RFTF9TT1VSQ0VfUk9MRRACEh8KG0NIQVRfTU9ERUxfU09VUkNFX1NVR0dFU1RFRBADKqYBChRSZXBvc2l0b3J5VmlzaWJpbGl0eRIlCiFSRVBPU0lUT1JZX1ZJU0lCSUxJVFlfVU5TUEVDSUZJRUQQABIhCh1SRVBPU0lUT1JZX1ZJU0lCSUxJVFlfUFJJVkFURRABEiAKHFJFUE9TSVRPUllfVklTSUJJTElUWV9QVUJMSUMQAhIiCh5SRVBPU0lUT1JZX1ZJU0lCSUxJVFlfSU5URVJOQUwQAyqQAgoIVHVpVGhlbWUSGQoVVFVJX1RIRU1FX1VOU1BFQ0lGSUVEEAASEgoOVFVJX1RIRU1FX0RBUksQARITCg9UVUlfVEhFTUVfTElHSFQQAhIcChhUVUlfVEhFTUVfU09MQVJJWkVEX0RBUksQAxIdChlUVUlfVEhFTUVfU09MQVJJWkVEX0xJR0hUEAQSHgoaVFVJX1RIRU1FX0NBVFBQVUNDSU5fTU9DSEEQBRIeChpUVUlfVEhFTUVfQ0FUUFBVQ0NJTl9MQVRURRAGEiAKHFRVSV9USEVNRV9ISUdIX0NPTlRSQVNUX0RBUksQBxIhCh1UVUlfVEhFTUVfSElHSF9DT05UUkFTVF9MSUdIVBAIYgZwcm90bzM", [file_google_protobuf_timestamp, file_server_wire_v2_common, file_server_wire_v2_events, file_server_wire_v2_snapshot]);
+export const file_server_wire_v2_responses: GenFile =
+  /*@__PURE__*/
+  fileDesc(
+    'Ch5zZXJ2ZXIvd2lyZS92Mi9yZXNwb25zZXMucHJvdG8SDnNlcnZlci53aXJlLnYyIm0KCkNvbW1hbmRBY2sSLQoGYWN0aW9uGAEgASgOMh0uc2VydmVyLndpcmUudjIuQ29tbWFuZEFjdGlvbhIwCgZzdGF0dXMYAiABKA4yIC5zZXJ2ZXIud2lyZS52Mi5Db21tYW5kQWNrU3RhdHVzIlQKCkNoYXRSZXN1bHQSEAoIcXVlc3Rpb24YASABKAkSDgoGYW5zd2VyGAIgASgJEhYKCXRocmVhZF9pZBgDIAEoCUgAiAEBQgwKCl90aHJlYWRfaWQicgoQUGVyZm9ybWFuY2VSb3VuZBINCgVyb3VuZBgBIAEoDRITCgtwZXJmX21ldHJpYxgCIAEoARIRCglwZXJmX3VuaXQYAyABKAkSDgoGcGFzc2VkGAQgASgIEhcKD3Byb2ZpbGVfc2tpcHBlZBgFIAEoCCLiAwoSUGVyZm9ybWFuY2VDb250ZXh0Eh0KEG9iamVjdGl2ZV9tZXRyaWMYASABKAlIAIgBARIbCg5vYmplY3RpdmVfdW5pdBgCIAEoCUgBiAEBEkQKE29iamVjdGl2ZV9kaXJlY3Rpb24YAyABKA4yIi5zZXJ2ZXIud2lyZS52Mi5PYmplY3RpdmVEaXJlY3Rpb25IAogBARIlChhvYmplY3RpdmVfYmFzZWxpbmVfdmFsdWUYBCABKAFIA4gBARIlChhvYmplY3RpdmVfYmFzZWxpbmVfcm91bmQYBSABKA1IBIgBARImChlvYmplY3RpdmVfYmFzZWxpbmVfY29tbWl0GAYgASgJSAWIAQESIgoVb2JqZWN0aXZlX2Rlc2NyaXB0aW9uGAcgASgJSAaIAQFCEwoRX29iamVjdGl2ZV9tZXRyaWNCEQoPX29iamVjdGl2ZV91bml0QhYKFF9vYmplY3RpdmVfZGlyZWN0aW9uQhsKGV9vYmplY3RpdmVfYmFzZWxpbmVfdmFsdWVCGwoZX29iamVjdGl2ZV9iYXNlbGluZV9yb3VuZEIcChpfb2JqZWN0aXZlX2Jhc2VsaW5lX2NvbW1pdEIYChZfb2JqZWN0aXZlX2Rlc2NyaXB0aW9uIpAECg9IeXBvdGhlc2lzUm91bmQSDQoFcm91bmQYASABKA0SDgoGcGFzc2VkGAIgASgIEhAKCHJldmlld2VkGAMgASgIEkIKEmh5cG90aGVzaXNfb3V0Y29tZRgEIAEoDjIhLnNlcnZlci53aXJlLnYyLkh5cG90aGVzaXNPdXRjb21lSACIAQESPgoNanVkZ2VfdmVyZGljdBgFIAEoDjIiLnNlcnZlci53aXJlLnYyLlJvdW5kUmV2aWV3VmVyZGljdEgBiAEBEhgKC3BlcmZfbWV0cmljGAYgASgBSAKIAQESFgoJcGVyZl91bml0GAcgASgJSAOIAQESGwoOcGVyZl9kZWx0YV9wY3QYCCABKAFIBIgBARITCgZjb21taXQYCSABKAlIBYgBARIbChNvZmZpY2lhbF9ldmFsdWF0aW9uGAogASgIEkgKFWNhbmRpZGF0ZV9kaXNwb3NpdGlvbhgLIAEoDjIkLnNlcnZlci53aXJlLnYyLkNhbmRpZGF0ZURpc3Bvc2l0aW9uSAaIAQFCFQoTX2h5cG90aGVzaXNfb3V0Y29tZUIQCg5fanVkZ2VfdmVyZGljdEIOCgxfcGVyZl9tZXRyaWNCDAoKX3BlcmZfdW5pdEIRCg9fcGVyZl9kZWx0YV9wY3RCCQoHX2NvbW1pdEIYChZfY2FuZGlkYXRlX2Rpc3Bvc2l0aW9uIsAICg9IeXBvdGhlc2lzRW50cnkSFQoNaHlwb3RoZXNpc19pZBgBIAEoCRISCgppZGVudGlmaWVkGAIgASgIEhIKBXRpdGxlGAMgASgJSACIAQESEgoFY2xhaW0YBCABKAlIAYgBARITCgZhY3Rpb24YBSABKAlIAogBARITCgtmaXJzdF9yb3VuZBgGIAEoDRISCgpsYXN0X3JvdW5kGAcgASgNEi8KBnJvdW5kcxgIIAMoCzIfLnNlcnZlci53aXJlLnYyLkh5cG90aGVzaXNSb3VuZBIdChByZXNvbHZlZF9vdXRjb21lGAkgASgJSAOIAQESOAoNanVkZ2VfdmVyZGljdBgKIAEoDjIcLnNlcnZlci53aXJlLnYyLkp1ZGdlVmVyZGljdEgEiAEBEhgKC3BlcmZfbWV0cmljGAsgASgBSAWIAQESFgoJcGVyZl91bml0GAwgASgJSAaIAQESGwoOcGVyZl9kZWx0YV9wY3QYDSABKAFIB4gBARIdChBwZXJmX21ldHJpY19uYW1lGA4gASgJSAiIAQESPwoOcGVyZl9kaXJlY3Rpb24YDyABKA4yIi5zZXJ2ZXIud2lyZS52Mi5PYmplY3RpdmVEaXJlY3Rpb25ICYgBARIgChNwZXJmX2Jhc2VsaW5lX3ZhbHVlGBAgASgBSAqIAQESIAoTcGVyZl9iYXNlbGluZV9yb3VuZBgRIAEoDUgLiAEBEiEKFHBlcmZfYmFzZWxpbmVfY29tbWl0GBIgASgJSAyIAQESPwoRcGVyZl9kZWx0YV9yZWFzb24YEyABKA4yHy5zZXJ2ZXIud2lyZS52Mi5QZXJmRGVsdGFSZWFzb25IDYgBARIRCgRrZXB0GBQgASgISA6IAQESRgoUc3RyYXRlZ3lfZGlzcG9zaXRpb24YFSABKA4yIy5zZXJ2ZXIud2lyZS52Mi5TdHJhdGVneURpc3Bvc2l0aW9uSA+IAQESHAoPc3RyYXRlZ3lfcmVhc29uGBYgASgJSBCIAQESDgoGYWN0aXZlGBcgASgIQggKBl90aXRsZUIICgZfY2xhaW1CCQoHX2FjdGlvbkITChFfcmVzb2x2ZWRfb3V0Y29tZUIQCg5fanVkZ2VfdmVyZGljdEIOCgxfcGVyZl9tZXRyaWNCDAoKX3BlcmZfdW5pdEIRCg9fcGVyZl9kZWx0YV9wY3RCEwoRX3BlcmZfbWV0cmljX25hbWVCEQoPX3BlcmZfZGlyZWN0aW9uQhYKFF9wZXJmX2Jhc2VsaW5lX3ZhbHVlQhYKFF9wZXJmX2Jhc2VsaW5lX3JvdW5kQhcKFV9wZXJmX2Jhc2VsaW5lX2NvbW1pdEIUChJfcGVyZl9kZWx0YV9yZWFzb25CBwoFX2tlcHRCFwoVX3N0cmF0ZWd5X2Rpc3Bvc2l0aW9uQhIKEF9zdHJhdGVneV9yZWFzb24isAEKEEV4cGVyaW1lbnRVcGRhdGUSDgoGcnVuX2lkGAEgASgJEhUKDXByb2plY3Rpb25faWQYAiABKAkSGgoNZnJvbV9yZXZpc2lvbhgDIAEoDUgAiAEBEhgKEHRocm91Z2hfcmV2aXNpb24YBCABKA0SDQoFcmVzZXQYBSABKAgSHgoWcmVtb3ZlZF9oeXBvdGhlc2lzX2lkcxgGIAMoCUIQCg5fZnJvbV9yZXZpc2lvbiJ6ChBEZXNpZ25GaWxlQ2hhbmdlEgwKBHBhdGgYASABKAkSLAoGY2hhbmdlGAIgASgOMhwuc2VydmVyLndpcmUudjIuRGVzaWduQ2hhbmdlEhkKDHJlbmFtZWRfZnJvbRgDIAEoCUgAiAEBQg8KDV9yZW5hbWVkX2Zyb20ikwEKC0Rlc2lnblJvdW5kEg0KBXJvdW5kGAEgASgNEhMKBmNvbW1pdBgCIAEoCUgAiAEBEhEKBGJhc2UYAyABKAlIAYgBARIvCgVmaWxlcxgEIAEoCzIbLnNlcnZlci53aXJlLnYyLkRlc2lnbkZpbGVzSAKIAQFCCQoHX2NvbW1pdEIHCgVfYmFzZUIICgZfZmlsZXMiQAoLRGVzaWduRmlsZXMSMQoHY2hhbmdlcxgBIAMoCzIgLnNlcnZlci53aXJlLnYyLkRlc2lnbkZpbGVDaGFuZ2UilAEKC0Rlc2lnblBhdGNoEgwKBGJhc2UYASABKAkSDAoEaGVhZBgCIAEoCRIMCgRwYXRoGAMgASgJEhkKDHJlbmFtZWRfZnJvbRgEIAEoCUgAiAEBEhIKBXBhdGNoGAUgASgJSAGIAQESEQoJdHJ1bmNhdGVkGAYgASgIQg8KDV9yZW5hbWVkX2Zyb21CCAoGX3BhdGNoImIKD0NoYXRNb2RlbE9wdGlvbhINCgVtb2RlbBgBIAEoCRIvCgZzb3VyY2UYAiABKA4yHy5zZXJ2ZXIud2lyZS52Mi5DaGF0TW9kZWxTb3VyY2USDwoHZGVmYXVsdBgDIAEoCCJYChNDaGF0UHJvdmlkZXJPcHRpb25zEhAKCHByb3ZpZGVyGAEgASgJEi8KBm1vZGVscxgCIAMoCzIfLnNlcnZlci53aXJlLnYyLkNoYXRNb2RlbE9wdGlvbiJFCgtDaGF0T3B0aW9ucxI2Cglwcm92aWRlcnMYASADKAsyIy5zZXJ2ZXIud2lyZS52Mi5DaGF0UHJvdmlkZXJPcHRpb25zIvwBCgtUdWlEZWZhdWx0cxIQCghydW5zX2RpchgBIAEoCRISCgppbnB1dF9wYXRoGAIgASgJEhcKD2V4cGVyaW1lbnRfbmFtZRgDIAEoCRIdChByZXBvc2l0b3J5X293bmVyGAQgASgJSACIAQESFwoPcmVwb3NpdG9yeV9uYW1lGAUgASgJEjgKCnZpc2liaWxpdHkYBiABKA4yJC5zZXJ2ZXIud2lyZS52Mi5SZXBvc2l0b3J5VmlzaWJpbGl0eRInCgV0aGVtZRgHIAEoDjIYLnNlcnZlci53aXJlLnYyLlR1aVRoZW1lQhMKEV9yZXBvc2l0b3J5X293bmVyIoUJCghSZXNwb25zZRIYChBwcm90b2NvbF92ZXJzaW9uGAEgASgNEhIKCnJlcXVlc3RfaWQYAiABKAkSLQoJdGltZXN0YW1wGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIKCgJvaxgEIAEoCBISCgVlcnJvchgFIAEoCUgAiAEBEjMKCmRpYWdub3N0aWMYBiABKAsyGi5zZXJ2ZXIud2lyZS52Mi5EaWFnbm9zdGljSAGIAQESLAoDYWNrGAcgASgLMhouc2VydmVyLndpcmUudjIuQ29tbWFuZEFja0gCiAEBEi0KBGNoYXQYCCABKAsyGi5zZXJ2ZXIud2lyZS52Mi5DaGF0UmVzdWx0SAOIAQESOAoLY2hhdF90aHJlYWQYCSABKAsyHi5zZXJ2ZXIud2lyZS52Mi5DaGF0VGhyZWFkSW5mb0gEiAEBEjYKDGNoYXRfb3B0aW9ucxgKIAEoCzIbLnNlcnZlci53aXJlLnYyLkNoYXRPcHRpb25zSAWIAQESNgoMdHVpX2RlZmF1bHRzGAsgASgLMhsuc2VydmVyLndpcmUudjIuVHVpRGVmYXVsdHNIBogBARIyCghzbmFwc2hvdBgMIAEoCzIbLnNlcnZlci53aXJlLnYyLlJ1blNuYXBzaG90SAeIAQESKAoGZXZlbnRzGA0gAygLMhguc2VydmVyLndpcmUudjIuUnVuRXZlbnQSNQoLcGVyZm9ybWFuY2UYDiADKAsyIC5zZXJ2ZXIud2lyZS52Mi5QZXJmb3JtYW5jZVJvdW5kEkQKE3BlcmZvcm1hbmNlX2NvbnRleHQYDyABKAsyIi5zZXJ2ZXIud2lyZS52Mi5QZXJmb3JtYW5jZUNvbnRleHRICIgBARI0CgtleHBlcmltZW50cxgQIAMoCzIfLnNlcnZlci53aXJlLnYyLkh5cG90aGVzaXNFbnRyeRJAChFleHBlcmltZW50X3VwZGF0ZRgRIAEoCzIgLnNlcnZlci53aXJlLnYyLkV4cGVyaW1lbnRVcGRhdGVICYgBARIeChFleHBlcmltZW50c19yZWFkeRgSIAEoCEgKiAEBEisKBmRlc2lnbhgTIAMoCzIbLnNlcnZlci53aXJlLnYyLkRlc2lnblJvdW5kEhkKDGRlc2lnbl9yZWFkeRgUIAEoCEgLiAEBEjYKDGRlc2lnbl9wYXRjaBgVIAEoCzIbLnNlcnZlci53aXJlLnYyLkRlc2lnblBhdGNoSAyIAQFCCAoGX2Vycm9yQg0KC19kaWFnbm9zdGljQgYKBF9hY2tCBwoFX2NoYXRCDgoMX2NoYXRfdGhyZWFkQg8KDV9jaGF0X29wdGlvbnNCDwoNX3R1aV9kZWZhdWx0c0ILCglfc25hcHNob3RCFgoUX3BlcmZvcm1hbmNlX2NvbnRleHRCFAoSX2V4cGVyaW1lbnRfdXBkYXRlQhQKEl9leHBlcmltZW50c19yZWFkeUIPCg1fZGVzaWduX3JlYWR5Qg8KDV9kZXNpZ25fcGF0Y2gqlwEKDUNvbW1hbmRBY3Rpb24SHgoaQ09NTUFORF9BQ1RJT05fVU5TUEVDSUZJRUQQABIYChRDT01NQU5EX0FDVElPTl9QQVVTRRABEhkKFUNPTU1BTkRfQUNUSU9OX1JFU1VNRRACEhgKFENPTU1BTkRfQUNUSU9OX1NURUVSEAMSFwoTQ09NTUFORF9BQ1RJT05fU1RPUBAEKncKEENvbW1hbmRBY2tTdGF0dXMSIgoeQ09NTUFORF9BQ0tfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHgoaQ09NTUFORF9BQ0tfU1RBVFVTX1BFTkRJTkcQARIfChtDT01NQU5EX0FDS19TVEFUVVNfQ09OU1VNRUQQAipzChJPYmplY3RpdmVEaXJlY3Rpb24SIwofT0JKRUNUSVZFX0RJUkVDVElPTl9VTlNQRUNJRklFRBAAEhsKF09CSkVDVElWRV9ESVJFQ1RJT05fTUFYEAESGwoXT0JKRUNUSVZFX0RJUkVDVElPTl9NSU4QAiqUAwoRSHlwb3RoZXNpc091dGNvbWUSIgoeSFlQT1RIRVNJU19PVVRDT01FX1VOU1BFQ0lGSUVEEAASHwobSFlQT1RIRVNJU19PVVRDT01FX0NPTlRJTlVFEAESIAocSFlQT1RIRVNJU19PVVRDT01FX1NVUFBPUlRFRBACEiAKHEhZUE9USEVTSVNfT1VUQ09NRV9OT01JTkFURUQQAxIgChxIWVBPVEhFU0lTX09VVENPTUVfRElTUFJPVkVOEAQSLAooSFlQT1RIRVNJU19PVVRDT01FX0lNUExFTUVOVEFUSU9OX0ZBSUxFRBAFEiMKH0hZUE9USEVTSVNfT1VUQ09NRV9JTkNPTkNMVVNJVkUQBhIeChpIWVBPVEhFU0lTX09VVENPTUVfQkxPQ0tFRBAHEh0KGUhZUE9USEVTSVNfT1VUQ09NRV9QUk9WRU4QCBIfChtIWVBPVEhFU0lTX09VVENPTUVfUkVKRUNURUQQCRIhCh1IWVBPVEhFU0lTX09VVENPTUVfVU5NRUFTVVJFRBAKKpsBChJSb3VuZFJldmlld1ZlcmRpY3QSJAogUk9VTkRfUkVWSUVXX1ZFUkRJQ1RfVU5TUEVDSUZJRUQQABIdChlST1VORF9SRVZJRVdfVkVSRElDVF9QQVNTEAESHQoZUk9VTkRfUkVWSUVXX1ZFUkRJQ1RfRkFJTBACEiEKHVJPVU5EX1JFVklFV19WRVJESUNUX0RFRkVSUkVEEAMq2QEKFENhbmRpZGF0ZURpc3Bvc2l0aW9uEiUKIUNBTkRJREFURV9ESVNQT1NJVElPTl9VTlNQRUNJRklFRBAAEiQKIENBTkRJREFURV9ESVNQT1NJVElPTl9VTkFTU0VTU0VEEAESIQodQ0FORElEQVRFX0RJU1BPU0lUSU9OX0RJU0NBUkQQAhImCiJDQU5ESURBVEVfRElTUE9TSVRJT05fUFJFUkVRVUlTSVRFEAMSKQolQ0FORElEQVRFX0RJU1BPU0lUSU9OX1BBUkVUT19GUk9OVElFUhAEKrQBCg9QZXJmRGVsdGFSZWFzb24SIQodUEVSRl9ERUxUQV9SRUFTT05fVU5TUEVDSUZJRUQQABIlCiFQRVJGX0RFTFRBX1JFQVNPTl9OT19CQVNFTElORV9ZRVQQARIpCiVQRVJGX0RFTFRBX1JFQVNPTl9CQVNFTElORV9VTlJFU09MVkVEEAISLAooUEVSRl9ERUxUQV9SRUFTT05fTk9UX0ZSQU1FV09SS19NRUFTVVJFRBADKqQBChNTdHJhdGVneURpc3Bvc2l0aW9uEiQKIFNUUkFURUdZX0RJU1BPU0lUSU9OX1VOU1BFQ0lGSUVEEAASIgoeU1RSQVRFR1lfRElTUE9TSVRJT05fQVZBSUxBQkxFEAESHwobU1RSQVRFR1lfRElTUE9TSVRJT05fUEFSS0VEEAISIgoeU1RSQVRFR1lfRElTUE9TSVRJT05fQUJBTkRPTkVEEAMqmAEKDERlc2lnbkNoYW5nZRIdChlERVNJR05fQ0hBTkdFX1VOU1BFQ0lGSUVEEAASFwoTREVTSUdOX0NIQU5HRV9BRERFRBABEhoKFkRFU0lHTl9DSEFOR0VfTU9ESUZJRUQQAhIZChVERVNJR05fQ0hBTkdFX0RFTEVURUQQAxIZChVERVNJR05fQ0hBTkdFX1JFTkFNRUQQBCqMAQoPQ2hhdE1vZGVsU291cmNlEiEKHUNIQVRfTU9ERUxfU09VUkNFX1VOU1BFQ0lGSUVEEAASGQoVQ0hBVF9NT0RFTF9TT1VSQ0VfUlVOEAESGgoWQ0hBVF9NT0RFTF9TT1VSQ0VfUk9MRRACEh8KG0NIQVRfTU9ERUxfU09VUkNFX1NVR0dFU1RFRBADKqYBChRSZXBvc2l0b3J5VmlzaWJpbGl0eRIlCiFSRVBPU0lUT1JZX1ZJU0lCSUxJVFlfVU5TUEVDSUZJRUQQABIhCh1SRVBPU0lUT1JZX1ZJU0lCSUxJVFlfUFJJVkFURRABEiAKHFJFUE9TSVRPUllfVklTSUJJTElUWV9QVUJMSUMQAhIiCh5SRVBPU0lUT1JZX1ZJU0lCSUxJVFlfSU5URVJOQUwQAyqQAgoIVHVpVGhlbWUSGQoVVFVJX1RIRU1FX1VOU1BFQ0lGSUVEEAASEgoOVFVJX1RIRU1FX0RBUksQARITCg9UVUlfVEhFTUVfTElHSFQQAhIcChhUVUlfVEhFTUVfU09MQVJJWkVEX0RBUksQAxIdChlUVUlfVEhFTUVfU09MQVJJWkVEX0xJR0hUEAQSHgoaVFVJX1RIRU1FX0NBVFBQVUNDSU5fTU9DSEEQBRIeChpUVUlfVEhFTUVfQ0FUUFBVQ0NJTl9MQVRURRAGEiAKHFRVSV9USEVNRV9ISUdIX0NPTlRSQVNUX0RBUksQBxIhCh1UVUlfVEhFTUVfSElHSF9DT05UUkFTVF9MSUdIVBAIYgZwcm90bzM',
+    [
+      file_google_protobuf_timestamp,
+      file_server_wire_v2_common,
+      file_server_wire_v2_events,
+      file_server_wire_v2_snapshot,
+    ],
+  );
 
 /**
  * @generated from message server.wire.v2.CommandAck
  */
-export type CommandAck = Message<"server.wire.v2.CommandAck"> & {
+export type CommandAck = Message<'server.wire.v2.CommandAck'> & {
   /**
    * @generated from field: server.wire.v2.CommandAction action = 1;
    */
@@ -41,13 +50,14 @@ export type CommandAck = Message<"server.wire.v2.CommandAck"> & {
  * Describes the message server.wire.v2.CommandAck.
  * Use `create(CommandAckSchema)` to create a new message.
  */
-export const CommandAckSchema: GenMessage<CommandAck> = /*@__PURE__*/
+export const CommandAckSchema: GenMessage<CommandAck> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 0);
 
 /**
  * @generated from message server.wire.v2.ChatResult
  */
-export type ChatResult = Message<"server.wire.v2.ChatResult"> & {
+export type ChatResult = Message<'server.wire.v2.ChatResult'> & {
   /**
    * @generated from field: string question = 1;
    */
@@ -70,13 +80,14 @@ export type ChatResult = Message<"server.wire.v2.ChatResult"> & {
  * Describes the message server.wire.v2.ChatResult.
  * Use `create(ChatResultSchema)` to create a new message.
  */
-export const ChatResultSchema: GenMessage<ChatResult> = /*@__PURE__*/
+export const ChatResultSchema: GenMessage<ChatResult> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 1);
 
 /**
  * @generated from message server.wire.v2.PerformanceRound
  */
-export type PerformanceRound = Message<"server.wire.v2.PerformanceRound"> & {
+export type PerformanceRound = Message<'server.wire.v2.PerformanceRound'> & {
   /**
    * @generated from field: uint32 round = 1;
    */
@@ -109,7 +120,8 @@ export type PerformanceRound = Message<"server.wire.v2.PerformanceRound"> & {
  * Describes the message server.wire.v2.PerformanceRound.
  * Use `create(PerformanceRoundSchema)` to create a new message.
  */
-export const PerformanceRoundSchema: GenMessage<PerformanceRound> = /*@__PURE__*/
+export const PerformanceRoundSchema: GenMessage<PerformanceRound> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 2);
 
 /**
@@ -119,7 +131,7 @@ export const PerformanceRoundSchema: GenMessage<PerformanceRound> = /*@__PURE__*
  *
  * @generated from message server.wire.v2.PerformanceContext
  */
-export type PerformanceContext = Message<"server.wire.v2.PerformanceContext"> & {
+export type PerformanceContext = Message<'server.wire.v2.PerformanceContext'> & {
   /**
    * @generated from field: optional string objective_metric = 1;
    */
@@ -160,7 +172,8 @@ export type PerformanceContext = Message<"server.wire.v2.PerformanceContext"> & 
  * Describes the message server.wire.v2.PerformanceContext.
  * Use `create(PerformanceContextSchema)` to create a new message.
  */
-export const PerformanceContextSchema: GenMessage<PerformanceContext> = /*@__PURE__*/
+export const PerformanceContextSchema: GenMessage<PerformanceContext> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 3);
 
 /**
@@ -169,7 +182,7 @@ export const PerformanceContextSchema: GenMessage<PerformanceContext> = /*@__PUR
  *
  * @generated from message server.wire.v2.HypothesisRound
  */
-export type HypothesisRound = Message<"server.wire.v2.HypothesisRound"> & {
+export type HypothesisRound = Message<'server.wire.v2.HypothesisRound'> & {
   /**
    * @generated from field: uint32 round = 1;
    */
@@ -238,7 +251,8 @@ export type HypothesisRound = Message<"server.wire.v2.HypothesisRound"> & {
  * Describes the message server.wire.v2.HypothesisRound.
  * Use `create(HypothesisRoundSchema)` to create a new message.
  */
-export const HypothesisRoundSchema: GenMessage<HypothesisRound> = /*@__PURE__*/
+export const HypothesisRoundSchema: GenMessage<HypothesisRound> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 4);
 
 /**
@@ -246,7 +260,7 @@ export const HypothesisRoundSchema: GenMessage<HypothesisRound> = /*@__PURE__*/
  *
  * @generated from message server.wire.v2.HypothesisEntry
  */
-export type HypothesisEntry = Message<"server.wire.v2.HypothesisEntry"> & {
+export type HypothesisEntry = Message<'server.wire.v2.HypothesisEntry'> & {
   /**
    * @generated from field: string hypothesis_id = 1;
    */
@@ -383,7 +397,8 @@ export type HypothesisEntry = Message<"server.wire.v2.HypothesisEntry"> & {
  * Describes the message server.wire.v2.HypothesisEntry.
  * Use `create(HypothesisEntrySchema)` to create a new message.
  */
-export const HypothesisEntrySchema: GenMessage<HypothesisEntry> = /*@__PURE__*/
+export const HypothesisEntrySchema: GenMessage<HypothesisEntry> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 5);
 
 /**
@@ -393,7 +408,7 @@ export const HypothesisEntrySchema: GenMessage<HypothesisEntry> = /*@__PURE__*/
  *
  * @generated from message server.wire.v2.ExperimentUpdate
  */
-export type ExperimentUpdate = Message<"server.wire.v2.ExperimentUpdate"> & {
+export type ExperimentUpdate = Message<'server.wire.v2.ExperimentUpdate'> & {
   /**
    * @generated from field: string run_id = 1;
    */
@@ -429,7 +444,8 @@ export type ExperimentUpdate = Message<"server.wire.v2.ExperimentUpdate"> & {
  * Describes the message server.wire.v2.ExperimentUpdate.
  * Use `create(ExperimentUpdateSchema)` to create a new message.
  */
-export const ExperimentUpdateSchema: GenMessage<ExperimentUpdate> = /*@__PURE__*/
+export const ExperimentUpdateSchema: GenMessage<ExperimentUpdate> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 6);
 
 /**
@@ -437,7 +453,7 @@ export const ExperimentUpdateSchema: GenMessage<ExperimentUpdate> = /*@__PURE__*
  *
  * @generated from message server.wire.v2.DesignFileChange
  */
-export type DesignFileChange = Message<"server.wire.v2.DesignFileChange"> & {
+export type DesignFileChange = Message<'server.wire.v2.DesignFileChange'> & {
   /**
    * @generated from field: string path = 1;
    */
@@ -460,7 +476,8 @@ export type DesignFileChange = Message<"server.wire.v2.DesignFileChange"> & {
  * Describes the message server.wire.v2.DesignFileChange.
  * Use `create(DesignFileChangeSchema)` to create a new message.
  */
-export const DesignFileChangeSchema: GenMessage<DesignFileChange> = /*@__PURE__*/
+export const DesignFileChangeSchema: GenMessage<DesignFileChange> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 7);
 
 /**
@@ -469,7 +486,7 @@ export const DesignFileChangeSchema: GenMessage<DesignFileChange> = /*@__PURE__*
  *
  * @generated from message server.wire.v2.DesignRound
  */
-export type DesignRound = Message<"server.wire.v2.DesignRound"> & {
+export type DesignRound = Message<'server.wire.v2.DesignRound'> & {
   /**
    * @generated from field: uint32 round = 1;
    */
@@ -500,7 +517,8 @@ export type DesignRound = Message<"server.wire.v2.DesignRound"> & {
  * Describes the message server.wire.v2.DesignRound.
  * Use `create(DesignRoundSchema)` to create a new message.
  */
-export const DesignRoundSchema: GenMessage<DesignRound> = /*@__PURE__*/
+export const DesignRoundSchema: GenMessage<DesignRound> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 8);
 
 /**
@@ -508,7 +526,7 @@ export const DesignRoundSchema: GenMessage<DesignRound> = /*@__PURE__*/
  *
  * @generated from message server.wire.v2.DesignFiles
  */
-export type DesignFiles = Message<"server.wire.v2.DesignFiles"> & {
+export type DesignFiles = Message<'server.wire.v2.DesignFiles'> & {
   /**
    * @generated from field: repeated server.wire.v2.DesignFileChange changes = 1;
    */
@@ -519,7 +537,8 @@ export type DesignFiles = Message<"server.wire.v2.DesignFiles"> & {
  * Describes the message server.wire.v2.DesignFiles.
  * Use `create(DesignFilesSchema)` to create a new message.
  */
-export const DesignFilesSchema: GenMessage<DesignFiles> = /*@__PURE__*/
+export const DesignFilesSchema: GenMessage<DesignFiles> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 9);
 
 /**
@@ -527,7 +546,7 @@ export const DesignFilesSchema: GenMessage<DesignFiles> = /*@__PURE__*/
  *
  * @generated from message server.wire.v2.DesignPatch
  */
-export type DesignPatch = Message<"server.wire.v2.DesignPatch"> & {
+export type DesignPatch = Message<'server.wire.v2.DesignPatch'> & {
   /**
    * @generated from field: string base = 1;
    */
@@ -568,13 +587,14 @@ export type DesignPatch = Message<"server.wire.v2.DesignPatch"> & {
  * Describes the message server.wire.v2.DesignPatch.
  * Use `create(DesignPatchSchema)` to create a new message.
  */
-export const DesignPatchSchema: GenMessage<DesignPatch> = /*@__PURE__*/
+export const DesignPatchSchema: GenMessage<DesignPatch> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 10);
 
 /**
  * @generated from message server.wire.v2.ChatModelOption
  */
-export type ChatModelOption = Message<"server.wire.v2.ChatModelOption"> & {
+export type ChatModelOption = Message<'server.wire.v2.ChatModelOption'> & {
   /**
    * @generated from field: string model = 1;
    */
@@ -595,13 +615,14 @@ export type ChatModelOption = Message<"server.wire.v2.ChatModelOption"> & {
  * Describes the message server.wire.v2.ChatModelOption.
  * Use `create(ChatModelOptionSchema)` to create a new message.
  */
-export const ChatModelOptionSchema: GenMessage<ChatModelOption> = /*@__PURE__*/
+export const ChatModelOptionSchema: GenMessage<ChatModelOption> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 11);
 
 /**
  * @generated from message server.wire.v2.ChatProviderOptions
  */
-export type ChatProviderOptions = Message<"server.wire.v2.ChatProviderOptions"> & {
+export type ChatProviderOptions = Message<'server.wire.v2.ChatProviderOptions'> & {
   /**
    * @generated from field: string provider = 1;
    */
@@ -617,7 +638,8 @@ export type ChatProviderOptions = Message<"server.wire.v2.ChatProviderOptions"> 
  * Describes the message server.wire.v2.ChatProviderOptions.
  * Use `create(ChatProviderOptionsSchema)` to create a new message.
  */
-export const ChatProviderOptionsSchema: GenMessage<ChatProviderOptions> = /*@__PURE__*/
+export const ChatProviderOptionsSchema: GenMessage<ChatProviderOptions> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 12);
 
 /**
@@ -625,7 +647,7 @@ export const ChatProviderOptionsSchema: GenMessage<ChatProviderOptions> = /*@__P
  *
  * @generated from message server.wire.v2.ChatOptions
  */
-export type ChatOptions = Message<"server.wire.v2.ChatOptions"> & {
+export type ChatOptions = Message<'server.wire.v2.ChatOptions'> & {
   /**
    * @generated from field: repeated server.wire.v2.ChatProviderOptions providers = 1;
    */
@@ -636,7 +658,8 @@ export type ChatOptions = Message<"server.wire.v2.ChatOptions"> & {
  * Describes the message server.wire.v2.ChatOptions.
  * Use `create(ChatOptionsSchema)` to create a new message.
  */
-export const ChatOptionsSchema: GenMessage<ChatOptions> = /*@__PURE__*/
+export const ChatOptionsSchema: GenMessage<ChatOptions> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 13);
 
 /**
@@ -644,7 +667,7 @@ export const ChatOptionsSchema: GenMessage<ChatOptions> = /*@__PURE__*/
  *
  * @generated from message server.wire.v2.TuiDefaults
  */
-export type TuiDefaults = Message<"server.wire.v2.TuiDefaults"> & {
+export type TuiDefaults = Message<'server.wire.v2.TuiDefaults'> & {
   /**
    * @generated from field: string runs_dir = 1;
    */
@@ -685,7 +708,8 @@ export type TuiDefaults = Message<"server.wire.v2.TuiDefaults"> & {
  * Describes the message server.wire.v2.TuiDefaults.
  * Use `create(TuiDefaultsSchema)` to create a new message.
  */
-export const TuiDefaultsSchema: GenMessage<TuiDefaults> = /*@__PURE__*/
+export const TuiDefaultsSchema: GenMessage<TuiDefaults> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 14);
 
 /**
@@ -694,7 +718,7 @@ export const TuiDefaultsSchema: GenMessage<TuiDefaults> = /*@__PURE__*/
  *
  * @generated from message server.wire.v2.Response
  */
-export type Response = Message<"server.wire.v2.Response"> & {
+export type Response = Message<'server.wire.v2.Response'> & {
   /**
    * @generated from field: uint32 protocol_version = 1;
    */
@@ -821,7 +845,8 @@ export type Response = Message<"server.wire.v2.Response"> & {
  * Describes the message server.wire.v2.Response.
  * Use `create(ResponseSchema)` to create a new message.
  */
-export const ResponseSchema: GenMessage<Response> = /*@__PURE__*/
+export const ResponseSchema: GenMessage<Response> =
+  /*@__PURE__*/
   messageDesc(file_server_wire_v2_responses, 15);
 
 /**
@@ -857,7 +882,8 @@ export enum CommandAction {
 /**
  * Describes the enum server.wire.v2.CommandAction.
  */
-export const CommandActionSchema: GenEnum<CommandAction> = /*@__PURE__*/
+export const CommandActionSchema: GenEnum<CommandAction> =
+  /*@__PURE__*/
   enumDesc(file_server_wire_v2_responses, 0);
 
 /**
@@ -883,7 +909,8 @@ export enum CommandAckStatus {
 /**
  * Describes the enum server.wire.v2.CommandAckStatus.
  */
-export const CommandAckStatusSchema: GenEnum<CommandAckStatus> = /*@__PURE__*/
+export const CommandAckStatusSchema: GenEnum<CommandAckStatus> =
+  /*@__PURE__*/
   enumDesc(file_server_wire_v2_responses, 1);
 
 /**
@@ -909,7 +936,8 @@ export enum ObjectiveDirection {
 /**
  * Describes the enum server.wire.v2.ObjectiveDirection.
  */
-export const ObjectiveDirectionSchema: GenEnum<ObjectiveDirection> = /*@__PURE__*/
+export const ObjectiveDirectionSchema: GenEnum<ObjectiveDirection> =
+  /*@__PURE__*/
   enumDesc(file_server_wire_v2_responses, 2);
 
 /**
@@ -978,7 +1006,8 @@ export enum HypothesisOutcome {
 /**
  * Describes the enum server.wire.v2.HypothesisOutcome.
  */
-export const HypothesisOutcomeSchema: GenEnum<HypothesisOutcome> = /*@__PURE__*/
+export const HypothesisOutcomeSchema: GenEnum<HypothesisOutcome> =
+  /*@__PURE__*/
   enumDesc(file_server_wire_v2_responses, 3);
 
 /**
@@ -1012,7 +1041,8 @@ export enum RoundReviewVerdict {
 /**
  * Describes the enum server.wire.v2.RoundReviewVerdict.
  */
-export const RoundReviewVerdictSchema: GenEnum<RoundReviewVerdict> = /*@__PURE__*/
+export const RoundReviewVerdictSchema: GenEnum<RoundReviewVerdict> =
+  /*@__PURE__*/
   enumDesc(file_server_wire_v2_responses, 4);
 
 /**
@@ -1048,7 +1078,8 @@ export enum CandidateDisposition {
 /**
  * Describes the enum server.wire.v2.CandidateDisposition.
  */
-export const CandidateDispositionSchema: GenEnum<CandidateDisposition> = /*@__PURE__*/
+export const CandidateDispositionSchema: GenEnum<CandidateDisposition> =
+  /*@__PURE__*/
   enumDesc(file_server_wire_v2_responses, 5);
 
 /**
@@ -1081,7 +1112,8 @@ export enum PerfDeltaReason {
 /**
  * Describes the enum server.wire.v2.PerfDeltaReason.
  */
-export const PerfDeltaReasonSchema: GenEnum<PerfDeltaReason> = /*@__PURE__*/
+export const PerfDeltaReasonSchema: GenEnum<PerfDeltaReason> =
+  /*@__PURE__*/
   enumDesc(file_server_wire_v2_responses, 6);
 
 /**
@@ -1114,7 +1146,8 @@ export enum StrategyDisposition {
 /**
  * Describes the enum server.wire.v2.StrategyDisposition.
  */
-export const StrategyDispositionSchema: GenEnum<StrategyDisposition> = /*@__PURE__*/
+export const StrategyDispositionSchema: GenEnum<StrategyDisposition> =
+  /*@__PURE__*/
   enumDesc(file_server_wire_v2_responses, 7);
 
 /**
@@ -1150,7 +1183,8 @@ export enum DesignChange {
 /**
  * Describes the enum server.wire.v2.DesignChange.
  */
-export const DesignChangeSchema: GenEnum<DesignChange> = /*@__PURE__*/
+export const DesignChangeSchema: GenEnum<DesignChange> =
+  /*@__PURE__*/
   enumDesc(file_server_wire_v2_responses, 8);
 
 /**
@@ -1181,7 +1215,8 @@ export enum ChatModelSource {
 /**
  * Describes the enum server.wire.v2.ChatModelSource.
  */
-export const ChatModelSourceSchema: GenEnum<ChatModelSource> = /*@__PURE__*/
+export const ChatModelSourceSchema: GenEnum<ChatModelSource> =
+  /*@__PURE__*/
   enumDesc(file_server_wire_v2_responses, 9);
 
 /**
@@ -1212,7 +1247,8 @@ export enum RepositoryVisibility {
 /**
  * Describes the enum server.wire.v2.RepositoryVisibility.
  */
-export const RepositoryVisibilitySchema: GenEnum<RepositoryVisibility> = /*@__PURE__*/
+export const RepositoryVisibilitySchema: GenEnum<RepositoryVisibility> =
+  /*@__PURE__*/
   enumDesc(file_server_wire_v2_responses, 10);
 
 /**
@@ -1268,6 +1304,6 @@ export enum TuiTheme {
 /**
  * Describes the enum server.wire.v2.TuiTheme.
  */
-export const TuiThemeSchema: GenEnum<TuiTheme> = /*@__PURE__*/
+export const TuiThemeSchema: GenEnum<TuiTheme> =
+  /*@__PURE__*/
   enumDesc(file_server_wire_v2_responses, 11);
-
