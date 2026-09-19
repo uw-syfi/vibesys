@@ -488,6 +488,166 @@ def test_control_server_shutdown_is_bounded_for_incomplete_request(tmp_path: Pat
     assert completed_without_peer_close
 
 
+def test_control_server_shutdown_is_bounded_for_drip_fed_request(tmp_path: Path) -> None:
+    socket_path = tmp_path / "control.sock"
+    server = LifecycleControlServer(socket_path, {})
+    server.__enter__()
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.connect(str(socket_path))
+    stop_feeding = threading.Event()
+
+    def drip() -> None:
+        while not stop_feeding.is_set():
+            try:
+                client.sendall(b" ")
+            except OSError:
+                return
+            stop_feeding.wait(0.1)
+
+    feeder = threading.Thread(target=drip, daemon=True)
+    feeder.start()
+    stopped = threading.Event()
+    shutdown = threading.Thread(target=lambda: (server.__exit__(), stopped.set()), daemon=True)
+    shutdown.start()
+
+    completed_while_feeding = stopped.wait(timeout=3)
+    stop_feeding.set()
+    client.close()
+    shutdown.join(timeout=2)
+
+    assert completed_while_feeding
+
+
+def test_request_action_reports_empty_response_and_times_out(tmp_path: Path) -> None:
+    socket_path = tmp_path / "control.sock"
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(socket_path))
+    listener.listen(2)
+    accepted: list[socket.socket] = []
+
+    def close_immediately() -> None:
+        connection, _ = listener.accept()
+        connection.close()
+
+    closer = threading.Thread(target=close_immediately, daemon=True)
+    closer.start()
+    with pytest.raises(RuntimeError, match="Kubernetes lifecycle control"):
+        request_action(socket_path, "stop")
+    closer.join(timeout=2)
+
+    def hold_open() -> None:
+        connection, _ = listener.accept()
+        accepted.append(connection)
+
+    holder = threading.Thread(target=hold_open, daemon=True)
+    holder.start()
+    with pytest.raises(RuntimeError, match="control failed"):
+        request_action(socket_path, "stop", timeout_seconds=0.2)
+    holder.join(timeout=2)
+    for connection in accepted:
+        connection.close()
+    listener.close()
+
+
+def test_stop_forwards_survives_unkillable_forward_and_clears(tmp_path: Path) -> None:
+    class Stubborn(_Process):
+        def wait(self, timeout: float | None = None) -> int:
+            raise subprocess.TimeoutExpired("kubectl", timeout or 0)
+
+    lifecycle = KubernetesLifecycle(_config(Path("manifest.yaml")), tmp_path, config_dir=tmp_path)
+    lifecycle._forwards = [Stubborn(), Stubborn()]  # noqa: SLF001
+    lifecycle._stop_forwards()  # noqa: SLF001
+    assert lifecycle._forwards == []  # noqa: SLF001
+
+
+def _cli_lifecycle(closed: list[bool], *, fail_close: bool = False) -> type:
+    class Lifecycle:
+        base_url = "http://127.0.0.1:15000"
+        endpoints: ClassVar[dict[str, str]] = {"frontend": base_url}
+
+        def start(self) -> None:
+            return None
+
+        def close(self) -> None:
+            closed.append(True)
+            if fail_close:
+                raise RuntimeError("cluster gone")  # noqa: TRY003
+
+        def stop(self) -> None:
+            return None
+
+        def start_stopped(self) -> None:
+            return None
+
+    return Lifecycle
+
+
+def test_cli_close_failure_preserves_child_exit_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = tmp_path / "runtime.yaml"
+    config.write_text("{}", encoding="utf-8")
+    closed: list[bool] = []
+
+    class Child:
+        pid = 123
+
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            return 7
+
+        def poll(self) -> int:
+            return 7
+
+    lifecycle_type = _cli_lifecycle(closed, fail_close=True)
+    monkeypatch.setattr(runtime_cli, "load_config", lambda _path: object())
+    monkeypatch.setattr(runtime_cli, "KubernetesLifecycle", lambda *_a, **_k: lifecycle_type())
+    monkeypatch.setattr(runtime_cli.subprocess, "Popen", lambda *_a, **_k: Child())
+
+    result = runtime_cli.main(
+        ["--config", str(config), "--candidate-dir", str(tmp_path), "--", "x"]
+    )
+
+    assert result == 7
+    assert closed == [True]
+    assert "cleanup failed" in capsys.readouterr().err
+
+
+def test_cli_cleanup_survives_vanished_or_unkillable_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tmp_path / "runtime.yaml"
+    config.write_text("{}", encoding="utf-8")
+    closed: list[bool] = []
+
+    class Child:
+        pid = 123
+
+        def wait(self, timeout: float | None = None) -> int:
+            if timeout is not None:
+                raise subprocess.TimeoutExpired("child", timeout)
+            return 1
+
+        def poll(self) -> None:
+            return None
+
+    def vanished(_pid: int, _signal: int) -> None:
+        raise ProcessLookupError
+
+    lifecycle_type = _cli_lifecycle(closed)
+    monkeypatch.setattr(runtime_cli, "load_config", lambda _path: object())
+    monkeypatch.setattr(runtime_cli, "KubernetesLifecycle", lambda *_a, **_k: lifecycle_type())
+    monkeypatch.setattr(runtime_cli.subprocess, "Popen", lambda *_a, **_k: Child())
+    monkeypatch.setattr(runtime_cli.os, "killpg", vanished)
+    original_signal = signal.getsignal(signal.SIGTERM)
+
+    # Child.wait() with no timeout returns immediately; the finally block must still close.
+    runtime_cli.main(["--config", str(config), "--candidate-dir", str(tmp_path), "--", "x"])
+
+    assert closed == [True]
+    assert signal.getsignal(signal.SIGTERM) == original_signal
+
+
 def test_cli_renders_managed_lifecycle_control_commands(tmp_path: Path) -> None:
     lifecycle = cast(
         "KubernetesLifecycle",

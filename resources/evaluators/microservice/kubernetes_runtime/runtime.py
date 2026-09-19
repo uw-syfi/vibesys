@@ -11,6 +11,7 @@ import time
 import urllib.request
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Protocol
 
@@ -430,14 +431,18 @@ class KubernetesLifecycle:
             raise RuntimeError(f"refusing to mutate namespace {namespace!r}: ownership changed")
 
     def _stop_forwards(self) -> None:
-        for forward in reversed(self._forwards):
-            forward.terminate()
-            try:
-                forward.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                forward.kill()
-                forward.wait(timeout=5)
-        self._forwards.clear()
+        try:
+            for forward in reversed(self._forwards):
+                with suppress(ProcessLookupError):
+                    forward.terminate()
+                try:
+                    forward.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    with suppress(ProcessLookupError, subprocess.TimeoutExpired):
+                        forward.kill()
+                        forward.wait(timeout=5)
+        finally:
+            self._forwards.clear()
 
     def _render_manifests(self, namespace: str) -> str:
         rendered: list[str] = []

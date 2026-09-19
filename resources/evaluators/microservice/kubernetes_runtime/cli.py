@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -58,7 +59,33 @@ def _run_control(argv: list[str]) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:  # noqa: C901
+def _shutdown(
+    child: subprocess.Popen[bytes] | None,
+    lifecycle: KubernetesLifecycle,
+    previous: dict[signal.Signals, Any],
+) -> None:
+    """Stop the evaluator command and always attempt lifecycle cleanup."""
+    # Ignore further signals so a second SIGTERM cannot interrupt cleanup.
+    for handled in previous:
+        signal.signal(handled, signal.SIG_IGN)
+    if child is not None and child.poll() is None:
+        with suppress(ProcessLookupError):
+            os.killpg(child.pid, signal.SIGTERM)
+        try:
+            child.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            with suppress(ProcessLookupError, subprocess.TimeoutExpired):
+                os.killpg(child.pid, signal.SIGKILL)
+                child.wait(timeout=5)
+    try:
+        lifecycle.close()
+    except Exception as error:  # noqa: BLE001
+        sys.stderr.write(f"kubernetes cleanup failed: {str(error)[:500]}\n")
+    for handled, handler in previous.items():
+        signal.signal(handled, handler)
+
+
+def main(argv: list[str] | None = None) -> int:
     """Run an evaluator command inside an owned Kubernetes lifecycle."""
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv[:1] == ["--control"]:
@@ -109,16 +136,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901
     except KeyboardInterrupt:
         return 130
     finally:
-        if child is not None and child.poll() is None:
-            os.killpg(child.pid, signal.SIGTERM)
-            try:
-                child.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                os.killpg(child.pid, signal.SIGKILL)
-                child.wait(timeout=5)
-        lifecycle.close()
-        for handled, handler in previous.items():
-            signal.signal(handled, handler)
+        _shutdown(child, lifecycle, previous)
 
 
 if __name__ == "__main__":

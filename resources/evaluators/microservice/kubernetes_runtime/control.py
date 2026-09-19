@@ -6,8 +6,9 @@ import json
 import socket
 import socketserver
 import threading
+import time
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -15,16 +16,30 @@ if TYPE_CHECKING:
 
 _MAX_REQUEST_BYTES = 64 * 1024
 _REQUEST_TIMEOUT_SECONDS = 0.5
+_RESPONSE_TIMEOUT_SECONDS = 5.0
+_CONNECT_TIMEOUT_SECONDS = 5.0
+# Actions wrap kubectl waits that are individually bounded by the lifecycle timeout.
+_ACTION_TIMEOUT_SECONDS = 3600.0
 
 
-class _Readable(Protocol):
-    def readline(self, limit: int = -1, /) -> bytes: ...
-
-
-def _read_frame(stream: _Readable) -> tuple[bytes | None, str | None]:
-    frame = stream.readline(_MAX_REQUEST_BYTES + 1)
-    if not frame.endswith(b"\n"):
-        return None, "incomplete Kubernetes lifecycle request"
+def _read_frame(connection: socket.socket, deadline: float) -> tuple[bytes | None, str | None]:
+    """Read one newline-terminated request, bounded in size and total time."""
+    buffer = b""
+    while b"\n" not in buffer:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None, "incomplete Kubernetes lifecycle request"
+        connection.settimeout(remaining)
+        try:
+            chunk = connection.recv(4096)
+        except OSError:
+            return None, "incomplete Kubernetes lifecycle request"
+        if not chunk:
+            return None, "incomplete Kubernetes lifecycle request"
+        buffer += chunk
+        if len(buffer) > _MAX_REQUEST_BYTES and b"\n" not in buffer[:_MAX_REQUEST_BYTES]:
+            return None, "Kubernetes lifecycle request is too large"
+    frame = buffer[: buffer.index(b"\n") + 1]
     if len(frame) > _MAX_REQUEST_BYTES:
         return None, "Kubernetes lifecycle request is too large"
     return frame, None
@@ -44,8 +59,8 @@ class _ControlHandler(socketserver.StreamRequestHandler):
         if not isinstance(server, _ControlServer):
             return
         try:
-            self.connection.settimeout(_REQUEST_TIMEOUT_SECONDS)
-            frame, error = _read_frame(self.rfile)
+            deadline = time.monotonic() + _REQUEST_TIMEOUT_SECONDS
+            frame, error = _read_frame(self.connection, deadline)
             if frame is None:
                 response: dict[str, Any] = {"ok": False, "error": error or "invalid request"}
             else:
@@ -62,7 +77,8 @@ class _ControlHandler(socketserver.StreamRequestHandler):
                     }
         except Exception as error:  # noqa: BLE001
             response = {"ok": False, "error": str(error)}
-        with suppress(BrokenPipeError, ConnectionResetError):
+        self.connection.settimeout(_RESPONSE_TIMEOUT_SECONDS)
+        with suppress(OSError):
             self.wfile.write(json.dumps(response).encode() + b"\n")
 
 
@@ -88,17 +104,30 @@ class LifecycleControlServer:
         self._path.unlink(missing_ok=True)
 
 
-def request_action(path: Path, action: str) -> None:
+def request_action(
+    path: Path, action: str, *, timeout_seconds: float = _ACTION_TIMEOUT_SECONDS
+) -> None:
     """Request one lifecycle action and wait for its completion."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.connect(str(path))
-        client.sendall(json.dumps({"action": action}).encode() + b"\n")
-        response_bytes = b""
-        while not response_bytes.endswith(b"\n"):
-            chunk = client.recv(4096)
-            if not chunk:
-                break
-            response_bytes += chunk
-    response = json.loads(response_bytes)
-    if not response.get("ok"):
-        raise RuntimeError(response.get("error", "Kubernetes lifecycle control failed"))
+        try:
+            client.settimeout(_CONNECT_TIMEOUT_SECONDS)
+            client.connect(str(path))
+            client.settimeout(timeout_seconds)
+            client.sendall(json.dumps({"action": action}).encode() + b"\n")
+            response_bytes = b""
+            while not response_bytes.endswith(b"\n"):
+                chunk = client.recv(4096)
+                if not chunk:
+                    break
+                response_bytes += chunk
+        except OSError as error:
+            raise RuntimeError(f"Kubernetes lifecycle control failed: {error}") from error  # noqa: TRY003
+    try:
+        response = json.loads(response_bytes)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(  # noqa: TRY003
+            "Kubernetes lifecycle control returned no valid response"
+        ) from error
+    if not isinstance(response, dict) or not response.get("ok"):
+        message = response.get("error") if isinstance(response, dict) else None
+        raise RuntimeError(message or "Kubernetes lifecycle control failed")
