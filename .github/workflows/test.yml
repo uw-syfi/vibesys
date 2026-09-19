@@ -32,6 +32,7 @@ jobs:
     outputs:
       python: ${{ steps.filter.outputs.python }}
       tui: ${{ steps.filter.outputs.tui }}
+      proto: ${{ steps.filter.outputs.proto }}
       examples: ${{ steps.filter.outputs.examples }}
       agent_image: ${{ steps.filter.outputs.agent_image }}
       evaluators: ${{ steps.filter.outputs.evaluators }}
@@ -70,22 +71,30 @@ jobs:
               - '.github/workflows/test.yml'
             # Mirrors the rebuild watch set the repository launcher uses in
             # src/entrypoints/launcher.py: the TUI is affected by the TypeScript
-            # workspace itself and by the Python modules that feed the
-            # generated protocol bindings, and by nothing else.
+            # workspace itself, whose generated protocol bindings are committed
+            # under clients/backend-client/src/gen, and by nothing else.
             tui:
               - 'clients/**'
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
-              - 'src/server/api/schema.py'
-              - 'src/server/events.py'
-              - 'src/server/api/protocol.py'
-              - 'src/server/controller.py'
-              - 'src/server/diagnostics.py'
-              - 'src/server/settings.py'
               - 'packaging/fetch_bun.py'
               - 'scripts/check_ts_architecture.test.mjs'
               - 'scripts/check_ts_package_manifests.mjs'
+              - '.github/workflows/test.yml'
+            # What `proto` checks: the wire contract, its buf configuration, the
+            # generators' pins, and both generated trees.
+            proto:
+              - 'proto/**'
+              - 'buf.yaml'
+              - 'buf.gen.yaml'
+              - 'src/server/wire/**'
+              - 'clients/backend-client/src/gen/**'
+              - 'scripts/check_proto_breaking.mjs'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pyproject.toml'
+              - 'uv.lock'
               - '.github/workflows/test.yml'
             # What `validate-examples` checks: the example repositories
             # themselves (a submodule bump shows up as a change to the gitlink
@@ -214,6 +223,53 @@ jobs:
       - name: Check Python types
         run: ./scripts/check_types.sh
 
+  # The wire contract is proto/. Lint and breaking-change checks run on the
+  # schema; the drift check regenerates the committed Python and TypeScript
+  # bindings and fails if they differ from what is checked in.
+  proto:
+    needs: changes
+    if: needs.changes.outputs.proto == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `buf breaking` compares against origin/main, which needs its history.
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack install --global pnpm@11.11.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: |
+          uv sync --dev
+          pnpm install --frozen-lockfile
+
+      - name: Lint the protocol
+        run: pnpm proto:lint
+
+      - name: Check for breaking protocol changes
+        run: pnpm proto:breaking
+
+      - name: Check generated protocol bindings
+        run: pnpm proto:check
+
   tui:
     needs: changes
     if: needs.changes.outputs.tui == 'true'
@@ -271,11 +327,6 @@ jobs:
 
       - name: Check TypeScript package boundaries
         run: pnpm check:ts-architecture
-
-      - name: Check generated protocol bindings
-        run: |
-          pnpm --dir clients/backend-client generate:protocol
-          git diff --exit-code -- clients/backend-client/src/generated/protocol.schema.json clients/backend-client/src/generated/protocol.generated.ts
 
       - name: Check TypeScript packages
         run: pnpm check:clients
@@ -664,6 +715,7 @@ jobs:
       - changes
       - python-checks
       - typecheck
+      - proto
       - tui
       - queue-native
       - validate-examples
@@ -723,6 +775,7 @@ jobs:
     needs:
       - changes
       - python-checks
+      - proto
       - tui
       - queue-native
       - validate-examples

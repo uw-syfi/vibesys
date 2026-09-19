@@ -121,7 +121,6 @@ The TypeScript client has its own workflow; see
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm --dir clients/backend-client generate:protocol
 pnpm check:ts-architecture
 pnpm check:clients
 pnpm test:clients
@@ -129,10 +128,41 @@ pnpm build:clients
 pnpm check:ts
 ```
 
-When Python protocol models change, regenerate the files under
-`clients/backend-client/src/generated/` and review the diff.
 See the [TUI architecture guide](tui-architecture.md) for package ownership and dependency rules.
 TUI-specific contributor docs are indexed in [`tui/README.md`](tui/README.md).
+
+### Wire protocol
+
+The backend to frontend control protocol is defined once, in Protocol Buffers:
+`proto/server/wire/v2/*.proto`. Both sides use generated messages
+(`src/server/wire/v2/*_pb2.py` and `clients/backend-client/src/gen/`); nothing
+else describes the contract. The JSONL transport carries proto3 canonical JSON
+with the snake_case proto field names. Semantic rules protobuf cannot express
+(value ranges, non-empty text, finite floats, required enums) are hand-written
+in `src/server/wire/validate.py` and, for the requests the TypeScript client
+builds, in `clients/backend-client`.
+
+Tooling is pinned in the repository: `buf` and `protoc-gen-es` from pnpm, and
+`protoc` from the `grpcio-tools` wheel in the uv dev group.
+
+```bash
+pnpm proto:lint       # buf lint (STANDARD rules)
+pnpm proto:generate   # regenerate Python and TypeScript bindings
+pnpm proto:check      # regenerate and fail if the checked-in bindings differ
+pnpm proto:breaking   # buf breaking against origin/main (PROTO_BASE_REF to override)
+```
+
+The generated code is committed, as the JSON Schema output was: the bindings are
+part of what a reviewer sees change, `pip install` and the TypeScript build need
+no code generator, and CI's `proto` job fails when a checked-in binding is stale.
+
+Compatible changes (new fields, new enum values, new messages) go into the
+current `v2` package. A change `buf breaking` rejects means a new package
+directory (`v3`) and a `PROTOCOL_VERSION` bump. Servers parse strictly, so an
+unknown field is rejected with `invalid_message`; the `tail` and `store_id`
+subscribe options rely on that rejection as their capability probe. Journals
+recorded under version 1 are upgraded line by line on load
+(`src/server/wire/upgrade.py`).
 
 ## Extend VibeSys
 

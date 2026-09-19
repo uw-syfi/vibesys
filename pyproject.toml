@@ -87,6 +87,7 @@ dev = [
     "twine",
     "ty==0.0.75",
     "grpcio-tools>=1.81.1",
+    "types-protobuf>=7.35.1.20260906",
 ]
 test = [
     "hypothesis",

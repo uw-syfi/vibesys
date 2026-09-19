@@ -115,7 +115,7 @@ Discount lines that add no review effort before rating:
   hundreds of lines still needs a skim for what it does not assert.
 
 Note the discount in the report, for example "3655 lines, of which 408 are
-the regenerated protocol schema and about 1200 are tests; logical change is
+the regenerated protocol bindings and about 1200 are tests; logical change is
 a new rail view plus its state".
 
 ## Review Sequence

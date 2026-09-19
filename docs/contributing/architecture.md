@@ -83,6 +83,7 @@ graph TD
 graph TD
     entrypoints --> server.runtime
     entrypoints --> server.settings
+    entrypoints --> server.wire
     entrypoints --> vibesys
     entrypoints --> vibesys.agents
     entrypoints --> vibesys.domains
@@ -95,12 +96,10 @@ graph TD
     server.api --> server.chat
     server.api --> server.controller
     server.api --> server.diagnostics
-    server.api --> server.events
     server.api --> server.execution
     server.api --> server.integration
     server.api --> server.journal
-    server.api --> server.run_lifecycle
-    server.api --> server.settings
+    server.api --> server.wire
     server.api --> vibesys
     server.api --> vibesys.loops
     server.api --> vibesys.run
@@ -111,31 +110,33 @@ graph TD
     server.chat --> server.execution
     server.chat --> server.journal
     server.chat --> server.run_lifecycle
+    server.chat --> server.wire
     server.chat --> vibesys.agents
     server.chat --> vibesys.domains
     server.chat --> vibesys.run
     server.chat --> vs_project
     server.chat --> vs_sandbox
     server.controller --> server.diagnostics
-    server.controller --> server.events
     server.controller --> server.execution
     server.controller --> server.journal
     server.controller --> server.run_lifecycle
+    server.controller --> server.wire
     server.controller --> vs_project
-    server.events --> server.diagnostics
+    server.diagnostics --> server.wire
     server.events --> server.event_index
-    server.events --> server.run_lifecycle
+    server.events --> server.wire
     server.execution --> server.diagnostics
     server.execution --> server.events
     server.execution --> server.journal
+    server.execution --> server.wire
     server.integration --> server.chat
     server.integration --> server.controller
     server.integration --> server.diagnostics
-    server.integration --> server.events
     server.integration --> server.execution
     server.integration --> server.journal
     server.integration --> server.read_model
     server.integration --> server.run_lifecycle
+    server.integration --> server.wire
     server.integration --> vibesys
     server.integration --> vibesys.agents
     server.integration --> vibesys.render
@@ -143,23 +144,24 @@ graph TD
     server.integration --> vs_project
     server.journal --> server.diagnostics
     server.journal --> server.events
-    server.read_model --> server.events
+    server.journal --> server.wire
     server.read_model --> server.integration
+    server.read_model --> server.wire
     server.runtime --> server.api
     server.runtime --> server.chat
     server.runtime --> server.controller
     server.runtime --> server.diagnostics
-    server.runtime --> server.events
     server.runtime --> server.execution
     server.runtime --> server.integration
     server.runtime --> server.journal
     server.runtime --> server.read_model
     server.runtime --> server.settings
     server.runtime --> server.transport
+    server.runtime --> server.wire
     server.runtime --> vibesys
-    server.settings --> vibesys
-    server.tool_payloads --> server.events
+    server.tool_payloads --> server.wire
     server.transport --> server.api
+    server.transport --> server.wire
     server.transport --> vibesys
     vibesys --> vibesys.agents
     vibesys --> vibesys.backends

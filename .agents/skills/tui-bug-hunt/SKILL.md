@@ -42,7 +42,7 @@ breakpoint/error/issue-form tables. This file is the workflow.
   `cargo` when running real rounds on the queue example. `claude` CLI installed
   and authenticated (`claude -p "ok"` returns `ok`) for real-provider runs.
 - TUI built: `clients/tui/dist/launcher.js` and `dist/index.js` exist. If not:
-  `pnpm install --frozen-lockfile && pnpm --dir clients/backend-client generate:protocol && pnpm build:clients`.
+  `pnpm install --frozen-lockfile && pnpm build:clients`.
 - Python env: `<repo>/.venv` with `vibesys` installed (`uv sync`). Export
   `VIBESYS_PYTHON=<repo>/.venv/bin/python`.
 - A standalone candidate repo (its own git root). The bundled `queue-rs` example
@@ -373,11 +373,11 @@ Rules that follow from this and from coding-best-practices:
 
 **Contract changes are authoritative-first.** If the fix needs a new or changed
 event/query field, edit the one authoritative definition
-(`src/vibesys/server/protocol.py`), then regenerate the TS bindings
-(`pnpm --dir clients/backend-client generate:protocol`) rather than hand-editing
+(`proto/server/wire/v2/*.proto`), then regenerate both bindings
+(`pnpm proto:generate`) rather than hand-editing
 generated files. Keep changes additive/backward-compatible; bump the protocol
 version only for an incompatible change. Round-trip a representative payload at
-the boundary in a test. The committed-schema drift test must stay green (a
+the boundary in a test. The `pnpm proto:check` drift check must stay green (a
 no-wire-change fix regenerates to a zero diff, as PR #495/#497 note).
 
 **Keep the change small and idiomatic.** Match the surrounding file's naming,

@@ -51,7 +51,7 @@ forbid_circular_dependencies = false
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["vs_project", "vs_github", "vibesys", "vibesys.domains", "vibesys.loops", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vibesys.agents", "server.runtime", "server.settings"]
+depends_on = ["vs_project", "vs_github", "vibesys", "vibesys.domains", "vibesys.loops", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vibesys.agents", "server.runtime", "server.settings", "server.wire"]
 
 [[modules]]
 path = "server"
@@ -59,23 +59,23 @@ depends_on = []
 
 [[modules]]
 path = "server.api"
-depends_on = ["vs_project", "vibesys", "server.diagnostics", "server.journal", "server.execution", "vibesys.loops", "server.settings", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle", "vs_loop_state", "vibesys.run"]
+depends_on = ["vs_project", "vibesys", "server.diagnostics", "server.journal", "server.execution", "vibesys.loops", "server.controller", "server.chat", "server.integration", "vs_loop_state", "vibesys.run", "server.wire"]
 
 [[modules]]
 path = "server.chat"
-depends_on = ["vs_project", "vibesys.run", "vs_sandbox", "vibesys.agents", "server.controller", "server.run_lifecycle", "server.journal", "vibesys.domains", "server.events", "server.execution"]
+depends_on = ["vs_project", "vibesys.run", "vs_sandbox", "vibesys.agents", "server.controller", "server.run_lifecycle", "server.journal", "vibesys.domains", "server.events", "server.execution", "server.wire"]
 
 [[modules]]
 path = "server.transport"
-depends_on = ["server.api", "vibesys"]
+depends_on = ["server.api", "vibesys", "server.wire"]
 
 [[modules]]
 path = "server.controller"
-depends_on = ["server.diagnostics", "server.events", "server.execution", "server.run_lifecycle", "server.journal", "vs_project"]
+depends_on = ["server.diagnostics", "server.execution", "server.run_lifecycle", "server.journal", "vs_project", "server.wire"]
 
 [[modules]]
 path = "server.diagnostics"
-depends_on = []
+depends_on = ["server.wire"]
 
 [[modules]]
 path = "server.event_index"
@@ -87,23 +87,23 @@ depends_on = []
 
 [[modules]]
 path = "server.events"
-depends_on = ["server.diagnostics", "server.run_lifecycle", "server.event_index"]
+depends_on = ["server.event_index", "server.wire"]
 
 [[modules]]
 path = "server.execution"
-depends_on = ["server.diagnostics", "server.events", "server.journal"]
+depends_on = ["server.diagnostics", "server.events", "server.journal", "server.wire"]
 
 [[modules]]
 path = "server.integration"
-depends_on = ["vibesys", "vibesys.run", "server.execution", "server.chat", "server.events", "vibesys.agents", "server.read_model", "server.diagnostics", "server.journal", "server.controller", "vs_project", "vibesys.render", "server.run_lifecycle"]
+depends_on = ["vibesys", "vibesys.run", "server.execution", "server.chat", "vibesys.agents", "server.read_model", "server.diagnostics", "server.journal", "server.controller", "vs_project", "vibesys.render", "server.run_lifecycle", "server.wire"]
 
 [[modules]]
 path = "server.journal"
-depends_on = ["server.events", "server.diagnostics"]
+depends_on = ["server.events", "server.diagnostics", "server.wire"]
 
 [[modules]]
 path = "server.read_model"
-depends_on = ["server.integration", "server.events"]
+depends_on = ["server.integration", "server.wire"]
 
 [[modules]]
 path = "server.run_lifecycle"
@@ -111,15 +111,15 @@ depends_on = []
 
 [[modules]]
 path = "server.runtime"
-depends_on = ["server.read_model", "server.settings", "server.chat", "server.events", "server.execution", "server.journal", "vibesys", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics"]
+depends_on = ["server.read_model", "server.settings", "server.chat", "server.execution", "server.journal", "vibesys", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics", "server.wire"]
 
 [[modules]]
 path = "server.settings"
-depends_on = ["vibesys"]
+depends_on = []
 
 [[modules]]
 path = "server.tool_payloads"
-depends_on = ["server.events"]
+depends_on = ["server.wire"]
 
 [[modules]]
 path = "vibesys"

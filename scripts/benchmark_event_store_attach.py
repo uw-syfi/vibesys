@@ -48,11 +48,11 @@ class BenchmarkTarget:
 
 def _event_line(sequence: int, payload_bytes: int = 900) -> bytes:
     event = {
-        "protocol_version": 1,
+        "protocol_version": 2,
         "sequence": sequence,
         "run_id": "benchmark",
         "timestamp": "2026-01-01T00:00:00Z",
-        "type": "output",
+        "type": "EVENT_TYPE_OUTPUT",
         "text": "x" * payload_bytes,
     }
     return (json.dumps(event, separators=(",", ":")) + "\n").encode()

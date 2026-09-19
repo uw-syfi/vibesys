@@ -75,6 +75,7 @@ module.exports = {
     tsPreCompilationDeps: true,
     enhancedResolveOptions: {
       conditionNames: ['types', 'import', 'node', 'default'],
+      exportsFields: ['exports'],
       extensions: ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.d.ts', '.json'],
     },
     reporterOptions: {
