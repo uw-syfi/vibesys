@@ -30,6 +30,19 @@ entry points, so the check does not depend on prior builds. A small manifest che
 workspace dependencies that are declared but unused, because they do not appear in a source
 dependency graph. Rule regressions run as part of `pnpm test:clients`.
 
+The check scans each package's `src/` plus the non-shipping code next to it (`tui/dev`, benchmarks,
+`clients/scripts`). Beyond the package direction, it enforces:
+
+- No deep imports into another workspace package (`@vibesys/x/dist/...`, `@vibesys/x/src/...`,
+  relative paths into a sibling package). Only the public `exports` are importable.
+- Nothing in a package imports `tui/dev`, benchmarks, or `scripts`; the tooling itself must still
+  resolve, declare its dependencies, and stay free of cycles.
+- Inside `tui/src`: OpenTUI is confined to `ui/` and the composition root (`index.ts`,
+  `runtime.ts`); state and controller modules do not import the controller or the wiring above them;
+  `ui/` reaches `session-controller` by type only and never imports the composition root;
+  `index.ts` and `launcher.ts` are never imported; `launcher.ts` imports nothing but `ui/theme.ts`.
+  Test files are exempt from the `tui/src` layer rules.
+
 ## Ownership
 
 | State or behavior | Owner |
