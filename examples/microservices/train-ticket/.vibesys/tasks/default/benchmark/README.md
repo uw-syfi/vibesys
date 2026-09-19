@@ -17,7 +17,7 @@ From the repository root:
 
 ```bash
 go -C resources/evaluators/microservice run ./cmd/servicebench \
-  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --workload "$PWD/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" \
   --base-url http://localhost:8080 \
   --seed random \
   --output-json /tmp/train-ticket.json \
@@ -35,7 +35,7 @@ and choose a rate the candidate can sustain:
 
 ```bash
 go -C resources/evaluators/microservice run ./cmd/servicebench \
-  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --workload "$PWD/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" \
   --profile offered-load \
   --rate 100 \
   --base-url http://localhost:8080

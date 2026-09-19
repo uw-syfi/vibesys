@@ -108,7 +108,15 @@ def test_social_accuracy_runs_semantically_validated_light_profile() -> None:
 
 
 def test_train_ticket_workload_preserves_canonical_semantic_mix() -> None:
-    reference = MICROSERVICE_ROOT / "train-ticket" / "benchmark" / "workload.toml"
+    reference = (
+        MICROSERVICE_ROOT
+        / "train-ticket"
+        / ".vibesys"
+        / "tasks"
+        / "default"
+        / "benchmark"
+        / "workload.toml"
+    )
     packaged = TASK_DIRS["train-ticket"] / "workload.toml"
     expected = tomllib.loads(reference.read_text())
     actual = tomllib.loads(packaged.read_text())

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from vibesys.evaluators import PROJECT_ROOT_TOKEN
-from vibesys.input_manifest import InputBundle, load_input_bundle, load_project_task
+from vibesys.input_manifest import InputBundle, load_project_task
 from vs_project import Project, ProjectLayoutError
 
 PROJECT_ROOT = Path(__file__).parents[2]
@@ -30,10 +30,15 @@ except ProjectLayoutError as error:
         allow_module_level=True,
     )
 DEATHSTAR_TASKS = {task.name.value: task for task in DEATHSTAR_LAYOUT.discover_tasks()}
-LEGACY_SCENARIOS = (MICROSERVICE_ROOT / "train-ticket",)
+TRAIN_TICKET_TASK = MICROSERVICE_ROOT / "train-ticket" / ".vibesys" / "tasks" / "default"
 HOTEL_CORRECTNESS_ROOT = MICROSERVICE_ROOT / "hotel-correctness"
 HOTEL_TEMP_ROOT = Path("/") / "tmp" / "vibesys-hotel-reservation" / "otel"
 HOTEL_BENCHMARK_ROOT = HOTEL_CORRECTNESS_ROOT / "benchmark"
+
+
+def _train_ticket_bundle() -> InputBundle:
+    project = Project.open(MICROSERVICE_ROOT / "train-ticket")
+    return load_project_task(project, project.select_task(None))
 
 
 def _deathstar_bundle(task_name: str) -> InputBundle:
@@ -44,14 +49,15 @@ def _adjacent_pairs(command: tuple[str, ...]) -> set[tuple[str, str]]:
     return set(pairwise(command))
 
 
-def test_legacy_microservice_scenario_uses_source_evaluator() -> None:
-    bundle = load_input_bundle(MICROSERVICE_ROOT / "train-ticket")
+def test_train_ticket_benchmark_uses_packaged_evaluator() -> None:
+    bundle = _train_ticket_bundle()
 
-    assert bundle.evaluator_path == PROJECT_ROOT / "resources" / "evaluators" / "microservice"
+    assert bundle.evaluator_path is None
+    assert bundle.evaluator_package_digest is not None
     assert bundle.benchmark_command[:5] == (
         "go",
         "-C",
-        "_evaluator/microservice",
+        str(PROJECT_ROOT / "resources" / "evaluators" / "microservice"),
         "run",
         "./cmd/servicebench",
     )
@@ -89,17 +95,17 @@ def test_microservice_scenarios_are_discovered() -> None:
         "hotel-reservation",
         "social-network-read-timeline",
     }
-    assert {path.name for path in LEGACY_SCENARIOS} == {"train-ticket"}
+    assert TRAIN_TICKET_TASK.is_dir()
     assert HOTEL_CORRECTNESS_ROOT.is_dir()
 
 
-def test_train_ticket_accuracy_uses_source_evaluator() -> None:
-    bundle = load_input_bundle(MICROSERVICE_ROOT / "train-ticket")
+def test_train_ticket_accuracy_uses_packaged_evaluator() -> None:
+    bundle = _train_ticket_bundle()
 
     assert bundle.accuracy_command[:5] == (
         "go",
         "-C",
-        "_evaluator/microservice",
+        str(PROJECT_ROOT / "resources" / "evaluators" / "microservice"),
         "run",
         "./cmd/servicebench",
     )
@@ -191,7 +197,7 @@ def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() ->
 @pytest.mark.parametrize(
     "scenario_path",
     [
-        MICROSERVICE_ROOT / "train-ticket",
+        TRAIN_TICKET_TASK,
         DEATHSTAR_TASKS["hotel-reservation"].path,
         DEATHSTAR_TASKS["social-network-read-timeline"].path,
     ],

@@ -5,6 +5,12 @@ Go service evaluator runs both modes; independent Train Ticket benchmark and
 accuracy adapters retain separate application-specific semantic oracles.
 Both modes can run without a full `vibesys --input` optimization run.
 
+Layout: the evaluator-owned task is `.vibesys/tasks/default` (objective, input
+manifest, `benchmark/workload.toml`). Run it with
+`vibesys --input examples/microservices/train-ticket`; `--task` is optional
+because `default` is the only task. `scripts/start-local-cluster.sh` is a
+developer helper that no run command invokes, so it stays outside the task.
+
 Expected target for a gateway/proxy deployment:
 
 - UI proxy: `http://localhost:8080`
@@ -16,11 +22,11 @@ The scripts call `/api/v1/...` endpoints through whichever base URL you pass.
 ```bash
 go -C resources/evaluators/microservice run ./cmd/servicebench \
   --mode accuracy \
-  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --workload "$PWD/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" \
   --base-url http://localhost:8080 \
   --seed random
 go -C resources/evaluators/microservice run ./cmd/servicebench \
-  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --workload "$PWD/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" \
   --base-url http://localhost:8080 \
 	--duration 30 \
   --output-json /tmp/train_ticket_bench.json
@@ -131,7 +137,7 @@ Manual direct-service runs:
 ```bash
 go -C resources/evaluators/microservice run ./cmd/servicebench \
   --mode accuracy \
-  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --workload "$PWD/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" \
   --seed random \
   --target config=http://localhost:15679 \
   --target station=http://localhost:12345 \
@@ -141,7 +147,7 @@ go -C resources/evaluators/microservice run ./cmd/servicebench \
   --target price=http://localhost:16579
 
 go -C resources/evaluators/microservice run ./cmd/servicebench \
-  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --workload "$PWD/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" \
   --target config=http://localhost:15679 \
   --target station=http://localhost:12345 \
   --target train=http://localhost:14567 \
@@ -157,12 +163,12 @@ Manual gateway runs after source-built deployment:
 ```bash
 go -C resources/evaluators/microservice run ./cmd/servicebench \
   --mode accuracy \
-  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --workload "$PWD/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" \
   --base-url http://localhost:18888 \
   --seed random
 
 go -C resources/evaluators/microservice run ./cmd/servicebench \
-  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --workload "$PWD/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" \
   --base-url http://localhost:18888 \
 	--duration 30 \
   --concurrency 32

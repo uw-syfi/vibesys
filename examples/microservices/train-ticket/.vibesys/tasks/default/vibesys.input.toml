@@ -1,0 +1,27 @@
+version = 1
+
+[agent]
+domain = "microservices"
+
+[evaluator]
+name = "vibesys-evaluator-microservice"
+version = "0.1.0"
+
+[accuracy]
+entrypoint = "servicebench"
+args = [
+  "--mode", "accuracy",
+  "--workload", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/workload.toml",
+  "--seed", "random",
+]
+timeout_seconds = 120
+
+[benchmark]
+entrypoint = "servicebench"
+args = [
+  "--workload", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/workload.toml",
+  "--seed", "random",
+  "--fixture-seed", "random",
+]
+timeout_seconds = 300
+result_protocol = 2
