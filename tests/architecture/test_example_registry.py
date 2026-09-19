@@ -357,5 +357,5 @@ def test_known_failing_entries_are_registered_consistently() -> None:
 )
 def test_registry_entry_model_rejects_inconsistent_entries(fields: dict[str, object]) -> None:
     base = {"path": "examples/x", "layout": "task", "status": "validated"}
-    with pytest.raises(ValueError, match="examples/x|surprise|Extra"):
+    with pytest.raises(ValueError, match=r"examples/x|surprise|Extra"):
         ExampleEntry.model_validate({**base, **fields})
