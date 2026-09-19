@@ -10,7 +10,6 @@ import platform
 import shutil
 import stat
 import subprocess
-import sys
 import tempfile
 import tomllib
 from collections.abc import Callable, Sequence
@@ -18,20 +17,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Never, cast
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-# Root for `scripts.*`; `packaging/` holds top-level modules (no __init__.py,
-# so it cannot shadow the PyPA `packaging` library).
-for _path in (REPO_ROOT, REPO_ROOT / "packaging"):
-    if str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
-
-from release_versions import (  # noqa: E402
+from release_versions import (
     ReleaseVersionSyntaxError,
     npm_release_identity,
     python_release_identity,
 )
-from tui_packaging import BUN_VERSION, validate_tui_payload  # noqa: E402
-from wheel_targets import resolve_wheel_target  # noqa: E402
+from tui_packaging import BUN_VERSION, validate_tui_payload
+from wheel_targets import resolve_wheel_target
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 _WORKSPACE_RUNTIME_PACKAGES = ("@vibesys/backend-client", "@vibesys/core-state")

@@ -7,7 +7,6 @@ if [ "$#" -ne 1 ]; then
 fi
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
-repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd -P)
 wheel=$(realpath "$1")
 
 if [ ! -f "$wheel" ]; then
@@ -26,8 +25,8 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 cp "$wheel" "$context/$(basename "$wheel")"
-cp "$repo_root/scripts/verify_installed_release.py" "$context/verify_installed_release.py"
-cp "$repo_root/packaging/release-wheel.Dockerfile" "$context/Dockerfile"
+cp "$script_dir/verify_installed_release.py" "$context/verify_installed_release.py"
+cp "$script_dir/release-wheel.Dockerfile" "$context/Dockerfile"
 
 image_id=$(docker build --quiet "$context")
 docker run --rm "$image_id"

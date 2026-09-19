@@ -15,14 +15,9 @@ from collections.abc import Callable, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Never, cast
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-# Root for `scripts.*`; `packaging/` holds top-level modules (no __init__.py,
-# so it cannot shadow the PyPA `packaging` library).
-for _path in (REPO_ROOT, REPO_ROOT / "packaging"):
-    if str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
+from wheel_targets import TARGETS, WheelTarget, resolve_wheel_target
 
-from wheel_targets import TARGETS, WheelTarget, resolve_wheel_target  # noqa: E402
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 _POLICY_PATH = REPO_ROOT / "packaging" / "manylinux_2_28-policy.json"

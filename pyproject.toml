@@ -188,7 +188,7 @@ max_lines = 2000
 # Directories scanned for `*.py`. Any path with a `tests` or `__pycache__`
 # component is skipped: long test modules are normal, and `biome.json`
 # exempts `*.test.ts` from its file-length rule for the same reason.
-roots = ["src", "libs", "scripts", "sdk"]
+roots = ["src", "libs", "scripts", "packaging", "sdk"]
 
 # Temporary migration debt only. Do not add entries or raise recorded counts.
 # Remove each entry as its file is refactored below the ceiling. Exceeding a
@@ -248,9 +248,6 @@ convention = "google"
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ruff.lint.per-file-ignores]
-# packaging/ holds top-level build modules with no __init__.py on purpose: a
-# `packaging` package would shadow the PyPA `packaging` library.
-"packaging/*.py" = ["INP001"]
 "tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "libs/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "sdk/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
@@ -258,6 +255,10 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 # on stdout, so `print` is the intended output mechanism rather than a stray
 # debug statement. Same categorical treatment as S101 in tests/.
 "scripts/**" = ["T201"]
+# packaging/ holds top-level build modules with no __init__.py on purpose (a
+# `packaging` package would shadow the PyPA `packaging` library), and release
+# tools that report on stdout/stderr like scripts/.
+"packaging/*.py" = ["INP001", "T201"]
 # examples/ ships candidate reference implementations, benchmark harnesses,
 # and vendored submodule checkouts (transformers, DeathStarBench, TensorRT-LLM,
 # Show-o, train-ticket, TraceLab) rather than first-party framework code. Keep

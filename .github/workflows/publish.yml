@@ -22,14 +22,6 @@ on:
       - 'setup.py'
       - 'MANIFEST.in'
       - 'packaging/**'
-      - 'scripts/__init__.py'
-      - 'scripts/build_release_wheel.py'
-      - 'scripts/audit_release_wheel.py'
-      - 'scripts/verify_release_wheel.py'
-      - 'scripts/verify_installed_release.py'
-      - 'scripts/check_release_version.py'
-      - 'scripts/test_release_wheel.sh'
-      - 'scripts/fetch_bun.py'
       # The bundled TUI payload: the workspace `pnpm build:clients` builds and
       # `pnpm deploy` stages, and the launcher that resolves it.
       - 'clients/**'
@@ -85,9 +77,9 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           if [[ "$EVENT_NAME" == release ]]; then
-            uv run python scripts/check_release_version.py --tag "refs/tags/$RELEASE_TAG"
+            uv run python packaging/check_release_version.py --tag "refs/tags/$RELEASE_TAG"
           else
-            uv run python scripts/check_release_version.py
+            uv run python packaging/check_release_version.py
           fi
 
       - name: Require the released commit to be on main
@@ -188,14 +180,14 @@ jobs:
       - name: Fetch verified Bun 1.3.9
         env:
           TARGET: ${{ matrix.target }}
-        run: python3 scripts/fetch_bun.py --target "$TARGET" --output "$RUNNER_TEMP/vibesys-bun/bin/bun"
+        run: python3 packaging/fetch_bun.py --target "$TARGET" --output "$RUNNER_TEMP/vibesys-bun/bin/bun"
 
       - name: Build one native wheel
         env:
           TARGET: ${{ matrix.target }}
         run: |
           mkdir -p dist/release
-          uv run python scripts/build_release_wheel.py \
+          uv run python packaging/build_release_wheel.py \
             --target "$TARGET" \
             --bun "$RUNNER_TEMP/vibesys-bun/bin/bun" \
             --output-dir dist/release
@@ -207,8 +199,8 @@ jobs:
           set -- dist/release/*.whl
           test "$#" -eq 1
           test -f "$1"
-          uv run python scripts/verify_release_wheel.py "$1" --target "$TARGET"
-          uv run python scripts/audit_release_wheel.py "$1" --target "$TARGET"
+          uv run python packaging/verify_release_wheel.py "$1" --target "$TARGET"
+          uv run python packaging/audit_release_wheel.py "$1" --target "$TARGET"
           if [[ "$TARGET" == linux-* ]]; then
             uv run auditwheel show "$1"
           fi
@@ -228,7 +220,7 @@ jobs:
           test -z "$(find "$install_home" -mindepth 1 -print -quit)"
           test -z "$(find "$verify_home" -mindepth 1 -print -quit)"
           cp "$(command -v uv)" "$bootstrap_bin/uv"
-          cp "$GITHUB_WORKSPACE/scripts/verify_installed_release.py" \
+          cp "$GITHUB_WORKSPACE/packaging/verify_installed_release.py" \
             "$runtime_root/verify_installed_release.py"
           install_wheel="$runtime_root/$(basename "$wheel")"
           cp "$wheel" "$install_wheel"
@@ -250,7 +242,7 @@ jobs:
 
       - name: Verify Linux x86-64 in the Docker clean room
         if: matrix.target == 'linux-x86_64'
-        run: ./scripts/test_release_wheel.sh dist/release/*.whl
+        run: ./packaging/test_release_wheel.sh dist/release/*.whl
 
       - name: Upload one target wheel
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -300,15 +292,15 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           if [[ "$EVENT_NAME" == release ]]; then
-            uv run python scripts/check_release_version.py \
+            uv run python packaging/check_release_version.py \
               --tag "refs/tags/$RELEASE_TAG" --wheel-dir dist/release
           else
-            uv run python scripts/check_release_version.py --wheel-dir dist/release
+            uv run python packaging/check_release_version.py --wheel-dir dist/release
           fi
           PYTHONPATH=packaging uv run python - <<'PY'
           from pathlib import Path
-          from scripts.check_release_version import check_release_version
-          from scripts.verify_release_wheel import verify_wheel
+          from check_release_version import check_release_version
+          from verify_release_wheel import verify_wheel
           from wheel_targets import TARGETS
 
           root = Path.cwd()
