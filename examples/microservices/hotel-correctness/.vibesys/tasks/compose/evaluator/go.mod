@@ -9,4 +9,4 @@ require (
 	github.com/uw-syfi/vibesys/sdk/vs-evaluator/vseval v0.2.0 // indirect
 )
 
-replace vibesys/microservice-evaluator => ../../../../resources/evaluators/microservice
+replace vibesys/microservice-evaluator => ../../../../../../../resources/evaluators/microservice
