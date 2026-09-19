@@ -13,7 +13,7 @@ import uuid
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from google.protobuf import json_format, struct_pb2
 from pydantic import BaseModel
@@ -34,15 +34,15 @@ if TYPE_CHECKING:
 
     from server.event_index import SourceStat
 
-EventTypeValue = events_pb2.EventType.ValueType
+EventTypeValue = events_pb2.EventType
 
-_V1_TYPE_NUMBERS: dict[str, int] = {
-    value.name.removeprefix("EVENT_TYPE_").lower(): value.number
+_V1_TYPE_NUMBERS: dict[str, EventTypeValue] = {
+    value.name.removeprefix("EVENT_TYPE_").lower(): cast("EventTypeValue", value.number)
     for value in events_pb2.EventType.DESCRIPTOR.values
     if value.number != 0
 }
-_V2_TYPE_NUMBERS: dict[str, int] = {
-    value.name: value.number
+_V2_TYPE_NUMBERS: dict[str, EventTypeValue] = {
+    value.name: cast("EventTypeValue", value.number)
     for value in events_pb2.EventType.DESCRIPTOR.values
     if value.number != 0
 }

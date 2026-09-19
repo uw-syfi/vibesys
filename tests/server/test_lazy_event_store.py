@@ -12,6 +12,7 @@ import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from tests.server.support import build_server_parts
@@ -51,7 +52,7 @@ class _EagerEventStore(EventStore):
         return _records_from_events(_repair_legacy_sequences(events)), malformed_tail_offset
 
 
-def _v1_lower(value: object) -> object:
+def _v1_lower(value: Any) -> Any:  # noqa: ANN401
     """Rewrite v2 enum names to the lower-case strings version 1 used."""
     if isinstance(value, dict):
         return {key: _v1_lower(item) for key, item in value.items()}
@@ -108,7 +109,12 @@ def _legacy_sequence_plan(count: int) -> list[int]:
     return plan
 
 
-def _event(sequence: int, event_type: int, text: str = "", **fields: object) -> RunEvent:
+def _event(
+    sequence: int,
+    event_type: events_pb2.EventType,
+    text: str = "",
+    **fields: Any,  # noqa: ANN401
+) -> RunEvent:
     event = messages.make_event(event_type, text, **fields)
     event.sequence = sequence
     event.run_id = "persisted-run"

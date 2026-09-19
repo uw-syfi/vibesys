@@ -13,16 +13,13 @@ no code here. It also adapts the core's presentation-neutral payloads, whose
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from google.protobuf.descriptor import FieldDescriptor
 
-from server.wire import PROTOCOL_VERSION, enums
+from server.wire import PROTOCOL_VERSION, descriptors, enums
 from server.wire.codec import WireError, from_dict
 from server.wire.v2 import events_pb2
-
-if TYPE_CHECKING:
-    from google.protobuf.descriptor import Descriptor
 
 _DATA_FIELDS = {
     field.name: field for field in events_pb2.RunEvent.DESCRIPTOR.oneofs_by_name["data"].fields
@@ -58,7 +55,7 @@ def upgrade_payload(data: dict[str, Any]) -> dict[str, Any]:
     body = _without(data, "kind")
     if kind == "tool_result":
         body = _tool_result_body(body)
-    return {kind: _convert(field.message_type, body)}
+    return {field.name: _convert(descriptors.message_type(field), body)}
 
 
 def event_from_legacy(record: dict[str, Any]) -> events_pb2.RunEvent:
@@ -84,7 +81,7 @@ def _without(record: dict[str, Any], *keys: str) -> dict[str, Any]:
     return {key: value for key, value in record.items() if key not in keys}
 
 
-def _convert(descriptor: Descriptor, record: dict[str, Any]) -> dict[str, Any]:
+def _convert(descriptor: Any, record: dict[str, Any]) -> dict[str, Any]:  # noqa: ANN401
     """Drop nulls and rewrite enum strings to prefixed names, recursively."""
     converted: dict[str, Any] = {}
     for key, value in record.items():
@@ -105,15 +102,15 @@ def _convert_field(field: FieldDescriptor, value: Any) -> Any:  # noqa: ANN401
 
 def _convert_one(field: FieldDescriptor, value: Any) -> Any:  # noqa: ANN401
     if field.type == FieldDescriptor.TYPE_ENUM and isinstance(value, str):
-        enum_type = field.enum_type
+        enum_type = descriptors.enum_type(field)
         name = enums.prefix(enum_type) + value.upper().replace("-", "_")
         if name not in enum_type.values_by_name:
             raise WireError("invalid_message", f"{value!r} is not a {enum_type.name}")
         return name
     if (
         field.type == FieldDescriptor.TYPE_MESSAGE
-        and not field.message_type.full_name.startswith(_WELL_KNOWN)
+        and not descriptors.message_type(field).full_name.startswith(_WELL_KNOWN)
         and isinstance(value, dict)
     ):
-        return _convert(field.message_type, value)
+        return _convert(descriptors.message_type(field), value)
     return value

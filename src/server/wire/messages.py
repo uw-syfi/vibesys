@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from google.protobuf.message import Message
 
-from server.wire import PROTOCOL_VERSION
+from server.wire import PROTOCOL_VERSION, descriptors
 from server.wire.v2 import events_pb2, requests_pb2
 
 if TYPE_CHECKING:
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 M = TypeVar("M", bound=Message)
 
 _DATA_FIELD_BY_TYPE = {
-    field.message_type.full_name: field.name
+    descriptors.message_type(field).full_name: field.name
     for field in events_pb2.RunEvent.DESCRIPTOR.oneofs_by_name["data"].fields
 }
 
@@ -83,7 +83,7 @@ def set_payload(event: events_pb2.RunEvent, payload: Message) -> None:
 
 
 def make_event(
-    event_type: events_pb2.EventType.ValueType,
+    event_type: events_pb2.EventType,
     text: str = "",
     *,
     data: Message | None = None,

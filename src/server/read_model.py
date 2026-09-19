@@ -143,7 +143,7 @@ class RunInspector:
         return f"No {label} has been persisted yet."
 
     def _latest_execution(
-        self, *, status: EventStatus.ValueType | None = None, agent_kind: str | None = None
+        self, *, status: EventStatus | None = None, agent_kind: str | None = None
     ) -> str | None:
         for event in reversed(self.integration.read_events()):
             if event.type != EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED:

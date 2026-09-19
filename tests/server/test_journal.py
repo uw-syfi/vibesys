@@ -252,7 +252,7 @@ def test_invocation_and_terminal_failure_share_diagnostic_identity(tmp_path):  #
     ],
 )
 def test_operational_failure_events_require_diagnostics(
-    tmp_path: Path, event_type: EventType.ValueType
+    tmp_path: Path, event_type: EventType
 ) -> None:
     parts = build_server_parts(tmp_path)
     with pytest.raises(ValueError, match="must include a diagnostic"):

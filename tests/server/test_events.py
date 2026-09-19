@@ -1,6 +1,7 @@
 """Serialization tests for the run-event wire contract."""
 
 import json
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -12,6 +13,9 @@ from server.diagnostics import (
 from server.events import parse_event
 from server.wire import codec, messages, validate
 from server.wire.v2 import common_pb2, events_pb2, snapshot_pb2
+
+if TYPE_CHECKING:
+    from google.protobuf.message import Message
 
 ET = events_pb2.EventType
 ES = events_pb2.EventStatus
@@ -81,7 +85,8 @@ class TestNewEventDataRoundTrip:
         assert restored.tool_result.WhichOneof("payload") == "json"
         value = restored.tool_result.json.value.struct_value
         assert value["ok"] is True
-        assert list(value["rows"]) == [1, 2]
+        rows: Any = value["rows"]
+        assert list(rows) == [1, 2]
 
     def test_tool_result_payload_rejects_unknown_kind(self):  # noqa: ANN201  # tracked: #288
         """A payload key outside the oneof is an unknown field on the wire."""
@@ -153,7 +158,7 @@ class TestNewEventDataRoundTrip:
 def _sample_events() -> list[events_pb2.RunEvent]:
     """One event per payload kind, each carrying non-default field values."""
     e = events_pb2
-    payloads: list[tuple[int, object]] = [
+    payloads: list[tuple[events_pb2.EventType, Message]] = [
         (ET.EVENT_TYPE_CHAT, e.ChatData(answer="a", thread_title="t", invocation_id="i")),
         (
             ET.EVENT_TYPE_CHAT_THREAD_CREATED,
@@ -283,7 +288,7 @@ def _sample_events() -> list[events_pb2.RunEvent]:
             e.FrameworkWarningData(summary="s", detail="d", source=LOOP),
         ),
     ]
-    events = [messages.make_event(kind, "t", data=data) for kind, data in payloads]  # type: ignore[arg-type]
+    events = [messages.make_event(kind, "t", data=data) for kind, data in payloads]
     finished = messages.make_event(ET.EVENT_TYPE_INVOCATION_FINISHED)
     finished.invocation_finished.result.struct_value.update({"k": [1, "x"]})
     events.append(finished)

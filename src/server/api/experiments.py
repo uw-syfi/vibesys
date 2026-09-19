@@ -418,7 +418,7 @@ def _disposition(value: str | None) -> CandidateDisposition | None:
     return member if member is not None and member.value == value else None
 
 
-def _judge_verdict(hypothesis: Hypothesis) -> events_pb2.JudgeVerdict.ValueType | None:
+def _judge_verdict(hypothesis: Hypothesis) -> events_pb2.JudgeVerdict | None:
     value = hypothesis.review.value
     return enums.number(events_pb2.JudgeVerdict, value) if value in ("pass", "fail") else None
 

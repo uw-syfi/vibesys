@@ -27,7 +27,7 @@ _ROUND_EVERY = 25
 
 def _event(
     sequence: int,
-    event_type: events_pb2.EventType.ValueType,
+    event_type: events_pb2.EventType,
     *,
     text: str = "",
     data: Message | None = None,

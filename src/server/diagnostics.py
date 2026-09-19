@@ -21,11 +21,9 @@ def make_diagnostic(  # noqa: PLR0913  # independent contract dimensions
     *,
     code: str,
     summary: str,
-    scope: DiagnosticScope.ValueType,
-    severity: DiagnosticSeverity.ValueType = DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
-    retryability: DiagnosticRetryability.ValueType = (
-        DiagnosticRetryability.DIAGNOSTIC_RETRYABILITY_UNKNOWN
-    ),
+    scope: DiagnosticScope,
+    severity: DiagnosticSeverity = DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
+    retryability: DiagnosticRetryability = (DiagnosticRetryability.DIAGNOSTIC_RETRYABILITY_UNKNOWN),
     detail: str | None = None,
     hint: str | None = None,
     cause_id: str | None = None,
@@ -95,15 +93,13 @@ def exception_summary(error: BaseException, operation: str = "Operation") -> str
 def exception_to_diagnostic(  # noqa: PLR0913  # independent contract dimensions
     error: BaseException,
     *,
-    scope: DiagnosticScope.ValueType,
+    scope: DiagnosticScope,
     operation: str = "Operation",
     summary: str | None = None,
     code: str | None = None,
     hint: str | None = None,
-    severity: DiagnosticSeverity.ValueType = DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
-    retryability: DiagnosticRetryability.ValueType = (
-        DiagnosticRetryability.DIAGNOSTIC_RETRYABILITY_UNKNOWN
-    ),
+    severity: DiagnosticSeverity = DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
+    retryability: DiagnosticRetryability = (DiagnosticRetryability.DIAGNOSTIC_RETRYABILITY_UNKNOWN),
     cause_id: str | None = None,
     debug_ref: str | None = None,
 ) -> Diagnostic:

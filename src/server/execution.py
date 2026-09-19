@@ -104,7 +104,7 @@ class ExecutionTracker:
 
     def publish_presentation(
         self,
-        event_type: EventType.ValueType,
+        event_type: EventType,
         data: Message,
         *,
         agent_kind: str | None = None,
@@ -403,7 +403,7 @@ class ExecutionTracker:
         self._active_tools.pop(execution_id, None)
 
     def _activity_for_presentation(  # noqa: C901, PLR0911
-        self, event_type: EventType.ValueType, data: Message, execution_id: str
+        self, event_type: EventType, data: Message, execution_id: str
     ) -> snapshot_pb2.AgentExecutionActivityData | None:
         if event_type == EventType.EVENT_TYPE_AGENT_OUTPUT_CHUNK and isinstance(
             data, events_pb2.AgentOutputChunkData
@@ -457,7 +457,7 @@ def _attempt_from_label(round_label: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _execution_error_status(error: BaseException) -> EventStatus.ValueType:
+def _execution_error_status(error: BaseException) -> EventStatus:
     if isinstance(error, asyncio.CancelledError) or type(error).__name__ == "CancelledError":
         return EventStatus.EVENT_STATUS_CANCELLED
     if isinstance(error, (KeyboardInterrupt, SystemExit)):

@@ -300,7 +300,7 @@ def _chat_execution(parts, thread_id):  # noqa: ANN001, ANN202
     )
 
 
-def _presentation_threads(parts) -> list[tuple[EventType.ValueType, str | None]]:  # noqa: ANN001
+def _presentation_threads(parts) -> list[tuple[EventType, str | None]]:  # noqa: ANN001
     return [
         (event.type, _opt(event, "chat_thread_id"))
         for event in parts.journal.read()

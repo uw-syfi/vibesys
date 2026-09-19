@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _theme(theme: TuiTheme) -> int:
+def _theme(theme: TuiTheme) -> responses_pb2.TuiTheme:
     return enums.number(responses_pb2.TuiTheme, theme)
 
 

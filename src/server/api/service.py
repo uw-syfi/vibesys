@@ -657,8 +657,8 @@ def _respond(request: requests_pb2.Request, **sections: Any) -> responses_pb2.Re
 
 def _ack(
     request: requests_pb2.Request,
-    action: responses_pb2.CommandAction.ValueType,
-    status: responses_pb2.CommandAckStatus.ValueType,
+    action: responses_pb2.CommandAction,
+    status: responses_pb2.CommandAckStatus,
 ) -> responses_pb2.Response:
     return _respond(request, ack=responses_pb2.CommandAck(action=action, status=status))
 

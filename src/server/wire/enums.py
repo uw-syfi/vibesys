@@ -20,7 +20,7 @@ E = TypeVar("E", bound=Enum)
 
 def prefix(enum_type: EnumTypeWrapper | EnumDescriptor) -> str:
     """Return the value-name prefix of a proto enum, for example ``RUN_STATUS_``."""
-    descriptor = getattr(enum_type, "DESCRIPTOR", enum_type)
+    descriptor: Any = getattr(enum_type, "DESCRIPTOR", enum_type)
     return descriptor.values[0].name.removesuffix("UNSPECIFIED")
 
 
@@ -29,11 +29,13 @@ def _key(value: str | Enum) -> str:
     return text.upper().replace("-", "_")
 
 
-def number(enum_type: EnumTypeWrapper, value: str | Enum) -> int:
+def number(enum_type: EnumTypeWrapper, value: str | Enum) -> Any:  # noqa: ANN401
     """Map a domain string or enum member to the proto enum number.
 
     Raises ``ValueError`` when the proto enum has no such member, which is how
-    a domain vocabulary that drifted from the proto surfaces.
+    a domain vocabulary that drifted from the proto surfaces. The result is
+    typed ``Any`` because the generated stubs give every enum its own value
+    type, and a plain ``int`` is not assignable to any of them.
     """
     name = prefix(enum_type) + _key(value)
     try:
@@ -71,7 +73,7 @@ def names(enum_type: EnumTypeWrapper) -> set[str]:
     }
 
 
-def optional_number(enum_type: EnumTypeWrapper, value: str | Enum | None) -> int | None:
+def optional_number(enum_type: EnumTypeWrapper, value: str | Enum | None) -> Any:  # noqa: ANN401
     """Like :func:`number` but passes ``None`` through for an absent value."""
     return None if value is None else number(enum_type, value)
 

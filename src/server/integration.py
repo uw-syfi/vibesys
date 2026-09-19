@@ -54,7 +54,7 @@ _PAYLOAD_TYPES: dict[str, type[Message]] = {
     field.name: type(getattr(events_pb2.RunEvent(), field.name))
     for field in events_pb2.RunEvent.DESCRIPTOR.oneofs_by_name["data"].fields
 }
-_TERMINAL_TRIGGERS: dict[EventType.ValueType, RunTrigger] = {
+_TERMINAL_TRIGGERS: dict[EventType, RunTrigger] = {
     EventType.EVENT_TYPE_RUN_FINISHED: RunTrigger.COMPLETED,
     EventType.EVENT_TYPE_RUN_FAILED: RunTrigger.FAILED,
 }
@@ -73,9 +73,7 @@ _PRESENTATION_EVENTS = frozenset(
         EventType.EVENT_TYPE_USAGE_UPDATE,
     }
 )
-_CORE_FAILURE_CONTEXTS: dict[
-    EventType.ValueType, tuple[DiagnosticScope.ValueType, DiagnosticSeverity.ValueType, str]
-] = {
+_CORE_FAILURE_CONTEXTS: dict[EventType, tuple[DiagnosticScope, DiagnosticSeverity, str]] = {
     EventType.EVENT_TYPE_CONFIGURATION_FAILED: (
         DiagnosticScope.DIAGNOSTIC_SCOPE_CONFIGURATION,
         DiagnosticSeverity.DIAGNOSTIC_SEVERITY_FATAL,
@@ -150,9 +148,7 @@ def _framework_warning_diagnostic(data: events_pb2.FrameworkWarningData) -> Diag
     )
 
 
-def _core_failure_diagnostic(
-    event_type: EventType.ValueType, text: str, data: Message | None
-) -> Diagnostic:
+def _core_failure_diagnostic(event_type: EventType, text: str, data: Message | None) -> Diagnostic:
     """Build a structured diagnostic for a failed core event that lacks one.
 
     Core events carry unstructured failure facts (event text, a payload error
@@ -179,9 +175,9 @@ def _core_failure_diagnostic(
 
 
 def _core_event_diagnostic(
-    event_type: EventType.ValueType,
+    event_type: EventType,
     text: str,
-    status: EventStatus.ValueType | None,
+    status: EventStatus | None,
     data: Message | None,
 ) -> Diagnostic | None:
     """Return the diagnostic a projected core event must carry, if any."""
@@ -447,7 +443,7 @@ class RunIntegrationAdapter:
 
     def record(
         self,
-        event_type: EventType.ValueType,
+        event_type: EventType,
         text: str = "",
         *,
         data: Message | None = None,
@@ -468,9 +464,9 @@ class RunIntegrationAdapter:
 
     def _event_diagnostic(
         self,
-        event_type: EventType.ValueType,
+        event_type: EventType,
         text: str,
-        status: EventStatus.ValueType | None,
+        status: EventStatus | None,
         data: Message | None,
         execution_id: str | None,
     ) -> Diagnostic | None:

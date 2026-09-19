@@ -145,7 +145,7 @@ class EventJournal:
 
     def record(
         self,
-        event_type: EventType.ValueType,
+        event_type: EventType,
         text: str = "",
         *,
         data: Message | None = None,
@@ -181,16 +181,16 @@ class EventJournal:
 
     def record_failure(  # noqa: PLR0913
         self,
-        event_type: EventType.ValueType,
+        event_type: EventType,
         error: BaseException,
         *,
-        scope: DiagnosticScope.ValueType,
+        scope: DiagnosticScope,
         operation: str,
         data: Message | None = None,
         data_factory: Callable[[Diagnostic], Message] | None = None,
         text: str | None = None,
-        severity: DiagnosticSeverity.ValueType = DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
-        status: EventStatus.ValueType = EventStatus.EVENT_STATUS_FAILED,
+        severity: DiagnosticSeverity = DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
+        status: EventStatus = EventStatus.EVENT_STATUS_FAILED,
         diagnostic: Diagnostic | None = None,
         **fields: Any,  # noqa: ANN401
     ) -> events_pb2.RunEvent:
@@ -213,16 +213,16 @@ class EventJournal:
 
     def record_terminal_failure(  # noqa: PLR0913
         self,
-        event_type: EventType.ValueType,
+        event_type: EventType,
         error: BaseException,
         *,
-        scope: DiagnosticScope.ValueType,
+        scope: DiagnosticScope,
         operation: str,
         data: Message | None = None,
         data_factory: Callable[[Diagnostic], Message] | None = None,
         text: str | None = None,
-        severity: DiagnosticSeverity.ValueType = DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
-        status: EventStatus.ValueType = EventStatus.EVENT_STATUS_FAILED,
+        severity: DiagnosticSeverity = DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
+        status: EventStatus = EventStatus.EVENT_STATUS_FAILED,
         diagnostic: Diagnostic | None = None,
         **fields: Any,  # noqa: ANN401
     ) -> events_pb2.RunEvent:
@@ -246,13 +246,13 @@ class EventJournal:
     def capture_failure(  # noqa: PLR0913
         self,
         *,
-        event_type: EventType.ValueType,
-        scope: DiagnosticScope.ValueType,
+        event_type: EventType,
+        scope: DiagnosticScope,
         operation: str,
         data: Message | None = None,
         data_factory: Callable[[Diagnostic], Message] | None = None,
         text: str | None = None,
-        severity: DiagnosticSeverity.ValueType = DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
+        severity: DiagnosticSeverity = DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
         **fields: Any,  # noqa: ANN401
     ) -> Generator[None]:
         """Record and re-raise an exception from a nonterminal operation."""
@@ -344,7 +344,7 @@ class EventJournal:
             self._error_diagnostics.clear()
 
     def diagnostic_for(
-        self, error: BaseException, scope: DiagnosticScope.ValueType, *, operation: str
+        self, error: BaseException, scope: DiagnosticScope, *, operation: str
     ) -> Diagnostic:
         """Return one stable diagnostic for an exception chain."""
         key = id(error)
@@ -400,9 +400,7 @@ class EventJournal:
                 if replay_filter(header_from_event(event)):
                     listener(event)
 
-    def _index_execution_identity(
-        self, event_type: EventType.ValueType, execution_id: str | None
-    ) -> None:
+    def _index_execution_identity(self, event_type: EventType, execution_id: str | None) -> None:
         if execution_id is None:
             return
         if event_type in _CANONICAL_LIFECYCLE_EVENTS:
@@ -421,8 +419,8 @@ class EventJournal:
 
 
 def _require_failure_diagnostic(
-    event_type: EventType.ValueType,
-    status: EventStatus.ValueType | None,
+    event_type: EventType,
+    status: EventStatus | None,
     diagnostic: Diagnostic | None,
 ) -> None:
     """Reject a FAILED operational event that carries no diagnostic.
@@ -438,7 +436,7 @@ def _require_failure_diagnostic(
         raise ValueError(f"Failed {_name(event_type)} events must include a diagnostic")  # noqa: TRY003
 
 
-def _name(event_type: EventType.ValueType) -> str:
+def _name(event_type: EventType) -> str:
     """Return the domain spelling of an event type, for example ``run_failed``."""
     return enums.text(EventType, event_type)
 

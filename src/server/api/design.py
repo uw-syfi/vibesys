@@ -53,7 +53,7 @@ _PATCH_CACHE_CAPACITY = 64
 #: ``git diff`` command for the rest.
 _PATCH_CHAR_LIMIT = 200_000
 
-_CHANGE_BY_STATUS: dict[str, responses_pb2.DesignChange.ValueType] = {
+_CHANGE_BY_STATUS: dict[str, responses_pb2.DesignChange] = {
     "A": responses_pb2.DESIGN_CHANGE_ADDED,
     "D": responses_pb2.DESIGN_CHANGE_DELETED,
 }

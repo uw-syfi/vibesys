@@ -48,7 +48,7 @@ def _batch(message: server_messages_pb2.ServerMessage) -> list[events_pb2.RunEve
 
 def _collect_until(
     socket_path: Path,
-    terminal_type: events_pb2.EventType.ValueType,
+    terminal_type: events_pb2.EventType,
     received: list[events_pb2.RunEvent],
 ) -> None:
     _await_socket(socket_path)

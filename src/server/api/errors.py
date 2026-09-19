@@ -18,7 +18,7 @@ def error_response(
     error: BaseException,
     *,
     operation: str = "Request",
-    scope: DiagnosticScope.ValueType = DiagnosticScope.DIAGNOSTIC_SCOPE_REQUEST,
+    scope: DiagnosticScope = DiagnosticScope.DIAGNOSTIC_SCOPE_REQUEST,
     code: str | None = None,
 ) -> responses_pb2.Response:
     """Build a failed response carrying both the legacy string and the diagnostic."""

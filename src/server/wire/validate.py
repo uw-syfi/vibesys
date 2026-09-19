@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 from google.protobuf.descriptor import FieldDescriptor
 
-from server.wire import PROTOCOL_VERSION
+from server.wire import PROTOCOL_VERSION, descriptors
 from server.wire.codec import WireError
 
 if TYPE_CHECKING:
@@ -47,7 +47,7 @@ def _plan(descriptor: Descriptor) -> tuple[tuple[FieldDescriptor, str], ...]:
             plan.append((field, "enum"))
         elif field.type == _DOUBLE:
             plan.append((field, "double"))
-        elif field.type == _MESSAGE and not field.message_type.full_name.startswith(
+        elif field.type == _MESSAGE and not descriptors.message_type(field).full_name.startswith(
             "google.protobuf."
         ):
             plan.append((field, "message"))
