@@ -2,11 +2,12 @@
 """Keep the Mermaid module graph in docs/contributing/architecture.md current.
 
 `tach show --mermaid` renders the module graph declared in `tach.toml`. This
-script embeds two views between marker comments in the architecture doc:
+script embeds three views between marker comments in the architecture doc:
 
-    1. the full graph, and
+    1. a high-level overview collapsed to top-level packages,
     2. the core strongly connected component (the known cycle), filtered from
-       the full graph so the cycle is legible.
+       the full graph so the cycle is legible, and
+    3. the full module graph.
 
 Tach's edge order is not guaranteed stable, so edges are sorted. Only the local
 Mermaid output is used; never `tach show --web`, which uploads the graph.
@@ -72,16 +73,25 @@ def mermaid(edges: list[tuple[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def collapse(edges: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Fold dotted submodules into their top-level package, dropping self-edges."""
+    folded = {(src.split(".")[0], dst.split(".")[0]) for src, dst in edges}
+    return sorted(e for e in folded if e[0] != e[1])
+
+
 def render_block(edges: list[tuple[str, str]]) -> str:
-    """Build the marked region: the full graph plus the core-cycle view."""
+    """Build the marked region: overview, core-cycle view, then full graph."""
     core = [e for e in edges if e[0] in CORE and e[1] in CORE]
     return "\n".join(
         [
             START,
-            "## Full graph",
+            "## Architecture overview",
+            "",
+            "Submodules such as `vibesys.agents` and `server.api` are collapsed "
+            "into their top-level package.",
             "",
             "```mermaid",
-            mermaid(edges),
+            mermaid(collapse(edges)),
             "```",
             "",
             "## Core cycle",
@@ -90,6 +100,12 @@ def render_block(edges: list[tuple[str, str]]) -> str:
             "",
             "```mermaid",
             mermaid(core),
+            "```",
+            "",
+            "## Full module graph",
+            "",
+            "```mermaid",
+            mermaid(edges),
             "```",
             END,
         ]

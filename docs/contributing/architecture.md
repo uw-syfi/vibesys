@@ -12,11 +12,74 @@ fails when they are stale. To refresh after editing `tach.toml`:
 uv run python scripts/check_tach_graph.py --write
 ```
 
-The second view is the core strongly connected component, a known cycle that
-`tach.toml` tolerates until it is broken.
+Views: a package-level overview, the core strongly connected component (a
+known cycle that `tach.toml` tolerates until it is broken), and the full module
+graph.
 
 <!-- tach-graph:start -->
-## Full graph
+## Architecture overview
+
+Submodules such as `vibesys.agents` and `server.api` are collapsed into their top-level package.
+
+```mermaid
+graph TD
+    entrypoints --> server
+    entrypoints --> vibesys
+    entrypoints --> vs_github
+    entrypoints --> vs_project
+    server --> vibesys
+    server --> vs_loop_state
+    server --> vs_project
+    server --> vs_sandbox
+    vibesys --> vs_evaluator_protocol
+    vibesys --> vs_feature_flags
+    vibesys --> vs_github
+    vibesys --> vs_issue_board
+    vibesys --> vs_loop_state
+    vibesys --> vs_project
+    vibesys --> vs_prompts
+    vibesys --> vs_sandbox
+    vs_project --> vs_loop_state
+```
+
+## Core cycle
+
+Edges among the modules of the known strongly connected core.
+
+```mermaid
+graph TD
+    vibesys --> vibesys.agents
+    vibesys --> vibesys.backends
+    vibesys --> vibesys.domains
+    vibesys --> vibesys.evaluators
+    vibesys --> vibesys.render
+    vibesys --> vibesys.run
+    vibesys --> vibesys.sandbox
+    vibesys.agents --> vibesys
+    vibesys.agents --> vibesys.render
+    vibesys.agents --> vibesys.run
+    vibesys.backends --> vibesys
+    vibesys.domains --> vibesys.prompts
+    vibesys.evaluators --> vibesys
+    vibesys.prompts --> vibesys
+    vibesys.render --> vibesys
+    vibesys.render --> vibesys.run
+    vibesys.run --> vibesys
+    vibesys.run --> vibesys.agents
+    vibesys.run --> vibesys.backends
+    vibesys.run --> vibesys.render
+    vibesys.run --> vibesys.sandbox
+    vibesys.sandbox --> vibesys
+    vibesys.sandbox --> vibesys.agents
+    vibesys.sandbox --> vibesys.backends
+    vibesys.sandbox --> vibesys.domains
+    vibesys.sandbox --> vibesys.evaluators
+    vibesys.sandbox --> vibesys.prompts
+    vibesys.sandbox --> vibesys.skypilot
+    vibesys.skypilot --> vibesys
+```
+
+## Full module graph
 
 ```mermaid
 graph TD
@@ -156,42 +219,5 @@ graph TD
     vibesys.skypilot --> vibesys
     vibesys.skypilot --> vs_project
     vs_project --> vs_loop_state
-```
-
-## Core cycle
-
-Edges among the modules of the known strongly connected core.
-
-```mermaid
-graph TD
-    vibesys --> vibesys.agents
-    vibesys --> vibesys.backends
-    vibesys --> vibesys.domains
-    vibesys --> vibesys.evaluators
-    vibesys --> vibesys.render
-    vibesys --> vibesys.run
-    vibesys --> vibesys.sandbox
-    vibesys.agents --> vibesys
-    vibesys.agents --> vibesys.render
-    vibesys.agents --> vibesys.run
-    vibesys.backends --> vibesys
-    vibesys.domains --> vibesys.prompts
-    vibesys.evaluators --> vibesys
-    vibesys.prompts --> vibesys
-    vibesys.render --> vibesys
-    vibesys.render --> vibesys.run
-    vibesys.run --> vibesys
-    vibesys.run --> vibesys.agents
-    vibesys.run --> vibesys.backends
-    vibesys.run --> vibesys.render
-    vibesys.run --> vibesys.sandbox
-    vibesys.sandbox --> vibesys
-    vibesys.sandbox --> vibesys.agents
-    vibesys.sandbox --> vibesys.backends
-    vibesys.sandbox --> vibesys.domains
-    vibesys.sandbox --> vibesys.evaluators
-    vibesys.sandbox --> vibesys.prompts
-    vibesys.sandbox --> vibesys.skypilot
-    vibesys.skypilot --> vibesys
 ```
 <!-- tach-graph:end -->
