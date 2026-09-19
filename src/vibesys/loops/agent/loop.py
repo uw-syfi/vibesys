@@ -57,6 +57,8 @@ from vibesys.loops.agent.hypothesis_controller import (
     ProfileGuidanceView,
     persist_active_hypothesis,
     persist_agent_run_state,
+    plan_changed_keys,
+    publish_experiments_changed,
 )
 from vibesys.loops.agent.model import (
     AgentRunState,
@@ -92,7 +94,6 @@ from vibesys.run import LoopContext, RepositoryVisibility, RunIntegration, RunSt
 from vibesys.run.events import (
     CoreEventType,
     EventStatus,
-    ExperimentsChangedData,
     FrameworkSource,
     GateKind,
     JudgeResultData,
@@ -2488,6 +2489,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     state_store.save(agent_run_state)
     state_store.cleanup_legacy_portable([record.round_number for record in legacy_records])
     ctx.state.commit("agent: migrate unified hypothesis state", state_store.namespace)
+    ctx.publish_committed_state("agent", agent_run_state)
     state_store.cleanup_legacy_local(local_agent_state)
     round_history = RoundHistory(records=agent_run_state.rounds)
     records = round_history.records
@@ -2644,9 +2646,8 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         agent_run_state,
                         label=f"agent: start hypothesis {plan.hypothesis_id}",
                     )
-                    ctx.events.emit(
-                        CoreEventType.EXPERIMENTS_CHANGED,
-                        data=ExperimentsChangedData(reason="active_hypothesis_changed"),
+                    publish_experiments_changed(
+                        ctx, agent_run_state, "active_hypothesis_changed", plan_changed_keys(plan)
                     )
                 else:
                     plan = active_hypothesis.plan
@@ -3667,9 +3668,8 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                 ctx.persist_completed_round()
                 agent_run_state = next_agent_run_state
                 active_hypothesis = agent_run_state.active_hypothesis
-                ctx.events.emit(
-                    CoreEventType.EXPERIMENTS_CHANGED,
-                    data=ExperimentsChangedData(reason="round_persisted"),
+                publish_experiments_changed(
+                    ctx, agent_run_state, "round_persisted", (completed_record.hypothesis_id,)
                 )
                 ctx.events.emit(
                     CoreEventType.ROUND_FINISHED,

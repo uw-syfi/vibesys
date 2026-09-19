@@ -95,7 +95,7 @@ export function bindKeybindings(
       return;
     }
     // The command input's own error clears the same way: Esc goes back one
-    // level (tui-conventions.md), and a stale input error is a level to leave
+    // level (tui/conventions.md), and a stale input error is a level to leave
     // just as much as the banner is.
     if (controller.state.inputError !== null && key.name === 'escape') {
       controller.clearInputError();

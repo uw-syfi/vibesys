@@ -3206,7 +3206,7 @@ describe('theming', () => {
    * The role colour a transcript card carries.
    *
    * The top-edge rule, because that is where the role lives: a card has no
-   * fill (tui-conventions.md) and #565 replaced its four sides with that one
+   * fill (tui/conventions.md) and #565 replaced its four sides with that one
    * rule, so the body text reports the canvas and the role would otherwise go
    * unasserted here. `conversation.test.ts` pins the same colour as a
    * computation over theme.ts across all eight themes; this asserts the
@@ -5929,7 +5929,7 @@ describe('header hierarchy', () => {
 /**
  * A fill lives on an inner box, so a border ring shows what is behind the box.
  *
- * `docs/contributing/tui-conventions.md` states the rule and the reason.
+ * `docs/contributing/tui/conventions.md` states the rule and the reason.
  * `BoxRenderable` hands `OptimizedBuffer.drawBox` one `backgroundColor` for the
  * whole rectangle and the buffer is write-only, so a fill set on a bordered box
  * paints the ring as well: the painted rectangle ends up one cell larger than
@@ -6348,7 +6348,7 @@ function paneBorders(testRenderer: TestRendererSetup): Record<string, string> {
       // All three corner glyphs a titled box can open with: rounded, the
       // heavy one a focused pane would draw, and square. Square is in the set
       // because an overlay keeps an outer fill and so draws a square frame
-      // (tui-conventions.md), and the narrow-terminal visualization is drawn
+      // (tui/conventions.md), and the narrow-terminal visualization is drawn
       // through the overlay while it is also the performance pane.
       for (const match of span.text.matchAll(/[╭┏┌][─━]([^─━╮┓┐]+)[─━]/g)) {
         borders[(match[1] ?? '').trim()] = rgbToHex(span.fg).toLowerCase();

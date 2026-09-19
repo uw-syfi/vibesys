@@ -49,6 +49,11 @@ class GitHubAPIError(RuntimeError):
         return cls(f"GitHub API could not {operation}")
 
     @classmethod
+    def graphql_failed(cls) -> GitHubAPIError:
+        """Build an error for a GraphQL operation that reported errors."""
+        return cls("GitHub GraphQL reported an error")
+
+    @classmethod
     def malformed_json(cls) -> GitHubAPIError:
         """Build an error for a malformed API response."""
         return cls("GitHub API returned malformed JSON")
@@ -62,6 +67,57 @@ class GitHubClient(Protocol):
 
     def write(self, endpoint: str, *, method: str, payload: Mapping[str, object]) -> object:
         """Write one API endpoint."""
+
+    def graphql(self, query: str, variables: Mapping[str, object]) -> object:
+        """Run one GraphQL operation and return its ``data`` object."""
+
+
+@dataclass(frozen=True)
+class Merged:
+    """The pull request was merged directly; ``sha`` is the real merge commit."""
+
+    sha: str
+
+
+@dataclass(frozen=True)
+class Enqueued:
+    """The pull request was handed to the merge queue. Nothing is merged yet."""
+
+
+@dataclass(frozen=True)
+class AlreadyQueued:
+    """The pull request was already in the merge queue; nothing was changed."""
+
+
+LandOutcome = Merged | Enqueued | AlreadyQueued
+
+
+@dataclass(frozen=True)
+class LandingRequest:
+    """A pull request that already passed every scope and policy check."""
+
+    repository: str
+    number: int
+    node_id: str
+    head_sha: str
+    base_branch: str
+    merge_method: str
+
+
+class LandingStrategy(Protocol):
+    """Lands a validated pull request, or raises ``MergeRefusalError``."""
+
+    def land(self, request: LandingRequest) -> Merged | Enqueued:
+        """Merge or enqueue the request."""
+
+
+@dataclass(frozen=True)
+class QueueState:
+    """Merge queue facts for one pull request and its base branch."""
+
+    pull_request_id: str
+    queue_required: bool
+    in_queue: bool
 
 
 @dataclass(frozen=True)
@@ -130,6 +186,18 @@ class GitHubAPI:
             operation="update GitHub state",
             input=json.dumps(payload),
         )
+
+    def graphql(self, query: str, variables: Mapping[str, object]) -> object:
+        """Run one GraphQL operation; any reported error fails the call."""
+        document = self._run_json(
+            ["gh", "api", "graphql", "--input", "-"],
+            operation="run GitHub GraphQL",
+            input=json.dumps({"query": query, "variables": variables}),
+        )
+        root = _mapping(document, "GraphQL response")
+        if root.get("errors"):
+            raise GitHubAPIError.graphql_failed()
+        return root.get("data")
 
     def _run_json(self, command: Sequence[str], *, operation: str, **kwargs: object) -> object:
         try:
@@ -421,8 +489,98 @@ def authorize_check_job(jobs: object, *, check_id: str, job_name: str) -> None:
         _refuse(f"check {check_id!r} job {job_name!r} has not succeeded")
 
 
-def run(event_path: Path, *, api: GitHubClient) -> str:
-    """Validate every gate, merge atomically, and return the merge SHA."""
+QUEUE_STATE_QUERY = """
+query($owner: String!, $name: String!, $number: Int!, $branch: String!) {
+  repository(owner: $owner, name: $name) {
+    mergeQueue(branch: $branch) { id }
+    pullRequest(number: $number) { id isInMergeQueue }
+  }
+}
+"""
+ENQUEUE_MUTATION = """
+mutation($id: ID!, $sha: GitObjectID!) {
+  enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $sha}) {
+    mergeQueueEntry { id }
+  }
+}
+"""
+
+
+def read_queue_state(api: GitHubClient, *, policy: Policy, number: int) -> QueueState:
+    """Read whether the base branch has a merge queue and whether the PR is in it.
+
+    A merge queue that exists on the branch is treated as required: GitHub only
+    configures one through a branch rule. Any malformed answer fails closed.
+    """
+    owner, _, name = policy.repository.partition("/")
+    data = _mapping(
+        api.graphql(
+            QUEUE_STATE_QUERY,
+            {"owner": owner, "name": name, "number": number, "branch": policy.base_branch},
+        ),
+        "GraphQL data",
+    )
+    repository = _mapping(data.get("repository"), "GraphQL repository")
+    pull = _mapping(repository.get("pullRequest"), "GraphQL pull request")
+    in_queue = pull.get("isInMergeQueue")
+    if not isinstance(in_queue, bool) or "mergeQueue" not in repository:
+        _refuse("GitHub returned an unreadable merge queue state")
+    return QueueState(
+        pull_request_id=_string(pull.get("id"), "GraphQL pull request id"),
+        queue_required=repository["mergeQueue"] is not None,
+        in_queue=in_queue,
+    )
+
+
+@dataclass(frozen=True)
+class DirectMerge:
+    """Land through the pull request merge API (base branch has no merge queue)."""
+
+    api: GitHubClient
+
+    def land(self, request: LandingRequest) -> Merged:
+        """Squash-merge atomically against the validated head SHA."""
+        repository = quote(request.repository, safe="/")
+        response = _mapping(
+            self.api.write(
+                f"repos/{repository}/pulls/{request.number}/merge",
+                method="PUT",
+                payload={"sha": request.head_sha, "merge_method": request.merge_method},
+            ),
+            "merge response",
+        )
+        if response.get("merged") is not True:
+            _refuse("GitHub refused the merge")
+        return Merged(_string(response.get("sha"), "merge response SHA"))
+
+
+@dataclass(frozen=True)
+class QueueEnqueue:
+    """Land through the base branch merge queue; the queue's CI is the final gate."""
+
+    api: GitHubClient
+
+    def land(self, request: LandingRequest) -> Enqueued:
+        """Enqueue, letting GitHub reject the request if the head moved."""
+        data = _mapping(
+            self.api.graphql(
+                ENQUEUE_MUTATION, {"id": request.node_id, "sha": request.head_sha}
+            ),
+            "GraphQL data",
+        )
+        payload = _mapping(data.get("enqueuePullRequest"), "enqueue response")
+        entry = _mapping(payload.get("mergeQueueEntry"), "merge queue entry")
+        _string(entry.get("id"), "merge queue entry id")
+        return Enqueued()
+
+
+def choose_strategy(state: QueueState, api: GitHubClient) -> LandingStrategy:
+    """Pick the landing mode from the observed queue state."""
+    return QueueEnqueue(api) if state.queue_required else DirectMerge(api)
+
+
+def run(event_path: Path, *, api: GitHubClient) -> LandOutcome:
+    """Validate every gate, then land through the strategy the base branch needs."""
     policy = load_policy()
     event = parse_event(json.loads(event_path.read_text()))
     authorize_event(event, policy)
@@ -433,6 +591,9 @@ def run(event_path: Path, *, api: GitHubClient) -> str:
         api.get(f"repos/{repository}/collaborators/{actor}/permission"),
         actor=event.actor,
     )
+    queue = read_queue_state(api, policy=policy, number=event.number)
+    if queue.in_queue:
+        return AlreadyQueued()
     pull = api.get(pull_endpoint)
     head_sha = authorize_pull_request(pull, policy=policy, expected_number=event.number)
     changed_files = _mapping(pull, "pull request").get("changed_files")
@@ -460,17 +621,25 @@ def run(event_path: Path, *, api: GitHubClient) -> str:
     refreshed_sha = authorize_pull_request(refreshed, policy=policy, expected_number=event.number)
     if refreshed_sha != head_sha:
         _refuse("the pull request changed during validation; rerun the command")
-    response = _mapping(
-        api.write(
-            f"{pull_endpoint}/merge",
-            method="PUT",
-            payload={"sha": head_sha, "merge_method": policy.merge_method},
-        ),
-        "merge response",
+    return choose_strategy(queue, api).land(
+        LandingRequest(
+            repository=policy.repository,
+            number=event.number,
+            node_id=queue.pull_request_id,
+            head_sha=head_sha,
+            base_branch=policy.base_branch,
+            merge_method=policy.merge_method,
+        )
     )
-    if response.get("merged") is not True:
-        _refuse("GitHub refused the merge")
-    return _string(response.get("sha"), "merge response SHA")
+
+
+def _success_message(outcome: Merged | Enqueued) -> str:
+    if isinstance(outcome, Merged):
+        return f"Scoped merge completed at `{outcome.sha}`."
+    return (
+        "Scoped merge enqueued: all delegated checks passed and the pull request was "
+        "added to the merge queue. It is not merged yet; the queue's own CI decides."
+    )
 
 
 def _comment(api: GitHubClient, event: Event, body: str) -> None:
@@ -572,13 +741,17 @@ def main() -> int:
         event = parse_event(json.loads(args.event.read_text()))
         if event.body.strip() != load_policy().command:
             return 0
-        merge_sha = run(args.event, api=api)
+        outcome = run(args.event, api=api)
     except MergeRefusalError as exc:
         message = f"Scoped merge refused: {exc}."
     except (GitHubAPIError, OSError, json.JSONDecodeError, tomllib.TOMLDecodeError):
         message = "Scoped merge refused: validation could not be completed safely."
     else:
-        message = f"Scoped merge completed at `{merge_sha}`."
+        if isinstance(outcome, AlreadyQueued):
+            # The earlier command already posted the audit comment.
+            print("Pull request is already in the merge queue.")
+            return 0
+        message = _success_message(outcome)
         with suppress(GitHubAPIError):
             _comment(api, event, message)
         print(message)

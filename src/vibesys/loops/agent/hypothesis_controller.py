@@ -19,12 +19,16 @@ from vibesys.loops.agent.model import (
     ProfileGuidedComponent,
     ProfileImprovementSample,
 )
+from vibesys.run.events import CoreEventType, ExperimentsChangedData
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from vibesys.input_manifest import ProfileGuidedInput
     from vibesys.loops.agent.model import Hypothesis
     from vibesys.loops.agent.state import AgentRunStateStore
     from vibesys.run import LoopContext
+    from vibesys.run.events import ExperimentsChangeReason
     from vibesys.schemas import OrchestratorPlan
     from vs_loop_state import RoundRecord
 
@@ -370,6 +374,26 @@ def persist_active_hypothesis(
     updated = update_active_hypothesis(state, hypothesis)
     persist_agent_run_state(ctx, store, updated, label=label)
     return updated
+
+
+def plan_changed_keys(plan: OrchestratorPlan) -> tuple[str, ...]:
+    """Hypothesis ids a plan declares or updates."""
+    return (plan.hypothesis_id, *(update.hypothesis_id for update in plan.hypothesis_updates))
+
+
+def publish_experiments_changed(
+    ctx: LoopContext,
+    state: AgentRunState,
+    reason: ExperimentsChangeReason,
+    changed_keys: Sequence[str | None],
+) -> None:
+    """Publish the committed agent state hint, then announce its revision."""
+    keys = tuple(key for key in changed_keys if key is not None)
+    ctx.publish_committed_state("agent", state, changed_keys=keys)
+    ctx.events.emit(
+        CoreEventType.EXPERIMENTS_CHANGED,
+        data=ExperimentsChangedData(reason=reason, revision=state.experiment_revision),
+    )
 
 
 def _merge_attribution(

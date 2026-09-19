@@ -10,7 +10,9 @@ import {
 } from './execution-status.js';
 import {
   type AgentPhase,
+  adoptRunMapArrays,
   applyRunMapEvent,
+  indexRunMapArrays,
   mergePhaseLists,
   mergeRoundLists,
   type RoundSummary,
@@ -60,16 +62,8 @@ export interface BenchmarkRecord {
   unit: string;
 }
 
-/**
- * A round as core state carries it: the run map's timing and status summary
- * plus round facts folded outside the run map. `profileSkipped` is set from a
- * `round_finished` event whose round ran no fresh profile (such a round records
- * no perf reading); readers treat an absent flag as false, which also covers
- * events recorded before the field existed.
- */
-export interface RoundState extends RoundSummary {
-  profileSkipped?: boolean;
-}
+/** A round as core state carries the run map's timing, status, and profile result. */
+export type RoundState = RoundSummary;
 
 type RunEventData = NonNullable<RunEvent['data']>;
 export type TypedToolResult = Extract<RunEventData, {kind?: 'tool_result'}>;
@@ -365,7 +359,9 @@ export function reduceEventBatch(
   for (const event of events) folded = foldEvent(folded, event, folder);
   const committed = folder.commit(folded);
   const reduced =
-    historyAfterSequence === undefined ? committed : {...committed, historyAfterSequence};
+    historyAfterSequence === undefined
+      ? committed
+      : cloneCoreStateWith(committed, {historyAfterSequence});
   return activeExecutions === undefined
     ? reduced
     : reconcileActiveExecutions(reduced, activeExecutions, throughSequence);
@@ -431,21 +427,19 @@ export function reduceEventPrefix(
       (left, right) => (left.sequence ?? 0) - (right.sequence ?? 0),
     ),
   );
-  const older: CoreState = {
-    ...olderData,
+  const older = cloneCoreStateWith(olderData, {
     outerLoop: runMapReplay.outerLoop,
     expectedRoles: runMapReplay.expectedRoles,
-    rounds: runMapReplay.rounds,
-    phases: runMapReplay.phases,
     lastEventTimestamp: runMapReplay.lastEventTimestamp,
     lastRunMapSequence: runMapReplay.lastRunMapSequence,
     runLifetimeBoundaries: mergeRunLifetimeBoundaries(
       runMapReplay.runLifetimeBoundaries,
       state.runLifetimeBoundaries,
     ),
-  };
+  });
+  adoptRunMapArrays(older, runMapReplay);
   const chatTranscripts = mergeChatTranscriptsPrefix(older.chatTranscripts, state.chatTranscripts);
-  return {
+  const merged: CoreState = {
     sequence: state.sequence,
     // The newer events own run termination.
     status: state.status,
@@ -498,6 +492,8 @@ export function reduceEventPrefix(
     chatTypedToolEvents: mergeTypedToolFlags(older.chatTypedToolEvents, state.chatTypedToolEvents),
     historyAfterSequence,
   };
+  indexRunMapArrays(merged);
+  return merged;
 }
 
 /**
@@ -746,7 +742,8 @@ export function reduceEvent(state: CoreState, event: RunEvent): CoreState {
 function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder | null): CoreState {
   const sequence = event.sequence ?? 0;
   if (sequence > 0 && sequence <= state.sequence) return state;
-  let next: CoreState = {...state, sequence: Math.max(state.sequence, sequence)};
+  let next = cloneCoreState(state);
+  next.sequence = Math.max(state.sequence, sequence);
   next = applyDiagnosticEvent(next, event);
   next = applyAgentExecutionEvent(next, event);
   next = applyAgentStatusEvent(next, event);
@@ -771,21 +768,10 @@ function applyRunMapProjection(
       : isRunLifetimeBoundary(event)
         ? {event, closeout: null}
         : null;
-  const runMap = applyRunMapEvent(
-    {
-      outerLoop: next.outerLoop,
-      expectedRoles: next.expectedRoles,
-      rounds: next.rounds,
-      phases: next.phases,
-      lastEventTimestamp: next.lastEventTimestamp,
-    },
-    event,
-    boundary?.closeout?.timestamp ?? null,
-  );
+  const runMap = applyRunMapEvent(next, event, boundary?.closeout?.timestamp ?? null);
   next.outerLoop = runMap.outerLoop;
   next.expectedRoles = runMap.expectedRoles;
-  next.rounds = runMap.rounds;
-  next.phases = runMap.phases;
+  adoptRunMapArrays(next, runMap);
   next.lastEventTimestamp = runMap.lastEventTimestamp;
   next.lastRunMapSequence = sequence;
   if (boundary !== null) {
@@ -796,12 +782,6 @@ function applyRunMapProjection(
 
 function applyRunFacts(state: CoreState, event: RunEvent, sequence: number): CoreState {
   const data = event.data;
-  if (data?.kind === 'round_finished' && data.profile_skipped === true) {
-    const finishedRound = roundNumberFromLabel(event.round_label);
-    state.rounds = state.rounds.map(round =>
-      round.number === finishedRound ? {...round, profileSkipped: true} : round,
-    );
-  }
   if (data?.kind === 'tool_call' || data?.kind === 'tool_result') state.typedToolEvents = true;
   if (data?.kind === 'todo_update') state.todos = updateTodos(state.todos, event);
   if (data?.kind === 'usage_update') {
@@ -910,11 +890,11 @@ export function latestDiagnosticChange(
 /** Folds one backend-published status, ending the run when that status has. */
 function applyRunStatus(state: CoreState, status: CoreRunStatus): CoreState {
   const ended = endedRunStatus(status);
-  return ended === null ? {...state, status} : terminate(state, ended);
+  return ended === null ? cloneCoreStateWith(state, {status}) : terminate(state, ended);
 }
 
 function terminate(state: CoreState, status: EndedRunStatus): CoreState {
-  return {...state, status, activeExecutions: {}};
+  return cloneCoreStateWith(state, {status, activeExecutions: {}});
 }
 
 function activeExecutionsFromCheckpoint(
@@ -950,8 +930,7 @@ function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState 
   const data = event.data;
   if (executionId == null) return state;
   if (data?.kind === 'agent_execution_started') {
-    return {
-      ...state,
+    return cloneCoreStateWith(state, {
       activeExecutions: {
         ...state.activeExecutions,
         [executionId]: {
@@ -973,13 +952,12 @@ function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState 
           model: data.model ?? null,
         },
       },
-    };
+    });
   }
   if (data?.kind === 'agent_execution_activity_changed') {
     const current = state.activeExecutions[executionId];
     if (current === undefined) return state;
-    return {
-      ...state,
+    return cloneCoreStateWith(state, {
       activeExecutions: {
         ...state.activeExecutions,
         [executionId]: {
@@ -987,11 +965,11 @@ function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState 
           activity: {mode: data.mode, summary: data.summary, tool: data.tool ?? null},
         },
       },
-    };
+    });
   }
   if (data?.kind === 'agent_execution_finished') {
     const {[executionId]: _finished, ...remaining} = state.activeExecutions;
-    return {...state, activeExecutions: remaining};
+    return cloneCoreStateWith(state, {activeExecutions: remaining});
   }
   return state;
 }
@@ -1071,7 +1049,9 @@ function applyChatEvent(
   let next = state;
   const typed = data?.kind === 'tool_call' || data?.kind === 'tool_result';
   if (typed && next.chatTypedToolEvents[threadId] !== true) {
-    next = {...next, chatTypedToolEvents: {...next.chatTypedToolEvents, [threadId]: true}};
+    next = cloneCoreStateWith(next, {
+      chatTypedToolEvents: {...next.chatTypedToolEvents, [threadId]: true},
+    });
   }
   const legacyToolChunk =
     data?.kind === 'agent_output_chunk' &&
@@ -1101,7 +1081,7 @@ function upsertChatThread(state: CoreState, thread: ChatThread): CoreState {
     state.chatTranscripts[thread.id] === undefined
       ? {...state.chatTranscripts, [thread.id]: []}
       : state.chatTranscripts;
-  return {...state, chatThreads, chatTranscripts};
+  return cloneCoreStateWith(state, {chatThreads, chatTranscripts});
 }
 
 function setChatThreadTitle(state: CoreState, threadId: string, title: string): CoreState {
@@ -1114,12 +1094,11 @@ function setChatThreadTitle(state: CoreState, threadId: string, title: string): 
       title,
     );
   }
-  return {
-    ...state,
+  return cloneCoreStateWith(state, {
     chatThreads: state.chatThreads.map(thread =>
       thread.id === threadId ? {...thread, title} : thread,
     ),
-  };
+  });
 }
 
 function appendChatTranscript(
@@ -1139,11 +1118,10 @@ function appendChatTranscript(
     foldTranscriptEntry(transcript, entry, null);
   }
   const chatTranscripts = {...state.chatTranscripts, [threadId]: transcript};
-  return {
-    ...state,
+  return cloneCoreStateWith(state, {
     chatTranscripts,
     chatTranscript: threadId === DEFAULT_CHAT_THREAD_ID ? transcript : state.chatTranscript,
-  };
+  });
 }
 
 /**
@@ -1179,7 +1157,9 @@ function foldChatAnswer(entries: TranscriptEntry[], incoming: TranscriptEntry): 
 function applyDiagnosticEvent(state: CoreState, event: RunEvent): CoreState {
   const diagnostic = diagnosticFromEvent(event);
   if (diagnostic === null) return state;
-  return {...state, diagnostics: upsertDiagnostic(state.diagnostics, diagnostic)};
+  return cloneCoreStateWith(state, {
+    diagnostics: upsertDiagnostic(state.diagnostics, diagnostic),
+  });
 }
 
 /** Merges `incoming` into the diagnostic it identifies, else appends it. */
@@ -2115,16 +2095,15 @@ class TranscriptFolder {
   commit(state: CoreState): CoreState {
     if (this.#buffers.size === 0) return state;
     const run = this.#buffers.get(RUN_TRANSCRIPT);
-    let next = run === undefined ? state : {...state, transcript: run.entries};
+    let next = run === undefined ? state : cloneCoreStateWith(state, {transcript: run.entries});
     const threads = [...this.#buffers].filter(([key]) => key !== RUN_TRANSCRIPT);
     if (threads.length === 0) return next;
     const chatTranscripts = {...next.chatTranscripts};
     for (const [threadId, buffer] of threads) chatTranscripts[threadId] = buffer.entries;
-    next = {
-      ...next,
+    next = cloneCoreStateWith(next, {
       chatTranscripts,
       chatTranscript: chatTranscripts[DEFAULT_CHAT_THREAD_ID] ?? next.chatTranscript,
-    };
+    });
     return next;
   }
 }

@@ -6,7 +6,7 @@ in-memory KV server.
 
 ## Notes
 
-- Seed baseline: `reference/seed_server.py`, ~10k ops/sec.
+- Seed baseline: `.vibesys/tasks/default/reference/seed_server.py`, ~10k ops/sec.
 - **Headline metric:** the benchmark's `PERF_METRIC:` line — median throughput
   over several fixed-duration runs at the default concurrency (`--threads 16`).
   Single-connection numbers are RTT-bound and hide the server's ceiling, so the

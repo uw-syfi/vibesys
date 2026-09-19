@@ -15,13 +15,21 @@ from hypothesis import given
 from hypothesis import strategies as st
 from scripts import delegated_merge
 from scripts.delegated_merge import (
+    AlreadyQueued,
     Capability,
     Check,
+    DirectMerge,
+    Enqueued,
     Event,
     GitHubAPI,
     GitHubAPIError,
+    LandingRequest,
+    LandingStrategy,
+    Merged,
     MergeRefusalError,
     Policy,
+    QueueEnqueue,
+    QueueState,
     RepositoryRole,
     authorize_check_job,
     authorize_event,
@@ -29,7 +37,9 @@ from scripts.delegated_merge import (
     authorize_membership,
     authorize_pull_request,
     authorize_repository_access,
+    choose_strategy,
     load_policy,
+    read_queue_state,
     run,
     select_workflow_run,
 )
@@ -272,6 +282,33 @@ def test_checked_in_policy_loads_and_hard_denies() -> None:
 
 
 @pytest.mark.parametrize(
+    "filenames",
+    [
+        ["docs/contributing/tui/README.md"],
+        ["docs/contributing/tui/conventions.md", "clients/tui/src/app.ts"],
+    ],
+)
+def test_checked_in_policy_lets_tui_members_land_tui_docs(filenames: list[str]) -> None:
+    policy = load_policy()
+    entries = [{"filename": name} for name in filenames]
+
+    capabilities, _checks = authorize_files([entries], changed_files=len(entries), policy=policy)
+
+    assert capabilities == {"tui"}
+    assert {"ayanbinrafaih", "nano-ai"} <= policy.capabilities["tui"].members
+
+
+@pytest.mark.parametrize(
+    "filename", ["docs/contributing/other.md", "docs/contributing/tui-conventions.md"]
+)
+def test_checked_in_policy_keeps_other_contributing_docs_out_of_scope(filename: str) -> None:
+    policy = load_policy()
+
+    with pytest.raises(MergeRefusalError, match="does not match"):
+        authorize_files([[{"filename": filename}]], changed_files=1, policy=policy)
+
+
+@pytest.mark.parametrize(
     ("old", "new", "message"),
     [
         ("schema_version = 1", "schema_version = 2", "schema_version"),
@@ -507,8 +544,27 @@ def test_check_authorization_uses_latest_exact_head_run_and_exact_job() -> None:
 class FakeGitHubAPI:
     """Record the state transitions made by one complete merge attempt."""
 
-    def __init__(self, *, refreshed_sha: str = "abc123") -> None:
+    def __init__(  # noqa: PLR0913  # keyword-only scenario knobs
+        self,
+        *,
+        refreshed_sha: str = "abc123",
+        queue: object = None,
+        in_queue: object = False,
+        graphql_error: bool = False,
+        enqueue_entry: object = None,
+        state_data: object = "default",
+        merge_response: object = None,
+        filename: str = "owned/core/events.py",
+    ) -> None:
+        self.state_data = state_data
+        self.merge_response = merge_response or {"merged": True, "sha": "merge456"}
+        self.filename = filename
         self.refreshed_sha = refreshed_sha
+        self.queue = queue
+        self.in_queue = in_queue
+        self.graphql_error = graphql_error
+        self.enqueue_entry = {"id": "entry1"} if enqueue_entry is None else enqueue_entry
+        self.graphql_calls: list[tuple[str, dict[str, object]]] = []
         self.pull_reads = 0
         self.writes: list[tuple[str, str, dict[str, object]]] = []
 
@@ -519,7 +575,7 @@ class FakeGitHubAPI:
             self.pull_reads += 1
             return _pull(head={"sha": "abc123" if self.pull_reads == 1 else self.refreshed_sha})
         if endpoint.endswith("/files?per_page=100") and paginate:
-            return [[{"filename": "owned/core/events.py"}]]
+            return [[{"filename": self.filename}]]
         if "/actions/workflows/test.yml/runs?" in endpoint:
             return {
                 "workflow_runs": [
@@ -546,7 +602,22 @@ class FakeGitHubAPI:
 
     def write(self, endpoint: str, *, method: str, payload: Mapping[str, object]) -> object:
         self.writes.append((endpoint, method, dict(payload)))
-        return {"merged": True, "sha": "merge456"}
+        return self.merge_response
+
+    def graphql(self, query: str, variables: Mapping[str, object]) -> object:
+        self.graphql_calls.append((query, dict(variables)))
+        if self.graphql_error:
+            raise GitHubAPIError.graphql_failed()
+        if "enqueuePullRequest" in query:
+            return {"enqueuePullRequest": {"mergeQueueEntry": self.enqueue_entry}}
+        if self.state_data != "default":
+            return self.state_data
+        return {
+            "repository": {
+                "mergeQueue": self.queue,
+                "pullRequest": {"id": "PR_node", "isInMergeQueue": self.in_queue},
+            }
+        }
 
 
 def _write_event(path: Path) -> None:
@@ -577,7 +648,7 @@ def test_complete_merge_rechecks_head_and_sends_atomic_squash_request(
     _use_test_policy(monkeypatch)
     api = FakeGitHubAPI()
 
-    assert run(event_path, api=api) == "merge456"
+    assert run(event_path, api=api) == Merged("merge456")
     assert api.pull_reads == 2
     assert api.writes == [
         (
@@ -602,6 +673,157 @@ def test_complete_merge_refuses_head_change_before_write(
     assert api.writes == []
 
 
+def _land_request() -> LandingRequest:
+    return LandingRequest(
+        repository="uw-syfi/vibesys",
+        number=42,
+        node_id="PR_node",
+        head_sha="abc123",
+        base_branch="main",
+        merge_method="squash",
+    )
+
+
+@pytest.mark.parametrize(
+    ("strategy_type", "expected"),
+    [(DirectMerge, Merged("merge456")), (QueueEnqueue, Enqueued())],
+)
+def test_strategies_share_one_landing_contract(
+    strategy_type: type[DirectMerge] | type[QueueEnqueue], expected: Merged | Enqueued
+) -> None:
+    api = FakeGitHubAPI(queue={"id": "Q"})
+    strategy: LandingStrategy = strategy_type(api)
+
+    assert strategy.land(_land_request()) == expected
+
+
+def test_strategies_refuse_an_unconfirmed_landing() -> None:
+    with pytest.raises(MergeRefusalError, match="refused the merge"):
+        DirectMerge(FakeGitHubAPI(merge_response={"merged": False})).land(_land_request())
+    for entry in ("not-an-object", {}, {"id": ""}):
+        api = FakeGitHubAPI(queue={"id": "Q"}, enqueue_entry=entry)
+        with pytest.raises(MergeRefusalError):
+            QueueEnqueue(api).land(_land_request())
+    with pytest.raises(GitHubAPIError):
+        QueueEnqueue(FakeGitHubAPI(graphql_error=True)).land(_land_request())
+
+
+def test_selector_uses_enqueue_only_when_a_queue_is_observed() -> None:
+    api = FakeGitHubAPI()
+    assert isinstance(
+        choose_strategy(QueueState("id", queue_required=False, in_queue=False), api), DirectMerge
+    )
+    assert isinstance(
+        choose_strategy(QueueState("id", queue_required=True, in_queue=False), api), QueueEnqueue
+    )
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        None,
+        {"repository": None},
+        {"repository": {"mergeQueue": None}},
+        {"repository": {"pullRequest": {"id": "x", "isInMergeQueue": False}}},
+        {"repository": {"mergeQueue": None, "pullRequest": {"id": "x", "isInMergeQueue": "no"}}},
+        {"repository": {"mergeQueue": None, "pullRequest": {"id": "", "isInMergeQueue": False}}},
+    ],
+)
+def test_queue_state_fails_closed_on_unreadable_answers(data: object) -> None:
+    api = FakeGitHubAPI(state_data=data)
+
+    with pytest.raises(MergeRefusalError):
+        read_queue_state(api, policy=_policy(), number=42)
+
+
+def test_queue_required_enqueues_after_all_checks_without_a_merge_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    _use_test_policy(monkeypatch)
+    api = FakeGitHubAPI(queue={"id": "Q"})
+
+    assert run(event_path, api=api) == Enqueued()
+    assert api.pull_reads == 2
+    assert api.writes == []
+    assert api.graphql_calls[-1][1] == {"id": "PR_node", "sha": "abc123"}
+
+
+def test_queue_mode_keeps_scope_and_head_refusals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    _use_test_policy(monkeypatch)
+
+    stale = FakeGitHubAPI(queue={"id": "Q"}, refreshed_sha="new789")
+    with pytest.raises(MergeRefusalError, match="changed during validation"):
+        run(event_path, api=stale)
+    assert not any("enqueuePullRequest" in query for query, _ in stale.graphql_calls)
+
+    out_of_scope = FakeGitHubAPI(queue={"id": "Q"}, filename="elsewhere/file.py")
+    with pytest.raises(MergeRefusalError, match="does not match"):
+        run(event_path, api=out_of_scope)
+    assert len(out_of_scope.graphql_calls) == 1
+    assert out_of_scope.writes == []
+
+
+def test_already_queued_pull_request_is_a_noop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    _use_test_policy(monkeypatch)
+    api = FakeGitHubAPI(queue={"id": "Q"}, in_queue=True)
+
+    assert run(event_path, api=api) == AlreadyQueued()
+    assert api.writes == []
+    assert len(api.graphql_calls) == 1
+
+
+def test_queue_lookup_failure_never_merges_or_enqueues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    _use_test_policy(monkeypatch)
+    api = FakeGitHubAPI(graphql_error=True)
+
+    with pytest.raises(GitHubAPIError):
+        run(event_path, api=api)
+    assert api.writes == []
+
+
+def test_main_reports_enqueue_distinctly_from_merge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    _use_test_policy(monkeypatch)
+    monkeypatch.setattr("sys.argv", ["delegated_merge", "--event", str(event_path)])
+    results: list[tuple[FakeGitHubAPI, int, str]] = []
+    fakes = (
+        FakeGitHubAPI(queue={"id": "Q"}),
+        FakeGitHubAPI(),
+        FakeGitHubAPI(queue={"id": "Q"}, in_queue=True),
+    )
+    for api in fakes:
+        monkeypatch.setattr(delegated_merge, "GitHubAPI", lambda api=api: api)
+        code = delegated_merge.main()
+        results.append((api, code, capsys.readouterr().out))
+
+    (queued, queued_code, queued_out), (direct, _, direct_out), (dup, dup_code, _) = results
+    assert queued_code == 0
+    assert "enqueued" in queued_out
+    assert "merge456" not in queued_out
+    assert "not merged yet" in str(queued.writes[0][2]["body"])
+    assert "completed at `merge456`" in direct_out
+    assert direct.writes[0][1] == "PUT"
+    assert dup_code == 0
+    assert not any(endpoint.endswith("/comments") for endpoint, _, _ in dup.writes)
+
+
 def test_workflow_uses_trusted_default_branch_and_pinned_actions() -> None:
     path = REPO_ROOT / ".github" / "workflows" / "delegated-merge.yml"
     text = path.read_text()
@@ -615,7 +837,7 @@ def test_workflow_uses_trusted_default_branch_and_pinned_actions() -> None:
         "actions": "read",
         "contents": "write",
         "issues": "write",
-        "pull-requests": "read",
+        "pull-requests": "write",
     }
     assert "github.event.repository.default_branch" in text
     assert "startsWith(github.event.comment.body, '/merge-')" in text
