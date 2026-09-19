@@ -173,6 +173,11 @@ jobs:
       - name: Check Tach module boundaries
         run: uv run tach check
 
+      # The Mermaid graph in docs/contributing/architecture.md is generated
+      # from tach.toml; refresh with `scripts/check_tach_graph.py --write`.
+      - name: Check Tach module graph doc is current
+        run: uv run python scripts/check_tach_graph.py --check
+
       # docs/ and root Markdown are covered by website.yml, which this
       # workflow's paths-ignore hands off to. This pass catches the rest:
       # Markdown under src/, resources/, clients/, and examples/.
