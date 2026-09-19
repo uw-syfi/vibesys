@@ -10,14 +10,10 @@ import pytest
 from vibesys.agents import build_agent_client
 from vibesys.agents.callbacks import AgentLogger
 from vibesys.agents.client import AgentClient
-from vibesys.agents.deepagents_runner import DeepAgentsClient
 from vibesys.agents.drivers.agentshim import AgentShimDriver
-from vibesys.agents.progress import RoundProgress
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.config import Config
 from vibesys.render.log import log_json_and_print, log_prompt_markdown_and_print
 from vibesys.schemas import (
-    IssueJudgeResponse,
     JudgeResponse,
     Verdict,
 )
@@ -61,341 +57,6 @@ def test_json_emitter_preserves_raw_log(capsys):  # noqa: ANN001, ANN201  # trac
     assert log.getvalue() == raw_json + "\n"
 
 
-class TestDeepAgentsClient:
-    """Tests for :class:`DeepAgentsClient`."""
-
-    def test_deepagents_runner_names_no_provider_conversation(self) -> None:
-        runner = DeepAgentsClient(
-            model="m",
-            backends={"judge": MagicMock(name="judge-backend")},
-            skills=[],
-            model_name="m",
-            run_log_file=None,
-        )
-        key = AgentSessionKey(SessionScope.CHAT, "thread-a")
-
-        # A deepagents thread is a checkpointer entry, not a provider
-        # conversation, and this client never runs ``AgentClient.__init__``, so
-        # the inherited implementation would have no cache or store to read.
-        assert runner.provider_session_id(key) is None
-        assert runner.last_turn_provider_session_id(key) is None
-
-    def test_deepagents_runner_invoke_returns_structured_response(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        pass_response = JudgeResponse(
-            analysis="looks good",
-            feedback="",
-            verdict=Verdict.PASS,
-        )
-        with (
-            patch("vibesys.agents.deepagents_runner.create_deep_agent") as mock_create,
-            patch("vibesys.agents.deepagents_runner.run_typed_agent") as mock_run,
-        ):
-            mock_create.return_value = MagicMock(name="deep_agent")
-            mock_run.return_value = pass_response
-
-            runner = DeepAgentsClient(
-                model="m",
-                backends={
-                    "implementer": MagicMock(name="impl-backend"),
-                    "judge": MagicMock(name="judge-backend"),
-                    "perf_eval": MagicMock(name="perf-backend"),
-                },
-                skills=[],
-                model_name="m",
-                run_log_file=None,
-            )
-
-            result = runner.invoke(
-                kind="judge",
-                workspace=tmp_path,
-                system_prompt="sys",
-                user_prompt="usr",
-                response_cls=JudgeResponse,
-                fallback_factory=_judge_fallback,
-                round_label="judge #1",
-                progress=RoundProgress(1, 5),
-            )
-
-        assert result is pass_response
-        assert mock_run.call_count == 1
-        _, kwargs = mock_run.call_args
-        assert kwargs["response_cls"] is JudgeResponse
-        assert kwargs["fallback_factory"] is _judge_fallback
-        callbacks = kwargs["callbacks"]
-        assert callbacks[0]._progress.label() == "Round 1/5"  # noqa: SLF001  # tracked: #288
-
-    def test_deepagents_runner_picks_backend_by_kind(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        impl_backend = MagicMock(name="impl-backend")
-        judge_backend = MagicMock(name="judge-backend")
-        perf_backend = MagicMock(name="perf-backend")
-
-        captured_backends: list = []
-
-        def _capture(**kwargs):  # noqa: ANN003, ANN202  # tracked: #288
-            captured_backends.append(kwargs["backend"])
-            return MagicMock(name="deep_agent")
-
-        with (
-            patch(
-                "vibesys.agents.deepagents_runner.create_deep_agent",
-                side_effect=_capture,
-            ),
-            patch(
-                "vibesys.agents.deepagents_runner.run_typed_agent",
-                return_value=_judge_fallback(),
-            ),
-        ):
-            runner = DeepAgentsClient(
-                model="m",
-                backends={
-                    "implementer": impl_backend,
-                    "judge": judge_backend,
-                    "perf_eval": perf_backend,
-                },
-                skills=[],
-                model_name="m",
-                run_log_file=None,
-            )
-
-            for kind in ("implementer", "judge", "perf_eval"):
-                runner.invoke(
-                    kind=kind,
-                    workspace=tmp_path,
-                    system_prompt="sys",
-                    user_prompt="usr",
-                    response_cls=JudgeResponse,
-                    fallback_factory=_judge_fallback,
-                    round_label=f"{kind} #1",
-                )
-
-        assert captured_backends == [impl_backend, judge_backend, perf_backend]
-
-    def test_deepagents_runner_returns_plain_text_without_response_format(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        with (
-            patch("vibesys.agents.deepagents_runner.create_deep_agent") as mock_create,
-            patch(
-                "vibesys.agents.deepagents_runner.run_agent",
-                return_value="Natural **Markdown** answer.",
-            ) as mock_run,
-        ):
-            mock_create.return_value = MagicMock(name="chat-agent")
-            runner = DeepAgentsClient(
-                model="m",
-                backends={"chat": MagicMock(name="chat-backend")},
-                skills=[],
-                model_name="m",
-                run_log_file=None,
-            )
-
-            result = runner.invoke_text(
-                kind="chat",
-                workspace=tmp_path,
-                system_prompt="investigate",
-                user_prompt="what happened?",
-                round_label="experiment chat",
-            )
-
-        assert result == "Natural **Markdown** answer."
-        assert "response_format" not in mock_create.call_args.kwargs
-        assert mock_run.call_args.args[1] == "what happened?"
-
-    def test_deepagents_runner_sessions_are_explicit_and_role_scoped(self):  # noqa: ANN201  # tracked: #288
-        runner = DeepAgentsClient(
-            model="m",
-            backends={},
-            skills=[],
-            model_name="m",
-            run_log_file=None,
-        )
-
-        first = runner._session(  # noqa: SLF001  # tracked: #288
-            kind="implementer",
-            reuse_session=True,
-            session_key=AgentSessionKey(SessionScope.HYPOTHESIS, "a"),
-        )
-        continued = runner._session(  # noqa: SLF001  # tracked: #288
-            kind="implementer",
-            reuse_session=True,
-            session_key=AgentSessionKey(SessionScope.HYPOTHESIS, "a"),
-        )
-        other_role = runner._session(  # noqa: SLF001  # tracked: #288
-            kind="judge",
-            reuse_session=True,
-            session_key=AgentSessionKey(SessionScope.HYPOTHESIS, "a"),
-        )
-        fresh = runner._session(  # noqa: SLF001  # tracked: #288
-            kind="implementer",
-            reuse_session=False,
-            session_key=AgentSessionKey(SessionScope.HYPOTHESIS, "a"),
-        )
-
-        assert continued is first
-        assert other_role is not first
-        assert fresh is not first
-
-    def test_deepagents_runner_reuses_graph_with_fresh_default_threads(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        """Repeated calls reuse construction but keep default conversations isolated."""
-        pass_response = JudgeResponse(
-            analysis="looks good",
-            feedback="",
-            verdict=Verdict.PASS,
-        )
-        with (
-            patch("vibesys.agents.deepagents_runner.create_deep_agent") as mock_create,
-            patch(
-                "vibesys.agents.deepagents_runner.run_typed_agent",
-                return_value=pass_response,
-            ) as mock_run,
-        ):
-            mock_create.return_value = MagicMock(name="deep_agent")
-            runner = DeepAgentsClient(
-                model="m",
-                backends={"judge": MagicMock(name="judge-backend")},
-                skills=[],
-                model_name="m",
-                run_log_file=None,
-            )
-
-            for i in range(2):
-                runner.invoke(
-                    kind="judge",
-                    workspace=tmp_path,
-                    system_prompt="sys",
-                    user_prompt=f"usr {i}",
-                    response_cls=JudgeResponse,
-                    fallback_factory=_judge_fallback,
-                    round_label=f"judge #{i}",
-                )
-
-            assert mock_create.call_count == 1
-            thread_ids = [call.kwargs["thread_id"] for call in mock_run.call_args_list]
-            assert thread_ids[0] != thread_ids[1]
-
-    def test_deepagents_runner_rebuilds_when_response_schema_changes(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        """A different response model must not reuse the old structured graph."""
-        with (
-            patch("vibesys.agents.deepagents_runner.create_deep_agent") as mock_create,
-            patch(
-                "vibesys.agents.deepagents_runner.run_typed_agent",
-                return_value=JudgeResponse(analysis="ok", feedback="", verdict=Verdict.PASS),
-            ),
-        ):
-            mock_create.return_value = MagicMock(name="deep_agent")
-            runner = DeepAgentsClient(
-                model="m",
-                backends={"judge": MagicMock(name="judge-backend")},
-                skills=[],
-                model_name="m",
-                run_log_file=None,
-            )
-
-            runner.invoke(
-                kind="judge",
-                workspace=tmp_path,
-                system_prompt="sys",
-                user_prompt="usr",
-                response_cls=JudgeResponse,
-                fallback_factory=_judge_fallback,
-                round_label="judge #1",
-            )
-            runner.invoke(
-                kind="judge",
-                workspace=tmp_path,
-                system_prompt="sys",
-                user_prompt="usr",
-                response_cls=IssueJudgeResponse,
-                fallback_factory=lambda: IssueJudgeResponse(
-                    issue_id=1,
-                    analysis="fallback",
-                    feedback="fallback",
-                    verdict=Verdict.FAIL,
-                ),
-                round_label="judge #2",
-            )
-
-            assert mock_create.call_count == 2
-            assert "response_format" in mock_create.call_args_list[0].kwargs
-            assert "response_format" in mock_create.call_args_list[1].kwargs
-            assert (
-                mock_create.call_args_list[0].kwargs["response_format"].schema
-                is not mock_create.call_args_list[1].kwargs["response_format"].schema
-            )
-
-    def test_deepagents_runner_rebuilds_when_tool_objects_change(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        """Same-named tools can carry different closure-bound behavior."""
-        with (
-            patch("vibesys.agents.deepagents_runner.create_deep_agent") as mock_create,
-            patch(
-                "vibesys.agents.deepagents_runner.run_typed_agent",
-                return_value=JudgeResponse(analysis="ok", feedback="", verdict=Verdict.PASS),
-            ),
-        ):
-            mock_create.return_value = MagicMock(name="deep_agent")
-            runner = DeepAgentsClient(
-                model="m",
-                backends={"judge": MagicMock(name="judge-backend")},
-                skills=[],
-                model_name="m",
-                run_log_file=None,
-            )
-
-            for tool in (MagicMock(name="same-tool"), MagicMock(name="same-tool")):
-                runner.invoke(
-                    kind="judge",
-                    workspace=tmp_path,
-                    system_prompt="sys",
-                    user_prompt="usr",
-                    response_cls=JudgeResponse,
-                    fallback_factory=_judge_fallback,
-                    round_label="judge",
-                    tools=[tool],
-                )
-
-            assert mock_create.call_count == 2
-
-    def test_deepagents_runner_typed_and_text_graphs_are_separate(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        with (
-            patch("vibesys.agents.deepagents_runner.create_deep_agent") as mock_create,
-            patch(
-                "vibesys.agents.deepagents_runner.run_typed_agent",
-                return_value=JudgeResponse(analysis="ok", feedback="", verdict=Verdict.PASS),
-            ),
-            patch(
-                "vibesys.agents.deepagents_runner.run_agent",
-                return_value="plain text",
-            ),
-        ):
-            mock_create.return_value = MagicMock(name="deep_agent")
-            runner = DeepAgentsClient(
-                model="m",
-                backends={"judge": MagicMock(name="judge-backend")},
-                skills=[],
-                model_name="m",
-                run_log_file=None,
-            )
-
-            runner.invoke(
-                kind="judge",
-                workspace=tmp_path,
-                system_prompt="sys",
-                user_prompt="usr",
-                response_cls=JudgeResponse,
-                fallback_factory=_judge_fallback,
-                round_label="judge",
-            )
-            runner.invoke_text(
-                kind="judge",
-                workspace=tmp_path,
-                system_prompt="sys",
-                user_prompt="usr",
-                round_label="chat",
-            )
-
-            assert mock_create.call_count == 2
-            assert "response_format" in mock_create.call_args_list[0].kwargs
-            assert "response_format" not in mock_create.call_args_list[1].kwargs
-
-
 class TestBuildAgentClient:
     """Tests for :func:`build_agent_client`."""
 
@@ -409,9 +70,7 @@ class TestBuildAgentClient:
                 "judge": MagicMock(),
                 "perf_eval": MagicMock(),
             },
-            skills=[],
             skill_source_dirs=[],
-            model="m",
             model_name="m",
             run_log_file=None,
             use_docker=False,
@@ -425,9 +84,7 @@ class TestBuildAgentClient:
             agent_backend=None,
             cli_provider=None,
             backends=None,
-            skills=[],
             skill_source_dirs=[],
-            model=None,
             model_name="m",
             run_log_file=None,
             use_docker=False,
@@ -442,9 +99,7 @@ class TestBuildAgentClient:
             agent_backend=None,
             cli_provider=None,
             backends=None,
-            skills=[],
             skill_source_dirs=[],
-            model=None,
             model_name="m",
             run_log_file=None,
             use_docker=False,
@@ -466,9 +121,7 @@ class TestBuildAgentClient:
             agent_backend="cli",
             cli_provider="claude",
             backends=mock_backends,
-            skills=[],
             skill_source_dirs=[],
-            model=None,
             model_name="m",
             run_log_file=None,
             use_docker=True,
@@ -484,9 +137,7 @@ class TestBuildAgentClient:
                 agent_backend="cli",
                 cli_provider="nonexistent",
                 backends={},
-                skills=[],
                 skill_source_dirs=[],
-                model=None,
                 model_name="m",
                 run_log_file=None,
                 use_docker=True,
@@ -499,24 +150,20 @@ class TestBuildAgentClient:
                 agent_backend="bogus",
                 cli_provider=None,
                 backends=None,
-                skills=[],
                 skill_source_dirs=[],
-                model=None,
                 model_name="m",
                 run_log_file=None,
                 use_docker=False,
             )
 
-    def test_required_project_enforcement_rejects_deepagents(self):  # noqa: ANN201  # tracked: #288
+    def test_required_project_enforcement_rejects_non_cli_backend(self):  # noqa: ANN201  # tracked: #288
         with pytest.raises(SystemExit, match="requires the CLI agent backend"):
             build_agent_client(
-                _agent_config(backend="deepagents"),
+                _agent_config(backend="unsupported"),
                 agent_backend=None,
                 cli_provider=None,
                 backends={"implementer": MagicMock()},
-                skills=[],
                 skill_source_dirs=[],
-                model="m",
                 model_name="m",
                 run_log_file=None,
                 use_docker=False,
@@ -540,9 +187,7 @@ class TestBuildAgentClient:
             agent_backend=None,
             cli_provider=None,
             backends=None,
-            skills=[],
             skill_source_dirs=[],
-            model=None,
             model_name="m",
             run_log_file=None,
             use_docker=False,
@@ -558,9 +203,7 @@ class TestBuildAgentClient:
             agent_backend=None,
             cli_provider=None,
             backends=None,
-            skills=[],
             skill_source_dirs=[],
-            model=None,
             model_name="m",
             run_log_file=None,
             use_docker=False,
@@ -580,9 +223,7 @@ class TestBuildAgentClient:
             agent_backend=None,
             cli_provider=None,
             backends=None,
-            skills=[],
             skill_source_dirs=[],
-            model=None,
             model_name="m",
             run_log_file=None,
             use_docker=False,
@@ -608,9 +249,7 @@ class TestBuildAgentClient:
             agent_backend=None,
             cli_provider=None,
             backends=None,
-            skills=[],
             skill_source_dirs=[],
-            model=None,
             model_name=model_name,
             run_log_file=None,
             use_docker=False,
@@ -722,9 +361,7 @@ class TestBuildAgentClientBackendSelection:
             agent_backend=agent_backend,
             cli_provider=cli_provider,
             backends=None,
-            skills=[],
             skill_source_dirs=[],
-            model=None,
             model_name="",
             run_log_file=None,
             use_docker=False,
@@ -742,7 +379,7 @@ class TestBuildAgentClientBackendSelection:
 
     def test_agent_backend_flag_overrides_config(self):  # noqa: ANN201  # tracked: #288
         # An explicit --agent-backend flag wins over [agent].backend.
-        runner = self._build(_agent_config(backend="deepagents"), agent_backend="cli")
+        runner = self._build(_agent_config(backend="stub"), agent_backend="cli")
         assert isinstance(runner, AgentClient)
 
     def test_config_can_select_cli_provider(self):  # noqa: ANN201  # tracked: #288

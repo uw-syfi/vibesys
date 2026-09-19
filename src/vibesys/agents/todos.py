@@ -7,11 +7,6 @@ tool call or a ``todo_list`` stream item. This module owns the mapping from
 those provider vocabularies to the neutral :class:`TodoItemData` contract so
 everything downstream of the output sink stays agent-agnostic.
 
-The deepagents backend additionally publishes todos from its graph state
-channel in :mod:`vibesys.agents.runner`; its ``write_todos`` tool call also
-matches here, which is harmless because todo updates are full-list snapshots
-and re-publishing the same snapshot is idempotent for every consumer.
-
 Extraction is best-effort by design: payloads originate from agent tool
 calls, so a malformed entry is skipped and an unrecognized payload yields
 "no update" — never an exception into the agent run. Statuses pass through
@@ -84,8 +79,8 @@ def _extract(
 
 
 def _from_todos_arg(args: Mapping[str, Any]) -> list[TodoItemData] | None:
-    """Claude Code ``TodoWrite`` / opencode ``todowrite`` / Gemini and
-    deepagents ``write_todos``: ``{"todos": [{"content", "status"}, …]}``.
+    """Claude Code ``TodoWrite`` / opencode ``todowrite`` / Gemini
+    ``write_todos``: ``{"todos": [{"content", "status"}, …]}``.
     """  # noqa: D205  # tracked: #288
     return _extract(args, "todos", ("content", "description"))
 

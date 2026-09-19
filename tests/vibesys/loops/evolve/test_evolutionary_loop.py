@@ -220,7 +220,7 @@ def _make_runner(  # noqa: ANN202, C901, PLR0913  # tracked: #288
     counters = {"mutator": 0, "judge": 0, "profiler": 0}
 
     runner = MagicMock(spec=AgentClient)
-    runner.backend_name = "deepagents"
+    runner.backend_name = "cli"
     # Every invocation event carries the client's attribution, so the mock
     # supplies real strings the event payload can validate.
     runner.driver_name = "mock"
@@ -309,7 +309,6 @@ def _invoke_loop(
     }
     defaults.update(kwargs)
     with (
-        patch("vibesys.context.build_model", return_value="mock-model"),
         patch("vibesys.backends.cuda.make_local_shell_sandbox"),
         patch("vibesys.context.build_agent_client", return_value=runner),
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
@@ -1405,7 +1404,6 @@ def test_evaluate_in_subcontext_builds_worktree_and_evaluates(tmp_path, ref_file
     it, and the offspring commit lands in the parent's shared object store."""
     runner = _make_runner(mutator_writes=True)
     with (
-        patch("vibesys.context.build_model", return_value="mock-model"),
         patch("vibesys.backends.cuda.make_local_shell_sandbox"),
         patch("vibesys.context.build_agent_client", return_value=runner),
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
@@ -1423,7 +1421,7 @@ def test_evaluate_in_subcontext_builds_worktree_and_evaluates(tmp_path, ref_file
             project_configuration=EvolveRunConfiguration(
                 outer_loop="evolve",
                 run_environment=RunEnvironmentRecord(name="local"),
-                agent_backend="deepagents",
+                agent_backend="cli",
                 compute_backend="cuda",
                 max_generations=1,
                 children_per_generation=1,

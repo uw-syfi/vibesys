@@ -46,8 +46,6 @@ class AgentRuntimeResources:
 
     config: Config
     compute_backend: ComputeBackend
-    model: Any
-    skills: tuple[str, ...]
     skill_source_dirs: tuple[Path, ...]
     environment: RunEnvironment
     environment_request: RunEnvironmentRequest

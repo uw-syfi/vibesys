@@ -20,17 +20,13 @@ dependencies = [
     "agentshim>=0.6.1,<0.7",
     "cbor2<6",
     "cryptography<50",
-    "deepagents",
     "jinja2>=3.1",
-    "langchain-google-vertexai>=3.2.2",
-    "langchain-openai",
     "huggingface_hub",
     "mcp>=1.0,<2",
     "modal>=1.4.2",
     "pydantic>=2",
     "pyyaml>=6",
     "python-dotenv>=1.0.1",
-    "loguru>=0.7.2",
     "openevolve==0.3.1",
     # Agent driver selected with `[agent].driver = "omnigent"`. A fast-moving
     # alpha, pinned exactly; carried in the base dependencies so every install
@@ -177,7 +173,7 @@ roots = ["src", "libs", "scripts", "packaging", "sdk"]
 # CLI entry point; every subcommand's argument wiring lives here.
 "src/entrypoints/headless.py" = 2663
 # Sandbox run environment: setup, execution, and teardown across strategies.
-"src/vibesys/sandbox/run_environment.py" = 2253
+"src/vibesys/sandbox/run_environment.py" = 2251
 
 [tool.ruff]
 line-length = 100
@@ -219,6 +215,14 @@ max-complexity = 10
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"deepagents".msg = "The deepagents backend was removed; agents run through agent CLI drivers."
+"langchain".msg = "langchain was removed; do not reintroduce it."
+"langchain_core".msg = "langchain was removed; do not reintroduce it."
+"langchain_openai".msg = "langchain was removed; do not reintroduce it."
+"langchain_google_vertexai".msg = "langchain was removed; do not reintroduce it."
+"langgraph".msg = "langgraph was removed; do not reintroduce it."
 
 [tool.ruff.lint.flake8-type-checking]
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]

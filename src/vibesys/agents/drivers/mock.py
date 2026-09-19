@@ -68,7 +68,6 @@ if TYPE_CHECKING:
 
 MOCK_CAPABILITIES = AgentCapabilities(
     mcp_servers=True,
-    in_process_tools=False,
     nested_read_only_paths=True,
     hidden_paths=True,
     host_path_grants=True,

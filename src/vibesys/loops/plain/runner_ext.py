@@ -2,15 +2,12 @@
 
 Wraps any :class:`~vibesys.agents.contracts.AgentClientProtocol` and injects
 tracker access for the ``judge`` and ``perf_eval`` phases. The wrapper
-picks the right transport (MCP server spec or in-process ``@tool`` callables)
-from the inner client's declared capabilities.
+requires an MCP-capable inner client and hands it an issue-board MCP server
+spec.
 
-This module is the only place that knows BOTH:
-  - the issue-tracker policy (creator/iteration/cap/types per phase)
-  - the per-backend translation (``MCPServerSpec`` vs ``list[BaseTool]``)
-
-The base AgentClient implementations stay agnostic — they only see the
-generic ``mcp_servers``/``tools`` injection-point kwargs.
+This module is the only place that knows the issue-tracker policy
+(creator/iteration/cap/types per phase). The base AgentClient implementations
+stay agnostic: they only see the generic ``mcp_servers`` injection-point kwarg.
 
 Implementer phase: passes through unmodified. The relevant issue is
 inlined into the implementer's system prompt by the loop, so no tracker
@@ -22,7 +19,6 @@ from __future__ import annotations
 from pathlib import Path  # noqa: TC003
 from typing import Any, TextIO, TypeVar
 
-from langchain_core.tools import BaseTool  # noqa: TC002  # tracked: #288
 from pydantic import BaseModel
 
 from vibesys.agents.client import AgentClient
@@ -34,8 +30,7 @@ from vibesys.agents.contracts import (  # noqa: TC001
 from vibesys.agents.progress import AgentProgress  # noqa: TC001
 from vibesys.agents.session_key import AgentSessionKey  # noqa: TC001
 from vibesys.loops.plain.mcp_config import build_issue_mcp_spec
-from vibesys.loops.plain.tools import build_issue_tools
-from vs_issue_board import IssueBoard, IssueType
+from vs_issue_board import IssueType
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -63,11 +58,9 @@ class PlainLoopAgentClient(AgentClient):
         self,
         inner: AgentClientProtocol,
         *,
-        store: IssueBoard,
         max_issues_per_perf_eval: int,
     ):
         self._inner = inner
-        self._store = store
         self._perf_eval_cap = max_issues_per_perf_eval
 
     @property
@@ -121,7 +114,6 @@ class PlainLoopAgentClient(AgentClient):
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
-        tools: list[BaseTool] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
     ) -> str:
@@ -136,7 +128,6 @@ class PlainLoopAgentClient(AgentClient):
             invocation_id=invocation_id,
             progress=progress,
             mcp_servers=mcp_servers,
-            tools=tools,
             reuse_session=reuse_session,
             session_key=session_key,
         )
@@ -148,7 +139,6 @@ class PlainLoopAgentClient(AgentClient):
         response_cls: type[T],
         iteration: int | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
-        tools: list[BaseTool] | None = None,
         **kwargs: Any,  # noqa: ANN401  # tracked: #288
     ) -> T:
         if kind in ("judge", "perf_eval"):
@@ -158,67 +148,51 @@ class PlainLoopAgentClient(AgentClient):
                     "iteration= so the cap can be scoped per-iteration"
                 )
             if kind == "judge":
-                tracker_kwargs = self._tracker_kwargs(
-                    creator="judge",
-                    iteration=iteration,
-                    cap=_JUDGE_CAP,
-                    allowed_types=_JUDGE_ALLOWED_TYPES,
-                )
+                mcp_servers = [
+                    self._issue_mcp_spec(
+                        creator="judge",
+                        iteration=iteration,
+                        cap=_JUDGE_CAP,
+                        allowed_types=_JUDGE_ALLOWED_TYPES,
+                    )
+                ]
             else:  # perf_eval
-                tracker_kwargs = self._tracker_kwargs(
-                    creator="perf_eval",
-                    iteration=iteration,
-                    cap=self._perf_eval_cap,
-                    allowed_types=_PERF_EVAL_ALLOWED_TYPES,
-                )
-            mcp_servers = tracker_kwargs.get("mcp_servers", mcp_servers)
-            tools = tracker_kwargs.get("tools", tools)
+                mcp_servers = [
+                    self._issue_mcp_spec(
+                        creator="perf_eval",
+                        iteration=iteration,
+                        cap=self._perf_eval_cap,
+                        allowed_types=_PERF_EVAL_ALLOWED_TYPES,
+                    )
+                ]
         # implementer (and any other phase) passes through unmodified.
         return self._inner.invoke(
             kind=kind,
             response_cls=response_cls,
             mcp_servers=mcp_servers,
-            tools=tools,
             **kwargs,
         )
 
-    def _tracker_kwargs(
+    def _issue_mcp_spec(
         self,
         *,
         creator: str,
         iteration: int,
         cap: int,
         allowed_types: frozenset[IssueType],
-    ) -> dict[str, Any]:
-        """Build the right injection-point kwarg for the inner backend.
+    ) -> MCPServerSpec:
+        """Build the issue-board MCP server spec for one judge/perf_eval turn.
 
-        Returns ``{"mcp_servers": [...]}`` when the runtime supports MCP and
-        ``{"tools": [...]}`` when it supports in-process tools.
-
-        Both factories share the policy semantics in
-        :mod:`vs_issue_board.policy`, so cap and type-allowlist
-        enforcement is byte-identical between backends.
+        Cap and type-allowlist enforcement live in :mod:`vs_issue_board.policy`.
         """
-        if self._inner.capabilities.mcp_servers:
-            spec = build_issue_mcp_spec(
-                store_relpath="issues.json",
-                creator=creator,
-                iteration=iteration,
-                cap=cap,
-                allowed_types=set(allowed_types),
-            )
-            return {"mcp_servers": [spec]}
-        if not self._inner.capabilities.in_process_tools:
+        if not self._inner.capabilities.mcp_servers:
             raise RuntimeError(  # noqa: TRY003
                 f"agent backend {self._inner.backend_name!r} cannot expose issue-board tools"
             )
-        # Deepagents and other explicitly in-process implementations.
-        issue_tools = build_issue_tools(
-            self._store,
-            iteration=iteration,
-            can_create=True,
+        return build_issue_mcp_spec(
+            store_relpath="issues.json",
             creator=creator,
-            create_cap=cap,
-            allowed_create_types=set(allowed_types),
+            iteration=iteration,
+            cap=cap,
+            allowed_types=set(allowed_types),
         )
-        return {"tools": issue_tools}

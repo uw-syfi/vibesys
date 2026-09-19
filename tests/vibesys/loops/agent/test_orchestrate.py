@@ -63,6 +63,7 @@ from vibesys.schemas import (
 )
 from vs_loop_state.agent import RoundRecord
 from vs_project import Project, serialize_round
+from vs_sandbox import SandboxExecutionResult
 
 if TYPE_CHECKING:
     from vibesys.run.protocol import LoopContext
@@ -70,6 +71,11 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Fixtures & helpers
 # ---------------------------------------------------------------------------
+
+
+def _exec_result(*, exit_code: int, output: str) -> SandboxExecutionResult:
+    """Build a judge-backend result whose stdout is the whole output."""
+    return SandboxExecutionResult(output=output, exit_code=exit_code, stdout=output)
 
 
 def test_missing_implementer_response_fails_closed():  # noqa: ANN201  # tracked: #288
@@ -208,7 +214,7 @@ def _make_orchestrate_runner(  # noqa: ANN202, C901, PLR0913  # tracked: #288
     counters = {"impl": 0, "judge": 0, "orch_pre": 0, "orch_plan": 0, "prof": 0}
 
     runner = MagicMock(spec=AgentClient)
-    runner.backend_name = "deepagents"
+    runner.backend_name = "cli"
     # The loop records implementer attribution on each round; give the mock
     # real strings so the RoundRecord (str | None fields) validates.
     runner.driver_name = "mock"
@@ -375,7 +381,6 @@ def _invoke_orchestrate(
     }
     defaults.update(kwargs)
     with (
-        patch("vibesys.context.build_model", return_value="mock-model"),
         patch("vibesys.backends.cuda.make_local_shell_sandbox"),
         patch("vibesys.context.build_agent_client", return_value=runner),
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
@@ -1886,7 +1891,7 @@ def test_framework_accuracy_gate_runs_manifest_command_and_records_pass(tmp_path
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
     ctx.judge_accuracy_command = "trusted-check --profile hard"
-    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=0, output="PASS")
+    ctx.judge_backend.execute.return_value = _exec_result(exit_code=0, output="PASS")
     progress = tmp_path / "progress.md"
 
     feedback = _run_framework_accuracy_gate(
@@ -1926,7 +1931,7 @@ def test_framework_local_validation_executes_and_reuses_exact_inputs(tmp_path): 
     ctx.workspace = workspace
     ctx.git.current_sha.return_value = "a" * 40
     ctx.git.pending_changes.return_value = []
-    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=0, output="1 passed")
+    ctx.judge_backend.execute.return_value = _exec_result(exit_code=0, output="1 passed")
 
     feedback = _run_framework_validation_gate(
         ctx,
@@ -1985,7 +1990,7 @@ def test_framework_local_validation_emits_balanced_gate_pairs(tmp_path):  # noqa
     ctx.workspace = workspace
     ctx.git.current_sha.return_value = "a" * 40
     ctx.git.pending_changes.return_value = []
-    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=0, output="1 passed")
+    ctx.judge_backend.execute.return_value = _exec_result(exit_code=0, output="1 passed")
 
     seen = []
     unsubscribe = output_sink().subscribe(seen.append)
@@ -2041,7 +2046,7 @@ def test_framework_local_validation_fails_and_restores_mutation(tmp_path):  # no
     ctx.git.current_sha.return_value = "b" * 40
     ctx.git.pending_changes.return_value = ["server.py"]
     ctx.git.checkout_tree.return_value = True
-    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=0, output="1 passed")
+    ctx.judge_backend.execute.return_value = _exec_result(exit_code=0, output="1 passed")
 
     feedback = _run_framework_validation_gate(
         ctx,
@@ -2091,7 +2096,7 @@ def test_framework_accuracy_gate_rejects_checker_failure(tmp_path):  # noqa: ANN
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
     ctx.judge_accuracy_command = "trusted-check"
-    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=1, output="bad history")
+    ctx.judge_backend.execute.return_value = _exec_result(exit_code=1, output="bad history")
 
     feedback = _run_framework_accuracy_gate(
         ctx,
@@ -2113,7 +2118,7 @@ def test_framework_accuracy_gate_uses_manifest_timeout(tmp_path):  # noqa: ANN00
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
     ctx.judge_accuracy_command = "trusted-check"
-    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=0, output="PASS")
+    ctx.judge_backend.execute.return_value = _exec_result(exit_code=0, output="PASS")
     feedback = _run_framework_accuracy_gate(
         ctx,
         round_number=1,
@@ -2134,7 +2139,7 @@ def test_framework_accuracy_gate_passes_candidate_revision_to_environment(tmp_pa
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
     ctx.judge_accuracy_command = "trusted-check"
-    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=0, output="PASS")
+    ctx.judge_backend.execute.return_value = _exec_result(exit_code=0, output="PASS")
 
     feedback = _run_framework_accuracy_gate(
         ctx,
@@ -2158,7 +2163,7 @@ def test_framework_accuracy_gate_can_release_final_deployment(tmp_path):  # noqa
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
     ctx.judge_accuracy_command = "trusted-check"
-    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=0, output="PASS")
+    ctx.judge_backend.execute.return_value = _exec_result(exit_code=0, output="PASS")
     ctx.run_environment_view.deployment_release_env_var = "VIBESYS_RELEASE_MODAL_DEPLOYMENT"
 
     feedback = _run_framework_accuracy_gate(
@@ -2205,7 +2210,7 @@ def test_framework_accuracy_gate_rejects_changes_during_execution(tmp_path):  # 
     ctx = MagicMock()
     ctx.trusted_input_changes.side_effect = [[], ["_input_libs/checker.go"]]
     ctx.judge_accuracy_command = "trusted-check"
-    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=0, output="PASS")
+    ctx.judge_backend.execute.return_value = _exec_result(exit_code=0, output="PASS")
 
     feedback = _run_framework_accuracy_gate(
         ctx,
@@ -2222,7 +2227,7 @@ def test_framework_gates_reuse_accuracy_pass_after_later_gate_failure(tmp_path):
     from vibesys.loops.agent.loop import _run_framework_gates  # noqa: PLC0415  # tracked: #288
 
     ctx = MagicMock()
-    ctx.agent_client.backend_name = "deepagents"
+    ctx.agent_client.backend_name = "cli"
     ctx.judge_accuracy_command = "trusted-check"
     progress = tmp_path / "progress.md"
 
@@ -2280,7 +2285,7 @@ def test_framework_benchmark_extracts_declared_metric(tmp_path):  # noqa: ANN001
     ctx = MagicMock()
     ctx.judge_benchmark_command = "trusted-benchmark --repetitions 3"
     ctx.trusted_input_changes.side_effect = [[], []]
-    ctx.judge_backend.execute.return_value = SimpleNamespace(
+    ctx.judge_backend.execute.return_value = _exec_result(
         exit_code=0,
         output=(
             f"benchmark diagnostics\n{FRAMEWORK_BENCHMARK_MARKER}\n"
@@ -2325,7 +2330,7 @@ def test_framework_benchmark_prefers_top_level_metric_over_trial_diagnostics(tmp
     ctx = MagicMock()
     ctx.judge_benchmark_command = "trusted-benchmark"
     ctx.trusted_input_changes.side_effect = [[], []]
-    ctx.judge_backend.execute.return_value = SimpleNamespace(
+    ctx.judge_backend.execute.return_value = _exec_result(
         exit_code=0,
         output=(
             f"{FRAMEWORK_BENCHMARK_MARKER}\n"
@@ -2358,7 +2363,7 @@ def test_framework_benchmark_rejects_ambiguous_metric(tmp_path):  # noqa: ANN001
     ctx = MagicMock()
     ctx.judge_benchmark_command = "trusted-benchmark"
     ctx.trusted_input_changes.side_effect = [[], []]
-    ctx.judge_backend.execute.return_value = SimpleNamespace(
+    ctx.judge_backend.execute.return_value = _exec_result(
         exit_code=0,
         output=(
             f'{FRAMEWORK_BENCHMARK_MARKER}\n[{{"ops": 1}}, {{"ops": 2}}]\n'
@@ -2402,7 +2407,7 @@ def _protocol_benchmark_ctx(stream: str) -> MagicMock:
     ctx = MagicMock()
     ctx.judge_benchmark_command = "trusted-benchmark"
     ctx.trusted_input_changes.side_effect = [[], []]
-    ctx.judge_backend.execute.return_value = SimpleNamespace(
+    ctx.judge_backend.execute.return_value = _exec_result(
         exit_code=0,
         output=(
             f"benchmark diagnostics\n{FRAMEWORK_BENCHMARK_MARKER}\n"

@@ -53,7 +53,6 @@ from vibesys.events import (
     PhaseData,
     json_value,
 )
-from vibesys.llm_client import build_model
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
     ProfilerKind,
@@ -426,7 +425,6 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             )
             resolved_backend = agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND
             resolved_cli_provider = cli_provider or config.agent.cli_provider or "codex"
-            model = None if resolved_backend == "cli" else build_model(config)
             model_name = config.model.name
         with boot_trace.span("profiler_preflight"):
             resolved_profiler_kind = resolve_profiler_kind(
@@ -923,10 +921,8 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                     # file access.
                     "orchestrator": session.sandbox,
                 },
-                skills=[src.name for src in skill_source_paths],
                 skill_source_dirs=skill_source_paths,
                 compute_backend=backend,
-                model=model,
                 model_name=model_name,
                 run_log_file=logger.writer,
                 use_docker=session.view.cli_sandboxed,
@@ -945,7 +941,6 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             paths=paths,
             debug=debug,
             backend_impl=backend_impl,
-            model=model,
             model_name=model_name,
             input_path=input_path_str,
             workspace_sources=(),
@@ -998,8 +993,6 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                 agent_runtime=AgentRuntimeResources(
                     config=config,
                     compute_backend=backend,
-                    model=model,
-                    skills=tuple(source.name for source in skill_source_paths),
                     skill_source_dirs=tuple(skill_source_paths),
                     environment=environment,
                     environment_request=run_environment_request,
@@ -1175,10 +1168,8 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
             "profiler": session.sandbox,
             "orchestrator": session.sandbox,
         },
-        skills=[src.name for src in parent.skill_source_paths],
         skill_source_dirs=parent.skill_source_paths,
         compute_backend=parent.backend,
-        model=parent.model,
         model_name=parent.model_name,
         run_log_file=logger.writer,
         use_docker=session.view.cli_sandboxed,
@@ -1206,7 +1197,6 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
         paths=paths,
         debug=parent.debug,
         backend_impl=parent.backend_impl,
-        model=parent.model,
         model_name=parent.model_name,
         input_path=parent.input_path,
         workspace_sources=parent.workspace_sources,
@@ -1268,7 +1258,6 @@ class _RunContext:
         paths: RunPaths,
         debug: bool,
         backend_impl: ComputeBackendImpl,
-        model: Any,  # noqa: ANN401  # tracked: #288
         model_name: str,
         input_path: str | None,
         workspace_sources: tuple[WorkspaceSource, ...],
@@ -1313,7 +1302,6 @@ class _RunContext:
         self._paths = paths
         self.debug = debug
         self.backend_impl = backend_impl
-        self.model = model
         self.model_name = model_name
         self.input_path = input_path
         self.workspace_sources = workspace_sources

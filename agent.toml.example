@@ -1,6 +1,6 @@
 [model]
 name = "gpt-5.4"
-# Choose a model supported by the selected CLI provider or API backend.
+# Choose a model supported by the selected CLI provider.
 # provider = "vertex-ai"    # vertex-ai, anthropic, google-genai (auto-detected if omitted)
 
 # [thinking]
@@ -21,11 +21,10 @@ name = "gpt-5.4"
 # [agent]
 # Selects the agent backend used by the outer loops. The default is "cli",
 # which drives an external coding-agent CLI (Claude Code, Gemini, Codex, or
-# Opencode) through vibesys/agents. Set backend = "deepagents" to use the
-# LangChain/deepagents runner instead.
+# Opencode) through vibesys/agents.
 #
 # CLI flags --agent-backend / --cli-provider on `./vs` override these values.
-# backend = "cli"             # or "deepagents"
+# backend = "cli"
 # cli_provider = "codex"      # used when backend = "cli";
                               # one of: claude, gemini, codex, opencode
 # cli_timeout = 1800          # per-invocation timeout in seconds

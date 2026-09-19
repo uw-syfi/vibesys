@@ -389,14 +389,11 @@ def run_plain_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         render_all(issues_dir, store)
 
         # Wrap the runner so judge/perf_eval invokes auto-receive issue
-        # tracker access (in-process @tool callables under deepagents,
-        # MCP server spec under cli). The wrapper consumes an extra
+        # tracker access (an MCP server spec). The wrapper consumes an extra
         # ``iteration=`` kwarg on invoke() that the loop passes per call.
         # See vibesys/plain/runner_ext.py.
-        # The wrapper preserves the AgentClient surface while adding issue tools.
         ctx.agent_client = PlainLoopAgentClient(
             ctx.agent_client,
-            store=store,
             max_issues_per_perf_eval=max_issues_per_perf_eval,
         )
 
@@ -578,9 +575,8 @@ def run_plain_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
 
                     ctx.wait_for_debug(f"Judge step on issue #{issue.id}")
                     ctx.lprint(f"\n>>> Judge reviewing issue #{issue.id}...")
-                    # PlainLoopAgentClient injects tracker access (in-process
-                    # @tool callables under deepagents, MCPServerSpec under
-                    # cli) for kind="judge" — see
+                    # PlainLoopAgentClient injects tracker access (an
+                    # MCPServerSpec) for kind="judge" — see
                     # vibesys/plain/runner_ext.py. The judge may file
                     # at most ONE bug-type issue per review; that policy is
                     # enforced by the wrapper.
@@ -601,12 +597,10 @@ def run_plain_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         round_label=f"judge issue #{issue.id} att{issue.attempts}",
                     )
 
-                    # Under cli the MCP server writes via a separate IssueBoard
-                    # on the same file, so reload picks up tool-created issues.
-                    # Under deepagents the @tool callables mutate the in-memory
-                    # store directly, so reload is a no-op there. reload() does
-                    # not fire on_change, so re-render explicitly to keep the
-                    # per-issue markdown view in sync.
+                    # The MCP server writes via a separate IssueBoard on the
+                    # same file, so reload picks up tool-created issues.
+                    # reload() does not fire on_change, so re-render explicitly
+                    # to keep the per-issue markdown view in sync.
                     store.reload()
                     render_all(issues_dir, store)
 

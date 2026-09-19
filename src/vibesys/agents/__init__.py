@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 
     from .client import AgentClient
     from .contracts import AgentClientProtocol
-    from .deepagents_runner import DeepAgentsClient
     from .session_store import SessionStore
 
 __all__ = [
@@ -26,7 +25,6 @@ __all__ = [
     "AgentClientProtocol",
     "AgentProgress",
     "CandidateProgress",
-    "DeepAgentsClient",
     "ResponseFallback",
     "RoundProgress",
     "build_agent_client",
@@ -43,10 +41,6 @@ def __getattr__(name: str) -> Any:  # noqa: ANN401
         from .contracts import AgentClientProtocol  # noqa: PLC0415
 
         return AgentClientProtocol
-    if name == "DeepAgentsClient":
-        from .deepagents_runner import DeepAgentsClient  # noqa: PLC0415
-
-        return DeepAgentsClient
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")  # noqa: TRY003
 
 
@@ -56,10 +50,8 @@ def build_agent_client(  # noqa: PLR0913
     agent_backend: str | None,
     cli_provider: str | None,
     backends: dict[str, Any] | None,
-    skills: list[str],
     skill_source_dirs: list[Path],
     compute_backend: ComputeBackend | None = None,
-    model: Any,  # noqa: ANN401
     model_name: str,
     run_log_file: TextIO | None,
     use_docker: bool,
@@ -77,10 +69,8 @@ def build_agent_client(  # noqa: PLR0913
         agent_backend=agent_backend,
         cli_provider=cli_provider,
         backends=backends,
-        skills=skills,
         skill_source_dirs=skill_source_dirs,
         compute_backend=compute_backend,
-        model=model,
         model_name=model_name,
         run_log_file=run_log_file,
         use_docker=use_docker,

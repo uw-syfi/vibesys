@@ -8,7 +8,7 @@ is not published as a separate Python distribution.
 `vs-issue-board` owns the generic issue tracker pieces that do not depend on
 VibeSys: the persistent issue store, typed issue models, create-policy
 helpers, text formatting helpers, and a stdio MCP server. Applications can use
-it directly, then add their own rendering, prompts, LangChain wrappers, or loop
+it directly, then add their own rendering, prompts, tool adapters, or loop
 orchestration around it.
 
 ## Concepts
@@ -125,7 +125,7 @@ VibeSys. Examples: persistence, issue lifecycle state, type validation,
 formatting, create policies, and MCP access.
 
 Keep application-specific behavior outside the package. Examples: prompt text,
-loop scheduling, markdown report rendering, LangChain `@tool` adapters, and
+loop scheduling, markdown report rendering, agent tool adapters, and
 VibeSys-specific CLI wiring.
 
 ## Testing

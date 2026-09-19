@@ -187,8 +187,8 @@ class AgentCfg(_Strict):  # noqa: D101  # tracked: #288
     backend: str | None = Field(
         default=None,
         description=(
-            "Agent runner backend: 'cli' (drive an external coding-agent CLI) or "
-            "'deepagents'. The --agent-backend flag overrides; defaults to 'cli'."
+            "Agent runner backend: 'cli' (drive an external coding-agent CLI). "
+            "The --agent-backend flag overrides; defaults to 'cli'."
         ),
     )
     cli_provider: str | None = Field(

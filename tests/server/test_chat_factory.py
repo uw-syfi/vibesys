@@ -78,7 +78,6 @@ def _attachment(
         ),
         compute_backend="cpu",
         model=None,
-        skills=(),
         skill_source_dirs=(),
         environment=environment,
         environment_request=_EnvironmentRequest(),
