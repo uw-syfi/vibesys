@@ -16,17 +16,13 @@ from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import Any, Literal
 
+from vibesys import constants
 from vibesys.agents.base import ResponseFallback
 from vibesys.agents.factory import resolve_agent_driver
 from vibesys.agents.progress import RoundProgress
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.config import Config, as_config
-from vibesys.constants import (
-    DEFAULT_AGENT_BACKEND,
-    DEFAULT_COMPUTE_BACKEND,
-    ComputeBackend,
-    DomainName,
-)
+from vibesys.constants import DEFAULT_AGENT_BACKEND, DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibesys.context import create_run_context
 from vibesys.domains.base import DomainDefinition, DomainRole
 from vibesys.domains.registry import resolve_domain
@@ -2306,7 +2302,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
     modality: str | None = None,
     inner_loop: str = "multi-agent",
-    domain: DomainName | None = None,
+    domain: constants.DomainName | None = None,
     interface: str = DEFAULT_INTERFACE,
     remote_repo: str | None = None,
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
@@ -2378,10 +2374,9 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         objective.name: objective.direction for objective in objectives
     }
     if benchmark_result is not None:
-        # The legacy scalar result contract predates explicit directions and
-        # has always defined its reported metric as a maximization objective.
+        # The legacy scalar result contract has always defined its metric as maximized.
         manifest_axes.setdefault(benchmark_result.metric, "max")
-    if modality is None and domain_definition.name is DomainName.LLM_SERVING:
+    if modality is None and domain_definition.name is constants.DomainName.LLM_SERVING:
         modality = "text_generation"
     run_environment = run_environment or make_run_environment_spec()
     normalized_config = as_config(config)
