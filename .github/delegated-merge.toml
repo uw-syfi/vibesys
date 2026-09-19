@@ -18,6 +18,7 @@ prefixes = [
   "clients/core-state/src/",
   "clients/tui/dev/",
   "clients/tui/src/",
+  "docs/contributing/tui/",
 ]
 paths = []
 additional_checks = []

@@ -121,7 +121,7 @@ export class ExperimentLogView {
       onMouseUp: () => this.controller.focusPane('left'),
     });
     // The pane surface, on its own layer so the rounded frame stays rounded
-    // (tui-conventions.md). Same call as `chat-pane`.
+    // (tui/conventions.md). Same call as `chat-pane`.
     this.#fill = fillLayer(this.output, 'experiment-log-fill', theme.canvas);
     this.#header = new TextRenderable(renderer, {
       content: '',
@@ -137,7 +137,7 @@ export class ExperimentLogView {
     // collapses it to height 0 before every render, and only `#renderTable`
     // opens it back to 1. Inside the table view that height is fixed
     // regardless of how many rows follow, so it is a permanent row there
-    // (tui-conventions.md, "nothing moves that does not have to") without
+    // (tui/conventions.md, "nothing moves that does not have to") without
     // taxing views that have no header row to rule under.
     this.#headerRule = new TextRenderable(renderer, {
       content: '',
@@ -289,7 +289,7 @@ export class ExperimentLogView {
     const plan = planTable(state, this.#bodyWidth());
     if (plan === null) return;
     this.#header.content = plan.header;
-    // A permanent rule under the header (tui-conventions.md, "nothing moves
+    // A permanent rule under the header (tui/conventions.md, "nothing moves
     // that does not have to"): fixed at height 1 regardless of row count, so
     // it reads as a header rather than as one more line of text that happens
     // to sit above the rows.

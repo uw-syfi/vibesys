@@ -113,7 +113,7 @@ export function createOpenTuiApp(
     border: true,
     // Rounded, like the panes below it. The fill is on an inner layer, so
     // there is nothing in the corner cell to bleed past the arc
-    // (tui-conventions.md).
+    // (tui/conventions.md).
     borderStyle: 'rounded',
     borderColor: theme.border,
   });

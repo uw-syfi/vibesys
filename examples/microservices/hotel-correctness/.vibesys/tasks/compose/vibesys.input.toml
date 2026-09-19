@@ -10,14 +10,14 @@ version = "0.1.0"
 [accuracy]
 entrypoint = "python"
 args = [
-  "${PROJECT_ROOT}/evaluator/run.py",
+  "${PROJECT_ROOT}/.vibesys/tasks/compose/evaluator/run.py",
   "--package-root",
   "${PACKAGE_ROOT}",
   "--",
   "--mode",
   "accuracy",
   "--workload",
-  "${PROJECT_ROOT}/benchmark/workload.toml",
+  "${PROJECT_ROOT}/.vibesys/tasks/compose/benchmark/workload.toml",
   "--seed",
   "random",
   "--candidate-dir",
@@ -38,7 +38,7 @@ entrypoint = "servicebench"
 args = [
   "trace",
   "--workload",
-  "${PROJECT_ROOT}/benchmark/workload.toml",
+  "${PROJECT_ROOT}/.vibesys/tasks/compose/benchmark/workload.toml",
   "--seed",
   "random",
   "--fixture-seed",
@@ -46,7 +46,7 @@ args = [
   "--candidate-dir",
   "${PROJECT_ROOT}/deathstarbench/hotelReservation",
   "--run-command-json",
-  "[\"sh\",\"-c\",\"rm -f /tmp/vibesys-hotel-reservation/otel/traces.otlp.ndjson && go -C \\\"$1\\\" run ./cmd/otelinject --compose \\\"$2\\\" --config \\\"$3\\\" --metrics-dir /tmp/vibesys-hotel-reservation/otel --output /tmp/vibesys-hotel-reservation/otel/compose.telemetry.yaml && docker compose -f \\\"$2\\\" -f /tmp/vibesys-hotel-reservation/otel/compose.telemetry.yaml up -d --build\",\"vibesys-hotel-run\",\"${PACKAGE_ROOT}\",\"${PROJECT_ROOT}/deathstarbench/hotelReservation/docker-compose.yml\",\"${PROJECT_ROOT}/benchmark/telemetry.toml\"]",
+  "[\"sh\",\"-c\",\"rm -f /tmp/vibesys-hotel-reservation/otel/traces.otlp.ndjson && go -C \\\"$1\\\" run ./cmd/otelinject --compose \\\"$2\\\" --config \\\"$3\\\" --metrics-dir /tmp/vibesys-hotel-reservation/otel --output /tmp/vibesys-hotel-reservation/otel/compose.telemetry.yaml && docker compose -f \\\"$2\\\" -f /tmp/vibesys-hotel-reservation/otel/compose.telemetry.yaml up -d --build\",\"vibesys-hotel-run\",\"${PACKAGE_ROOT}\",\"${PROJECT_ROOT}/deathstarbench/hotelReservation/docker-compose.yml\",\"${PROJECT_ROOT}/.vibesys/tasks/compose/benchmark/telemetry.toml\"]",
   "--stop-command-json",
   "[\"docker\",\"compose\",\"stop\",\"-t\",\"10\",\"frontend\",\"geo\",\"profile\",\"rate\",\"recommendation\",\"reservation\",\"search\",\"user\"]",
   "--cleanup-command-json",

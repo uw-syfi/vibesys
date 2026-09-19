@@ -67,6 +67,9 @@ export type ProtocolVersion10 = 1;
 export type RequestId10 = string;
 export type Timestamp10 = string;
 export type Type10 = "query.experiments";
+export type RunId = string;
+export type ProjectionId = string;
+export type Revision = number;
 export type ProtocolVersion11 = 1;
 export type RequestId11 = string;
 export type Timestamp11 = string;
@@ -149,7 +152,7 @@ export type TuiTheme =
   | "high-contrast-dark"
   | "high-contrast-light";
 export type ProtocolVersion15 = 1;
-export type RunId = string;
+export type RunId1 = string;
 export type Sequence = number;
 /**
  * Lifecycle status of one run, as frontends observe it.
@@ -183,7 +186,7 @@ export type ActiveExecutions = ActiveAgentExecution[];
 export type ChatThreads = ChatThreadInfo[];
 export type ProtocolVersion16 = 1;
 export type Sequence1 = number;
-export type RunId1 = string;
+export type RunId2 = string;
 export type Timestamp15 = string;
 export type EventType =
   | "server_started"
@@ -305,6 +308,7 @@ export type Signal = string | null;
 export type Kind11 = "run_status_changed";
 export type Kind12 = "experiments_changed";
 export type Reason1 = "project_attached" | "active_hypothesis_changed" | "round_persisted";
+export type Revision1 = number | null;
 export type Kind13 = "configuration_failed";
 export type Code1 = string;
 export type Stage2 = string;
@@ -505,6 +509,12 @@ export type StrategyDisposition = ("available" | "parked" | "abandoned") | null;
 export type StrategyReason = string | null;
 export type Active = boolean;
 export type Experiments = HypothesisEntry[];
+export type RunId3 = string;
+export type ProjectionId1 = string;
+export type FromRevision = number | null;
+export type ThroughRevision = number;
+export type Reset = boolean;
+export type RemovedHypothesisIds = string[];
 export type ExperimentsReady = boolean | null;
 export type Round2 = number;
 export type Commit2 = string | null;
@@ -517,7 +527,7 @@ export type DesignReady = boolean | null;
 export type ServerMessage = SubscribedMessage | EventMessage | EventBatchMessage | ProtocolErrorMessage;
 export type Type14 = "subscribed";
 export type RequestId15 = string;
-export type RunId2 = string;
+export type RunId4 = string;
 export type LatestSequence = number;
 export type Type15 = "event";
 export type Type16 = "event_batch";
@@ -634,6 +644,15 @@ export interface ExperimentQuery {
   request_id?: RequestId10;
   timestamp?: Timestamp10;
   type?: Type10;
+  after?: ExperimentCursor | null;
+}
+/**
+ * Client's last completely applied experiment projection.
+ */
+export interface ExperimentCursor {
+  run_id: RunId;
+  projection_id: ProjectionId;
+  revision: Revision;
 }
 /**
  * Request the per-round design log for the attached run.
@@ -683,6 +702,7 @@ export interface Response {
   performance?: Performance;
   performance_context?: PerformanceContext | null;
   experiments?: Experiments;
+  experiment_update?: ExperimentUpdate | null;
   experiments_ready?: ExperimentsReady;
   design?: Design;
   design_ready?: DesignReady;
@@ -761,7 +781,7 @@ export interface InteractiveSetupDefaults {
 }
 export interface RunSnapshot {
   protocol_version?: ProtocolVersion15;
-  run_id: RunId;
+  run_id: RunId1;
   sequence: Sequence;
   status: RunStatus;
   agent_kind?: AgentKind;
@@ -805,7 +825,7 @@ export interface AgentExecutionActivityData {
 export interface RunEvent {
   protocol_version?: ProtocolVersion16;
   sequence?: Sequence1;
-  run_id?: RunId1;
+  run_id?: RunId2;
   timestamp: Timestamp15;
   type: EventType;
   text?: Text2;
@@ -927,6 +947,7 @@ export interface RunStatusChangedData {
 export interface ExperimentsChangedData {
   kind?: Kind12;
   reason: Reason1;
+  revision?: Revision1;
   [k: string]: unknown;
 }
 export interface ConfigurationFailedData {
@@ -1214,6 +1235,21 @@ export interface HypothesisRound {
   candidate_disposition?: CandidateDisposition | null;
 }
 /**
+ * How to apply ``Response.experiments`` to a client's prior snapshot.
+ *
+ * A reset replaces the entire list. A delta replaces entries by stable
+ * hypothesis ID and then removes the named IDs. ``from_revision`` is None for
+ * a reset because no prior client state is trusted.
+ */
+export interface ExperimentUpdate {
+  run_id: RunId3;
+  projection_id: ProjectionId1;
+  from_revision?: FromRevision;
+  through_revision: ThroughRevision;
+  reset: Reset;
+  removed_hypothesis_ids?: RemovedHypothesisIds;
+}
+/**
  * What one round changed in the workspace.
  *
  * Deliberately narrow: every other per-round fact (outcome, review,
@@ -1243,7 +1279,7 @@ export interface DesignFileChange {
 export interface SubscribedMessage {
   type?: Type14;
   request_id: RequestId15;
-  run_id: RunId2;
+  run_id: RunId4;
   latest_sequence: LatestSequence;
 }
 export interface EventMessage {

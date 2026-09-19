@@ -143,7 +143,7 @@ def test_hotel_tasks_share_packaged_go_oracle(task_name: str) -> None:
     assert bundle.evaluator_path is None
     assert bundle.evaluator_package_root == PACKAGE_ROOT
     assert bundle.evaluator_package_digest
-    assert "${PROJECT_ROOT}/evaluator/run.py" in bundle.accuracy_command
+    assert "${PROJECT_ROOT}/.vibesys/tasks/compose/evaluator/run.py" in bundle.accuracy_command
     assert ("--package-root", str(PACKAGE_ROOT)) in set(pairwise(bundle.accuracy_command))
     if task_name == "kubernetes":
         assert "${KUBERNETES_STOP_COMMAND_JSON}" in bundle.accuracy_command
@@ -191,10 +191,10 @@ def test_hotel_native_task_materializes_shared_checker(
     resolved = load_project_task(copied, copied.select_task("kubernetes"))
     assert resolved.accuracy_command == bundle.accuracy_command
     for path in (
-        "evaluator/run.py",
-        "evaluator/runtime.mod",
-        "evaluator/internal/hotel/suite.go",
-        "benchmark/workload.toml",
+        ".vibesys/tasks/compose/evaluator/run.py",
+        ".vibesys/tasks/compose/evaluator/runtime.mod",
+        ".vibesys/tasks/compose/evaluator/internal/hotel/suite.go",
+        ".vibesys/tasks/compose/benchmark/workload.toml",
     ):
         assert (destination / path).read_bytes() == (source / path).read_bytes()
     assert not (destination / "vibesys.input.toml").exists()

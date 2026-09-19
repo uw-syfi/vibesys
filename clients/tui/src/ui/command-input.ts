@@ -34,7 +34,7 @@ const COMMAND_TITLE = 'Command';
 /**
  * The reserved row above the box is blank while no input error stands: it only
  * holds its height, so an error never moves the layout. Bindings belong on the
- * key-help line (tui-conventions.md, "Bindings are visible").
+ * key-help line (tui/conventions.md, "Bindings are visible").
  */
 const RESTING_HINT = '';
 
@@ -44,7 +44,7 @@ const BOX_CHROME = 3;
 /**
  * The box's own rows plus the hint row above it, mirroring `chat-composer.ts`'s
  * `COMPOSER_CHROME`. The row is reserved rather than inserted on demand: per
- * `tui-conventions.md`, a row that appears and disappears resizes everything
+ * `tui/conventions.md`, a row that appears and disappears resizes everything
  * under it, so it is always present and only its content and colour change.
  */
 const COMMAND_CHROME = BOX_CHROME + 1;
@@ -143,7 +143,7 @@ function createCommandInputControls(
     visible: false,
     zIndex: 5,
     border: true,
-    // Square with an outer fill, the overlay exception (tui-conventions.md):
+    // Square with an outer fill, the overlay exception (tui/conventions.md):
     // this popup floats over the panes above the command column, so its fill
     // has to reach the border ring to stop them showing through, and that is
     // only honest under a square corner.

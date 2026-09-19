@@ -74,7 +74,7 @@ function roundMetric(round: RoundState, state: SessionState, now: Date): string 
  * The bar redraws every second, and `9s` -> `10s` or `1m 9s` -> `1m 10s` would
  * otherwise widen the slot and slide every tab to its right twice a minute, or
  * cross a ladder boundary and drop the other tabs' metrics for part of it.
- * tui-conventions.md reserves space for variable-width numbers. The pad is
+ * tui/conventions.md reserves space for variable-width numbers. The pad is
  * trailing, so it falls in the gap between slots rather than under the glyph.
  */
 function steadyElapsedLabel(elapsedMs: number): string {

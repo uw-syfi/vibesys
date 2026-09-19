@@ -132,6 +132,7 @@ pnpm check:ts
 When Python protocol models change, regenerate the files under
 `clients/backend-client/src/generated/` and review the diff.
 See the [TUI architecture guide](tui-architecture.md) for package ownership and dependency rules.
+TUI-specific contributor docs are indexed in [`tui/README.md`](tui/README.md).
 
 ## Extend VibeSys
 
