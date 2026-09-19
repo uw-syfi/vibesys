@@ -1,7 +1,8 @@
 """YCSB throughput benchmark against an already-running candidate server.
 
 Requires: Java 8+. Downloads the pinned YCSB 0.17.0 Redis binding to
-~/.cache/vibesys/kv-store/ycsb/ (override: KV_STORE_YCSB_HOME) on first run if it is not already present.
+~/.cache/vibesys/kv-store/ycsb/ (override: KV_STORE_YCSB_HOME; falls back to the
+temp dir if the home directory is not writable) on first run if it is not already present.
 
 Reports steady-state throughput so the number reflects the server, not JVM/JIT
 warmup: one discarded warmup run primes the JVM/JIT/connections, then several
@@ -37,11 +38,21 @@ YCSB_URL = (
     f"https://github.com/brianfrankcooper/YCSB/releases/download/"
     f"{YCSB_VERSION}/ycsb-redis-binding-{YCSB_VERSION}.tar.gz"
 )
+
+
 # The task directory is read-only during a run, so the download lives in a user
-# cache (override with KV_STORE_YCSB_HOME) instead of next to this script.
-YCSB_HOME = Path(
-    os.environ.get("KV_STORE_YCSB_HOME") or Path.home() / ".cache" / "vibesys" / "kv-store" / "ycsb"
-)
+# cache (override with KV_STORE_YCSB_HOME) instead of next to this script. When
+# the home directory is not writable (some sandboxes), fall back to the temp dir.
+def _default_ycsb_home() -> Path:
+    cache = Path.home() / ".cache" / "vibesys" / "kv-store"
+    try:
+        cache.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        cache = Path(tempfile.gettempdir()) / "vibesys-kv-store"
+    return cache / "ycsb"
+
+
+YCSB_HOME = Path(os.environ.get("KV_STORE_YCSB_HOME") or _default_ycsb_home())
 
 WORKLOADS = {"a": "workloads/workloada", "b": "workloads/workloadb", "c": "workloads/workloadc"}
 
