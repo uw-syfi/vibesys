@@ -240,7 +240,7 @@ class GitHubAPI:
 def landing_client(environ: Mapping[str, str] = os.environ) -> GitHubAPI | None:
     """Build the write client for landing from ``LANDING_GH_TOKEN``, or None if unset.
 
-    The landing token is a GitHub App installation token: pull requests
+    The landing token is a fine-grained PAT: pull requests
     enqueued with ``GITHUB_TOKEN`` do not start the merge queue's CI. It is
     never derived from, or replaced by, the read token.
     """

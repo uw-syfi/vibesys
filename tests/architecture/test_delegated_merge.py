@@ -1155,19 +1155,10 @@ def test_workflow_uses_trusted_default_branch_and_pinned_actions() -> None:
         if "uses" in step:
             reference = step["uses"].split("@", maxsplit=1)[1].split()[0]
             assert re.fullmatch(r"[0-9a-f]{40}", reference)
-    mint = next(step for step in steps if step.get("id") == "landing-token")
-    assert mint["uses"].startswith("actions/create-github-app-token@")
-    assert mint["with"] == {
-        "client-id": "${{ secrets.MERGE_QUEUE_APP_ID }}",
-        "private-key": "${{ secrets.MERGE_QUEUE_APP_PRIVATE_KEY }}",
-        "repositories": "${{ github.event.repository.name }}",
-        "permission-pull-requests": "write",
-        "permission-contents": "write",
-    }
-    assert steps.index(mint) < len(steps) - 1
+    assert not any("create-github-app-token" in step.get("uses", "") for step in steps)
     assert steps[-1]["env"] == {
         "GH_TOKEN": "${{ github.token }}",
-        "LANDING_GH_TOKEN": "${{ steps.landing-token.outputs.token }}",
+        "LANDING_GH_TOKEN": "${{ secrets.MERGE_QUEUE_PAT }}",
     }
     assert "secrets." not in "\n".join(step.get("run", "") for step in steps)
 

@@ -117,32 +117,23 @@ workflow has already passed before the merge, but the resulting update to
 GitHub does not start workflows for events created with `GITHUB_TOKEN`. A merge
 queue entry created with it never gets its `merge_group` CI run, so the entry
 stalls. The landing writes (`enqueuePullRequest`, `PUT .../merge-async`, and the
-direct `PUT .../merge`) therefore use an installation token minted by
-`actions/create-github-app-token` in the `Mint landing token` step. Reads, the
-role check, and audit comments keep `GITHUB_TOKEN`.
+direct `PUT .../merge`) therefore use a fine-grained personal access token
+passed to the `Authorize and merge or enqueue` step as `LANDING_GH_TOKEN`. Reads,
+the role check, and audit comments keep `GITHUB_TOKEN`.
 
-1. Create a GitHub App owned by the `uw-syfi` organization. Repository
-   permissions: Pull requests read and write, Contents read and write, Metadata
-   read. Leave every other permission unset. Disable the webhook. Do not add
-   the app to any branch protection or ruleset bypass list.
-2. Install it on this repository only.
-3. Add repository secrets `MERGE_QUEUE_APP_ID` and
-   `MERGE_QUEUE_APP_PRIVATE_KEY` (the full PEM, including the header and footer
-   lines). Despite its name, `MERGE_QUEUE_APP_ID` must hold the app's Client
-   ID (shown as `Client ID` on the app settings page, like `Iv23...`), not the
-   numeric App ID. The workflow passes it as the action's `client-id` input;
-   using the wrong value fails with `'Issuer' claim ('iss') must be an Integer`.
+1. Create a fine-grained PAT owned by a maintainer account (ideally a dedicated
+   machine user), with resource owner `uw-syfi`, repository access limited to
+   `vibesys`, and repository permissions Pull requests read and write and
+   Contents read and write (Metadata read is implied). Leave every other
+   permission unset. Set an expiration.
+2. Add it as the repository secret `MERGE_QUEUE_PAT`.
 
-To rotate the key, generate a new private key in the app settings, replace
-`MERGE_QUEUE_APP_PRIVATE_KEY`, run `/merge-scoped` on a small in-scope pull
-request to confirm, then delete the old key in the app settings.
+To rotate, generate a new PAT, replace `MERGE_QUEUE_PAT`, run `/merge-scoped` on
+a small in-scope pull request to confirm, then revoke the old PAT.
 
-If either secret is missing, the mint step fails and the job stops before the
-script runs, so nothing is landed. A failed `Mint landing token` step, which leaves no bot
-comment on the pull request, means the App secrets are wrong or missing. Check
-the job log. If the step is skipped or produces an empty
-token, the script refuses with a message naming the landing token, before any
-landing write. It never falls back to `GITHUB_TOKEN`.
+If `MERGE_QUEUE_PAT` is missing or empty, the script refuses with a message
+naming the landing token, before any landing write. It never falls back to
+`GITHUB_TOKEN`.
 
 ## Migration from the scoped TUI bot
 
