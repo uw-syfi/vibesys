@@ -3,7 +3,13 @@ import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing'
 import type {AgentPhase} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
-import {AgentMapView, agentPaneWidth, STACKED_WIDTH, TRANSCRIPT_MIN} from './agent-map.js';
+import {
+  AgentMapView,
+  agentMapLayout,
+  agentPaneWidth,
+  STACKED_WIDTH,
+  TRANSCRIPT_MIN,
+} from './agent-map.js';
 import {resolveTheme} from './theme.js';
 
 /** A round with one agent per kind, in order. */
@@ -51,6 +57,98 @@ describe('agentPaneWidth', () => {
         expect(terminalWidth - paneWidth).toBeGreaterThanOrEqual(TRANSCRIPT_MIN);
       }
     }
+  });
+});
+
+describe('agentMapLayout', () => {
+  test('switches between graph and stacked layout at the automatic width boundary', () => {
+    expect(agentMapLayout(104, THREE, undefined, 20)).toEqual({
+      paneWidth: STACKED_WIDTH,
+      graphWidth: null,
+      graphRows: 17,
+    });
+    expect(agentMapLayout(105, THREE, undefined, 20)).toEqual({
+      paneWidth: 63,
+      graphWidth: 63,
+      graphRows: 17,
+    });
+  });
+
+  test('keeps a zoom width while choosing whether the graph fits inside it', () => {
+    expect(agentMapLayout(200, THREE, 62, 20)).toEqual({
+      paneWidth: 62,
+      graphWidth: null,
+      graphRows: 17,
+    });
+    expect(agentMapLayout(200, THREE, 63, 2)).toEqual({
+      paneWidth: 63,
+      graphWidth: 63,
+      graphRows: 0,
+    });
+  });
+});
+
+describe('agent map rendering states', () => {
+  const cleanup: Array<() => void> = [];
+
+  afterEach(() => {
+    for (const destroy of cleanup.splice(0).reverse()) destroy();
+  });
+
+  async function renderState(state: SessionState, width: number): Promise<string> {
+    const testRenderer = await createTestRenderer({width, height: 20});
+    const view = new AgentMapView(
+      testRenderer.renderer,
+      {} as unknown as SessionController,
+      resolveTheme(null),
+    );
+    testRenderer.renderer.root.add(view.output);
+    cleanup.push(() => {
+      view.destroy();
+      view.output.destroyRecursively();
+      testRenderer.renderer.destroy();
+    });
+    view.render(state, width, 20);
+    await testRenderer.renderOnce();
+    return testRenderer.captureCharFrame();
+  }
+
+  test('distinguishes a planned round from a run waiting for phases', async () => {
+    const base = initialSessionState();
+    const planned = await renderState(
+      {
+        ...base,
+        selectedRound: 2,
+        core: {...base.core, maxRounds: 2, rounds: [{number: 1, status: 'completed'}]},
+      },
+      50,
+    );
+    const waiting = await renderState(base, 50);
+
+    expect(planned).toContain('Round 2 has not run yet.');
+    expect(waiting).toContain('Waiting for phases…');
+  });
+
+  test('keeps the heading in both content layouts and elides only its optional summary', async () => {
+    const base = initialSessionState();
+    const state: SessionState = {
+      ...base,
+      selectedRound: 1,
+      core: {
+        ...base.core,
+        rounds: [{number: 1, status: 'completed'}],
+        phases: round('orchestrator'),
+      },
+    };
+
+    const graph = await renderState(state, 80);
+    const stacked = await renderState(state, 30);
+
+    expect(graph).toContain('Round 1 flow');
+    expect(graph).toContain('1 agent · 0 active · 1 done');
+    expect(stacked).toContain('Round 1 flow');
+    expect(stacked).not.toContain('1 agent · 0 active · 1 done');
+    expect(stacked).toContain('✓ orchestrator');
   });
 });
 
