@@ -123,6 +123,9 @@ omit = [
     # Module execution stubs contain only a guarded call into a measured
     # entrypoint. Exercising them would require invoking a separate process.
     "*/__main__.py",
+    # Generated protobuf bindings (`pnpm proto:generate`): the module body is
+    # descriptor registration, exercised by import, not behavior worth measuring.
+    "*/server/wire/v2/*_pb2.py",
 ]
 
 [tool.coverage.report]
