@@ -16,7 +16,7 @@ importers:
         specifier: 16.10.4
         version: 16.10.4
 
-  clients/backend-client:
+  backend-client:
     devDependencies:
       '@types/bun':
         specifier: 1.3.9
@@ -31,7 +31,7 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  clients/core-state:
+  core-state:
     dependencies:
       '@vibesys/backend-client':
         specifier: workspace:*
@@ -44,7 +44,7 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  clients/tui:
+  tui:
     dependencies:
       '@opentui/core':
         specifier: 0.4.3

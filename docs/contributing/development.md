@@ -120,8 +120,9 @@ The TypeScript client has its own workflow; see
 [`clients/tui/README.md`](https://github.com/uw-syfi/vibesys/blob/main/clients/tui/README.md). The short version is:
 
 ```bash
+cd clients
 pnpm install --frozen-lockfile
-pnpm --dir clients/backend-client generate:protocol
+pnpm --dir backend-client generate:protocol
 pnpm check:ts-architecture
 pnpm check:clients
 pnpm test:clients

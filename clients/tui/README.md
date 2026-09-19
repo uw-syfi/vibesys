@@ -340,8 +340,9 @@ FIFO-by-tool fallback.
 From the repository root:
 
 ```bash
+cd clients
 pnpm install --frozen-lockfile
-pnpm --dir clients/backend-client generate:protocol
+pnpm --dir backend-client generate:protocol
 pnpm check:ts-architecture
 pnpm check:clients
 pnpm test:clients

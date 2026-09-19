@@ -92,9 +92,10 @@ wall time since the user ran the command rather than since the frontend process 
 
 ## Validation
 
-Run all package checks from the repository root:
+Run all package checks from `clients/`, the TypeScript workspace root:
 
 ```bash
+cd clients
 pnpm check:ts-architecture
 pnpm check:clients
 pnpm test:clients

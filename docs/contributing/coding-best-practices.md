@@ -273,7 +273,7 @@ splitting or simplifying the affected code.
 
 ```bash
 uv run python scripts/check_file_length.py
-pnpm lint:ts
+(cd clients && pnpm lint:ts)
 ```
 
 ## Avoid

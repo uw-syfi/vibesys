@@ -74,9 +74,6 @@ jobs:
             # generated protocol bindings, and by nothing else.
             tui:
               - 'clients/**'
-              - 'package.json'
-              - 'pnpm-lock.yaml'
-              - 'pnpm-workspace.yaml'
               - 'src/server/api/schema.py'
               - 'src/server/events.py'
               - 'src/server/api/protocol.py'
@@ -84,8 +81,6 @@ jobs:
               - 'src/server/diagnostics.py'
               - 'src/server/settings.py'
               - 'packaging/fetch_bun.py'
-              - 'scripts/check_ts_architecture.test.mjs'
-              - 'scripts/check_ts_package_manifests.mjs'
               - '.github/workflows/test.yml'
             # What `validate-examples` checks: the example repositories
             # themselves (a submodule bump shows up as a change to the gitlink
@@ -236,7 +231,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.PNPM_STORE_PATH }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('clients/pnpm-lock.yaml') }}
           # A lockfile bump usually changes a handful of packages, so an older
           # store is still worth most of its download cost.
           restore-keys: pnpm-store-${{ runner.os }}-
@@ -259,40 +254,49 @@ jobs:
         run: uv sync --dev
 
       - name: Install TUI dependencies
+        working-directory: clients
         run: pnpm install --frozen-lockfile
 
       - name: Check TypeScript formatting and lint
+        working-directory: clients
         run: pnpm check:ts
 
       - name: Check TypeScript package boundaries
+        working-directory: clients
         run: pnpm check:ts-architecture
 
       - name: Check generated protocol bindings
+        working-directory: clients
         run: |
-          pnpm --dir clients/backend-client generate:protocol
-          git diff --exit-code -- clients/backend-client/src/generated/protocol.schema.json clients/backend-client/src/generated/protocol.generated.ts
+          pnpm --dir backend-client generate:protocol
+          git diff --exit-code -- backend-client/src/generated/protocol.schema.json backend-client/src/generated/protocol.generated.ts
 
       - name: Check TypeScript packages
+        working-directory: clients
         run: pnpm check:clients
 
       - name: Test TypeScript packages
+        working-directory: clients
         run: pnpm test:clients
 
       - name: Build TypeScript packages
+        working-directory: clients
         run: pnpm build:clients
 
       - name: Smoke-test packed public TUI package
+        working-directory: clients
         run: |
           pack_dir="$RUNNER_TEMP/vibesys-tui-pack"
           install_dir="$RUNNER_TEMP/vibesys-tui-install"
           mkdir -p "$pack_dir" "$install_dir"
-          pnpm --dir clients/tui pack --pack-destination "$pack_dir"
+          pnpm --dir tui pack --pack-destination "$pack_dir"
           npm install --prefix "$install_dir" --ignore-scripts "$pack_dir"/*.tgz
           test -f "$install_dir/node_modules/@vibesys/tui/node_modules/@vibesys/backend-client/dist/index.js"
           test -f "$install_dir/node_modules/@vibesys/tui/node_modules/@vibesys/core-state/dist/index.js"
           bun "$install_dir/node_modules/@vibesys/tui/dist/self-test.js"
 
       - name: Smoke-test deployed TUI workspace packages
+        working-directory: clients
         run: |
           deploy_dir="$RUNNER_TEMP/vibesys-tui-deploy"
           pnpm --config.node-linker=hoisted --filter @vibesys/tui deploy --prod "$deploy_dir"

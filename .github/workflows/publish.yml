@@ -25,9 +25,6 @@ on:
       # The bundled TUI payload: the workspace `pnpm build:clients` builds and
       # `pnpm deploy` stages, and the launcher that resolves it.
       - 'clients/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
       - 'src/entrypoints/launcher.py'
       # Licenses whose digests the wheel verifier compares.
       - 'LICENSE'
@@ -154,7 +151,7 @@ jobs:
           # Keyed on matrix.target, not runner.os: linux-x86_64 and
           # linux-aarch64 share an OS but not an architecture, and OpenTUI's
           # native optional dependencies differ per architecture.
-          key: pnpm-store-${{ matrix.target }}-${{ hashFiles('pnpm-lock.yaml') }}
+          key: pnpm-store-${{ matrix.target }}-${{ hashFiles('clients/pnpm-lock.yaml') }}
           restore-keys: pnpm-store-${{ matrix.target }}-
 
       - name: Install Python dependencies

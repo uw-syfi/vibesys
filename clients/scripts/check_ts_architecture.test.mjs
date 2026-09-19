@@ -8,8 +8,8 @@ import {cruise} from 'dependency-cruiser';
 import extractDepcruiseOptions from 'dependency-cruiser/config-utl/extract-depcruise-options';
 import {manifestErrors} from './check_ts_package_manifests.mjs';
 
-const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const CONFIG = join(REPOSITORY_ROOT, '.dependency-cruiser.cjs');
+const WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const CONFIG = join(WORKSPACE_ROOT, '.dependency-cruiser.cjs');
 
 test('dependency-cruiser rejects forbidden package and runtime edges', async () => {
   const root = await mkdtemp(join(tmpdir(), 'vibesys-dependency-rules-'));
@@ -19,9 +19,9 @@ test('dependency-cruiser rejects forbidden package and runtime edges', async () 
       compilerOptions: {
         baseUrl: '.',
         paths: {
-          '@vibesys/backend-client': ['clients/backend-client/src/index.ts'],
-          '@vibesys/core-state': ['clients/core-state/src/index.ts'],
-          '@vibesys/tui': ['clients/tui/src/index.ts'],
+          '@vibesys/backend-client': ['backend-client/src/index.ts'],
+          '@vibesys/core-state': ['core-state/src/index.ts'],
+          '@vibesys/tui': ['tui/src/index.ts'],
         },
       },
     }),
@@ -49,14 +49,11 @@ test('dependency-cruiser rejects forbidden package and runtime edges', async () 
   await writeExternalPackage(root, 'undeclared-package');
 
   const options = await extractDepcruiseOptions(CONFIG);
-  const result = await cruise(
-    ['clients/backend-client/src', 'clients/core-state/src', 'clients/tui/src'],
-    {
-      ...options,
-      baseDir: root,
-      tsConfig: {fileName: join(root, 'tsconfig.architecture.json')},
-    },
-  );
+  const result = await cruise(['backend-client/src', 'core-state/src', 'tui/src'], {
+    ...options,
+    baseDir: root,
+    tsConfig: {fileName: join(root, 'tsconfig.architecture.json')},
+  });
   const violatedRules = new Set(
     result.output.summary.violations.map(violation => violation.rule.name),
   );
@@ -90,20 +87,20 @@ test('manifest policy rejects declared reverse dependencies', async () => {
   });
 
   assert.deepEqual(await manifestErrors(root), [
-    'clients/backend-client/package.json: @vibesys/backend-client must not depend on @vibesys/core-state',
-    'clients/core-state/package.json: @vibesys/core-state must not depend on @opentui/core',
-    'clients/tui/package.json: @vibesys/tui must declare @vibesys/core-state in dependencies',
+    'backend-client/package.json: @vibesys/backend-client must not depend on @vibesys/core-state',
+    'core-state/package.json: @vibesys/core-state must not depend on @opentui/core',
+    'tui/package.json: @vibesys/tui must declare @vibesys/core-state in dependencies',
   ]);
 });
 
 async function writeSource(root, packageDirectory, file, source) {
-  const directory = join(root, 'clients', packageDirectory, 'src');
+  const directory = join(root, packageDirectory, 'src');
   await mkdir(directory, {recursive: true});
   await writeFile(join(directory, file), source);
 }
 
 async function writeManifest(root, directory, name, dependencies) {
-  const packageDirectory = join(root, 'clients', directory);
+  const packageDirectory = join(root, directory);
   await mkdir(packageDirectory, {recursive: true});
   await writeFile(join(packageDirectory, 'package.json'), JSON.stringify({name, dependencies}));
 }
