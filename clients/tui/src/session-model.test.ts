@@ -1,19 +1,26 @@
 import {describe, expect, it, test} from 'bun:test';
 import {create, type MessageInitShape} from '@bufbuild/protobuf';
 import {
+  ActiveAgentExecutionSchema,
   AgentOutputChannel,
   DiagnosticRetryability,
+  DiagnosticSchema,
   DiagnosticScope,
   DiagnosticSeverity,
   EventStatus,
   EventType,
   type HypothesisEntry,
   HypothesisEntrySchema,
+  HypothesisRoundSchema,
   type RunEvent,
   RunEventSchema,
-  type RunStatus,
+  ExecutionActivityMode,
+  FrameworkSource,
+  JudgeVerdict,
+  RoundJudgeVerdict,
+  RunStatus,
 } from '@vibesys/backend-client';
-import {makeEvent} from '@vibesys/backend-client/testing';
+import {makeEvent, timestampOf} from '@vibesys/backend-client/testing';
 import {hasRunEnded} from '@vibesys/core-state';
 import type {SessionState} from './session-model.js';
 import {
@@ -110,7 +117,7 @@ describe('error report normalization', () => {
     const state = reportError(initialSessionState(), 'legacy message', {
       scope: 'request',
       severity: 'recoverable',
-      diagnostic: {
+      diagnostic: create(DiagnosticSchema, {
         id: 'diagnostic-1',
         code: 'agent_failed',
         summary: 'The worker failed.',
@@ -119,7 +126,7 @@ describe('error report normalization', () => {
         scope: DiagnosticScope.INVOCATION,
         severity: DiagnosticSeverity.FATAL,
         retryability: DiagnosticRetryability.MANUAL,
-      },
+      }),
       agentKind: 'implementer',
       invocationId: 'invocation-1',
     });
@@ -195,13 +202,13 @@ describe('event batch projection', () => {
     const state = applyEventBatch(before, [
       {
         ...event(1, EventType.RUN_FAILED),
-        diagnostic: {
+        diagnostic: create(DiagnosticSchema, {
           code: 'interrupted',
           summary: 'Previous process was interrupted.',
           scope: DiagnosticScope.RUN,
           severity: DiagnosticSeverity.FATAL,
           retryability: DiagnosticRetryability.NEVER,
-        },
+        }),
       },
       event(2, EventType.RUN_STARTED, {
         case: 'runStarted',
@@ -223,13 +230,13 @@ describe('event batch projection', () => {
       }),
       {
         ...event(2, EventType.RUN_FAILED),
-        diagnostic: {
+        diagnostic: create(DiagnosticSchema, {
           code: 'run_failed',
           summary: 'The current run failed.',
           scope: DiagnosticScope.RUN,
           severity: DiagnosticSeverity.FATAL,
           retryability: DiagnosticRetryability.NEVER,
-        },
+        }),
       },
     ]);
 
@@ -245,29 +252,28 @@ describe('event batch projection', () => {
       }),
       {
         ...event(2, EventType.RUN_FAILED),
-        diagnostic: {
+        diagnostic: create(DiagnosticSchema, {
           id: 'failure-1',
           code: 'run_failed',
           summary: 'The current run failed.',
           scope: DiagnosticScope.RUN,
           severity: DiagnosticSeverity.FATAL,
           retryability: DiagnosticRetryability.NEVER,
-        },
+        }),
       },
       {
         ...event(3, EventType.FRAMEWORK_WARNING, {
           case: 'frameworkWarning',
-          value: {summary: 'profiler failed', detail: 'nsys exited 1', source: 'loop'},
+          value: {summary: 'profiler failed', detail: 'nsys exited 1', source: FrameworkSource.LOOP},
         }),
-        agentKind: null,
-        diagnostic: {
+        diagnostic: create(DiagnosticSchema, {
           id: 'warn-1',
           code: 'framework_warning',
           summary: 'profiler failed',
           scope: DiagnosticScope.RUN,
           severity: DiagnosticSeverity.WARNING,
           source: 'loop',
-        },
+        }),
       },
     ]);
 
@@ -668,7 +674,7 @@ describe('session event model', () => {
       state,
       executionEvent(
         1,
-        'agent_execution_started',
+        EventType.AGENT_EXECUTION_STARTED,
         'impl-1',
         {
           case: 'agentExecutionStarted',
@@ -678,10 +684,8 @@ describe('session event model', () => {
             systemPrompt: '',
             userPrompt: 'Implement the queue',
             activity: {
-              kind: 'agent_execution_activity_changed',
               mode: ExecutionActivityMode.THINKING,
               summary: 'Inspecting the queue',
-              tool: null,
             },
           },
         },
@@ -692,20 +696,17 @@ describe('session event model', () => {
       state,
       executionEvent(
         2,
-        'agent_execution_started',
+        EventType.AGENT_EXECUTION_STARTED,
         'review-1',
         {
           case: 'agentExecutionStarted',
           value: {
             stage: 'review',
-            attempt: null,
             systemPrompt: '',
             userPrompt: 'Review the diff',
             activity: {
-              kind: 'agent_execution_activity_changed',
               mode: ExecutionActivityMode.WAITING,
               summary: 'Waiting for the implementation',
-              tool: null,
             },
           },
         },
@@ -716,7 +717,7 @@ describe('session event model', () => {
       state,
       executionEvent(
         3,
-        'agent_execution_activity_changed',
+        EventType.AGENT_EXECUTION_ACTIVITY_CHANGED,
         'impl-1',
         {
           case: 'agentExecutionActivityChanged',
@@ -728,7 +729,7 @@ describe('session event model', () => {
 
     expect(Object.keys(state.core.activeExecutions)).toEqual(['impl-1', 'review-1']);
     expect(state.core.activeExecutions['impl-1']?.activity).toEqual({
-      mode: ExecutionActivityMode.TOOL,
+      mode: 'tool',
       summary: 'Running queue tests',
       tool: 'Bash',
     });
@@ -740,9 +741,9 @@ describe('session event model', () => {
       state,
       executionEvent(
         4,
-        'agent_execution_finished',
+        EventType.AGENT_EXECUTION_FINISHED,
         'impl-1',
-        {case: 'agentExecutionFinished', value: {error: null}},
+        {case: 'agentExecutionFinished', value: {}},
         'implementer',
       ),
     );
@@ -754,7 +755,7 @@ describe('session event model', () => {
       initialSessionState(),
       executionEvent(
         1,
-        'agent_execution_started',
+        EventType.AGENT_EXECUTION_STARTED,
         'impl-1',
         {
           case: 'agentExecutionStarted',
@@ -764,10 +765,8 @@ describe('session event model', () => {
             systemPrompt: '',
             userPrompt: 'Implement the queue',
             activity: {
-              kind: 'agent_execution_activity_changed',
               mode: ExecutionActivityMode.THINKING,
               summary: 'Inspecting the queue',
-              tool: null,
             },
           },
         },
@@ -784,21 +783,19 @@ describe('session event model', () => {
 
   it('reconciles from a checkpoint without advancing the replay cursor', () => {
     const state = applyActiveExecutionCheckpoint(initialSessionState(), [
-      {
-        execution_id: 'judge-2',
+      create(ActiveAgentExecutionSchema, {
+        executionId: 'judge-2',
         agentKind: 'judge',
         roundLabel: 'round-2-judge',
         stage: 'evaluation',
         attempt: 1,
         assignment: 'Evaluate the candidate',
-        started_at: '2026-01-01T00:00:00Z',
+        startedAt: timestampOf('2026-01-01T00:00:00Z'),
         activity: {
-          kind: 'agent_execution_activity_changed',
           mode: ExecutionActivityMode.THINKING,
           summary: 'Inspecting the diff',
-          tool: null,
         },
-      },
+      }),
     ]);
 
     expect(state.core.sequence).toBe(0);
@@ -825,7 +822,7 @@ describe('session event model', () => {
       initialSessionState(),
       executionEvent(
         1,
-        'agent_execution_started',
+        EventType.AGENT_EXECUTION_STARTED,
         'impl-1',
         {
           case: 'agentExecutionStarted',
@@ -835,22 +832,15 @@ describe('session event model', () => {
             systemPrompt: '',
             userPrompt: 'Implement the queue',
             activity: {
-              kind: 'agent_execution_activity_changed',
               mode: ExecutionActivityMode.THINKING,
               summary: 'Inspecting the queue',
-              tool: null,
             },
           },
         },
         'implementer',
       ),
     );
-    const interrupted = applyEvent(active, {
-      sequence: 2,
-      timestamp: '2026-01-01T00:00:01Z',
-      type: 'run_interrupted',
-      data: {case: 'runInterrupted', value: {reason: 'SIGINT', signal: 'SIGINT'}},
-    });
+    const interrupted = applyEvent(active, makeEvent(EventType.RUN_INTERRUPTED, {sequence: 2, timestamp: timestampOf('2026-01-01T00:00:01Z'), data: {case: 'runInterrupted', value: {reason: 'SIGINT', signal: 'SIGINT'}}}));
 
     expect(interrupted.core.activeExecutions).toEqual({});
   });
@@ -860,20 +850,17 @@ describe('session event model', () => {
       initialSessionState(),
       executionEvent(
         1,
-        'agent_execution_started',
+        EventType.AGENT_EXECUTION_STARTED,
         'chat-execution',
         {
           case: 'agentExecutionStarted',
           value: {
             stage: 'chat',
-            attempt: null,
             systemPrompt: '',
             userPrompt: 'What is running?',
             activity: {
-              kind: 'agent_execution_activity_changed',
               mode: ExecutionActivityMode.THINKING,
               summary: 'Inspecting the run',
-              tool: null,
             },
           },
         },
@@ -888,9 +875,9 @@ describe('session event model', () => {
       state,
       executionEvent(
         2,
-        'agent_execution_finished',
+        EventType.AGENT_EXECUTION_FINISHED,
         'chat-execution',
-        {case: 'agentExecutionFinished', value: {error: null}},
+        {case: 'agentExecutionFinished', value: {}},
         'chat',
       ),
     );
@@ -931,7 +918,7 @@ describe('session event model', () => {
       initialSessionState(),
       event(1, EventType.ROUND_FINISHED, {
         case: 'roundFinished',
-        value: {attempts: 1, judgeVerdict: RoundJudgeVerdict.SKIPPED, perfMetric: null, perfUnit: null},
+        value: {attempts: 1, judgeVerdict: RoundJudgeVerdict.SKIPPED},
       }),
     );
 
@@ -959,7 +946,6 @@ describe('session event model', () => {
           code: 'resume_limit_exhausted',
           stage: 'resume_resolution',
           message: 'This run has completed 30 rounds.',
-          usage: null,
           exitCode: 2,
         },
       }),
@@ -984,7 +970,7 @@ describe('session event model', () => {
         case: 'invocationFinished',
         value: {error: 'RuntimeError: app-server initialization was denied'},
       }),
-      status: 'failed',
+      status: EventStatus.FAILED,
       executionId: 'invocation-1',
     });
 
@@ -1023,20 +1009,19 @@ describe('session event model', () => {
     let state = applyEvent(initialSessionState(), {
       ...event(1, EventType.INVOCATION_FINISHED),
       executionId: 'invocation-1',
-      diagnostic: {
+      diagnostic: create(DiagnosticSchema, {
         id: 'failure-1',
         code: 'agent_failed',
         summary: 'The worker failed.',
-        detail: null,
         scope: DiagnosticScope.INVOCATION,
         severity: DiagnosticSeverity.ERROR,
         retryability: DiagnosticRetryability.MANUAL,
-      },
+      }),
     });
     state = dismissErrorBanner(state);
     state = applyEvent(state, {
       ...event(2, EventType.RUN_FAILED),
-      diagnostic: {
+      diagnostic: create(DiagnosticSchema, {
         id: 'failure-1',
         code: 'agent_failed',
         summary: 'The worker failed.',
@@ -1044,7 +1029,7 @@ describe('session event model', () => {
         scope: DiagnosticScope.INVOCATION,
         severity: DiagnosticSeverity.FATAL,
         retryability: DiagnosticRetryability.MANUAL,
-      },
+      }),
     });
 
     expect(state.errorBanner).toMatchObject({
@@ -1062,7 +1047,7 @@ describe('session event model', () => {
         value: {error: 'legacy invocation error'},
       }),
       text: 'legacy invocation text',
-      diagnostic: {
+      diagnostic: create(DiagnosticSchema, {
         id: 'failure-1',
         code: 'unrecognized_future_code',
         summary: 'The worker could not start.',
@@ -1071,12 +1056,12 @@ describe('session event model', () => {
         scope: DiagnosticScope.INVOCATION,
         severity: DiagnosticSeverity.ERROR,
         retryability: DiagnosticRetryability.MANUAL,
-      },
+      }),
     });
     state = applyEvent(state, {
       ...event(2, EventType.RUN_FAILED),
       text: 'legacy terminal text',
-      diagnostic: {
+      diagnostic: create(DiagnosticSchema, {
         id: 'failure-1',
         code: 'unrecognized_future_code',
         summary: 'The worker could not start.',
@@ -1085,7 +1070,7 @@ describe('session event model', () => {
         scope: DiagnosticScope.INVOCATION,
         severity: DiagnosticSeverity.FATAL,
         retryability: DiagnosticRetryability.MANUAL,
-      },
+      }),
     });
 
     expect(state.errorBanner).toMatchObject({
@@ -1120,7 +1105,6 @@ describe('session event model', () => {
         case: 'invocationFinished',
         value: {error: 'The agent process could not start.'},
       }),
-      status: null,
     });
 
     expect(state.errorBanner).toMatchObject({
@@ -1143,7 +1127,7 @@ describe('session event model', () => {
         case: 'runInterrupted',
         value: {reason: 'launcher_terminated', signal: 'SIGTERM'},
       }),
-      diagnostic: {
+      diagnostic: create(DiagnosticSchema, {
         id: 'interrupted-1',
         code: 'interrupted',
         summary: 'Run interrupted',
@@ -1151,7 +1135,7 @@ describe('session event model', () => {
         scope: DiagnosticScope.RUN,
         severity: DiagnosticSeverity.FATAL,
         retryability: DiagnosticRetryability.NEVER,
-      },
+      }),
     });
 
     expect(state.errorBanner).toMatchObject({
@@ -1166,10 +1150,9 @@ describe('session event model', () => {
     const warned = applyEvent(initialSessionState(), {
       ...event(1, EventType.FRAMEWORK_WARNING, {
         case: 'frameworkWarning',
-        value: {summary: 'profiler failed', detail: 'nsys exited 1', source: 'loop'},
+        value: {summary: 'profiler failed', detail: 'nsys exited 1', source: FrameworkSource.LOOP},
       }),
-      agentKind: null,
-      diagnostic: {
+      diagnostic: create(DiagnosticSchema, {
         id: 'warn-1',
         code: 'framework_warning',
         summary: 'profiler failed',
@@ -1177,7 +1160,7 @@ describe('session event model', () => {
         scope: DiagnosticScope.RUN,
         severity: DiagnosticSeverity.WARNING,
         source: 'loop',
-      },
+      }),
     });
 
     expect(warned.core.diagnostics).toMatchObject([
@@ -1187,14 +1170,14 @@ describe('session event model', () => {
 
     const failed = applyEvent(warned, {
       ...event(2, EventType.RUN_FAILED),
-      diagnostic: {
+      diagnostic: create(DiagnosticSchema, {
         id: 'failure-1',
         code: 'run_failed',
         summary: 'The current run failed.',
         scope: DiagnosticScope.RUN,
         severity: DiagnosticSeverity.FATAL,
         retryability: DiagnosticRetryability.NEVER,
-      },
+      }),
     });
 
     expect(failed.errorBanner).toMatchObject({
@@ -1216,7 +1199,7 @@ describe('session event model', () => {
       state,
       chatEvent(2, EventType.TOOL_CALL, {
         case: 'toolCall',
-        value: {tool: 'read_file', args: {path: 'progress.md'}, status: null},
+        value: {tool: 'read_file', args: {path: 'progress.md'}},
       }),
     );
     state = applyEvent(
@@ -1244,7 +1227,7 @@ describe('session event model', () => {
       state,
       event(
         1,
-        'agent_output_chunk',
+        EventType.AGENT_OUTPUT_CHUNK,
         {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content: 'hello '}},
         'invocation-1',
       ),
@@ -1253,7 +1236,7 @@ describe('session event model', () => {
       state,
       event(
         2,
-        'agent_output_chunk',
+        EventType.AGENT_OUTPUT_CHUNK,
         {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content: 'world'}},
         'invocation-1',
       ),
@@ -1262,7 +1245,7 @@ describe('session event model', () => {
       state,
       event(
         3,
-        'agent_output_chunk',
+        EventType.AGENT_OUTPUT_CHUNK,
         {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: '→ Bash(command="first")\n'}},
         'invocation-1',
       ),
@@ -1271,7 +1254,7 @@ describe('session event model', () => {
       state,
       event(
         4,
-        'agent_output_chunk',
+        EventType.AGENT_OUTPUT_CHUNK,
         {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: 'first result'}},
         'invocation-1',
       ),
@@ -1280,7 +1263,7 @@ describe('session event model', () => {
       state,
       event(
         5,
-        'agent_output_chunk',
+        EventType.AGENT_OUTPUT_CHUNK,
         {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: '→ Bash(command="second")\n'}},
         'invocation-1',
       ),
@@ -1289,7 +1272,7 @@ describe('session event model', () => {
       state,
       event(
         6,
-        'agent_output_chunk',
+        EventType.AGENT_OUTPUT_CHUNK,
         {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: 'second result'}},
         'invocation-1',
       ),
@@ -1321,7 +1304,7 @@ describe('session event model', () => {
       state,
       event(
         2,
-        'tool_result',
+        EventType.TOOL_RESULT,
         {case: 'toolResult', value: {tool: 'Bash', content: 'first result'}},
         'inv-1',
       ),
@@ -1339,7 +1322,7 @@ describe('session event model', () => {
       state,
       event(
         4,
-        'tool_result',
+        EventType.TOOL_RESULT,
         {case: 'toolResult', value: {tool: 'Bash', content: 'second result'}},
         'inv-1',
       ),
@@ -1353,7 +1336,7 @@ describe('session event model', () => {
       kind: 'tool',
       toolName: 'Bash',
       toolArguments: {command: 'first'},
-      toolResult: {kind: 'tool_result', tool: 'Bash', content: 'first result'},
+      toolResult: {tool: 'Bash', content: 'first result'},
     });
   });
 
@@ -1363,7 +1346,7 @@ describe('session event model', () => {
       state,
       event(
         1,
-        'tool_call',
+        EventType.TOOL_CALL,
         {case: 'toolCall', value: {tool: 'Read', callId: 'call-a', args: {path: 'a'}}},
         'inv-1',
       ),
@@ -1372,7 +1355,7 @@ describe('session event model', () => {
       state,
       event(
         2,
-        'tool_call',
+        EventType.TOOL_CALL,
         {case: 'toolCall', value: {tool: 'Read', callId: 'call-b', args: {path: 'b'}}},
         'inv-1',
       ),
@@ -1381,7 +1364,7 @@ describe('session event model', () => {
       state,
       event(
         3,
-        'tool_result',
+        EventType.TOOL_RESULT,
         {case: 'toolResult', value: {tool: 'Read', callId: 'call-b', content: 'result b'}},
         'inv-1',
       ),
@@ -1390,7 +1373,7 @@ describe('session event model', () => {
       state,
       event(
         4,
-        'tool_result',
+        EventType.TOOL_RESULT,
         {case: 'toolResult', value: {tool: 'Read', callId: 'call-a', content: 'result a'}},
         'inv-1',
       ),
@@ -1432,7 +1415,7 @@ describe('session event model', () => {
       state,
       event(
         2,
-        'agent_output_chunk',
+        EventType.AGENT_OUTPUT_CHUNK,
         {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: '→ Bash(command="ls")\n'}},
         'inv-1',
       ),
@@ -1473,30 +1456,15 @@ describe('session event model', () => {
 
   it('keeps each phase’s todo list separate so agents never clobber each other', () => {
     let state = initialSessionState();
-    state = applyEvent(state, {
-      sequence: 1,
-      timestamp: '2026-01-01T00:00:00Z',
-      type: 'todo_update',
-      agentKind: 'implementer',
+    state = applyEvent(state, makeEvent(EventType.TODO_UPDATE, {sequence: 1, timestamp: timestampOf('2026-01-01T00:00:00Z'), agentKind: 'implementer',
       roundLabel: 'round-1',
-      data: {case: 'todoUpdate', value: {todos: [{content: 'Edit files', status: 'in_progress'}]}},
-    });
-    state = applyEvent(state, {
-      sequence: 2,
-      timestamp: '2026-01-01T00:01:00Z',
-      type: 'todo_update',
-      agentKind: 'judge',
+      data: {case: 'todoUpdate', value: {todos: [{content: 'Edit files', status: 'in_progress'}]}}}));
+    state = applyEvent(state, makeEvent(EventType.TODO_UPDATE, {sequence: 2, timestamp: timestampOf('2026-01-01T00:01:00Z'), agentKind: 'judge',
       roundLabel: 'round-1',
-      data: {case: 'todoUpdate', value: {todos: [{content: 'Check behavior', status: 'pending'}]}},
-    });
-    state = applyEvent(state, {
-      sequence: 3,
-      timestamp: '2026-01-01T00:02:00Z',
-      type: 'todo_update',
-      agentKind: 'implementer',
+      data: {case: 'todoUpdate', value: {todos: [{content: 'Check behavior', status: 'pending'}]}}}));
+    state = applyEvent(state, makeEvent(EventType.TODO_UPDATE, {sequence: 3, timestamp: timestampOf('2026-01-01T00:02:00Z'), agentKind: 'implementer',
       roundLabel: 'round-2',
-      data: {case: 'todoUpdate', value: {todos: [{content: 'Fix regression', status: 'pending'}]}},
-    });
+      data: {case: 'todoUpdate', value: {todos: [{content: 'Fix regression', status: 'pending'}]}}}));
 
     // Live view follows the currently active agent (round-2 implementer).
     expect(visibleTodos(state)).toEqual([{content: 'Fix regression', status: 'pending'}]);
@@ -1514,7 +1482,7 @@ describe('session event model', () => {
       state,
       executionEvent(
         1,
-        'todo_update',
+        EventType.TODO_UPDATE,
         'impl-a',
         {
           case: 'todoUpdate',
@@ -1527,7 +1495,7 @@ describe('session event model', () => {
       state,
       executionEvent(
         2,
-        'todo_update',
+        EventType.TODO_UPDATE,
         'impl-b',
         {
           case: 'todoUpdate',
@@ -1546,23 +1514,13 @@ describe('session event model', () => {
 
   it('hides todos when the active phase has not emitted any', () => {
     let state = initialSessionState();
-    state = applyEvent(state, {
-      sequence: 1,
-      timestamp: '2026-01-01T00:00:00Z',
-      type: 'todo_update',
-      agentKind: 'implementer',
+    state = applyEvent(state, makeEvent(EventType.TODO_UPDATE, {sequence: 1, timestamp: timestampOf('2026-01-01T00:00:00Z'), agentKind: 'implementer',
       roundLabel: 'round-1',
-      data: {case: 'todoUpdate', value: {todos: [{content: 'Edit files', status: 'completed'}]}},
-    });
+      data: {case: 'todoUpdate', value: {todos: [{content: 'Edit files', status: 'completed'}]}}}));
     // The judge phase starts without emitting todos; the implementer's
     // leftovers must not linger in the live view.
-    state = applyEvent(state, {
-      sequence: 2,
-      timestamp: '2026-01-01T00:01:00Z',
-      type: 'phase_started',
-      agentKind: 'judge',
-      roundLabel: 'round-1',
-    });
+    state = applyEvent(state, makeEvent(EventType.PHASE_STARTED, {sequence: 2, timestamp: timestampOf('2026-01-01T00:01:00Z'), agentKind: 'judge',
+      roundLabel: 'round-1'}));
 
     expect(visibleTodos(state)).toEqual([]);
   });
@@ -1605,11 +1563,11 @@ describe('session event model', () => {
         value: {status, previous},
       });
 
-    let state = applyEvent(initialSessionState(), statusChange(1, 'pausing', 'running'));
+    let state = applyEvent(initialSessionState(), statusChange(1, RunStatus.PAUSING, RunStatus.RUNNING));
     expect(runStateText(state)).toBe('pausing…');
-    state = applyEvent(state, statusChange(2, 'paused', 'pausing'));
+    state = applyEvent(state, statusChange(2, RunStatus.PAUSED, RunStatus.PAUSING));
     expect(runStateText(state)).toBe('paused');
-    state = applyEvent(state, statusChange(3, 'completed', 'paused'));
+    state = applyEvent(state, statusChange(3, RunStatus.COMPLETED, RunStatus.PAUSED));
 
     expect(runStateText(state)).toBe('completed');
   });
@@ -1639,7 +1597,7 @@ describe('session event model', () => {
       initialSessionState(),
       event(
         1,
-        'agent_output_chunk',
+        EventType.AGENT_OUTPUT_CHUNK,
         {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.PROMPT, content: '# Task\n\nUse `pytest`.'}},
         'invocation-1',
       ),
@@ -1666,14 +1624,14 @@ describe('session event model', () => {
     state = applyEvent(state, {
       ...event(2, EventType.PHASE_STARTED, {
         case: 'phase',
-        value: {phase: 'orchestrator', attempt: null},
+        value: {phase: 'orchestrator'},
       }),
       agentKind: 'orchestrator',
     });
     state = applyEvent(state, {
       ...event(3, EventType.PHASE_FINISHED, {
         case: 'phase',
-        value: {phase: 'orchestrator', attempt: null},
+        value: {phase: 'orchestrator'},
       }),
       agentKind: 'orchestrator',
     });
@@ -1699,7 +1657,7 @@ describe('session event model', () => {
       state,
       event(
         1,
-        'agent_output_chunk',
+        EventType.AGENT_OUTPUT_CHUNK,
         {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content: 'judge output'}},
         'judge-1',
       ),
@@ -1707,7 +1665,7 @@ describe('session event model', () => {
     state = applyEvent(state, {
       ...event(
         2,
-        'agent_output_chunk',
+        EventType.AGENT_OUTPUT_CHUNK,
         {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content: 'profiler output'}},
         'profiler-1',
       ),
@@ -1716,7 +1674,7 @@ describe('session event model', () => {
     state = applyEvent(state, {
       ...event(
         3,
-        'agent_output_chunk',
+        EventType.AGENT_OUTPUT_CHUNK,
         {
           case: 'agentOutputChunk',
           value: {channel: AgentOutputChannel.ASSISTANT, content: 'round two judge output'},
@@ -1789,7 +1747,7 @@ describe('hypothesis detail navigation', () => {
       {
         ...hypothesis,
         firstRound: 2,
-        rounds: [{round: 2, passed: false, reviewed: true}],
+        rounds: [create(HypothesisRoundSchema, {round: 2, passed: false, reviewed: true})],
       },
     ]);
 
@@ -2116,18 +2074,13 @@ describe('a long run', () => {
     // Two hundred rounds of chatter: far past any per-entry cap.
     for (let round = 1; round <= 200; round += 1) {
       for (let turn = 0; turn < 30; turn += 1) {
-        state = applyEvent(state, {
-          sequence: round * 100 + turn,
-          timestamp: '2026-01-01T00:00:00Z',
-          type: 'agent_output_chunk',
-          agentKind: 'implementer',
+        state = applyEvent(state, makeEvent(EventType.AGENT_OUTPUT_CHUNK, {sequence: round * 100 + turn, timestamp: timestampOf('2026-01-01T00:00:00Z'), agentKind: 'implementer',
           roundLabel: `round-${round}-implementer`,
           executionId: `impl-${round}-${turn}`,
           data: {
             case: 'agentOutputChunk',
             value: {channel: AgentOutputChannel.ASSISTANT, content: `round ${round} turn ${turn}`},
-          },
-        } as RunEvent);
+          }}));
       }
     }
 
@@ -2237,7 +2190,10 @@ describe('scope follows round navigation', () => {
       {
         ...hypothesisB,
         lastRound: 4,
-        rounds: [...hypothesisB.rounds, {round: 4, passed: true, reviewed: false}],
+        rounds: [
+          ...hypothesisB.rounds,
+          create(HypothesisRoundSchema, {round: 4, passed: true, reviewed: false}),
+        ],
       },
     ]);
 
