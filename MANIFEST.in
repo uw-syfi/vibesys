@@ -19,14 +19,14 @@ graft libs/vs-sandbox/src
 
 # Include every TypeScript client package in the sdist for development source builds.
 # Exclude generated and installed artifacts.
-include package.json
-include pnpm-lock.yaml
-include pnpm-workspace.yaml
-include biome.json
-include tsconfig.architecture.json
-include .dependency-cruiser.cjs
-include scripts/check_ts_architecture.test.mjs
-include scripts/check_ts_package_manifests.mjs
+include clients/package.json
+include clients/pnpm-lock.yaml
+include clients/pnpm-workspace.yaml
+include clients/biome.json
+include clients/tsconfig.architecture.json
+include clients/.dependency-cruiser.cjs
+include clients/scripts/check_ts_architecture.test.mjs
+include clients/scripts/check_ts_package_manifests.mjs
 graft clients/backend-client/src
 include clients/backend-client/package.json
 include clients/backend-client/tsconfig.json

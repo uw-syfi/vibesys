@@ -14,10 +14,9 @@ from vibesys.agents import AgentClient, AgentClientProtocol
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.agents.stub_runner import StubAgentClient
 from vibesys.config import Config, as_config
-from vibesys.constants import ComputeBackend
-from vibesys.domains.base import DomainName
+from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationError
-from vibesys.input_manifest import BenchmarkResult, WorkspaceSource
+from vibesys.evaluators.input_manifest import BenchmarkResult, WorkspaceSource
 from vibesys.loops.agent import issue_board
 from vibesys.loops.agent.hypotheses import reproject_run_evidence
 from vibesys.loops.agent.loop import (
@@ -2271,7 +2270,7 @@ def test_framework_gates_reuse_accuracy_pass_after_later_gate_failure(tmp_path):
 
 
 def test_framework_benchmark_extracts_declared_metric(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
     from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
     from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
         FRAMEWORK_BENCHMARK_END_MARKER,
@@ -2316,7 +2315,7 @@ def test_framework_benchmark_extracts_declared_metric(tmp_path):  # noqa: ANN001
 
 
 def test_framework_benchmark_prefers_top_level_metric_over_trial_diagnostics(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
     from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
     from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
         FRAMEWORK_BENCHMARK_END_MARKER,
@@ -2349,7 +2348,7 @@ def test_framework_benchmark_prefers_top_level_metric_over_trial_diagnostics(tmp
 
 
 def test_framework_benchmark_rejects_ambiguous_metric(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
     from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
     from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
         FRAMEWORK_BENCHMARK_END_MARKER,
@@ -4092,7 +4091,7 @@ def test_judge_audited_implementer_metrics_are_recorded(tmp_path, ref_file):  # 
 
 
 def test_official_framework_benchmark_scalar_populates_round_metrics(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
 
     # No implementer-reported perf: accepted_metrics stays empty, so the only
     # objective row can come from the official framework benchmark's scalar.
@@ -4123,7 +4122,7 @@ def test_official_framework_benchmark_scalar_populates_round_metrics(tmp_path, r
 
 
 def test_official_regression_disproves_and_drops_queue_candidate(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
 
     runner = _make_orchestrate_runner(
         plans=[
@@ -4592,7 +4591,9 @@ def test_loop_max_rounds_terminates(tmp_path, ref_file):  # noqa: ANN001, ANN201
 
 def test_cli_loads_objective_md_from_ref_parent(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     from entrypoints.headless import _load_objective  # noqa: PLC0415  # tracked: #288
-    from vibesys.input_manifest import load_input_bundle  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import (  # noqa: PLC0415  # tracked: #288
+        load_input_bundle,
+    )
 
     bundle = tmp_path / "modelA"
     bundle.mkdir()
@@ -4609,7 +4610,9 @@ def test_cli_loads_objective_md_from_ref_parent(tmp_path):  # noqa: ANN001, ANN2
 
 
 def test_cli_missing_objective_md_errors(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.input_manifest import load_input_bundle  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import (  # noqa: PLC0415  # tracked: #288
+        load_input_bundle,
+    )
 
     bundle = tmp_path / "modelB"
     bundle.mkdir()

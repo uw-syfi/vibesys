@@ -43,13 +43,21 @@ from jinja2 import Environment, FileSystemLoader
 from vibesys.agents.factory import resolve_agent_driver
 from vibesys.agents.progress import CandidateProgress
 from vibesys.config import Config, as_config
-from vibesys.constants import DEFAULT_AGENT_BACKEND, DEFAULT_COMPUTE_BACKEND, ComputeBackend
+from vibesys.constants import (
+    DEFAULT_AGENT_BACKEND,
+    DEFAULT_COMPUTE_BACKEND,
+    ComputeBackend,
+    DomainName,
+)
 from vibesys.context import create_candidate_context, create_run_context
-from vibesys.domains.base import DomainDefinition, DomainName, DomainRole
+from vibesys.domains.base import DomainDefinition, DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
+from vibesys.evaluators.input_manifest import (  # noqa: TC001  # tracked: #288
+    BenchmarkResult,
+    WorkspaceSource,
+)
 from vibesys.events import FrameworkSource
-from vibesys.input_manifest import BenchmarkResult, WorkspaceSource  # noqa: TC001  # tracked: #288
 from vibesys.loops.evolve.population import (
     Individual,
     Population,

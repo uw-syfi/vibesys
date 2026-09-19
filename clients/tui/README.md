@@ -340,6 +340,7 @@ FIFO-by-tool fallback.
 From the repository root:
 
 ```bash
+cd clients
 pnpm install --frozen-lockfile
 pnpm proto:generate
 pnpm check:ts-architecture

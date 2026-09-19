@@ -34,7 +34,7 @@ export async function manifestErrors(root) {
   const errors = [];
   const workspaceNames = new Set(Object.keys(PACKAGES));
   for (const [expectedName, policy] of Object.entries(PACKAGES)) {
-    const relativePath = join('clients', policy.directory, 'package.json');
+    const relativePath = join(policy.directory, 'package.json');
     let manifest;
     try {
       manifest = JSON.parse(await readFile(join(root, relativePath), 'utf8'));

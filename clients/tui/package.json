@@ -44,6 +44,7 @@
     "@vibesys/core-state"
   ],
   "devDependencies": {
+    "@bufbuild/protobuf": "^2.15.0",
     "@types/bun": "1.3.9",
     "@types/node": "^24.0.0",
     "typescript": "^5.8.3"

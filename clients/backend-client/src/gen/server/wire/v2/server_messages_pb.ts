@@ -4,30 +4,26 @@
 // @generated from file server/wire/v2/server_messages.proto (package server.wire.v2, syntax proto3)
 /* eslint-disable */
 
-import type {Message} from '@bufbuild/protobuf';
-import type {GenFile, GenMessage} from '@bufbuild/protobuf/codegenv2';
-import {fileDesc, messageDesc} from '@bufbuild/protobuf/codegenv2';
-import type {Diagnostic} from './common_pb.js';
-import {file_server_wire_v2_common} from './common_pb.js';
-import type {RunEvent} from './events_pb.js';
-import {file_server_wire_v2_events} from './events_pb.js';
-import type {ActiveAgentExecution} from './snapshot_pb.js';
-import {file_server_wire_v2_snapshot} from './snapshot_pb.js';
+import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { Diagnostic } from "./common_pb.js";
+import { file_server_wire_v2_common } from "./common_pb.js";
+import type { RunEvent } from "./events_pb.js";
+import { file_server_wire_v2_events } from "./events_pb.js";
+import type { ActiveAgentExecution } from "./snapshot_pb.js";
+import { file_server_wire_v2_snapshot } from "./snapshot_pb.js";
+import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file server/wire/v2/server_messages.proto.
  */
-export const file_server_wire_v2_server_messages: GenFile =
-  /*@__PURE__*/
-  fileDesc(
-    'CiRzZXJ2ZXIvd2lyZS92Mi9zZXJ2ZXJfbWVzc2FnZXMucHJvdG8SDnNlcnZlci53aXJlLnYyIlAKEVN1YnNjcmliZWRNZXNzYWdlEhIKCnJlcXVlc3RfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEhcKD2xhdGVzdF9zZXF1ZW5jZRgDIAEoDSLKAQoRRXZlbnRCYXRjaE1lc3NhZ2USKAoGZXZlbnRzGAEgAygLMhguc2VydmVyLndpcmUudjIuUnVuRXZlbnQSGAoQdGhyb3VnaF9zZXF1ZW5jZRgCIAEoDRI/ChFhY3RpdmVfZXhlY3V0aW9ucxgDIAMoCzIkLnNlcnZlci53aXJlLnYyLkFjdGl2ZUFnZW50RXhlY3V0aW9uEhAKCHN0b3JlX2lkGAQgASgJEh4KFmhpc3RvcnlfYWZ0ZXJfc2VxdWVuY2UYBSABKA0ioQEKFFByb3RvY29sRXJyb3JNZXNzYWdlEhcKCnJlcXVlc3RfaWQYASABKAlIAIgBARIMCgRjb2RlGAIgASgJEg8KB21lc3NhZ2UYAyABKAkSMwoKZGlhZ25vc3RpYxgEIAEoCzIaLnNlcnZlci53aXJlLnYyLkRpYWdub3N0aWNIAYgBAUINCgtfcmVxdWVzdF9pZEINCgtfZGlhZ25vc3RpYyL1AQoNU2VydmVyTWVzc2FnZRI3CgpzdWJzY3JpYmVkGAEgASgLMiEuc2VydmVyLndpcmUudjIuU3Vic2NyaWJlZE1lc3NhZ2VIABIpCgVldmVudBgCIAEoCzIYLnNlcnZlci53aXJlLnYyLlJ1bkV2ZW50SAASOAoLZXZlbnRfYmF0Y2gYAyABKAsyIS5zZXJ2ZXIud2lyZS52Mi5FdmVudEJhdGNoTWVzc2FnZUgAEj4KDnByb3RvY29sX2Vycm9yGAQgASgLMiQuc2VydmVyLndpcmUudjIuUHJvdG9jb2xFcnJvck1lc3NhZ2VIAEIGCgRib2R5YgZwcm90bzM',
-    [file_server_wire_v2_common, file_server_wire_v2_events, file_server_wire_v2_snapshot],
-  );
+export const file_server_wire_v2_server_messages: GenFile = /*@__PURE__*/
+  fileDesc("CiRzZXJ2ZXIvd2lyZS92Mi9zZXJ2ZXJfbWVzc2FnZXMucHJvdG8SDnNlcnZlci53aXJlLnYyIlAKEVN1YnNjcmliZWRNZXNzYWdlEhIKCnJlcXVlc3RfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEhcKD2xhdGVzdF9zZXF1ZW5jZRgDIAEoDSLKAQoRRXZlbnRCYXRjaE1lc3NhZ2USKAoGZXZlbnRzGAEgAygLMhguc2VydmVyLndpcmUudjIuUnVuRXZlbnQSGAoQdGhyb3VnaF9zZXF1ZW5jZRgCIAEoDRI/ChFhY3RpdmVfZXhlY3V0aW9ucxgDIAMoCzIkLnNlcnZlci53aXJlLnYyLkFjdGl2ZUFnZW50RXhlY3V0aW9uEhAKCHN0b3JlX2lkGAQgASgJEh4KFmhpc3RvcnlfYWZ0ZXJfc2VxdWVuY2UYBSABKA0ioQEKFFByb3RvY29sRXJyb3JNZXNzYWdlEhcKCnJlcXVlc3RfaWQYASABKAlIAIgBARIMCgRjb2RlGAIgASgJEg8KB21lc3NhZ2UYAyABKAkSMwoKZGlhZ25vc3RpYxgEIAEoCzIaLnNlcnZlci53aXJlLnYyLkRpYWdub3N0aWNIAYgBAUINCgtfcmVxdWVzdF9pZEINCgtfZGlhZ25vc3RpYyL1AQoNU2VydmVyTWVzc2FnZRI3CgpzdWJzY3JpYmVkGAEgASgLMiEuc2VydmVyLndpcmUudjIuU3Vic2NyaWJlZE1lc3NhZ2VIABIpCgVldmVudBgCIAEoCzIYLnNlcnZlci53aXJlLnYyLlJ1bkV2ZW50SAASOAoLZXZlbnRfYmF0Y2gYAyABKAsyIS5zZXJ2ZXIud2lyZS52Mi5FdmVudEJhdGNoTWVzc2FnZUgAEj4KDnByb3RvY29sX2Vycm9yGAQgASgLMiQuc2VydmVyLndpcmUudjIuUHJvdG9jb2xFcnJvck1lc3NhZ2VIAEIGCgRib2R5YgZwcm90bzM", [file_server_wire_v2_common, file_server_wire_v2_events, file_server_wire_v2_snapshot]);
 
 /**
  * @generated from message server.wire.v2.SubscribedMessage
  */
-export type SubscribedMessage = Message<'server.wire.v2.SubscribedMessage'> & {
+export type SubscribedMessage = Message<"server.wire.v2.SubscribedMessage"> & {
   /**
    * @generated from field: string request_id = 1;
    */
@@ -48,14 +44,13 @@ export type SubscribedMessage = Message<'server.wire.v2.SubscribedMessage'> & {
  * Describes the message server.wire.v2.SubscribedMessage.
  * Use `create(SubscribedMessageSchema)` to create a new message.
  */
-export const SubscribedMessageSchema: GenMessage<SubscribedMessage> =
-  /*@__PURE__*/
+export const SubscribedMessageSchema: GenMessage<SubscribedMessage> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_server_messages, 0);
 
 /**
  * @generated from message server.wire.v2.EventBatchMessage
  */
-export type EventBatchMessage = Message<'server.wire.v2.EventBatchMessage'> & {
+export type EventBatchMessage = Message<"server.wire.v2.EventBatchMessage"> & {
   /**
    * @generated from field: repeated server.wire.v2.RunEvent events = 1;
    */
@@ -95,14 +90,13 @@ export type EventBatchMessage = Message<'server.wire.v2.EventBatchMessage'> & {
  * Describes the message server.wire.v2.EventBatchMessage.
  * Use `create(EventBatchMessageSchema)` to create a new message.
  */
-export const EventBatchMessageSchema: GenMessage<EventBatchMessage> =
-  /*@__PURE__*/
+export const EventBatchMessageSchema: GenMessage<EventBatchMessage> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_server_messages, 1);
 
 /**
  * @generated from message server.wire.v2.ProtocolErrorMessage
  */
-export type ProtocolErrorMessage = Message<'server.wire.v2.ProtocolErrorMessage'> & {
+export type ProtocolErrorMessage = Message<"server.wire.v2.ProtocolErrorMessage"> & {
   /**
    * @generated from field: optional string request_id = 1;
    */
@@ -128,8 +122,7 @@ export type ProtocolErrorMessage = Message<'server.wire.v2.ProtocolErrorMessage'
  * Describes the message server.wire.v2.ProtocolErrorMessage.
  * Use `create(ProtocolErrorMessageSchema)` to create a new message.
  */
-export const ProtocolErrorMessageSchema: GenMessage<ProtocolErrorMessage> =
-  /*@__PURE__*/
+export const ProtocolErrorMessageSchema: GenMessage<ProtocolErrorMessage> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_server_messages, 2);
 
 /**
@@ -137,46 +130,41 @@ export const ProtocolErrorMessageSchema: GenMessage<ProtocolErrorMessage> =
  *
  * @generated from message server.wire.v2.ServerMessage
  */
-export type ServerMessage = Message<'server.wire.v2.ServerMessage'> & {
+export type ServerMessage = Message<"server.wire.v2.ServerMessage"> & {
   /**
    * @generated from oneof server.wire.v2.ServerMessage.body
    */
-  body:
-    | {
-        /**
-         * @generated from field: server.wire.v2.SubscribedMessage subscribed = 1;
-         */
-        value: SubscribedMessage;
-        case: 'subscribed';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.RunEvent event = 2;
-         */
-        value: RunEvent;
-        case: 'event';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.EventBatchMessage event_batch = 3;
-         */
-        value: EventBatchMessage;
-        case: 'eventBatch';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.ProtocolErrorMessage protocol_error = 4;
-         */
-        value: ProtocolErrorMessage;
-        case: 'protocolError';
-      }
-    | {case: undefined; value?: undefined};
+  body: {
+    /**
+     * @generated from field: server.wire.v2.SubscribedMessage subscribed = 1;
+     */
+    value: SubscribedMessage;
+    case: "subscribed";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.RunEvent event = 2;
+     */
+    value: RunEvent;
+    case: "event";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.EventBatchMessage event_batch = 3;
+     */
+    value: EventBatchMessage;
+    case: "eventBatch";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.ProtocolErrorMessage protocol_error = 4;
+     */
+    value: ProtocolErrorMessage;
+    case: "protocolError";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
  * Describes the message server.wire.v2.ServerMessage.
  * Use `create(ServerMessageSchema)` to create a new message.
  */
-export const ServerMessageSchema: GenMessage<ServerMessage> =
-  /*@__PURE__*/
+export const ServerMessageSchema: GenMessage<ServerMessage> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_server_messages, 3);
+

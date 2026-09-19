@@ -14,7 +14,7 @@ from vibesys.events import TodoUpdateData
 
 def test_run_agent_passes_thread_id():  # noqa: ANN201  # tracked: #288
     """run_agent must pass a thread_id in config so checkpointer can persist state."""
-    from vibesys.agent_runner import run_agent  # noqa: PLC0415  # tracked: #288
+    from vibesys.agents.runner import run_agent  # noqa: PLC0415  # tracked: #288
 
     agent = MagicMock()
     agent.stream.return_value = iter(
@@ -32,7 +32,7 @@ def test_run_agent_passes_thread_id():  # noqa: ANN201  # tracked: #288
 
 def test_run_judge_agent_passes_thread_id():  # noqa: ANN201  # tracked: #288
     """run_judge_agent must pass a thread_id in config so checkpointer can persist state."""
-    from vibesys.agent_runner import run_judge_agent  # noqa: PLC0415  # tracked: #288
+    from vibesys.agents.runner import run_judge_agent  # noqa: PLC0415  # tracked: #288
     from vibesys.schemas import JudgeResponse, Verdict  # noqa: PLC0415  # tracked: #288
 
     agent = MagicMock()
@@ -66,7 +66,7 @@ def _capture_todo_updates():  # noqa: ANN202  # tracked: #288
     updates: list[TodoUpdateData] = []
 
     def record(todos):  # noqa: ANN001, ANN202  # tracked: #288
-        from vibesys.agent_runner import TodoItemData  # noqa: PLC0415  # tracked: #288
+        from vibesys.agents.runner import TodoItemData  # noqa: PLC0415  # tracked: #288
 
         updates.append(
             TodoUpdateData(
@@ -76,12 +76,12 @@ def _capture_todo_updates():  # noqa: ANN202  # tracked: #288
             )
         )
 
-    return updates, patch("vibesys.agent_runner.publish_todos", side_effect=record)
+    return updates, patch("vibesys.agents.runner.publish_todos", side_effect=record)
 
 
 def test_run_agent_publishes_todos_from_tools_node():  # noqa: ANN201  # tracked: #288
     """run_agent picks up todos from the tools node (where write_todos Command lands)."""
-    from vibesys.agent_runner import run_agent  # noqa: PLC0415  # tracked: #288
+    from vibesys.agents.runner import run_agent  # noqa: PLC0415  # tracked: #288
 
     agent = MagicMock()
     agent.stream.return_value = iter(
@@ -121,7 +121,7 @@ def test_run_agent_publishes_todos_from_tools_node():  # noqa: ANN201  # tracked
 
 def test_run_agent_publishes_todos_from_any_node():  # noqa: ANN201  # tracked: #288
     """run_agent finds todos regardless of which node key they appear under."""
-    from vibesys.agent_runner import run_agent  # noqa: PLC0415  # tracked: #288
+    from vibesys.agents.runner import run_agent  # noqa: PLC0415  # tracked: #288
 
     agent = MagicMock()
     agent.stream.return_value = iter(
@@ -144,7 +144,7 @@ def test_run_agent_publishes_todos_from_any_node():  # noqa: ANN201  # tracked: 
 
 def test_run_judge_agent_publishes_todos():  # noqa: ANN201  # tracked: #288
     """run_judge_agent picks up todos from the tools node."""
-    from vibesys.agent_runner import run_judge_agent  # noqa: PLC0415  # tracked: #288
+    from vibesys.agents.runner import run_judge_agent  # noqa: PLC0415  # tracked: #288
     from vibesys.schemas import JudgeResponse, Verdict  # noqa: PLC0415  # tracked: #288
 
     agent = MagicMock()
@@ -179,7 +179,7 @@ def test_run_judge_agent_publishes_todos():  # noqa: ANN201  # tracked: #288
 
 def test_publish_todos_emits_structured_event():  # noqa: ANN201  # tracked: #288
     """publish_todos converts raw stream dicts into a typed TODO_UPDATE event."""
-    from vibesys.agent_runner import publish_todos  # noqa: PLC0415  # tracked: #288
+    from vibesys.agents.runner import publish_todos  # noqa: PLC0415  # tracked: #288
     from vibesys.events import CoreEvent, CoreEventType  # noqa: PLC0415  # tracked: #288
     from vibesys.render import output_sink  # noqa: PLC0415  # tracked: #288
 

@@ -11,7 +11,7 @@ plugins:
   - protoc_builtin: pyi
     protoc_path: [uv, run, --no-sync, python, -m, grpc_tools.protoc]
     out: src
-  - local: node_modules/.bin/protoc-gen-es
+  - local: protoc-gen-es
     out: clients/backend-client/src/gen
     opt:
       - target=ts

@@ -24,8 +24,8 @@ from vibesys.loops.agent.model import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.events import ExperimentsChangeReason
-    from vibesys.input_manifest import ProfileGuidedInput
     from vibesys.loops.agent.model import Hypothesis
     from vibesys.loops.agent.state import AgentRunStateStore
     from vibesys.run import LoopContext

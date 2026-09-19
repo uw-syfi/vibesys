@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from vibesys.agents.contracts import AgentClientProtocol
     from vibesys.agents.progress import AgentProgress
     from vibesys.constants import ComputeBackend
-    from vibesys.input_manifest import WorkspaceSource
+    from vibesys.evaluators.input_manifest import WorkspaceSource
     from vibesys.profilers import ProfilerKind
     from vibesys.run.event_journal import EventJournal
     from vibesys.run.git_tracker import GitTracker

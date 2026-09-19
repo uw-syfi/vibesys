@@ -4,54 +4,50 @@
 // @generated from file server/wire/v2/requests.proto (package server.wire.v2, syntax proto3)
 /* eslint-disable */
 
-import type {Message} from '@bufbuild/protobuf';
-import type {GenEnum, GenFile, GenMessage} from '@bufbuild/protobuf/codegenv2';
-import {enumDesc, fileDesc, messageDesc} from '@bufbuild/protobuf/codegenv2';
-import type {Timestamp} from '@bufbuild/protobuf/wkt';
-import {file_google_protobuf_timestamp} from '@bufbuild/protobuf/wkt';
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file server/wire/v2/requests.proto.
  */
-export const file_server_wire_v2_requests: GenFile =
-  /*@__PURE__*/
-  fileDesc(
-    'Ch1zZXJ2ZXIvd2lyZS92Mi9yZXF1ZXN0cy5wcm90bxIOc2VydmVyLndpcmUudjIiDgoMUGF1c2VDb21tYW5kIg8KDVJlc3VtZUNvbW1hbmQiHAoMU3RlZXJDb21tYW5kEgwKBHRleHQYASABKAkiDQoLU3RvcENvbW1hbmQiDwoNU25hcHNob3RRdWVyeSI/CglDaGF0UXVlcnkSDAoEdGV4dBgBIAEoCRIWCgl0aHJlYWRfaWQYAiABKAlIAIgBAUIMCgpfdGhyZWFkX2lkIrMBChVDaGF0VGhyZWFkQ3JlYXRlUXVlcnkSLwoGZHJpdmVyGAEgASgOMhouc2VydmVyLndpcmUudjIuQ2hhdERyaXZlckgAiAEBEhUKCHByb3ZpZGVyGAIgASgJSAGIAQESEgoFbW9kZWwYAyABKAlIAogBARISCgV0aXRsZRgEIAEoCUgDiAEBQgkKB19kcml2ZXJCCwoJX3Byb3ZpZGVyQggKBl9tb2RlbEIICgZfdGl0bGUiEgoQQ2hhdE9wdGlvbnNRdWVyeSISChBUdWlEZWZhdWx0c1F1ZXJ5Ig4KDEhpc3RvcnlRdWVyeSISChBQZXJmb3JtYW5jZVF1ZXJ5IksKEEV4cGVyaW1lbnRDdXJzb3ISDgoGcnVuX2lkGAEgASgJEhUKDXByb2plY3Rpb25faWQYAiABKAkSEAoIcmV2aXNpb24YAyABKA0iUQoPRXhwZXJpbWVudFF1ZXJ5EjQKBWFmdGVyGAEgASgLMiAuc2VydmVyLndpcmUudjIuRXhwZXJpbWVudEN1cnNvckgAiAEBQggKBl9hZnRlciINCgtEZXNpZ25RdWVyeSI8ChBEZXNpZ25QYXRjaFF1ZXJ5EgwKBGJhc2UYASABKAkSDAoEaGVhZBgCIAEoCRIMCgRwYXRoGAMgASgJImsKC0V2ZW50c1F1ZXJ5EhYKDmFmdGVyX3NlcXVlbmNlGAEgASgNEhwKD2JlZm9yZV9zZXF1ZW5jZRgCIAEoDUgAiAEBEhIKCnRpbWVvdXRfbXMYAyABKA1CEgoQX2JlZm9yZV9zZXF1ZW5jZSJYChBTdWJzY3JpYmVSZXF1ZXN0EhYKDmFmdGVyX3NlcXVlbmNlGAEgASgNEhEKBHRhaWwYAiABKA1IAIgBARIQCghzdG9yZV9pZBgDIAEoCUIHCgVfdGFpbCKyBwoHUmVxdWVzdBIYChBwcm90b2NvbF92ZXJzaW9uGAEgASgNEhIKCnJlcXVlc3RfaWQYAiABKAkSLQoJdGltZXN0YW1wGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBItCgVwYXVzZRgKIAEoCzIcLnNlcnZlci53aXJlLnYyLlBhdXNlQ29tbWFuZEgAEi8KBnJlc3VtZRgLIAEoCzIdLnNlcnZlci53aXJlLnYyLlJlc3VtZUNvbW1hbmRIABItCgVzdGVlchgMIAEoCzIcLnNlcnZlci53aXJlLnYyLlN0ZWVyQ29tbWFuZEgAEisKBHN0b3AYDSABKAsyGy5zZXJ2ZXIud2lyZS52Mi5TdG9wQ29tbWFuZEgAEjEKCHNuYXBzaG90GA4gASgLMh0uc2VydmVyLndpcmUudjIuU25hcHNob3RRdWVyeUgAEikKBGNoYXQYDyABKAsyGS5zZXJ2ZXIud2lyZS52Mi5DaGF0UXVlcnlIABJDChJjaGF0X3RocmVhZF9jcmVhdGUYECABKAsyJS5zZXJ2ZXIud2lyZS52Mi5DaGF0VGhyZWFkQ3JlYXRlUXVlcnlIABI4CgxjaGF0X29wdGlvbnMYESABKAsyIC5zZXJ2ZXIud2lyZS52Mi5DaGF0T3B0aW9uc1F1ZXJ5SAASOAoMdHVpX2RlZmF1bHRzGBIgASgLMiAuc2VydmVyLndpcmUudjIuVHVpRGVmYXVsdHNRdWVyeUgAEi8KB2hpc3RvcnkYEyABKAsyHC5zZXJ2ZXIud2lyZS52Mi5IaXN0b3J5UXVlcnlIABI3CgtwZXJmb3JtYW5jZRgUIAEoCzIgLnNlcnZlci53aXJlLnYyLlBlcmZvcm1hbmNlUXVlcnlIABI2CgtleHBlcmltZW50cxgVIAEoCzIfLnNlcnZlci53aXJlLnYyLkV4cGVyaW1lbnRRdWVyeUgAEi0KBmRlc2lnbhgWIAEoCzIbLnNlcnZlci53aXJlLnYyLkRlc2lnblF1ZXJ5SAASOAoMZGVzaWduX3BhdGNoGBcgASgLMiAuc2VydmVyLndpcmUudjIuRGVzaWduUGF0Y2hRdWVyeUgAEi0KBmV2ZW50cxgYIAEoCzIbLnNlcnZlci53aXJlLnYyLkV2ZW50c1F1ZXJ5SAASNQoJc3Vic2NyaWJlGBkgASgLMiAuc2VydmVyLndpcmUudjIuU3Vic2NyaWJlUmVxdWVzdEgAQgYKBGJvZHkqXgoKQ2hhdERyaXZlchIbChdDSEFUX0RSSVZFUl9VTlNQRUNJRklFRBAAEhkKFUNIQVRfRFJJVkVSX0FHRU5UU0hJTRABEhgKFENIQVRfRFJJVkVSX09NTklHRU5UEAJiBnByb3RvMw',
-    [file_google_protobuf_timestamp],
-  );
+export const file_server_wire_v2_requests: GenFile = /*@__PURE__*/
+  fileDesc("Ch1zZXJ2ZXIvd2lyZS92Mi9yZXF1ZXN0cy5wcm90bxIOc2VydmVyLndpcmUudjIiDgoMUGF1c2VDb21tYW5kIg8KDVJlc3VtZUNvbW1hbmQiHAoMU3RlZXJDb21tYW5kEgwKBHRleHQYASABKAkiDQoLU3RvcENvbW1hbmQiDwoNU25hcHNob3RRdWVyeSI/CglDaGF0UXVlcnkSDAoEdGV4dBgBIAEoCRIWCgl0aHJlYWRfaWQYAiABKAlIAIgBAUIMCgpfdGhyZWFkX2lkIrMBChVDaGF0VGhyZWFkQ3JlYXRlUXVlcnkSLwoGZHJpdmVyGAEgASgOMhouc2VydmVyLndpcmUudjIuQ2hhdERyaXZlckgAiAEBEhUKCHByb3ZpZGVyGAIgASgJSAGIAQESEgoFbW9kZWwYAyABKAlIAogBARISCgV0aXRsZRgEIAEoCUgDiAEBQgkKB19kcml2ZXJCCwoJX3Byb3ZpZGVyQggKBl9tb2RlbEIICgZfdGl0bGUiEgoQQ2hhdE9wdGlvbnNRdWVyeSISChBUdWlEZWZhdWx0c1F1ZXJ5Ig4KDEhpc3RvcnlRdWVyeSISChBQZXJmb3JtYW5jZVF1ZXJ5IksKEEV4cGVyaW1lbnRDdXJzb3ISDgoGcnVuX2lkGAEgASgJEhUKDXByb2plY3Rpb25faWQYAiABKAkSEAoIcmV2aXNpb24YAyABKA0iUQoPRXhwZXJpbWVudFF1ZXJ5EjQKBWFmdGVyGAEgASgLMiAuc2VydmVyLndpcmUudjIuRXhwZXJpbWVudEN1cnNvckgAiAEBQggKBl9hZnRlciINCgtEZXNpZ25RdWVyeSI8ChBEZXNpZ25QYXRjaFF1ZXJ5EgwKBGJhc2UYASABKAkSDAoEaGVhZBgCIAEoCRIMCgRwYXRoGAMgASgJImsKC0V2ZW50c1F1ZXJ5EhYKDmFmdGVyX3NlcXVlbmNlGAEgASgNEhwKD2JlZm9yZV9zZXF1ZW5jZRgCIAEoDUgAiAEBEhIKCnRpbWVvdXRfbXMYAyABKA1CEgoQX2JlZm9yZV9zZXF1ZW5jZSJYChBTdWJzY3JpYmVSZXF1ZXN0EhYKDmFmdGVyX3NlcXVlbmNlGAEgASgNEhEKBHRhaWwYAiABKA1IAIgBARIQCghzdG9yZV9pZBgDIAEoCUIHCgVfdGFpbCKyBwoHUmVxdWVzdBIYChBwcm90b2NvbF92ZXJzaW9uGAEgASgNEhIKCnJlcXVlc3RfaWQYAiABKAkSLQoJdGltZXN0YW1wGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBItCgVwYXVzZRgKIAEoCzIcLnNlcnZlci53aXJlLnYyLlBhdXNlQ29tbWFuZEgAEi8KBnJlc3VtZRgLIAEoCzIdLnNlcnZlci53aXJlLnYyLlJlc3VtZUNvbW1hbmRIABItCgVzdGVlchgMIAEoCzIcLnNlcnZlci53aXJlLnYyLlN0ZWVyQ29tbWFuZEgAEisKBHN0b3AYDSABKAsyGy5zZXJ2ZXIud2lyZS52Mi5TdG9wQ29tbWFuZEgAEjEKCHNuYXBzaG90GA4gASgLMh0uc2VydmVyLndpcmUudjIuU25hcHNob3RRdWVyeUgAEikKBGNoYXQYDyABKAsyGS5zZXJ2ZXIud2lyZS52Mi5DaGF0UXVlcnlIABJDChJjaGF0X3RocmVhZF9jcmVhdGUYECABKAsyJS5zZXJ2ZXIud2lyZS52Mi5DaGF0VGhyZWFkQ3JlYXRlUXVlcnlIABI4CgxjaGF0X29wdGlvbnMYESABKAsyIC5zZXJ2ZXIud2lyZS52Mi5DaGF0T3B0aW9uc1F1ZXJ5SAASOAoMdHVpX2RlZmF1bHRzGBIgASgLMiAuc2VydmVyLndpcmUudjIuVHVpRGVmYXVsdHNRdWVyeUgAEi8KB2hpc3RvcnkYEyABKAsyHC5zZXJ2ZXIud2lyZS52Mi5IaXN0b3J5UXVlcnlIABI3CgtwZXJmb3JtYW5jZRgUIAEoCzIgLnNlcnZlci53aXJlLnYyLlBlcmZvcm1hbmNlUXVlcnlIABI2CgtleHBlcmltZW50cxgVIAEoCzIfLnNlcnZlci53aXJlLnYyLkV4cGVyaW1lbnRRdWVyeUgAEi0KBmRlc2lnbhgWIAEoCzIbLnNlcnZlci53aXJlLnYyLkRlc2lnblF1ZXJ5SAASOAoMZGVzaWduX3BhdGNoGBcgASgLMiAuc2VydmVyLndpcmUudjIuRGVzaWduUGF0Y2hRdWVyeUgAEi0KBmV2ZW50cxgYIAEoCzIbLnNlcnZlci53aXJlLnYyLkV2ZW50c1F1ZXJ5SAASNQoJc3Vic2NyaWJlGBkgASgLMiAuc2VydmVyLndpcmUudjIuU3Vic2NyaWJlUmVxdWVzdEgAQgYKBGJvZHkqXgoKQ2hhdERyaXZlchIbChdDSEFUX0RSSVZFUl9VTlNQRUNJRklFRBAAEhkKFUNIQVRfRFJJVkVSX0FHRU5UU0hJTRABEhgKFENIQVRfRFJJVkVSX09NTklHRU5UEAJiBnByb3RvMw", [file_google_protobuf_timestamp]);
 
 /**
  * Pause after the agent call in flight reaches its boundary.
  *
  * @generated from message server.wire.v2.PauseCommand
  */
-export type PauseCommand = Message<'server.wire.v2.PauseCommand'> & {};
+export type PauseCommand = Message<"server.wire.v2.PauseCommand"> & {
+};
 
 /**
  * Describes the message server.wire.v2.PauseCommand.
  * Use `create(PauseCommandSchema)` to create a new message.
  */
-export const PauseCommandSchema: GenMessage<PauseCommand> =
-  /*@__PURE__*/
+export const PauseCommandSchema: GenMessage<PauseCommand> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 0);
 
 /**
  * @generated from message server.wire.v2.ResumeCommand
  */
-export type ResumeCommand = Message<'server.wire.v2.ResumeCommand'> & {};
+export type ResumeCommand = Message<"server.wire.v2.ResumeCommand"> & {
+};
 
 /**
  * Describes the message server.wire.v2.ResumeCommand.
  * Use `create(ResumeCommandSchema)` to create a new message.
  */
-export const ResumeCommandSchema: GenMessage<ResumeCommand> =
-  /*@__PURE__*/
+export const ResumeCommandSchema: GenMessage<ResumeCommand> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 1);
 
 /**
  * @generated from message server.wire.v2.SteerCommand
  */
-export type SteerCommand = Message<'server.wire.v2.SteerCommand'> & {
+export type SteerCommand = Message<"server.wire.v2.SteerCommand"> & {
   /**
    * Non-empty; the server rejects an empty text.
    *
@@ -64,8 +60,7 @@ export type SteerCommand = Message<'server.wire.v2.SteerCommand'> & {
  * Describes the message server.wire.v2.SteerCommand.
  * Use `create(SteerCommandSchema)` to create a new message.
  */
-export const SteerCommandSchema: GenMessage<SteerCommand> =
-  /*@__PURE__*/
+export const SteerCommandSchema: GenMessage<SteerCommand> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 2);
 
 /**
@@ -73,33 +68,33 @@ export const SteerCommandSchema: GenMessage<SteerCommand> =
  *
  * @generated from message server.wire.v2.StopCommand
  */
-export type StopCommand = Message<'server.wire.v2.StopCommand'> & {};
+export type StopCommand = Message<"server.wire.v2.StopCommand"> & {
+};
 
 /**
  * Describes the message server.wire.v2.StopCommand.
  * Use `create(StopCommandSchema)` to create a new message.
  */
-export const StopCommandSchema: GenMessage<StopCommand> =
-  /*@__PURE__*/
+export const StopCommandSchema: GenMessage<StopCommand> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 3);
 
 /**
  * @generated from message server.wire.v2.SnapshotQuery
  */
-export type SnapshotQuery = Message<'server.wire.v2.SnapshotQuery'> & {};
+export type SnapshotQuery = Message<"server.wire.v2.SnapshotQuery"> & {
+};
 
 /**
  * Describes the message server.wire.v2.SnapshotQuery.
  * Use `create(SnapshotQuerySchema)` to create a new message.
  */
-export const SnapshotQuerySchema: GenMessage<SnapshotQuery> =
-  /*@__PURE__*/
+export const SnapshotQuerySchema: GenMessage<SnapshotQuery> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 4);
 
 /**
  * @generated from message server.wire.v2.ChatQuery
  */
-export type ChatQuery = Message<'server.wire.v2.ChatQuery'> & {
+export type ChatQuery = Message<"server.wire.v2.ChatQuery"> & {
   /**
    * @generated from field: string text = 1;
    */
@@ -117,8 +112,7 @@ export type ChatQuery = Message<'server.wire.v2.ChatQuery'> & {
  * Describes the message server.wire.v2.ChatQuery.
  * Use `create(ChatQuerySchema)` to create a new message.
  */
-export const ChatQuerySchema: GenMessage<ChatQuery> =
-  /*@__PURE__*/
+export const ChatQuerySchema: GenMessage<ChatQuery> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 5);
 
 /**
@@ -128,7 +122,7 @@ export const ChatQuerySchema: GenMessage<ChatQuery> =
  *
  * @generated from message server.wire.v2.ChatThreadCreateQuery
  */
-export type ChatThreadCreateQuery = Message<'server.wire.v2.ChatThreadCreateQuery'> & {
+export type ChatThreadCreateQuery = Message<"server.wire.v2.ChatThreadCreateQuery"> & {
   /**
    * @generated from field: optional server.wire.v2.ChatDriver driver = 1;
    */
@@ -156,8 +150,7 @@ export type ChatThreadCreateQuery = Message<'server.wire.v2.ChatThreadCreateQuer
  * Describes the message server.wire.v2.ChatThreadCreateQuery.
  * Use `create(ChatThreadCreateQuerySchema)` to create a new message.
  */
-export const ChatThreadCreateQuerySchema: GenMessage<ChatThreadCreateQuery> =
-  /*@__PURE__*/
+export const ChatThreadCreateQuerySchema: GenMessage<ChatThreadCreateQuery> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 6);
 
 /**
@@ -165,14 +158,14 @@ export const ChatThreadCreateQuerySchema: GenMessage<ChatThreadCreateQuery> =
  *
  * @generated from message server.wire.v2.ChatOptionsQuery
  */
-export type ChatOptionsQuery = Message<'server.wire.v2.ChatOptionsQuery'> & {};
+export type ChatOptionsQuery = Message<"server.wire.v2.ChatOptionsQuery"> & {
+};
 
 /**
  * Describes the message server.wire.v2.ChatOptionsQuery.
  * Use `create(ChatOptionsQuerySchema)` to create a new message.
  */
-export const ChatOptionsQuerySchema: GenMessage<ChatOptionsQuery> =
-  /*@__PURE__*/
+export const ChatOptionsQuerySchema: GenMessage<ChatOptionsQuery> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 7);
 
 /**
@@ -180,40 +173,40 @@ export const ChatOptionsQuerySchema: GenMessage<ChatOptionsQuery> =
  *
  * @generated from message server.wire.v2.TuiDefaultsQuery
  */
-export type TuiDefaultsQuery = Message<'server.wire.v2.TuiDefaultsQuery'> & {};
+export type TuiDefaultsQuery = Message<"server.wire.v2.TuiDefaultsQuery"> & {
+};
 
 /**
  * Describes the message server.wire.v2.TuiDefaultsQuery.
  * Use `create(TuiDefaultsQuerySchema)` to create a new message.
  */
-export const TuiDefaultsQuerySchema: GenMessage<TuiDefaultsQuery> =
-  /*@__PURE__*/
+export const TuiDefaultsQuerySchema: GenMessage<TuiDefaultsQuery> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 8);
 
 /**
  * @generated from message server.wire.v2.HistoryQuery
  */
-export type HistoryQuery = Message<'server.wire.v2.HistoryQuery'> & {};
+export type HistoryQuery = Message<"server.wire.v2.HistoryQuery"> & {
+};
 
 /**
  * Describes the message server.wire.v2.HistoryQuery.
  * Use `create(HistoryQuerySchema)` to create a new message.
  */
-export const HistoryQuerySchema: GenMessage<HistoryQuery> =
-  /*@__PURE__*/
+export const HistoryQuerySchema: GenMessage<HistoryQuery> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 9);
 
 /**
  * @generated from message server.wire.v2.PerformanceQuery
  */
-export type PerformanceQuery = Message<'server.wire.v2.PerformanceQuery'> & {};
+export type PerformanceQuery = Message<"server.wire.v2.PerformanceQuery"> & {
+};
 
 /**
  * Describes the message server.wire.v2.PerformanceQuery.
  * Use `create(PerformanceQuerySchema)` to create a new message.
  */
-export const PerformanceQuerySchema: GenMessage<PerformanceQuery> =
-  /*@__PURE__*/
+export const PerformanceQuerySchema: GenMessage<PerformanceQuery> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 10);
 
 /**
@@ -221,7 +214,7 @@ export const PerformanceQuerySchema: GenMessage<PerformanceQuery> =
  *
  * @generated from message server.wire.v2.ExperimentCursor
  */
-export type ExperimentCursor = Message<'server.wire.v2.ExperimentCursor'> & {
+export type ExperimentCursor = Message<"server.wire.v2.ExperimentCursor"> & {
   /**
    * @generated from field: string run_id = 1;
    */
@@ -242,8 +235,7 @@ export type ExperimentCursor = Message<'server.wire.v2.ExperimentCursor'> & {
  * Describes the message server.wire.v2.ExperimentCursor.
  * Use `create(ExperimentCursorSchema)` to create a new message.
  */
-export const ExperimentCursorSchema: GenMessage<ExperimentCursor> =
-  /*@__PURE__*/
+export const ExperimentCursorSchema: GenMessage<ExperimentCursor> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 11);
 
 /**
@@ -251,7 +243,7 @@ export const ExperimentCursorSchema: GenMessage<ExperimentCursor> =
  *
  * @generated from message server.wire.v2.ExperimentQuery
  */
-export type ExperimentQuery = Message<'server.wire.v2.ExperimentQuery'> & {
+export type ExperimentQuery = Message<"server.wire.v2.ExperimentQuery"> & {
   /**
    * Absent for legacy clients, which continue receiving a complete snapshot.
    *
@@ -264,8 +256,7 @@ export type ExperimentQuery = Message<'server.wire.v2.ExperimentQuery'> & {
  * Describes the message server.wire.v2.ExperimentQuery.
  * Use `create(ExperimentQuerySchema)` to create a new message.
  */
-export const ExperimentQuerySchema: GenMessage<ExperimentQuery> =
-  /*@__PURE__*/
+export const ExperimentQuerySchema: GenMessage<ExperimentQuery> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 12);
 
 /**
@@ -273,14 +264,14 @@ export const ExperimentQuerySchema: GenMessage<ExperimentQuery> =
  *
  * @generated from message server.wire.v2.DesignQuery
  */
-export type DesignQuery = Message<'server.wire.v2.DesignQuery'> & {};
+export type DesignQuery = Message<"server.wire.v2.DesignQuery"> & {
+};
 
 /**
  * Describes the message server.wire.v2.DesignQuery.
  * Use `create(DesignQuerySchema)` to create a new message.
  */
-export const DesignQuerySchema: GenMessage<DesignQuery> =
-  /*@__PURE__*/
+export const DesignQuerySchema: GenMessage<DesignQuery> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 13);
 
 /**
@@ -290,7 +281,7 @@ export const DesignQuerySchema: GenMessage<DesignQuery> =
  *
  * @generated from message server.wire.v2.DesignPatchQuery
  */
-export type DesignPatchQuery = Message<'server.wire.v2.DesignPatchQuery'> & {
+export type DesignPatchQuery = Message<"server.wire.v2.DesignPatchQuery"> & {
   /**
    * @generated from field: string base = 1;
    */
@@ -311,14 +302,13 @@ export type DesignPatchQuery = Message<'server.wire.v2.DesignPatchQuery'> & {
  * Describes the message server.wire.v2.DesignPatchQuery.
  * Use `create(DesignPatchQuerySchema)` to create a new message.
  */
-export const DesignPatchQuerySchema: GenMessage<DesignPatchQuery> =
-  /*@__PURE__*/
+export const DesignPatchQuerySchema: GenMessage<DesignPatchQuery> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 14);
 
 /**
  * @generated from message server.wire.v2.EventsQuery
  */
-export type EventsQuery = Message<'server.wire.v2.EventsQuery'> & {
+export type EventsQuery = Message<"server.wire.v2.EventsQuery"> & {
   /**
    * @generated from field: uint32 after_sequence = 1;
    */
@@ -345,14 +335,13 @@ export type EventsQuery = Message<'server.wire.v2.EventsQuery'> & {
  * Describes the message server.wire.v2.EventsQuery.
  * Use `create(EventsQuerySchema)` to create a new message.
  */
-export const EventsQuerySchema: GenMessage<EventsQuery> =
-  /*@__PURE__*/
+export const EventsQuerySchema: GenMessage<EventsQuery> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 15);
 
 /**
  * @generated from message server.wire.v2.SubscribeRequest
  */
-export type SubscribeRequest = Message<'server.wire.v2.SubscribeRequest'> & {
+export type SubscribeRequest = Message<"server.wire.v2.SubscribeRequest"> & {
   /**
    * @generated from field: uint32 after_sequence = 1;
    */
@@ -383,8 +372,7 @@ export type SubscribeRequest = Message<'server.wire.v2.SubscribeRequest'> & {
  * Describes the message server.wire.v2.SubscribeRequest.
  * Use `create(SubscribeRequestSchema)` to create a new message.
  */
-export const SubscribeRequestSchema: GenMessage<SubscribeRequest> =
-  /*@__PURE__*/
+export const SubscribeRequestSchema: GenMessage<SubscribeRequest> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 16);
 
 /**
@@ -392,7 +380,7 @@ export const SubscribeRequestSchema: GenMessage<SubscribeRequest> =
  *
  * @generated from message server.wire.v2.Request
  */
-export type Request = Message<'server.wire.v2.Request'> & {
+export type Request = Message<"server.wire.v2.Request"> & {
   /**
    * @generated from field: uint32 protocol_version = 1;
    */
@@ -411,128 +399,110 @@ export type Request = Message<'server.wire.v2.Request'> & {
   /**
    * @generated from oneof server.wire.v2.Request.body
    */
-  body:
-    | {
-        /**
-         * @generated from field: server.wire.v2.PauseCommand pause = 10;
-         */
-        value: PauseCommand;
-        case: 'pause';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.ResumeCommand resume = 11;
-         */
-        value: ResumeCommand;
-        case: 'resume';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.SteerCommand steer = 12;
-         */
-        value: SteerCommand;
-        case: 'steer';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.StopCommand stop = 13;
-         */
-        value: StopCommand;
-        case: 'stop';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.SnapshotQuery snapshot = 14;
-         */
-        value: SnapshotQuery;
-        case: 'snapshot';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.ChatQuery chat = 15;
-         */
-        value: ChatQuery;
-        case: 'chat';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.ChatThreadCreateQuery chat_thread_create = 16;
-         */
-        value: ChatThreadCreateQuery;
-        case: 'chatThreadCreate';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.ChatOptionsQuery chat_options = 17;
-         */
-        value: ChatOptionsQuery;
-        case: 'chatOptions';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.TuiDefaultsQuery tui_defaults = 18;
-         */
-        value: TuiDefaultsQuery;
-        case: 'tuiDefaults';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.HistoryQuery history = 19;
-         */
-        value: HistoryQuery;
-        case: 'history';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.PerformanceQuery performance = 20;
-         */
-        value: PerformanceQuery;
-        case: 'performance';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.ExperimentQuery experiments = 21;
-         */
-        value: ExperimentQuery;
-        case: 'experiments';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.DesignQuery design = 22;
-         */
-        value: DesignQuery;
-        case: 'design';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.DesignPatchQuery design_patch = 23;
-         */
-        value: DesignPatchQuery;
-        case: 'designPatch';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.EventsQuery events = 24;
-         */
-        value: EventsQuery;
-        case: 'events';
-      }
-    | {
-        /**
-         * @generated from field: server.wire.v2.SubscribeRequest subscribe = 25;
-         */
-        value: SubscribeRequest;
-        case: 'subscribe';
-      }
-    | {case: undefined; value?: undefined};
+  body: {
+    /**
+     * @generated from field: server.wire.v2.PauseCommand pause = 10;
+     */
+    value: PauseCommand;
+    case: "pause";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.ResumeCommand resume = 11;
+     */
+    value: ResumeCommand;
+    case: "resume";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.SteerCommand steer = 12;
+     */
+    value: SteerCommand;
+    case: "steer";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.StopCommand stop = 13;
+     */
+    value: StopCommand;
+    case: "stop";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.SnapshotQuery snapshot = 14;
+     */
+    value: SnapshotQuery;
+    case: "snapshot";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.ChatQuery chat = 15;
+     */
+    value: ChatQuery;
+    case: "chat";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.ChatThreadCreateQuery chat_thread_create = 16;
+     */
+    value: ChatThreadCreateQuery;
+    case: "chatThreadCreate";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.ChatOptionsQuery chat_options = 17;
+     */
+    value: ChatOptionsQuery;
+    case: "chatOptions";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.TuiDefaultsQuery tui_defaults = 18;
+     */
+    value: TuiDefaultsQuery;
+    case: "tuiDefaults";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.HistoryQuery history = 19;
+     */
+    value: HistoryQuery;
+    case: "history";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.PerformanceQuery performance = 20;
+     */
+    value: PerformanceQuery;
+    case: "performance";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.ExperimentQuery experiments = 21;
+     */
+    value: ExperimentQuery;
+    case: "experiments";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.DesignQuery design = 22;
+     */
+    value: DesignQuery;
+    case: "design";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.DesignPatchQuery design_patch = 23;
+     */
+    value: DesignPatchQuery;
+    case: "designPatch";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.EventsQuery events = 24;
+     */
+    value: EventsQuery;
+    case: "events";
+  } | {
+    /**
+     * @generated from field: server.wire.v2.SubscribeRequest subscribe = 25;
+     */
+    value: SubscribeRequest;
+    case: "subscribe";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
  * Describes the message server.wire.v2.Request.
  * Use `create(RequestSchema)` to create a new message.
  */
-export const RequestSchema: GenMessage<Request> =
-  /*@__PURE__*/
+export const RequestSchema: GenMessage<Request> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_requests, 17);
 
 /**
@@ -560,6 +530,6 @@ export enum ChatDriver {
 /**
  * Describes the enum server.wire.v2.ChatDriver.
  */
-export const ChatDriverSchema: GenEnum<ChatDriver> =
-  /*@__PURE__*/
+export const ChatDriverSchema: GenEnum<ChatDriver> = /*@__PURE__*/
   enumDesc(file_server_wire_v2_requests, 0);
+

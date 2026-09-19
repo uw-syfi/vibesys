@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.domains.base import DomainName
+from vibesys.constants import DomainName
 from vibesys.errors import ConfigurationError
-from vibesys.input_manifest import load_input_bundle
-from vibesys.input_synthesis import (
+from vibesys.evaluators.input_manifest import load_input_bundle
+from vibesys.evaluators.input_synthesis import (
     InputSynthesisError,
     SynthesizedInputSpec,
     synthesize_input_bundle,

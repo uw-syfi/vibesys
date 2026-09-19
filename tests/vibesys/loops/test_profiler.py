@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from vibesys.agent_runner import (
+from vibesys.agents.runner import (
     _parse_profiler_response_text,
     run_profiler_agent,
 )

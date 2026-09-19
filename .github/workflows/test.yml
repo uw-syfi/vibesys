@@ -75,12 +75,14 @@ jobs:
             # under clients/backend-client/src/gen, and by nothing else.
             tui:
               - 'clients/**'
-              - 'package.json'
-              - 'pnpm-lock.yaml'
-              - 'pnpm-workspace.yaml'
+              - 'proto/**'
+              - 'src/server/wire/**'
+              - 'src/server/api/**'
+              - 'src/server/events.py'
+              - 'src/server/controller.py'
+              - 'src/server/diagnostics.py'
+              - 'src/server/settings.py'
               - 'packaging/fetch_bun.py'
-              - 'scripts/check_ts_architecture.test.mjs'
-              - 'scripts/check_ts_package_manifests.mjs'
               - '.github/workflows/test.yml'
             # What `proto` checks: the wire contract, its buf configuration, the
             # generators' pins, and both generated trees.
@@ -91,8 +93,8 @@ jobs:
               - 'src/server/wire/**'
               - 'clients/backend-client/src/gen/**'
               - 'scripts/check_proto_breaking.mjs'
-              - 'package.json'
-              - 'pnpm-lock.yaml'
+              - 'clients/package.json'
+              - 'clients/pnpm-lock.yaml'
               - 'pyproject.toml'
               - 'uv.lock'
               - '.github/workflows/test.yml'
@@ -104,7 +106,7 @@ jobs:
               - 'examples/**'
               - '.gitmodules'
               - 'src/entrypoints/headless.py'
-              - 'src/vibesys/input_manifest.py'
+              - 'src/vibesys/evaluators/input_manifest.py'
               - 'src/vibesys/evaluators/**'
               - 'resources/evaluators/microservice/**'
               - 'scripts/example_repositories.py'
@@ -259,15 +261,18 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync --dev
-          pnpm install --frozen-lockfile
+          pnpm --dir clients install --frozen-lockfile
 
       - name: Lint the protocol
+        working-directory: clients
         run: pnpm proto:lint
 
       - name: Check for breaking protocol changes
+        working-directory: clients
         run: pnpm proto:breaking
 
       - name: Check generated protocol bindings
+        working-directory: clients
         run: pnpm proto:check
 
   tui:
@@ -297,7 +302,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.PNPM_STORE_PATH }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('clients/pnpm-lock.yaml') }}
           # A lockfile bump usually changes a handful of packages, so an older
           # store is still worth most of its download cost.
           restore-keys: pnpm-store-${{ runner.os }}-
@@ -320,35 +325,43 @@ jobs:
         run: uv sync --dev
 
       - name: Install TUI dependencies
+        working-directory: clients
         run: pnpm install --frozen-lockfile
 
       - name: Check TypeScript formatting and lint
+        working-directory: clients
         run: pnpm check:ts
 
       - name: Check TypeScript package boundaries
+        working-directory: clients
         run: pnpm check:ts-architecture
 
       - name: Check TypeScript packages
+        working-directory: clients
         run: pnpm check:clients
 
       - name: Test TypeScript packages
+        working-directory: clients
         run: pnpm test:clients
 
       - name: Build TypeScript packages
+        working-directory: clients
         run: pnpm build:clients
 
       - name: Smoke-test packed public TUI package
+        working-directory: clients
         run: |
           pack_dir="$RUNNER_TEMP/vibesys-tui-pack"
           install_dir="$RUNNER_TEMP/vibesys-tui-install"
           mkdir -p "$pack_dir" "$install_dir"
-          pnpm --dir clients/tui pack --pack-destination "$pack_dir"
+          pnpm --dir tui pack --pack-destination "$pack_dir"
           npm install --prefix "$install_dir" --ignore-scripts "$pack_dir"/*.tgz
           test -f "$install_dir/node_modules/@vibesys/tui/node_modules/@vibesys/backend-client/dist/index.js"
           test -f "$install_dir/node_modules/@vibesys/tui/node_modules/@vibesys/core-state/dist/index.js"
           bun "$install_dir/node_modules/@vibesys/tui/dist/self-test.js"
 
       - name: Smoke-test deployed TUI workspace packages
+        working-directory: clients
         run: |
           deploy_dir="$RUNNER_TEMP/vibesys-tui-deploy"
           pnpm --config.node-linker=hoisted --filter @vibesys/tui deploy --prod "$deploy_dir"

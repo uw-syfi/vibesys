@@ -4,25 +4,22 @@
 // @generated from file server/wire/v2/common.proto (package server.wire.v2, syntax proto3)
 /* eslint-disable */
 
-import type {Message} from '@bufbuild/protobuf';
-import type {GenEnum, GenFile, GenMessage} from '@bufbuild/protobuf/codegenv2';
-import {enumDesc, fileDesc, messageDesc} from '@bufbuild/protobuf/codegenv2';
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file server/wire/v2/common.proto.
  */
-export const file_server_wire_v2_common: GenFile =
-  /*@__PURE__*/
-  fileDesc(
-    'ChtzZXJ2ZXIvd2lyZS92Mi9jb21tb24ucHJvdG8SDnNlcnZlci53aXJlLnYyIoEDCgpEaWFnbm9zdGljEgoKAmlkGAEgASgJEgwKBGNvZGUYAiABKAkSDwoHc3VtbWFyeRgDIAEoCRITCgZkZXRhaWwYBCABKAlIAIgBARIRCgRoaW50GAUgASgJSAGIAQESLgoFc2NvcGUYBiABKA4yHy5zZXJ2ZXIud2lyZS52Mi5EaWFnbm9zdGljU2NvcGUSNAoIc2V2ZXJpdHkYByABKA4yIi5zZXJ2ZXIud2lyZS52Mi5EaWFnbm9zdGljU2V2ZXJpdHkSPAoMcmV0cnlhYmlsaXR5GAggASgOMiYuc2VydmVyLndpcmUudjIuRGlhZ25vc3RpY1JldHJ5YWJpbGl0eRIVCghjYXVzZV9pZBgJIAEoCUgCiAEBEhYKCWRlYnVnX3JlZhgKIAEoCUgDiAEBEhMKBnNvdXJjZRgLIAEoCUgEiAEBQgkKB19kZXRhaWxCBwoFX2hpbnRCCwoJX2NhdXNlX2lkQgwKCl9kZWJ1Z19yZWZCCQoHX3NvdXJjZSrpAQoJUnVuU3RhdHVzEhoKFlJVTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIXChNSVU5fU1RBVFVTX1NUQVJUSU5HEAESFgoSUlVOX1NUQVRVU19SVU5OSU5HEAISFgoSUlVOX1NUQVRVU19QQVVTSU5HEAMSFQoRUlVOX1NUQVRVU19QQVVTRUQQBBIXChNSVU5fU1RBVFVTX1NUT1BQSU5HEAUSFgoSUlVOX1NUQVRVU19TVE9QUEVEEAYSGAoUUlVOX1NUQVRVU19DT01QTEVURUQQBxIVChFSVU5fU1RBVFVTX0ZBSUxFRBAIKosCCg9EaWFnbm9zdGljU2NvcGUSIAocRElBR05PU1RJQ19TQ09QRV9VTlNQRUNJRklFRBAAEiIKHkRJQUdOT1NUSUNfU0NPUEVfQ09ORklHVVJBVElPThABEh8KG0RJQUdOT1NUSUNfU0NPUEVfSU5WT0NBVElPThACEhoKFkRJQUdOT1NUSUNfU0NPUEVfUEhBU0UQAxIYChRESUFHTk9TVElDX1NDT1BFX1JVThAEEhwKGERJQUdOT1NUSUNfU0NPUEVfUkVRVUVTVBAFEh0KGURJQUdOT1NUSUNfU0NPUEVfUFJPVE9DT0wQBhIeChpESUFHTk9TVElDX1NDT1BFX1RSQU5TUE9SVBAHKpgBChJEaWFnbm9zdGljU2V2ZXJpdHkSIwofRElBR05PU1RJQ19TRVZFUklUWV9VTlNQRUNJRklFRBAAEh8KG0RJQUdOT1NUSUNfU0VWRVJJVFlfV0FSTklORxABEh0KGURJQUdOT1NUSUNfU0VWRVJJVFlfRVJST1IQAhIdChlESUFHTk9TVElDX1NFVkVSSVRZX0ZBVEFMEAMq1AEKFkRpYWdub3N0aWNSZXRyeWFiaWxpdHkSJwojRElBR05PU1RJQ19SRVRSWUFCSUxJVFlfVU5TUEVDSUZJRUQQABIlCiFESUFHTk9TVElDX1JFVFJZQUJJTElUWV9BVVRPTUFUSUMQARIiCh5ESUFHTk9TVElDX1JFVFJZQUJJTElUWV9NQU5VQUwQAhIhCh1ESUFHTk9TVElDX1JFVFJZQUJJTElUWV9ORVZFUhADEiMKH0RJQUdOT1NUSUNfUkVUUllBQklMSVRZX1VOS05PV04QBGIGcHJvdG8z',
-  );
+export const file_server_wire_v2_common: GenFile = /*@__PURE__*/
+  fileDesc("ChtzZXJ2ZXIvd2lyZS92Mi9jb21tb24ucHJvdG8SDnNlcnZlci53aXJlLnYyIoEDCgpEaWFnbm9zdGljEgoKAmlkGAEgASgJEgwKBGNvZGUYAiABKAkSDwoHc3VtbWFyeRgDIAEoCRITCgZkZXRhaWwYBCABKAlIAIgBARIRCgRoaW50GAUgASgJSAGIAQESLgoFc2NvcGUYBiABKA4yHy5zZXJ2ZXIud2lyZS52Mi5EaWFnbm9zdGljU2NvcGUSNAoIc2V2ZXJpdHkYByABKA4yIi5zZXJ2ZXIud2lyZS52Mi5EaWFnbm9zdGljU2V2ZXJpdHkSPAoMcmV0cnlhYmlsaXR5GAggASgOMiYuc2VydmVyLndpcmUudjIuRGlhZ25vc3RpY1JldHJ5YWJpbGl0eRIVCghjYXVzZV9pZBgJIAEoCUgCiAEBEhYKCWRlYnVnX3JlZhgKIAEoCUgDiAEBEhMKBnNvdXJjZRgLIAEoCUgEiAEBQgkKB19kZXRhaWxCBwoFX2hpbnRCCwoJX2NhdXNlX2lkQgwKCl9kZWJ1Z19yZWZCCQoHX3NvdXJjZSrpAQoJUnVuU3RhdHVzEhoKFlJVTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIXChNSVU5fU1RBVFVTX1NUQVJUSU5HEAESFgoSUlVOX1NUQVRVU19SVU5OSU5HEAISFgoSUlVOX1NUQVRVU19QQVVTSU5HEAMSFQoRUlVOX1NUQVRVU19QQVVTRUQQBBIXChNSVU5fU1RBVFVTX1NUT1BQSU5HEAUSFgoSUlVOX1NUQVRVU19TVE9QUEVEEAYSGAoUUlVOX1NUQVRVU19DT01QTEVURUQQBxIVChFSVU5fU1RBVFVTX0ZBSUxFRBAIKosCCg9EaWFnbm9zdGljU2NvcGUSIAocRElBR05PU1RJQ19TQ09QRV9VTlNQRUNJRklFRBAAEiIKHkRJQUdOT1NUSUNfU0NPUEVfQ09ORklHVVJBVElPThABEh8KG0RJQUdOT1NUSUNfU0NPUEVfSU5WT0NBVElPThACEhoKFkRJQUdOT1NUSUNfU0NPUEVfUEhBU0UQAxIYChRESUFHTk9TVElDX1NDT1BFX1JVThAEEhwKGERJQUdOT1NUSUNfU0NPUEVfUkVRVUVTVBAFEh0KGURJQUdOT1NUSUNfU0NPUEVfUFJPVE9DT0wQBhIeChpESUFHTk9TVElDX1NDT1BFX1RSQU5TUE9SVBAHKpgBChJEaWFnbm9zdGljU2V2ZXJpdHkSIwofRElBR05PU1RJQ19TRVZFUklUWV9VTlNQRUNJRklFRBAAEh8KG0RJQUdOT1NUSUNfU0VWRVJJVFlfV0FSTklORxABEh0KGURJQUdOT1NUSUNfU0VWRVJJVFlfRVJST1IQAhIdChlESUFHTk9TVElDX1NFVkVSSVRZX0ZBVEFMEAMq1AEKFkRpYWdub3N0aWNSZXRyeWFiaWxpdHkSJwojRElBR05PU1RJQ19SRVRSWUFCSUxJVFlfVU5TUEVDSUZJRUQQABIlCiFESUFHTk9TVElDX1JFVFJZQUJJTElUWV9BVVRPTUFUSUMQARIiCh5ESUFHTk9TVElDX1JFVFJZQUJJTElUWV9NQU5VQUwQAhIhCh1ESUFHTk9TVElDX1JFVFJZQUJJTElUWV9ORVZFUhADEiMKH0RJQUdOT1NUSUNfUkVUUllBQklMSVRZX1VOS05PV04QBGIGcHJvdG8z");
 
 /**
  * Structured, provider-neutral description of an operator diagnostic.
  *
  * @generated from message server.wire.v2.Diagnostic
  */
-export type Diagnostic = Message<'server.wire.v2.Diagnostic'> & {
+export type Diagnostic = Message<"server.wire.v2.Diagnostic"> & {
   /**
    * @generated from field: string id = 1;
    */
@@ -85,8 +82,7 @@ export type Diagnostic = Message<'server.wire.v2.Diagnostic'> & {
  * Describes the message server.wire.v2.Diagnostic.
  * Use `create(DiagnosticSchema)` to create a new message.
  */
-export const DiagnosticSchema: GenMessage<Diagnostic> =
-  /*@__PURE__*/
+export const DiagnosticSchema: GenMessage<Diagnostic> = /*@__PURE__*/
   messageDesc(file_server_wire_v2_common, 0);
 
 /**
@@ -147,8 +143,7 @@ export enum RunStatus {
 /**
  * Describes the enum server.wire.v2.RunStatus.
  */
-export const RunStatusSchema: GenEnum<RunStatus> =
-  /*@__PURE__*/
+export const RunStatusSchema: GenEnum<RunStatus> = /*@__PURE__*/
   enumDesc(file_server_wire_v2_common, 0);
 
 /**
@@ -201,8 +196,7 @@ export enum DiagnosticScope {
 /**
  * Describes the enum server.wire.v2.DiagnosticScope.
  */
-export const DiagnosticScopeSchema: GenEnum<DiagnosticScope> =
-  /*@__PURE__*/
+export const DiagnosticScopeSchema: GenEnum<DiagnosticScope> = /*@__PURE__*/
   enumDesc(file_server_wire_v2_common, 1);
 
 /**
@@ -235,8 +229,7 @@ export enum DiagnosticSeverity {
 /**
  * Describes the enum server.wire.v2.DiagnosticSeverity.
  */
-export const DiagnosticSeveritySchema: GenEnum<DiagnosticSeverity> =
-  /*@__PURE__*/
+export const DiagnosticSeveritySchema: GenEnum<DiagnosticSeverity> = /*@__PURE__*/
   enumDesc(file_server_wire_v2_common, 2);
 
 /**
@@ -274,6 +267,6 @@ export enum DiagnosticRetryability {
 /**
  * Describes the enum server.wire.v2.DiagnosticRetryability.
  */
-export const DiagnosticRetryabilitySchema: GenEnum<DiagnosticRetryability> =
-  /*@__PURE__*/
+export const DiagnosticRetryabilitySchema: GenEnum<DiagnosticRetryability> = /*@__PURE__*/
   enumDesc(file_server_wire_v2_common, 3);
+

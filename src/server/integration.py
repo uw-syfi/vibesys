@@ -20,6 +20,7 @@ from server.diagnostics import (
     DiagnosticSeverity,
     make_diagnostic,
 )
+from server.read_model import RunInspector
 from server.run_lifecycle import RunTrigger
 from server.wire import codec, enums, messages, upgrade
 from server.wire.v2 import events_pb2
@@ -392,8 +393,6 @@ class RunIntegrationAdapter:
                 provider=resolved_provider,
                 model=resolved_model,
             )
-
-        from server.read_model import RunInspector  # noqa: PLC0415
 
         previous = self._chat_factory
         if previous is not None:

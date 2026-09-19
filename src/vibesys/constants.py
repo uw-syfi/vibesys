@@ -19,6 +19,13 @@ GOOGLE_PREFIXES = ("gemini-", "gemma-")
 OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4")
 
 
+class DomainName(StrEnum):  # noqa: D101  # tracked: #288
+    LLM_SERVING = "llm-serving"
+    GENERIC = "generic"
+    MICROSERVICES = "microservices"
+    DATABASE = "database"
+
+
 class ComputeBackend(StrEnum):
     """Compute backends the agent can target.
 

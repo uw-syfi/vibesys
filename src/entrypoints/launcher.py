@@ -61,10 +61,10 @@ _REBUILD_WATCH_FILES: tuple[str, ...] = (
     "clients/tui/package.json",
     "clients/tui/tsconfig.json",
     "clients/tui/tsconfig.check.json",
-    "package.json",
-    "pnpm-lock.yaml",
-    "pnpm-workspace.yaml",
-    "biome.json",
+    "clients/package.json",
+    "clients/pnpm-lock.yaml",
+    "clients/pnpm-workspace.yaml",
+    "clients/biome.json",
 )
 _REBUILD_WATCH_DIRS: tuple[str, ...] = (
     "clients/backend-client/src",
@@ -273,9 +273,12 @@ def _needs_rebuild(root: Path) -> bool:
     return _stale_reason(root) is not None
 
 
-#: Marker written under `node_modules` after a successful `pnpm install`, so
-#: later launches can skip reinstalling when nothing changed. Relative to the
-#: repository root, matching `_REBUILD_WATCH_FILES`/`_REBUILD_WATCH_DIRS`.
+#: The pnpm workspace root, relative to the repository root. Every pnpm
+#: command runs here, and `node_modules` and the lockfile live here.
+_WORKSPACE_REL = "clients"
+
+#: Marker written under the workspace `node_modules` after a successful
+#: `pnpm install`, so later launches can skip reinstalling when nothing changed.
 _INSTALL_STAMP_REL = "node_modules/.vibesys-install-stamp"
 
 
@@ -285,17 +288,18 @@ def _needs_install(root: Path) -> bool:
     Skipped when `node_modules` already exists and the lockfile is no newer
     than the stamp file written after the last successful install.
     """
-    if not (root / "node_modules").is_dir():
+    workspace = root / _WORKSPACE_REL
+    if not (workspace / "node_modules").is_dir():
         return True
-    stamp = root / _INSTALL_STAMP_REL
+    stamp = workspace / _INSTALL_STAMP_REL
     if not stamp.is_file():
         return True
-    lockfile = root / "pnpm-lock.yaml"
+    lockfile = workspace / "pnpm-lock.yaml"
     return lockfile.is_file() and lockfile.stat().st_mtime > stamp.stat().st_mtime
 
 
 def _write_install_stamp(root: Path) -> None:
-    stamp = root / _INSTALL_STAMP_REL
+    stamp = root / _WORKSPACE_REL / _INSTALL_STAMP_REL
     stamp.parent.mkdir(parents=True, exist_ok=True)
     stamp.touch()
 
@@ -308,7 +312,7 @@ def _run_pnpm_install(pnpm: list[str], root: Path) -> bool:
     started = time.monotonic()
     result = subprocess.run(  # noqa: S603  # tracked: #288
         [*pnpm, "install", "--frozen-lockfile"],
-        cwd=str(root),
+        cwd=str(root / _WORKSPACE_REL),
         capture_output=True,
         text=True,
         check=False,
@@ -326,7 +330,11 @@ def _run_pnpm_install(pnpm: list[str], root: Path) -> bool:
 
 def _run_build(pnpm: list[str], root: Path) -> bool:
     result = subprocess.run(  # noqa: S603  # tracked: #288
-        [*pnpm, "build:clients"], cwd=str(root), capture_output=True, text=True, check=False
+        [*pnpm, "build:clients"],
+        cwd=str(root / _WORKSPACE_REL),
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if result.returncode != 0:
         sys.stderr.write("vibesys: failed to build the interactive client:\n")

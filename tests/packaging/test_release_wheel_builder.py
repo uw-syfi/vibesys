@@ -100,7 +100,7 @@ def _fake_deployment(destination: Path) -> None:
 
 def test_build_release_wheel_assembles_payload_without_mutating_node_modules(tmp_path):  # noqa: ANN001, ANN201
     repo, bun = _make_repo(tmp_path / "repo")
-    sentinel = repo / "node_modules" / "sentinel"
+    sentinel = repo / "clients" / "node_modules" / "sentinel"
     sentinel.parent.mkdir()
     sentinel.write_text("untouched\n")
     output = tmp_path / "dist"
@@ -143,8 +143,11 @@ def test_build_release_wheel_assembles_payload_without_mutating_node_modules(tmp
     assert wheel.name == "vibesys-0.1.0-py3-none-manylinux_2_28_x86_64.whl"
     assert sentinel.read_text() == "untouched\n"
     commands = [call[0] for call in calls]
-    assert ["pnpm", "install", "--frozen-lockfile"] in commands
-    assert ["pnpm", "build:clients"] in commands
+    workspace = repo.resolve() / "clients"
+    assert [(c[0], c[1]) for c in calls if c[0][0] == "pnpm" and "deploy" not in c[0]] == [
+        (["pnpm", "install", "--frozen-lockfile"], workspace),
+        (["pnpm", "build:clients"], workspace),
+    ]
     deploy = next(command for command in commands if "deploy" in command)
     assert "--prod" in deploy
     assert "--legacy" not in deploy

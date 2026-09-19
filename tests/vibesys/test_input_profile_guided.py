@@ -5,7 +5,11 @@ import tomllib
 import pytest
 from pydantic import ValidationError
 
-from vibesys.input_manifest import InputManifest, ProfileGuidedInput, render_input_manifest
+from vibesys.evaluators.input_manifest import (
+    InputManifest,
+    ProfileGuidedInput,
+    render_input_manifest,
+)
 
 
 def _manifest(profile_guided: object) -> InputManifest:

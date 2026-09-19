@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from vibesys.constants import ComputeBackend
-from vibesys.input_manifest import WorkspaceSource
+from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.run import CopySpec, InputProjectSpec, Workspace
 from vibesys.run.workspace import GitSourceSpec
 from vibesys.sandbox.run_environment import LocalEnvironment

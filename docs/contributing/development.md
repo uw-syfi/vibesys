@@ -120,7 +120,9 @@ The TypeScript client has its own workflow; see
 [`clients/tui/README.md`](https://github.com/uw-syfi/vibesys/blob/main/clients/tui/README.md). The short version is:
 
 ```bash
+cd clients
 pnpm install --frozen-lockfile
+pnpm proto:generate
 pnpm check:ts-architecture
 pnpm check:clients
 pnpm test:clients
@@ -146,6 +148,7 @@ Tooling is pinned in the repository: `buf` and `protoc-gen-es` from pnpm, and
 `protoc` from the `grpcio-tools` wheel in the uv dev group.
 
 ```bash
+cd clients            # the pnpm workspace root; the scripts run buf from the repository root
 pnpm proto:lint       # buf lint (STANDARD rules)
 pnpm proto:generate   # regenerate Python and TypeScript bindings
 pnpm proto:check      # regenerate and fail if the checked-in bindings differ

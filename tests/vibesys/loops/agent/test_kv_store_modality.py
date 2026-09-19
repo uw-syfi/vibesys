@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from entrypoints.headless import _MODALITIES
-from vibesys.input_manifest import load_project_task
+from vibesys.evaluators.input_manifest import load_project_task
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_project import Project
 

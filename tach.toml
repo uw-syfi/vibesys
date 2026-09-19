@@ -13,13 +13,12 @@
 # modeled the same way: `server.api`, `server.runtime`, ... are modules, and
 # bare `server` is its package `__init__`.
 #
-# Known cycles (tolerated for now, to be tightened):
-# - vibesys, agents, run, render, sandbox, backends, skypilot, domains, prompts,
-#   evaluators form one strongly connected core.
-# - server.integration <-> server.read_model (read_model imports integration
-#   only under TYPE_CHECKING).
-# TODO: set forbid_circular_dependencies = true once the vibesys core cycle is
-# broken.
+# Cycles are forbidden (`forbid_circular_dependencies = true`). The core layers,
+# bottom to top: `vibesys` (top-level vibesys/*.py: config, schemas, ...); then
+# backends, evaluators, prompts, render, skypilot; then agents and domains;
+# then sandbox; then run; then `vibesys.context` (per-run lifecycle context,
+# imported only by loops and entrypoints); then loops. Do not add an upward
+# edge; move the shared code down instead.
 #
 # No layers. Every edge is listed, including those of `entrypoints` and each
 # `server.*` module. Order is enforced by the explicit edges: `server.runtime`
@@ -47,11 +46,11 @@ source_roots = [
 exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources", "build", "dist", ".venv"]
 # Also freeze imports that exist only under TYPE_CHECKING.
 ignore_type_checking_imports = false
-forbid_circular_dependencies = false
+forbid_circular_dependencies = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["vs_project", "vs_github", "vibesys", "vibesys.domains", "vibesys.loops", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vibesys.agents", "server.runtime", "server.settings", "server.wire"]
+depends_on = ["vs_project", "vs_github", "vibesys", "vibesys.evaluators", "vibesys.loops", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vibesys.agents", "server.runtime", "server.settings", "server.wire"]
 
 [[modules]]
 path = "server"
@@ -103,7 +102,7 @@ depends_on = ["server.events", "server.diagnostics", "server.wire"]
 
 [[modules]]
 path = "server.read_model"
-depends_on = ["server.integration", "server.wire"]
+depends_on = ["server.controller", "server.wire"]
 
 [[modules]]
 path = "server.run_lifecycle"
@@ -123,7 +122,11 @@ depends_on = ["server.wire"]
 
 [[modules]]
 path = "vibesys"
-depends_on = ["vibesys.agents", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vs_feature_flags"]
+depends_on = ["vs_feature_flags"]
+
+[[modules]]
+path = "vibesys.context"
+depends_on = ["vibesys", "vibesys.agents", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.agents"
@@ -131,15 +134,15 @@ depends_on = ["vibesys", "vibesys.render", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.loops"
-depends_on = ["vibesys", "vibesys.agents", "vibesys.domains", "vibesys.prompts", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_loop_state", "vs_evaluator_protocol", "vs_issue_board", "vs_sandbox", "vs_project"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.agents", "vibesys.domains", "vibesys.evaluators", "vibesys.prompts", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_loop_state", "vs_evaluator_protocol", "vs_issue_board", "vs_sandbox", "vs_project"]
 
 [[modules]]
 path = "vibesys.run"
-depends_on = ["vibesys", "vibesys.agents", "vibesys.backends", "vibesys.render", "vibesys.sandbox", "vs_github", "vs_sandbox", "vs_loop_state", "vs_project"]
+depends_on = ["vibesys", "vibesys.agents", "vibesys.backends", "vibesys.evaluators", "vibesys.render", "vibesys.sandbox", "vs_github", "vs_sandbox", "vs_loop_state", "vs_project"]
 
 [[modules]]
 path = "vibesys.domains"
-depends_on = ["vibesys.prompts"]
+depends_on = ["vibesys", "vibesys.prompts"]
 
 [[modules]]
 path = "vibesys.backends"
@@ -159,7 +162,7 @@ depends_on = ["vibesys"]
 
 [[modules]]
 path = "vibesys.evaluators"
-depends_on = ["vibesys", "vs_sandbox"]
+depends_on = ["vibesys", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.prompts"

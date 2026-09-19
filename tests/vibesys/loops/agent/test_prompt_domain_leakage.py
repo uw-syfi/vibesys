@@ -12,7 +12,7 @@ from pathlib import Path  # noqa: TC003  # tracked: #288
 
 import pytest
 
-from vibesys.domains.base import DomainName
+from vibesys.constants import DomainName
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.loops.agent import issue_board

@@ -1,7 +1,7 @@
 """Deepagents implementation of :class:`AgentClient`.
 
 Wraps ``deepagents.create_deep_agent`` and the existing
-``vibesys.agent_runner.run_typed_agent`` plumbing — no behavior
+``vibesys.agents.runner.run_typed_agent`` plumbing — no behavior
 change vs. what the simple loop did before this abstraction landed.
 """
 
@@ -19,16 +19,13 @@ from langchain_core.tools import BaseTool  # noqa: TC002  # tracked: #288
 from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel
 
-from vibesys.agent_runner import (
-    log_agent_config,
-    run_agent,
-    run_typed_agent,
-)
 from vibesys.agents.callbacks import AgentLogger
 from vibesys.agents.client import AgentClient
 from vibesys.agents.contracts import AgentCapabilities, MCPServerSpec
 from vibesys.agents.progress import AgentProgress  # noqa: TC001  # tracked: #288
+from vibesys.agents.runner import run_agent, run_typed_agent
 from vibesys.agents.session_key import AgentSessionKey  # noqa: TC001  # tracked: #288
+from vibesys.render.log import log_agent_config
 
 T = TypeVar("T", bound=BaseModel)
 

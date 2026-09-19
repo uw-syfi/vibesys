@@ -3,16 +3,17 @@
   "vcs": {
     "enabled": true,
     "clientKind": "git",
+    "root": "..",
     "useIgnoreFile": true
   },
   "files": {
     "includes": [
       ".dependency-cruiser.cjs",
-      "clients/**/*.ts",
-      "clients/**/*.tsx",
+      "**/*.ts",
+      "**/*.tsx",
       "scripts/**/*.mjs",
-      "!clients/**/dist",
-      "!clients/backend-client/src/generated"
+      "!**/dist",
+      "!backend-client/src/gen"
     ]
   },
   "formatter": {

@@ -25,18 +25,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from vibesys import boot_trace
-from vibesys import objective as _objective
 from vibesys.agents.provider_policy import SHIPPED_PROVIDERS
 from vibesys.config import Config, load_config
 from vibesys.constants import (
     KNOWN_COMPUTE_BACKENDS,
     PROJECT_ROOT,
     ComputeBackend,
+    DomainName,
 )
-from vibesys.domains.base import DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.evaluators import objective as _objective
+from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
-from vibesys.input_manifest import InputBundle, load_input_bundle, load_project_task
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.loops.roles import expected_agent_roles
 from vibesys.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind
@@ -1883,7 +1883,7 @@ def _parse_command_flag(raw: str, flag: str) -> tuple[str, ...]:
 
 def _synthesize_standalone_input(args: argparse.Namespace) -> Path:
     """Materialize standalone-input flags into a bundle and return its path."""
-    from vibesys.input_synthesis import (  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_synthesis import (  # noqa: PLC0415  # tracked: #288
         InputSynthesisError,
         SynthesizedInputSpec,
         synthesize_input_bundle,

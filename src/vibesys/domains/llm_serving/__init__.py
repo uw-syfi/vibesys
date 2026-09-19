@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from vibesys.domains.base import DomainDefinition, DomainName
+from vibesys.constants import DomainName
+from vibesys.domains.base import DomainDefinition
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.prompts import PROMPTS_DIR
 

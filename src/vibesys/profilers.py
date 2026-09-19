@@ -6,7 +6,7 @@ import platform
 from dataclasses import dataclass
 from enum import StrEnum
 
-from vibesys.domains.base import DomainName
+from vibesys.constants import DomainName
 
 
 class ProfilerKind(StrEnum):

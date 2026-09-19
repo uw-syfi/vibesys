@@ -24,7 +24,7 @@ from vibesys.evaluators import (
     tool_install_root,
     tool_spec_digest,
 )
-from vibesys.input_manifest import load_project_task
+from vibesys.evaluators.input_manifest import load_project_task
 from vibesys.profilers import ProfilerKind
 from vibesys.sandbox.run_environment import (
     RunEnvironmentRequest,
@@ -1975,7 +1975,7 @@ def test_modal_environment_prompt_notes_cover_seeded_checkouts(tmp_path):  # noq
     """Seeded starting-point checkouts live only in the editor container, so
     the runtime notes must tell the agent to bake them into the Modal image;
     unseeded runs must not mention checkouts at all."""
-    from vibesys.input_manifest import WorkspaceSource  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import WorkspaceSource  # noqa: PLC0415  # tracked: #288
 
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))

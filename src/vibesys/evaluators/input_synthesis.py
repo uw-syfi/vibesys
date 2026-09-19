@@ -5,7 +5,7 @@ External users who install VibeSys as a package do not have the repository
 ``OBJECTIVE.md`` + ``vibesys.input.toml`` bundle shape, they can pass the same
 information as separate flags (objective, domain, evaluator commands, optional
 reference/evaluator directories). This module materializes those flags into a
-conventional bundle directory that :func:`vibesys.input_manifest.load_input_bundle`
+conventional bundle directory that :func:`vibesys.evaluators.input_manifest.load_input_bundle`
 then loads unchanged, so every downstream consumer keeps seeing a real
 ``InputBundle`` rooted at a real directory.
 """
@@ -18,8 +18,8 @@ from pathlib import Path  # noqa: TC003  # tracked: #288
 
 from pydantic import ValidationError
 
-from vibesys.domains.base import DomainName  # noqa: TC001  # tracked: #288
-from vibesys.input_manifest import MANIFEST_NAME, InputManifest
+from vibesys.constants import DomainName  # noqa: TC001  # tracked: #288
+from vibesys.evaluators.input_manifest import MANIFEST_NAME, InputManifest
 
 #: Bundle-relative directory name used to stage trusted evaluator source
 #: supplied by standalone flags. It lives inside the synthesized bundle so the
@@ -125,7 +125,7 @@ def _render_manifest_toml(spec: SynthesizedInputSpec) -> str:
 
     This is a purpose-built emitter for exactly the tables the synthesizer
     generates, not a general TOML writer. The output round-trips through
-    :func:`vibesys.input_manifest.load_input_bundle`, which re-validates it. The
+    :func:`vibesys.evaluators.input_manifest.load_input_bundle`, which re-validates it. The
     same shape is validated eagerly via :func:`_build_manifest_dict`.
     """
     lines: list[str] = [

@@ -20,13 +20,13 @@ from vibesys.agents.session_store import DurableSessionStore
 from vibesys.backends.cuda import CudaBackend
 from vibesys.backends.cuda.gpu_monitor import GpuInfo
 from vibesys.config import Config
+from vibesys.constants import DomainName
 from vibesys.context import (
     _resume_configuration_update,
     _RunContext,
     create_candidate_context,
     create_run_context,
 )
-from vibesys.domains.base import DomainName
 from vibesys.domains.environment import EnvironmentPatch, NoopEnvironmentHooks
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.errors import ConfigurationError
@@ -35,8 +35,8 @@ from vibesys.evaluators import (
     resolve_evaluator_package,
     tool_install_root,
 )
+from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.events import CoreEventType
-from vibesys.input_manifest import WorkspaceSource
 from vibesys.loops.agent.model import AgentRunState
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.run import (

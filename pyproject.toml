@@ -163,12 +163,12 @@ allowlist = [
 # God-file ceiling for first-party Python, in physical lines (`wc -l`).
 # Enforced by `scripts/check_file_length.py`. Ruff's C901/PL rules bound
 # individual functions but say nothing about how many of them one module may
-# accumulate, and `biome.json` has the TypeScript counterpart
+# accumulate, and `clients/biome.json` has the TypeScript counterpart
 # (`style/noExcessiveLinesPerFile`) at the same 2000-line ceiling.
 max_lines = 2000
 
 # Directories scanned for `*.py`. Any path with a `tests` or `__pycache__`
-# component is skipped: long test modules are normal, and `biome.json`
+# component is skipped: long test modules are normal, and `clients/biome.json`
 # exempts `*.test.ts` from its file-length rule for the same reason.
 roots = ["src", "libs", "scripts", "packaging", "sdk"]
 

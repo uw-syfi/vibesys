@@ -10,8 +10,7 @@ from typing import Any
 
 import yaml
 
-from vibesys.constants import PROJECT_ROOT, ComputeBackend
-from vibesys.domains.base import DomainName
+from vibesys.constants import PROJECT_ROOT, ComputeBackend, DomainName
 from vibesys.schemas import SkillResourceSelection  # noqa: TC001  # tracked: #288
 
 SIDECAR_NAME = ".vibesys.toml"

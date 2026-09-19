@@ -22,8 +22,8 @@ import pytest
 
 from vibesys.agents import AgentClient
 from vibesys.config import Config
+from vibesys.constants import DomainName
 from vibesys.context import create_run_context
-from vibesys.domains.base import DomainName
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.domains.registry import resolve_domain
 from vibesys.events import FrameworkWarningData
@@ -66,7 +66,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vibesys.constants import ComputeBackend
-    from vibesys.input_manifest import BenchmarkResult, WorkspaceSource
+    from vibesys.evaluators.input_manifest import BenchmarkResult, WorkspaceSource
     from vibesys.loops.evolve.search_policy import SearchPolicyName
     from vibesys.run import RepositoryVisibility
 
@@ -1561,7 +1561,7 @@ def test_benchmark_gate_extends_timeout_by_environment_setup_allowance():  # noq
     """Environment-owned deployment/readiness time must not eat the benchmark
     command's declared budget: the evolve gate forwards setup + contract, the
     same setup-aware policy the agent path uses."""
-    from vibesys.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
     from vibesys.loops.gates import BenchmarkContract  # noqa: PLC0415  # tracked: #288
 
     ctx = _FakeLoopContext(
@@ -1588,7 +1588,7 @@ def test_benchmark_gate_extends_timeout_by_environment_setup_allowance():  # noq
 
 def test_benchmark_gate_timeout_unchanged_without_setup_allowance():  # noqa: ANN201  # tracked: #288
     """With no setup allowance the forwarded budget is exactly the contract's."""
-    from vibesys.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
     from vibesys.loops.gates import BenchmarkContract  # noqa: PLC0415  # tracked: #288
 
     ctx = _FakeLoopContext(
@@ -1615,7 +1615,7 @@ def test_benchmark_gate_timeout_unchanged_without_setup_allowance():  # noqa: AN
 def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """A declared benchmark result contract, not the profiler agent's
     self-report, records every candidate's fitness."""
-    from vibesys.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
 
     runner = _make_runner()
     gate = MagicMock(side_effect=[_passing_gate_result(42.5), _passing_gate_result(43.75)])
@@ -1643,7 +1643,7 @@ def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path, ref_file):  # 
 
 
 def test_benchmark_contract_failure_fails_the_candidate_before_profiling(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
     from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
         BenchmarkGateResult,
         FrameworkBenchmarkOutcome,
@@ -1699,7 +1699,7 @@ def test_scalar_contract_keeps_the_profilers_other_axes_on_the_frontier(tmp_path
     parent selection. The trusted row now overrides the axes it measures and
     leaves the rest of the profiler's row in place.
     """
-    from vibesys.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
 
     space = MetricSpace(
         objectives=(

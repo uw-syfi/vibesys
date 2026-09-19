@@ -413,14 +413,17 @@ def test_ensure_built_runs_pnpm_steps(monkeypatch, tmp_path):  # noqa: ANN001, A
 
     monkeypatch.setattr(cli, "_pnpm_argv", lambda: ["/usr/bin/pnpm"])
     calls: list[list[str]] = []
+    cwds: list[str | None] = []
 
     def _run(cmd, cwd=None, capture_output=False, text=False, check=False):  # noqa: ANN001, ANN202, ARG001, FBT002  # tracked: #288
         calls.append(cmd)
+        cwds.append(cwd)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(cli.subprocess, "run", _run)
     assert cli._ensure_source_tui_built(tmp_path) is True  # noqa: SLF001  # tracked: #288
     assert [c[1] for c in calls] == ["install", "build:clients"]
+    assert set(cwds) == {str(tmp_path / "clients")}
 
 
 def test_ensure_built_reports_install_failure(monkeypatch, tmp_path, capsys):  # noqa: ANN001, ANN201
@@ -512,7 +515,7 @@ def test_run_pnpm_install_prints_messages_and_writes_stamp(monkeypatch, tmp_path
     err = capsys.readouterr().err
     assert "installing JS dependencies" in err
     assert "dependencies installed (" in err
-    assert (tmp_path / cli._INSTALL_STAMP_REL).is_file()  # noqa: SLF001  # tracked: #288
+    assert (tmp_path / "clients" / cli._INSTALL_STAMP_REL).is_file()  # noqa: SLF001  # tracked: #288
 
 
 def test_needs_install_when_node_modules_missing(tmp_path):  # noqa: ANN001, ANN201
@@ -520,26 +523,26 @@ def test_needs_install_when_node_modules_missing(tmp_path):  # noqa: ANN001, ANN
 
 
 def test_needs_install_when_stamp_missing(tmp_path):  # noqa: ANN001, ANN201
-    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "clients" / "node_modules").mkdir(parents=True)
     assert cli._needs_install(tmp_path) is True  # noqa: SLF001  # tracked: #288
 
 
 def test_needs_install_skips_when_stamp_is_fresh(tmp_path):  # noqa: ANN001, ANN201
-    (tmp_path / "node_modules").mkdir()
-    lockfile = tmp_path / "pnpm-lock.yaml"
+    (tmp_path / "clients" / "node_modules").mkdir(parents=True)
+    lockfile = tmp_path / "clients" / "pnpm-lock.yaml"
     lockfile.write_text("lockfileVersion: 9\n")
     _set_mtime(lockfile, 1000)
     cli._write_install_stamp(tmp_path)  # noqa: SLF001  # tracked: #288
-    _set_mtime(tmp_path / cli._INSTALL_STAMP_REL, 2000)  # noqa: SLF001  # tracked: #288
+    _set_mtime(tmp_path / "clients" / cli._INSTALL_STAMP_REL, 2000)  # noqa: SLF001  # tracked: #288
 
     assert cli._needs_install(tmp_path) is False  # noqa: SLF001  # tracked: #288
 
 
 def test_needs_install_when_lockfile_newer_than_stamp(tmp_path):  # noqa: ANN001, ANN201
-    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "clients" / "node_modules").mkdir(parents=True)
     cli._write_install_stamp(tmp_path)  # noqa: SLF001  # tracked: #288
-    _set_mtime(tmp_path / cli._INSTALL_STAMP_REL, 1000)  # noqa: SLF001  # tracked: #288
-    lockfile = tmp_path / "pnpm-lock.yaml"
+    _set_mtime(tmp_path / "clients" / cli._INSTALL_STAMP_REL, 1000)  # noqa: SLF001  # tracked: #288
+    lockfile = tmp_path / "clients" / "pnpm-lock.yaml"
     lockfile.write_text("lockfileVersion: 9\n")
     _set_mtime(lockfile, 2000)
 

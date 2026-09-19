@@ -31,11 +31,10 @@ from entrypoints.headless import (
     run_environment_spec_from_args,
 )
 from vibesys.config import Config
-from vibesys.constants import ComputeBackend
-from vibesys.domains.base import DomainName
+from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.events import CoreEventType, RunStartedData
-from vibesys.input_manifest import load_input_bundle
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.loops.roles import EXPECTED_AGENT_ROLES
 from vibesys.profilers import ProfilerKind

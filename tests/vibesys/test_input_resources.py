@@ -5,8 +5,8 @@ import tomllib
 import pytest
 from pydantic import ValidationError
 
-from vibesys.domains.base import DomainName
-from vibesys.input_manifest import InputManifest, render_input_manifest
+from vibesys.constants import DomainName
+from vibesys.evaluators.input_manifest import InputManifest, render_input_manifest
 from vs_project import RunResourceRequest
 
 

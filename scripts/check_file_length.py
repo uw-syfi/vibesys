@@ -20,7 +20,7 @@ Configuration lives in `pyproject.toml` under `[tool.vibesys.file_length]`:
     roots      -- repo-relative directories to scan for `*.py`. Any path with
                   a `tests` or `__pycache__` component is skipped: long test
                   modules are normal, and the same exemption applies to
-                  TypeScript test files in `biome.json`.
+                  TypeScript test files in `clients/biome.json`.
     allowlist  -- table of repo-relative path -> recorded line count for files
                   currently over the ceiling. Every entry should be preceded
                   by a comment explaining why it is still there.

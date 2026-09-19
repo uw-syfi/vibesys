@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from vibesys.input_manifest import WorkspaceSource
+from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.prompts.renderer import _build_env
 

@@ -103,14 +103,15 @@ def build_release_wheel(
     if distribution_identity != tui_identity:
         _fail(f"Python version {distribution_version} does not match TUI version {tui_version}")
 
+    workspace = repo_root / "clients"
     _run(
         ["pnpm", "install", "--frozen-lockfile"],
-        cwd=repo_root,
+        cwd=workspace,
         runner=build_environment.runner,
     )
     _run(
         ["pnpm", "build:clients"],
-        cwd=repo_root,
+        cwd=workspace,
         runner=build_environment.runner,
     )
 
@@ -126,7 +127,7 @@ def build_release_wheel(
             "--prod",
             str(app),
         ]
-        _run(deploy_command, cwd=repo_root, runner=build_environment.runner)
+        _run(deploy_command, cwd=workspace, runner=build_environment.runner)
         _normalize_deployed_workspace_dependencies(app)
         _prune_deployment(app, expected_native_package=target.opentui_package)
         _stage_runtime_and_licenses(repo_root, bun=bun, payload=payload)
