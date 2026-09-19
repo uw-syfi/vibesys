@@ -7,11 +7,14 @@ import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 import verify_installed_release as verifier
 
 from entrypoints.launcher import BundledTui
+from server.wire import codec
+from server.wire.v2 import responses_pb2
 
 
 def test_runtime_root_uses_the_resolved_filesystem_path(tmp_path: Path) -> None:
@@ -45,30 +48,31 @@ def test_console_entry_points_run_installed_commands_with_help(
     assert mcp_marker.read_text().splitlines() == ["--help"]
 
 
-def test_first_launch_defaults_use_user_owned_launch_directory_configuration(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def _tui_defaults_output(tmp_path: Path, **overrides: Any) -> str:  # noqa: ANN401
+    """The wire-form ``vibesys tui-defaults`` output the installed CLI prints."""
+    fields: dict[str, Any] = {
+        "runs_dir": str(tmp_path / "exp_env"),
+        "experiment_name": "experiment-20260811-120000",
+        "repository_name": "experiment-20260811-120000",
+        "visibility": responses_pb2.REPOSITORY_VISIBILITY_PUBLIC,
+        "theme": responses_pb2.TUI_THEME_SOLARIZED_LIGHT,
+    }
+    fields.update(overrides)
+    return codec.dumps(responses_pb2.TuiDefaults(**fields))
+
+
+def _verify_first_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str
+) -> list[tuple[list[str], int]]:
     observed: list[tuple[list[str], int]] = []
     executable = tmp_path / "bin" / "vibesys"
 
     def run_capture(command: list[str], *, timeout: int) -> str:
         observed.append((command, timeout))
-        config_path = tmp_path / "agent.toml"
-        config_text = config_path.read_text()
+        config_text = (tmp_path / "agent.toml").read_text()
         assert 'visibility = "public"' in config_text
         assert "owner" not in config_text
-        return json.dumps(
-            {
-                "runs_dir": str(tmp_path / "exp_env"),
-                "input_path": "",
-                "experiment_name": "experiment-20260811-120000",
-                "repository_owner": None,
-                "repository_name": "experiment-20260811-120000",
-                "visibility": "public",
-                "theme": "solarized-light",
-            }
-        )
+        return output
 
     monkeypatch.setattr(verifier, "_RUNTIME_ROOT", tmp_path)
     monkeypatch.setattr(verifier, "_run_capture", run_capture)
@@ -77,11 +81,40 @@ def test_first_launch_defaults_use_user_owned_launch_directory_configuration(
         "which",
         lambda name: str(executable) if name == "vibesys" else None,
     )
+    try:
+        verifier.verify_first_launch_defaults()
+    finally:
+        assert not (tmp_path / "agent.toml").exists()
+    return observed
 
-    verifier.verify_first_launch_defaults()
 
-    assert observed == [([str(executable), "tui-defaults"], 30)]
-    assert not (tmp_path / "agent.toml").exists()
+def test_first_launch_defaults_use_user_owned_launch_directory_configuration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed = _verify_first_launch(tmp_path, monkeypatch, _tui_defaults_output(tmp_path))
+
+    assert observed == [([str(tmp_path / "bin" / "vibesys"), "tui-defaults"], 30)]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"theme": responses_pb2.TUI_THEME_DARK},
+        {"visibility": responses_pb2.REPOSITORY_VISIBILITY_PRIVATE},
+        {"repository_owner": "someone"},
+        {"input_path": "input.toml"},
+    ],
+)
+def test_first_launch_defaults_reject_a_configuration_that_was_ignored(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, object],
+) -> None:
+    output = _tui_defaults_output(tmp_path, **overrides)
+
+    with pytest.raises(verifier.InstalledReleaseError):
+        _verify_first_launch(tmp_path, monkeypatch, output)
 
 
 def test_sdk_sync_uses_the_running_isolated_interpreter(tmp_path: Path) -> None:

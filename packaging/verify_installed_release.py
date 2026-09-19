@@ -5,7 +5,6 @@ from __future__ import annotations
 import errno
 import importlib
 import importlib.metadata
-import json
 import os
 import pty
 import select
@@ -17,9 +16,11 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Never, cast
+from typing import Never
 
 from entrypoints.launcher import bundled_tui
+from server.wire import codec
+from server.wire.v2 import responses_pb2
 from vibesys.evaluators import EvaluatorPackageRequirement, resolve_evaluator_package
 from vibesys.input_project import materialize_input_project
 from vibesys.loops.agent.state import AgentRunStateStore
@@ -81,7 +82,7 @@ class InstalledReleaseError(RuntimeError):
     @classmethod
     def invalid_first_launch_defaults(cls) -> InstalledReleaseError:
         """Build an error for malformed installed setup defaults."""
-        return cls("Installed first-launch defaults are not valid JSON")
+        return cls("Installed first-launch defaults are not a valid TuiDefaults message")
 
 
 def verify_installed_release() -> None:
@@ -176,34 +177,35 @@ theme = "solarized-light"
         )
     finally:
         config_path.unlink()
-    defaults = _parse_first_launch_defaults(output, source="launch-directory")
-    runs_dir = defaults.get("runs_dir")
+    defaults = _parse_first_launch_defaults(output)
     expected_runs_dir = (_RUNTIME_ROOT / "exp_env").resolve()
-    if not isinstance(runs_dir, str) or Path(runs_dir).resolve() != expected_runs_dir:
-        _fail(f"Installed first-launch runs directory is invalid: {runs_dir!r}")
-    if defaults.get("input_path") != "":
-        _fail(f"Installed first-launch input path must be empty: {defaults.get('input_path')!r}")
-    expected_defaults = {
-        "repository_owner": None,
-        "visibility": "public",
-        "theme": "solarized-light",
+    if not defaults.runs_dir or Path(defaults.runs_dir).resolve() != expected_runs_dir:
+        _fail(f"Installed first-launch runs directory is invalid: {defaults.runs_dir!r}")
+    if defaults.input_path != "":
+        _fail(f"Installed first-launch input path must be empty: {defaults.input_path!r}")
+    if defaults.HasField("repository_owner"):
+        _fail(
+            "Installed first launch ignored agent.toml from its working directory: "
+            f"repository_owner={defaults.repository_owner!r}"
+        )
+    expected_enums = {
+        "visibility": (defaults.visibility, responses_pb2.REPOSITORY_VISIBILITY_PUBLIC),
+        "theme": (defaults.theme, responses_pb2.TUI_THEME_SOLARIZED_LIGHT),
     }
-    for key, expected in expected_defaults.items():
-        if defaults.get(key) != expected:
+    for key, (actual, expected) in expected_enums.items():
+        if actual != expected:
             _fail(
                 f"Installed first launch ignored agent.toml from its working directory: "
-                f"{key}={defaults.get(key)!r}"
+                f"{key}={actual!r}"
             )
 
 
-def _parse_first_launch_defaults(output: str, *, source: str) -> dict[str, object]:
+def _parse_first_launch_defaults(output: str) -> responses_pb2.TuiDefaults:
+    """Parse the ``vibesys tui-defaults`` output, which is proto3 JSON."""
     try:
-        defaults: object = json.loads(output)
-    except json.JSONDecodeError as exc:
+        return codec.loads(responses_pb2.TuiDefaults, output)
+    except codec.WireError as exc:
         raise InstalledReleaseError.invalid_first_launch_defaults() from exc
-    if not isinstance(defaults, dict):
-        _fail(f"Installed {source} defaults must be a JSON object")
-    return cast("dict[str, object]", defaults)
 
 
 def _verify_resources() -> None:
