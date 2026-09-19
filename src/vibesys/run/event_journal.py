@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from vibesys.run.events import CoreEvent, CoreEventData, CoreEventType, make_core_event
+from vibesys.events import CoreEvent, CoreEventData, CoreEventType, make_core_event
 
 EventSubscriber = Callable[[CoreEvent], None]
 

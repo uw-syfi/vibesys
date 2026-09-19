@@ -5,10 +5,10 @@ tracking) rather than reusable standalone libraries, so they live under
 ``src/vibesys/run/`` instead of ``libs/``.
 """
 
+from vibesys.events import CoreEvent, CoreEventType
 from vibesys.repository import RepositoryVisibility
 from vibesys.run.device import DeviceLease
 from vibesys.run.event_journal import EventJournal
-from vibesys.run.events import CoreEvent, CoreEventType
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_tracker import GitTracker
 from vibesys.run.integration import (

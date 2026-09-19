@@ -12,7 +12,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from vibesys.run.events import (
+from vibesys.events import (
     AgentOutputChannel,
     AgentOutputChunkData,
     AgentStatusData,

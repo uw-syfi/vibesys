@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from vibesys.run.events import AgentStatusData  # noqa: TC001  # tracked: #288
+from vibesys.events import AgentStatusData  # noqa: TC001  # tracked: #288
 
 
 def format_token_count(n: int) -> str:

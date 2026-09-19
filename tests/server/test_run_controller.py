@@ -16,8 +16,8 @@ from server.events import (
     RunStatusChangedData,
 )
 from server.run_lifecycle import RunStatus
-from vibesys.run.events import CoreEventType
-from vibesys.run.events import EventStatus as CoreEventStatus
+from vibesys.events import CoreEventType
+from vibesys.events import EventStatus as CoreEventStatus
 
 
 def _status_changes(parts: ServerParts) -> list[tuple[RunStatus, RunStatus]]:

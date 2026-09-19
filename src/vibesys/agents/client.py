@@ -35,7 +35,7 @@ from vibesys.agents.contracts import (
 from vibesys.agents.provider_policy import DEFAULT_CLI_PROVIDER
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.agents.session_store import NullSessionStore, SessionStore
-from vibesys.run.events import CommandResultPayload, JsonResultPayload
+from vibesys.events import CommandResultPayload, JsonResultPayload
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping

@@ -47,7 +47,7 @@ from vibesys.agents.contracts import (
     SessionDisposition,
 )
 from vibesys.agents.drivers import agentshim as subject
-from vibesys.run.events import CommandResultPayload
+from vibesys.events import CommandResultPayload
 from vibesys.schemas import ImplementerResponse, JudgeResponse
 from vs_sandbox import HostResource, ProjectPathPolicy
 

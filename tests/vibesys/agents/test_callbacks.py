@@ -12,8 +12,8 @@ from vibesys.agents.client import _LoggerObserver
 from vibesys.agents.contracts import AgentEvent, AgentEventKind
 from vibesys.agents.progress import RoundProgress
 from vibesys.constants import DIM, GREEN, RED, RESET
+from vibesys.events import AgentOutputChunkData, ToolCallData, ToolResultData
 from vibesys.render.sink import output_sink
-from vibesys.run.events import AgentOutputChunkData, ToolCallData, ToolResultData
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 

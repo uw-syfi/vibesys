@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from server.controller import ProjectRunState, RunController
     from server.execution import ExecutionTracker
     from server.journal import EventJournal as WireEventJournal
-    from vibesys.run.events import CoreEvent
+    from vibesys.events import CoreEvent
     from vs_project import Project
 
 CommittedStateListener = Callable[[str, Path, str, BaseModel, tuple[str, ...] | None], None]

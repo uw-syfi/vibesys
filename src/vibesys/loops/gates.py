@@ -10,11 +10,7 @@ import uuid
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
-from vibesys.input_manifest import BenchmarkResult  # noqa: TC001  # tracked: #288
-from vibesys.loops.metrics import Objective  # noqa: TC001  # tracked: #288
-from vibesys.render.sink import output_sink
-from vibesys.run import LoopContext  # noqa: TC001  # tracked: #288
-from vibesys.run.events import (
+from vibesys.events import (
     CoreEventType,
     EventStatus,
     GateFinishedData,
@@ -22,6 +18,10 @@ from vibesys.run.events import (
     GateStartedData,
     SubprocessOutputData,
 )
+from vibesys.input_manifest import BenchmarkResult  # noqa: TC001  # tracked: #288
+from vibesys.loops.metrics import Objective  # noqa: TC001  # tracked: #288
+from vibesys.render.sink import output_sink
+from vibesys.run import LoopContext  # noqa: TC001  # tracked: #288
 from vs_evaluator_protocol import (
     Hello,
     ProtocolError,

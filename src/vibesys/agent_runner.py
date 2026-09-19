@@ -14,8 +14,8 @@ if TYPE_CHECKING:
 
     from langchain_core.callbacks import BaseCallbackHandler
 
+from vibesys.events import AgentOutputChannel, TodoItemData
 from vibesys.render.sink import output_sink
-from vibesys.run.events import AgentOutputChannel, TodoItemData
 from vibesys.schemas import (
     ImplementerResponse,
     IssueImplementerResponse,

@@ -26,6 +26,14 @@ from vibesys.context import create_run_context
 from vibesys.domains.base import DomainDefinition, DomainName, DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
+from vibesys.events import (
+    CoreEventType,
+    EventStatus,
+    FrameworkSource,
+    GateKind,
+    JudgeResultData,
+    RoundFinishedData,
+)
 from vibesys.input_manifest import (  # noqa: TC001  # tracked: #288
     BenchmarkResult,
     ProfileGuidedInput,
@@ -91,14 +99,6 @@ from vibesys.profilers import (
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.render.sink import output_sink
 from vibesys.run import LoopContext, RepositoryVisibility, RunIntegration, RunStateNamespace
-from vibesys.run.events import (
-    CoreEventType,
-    EventStatus,
-    FrameworkSource,
-    GateKind,
-    JudgeResultData,
-    RoundFinishedData,
-)
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,

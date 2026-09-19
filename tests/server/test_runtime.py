@@ -19,7 +19,7 @@ from server.integration import RunIntegrationAdapter
 from server.journal import EventJournal
 from server.runtime import ServerRuntime
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.run.events import CoreEventType, EventStatus
+from vibesys.events import CoreEventType, EventStatus
 
 
 def _await_socket(socket_path: Path) -> None:

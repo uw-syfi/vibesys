@@ -1959,14 +1959,14 @@ def test_framework_local_validation_executes_and_reuses_exact_inputs(tmp_path): 
 
 
 def test_framework_local_validation_emits_balanced_gate_pairs(tmp_path):  # noqa: ANN001, ANN201
-    from vibesys.render.sink import output_sink  # noqa: PLC0415  # tracked: #288
-    from vibesys.run.events import (  # noqa: PLC0415  # tracked: #288
+    from vibesys.events import (  # noqa: PLC0415  # tracked: #288
         CoreEventType,
         EventStatus,
         GateFinishedData,
         GateKind,
         GateStartedData,
     )
+    from vibesys.render.sink import output_sink  # noqa: PLC0415  # tracked: #288
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()

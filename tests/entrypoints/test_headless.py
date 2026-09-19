@@ -34,11 +34,11 @@ from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.domains.base import DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.events import CoreEventType, RunStartedData
 from vibesys.input_manifest import load_input_bundle
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.loops.roles import EXPECTED_AGENT_ROLES
 from vibesys.profilers import ProfilerKind
-from vibesys.run.events import CoreEventType, RunStartedData
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.sandbox.run_environment import run_environment_record
 from vs_project import (

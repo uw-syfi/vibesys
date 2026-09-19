@@ -1,7 +1,7 @@
 """Tests for the shared plain-text formatting helpers."""
 
+from vibesys.events import AgentStatusData
 from vibesys.render import format_status_prefix, format_token_count
-from vibesys.run.events import AgentStatusData
 
 
 class TestFormatTokenCount:

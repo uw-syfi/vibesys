@@ -5,9 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from vibesys.agents.callbacks import AgentLogger
-from vibesys.render.sink import OutputSink
-from vibesys.run.event_journal import EventJournal
-from vibesys.run.events import (
+from vibesys.events import (
     AgentOutputChunkData,
     CommandResultPayload,
     CoreEvent,
@@ -23,6 +21,8 @@ from vibesys.run.events import (
     ToolResultData,
     UsageUpdateData,
 )
+from vibesys.render.sink import OutputSink
+from vibesys.run.event_journal import EventJournal
 
 
 def _collect(sink: OutputSink) -> tuple[list[CoreEvent], Callable[[], None]]:
@@ -192,7 +192,7 @@ class TestFrameworkEmitters:
         assert data.model == "m"
 
     def test_gate_events_carry_envelope_status(self):  # noqa: ANN201
-        from vibesys.run.events import GateFinishedData, GateKind, GateStartedData  # noqa: PLC0415
+        from vibesys.events import GateFinishedData, GateKind, GateStartedData  # noqa: PLC0415
 
         sink = OutputSink()
         seen, _ = _collect(sink)

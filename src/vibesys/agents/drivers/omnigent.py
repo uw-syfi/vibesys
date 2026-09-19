@@ -44,7 +44,7 @@ from vibesys.agents.omnigent.providers import (
     OmnigentExecutorSpec,
     supported_providers,
 )
-from vibesys.run.events import CommandResultPayload, JsonResultPayload, ToolResultPayload
+from vibesys.events import CommandResultPayload, JsonResultPayload, ToolResultPayload
 from vs_sandbox import HostResourceContext
 
 if TYPE_CHECKING:

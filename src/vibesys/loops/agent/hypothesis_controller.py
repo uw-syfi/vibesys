@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, Self, runtime_checkable
 
+from vibesys.events import CoreEventType, ExperimentsChangedData
 from vibesys.loops.agent.hypotheses import (
     append_round,
     start_hypothesis,
@@ -19,16 +20,15 @@ from vibesys.loops.agent.model import (
     ProfileGuidedComponent,
     ProfileImprovementSample,
 )
-from vibesys.run.events import CoreEventType, ExperimentsChangedData
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vibesys.events import ExperimentsChangeReason
     from vibesys.input_manifest import ProfileGuidedInput
     from vibesys.loops.agent.model import Hypothesis
     from vibesys.loops.agent.state import AgentRunStateStore
     from vibesys.run import LoopContext
-    from vibesys.run.events import ExperimentsChangeReason
     from vibesys.schemas import OrchestratorPlan
     from vs_loop_state import RoundRecord
 

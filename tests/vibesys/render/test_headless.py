@@ -2,8 +2,7 @@
 
 from io import StringIO
 
-from vibesys.render import HeadlessRenderer, TodoDisplay
-from vibesys.run.events import (
+from vibesys.events import (
     AgentOutputChannel,
     AgentOutputChunkData,
     AgentStatusData,
@@ -16,6 +15,7 @@ from vibesys.run.events import (
     UsageUpdateData,
     make_core_event,
 )
+from vibesys.render import HeadlessRenderer, TodoDisplay
 
 
 def _render(*payloads: tuple[CoreEventType, CoreEventData], **kwargs) -> str:  # noqa: ANN003  # tracked: #288

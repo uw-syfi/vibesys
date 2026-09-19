@@ -48,6 +48,7 @@ from vibesys.context import create_candidate_context, create_run_context
 from vibesys.domains.base import DomainDefinition, DomainName, DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
+from vibesys.events import FrameworkSource
 from vibesys.input_manifest import BenchmarkResult, WorkspaceSource  # noqa: TC001  # tracked: #288
 from vibesys.loops.evolve.population import (
     Individual,
@@ -76,7 +77,6 @@ from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.render.sink import output_sink
 from vibesys.run import LoopContext, RepositoryVisibility, RunIntegration, RunStateNamespace
-from vibesys.run.events import FrameworkSource
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,

@@ -18,6 +18,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from vibesys.events import (
+    CoreEvent,
+    CoreEventType,
+    EventStatus,
+    GateFinishedData,
+    GateKind,
+    GateStartedData,
+)
 from vibesys.input_manifest import BenchmarkResult
 from vibesys.loops.gates import (
     _BENCHMARK_OUTPUT_PREFIX,
@@ -27,14 +35,6 @@ from vibesys.loops.gates import (
 )
 from vibesys.loops.metrics import Objective
 from vibesys.render.sink import output_sink
-from vibesys.run.events import (
-    CoreEvent,
-    CoreEventType,
-    EventStatus,
-    GateFinishedData,
-    GateKind,
-    GateStartedData,
-)
 from vs_sandbox import SandboxExecutionResult
 
 _SCALAR_SPEC = BenchmarkResult(json_argument="--out", metric="tok_per_sec")

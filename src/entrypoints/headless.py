@@ -35,6 +35,7 @@ from vibesys.constants import (
 )
 from vibesys.domains.base import DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.input_manifest import InputBundle, load_input_bundle, load_project_task
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.loops.roles import expected_agent_roles
@@ -48,7 +49,6 @@ from vibesys.repository import (
     validate_experiment_name,
 )
 from vibesys.resource_paths import default_skill_roots
-from vibesys.run.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker

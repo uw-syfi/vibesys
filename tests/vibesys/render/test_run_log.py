@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import io
 
-from vibesys.render.run_log import RunLogRenderer, format_framework_event
-from vibesys.run.events import (
+from vibesys.events import (
     AgentOutputChunkData,
     CoreEventType,
     EventStatus,
@@ -17,6 +16,7 @@ from vibesys.run.events import (
     WorkspaceSnapshotData,
     make_core_event,
 )
+from vibesys.render.run_log import RunLogRenderer, format_framework_event
 
 
 def _event(event_type, data, status=None):  # noqa: ANN001, ANN202

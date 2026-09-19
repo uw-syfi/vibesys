@@ -19,9 +19,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.agents.contracts import MCPServerSpec
+from vibesys.events import FrameworkSource
 from vibesys.profilers import ProfilerKind, profiler_definition, require_profiler_kind
 from vibesys.render.sink import output_sink
-from vibesys.run.events import FrameworkSource
 from vibesys.schemas import ProfilerSummary
 
 if TYPE_CHECKING:

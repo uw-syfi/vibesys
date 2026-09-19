@@ -15,7 +15,7 @@ from server.events import EventStatus, EventType
 from server.integration import _CORE_FAILURE_CONTEXTS
 from server.journal import DIAGNOSTIC_FAILURE_EVENTS
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
-from vibesys.run.events import (
+from vibesys.events import (
     AgentExecutionFinishedData,
     AgentOutputChunkData,
     CoreEventType,
@@ -27,7 +27,7 @@ from vibesys.run.events import (
     PhaseData,
     ToolCallData,
 )
-from vibesys.run.events import (
+from vibesys.events import (
     EventStatus as CoreEventStatus,
 )
 from vibesys.run.integration import (
@@ -405,7 +405,7 @@ def test_run_started_expected_roles_round_trip_through_the_wire_bridge() -> None
     """The core payload bridges to the wire model with and without the field."""
     from server.events import RunStartedData  # noqa: PLC0415
     from server.integration import _EVENT_DATA_ADAPTER  # noqa: PLC0415
-    from vibesys.run.events import RunStartedData as CoreRunStartedData  # noqa: PLC0415
+    from vibesys.events import RunStartedData as CoreRunStartedData  # noqa: PLC0415
 
     advertised = CoreRunStartedData(
         outer_loop="plain",

@@ -13,9 +13,7 @@ import sys
 from typing import TextIO
 
 from vibesys.constants import DIM, GREEN, RESET, YELLOW
-from vibesys.render.format import format_status_prefix
-from vibesys.render.run_log import format_framework_event
-from vibesys.run.events import (
+from vibesys.events import (
     AgentOutputChunkData,
     CoreEvent,
     TodoItemData,
@@ -23,6 +21,8 @@ from vibesys.run.events import (
     ToolCallData,
     ToolResultData,
 )
+from vibesys.render.format import format_status_prefix
+from vibesys.render.run_log import format_framework_event
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 

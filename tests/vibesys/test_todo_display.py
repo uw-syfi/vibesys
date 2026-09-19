@@ -7,7 +7,7 @@ updates.
 
 from unittest.mock import MagicMock, patch
 
-from vibesys.run.events import TodoUpdateData
+from vibesys.events import TodoUpdateData
 
 # --- Thread ID for state persistence ---
 
@@ -180,8 +180,8 @@ def test_run_judge_agent_publishes_todos():  # noqa: ANN201  # tracked: #288
 def test_publish_todos_emits_structured_event():  # noqa: ANN201  # tracked: #288
     """publish_todos converts raw stream dicts into a typed TODO_UPDATE event."""
     from vibesys.agent_runner import publish_todos  # noqa: PLC0415  # tracked: #288
+    from vibesys.events import CoreEvent, CoreEventType  # noqa: PLC0415  # tracked: #288
     from vibesys.render import output_sink  # noqa: PLC0415  # tracked: #288
-    from vibesys.run.events import CoreEvent, CoreEventType  # noqa: PLC0415  # tracked: #288
 
     seen: list[CoreEvent] = []
     unsubscribe = output_sink().subscribe(seen.append)

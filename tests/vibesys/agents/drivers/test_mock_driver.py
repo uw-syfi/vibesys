@@ -21,8 +21,7 @@ from vibesys.agents.drivers.mock import (
     ReplayPlaybook,
     ScriptedPlaybook,
 )
-from vibesys.render.sink import output_sink
-from vibesys.run.events import (
+from vibesys.events import (
     AgentOutputChunkData,
     CoreEvent,
     CoreEventType,
@@ -31,6 +30,7 @@ from vibesys.run.events import (
     ToolResultData,
     UsageUpdateData,
 )
+from vibesys.render.sink import output_sink
 from vibesys.schemas import OrchestratorPlan
 
 if TYPE_CHECKING:

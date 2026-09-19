@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from vibesys.render.sink import output_sink
-from vibesys.run.events import (
+from vibesys.events import (
     CoreEventType,
     FrameworkSource,
     WorkspaceSnapshotData,
 )
+from vibesys.render.sink import output_sink
 
 
 class GitTrackerEvents(Protocol):

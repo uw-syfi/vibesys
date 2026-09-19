@@ -35,6 +35,7 @@ from vibesys.evaluators import (
     resolve_evaluator_package,
     tool_install_root,
 )
+from vibesys.events import CoreEventType
 from vibesys.input_manifest import WorkspaceSource
 from vibesys.loops.agent.model import AgentRunState
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
@@ -46,7 +47,6 @@ from vibesys.run import (
     RunPaths,
     RunStateNamespace,
 )
-from vibesys.run.events import CoreEventType
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
 from vs_loop_state import PlainLoopCursor
 from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord

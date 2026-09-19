@@ -48,7 +48,7 @@ from vibesys.agents.contracts import (
 )
 from vibesys.agents.scripted_rounds import round_number_from_label, scripted_round_payload
 from vibesys.agents.todos import todos_from_tool_call
-from vibesys.run.events import (
+from vibesys.events import (
     AgentOutputChunkData,
     CommandResultPayload,
     CoreEvent,

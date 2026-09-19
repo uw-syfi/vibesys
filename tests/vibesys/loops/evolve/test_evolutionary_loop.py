@@ -26,6 +26,7 @@ from vibesys.context import create_run_context
 from vibesys.domains.base import DomainName
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.domains.registry import resolve_domain
+from vibesys.events import FrameworkWarningData
 from vibesys.loops.evolve import loop as evolve_loop
 from vibesys.loops.evolve.loop import (
     _candidate_code,
@@ -56,7 +57,6 @@ from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.profilers import ProfilerKind
 from vibesys.render.sink import output_sink
 from vibesys.run import EventJournal, GitTracker, LoopContext, RunState, RunStateNamespace
-from vibesys.run.events import FrameworkWarningData
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentSpec
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict

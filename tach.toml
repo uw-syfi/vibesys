@@ -91,7 +91,7 @@ depends_on = ["server.diagnostics", "server.events", "server.journal"]
 
 [[modules]]
 path = "server.integration"
-depends_on = ["vibesys.run", "server.execution", "server.chat", "server.events", "vibesys.agents", "server.read_model", "server.diagnostics", "server.journal", "server.controller", "vs_project", "vibesys.render", "server.run_lifecycle"]
+depends_on = ["vibesys", "vibesys.run", "server.execution", "server.chat", "server.events", "vibesys.agents", "server.read_model", "server.diagnostics", "server.journal", "server.controller", "vs_project", "vibesys.render", "server.run_lifecycle"]
 
 [[modules]]
 path = "server.journal"
@@ -123,7 +123,7 @@ depends_on = ["vibesys.agents", "vibesys.backends", "vibesys.domains", "vibesys.
 
 [[modules]]
 path = "vibesys.agents"
-depends_on = ["vibesys", "vibesys.render", "vibesys.run", "vs_project", "vs_sandbox"]
+depends_on = ["vibesys", "vibesys.render", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.loops"
@@ -151,7 +151,7 @@ depends_on = ["vibesys", "vs_project"]
 
 [[modules]]
 path = "vibesys.render"
-depends_on = ["vibesys", "vibesys.run"]
+depends_on = ["vibesys"]
 
 [[modules]]
 path = "vibesys.evaluators"

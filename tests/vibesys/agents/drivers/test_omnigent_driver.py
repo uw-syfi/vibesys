@@ -38,7 +38,7 @@ from vibesys.agents.drivers.omnigent import (
     _LifecycleState,
 )
 from vibesys.agents.omnigent.providers import OMNIGENT_PROVIDER_EXECUTORS
-from vibesys.run.events import CommandResultPayload, JsonResultPayload
+from vibesys.events import CommandResultPayload, JsonResultPayload
 from vibesys.schemas import JudgeResponse
 from vs_sandbox import HostResource, ProjectPathPolicy
 

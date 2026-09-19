@@ -40,6 +40,18 @@ from vibesys.domains.environment import (
 )
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators import load_evaluator_package, tool_install_root
+from vibesys.events import (
+    AgentExecutionActivityData,
+    AgentExecutionFinishedData,
+    AgentExecutionStartedData,
+    CoreEventType,
+    EventStatus,
+    ExperimentsChangedData,
+    InvocationFinishedData,
+    InvocationStartedData,
+    PhaseData,
+    json_value,
+)
 from vibesys.input_manifest import WorkspaceSource
 from vibesys.llm_client import build_model
 from vibesys.profilers import (
@@ -69,18 +81,6 @@ from vibesys.run import (
     RunStateNamespace,
     Workspace,
     provision_project,
-)
-from vibesys.run.events import (
-    AgentExecutionActivityData,
-    AgentExecutionFinishedData,
-    AgentExecutionStartedData,
-    CoreEventType,
-    EventStatus,
-    ExperimentsChangedData,
-    InvocationFinishedData,
-    InvocationStartedData,
-    PhaseData,
-    json_value,
 )
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration
