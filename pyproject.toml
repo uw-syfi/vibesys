@@ -173,7 +173,7 @@ roots = ["src", "libs", "scripts", "packaging", "sdk"]
 # CLI entry point; every subcommand's argument wiring lives here.
 "src/entrypoints/headless.py" = 2663
 # Sandbox run environment: setup, execution, and teardown across strategies.
-"src/vibesys/sandbox/run_environment.py" = 2251
+"src/vibesys/sandbox/run_environment.py" = 2239
 
 [tool.ruff]
 line-length = 100

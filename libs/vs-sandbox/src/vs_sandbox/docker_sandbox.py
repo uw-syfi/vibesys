@@ -188,9 +188,6 @@ class DockerSandbox(WorkspaceSandbox):
     Model weights and other host directories are bind-mounted, eliminating
     symlink issues and path confusion.
 
-    Virtual absolute paths (``/foo``) are translated to container paths
-    (``/workspace/foo``) by :meth:`_vpath`.
-
     The container starts from a prebuilt agent image (shipped CLIs, toolchains,
     and a non-root ``agent`` user with a real HOME already baked in), so no
     install runs at start. Only two things still happen at start, both as
@@ -249,7 +246,6 @@ class DockerSandbox(WorkspaceSandbox):
         env: dict[str, str] | None = None,
         bind_mounts: list[tuple[str, str, bool]] | None = None,
         resources: Sequence[HostResource] = (),
-        passthrough_paths: list[str] | None = None,
         log_path: str | Path | None = None,
         agent_uid: int | None = None,
         agent_gid: int | None = None,
@@ -298,8 +294,6 @@ class DockerSandbox(WorkspaceSandbox):
                 with *bind_mounts* rather than replacing it, so existing
                 callers that build mount tuples directly keep working
                 unchanged. Also the source :meth:`agent_path` consults.
-            passthrough_paths: Container paths outside /workspace that should
-                not be rewritten by virtual-path translation (e.g. ``["/model"]``).
             log_path: File path to log docker commands to. If None, no logging.
             agent_uid: Host uid the image's ``agent`` user is remapped to at
                 start, so files the agent writes to the bind-mounted
@@ -345,9 +339,6 @@ class DockerSandbox(WorkspaceSandbox):
         self._auth_files: list[tuple[str, str]] = list(auth_files or [])
         self._lifecycle = SandboxLifecycle(lifecycle_hooks)
 
-        # Container paths outside /workspace that _vpath must not rewrite.
-        self._passthrough_prefixes: list[str] = list(passthrough_paths or [])
-
     @staticmethod
     def _setup_logger(log_path: str | Path | None) -> logging.Logger | None:
         if log_path is None:
@@ -379,24 +370,6 @@ class DockerSandbox(WorkspaceSandbox):
                 self._logger.info("  stderr: %s", result.stderr.strip()[:1000])
         if error:
             self._logger.info("  error: %s", error)
-
-    # -- virtual-path translation ------------------------------------------
-    #
-    # The agent emits paths rooted at "/" (virtual workspace root).
-    # Shell commands run inside the container, where the workspace lives at
-    # /workspace, so a virtual path gets the container root prepended.
-
-    def _vpath(self, path: str) -> str:
-        """Translate a virtual absolute path to a container path."""
-        if path.startswith(self._CONTAINER_ROOT + "/") or path == self._CONTAINER_ROOT:
-            return path  # already absolute inside the container
-        # Preserve paths that match non-workspace mounts (e.g. /model)
-        for prefix in self._passthrough_prefixes:
-            if path == prefix or path.startswith(prefix + "/"):
-                return path
-        if path.startswith("/"):
-            return self._CONTAINER_ROOT + path
-        return path  # relative — resolved against workdir by the shell
 
     @staticmethod
     def _resolve_gpu_device(gpus: str) -> str:

@@ -60,7 +60,6 @@ class TestTrainiumSandbox:
             container == "/opt/neuron-compile-cache"
             for _host, container, _ro in sb._bind_mounts  # noqa: SLF001  # tracked: #288
         )
-        assert "/opt/neuron-compile-cache" in sb._passthrough_prefixes  # noqa: SLF001  # tracked: #288
         assert sb._env.get("NEURON_COMPILE_CACHE_URL") == "/opt/neuron-compile-cache"  # noqa: SLF001  # tracked: #288
         # auto-remove container + host-mounted neuronx-cc temp (TMPDIR)
         assert sb._auto_remove is True  # noqa: SLF001  # tracked: #288

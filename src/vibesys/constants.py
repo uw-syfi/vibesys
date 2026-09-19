@@ -14,10 +14,6 @@ YELLOW = "\033[33m"
 GREEN = "\033[32m"
 RESET = "\033[0m"
 
-ANTHROPIC_PREFIXES = ("claude-",)
-GOOGLE_PREFIXES = ("gemini-", "gemma-")
-OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4")
-
 
 class DomainName(StrEnum):  # noqa: D101  # tracked: #288
     LLM_SERVING = "llm-serving"

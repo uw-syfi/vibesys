@@ -1,12 +1,13 @@
 [model]
 name = "gpt-5.4"
 # Choose a model supported by the selected CLI provider.
-# provider = "vertex-ai"    # vertex-ai, anthropic, google-genai (auto-detected if omitted)
+# provider = "vertex-ai"    # deprecated: accepted for old configs, ignored
 
 # [thinking]
 # level = "medium"          # minimal, low, medium, high (Gemini 3+ models)
 # budget = 1024             # token budget (Gemini 2.5 models, -1 for dynamic)
 
+# Every [providers.*] table below is deprecated: accepted for old configs, ignored.
 # [providers.vertex-ai]
 # json = "~/keys/vertex.json"
 # project = "my-project"

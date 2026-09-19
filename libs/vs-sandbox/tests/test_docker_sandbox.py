@@ -790,35 +790,6 @@ class TestContextManager:
         assert sandbox._container_id is None  # noqa: SLF001  # tracked: #288
 
 
-class TestPathTranslation:
-    def test_absolute_virtual_path_gets_workspace_prefix(self, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        assert sandbox._vpath("/reference/model") == "/workspace/reference/model"  # noqa: SLF001  # tracked: #288
-
-    def test_root_path_maps_to_workspace(self, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        assert sandbox._vpath("/") == "/workspace/"  # noqa: SLF001  # tracked: #288
-
-    def test_already_workspace_path_unchanged(self, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        assert sandbox._vpath("/workspace/foo") == "/workspace/foo"  # noqa: SLF001  # tracked: #288
-
-    def test_workspace_root_unchanged(self, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        assert sandbox._vpath("/workspace") == "/workspace"  # noqa: SLF001  # tracked: #288
-
-    def test_relative_path_unchanged(self, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        assert sandbox._vpath("reference/model") == "reference/model"  # noqa: SLF001  # tracked: #288
-
-    def test_passthrough_path_not_rewritten(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        """Paths in passthrough_paths should not get /workspace prepended."""
-        s = DockerSandbox(
-            host_workspace=str(tmp_path / "workspace"),
-            image="nvcr.io/nvidia/pytorch:25.04-py3",
-            passthrough_paths=["/model"],
-        )
-        assert s._vpath("/model") == "/model"  # noqa: SLF001  # tracked: #288
-        assert s._vpath("/model/config.json") == "/model/config.json"  # noqa: SLF001  # tracked: #288
-        # Other absolute paths should still be rewritten
-        assert s._vpath("/other") == "/workspace/other"  # noqa: SLF001  # tracked: #288
-
-
 class TestCleanupOnExit:
     @pytest.fixture(autouse=True)
     def _clear_live_containers(self):  # noqa: ANN202  # tracked: #288

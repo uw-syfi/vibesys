@@ -67,7 +67,6 @@ class ComputeBackendImpl(Protocol):
         host_workspace: str,
         log_path: Path | str | None,
         bind_mounts: list[tuple[str, str, bool]],
-        passthrough_paths: list[str],
         extra_env: dict[str, str],
         extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,

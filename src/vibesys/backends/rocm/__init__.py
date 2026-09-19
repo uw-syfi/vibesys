@@ -154,7 +154,6 @@ class RocmBackend:
         host_workspace: str,
         log_path: Path | str | None,
         bind_mounts: list[tuple[str, str, bool]] | None = None,
-        passthrough_paths: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
@@ -169,7 +168,6 @@ class RocmBackend:
         from vs_sandbox import DockerSandbox  # noqa: PLC0415  # tracked: #288
 
         bind_mounts = list(bind_mounts or [])
-        passthrough_paths = list(passthrough_paths or [])
         extra_env = dict(extra_env or {})
         lifecycle_hooks = lifecycle_hooks or []
         # Accepted for ComputeBackendImpl protocol parity but unused: neither
@@ -196,7 +194,6 @@ class RocmBackend:
                 shm_size=_DEFAULT_SHM_SIZE,
                 bind_mounts=bind_mounts,
                 resources=resources,
-                passthrough_paths=passthrough_paths,
                 env=env,
                 log_path=log_path,
                 auth_files=auth_files,
