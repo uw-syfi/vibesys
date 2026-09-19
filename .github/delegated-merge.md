@@ -3,7 +3,7 @@
 The `Delegated merge` workflow lets selected collaborators merge pull requests
 by commenting `/merge-scoped` without granting repository-wide write access.
 The workflow runs trusted code from the default branch and uses the job's
-short-lived `GITHUB_TOKEN` to perform the merge.
+short-lived `GITHUB_TOKEN` to merge or enqueue.
 
 ## Policy
 
@@ -59,9 +59,33 @@ the command issuer to retain at least Triage access. The complete file list is
 validated before the broker passes the validated head SHA to GitHub's merge
 API. Missing or malformed policy fails closed.
 
-This broker merges through the pull request merge API, which GitHub refuses
-for a branch that requires a merge queue. Do not enable the merge queue for
-`main` until `/merge-scoped` is changed to enqueue the pull request instead.
+### Direct merge and merge queue
+
+All scope and policy checks are independent of how the pull request lands.
+After they pass, one of two landing strategies runs, chosen by a GraphQL read of
+`repository.mergeQueue(branch: "main")`:
+
+- No merge queue on `main`: `DirectMerge` calls the pull request merge API with
+  the validated head SHA. The comment reads ``Scoped merge completed at `<sha>` ``.
+- Merge queue on `main`: `QueueEnqueue` calls the `enqueuePullRequest` GraphQL
+  mutation with the validated head SHA as `expectedHeadOid`. The comment reads
+  `Scoped merge enqueued: ...` and states that nothing is merged yet. The
+  queue's own `merge_group` CI is the final gate and performs the merge. No
+  merge SHA is reported for an enqueue.
+
+A repeated `/merge-scoped` on a pull request already in the queue posts no
+comment and changes nothing. If the queue state cannot be read or parsed, the
+command refuses and neither merges nor enqueues. If the queue is enabled after
+the state was read, the direct merge is refused by GitHub and reported as a
+refusal, never as success. The `enqueuePullRequest` mutation needs
+`pull-requests: write`, so the workflow grants it to the job token. Whether
+`GITHUB_TOKEN` is accepted for enqueueing has not been exercised against a real
+queue; if GitHub rejects it, the command refuses safely and a dedicated token
+would be needed.
+
+To verify after enabling the queue with group size 1, comment `/merge-scoped`
+on a low-risk in-scope pull request and confirm it is enqueued and then merged
+by the queue.
 
 GitHub suppresses most workflow events caused by `GITHUB_TOKEN`. The PR test
 workflow has already passed before the merge, but the resulting update to
