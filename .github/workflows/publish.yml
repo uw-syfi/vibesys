@@ -3,12 +3,12 @@ name: Build and publish release wheels
 on:
   pull_request:
     branches: [main]
-    # This matrix builds and clean-room-verifies four release wheels, two of
-    # them on paid macOS runners, and `macos-x86_64` alone takes 4.5-7 minutes.
-    # That is the wall-clock long pole of a pull request (issue #474), and
-    # almost none of it is about the diff: a wheel is a copy of tracked files
-    # plus a bundled TUI payload, so only a change to the packaging machinery,
-    # its metadata, or the bundle's own inputs can change the verdict.
+    # This matrix builds and clean-room-verifies three release wheels, one of
+    # them on a paid macOS runner. That is the wall-clock long pole of a pull
+    # request (issue #474), and almost none of it is about the diff: a wheel
+    # is a copy of tracked files plus a bundled TUI payload, so only a change
+    # to the packaging machinery, its metadata, or the bundle's own inputs can
+    # change the verdict.
     #
     # Listed positively rather than as `paths-ignore`, because the safe default
     # for a new path is "does not affect the wheel". A `release` event ignores
@@ -120,8 +120,6 @@ jobs:
             runner: ubuntu-24.04
           - target: linux-aarch64
             runner: ubuntu-24.04-arm
-          - target: macos-x86_64
-            runner: macos-15-intel
           - target: macos-arm64
             runner: macos-14
     runs-on: ${{ matrix.runner }}
@@ -350,10 +348,10 @@ jobs:
           name: release-dist
           path: dist/release
 
-      - name: Require exactly four wheels and no sdist
+      - name: Require exactly three wheels and no sdist
         run: |
-          test "$(find dist/release -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 4
-          test "$(find dist/release -maxdepth 1 -type f -name '*.whl' | wc -l | tr -d ' ')" -eq 4
+          test "$(find dist/release -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 3
+          test "$(find dist/release -maxdepth 1 -type f -name '*.whl' | wc -l | tr -d ' ')" -eq 3
 
       - name: Publish with PyPI Trusted Publishing
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
