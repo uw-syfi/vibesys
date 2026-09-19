@@ -8,6 +8,9 @@ Use:
 - `--interface service`
 - `--modal` for B200-backed runs
 
+The objective, checkers, and benchmark live in `.vibesys/tasks/default/`; the
+single task is selected automatically, so no `--task` flag is needed.
+
 This input provides no serving engine and no pre-cloned engine source: the candidate
 builds the frontier-scale MoE serving stack for `moonshotai/Kimi-K3` (2.8T
 total / ~104B active MXFP4 MoE, 896 experts) from scratch and distributes it

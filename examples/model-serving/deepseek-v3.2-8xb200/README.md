@@ -8,6 +8,9 @@ Use:
 - `--interface service`
 - `--modal` for B200-backed runs
 
+The objective, checkers, and benchmark live in `.vibesys/tasks/default/`; the
+single task is selected automatically, so no `--task` flag is needed.
+
 This input provides no serving engine and no pre-cloned engine source: the candidate
 builds the FP8 MoE serving stack for `deepseek-ai/DeepSeek-V3.2` (MLA +
 DeepSeek Sparse Attention) from scratch and distributes it across 8xB200. It

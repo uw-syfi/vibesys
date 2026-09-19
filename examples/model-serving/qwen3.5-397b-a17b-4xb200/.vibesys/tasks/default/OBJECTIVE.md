@@ -41,7 +41,7 @@ Run the benchmark exactly as written unless the evaluator passes a different
 `--url` or `--output-json`:
 
 ```bash
-uv run python benchmark/benchmark.py --url <SERVER_URL> --output-json <PATH>
+uv run python .vibesys/tasks/default/benchmark/benchmark.py --url <SERVER_URL> --output-json <PATH>
 ```
 
 Default load:
