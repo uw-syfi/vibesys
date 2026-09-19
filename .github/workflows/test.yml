@@ -88,7 +88,7 @@ jobs:
             # What `validate-examples` checks: the example repositories
             # themselves (a submodule bump shows up as a change to the gitlink
             # path under examples/), the two validators, and the fetcher that
-            # materializes the overlays.
+            # materializes the external repositories.
             examples:
               - 'examples/**'
               - '.gitmodules'
@@ -409,13 +409,13 @@ jobs:
           VIBESYS_REQUIRE_MANAGED_CANDIDATE_TESTS: "1"
         run: go test -race ./...
 
-  # Owns everything that needs a repository-native example's `.vibesys` overlay,
-  # so no other job pays for one. It fetches the overlay alone (blob-filtered,
+  # Owns everything that needs a repository-native example's external repository `.vibesys` directory,
+  # so no other job pays for one. It fetches `.vibesys/` alone (blob-filtered,
   # depth-1, sparse) at the pinned gitlink rather than checking the submodule
   # out: ~7s and ~8MB for all four examples, against ~95s for one full
   # submodule clone.
   #
-  # Data-driven over .gitmodules and over each overlay's own tasks, so a new
+  # Data-driven over .gitmodules and over each external repository's own tasks, so a new
   # example repository or a new task needs no edit here. The `servicebench`
   # workload checks below stay explicit because their flags differ per task.
   validate-examples:
@@ -444,24 +444,24 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Fetch repository-native example overlays
+      - name: Fetch external example repositories
         run: uv run python scripts/example_repositories.py
 
       # Iterates examples/registry.toml, not a glob: every registered example
       # (both layouts, every task) is validated through `vibesys validate`,
       # its trust policy and path references are checked, and an example that
-      # is not registered fails the build. Overlays are fetched above, so a
+      # is not registered fails the build. External repositories are fetched above, so a
       # missing one must fail rather than skip.
       - name: Check registered examples
         env:
-          VIBESYS_REQUIRE_EXAMPLE_OVERLAYS: "1"
+          VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS: "1"
         run: uv run python -m pytest tests/architecture/test_example_registry.py -v --no-cov
 
-      # The overlay is present here and nowhere else, so force the module to
+      # The external repository is present here and nowhere else, so force the module to
       # fail rather than skip if the fetch above ever stops producing it.
       - name: Check microservice input contracts
         env:
-          VIBESYS_REQUIRE_EXAMPLE_OVERLAYS: "1"
+          VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS: "1"
         run: uv run python -m pytest tests/vibesys/test_microservice_inputs.py tests/vibesys/test_input_sources.py -v --no-cov
 
       - name: Validate microservice workloads

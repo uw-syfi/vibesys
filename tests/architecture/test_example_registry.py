@@ -29,9 +29,9 @@ from tests.support.example_registry import (
     Check,
     ExampleEntry,
     Layout,
+    external_repo_missing,
     load_registry,
-    overlay_missing,
-    require_overlays,
+    require_external_repos,
     submodule_example_paths,
     suggested_entry,
     unregistered_examples,
@@ -65,13 +65,13 @@ def _param(entry: ExampleEntry, check: Check) -> object:
 
 
 def _require_present(entry: ExampleEntry) -> None:
-    """Fail (CI) or skip (local) when the overlay this example needs is absent."""
-    if not overlay_missing(entry):
+    """Fail (CI) or skip (local) when this external repo example is not fetched."""
+    if not external_repo_missing(entry):
         return
-    message = f"{entry.path} requires its overlay, which is not fetched: {_FETCH_HINT}"
-    if require_overlays():
+    message = f"{entry.path} is an external repo that is not fetched: {_FETCH_HINT}"
+    if require_external_repos():
         pytest.fail(message)
-    pytest.skip(f"{message} (or set VIBESYS_REQUIRE_EXAMPLE_OVERLAYS=1 to fail instead)")
+    pytest.skip(f"{message} (or set VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS=1 to fail instead)")
 
 
 def _tasks(entry: ExampleEntry) -> tuple[str, ...]:
@@ -117,21 +117,21 @@ def test_registered_layout_and_tasks_match_disk(entry: ExampleEntry) -> None:
         )
 
 
-def test_overlay_examples_are_registered_with_overlay_requirement() -> None:
+def test_submodule_examples_are_registered_as_external_repos() -> None:
     by_path = {entry.path: entry for entry in ENTRIES}
     wrong = sorted(
         path
         for path in submodule_example_paths()
-        if path not in by_path or not by_path[path].needs_overlay
+        if path not in by_path or not by_path[path].external_repo
     )
-    assert not wrong, f'submodule examples {wrong} must be registered with requires = ["overlay"]'
+    assert not wrong, f"submodule examples {wrong} must be registered with external_repo = true"
 
 
-def test_ci_fetches_overlays_and_runs_this_module() -> None:
+def test_ci_fetches_external_repos_and_runs_this_module() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "test.yml").read_text()
     job = workflow.split("\n  validate-examples:", 1)[1].split("\n  # ", 1)[0]
     assert "scripts/example_repositories.py" in job
-    assert 'VIBESYS_REQUIRE_EXAMPLE_OVERLAYS: "1"' in job
+    assert 'VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS: "1"' in job
     assert "tests/architecture/test_example_registry.py" in job
 
 
@@ -361,7 +361,8 @@ def test_stale_reference_exclusions_are_current() -> None:
     [
         {"layout": "legacy", "tasks": ["a"]},
         {"surprise": 1},
-        {"live": "none"},  # a stale field must fail loudly
+        {"live": "none"},  # stale fields must fail loudly
+        {"requires": ["docker"]},
         {"known_failing": [{"check": "validate", "reason": "x"}]},
         {
             "skips": [{"check": "path-refs", "reason": "x"}],

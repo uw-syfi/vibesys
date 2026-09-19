@@ -1,10 +1,11 @@
-"""Discovery and overlay fetching for the repository-native example submodules.
+"""Discovery and fetching of the repository-native example submodules.
 
-A repository-native example is a candidate repository that carries its VibeSys
-tasks in a ``.vibesys/`` overlay (``docs/running-vibesys.md``). The repository
-tracks each one as a submodule under ``examples/<family>/repositories/<name>``.
+A repository-native example is an external repository (a candidate repository
+that lives outside this one) that carries its VibeSys tasks in a ``.vibesys/``
+directory (``docs/running-vibesys.md``). This repository tracks each one as a
+submodule under ``examples/<family>/repositories/<name>``.
 
-Validating those tasks only needs the overlay, not the candidate source, so
+Validating those tasks only needs ``.vibesys/``, not the candidate source, so
 this module fetches ``.vibesys/`` alone: a blob-filtered, depth-1 fetch of the
 pinned gitlink commit with a sparse checkout. On the DeathStarBench example
 that is ~3MB and ~2s, against ~95s and hundreds of MB for a full submodule
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: The one directory a repository-native example must contribute.
-OVERLAY_DIRNAME = ".vibesys"
+VIBESYS_DIRNAME = ".vibesys"
 
 #: ``examples/<family>/repositories/<name>``: the path shape that marks a
 #: submodule as a runnable candidate repository rather than a reference one.
@@ -39,7 +40,7 @@ _GITLINK_MODE = "160000"
 
 
 class ExampleRepositoryError(RuntimeError):
-    """Raised when a submodule declaration or its overlay cannot be resolved."""
+    """Raised when a submodule declaration or its ``.vibesys/`` directory cannot be resolved."""
 
     @classmethod
     def command_failed(cls, command: str, cwd: Path, stderr: str) -> ExampleRepositoryError:
@@ -57,9 +58,9 @@ class ExampleRepositoryError(RuntimeError):
         return cls(f"{path} is not a submodule gitlink (mode {mode})")
 
     @classmethod
-    def missing_overlay(cls, path: Path, commit: str) -> ExampleRepositoryError:
-        """Report an example whose pinned commit carries no task overlay."""
-        return cls(f"{path} at {commit} has no {OVERLAY_DIRNAME}/ overlay")
+    def missing_vibesys_dir(cls, path: Path, commit: str) -> ExampleRepositoryError:
+        """Report an example whose pinned commit carries no task directory."""
+        return cls(f"{path} at {commit} has no {VIBESYS_DIRNAME}/ directory")
 
 
 @dataclass(frozen=True)
@@ -147,12 +148,12 @@ def discover_example_repositories(repo_root: Path = REPO_ROOT) -> tuple[ExampleR
     return tuple(sorted(repositories, key=lambda repository: repository.path))
 
 
-def _manifest_paths(overlay: Path) -> Iterator[Path]:
-    yield from sorted(overlay.glob("tasks/*/vibesys.input.toml"))
+def _manifest_paths(vibesys_dir: Path) -> Iterator[Path]:
+    yield from sorted(vibesys_dir.glob("tasks/*/vibesys.input.toml"))
 
 
 def _declared_project_paths(manifest: Path) -> Iterator[str]:
-    """Yield the project-root-relative paths a manifest points at outside the overlay.
+    """Yield the project-root-relative paths a manifest points at outside ``.vibesys/``.
 
     Two manifest fields can name a file in the candidate repository rather than
     in the task directory, and ``vibesys validate`` requires both to exist:
@@ -182,10 +183,10 @@ def _declared_project_paths(manifest: Path) -> Iterator[str]:
                 yield executable
 
 
-def _sparse_directories(overlay: Path) -> tuple[str, ...]:
-    """Return the extra cone-mode directories the overlay's manifests depend on."""
+def _sparse_directories(vibesys_dir: Path) -> tuple[str, ...]:
+    """Return the extra cone-mode directories the ``.vibesys/`` manifests depend on."""
     directories: set[str] = set()
-    for manifest in _manifest_paths(overlay):
+    for manifest in _manifest_paths(vibesys_dir):
         for declared in _declared_project_paths(manifest):
             candidate = Path(declared)
             if candidate.is_absolute() or ".." in candidate.parts:
@@ -197,7 +198,7 @@ def _sparse_directories(overlay: Path) -> tuple[str, ...]:
     return tuple(sorted(directories))
 
 
-def fetch_overlay(repository: ExampleRepository, repo_root: Path = REPO_ROOT) -> Path:
+def fetch_external_repo(repository: ExampleRepository, repo_root: Path = REPO_ROOT) -> Path:
     """Materialize ``<repository>/.vibesys`` at the pinned commit, and little else.
 
     Idempotent: a checkout already sitting at the pinned commit is left alone.
@@ -205,7 +206,7 @@ def fetch_overlay(repository: ExampleRepository, repo_root: Path = REPO_ROOT) ->
     gitlink, so the superproject sees the submodule as checked out and clean.
 
     A second sparse-checkout pass widens the cone to the directories the
-    overlay's own manifests reference (see ``_declared_project_paths``), so a
+    ``.vibesys/``'s own manifests reference (see ``_declared_project_paths``), so a
     task that names a deployment entrypoint in the candidate repository still
     validates without cloning the repository.
     """
@@ -225,22 +226,22 @@ def fetch_overlay(repository: ExampleRepository, repo_root: Path = REPO_ROOT) ->
         # Cone mode also materializes the root-level files, which is both cheap
         # and what a reader expects from a checkout; nothing else comes down.
         _git("sparse-checkout", "init", "--cone", cwd=target)
-        _git("sparse-checkout", "set", OVERLAY_DIRNAME, cwd=target)
+        _git("sparse-checkout", "set", VIBESYS_DIRNAME, cwd=target)
         _git("fetch", "--depth", "1", "--filter=blob:none", "origin", repository.commit, cwd=target)
         _git("checkout", "--detach", repository.commit, cwd=target)
 
-    overlay = target / OVERLAY_DIRNAME
-    if not overlay.is_dir():
-        raise ExampleRepositoryError.missing_overlay(repository.path, repository.commit)
+    vibesys_dir = target / VIBESYS_DIRNAME
+    if not vibesys_dir.is_dir():
+        raise ExampleRepositoryError.missing_vibesys_dir(repository.path, repository.commit)
 
-    extra = _sparse_directories(overlay)
+    extra = _sparse_directories(vibesys_dir)
     if extra:
-        _git("sparse-checkout", "set", OVERLAY_DIRNAME, *extra, cwd=target)
+        _git("sparse-checkout", "set", VIBESYS_DIRNAME, *extra, cwd=target)
     return target
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Fetch every declared example repository's overlay, reporting each one."""
+    """Fetch every declared example's external repository, reporting each one."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--repo-root",
@@ -257,8 +258,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     for repository in repositories:
-        fetch_overlay(repository, repo_root)
-        print(f"{repository.path}: {OVERLAY_DIRNAME}/ at {repository.commit}")
+        fetch_external_repo(repository, repo_root)
+        print(f"{repository.path}: {VIBESYS_DIRNAME}/ at {repository.commit}")
     return 0
 
 

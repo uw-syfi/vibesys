@@ -15,18 +15,18 @@ MICROSERVICE_ROOT = PROJECT_ROOT / "examples" / "microservices"
 DEATHSTAR_ROOT = MICROSERVICE_ROOT / "repositories" / "deathstarbench"
 # The DeathStarBench tasks live in a submodule, so a plain checkout does not
 # have them and these assertions skip. CI's ``validate-examples`` job fetches
-# the ``.vibesys`` overlay and sets this, turning a missing overlay into a
+# the ``.vibesys`` directory and sets this, turning a missing external repository into a
 # failure rather than a silent loss of coverage.
-_REQUIRE_EXAMPLE_OVERLAYS = os.environ.get("VIBESYS_REQUIRE_EXAMPLE_OVERLAYS") == "1"
+_REQUIRE_EXAMPLE_EXTERNAL_REPOS = os.environ.get("VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS") == "1"
 try:
     DEATHSTAR_LAYOUT = Project.open(DEATHSTAR_ROOT)
     DEATHSTAR_LAYOUT.discover_tasks()
 except ProjectLayoutError as error:
-    if _REQUIRE_EXAMPLE_OVERLAYS:
+    if _REQUIRE_EXAMPLE_EXTERNAL_REPOS:
         raise
     pytest.skip(
         f"DeathStarBench repository example is not initialized: {error}"
-        " (set VIBESYS_REQUIRE_EXAMPLE_OVERLAYS=1 to force)",
+        " (set VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS=1 to force)",
         allow_module_level=True,
     )
 DEATHSTAR_TASKS = {task.name.value: task for task in DEATHSTAR_LAYOUT.discover_tasks()}

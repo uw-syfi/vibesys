@@ -11,8 +11,9 @@
 #   path        repo-relative example root
 #   layout      "task" (.vibesys/tasks/<task>/) or "legacy" (root vibesys.input.toml)
 #   tasks       "all" (default) or the exact task names on disk; legacy: omit
-#   requires    overlay | docker | kubernetes | gpu | model-weights. Only "overlay" changes
-#               behavior (the overlay is fetched in CI and must be present); the rest are hints
+#   external_repo  true (default false) when the task files and app source come from another
+#               repository that scripts/example_repositories.py checks out. Only this changes
+#               behavior: its checks run in CI (checkout required) and skip locally if absent
 #   known_failing  [{ check, reason, tracking }]: strict xfail; the test fails once the check
 #               passes, so entries only shrink
 #   skips       [{ check, reason }]: a check that cannot run because source is absent from
@@ -23,170 +24,140 @@ version = 1
 [[example]]
 path = "examples/data-structures/kvstore-default"
 layout = "task"
-requires = []
 
 [[example]]
 path = "examples/data-structures/prioqueue-mpmc"
 layout = "legacy"
-requires = []
 
 [[example]]
 path = "examples/data-structures/prioqueue-mpsc"
 layout = "legacy"
-requires = []
 
 [[example]]
 path = "examples/data-structures/prioqueue-spmc"
 layout = "legacy"
-requires = []
 
 [[example]]
 path = "examples/data-structures/prioqueue-spsc"
 layout = "legacy"
-requires = []
 
 [[example]]
 path = "examples/data-structures/repositories/queue-rs"
 layout = "task"
-requires = []
 
 [[example]]
 path = "examples/database/differential-dataflow"
 layout = "legacy"
-requires = []
 
 [[example]]
 path = "examples/kv-store"
 layout = "task"
-requires = []
 
 [[example]]
 path = "examples/microservices/hotel-correctness"
 layout = "task"
-requires = ["docker", "kubernetes"]
 
 [[example]]
 path = "examples/microservices/repositories/deathstarbench"
 layout = "task"
-requires = ["overlay", "docker"]
-skips = [{ check = "path-refs", reason = "overlay checkout has no candidate source for ${PROJECT_ROOT} paths to point at" }]
+external_repo = true
+skips = [{ check = "path-refs", reason = "external repo checkout has no candidate source for ${PROJECT_ROOT} paths to point at" }]
 
 [[example]]
 path = "examples/microservices/social-network-kubernetes"
 layout = "task"
-requires = ["kubernetes"]
 
 [[example]]
 path = "examples/microservices/train-ticket"
 layout = "task"
-requires = ["docker"]
 
 [[example]]
 path = "examples/microservices/train-ticket-kubernetes"
 layout = "task"
-requires = ["kubernetes"]
 
 [[example]]
 path = "examples/model-serving/Llama-3-8B"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/Llama-3-8B-trn2"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit"
 layout = "legacy"
-requires = ["model-weights"]
 
 [[example]]
 path = "examples/model-serving/deepseek-v3.2-8xb200"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/glm-5.2-8xb200"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/kimi-k3-8xb200"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/llama-70b-2xh100"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/moonshine-streaming"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/moonshine-streaming-vllm"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/olmo-hybrid-prefix-caching"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/olmo-hybrid-prefix-caching-vllm"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/qwen3-32b-code-edit"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/qwen3.5-397b-a17b-4xb200"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/qwen3.6-35b-a3b-2xh100"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/repositories/sglang"
 layout = "task"
-requires = ["overlay", "gpu", "model-weights"]
+external_repo = true
 
 [[example]]
 path = "examples/model-serving/repositories/vllm"
 layout = "task"
-requires = ["overlay", "gpu", "model-weights"]
+external_repo = true
 
 [[example]]
 path = "examples/model-serving/repositories/vllm-omni"
 layout = "task"
-requires = ["overlay", "gpu", "model-weights"]
+external_repo = true
 
 [[example]]
 path = "examples/model-serving/show-o2-1.5B-HQ"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/show-o2-1.5B-HQ-h100"
 layout = "legacy"
-requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/show-o2-1.5B-HQ-macbook"
 layout = "legacy"
-requires = ["model-weights"]
 
 [[example]]
 path = "examples/model-serving/whisper-large-v3"
 layout = "legacy"
-requires = ["gpu", "model-weights"]

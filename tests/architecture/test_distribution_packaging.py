@@ -81,7 +81,7 @@ def _submodule_configuration() -> tuple[configparser.ConfigParser, list[str]]:
 
 def _is_repository_example(config: configparser.ConfigParser, section: str) -> bool:
     # One definition, shared with the CI fetcher that materializes these
-    # examples' task overlays.
+    # examples' external repositories.
     return is_example_repository_path(Path(config.get(section, "path")))
 
 

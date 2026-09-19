@@ -94,7 +94,7 @@ git submodule update --init --recursive --checkout
 repository-native example's tasks skip when its submodule is absent, and CI's
 `validate-examples` job covers them instead. To get the same coverage locally
 without cloning the candidate repositories, fetch just their `.vibesys`
-overlays (a few MB and a few seconds, against hundreds of MB for a full
+directories (a few MB and a few seconds, against hundreds of MB for a full
 checkout):
 
 ```bash

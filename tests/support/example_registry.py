@@ -33,16 +33,6 @@ class Layout(StrEnum):
     LEGACY = "legacy"  # root `vibesys.input.toml` and `OBJECTIVE.md`
 
 
-class Requirement(StrEnum):
-    """What running an example needs beyond a plain checkout. Only OVERLAY changes CI behavior."""
-
-    OVERLAY = "overlay"  # `.vibesys/` fetched by scripts/example_repositories.py
-    DOCKER = "docker"
-    KUBERNETES = "kubernetes"
-    GPU = "gpu"
-    MODEL_WEIGHTS = "model-weights"
-
-
 class Check(StrEnum):
     """Static checks that run for every example and every task."""
 
@@ -78,7 +68,9 @@ class ExampleEntry(BaseModel):
     path: str  # repo-relative POSIX path
     layout: Layout
     tasks: Literal["all"] | tuple[str, ...] = "all"  # legacy examples have no tasks
-    requires: tuple[Requirement, ...] = ()
+    # True when the task files and app source come from another repository that
+    # scripts/example_repositories.py checks out (a submodule under repositories/).
+    external_repo: bool = False
     known_failing: tuple[KnownFailing, ...] = ()
     skips: tuple[Skip, ...] = ()
 
@@ -99,11 +91,6 @@ class ExampleEntry(BaseModel):
     def root(self) -> Path:
         """Absolute example root."""
         return REPO_ROOT / self.path
-
-    @property
-    def needs_overlay(self) -> bool:
-        """Whether the task definitions only exist after the overlay fetch."""
-        return Requirement.OVERLAY in self.requires
 
     def known_failure(self, check: Check) -> KnownFailing | None:
         """Return the registered known failure for ``check``, if any."""
@@ -137,14 +124,14 @@ def load_registry(path: Path = REGISTRY_PATH) -> Registry:
     return Registry.model_validate(tomllib.loads(path.read_text()))
 
 
-def require_overlays() -> bool:
-    """Whether a missing overlay must fail rather than skip (set by CI)."""
-    return os.environ.get("VIBESYS_REQUIRE_EXAMPLE_OVERLAYS") == "1"
+def require_external_repos() -> bool:
+    """Whether a missing external repo checkout must fail rather than skip (set by CI)."""
+    return os.environ.get("VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS") == "1"
 
 
-def overlay_missing(entry: ExampleEntry) -> bool:
-    """Whether ``entry`` needs its overlay and the checkout does not have it."""
-    return entry.needs_overlay and not (entry.root / ".vibesys" / "tasks").is_dir()
+def external_repo_missing(entry: ExampleEntry) -> bool:
+    """Whether ``entry`` is an external repo and its checkout is absent."""
+    return entry.external_repo and not (entry.root / ".vibesys" / "tasks").is_dir()
 
 
 def submodule_example_paths() -> set[str]:
@@ -168,8 +155,8 @@ def unregistered_examples(registered: set[str]) -> list[str]:
 
     Walks ``examples/`` and stops at the first directory that is registered or
     looks like an example, so candidate sources, ``reference/`` trees, and
-    nested submodules inside an example are never enumerated. Overlay
-    submodules count even when their overlay has not been fetched.
+    nested submodules inside an example are never enumerated. External-repo
+    submodules count even when the external repo has not been fetched.
     """
     found = {path for path in submodule_example_paths() if path not in registered}
     for current, dirs, _files in os.walk(REPO_ROOT / "examples"):
@@ -188,5 +175,5 @@ def unregistered_examples(registered: set[str]) -> list[str]:
 def suggested_entry(path: str) -> str:
     """Return the registry entry to paste for an unregistered example."""
     layout = Layout.TASK if (REPO_ROOT / path / ".vibesys" / "tasks").is_dir() else Layout.LEGACY
-    requires = '["overlay"]' if path in submodule_example_paths() else "[]"
-    return f'[[example]]\npath = "{path}"\nlayout = "{layout}"\nrequires = {requires}'
+    entry = f'[[example]]\npath = "{path}"\nlayout = "{layout}"'
+    return f"{entry}\nexternal_repo = true" if path in submodule_example_paths() else entry

@@ -9,7 +9,7 @@ add).
 An example is a directory with a root `vibesys.input.toml` or `OBJECTIVE.md`
 (legacy layout), or with `.vibesys/tasks/<task>/` (task layout). Submodule
 examples under `examples/<family>/repositories/` are registered with
-`requires = ["overlay"]`. Baselines, starters, and evaluator sources are not
+`external_repo = true`. Baselines, starters, and evaluator sources are not
 examples and are not registered.
 
 ## Static checks run for every example
@@ -27,7 +27,7 @@ check consumes it.
 | `path` | Repo-relative example root. |
 | `layout` | `task` or `legacy`. |
 | `tasks` | `"all"` (default) or the exact task names on disk. Omit for legacy. |
-| `requires` | `overlay`, `docker`, `kubernetes`, `gpu`, `model-weights`. Only `overlay` affects CI behavior (the overlay must be present); the others are hints. |
+| `external_repo` | `true` when the task files and app source come from another repository that `scripts/example_repositories.py` checks out. Default `false`. It is the only field that changes behavior. |
 | `known_failing` | `[{ check, reason, tracking }]`: a static check that fails today. |
 | `skips` | `[{ check, reason }]`: a check that cannot run because source is absent from the checkout. |
 
@@ -45,10 +45,10 @@ check consumes it.
 until you remove the entry, so the list only shrinks. `skips` is the only way
 to omit a check for one example, and is also strict: the test fails if the skip
 is no longer needed. Today one skip exists (`path-refs` for the
-deathstarbench overlay, whose checkout has no candidate source).
+deathstarbench external repo, whose checkout has no candidate source).
 
-Overlays are fetched in CI. A missing overlay fails there
-(`VIBESYS_REQUIRE_EXAMPLE_OVERLAYS=1`) and skips only locally; run
+External repos are fetched in CI. A missing checkout fails there
+(`VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS=1`) and skips only locally; run
 `uv run python scripts/example_repositories.py` first.
 
 Not covered: running an evaluator, and files a command reads indirectly
