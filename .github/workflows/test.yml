@@ -12,6 +12,10 @@ on:
       - '.github/workflows/website.yml'
   pull_request:
     branches: [main]
+  # GitHub merge queue: Required PR CI must report on the queue's temporary
+  # gh-readonly-queue/... branch or the queue waits for it until timeout.
+  merge_group:
+    types: [checks_requested]
 
 env:
   # Wall-clock budget for a whole run, enforced as a warning by `ci-budget`
@@ -38,6 +42,8 @@ jobs:
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
+          # merge_group is handled natively by paths-filter (diffs the queue
+          # branch head_sha against the group's base_sha).
           filters: |
             # What `python-checks` actually reads: `ruff`/`lint-imports`'s
             # source roots (`[tool.ruff] src` in pyproject.toml), the dirs
