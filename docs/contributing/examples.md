@@ -12,6 +12,16 @@ examples under `examples/<family>/repositories/` are registered with
 `requires = ["overlay"]`. Baselines, starters, and evaluator sources are not
 examples and are not registered.
 
+## Two axes
+
+**Static checks** (structure and configuration) run for every entry and every
+task, always. Needing docker, a cluster, a GPU, or model weights never exempts
+an example: none of them is needed to validate a manifest.
+
+**Live coverage** is the `live` field (`none`, `manual`, `ci`): whether any
+real run exercises the example. It never changes which static checks run.
+`requires` documents what a live run needs.
+
 ## Entry fields
 
 | Field | Meaning |
@@ -19,37 +29,30 @@ examples and are not registered.
 | `path` | Repo-relative example root. |
 | `layout` | `task` or `legacy`. |
 | `tasks` | `"all"` (default) or the exact task names on disk. Omit for legacy. |
-| `requires` | `overlay`, `docker`, `kubernetes`, `gpu`, `model-weights`. |
-| `status` | `validated`, `live-only`, or `known-failing`. |
-| `reason`, `tracking` | Required for `known-failing` (with a PR or issue link); `reason` for `live-only`. |
-| `failing_checks` | `validate` or `trust-policy`; `known-failing` only. |
+| `live` | `none`, `manual`, or `ci`. |
+| `requires` | `overlay`, `docker`, `kubernetes`, `gpu`, `model-weights` (documentation). |
+| `known_failing` | `[{ check, reason, tracking }]`: a static check that fails today. |
+| `skips` | `[{ check, reason }]`: a check that cannot run because source is absent from the checkout. |
 
-`validated` may only require `overlay`, which the `validate-examples` job
-fetches. Anything needing docker, a cluster, a GPU, or weights is `live-only`.
-
-Status never turns a static check off. `validated` and `live-only` entries get
-exactly the same checks below; `live-only` only records that a live run is not
-covered because CI lacks something the example needs. `known-failing` runs the
-same checks and expects the listed ones to fail. The only thing that stops a
-static check is an overlay that is not fetched, which fails in CI and skips
-locally. Two limits apply by layout: trust policy runs only for `task`
-layout (legacy inputs use a fixed trusted list), and path references are
-skipped for `overlay` examples (the checkout has no candidate source).
-
-## What CI checks for each entry
+## Static checks
 
 | Check | Catches | Fails as |
 | --- | --- | --- |
 | Registry completeness | New example directory, missing path, wrong layout, task list out of date | Names the file and the entry to add |
-| Validate | Everything `vibesys validate` rejects, per task, both layouts | Message with the example path and task |
-| Path references | `${PROJECT_ROOT}/...` in accuracy/benchmark commands pointing at nothing (skipped for overlays, which carry no candidate source) | Example, task, and path |
-| Trust policy (task layout) | Files those commands read that the agent could edit, using `build_project_path_policy` on a scratch copy | Lists the writable files and the read-only set |
-| Stale references | `examples/...` literals in workflows, scripts, docs, and READMEs whose target is gone | File and literal; exclusions live in the test with a comment |
+| `validate` | Everything `vibesys validate` rejects, per task, both layouts | Example path plus task |
+| `path-refs` | `${PROJECT_ROOT}/...` in accuracy/benchmark commands pointing at nothing | Example, task, path |
+| `trust-policy` | Files those commands read that the agent could edit, using `build_project_path_policy` on a scratch copy (both layouts) | Lists the writable files and the read-only set |
+| Stale references (repo-wide) | `examples/...` literals in workflows, scripts, docs, and READMEs whose target is gone | File and literal; exclusions live in the test with a comment |
 
-A `known-failing` check is strict xfail: when it starts passing the test fails
-until you remove the entry, so the list only shrinks. In CI a missing overlay
-fails (`VIBESYS_REQUIRE_EXAMPLE_OVERLAYS=1`); locally it skips, so run
+`known_failing` is a strict xfail: when the check starts passing the test fails
+until you remove the entry, so the list only shrinks. `skips` is the only way
+to omit a check for one example, and is also strict: the test fails if the skip
+is no longer needed. Today one skip exists (`path-refs` for the
+deathstarbench overlay, whose checkout has no candidate source).
+
+Overlays are fetched in CI. A missing overlay fails there
+(`VIBESYS_REQUIRE_EXAMPLE_OVERLAYS=1`) and skips only locally; run
 `uv run python scripts/example_repositories.py` first.
 
-Not covered: running an evaluator, docker, Kubernetes, GPUs, model weights, and
-files a command reads indirectly (imports, config it loads from disk).
+Not covered: running an evaluator, and files a command reads indirectly
+(imports, config it loads from disk).

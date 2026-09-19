@@ -14,6 +14,7 @@ model weights. See ``docs/contributing/examples.md``.
 
 from __future__ import annotations
 
+import posixpath
 import re
 import shutil
 import subprocess
@@ -28,7 +29,6 @@ from tests.support.example_registry import (
     Check,
     ExampleEntry,
     Layout,
-    Status,
     load_registry,
     overlay_missing,
     require_overlays,
@@ -52,12 +52,13 @@ _FETCH_HINT = "run `uv run python scripts/example_repositories.py`"
 
 def _param(entry: ExampleEntry, check: Check) -> object:
     marks = []
-    if entry.expects_failure(check):
+    known = entry.known_failure(check)
+    if known:
         marks.append(
             pytest.mark.xfail(
                 strict=True,
-                reason=f"known-failing: {entry.reason} ({entry.tracking}); remove `{check}` from "
-                f"failing_checks in {REGISTRY_RELATIVE} once it passes",
+                reason=f"known-failing: {known.reason} ({known.tracking}); remove the {check} "
+                f"known_failing entry in {REGISTRY_RELATIVE} once it passes",
             )
         )
     return pytest.param(entry, id=entry.path, marks=marks)
@@ -148,9 +149,22 @@ def test_example_validates(entry: ExampleEntry, capsys: pytest.CaptureFixture[st
         except ConfigurationError as error:
             failures.append(f"{entry.path} task={task}: {error}")
             continue
-        if not entry.needs_overlay:  # an overlay checkout has no candidate source to look in
-            failures.extend(_missing_references(entry, task))
     capsys.readouterr()
+    assert not failures, "\n".join(failures)
+
+
+@pytest.mark.parametrize("entry", [_param(e, Check.PATH_REFS) for e in ENTRIES])
+def test_command_path_references_exist(entry: ExampleEntry) -> None:
+    _require_present(entry)
+    failures = [
+        message for task in _tasks(entry) or (None,) for message in _missing_references(entry, task)
+    ]
+    skip = entry.skip(Check.PATH_REFS)
+    if skip:
+        assert failures, (
+            f"{entry.path}: the path-refs skip in {REGISTRY_RELATIVE} is obsolete; remove it"
+        )
+        pytest.skip(f"explicit skip: {skip.reason}")
     assert not failures, "\n".join(failures)
 
 
@@ -168,19 +182,23 @@ def _command_strings(manifest: Path) -> list[str]:
     return strings
 
 
+def _manifest(entry: ExampleEntry, task: str | None) -> Path:
+    if task is None:
+        return entry.root / "vibesys.input.toml"
+    return Project.open(entry.root).select_task(task).manifest_path
+
+
 def _referenced_paths(entry: ExampleEntry, task: str | None) -> set[str]:
     """Return project-relative paths that the task's commands read via PROJECT_ROOT."""
-    if task is None:
-        manifest = entry.root / "vibesys.input.toml"
-    else:
-        manifest = Project.open(entry.root).select_task(task).manifest_path
+    manifest = _manifest(entry, task)
     found = set()
     for text in _command_strings(manifest):
-        bare = text.removeprefix("./")
+        bare = posixpath.normpath(text)
         if (
-            bare
-            and not text.startswith(("-", "/"))
+            not text.startswith(("-", "/"))
             and "${" not in text
+            and bare != "."
+            and not bare.startswith("..")
             and (entry.root / bare).exists()
         ):
             found.add(bare)
@@ -192,11 +210,9 @@ def _referenced_paths(entry: ExampleEntry, task: str | None) -> set[str]:
 
 
 def _workspace_destinations(entry: ExampleEntry, task: str | None) -> set[str]:
-    if task is None:
-        manifest = entry.root / "vibesys.input.toml"
-    else:
-        manifest = Project.open(entry.root).select_task(task).manifest_path
-    sources = tomllib.loads(manifest.read_text()).get("workspace", {}).get("sources", [])
+    sources = (
+        tomllib.loads(_manifest(entry, task).read_text()).get("workspace", {}).get("sources", [])
+    )
     return {source["dest"] for source in sources}
 
 
@@ -222,9 +238,7 @@ def _readonly(relative: Path, read_only: Iterable[Path]) -> bool:
     return any(relative == path or relative.is_relative_to(path) for path in read_only)
 
 
-@pytest.mark.parametrize(
-    "entry", [_param(e, Check.TRUST_POLICY) for e in ENTRIES if e.layout is Layout.TASK]
-)
+@pytest.mark.parametrize("entry", [_param(e, Check.TRUST_POLICY) for e in ENTRIES])
 def test_task_inputs_are_read_only_for_the_agent(entry: ExampleEntry, tmp_path: Path) -> None:
     """Every project file a task command reads must be under a read-only path.
 
@@ -244,13 +258,15 @@ def test_task_inputs_are_read_only_for_the_agent(entry: ExampleEntry, tmp_path: 
     )
     policy = build_project_path_policy(project, evaluator_source=None)
     trusted = trusted_project_input_paths(project, evaluator_source=None)
-    unprotected = [p for p in trusted if not _readonly(p, policy.read_only_paths)]
+    unprotected = [
+        p for p in trusted if (project / p).exists() and not _readonly(p, policy.read_only_paths)
+    ]
     assert not unprotected, (
         f"{entry.path}: trusted inputs outside the sandbox policy: {unprotected}"
     )
 
     writable: list[str] = []
-    for task in _tasks(entry):
+    for task in _tasks(entry) or (None,):
         writable.extend(
             f"{relative} (task {task})"
             for relative in sorted(_referenced_paths(entry, task))
@@ -340,22 +356,20 @@ def test_stale_reference_exclusions_are_current() -> None:
     assert not dead, f"remove obsolete STALE_REFERENCE_EXCLUSIONS entries: {dead}"
 
 
-def test_known_failing_entries_are_registered_consistently() -> None:
-    failing = [entry for entry in ENTRIES if entry.status is Status.KNOWN_FAILING]
-    assert all(entry.failing_checks for entry in failing)
-
-
 @pytest.mark.parametrize(
     "fields",
     [
-        {"status": "validated", "requires": ["gpu"]},
-        {"status": "live-only"},
-        {"status": "known-failing", "reason": "x", "failing_checks": ["validate"]},
-        {"status": "validated", "layout": "legacy", "tasks": ["a"]},
-        {"status": "validated", "surprise": 1},
+        {"layout": "legacy", "tasks": ["a"]},
+        {"surprise": 1},
+        {"live": "sometimes"},
+        {"known_failing": [{"check": "validate", "reason": "x"}]},
+        {
+            "skips": [{"check": "path-refs", "reason": "x"}],
+            "known_failing": [{"check": "path-refs", "reason": "x", "tracking": "y"}],
+        },
     ],
 )
 def test_registry_entry_model_rejects_inconsistent_entries(fields: dict[str, object]) -> None:
-    base = {"path": "examples/x", "layout": "task", "status": "validated"}
-    with pytest.raises(ValueError, match=r"examples/x|surprise|Extra"):
+    base = {"path": "examples/x", "layout": "task", "live": "none"}
+    with pytest.raises(ValueError, match=r"examples/x|surprise|Extra|live|tracking"):
         ExampleEntry.model_validate({**base, **fields})

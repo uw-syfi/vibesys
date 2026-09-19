@@ -33,18 +33,16 @@ class Layout(StrEnum):
     LEGACY = "legacy"  # root `vibesys.input.toml` and `OBJECTIVE.md`
 
 
-class Status(StrEnum):
-    """What CI can promise about an example."""
+class Live(StrEnum):
+    """Whether any real run exercises the example. Never changes the static checks."""
 
-    VALIDATED = "validated"  # every static check passes and CI can satisfy `requires`
-    KNOWN_FAILING = (
-        "known-failing"  # a listed check fails today; must start failing the build when fixed
-    )
-    LIVE_ONLY = "live-only"  # static checks pass; a live run needs something CI lacks
+    NONE = "none"  # no real run is recorded
+    MANUAL = "manual"  # a maintainer runs it by hand
+    CI = "ci"  # a CI job runs it
 
 
 class Requirement(StrEnum):
-    """Something an example needs beyond a plain checkout."""
+    """What a live run needs beyond a plain checkout (documentation only)."""
 
     OVERLAY = "overlay"  # `.vibesys/` fetched by scripts/example_repositories.py
     DOCKER = "docker"
@@ -54,14 +52,30 @@ class Requirement(StrEnum):
 
 
 class Check(StrEnum):
-    """Static checks that can be registered as known-failing."""
+    """Static checks that run for every example and every task."""
 
-    VALIDATE = "validate"  # the `vibesys validate` contract, plus command path references
-    TRUST_POLICY = "trust-policy"  # evaluator-owned paths are read-only for the agent
+    VALIDATE = "validate"  # the `vibesys validate` contract
+    PATH_REFS = "path-refs"  # `${PROJECT_ROOT}/...` paths in task commands exist
+    TRUST_POLICY = "trust-policy"  # files the commands read are read-only for the agent
 
 
-#: Requirements the `validate-examples` CI job provides.
-CI_SATISFIABLE = frozenset({Requirement.OVERLAY})
+class KnownFailing(BaseModel):
+    """A check that fails today; strict xfail, so it must be removed once it passes."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    check: Check
+    reason: str
+    tracking: str  # issue or PR link
+
+
+class Skip(BaseModel):
+    """A check that cannot run because it needs source absent from the checkout."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    check: Check
+    reason: str
 
 
 class ExampleEntry(BaseModel):
@@ -72,34 +86,19 @@ class ExampleEntry(BaseModel):
     path: str  # repo-relative POSIX path
     layout: Layout
     tasks: Literal["all"] | tuple[str, ...] = "all"  # legacy examples have no tasks
+    live: Live
     requires: tuple[Requirement, ...] = ()
-    status: Status
-    reason: str | None = None
-    tracking: str | None = None  # issue or PR link for a known-failing entry
-    failing_checks: tuple[Check, ...] = ()
+    known_failing: tuple[KnownFailing, ...] = ()
+    skips: tuple[Skip, ...] = ()
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
         problems: list[str] = []
         if self.layout is Layout.LEGACY and self.tasks != "all":
             problems.append("legacy examples have no tasks; omit `tasks`")
-        if self.status is Status.VALIDATED:
-            unsatisfiable = sorted(set(self.requires) - CI_SATISFIABLE)
-            if unsatisfiable:
-                problems.append(
-                    f"status validated cannot require {unsatisfiable}; use live-only or known-failing"
-                )
-            if self.reason or self.tracking or self.failing_checks:
-                problems.append("reason, tracking and failing_checks are only for other statuses")
-        if self.status is Status.LIVE_ONLY:
-            if not self.reason:
-                problems.append("live-only needs a reason")
-            if self.failing_checks:
-                problems.append("failing_checks is only for known-failing")
-        if self.status is Status.KNOWN_FAILING and not (
-            self.reason and self.tracking and self.failing_checks
-        ):
-            problems.append("known-failing needs reason, tracking and failing_checks")
+        declared = [item.check for item in (*self.known_failing, *self.skips)]
+        if len(declared) != len(set(declared)):
+            problems.append("a check may be declared known_failing or skipped once")
         if problems:
             message = f"{self.path}: " + "; ".join(problems)
             raise ValueError(message)
@@ -115,9 +114,13 @@ class ExampleEntry(BaseModel):
         """Whether the task definitions only exist after the overlay fetch."""
         return Requirement.OVERLAY in self.requires
 
-    def expects_failure(self, check: Check) -> bool:
-        """Whether ``check`` is registered as failing today."""
-        return check in self.failing_checks
+    def known_failure(self, check: Check) -> KnownFailing | None:
+        """Return the registered known failure for ``check``, if any."""
+        return next((item for item in self.known_failing if item.check is check), None)
+
+    def skip(self, check: Check) -> Skip | None:
+        """Return the explicit skip for ``check``, if any."""
+        return next((item for item in self.skips if item.check is check), None)
 
 
 class Registry(BaseModel):
@@ -194,9 +197,8 @@ def unregistered_examples(registered: set[str]) -> list[str]:
 def suggested_entry(path: str) -> str:
     """Return the registry entry to paste for an unregistered example."""
     layout = Layout.TASK if (REPO_ROOT / path / ".vibesys" / "tasks").is_dir() else Layout.LEGACY
-    overlay = path in submodule_example_paths()
-    requires = '["overlay"]' if overlay else "[]"
+    requires = '["overlay"]' if path in submodule_example_paths() else "[]"
     return (
         f'[[example]]\npath = "{path}"\nlayout = "{layout}"\n'
-        f'requires = {requires}\nstatus = "validated"  # or live-only / known-failing, see docs/contributing/examples.md'
+        f'live = "none"  # none | manual | ci\nrequires = {requires}'
     )
