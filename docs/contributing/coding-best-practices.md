@@ -31,6 +31,17 @@ path.
   discussion in a separate design document.
 - Keep compatibility wrappers thin. New behavior should live in the canonical
   implementation module or reusable library.
+- `tach.toml` freezes the current Python module graph, and CI runs
+  `uv run tach check`. A new cross-module import fails until you add the edge
+  to `depends_on` in the same PR, so the reviewer sees it. Add an edge only when
+  the dependency is deliberate. The goal is to only ever remove edges. There are
+  no layers: every module, including `entrypoints` and each `server.*` module,
+  lists explicit edges. `entrypoints` is the composition root, with both a
+  server path and a direct headless path into core. Upward imports (core to
+  server, server to entrypoints, a `server.*` module to a higher one) fail
+  because the edge is undeclared. Tach is the single boundary tool. The libs
+  DAG holds because every lib edge is explicit (only `vs_project` to
+  `vs_loop_state` exists); reject any new one in review.
 
 When one part of the application describes behavior and another part applies
 it, separate these roles when they have different owners or change for different

@@ -11,7 +11,7 @@ durable core event journal, and does not import serving or process-entrypoint
 code. `server` imports the core in-process, projects core events into its wire
 journal, and owns frontend-specific facilities such as experiment chat.
 `entrypoints` composes either a local headless integration or the server
-runtime. Import Linter enforces this direction in CI.
+runtime. Tach enforces this direction in CI.
 
 The TypeScript frontend has three packages with one allowed dependency direction:
 

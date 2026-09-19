@@ -72,7 +72,7 @@ dev = [
     "check-wheel-contents",
     "diff-cover",
     "hypothesis",
-    "import-linter==2.13",
+    "tach==0.35.1",
     "matplotlib>=3.10.8",
     "pytest",
     "pytest-asyncio",
@@ -120,30 +120,6 @@ omit = [
     # Module execution stubs contain only a guarded call into a measured
     # entrypoint. Exercising them would require invoking a separate process.
     "*/__main__.py",
-]
-
-[tool.importlinter]
-root_packages = ["entrypoints", "server", "vibesys"]
-
-[[tool.importlinter.contracts]]
-name = "Application packages depend inward"
-type = "layers"
-layers = ["entrypoints", "server", "vibesys"]
-
-[[tool.importlinter.contracts]]
-name = "Server components depend inward"
-type = "layers"
-layers = [
-    "server.runtime",
-    "server.transport",
-    "server.api",
-    "server.integration",
-    "server.chat",
-    "server.controller",
-    "server.execution",
-    "server.journal",
-    "server.events",
-    "server.diagnostics",
 ]
 
 [tool.coverage.report]

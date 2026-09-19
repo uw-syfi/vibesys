@@ -45,7 +45,7 @@ jobs:
           # merge_group is handled natively by paths-filter (diffs the queue
           # branch head_sha against the group's base_sha).
           filters: |
-            # What `python-checks` actually reads: `ruff`/`lint-imports`'s
+            # What `python-checks` actually reads: `ruff`'s
             # source roots (`[tool.ruff] src` in pyproject.toml), the dirs
             # `check_format.sh` also formats, and dependency/lint config.
             # Deliberately coarse rather than chasing every edge case (e.g.
@@ -58,6 +58,7 @@ jobs:
               - 'libs/**'
               - 'sdk/**'
               - 'scripts/**'
+              - 'tach.toml'
               - '.github/delegated-merge.toml'
               - '.github/workflows/delegated-merge.yml'
               - 'examples/**'
@@ -166,8 +167,10 @@ jobs:
       - name: Check Python file length
         run: uv run python scripts/check_file_length.py
 
-      - name: Check Python package boundaries
-        run: uv run lint-imports
+      # tach.toml freezes the current module graph (ratchet): a new
+      # cross-module import fails unless tach.toml is edited in the same PR.
+      - name: Check Tach module boundaries
+        run: uv run tach check
 
       # docs/ and root Markdown are covered by website.yml, which this
       # workflow's paths-ignore hands off to. This pass catches the rest:

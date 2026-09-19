@@ -1,0 +1,198 @@
+# Architecture ratchet: freezes the Python module graph as of today.
+# `uv run tach check` fails if any module gains a dependency not listed here.
+# To add an edge on purpose, edit `depends_on` in the same PR so a reviewer sees
+# it. The goal is to only ever remove edges. `tach sync` regenerates
+# `depends_on` from the code; review its diff before committing.
+#
+# Scope: src/ (entrypoints, server, vibesys) and every libs/*/src. sdk/ is out.
+# Tach is the single boundary tool; there is no other import checker.
+#
+# Modeling: `vibesys` is a module whose children (`vibesys.agents`, ...) are
+# also modules. tach assigns each file to its deepest module, so `vibesys` means
+# the top-level vibesys/*.py files (config, context, schemas, ...). `server` is
+# modeled the same way: `server.api`, `server.runtime`, ... are modules, and
+# bare `server` is its package `__init__`.
+#
+# Known cycles (tolerated for now, to be tightened):
+# - vibesys, agents, run, render, sandbox, backends, skypilot, domains, prompts,
+#   evaluators form one strongly connected core.
+# - server.integration <-> server.read_model (read_model imports integration
+#   only under TYPE_CHECKING).
+# TODO: set forbid_circular_dependencies = true once the vibesys core cycle is
+# broken.
+#
+# No layers. Every edge is listed, including those of `entrypoints` and each
+# `server.*` module. Order is enforced by the explicit edges: `server.runtime`
+# sits on top, then transport, api, integration, chat, controller, execution,
+# journal, events, diagnostics at the bottom; a lower module must not list a
+# higher one. `entrypoints` is the composition root: it reaches core both
+# through `server` and directly (headless local mode), so it lists both. Upward
+# imports (core importing server/entrypoints, server importing entrypoints)
+# fail because the edge is undeclared.
+#
+# Libs form a DAG by review: every lib edge is explicit here, and only
+# `vs_project` -> `vs_loop_state` exists. Reject any other lib-to-lib edge.
+
+source_roots = [
+    "src",
+    "libs/vs-evaluator-protocol/src",
+    "libs/vs-feature-flags/src",
+    "libs/vs-github/src",
+    "libs/vs-issue-board/src",
+    "libs/vs-loop-state/src",
+    "libs/vs-project/src",
+    "libs/vs-prompts/src",
+    "libs/vs-sandbox/src",
+]
+exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources", "build", "dist", ".venv"]
+# Also freeze imports that exist only under TYPE_CHECKING.
+ignore_type_checking_imports = false
+forbid_circular_dependencies = false
+
+[[modules]]
+path = "entrypoints"
+depends_on = ["vs_project", "vs_github", "vibesys", "vibesys.domains", "vibesys.loops", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vibesys.agents", "server.runtime", "server.settings"]
+
+[[modules]]
+path = "server"
+depends_on = []
+
+[[modules]]
+path = "server.api"
+depends_on = ["vs_project", "vibesys", "server.diagnostics", "server.journal", "server.execution", "vibesys.loops", "server.settings", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle", "vs_loop_state", "vibesys.run"]
+
+[[modules]]
+path = "server.chat"
+depends_on = ["vs_project", "vibesys.run", "vs_sandbox", "vibesys.agents", "server.controller", "server.run_lifecycle", "server.journal", "vibesys.domains", "server.events", "server.execution"]
+
+[[modules]]
+path = "server.transport"
+depends_on = ["server.api", "vibesys"]
+
+[[modules]]
+path = "server.controller"
+depends_on = ["server.diagnostics", "server.events", "server.execution", "server.run_lifecycle", "server.journal", "vs_project"]
+
+[[modules]]
+path = "server.diagnostics"
+depends_on = []
+
+[[modules]]
+path = "server.event_index"
+depends_on = []
+
+[[modules]]
+path = "server.events"
+depends_on = ["server.diagnostics", "server.run_lifecycle", "server.event_index"]
+
+[[modules]]
+path = "server.execution"
+depends_on = ["server.diagnostics", "server.events", "server.journal"]
+
+[[modules]]
+path = "server.integration"
+depends_on = ["vibesys.run", "server.execution", "server.chat", "server.events", "vibesys.agents", "server.read_model", "server.diagnostics", "server.journal", "server.controller", "vs_project", "vibesys.render", "server.run_lifecycle"]
+
+[[modules]]
+path = "server.journal"
+depends_on = ["server.events", "server.diagnostics"]
+
+[[modules]]
+path = "server.read_model"
+depends_on = ["server.integration", "server.events"]
+
+[[modules]]
+path = "server.run_lifecycle"
+depends_on = []
+
+[[modules]]
+path = "server.runtime"
+depends_on = ["server.read_model", "server.settings", "server.chat", "server.events", "server.execution", "server.journal", "vibesys", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics"]
+
+[[modules]]
+path = "server.settings"
+depends_on = ["vibesys"]
+
+[[modules]]
+path = "server.tool_payloads"
+depends_on = ["server.events"]
+
+[[modules]]
+path = "vibesys"
+depends_on = ["vibesys.agents", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vs_feature_flags"]
+
+[[modules]]
+path = "vibesys.agents"
+depends_on = ["vibesys", "vibesys.render", "vibesys.run", "vs_project", "vs_sandbox"]
+
+[[modules]]
+path = "vibesys.loops"
+depends_on = ["vibesys", "vibesys.agents", "vibesys.domains", "vibesys.prompts", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_loop_state", "vs_evaluator_protocol", "vs_issue_board", "vs_sandbox", "vs_project"]
+
+[[modules]]
+path = "vibesys.run"
+depends_on = ["vibesys", "vibesys.agents", "vibesys.backends", "vibesys.render", "vibesys.sandbox", "vs_github", "vs_sandbox", "vs_loop_state", "vs_project"]
+
+[[modules]]
+path = "vibesys.domains"
+depends_on = ["vibesys.prompts"]
+
+[[modules]]
+path = "vibesys.backends"
+depends_on = ["vibesys", "vs_sandbox"]
+
+[[modules]]
+path = "vibesys.sandbox"
+depends_on = ["vibesys", "vibesys.agents", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.prompts", "vibesys.skypilot", "vs_project", "vs_sandbox"]
+
+[[modules]]
+path = "vibesys.skypilot"
+depends_on = ["vibesys", "vs_project"]
+
+[[modules]]
+path = "vibesys.render"
+depends_on = ["vibesys", "vibesys.run"]
+
+[[modules]]
+path = "vibesys.evaluators"
+depends_on = ["vibesys", "vs_sandbox"]
+
+[[modules]]
+path = "vibesys.prompts"
+depends_on = ["vibesys", "vs_prompts"]
+
+[[modules]]
+path = "vibesys._model_config"
+depends_on = []
+
+[[modules]]
+path = "vs_sandbox"
+depends_on = []
+
+[[modules]]
+path = "vs_project"
+depends_on = ["vs_loop_state"]
+
+[[modules]]
+path = "vs_loop_state"
+depends_on = []
+
+[[modules]]
+path = "vs_issue_board"
+depends_on = []
+
+[[modules]]
+path = "vs_evaluator_protocol"
+depends_on = []
+
+[[modules]]
+path = "vs_prompts"
+depends_on = []
+
+[[modules]]
+path = "vs_feature_flags"
+depends_on = []
+
+[[modules]]
+path = "vs_github"
+depends_on = []
