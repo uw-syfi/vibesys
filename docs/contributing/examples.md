@@ -22,6 +22,10 @@ an example: none of them is needed to validate a manifest.
 real run exercises the example. It never changes which static checks run.
 `requires` documents what a live run needs.
 
+Every entry currently has `live = "none"`. That records only that nobody has
+written down which examples are run by hand or in CI; it is not a claim that
+none are. Set `manual` or `ci` when you know.
+
 ## Entry fields
 
 | Field | Meaning |

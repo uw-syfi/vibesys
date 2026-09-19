@@ -289,8 +289,8 @@ STALE_REFERENCE_EXCLUSIONS: frozenset[tuple[str, str]] = frozenset(
         # Paths inside the candidate repository (vllm), not in this one.
         ("docs/cli-flags.md", "examples/deployment/service.py"),
         ("docs/running-vibesys.md", "examples/deployment/service.py"),
-        # Genuinely stale: no examples/model-serving/llama-mi300 exists. Needs an owner
-        # to point the Slurm walkthrough at a current example.
+        # Genuinely stale: no examples/model-serving/llama-mi300 exists.
+        # NEEDS AN OWNER: point the Slurm walkthrough at a current example.
         ("docs/contributing/remote-slurm-execution.md", "examples/model-serving/llama-mi300"),
     }
 )

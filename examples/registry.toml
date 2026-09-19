@@ -12,7 +12,8 @@
 #   path        repo-relative example root
 #   layout      "task" (.vibesys/tasks/<task>/) or "legacy" (root vibesys.input.toml)
 #   tasks       "all" (default) or the exact task names on disk; legacy: omit
-#   live        none | manual | ci: whether any real run exercises the example
+#   live        none | manual | ci: whether any real run exercises the example.
+#               Every entry is "none" because nobody recorded which are run; not a claim.
 #   requires    documentation of what a live run needs: overlay | docker | kubernetes |
 #               gpu | model-weights ("overlay" is fetched in CI, so its static checks run)
 #   known_failing  [{ check, reason, tracking }]: strict xfail; the test fails once the check
