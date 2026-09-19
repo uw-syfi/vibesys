@@ -16,7 +16,7 @@ import pytest
 
 from vibesys.agents import AgentClient
 from vibesys.agents.contracts import AgentCapabilities
-from vibesys.domains.base import DomainName
+from vibesys.constants import DomainName
 from vibesys.loops.plain.loop import PlainLoopState
 from vibesys.loops.plain.loop import run_plain_loop as _run_plain_loop
 from vibesys.loops.plain.state import PlainStateStore

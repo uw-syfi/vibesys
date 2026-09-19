@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from vibesys.constants import DomainName
 from vibesys.domains import database, generic, llm_serving, microservices
-from vibesys.domains.base import DomainDefinition, DomainName
+from vibesys.domains.base import DomainDefinition  # noqa: TC001  # tracked: #288
 
 DOMAINS: dict[DomainName, DomainDefinition] = {
     generic.DEFINITION.name: generic.DEFINITION,

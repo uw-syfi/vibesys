@@ -5,7 +5,8 @@ Hosts in-place optimization of real database / dataflow engines.
 
 from __future__ import annotations
 
-from vibesys.domains.base import DomainDefinition, DomainName
+from vibesys.constants import DomainName
+from vibesys.domains.base import DomainDefinition
 from vibesys.domains.environment import NoopEnvironmentHooks
 from vibesys.prompts import PROMPTS_DIR
 

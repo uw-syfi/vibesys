@@ -30,8 +30,8 @@ from vibesys.constants import (
     DEFAULT_COMPUTE_BACKEND,
     PROJECT_ROOT,
     ComputeBackend,
+    DomainName,
 )
-from vibesys.domains.base import DomainName
 from vibesys.domains.environment import (
     EnvironmentContext,
     EnvironmentHooks,

@@ -14,7 +14,8 @@ from typing import cast
 import pytest
 
 from vibesys.config import as_config
-from vibesys.domains.base import DomainName, DomainRole
+from vibesys.constants import DomainName
+from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import ConfigurationError

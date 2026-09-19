@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from vibesys.domains.base import DomainName
+from vibesys.constants import DomainName
 from vibesys.evaluators import EvaluatorPackageRequirement, resolve_evaluator_package
 from vs_project import RunResourceRequest
 

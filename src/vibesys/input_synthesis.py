@@ -18,7 +18,7 @@ from pathlib import Path  # noqa: TC003  # tracked: #288
 
 from pydantic import ValidationError
 
-from vibesys.domains.base import DomainName  # noqa: TC001  # tracked: #288
+from vibesys.constants import DomainName  # noqa: TC001  # tracked: #288
 from vibesys.input_manifest import MANIFEST_NAME, InputManifest
 
 #: Bundle-relative directory name used to stage trusted evaluator source

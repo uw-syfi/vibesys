@@ -13,12 +13,8 @@ from typing import cast
 
 import pytest
 
-from vibesys.domains.base import (
-    DOMAIN_ROLES,
-    DomainDefinition,
-    DomainName,
-    DomainRole,
-)
+from vibesys.constants import DomainName
+from vibesys.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
 from vibesys.domains.environment import NoopEnvironmentHooks
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.domains.registry import (

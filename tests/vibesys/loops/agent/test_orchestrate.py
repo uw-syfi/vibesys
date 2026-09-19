@@ -14,8 +14,7 @@ from vibesys.agents import AgentClient, AgentClientProtocol
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.agents.stub_runner import StubAgentClient
 from vibesys.config import Config, as_config
-from vibesys.constants import ComputeBackend
-from vibesys.domains.base import DomainName
+from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationError
 from vibesys.input_manifest import BenchmarkResult, WorkspaceSource
 from vibesys.loops.agent import issue_board

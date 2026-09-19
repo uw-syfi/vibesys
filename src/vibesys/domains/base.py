@@ -6,14 +6,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path  # noqa: TC003  # tracked: #288
 
+from vibesys.constants import DomainName  # noqa: TC001  # tracked: #288
 from vibesys.domains.environment import EnvironmentHooks  # noqa: TC001  # tracked: #288
-
-
-class DomainName(StrEnum):  # noqa: D101  # tracked: #288
-    LLM_SERVING = "llm-serving"
-    GENERIC = "generic"
-    MICROSERVICES = "microservices"
-    DATABASE = "database"
 
 
 class DomainRole(StrEnum):  # noqa: D101  # tracked: #288

@@ -22,8 +22,8 @@ import pytest
 
 from vibesys.agents import AgentClient
 from vibesys.config import Config
+from vibesys.constants import DomainName
 from vibesys.context import create_run_context
-from vibesys.domains.base import DomainName
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.domains.registry import resolve_domain
 from vibesys.events import FrameworkWarningData

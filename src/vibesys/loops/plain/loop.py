@@ -28,9 +28,13 @@ from typing import Any
 from vibesys.agents.factory import resolve_agent_driver
 from vibesys.agents.progress import RoundProgress
 from vibesys.config import Config, as_config
-from vibesys.constants import DEFAULT_AGENT_BACKEND, DEFAULT_COMPUTE_BACKEND, ComputeBackend
+from vibesys.constants import (
+    DEFAULT_AGENT_BACKEND,
+    DEFAULT_COMPUTE_BACKEND,
+    ComputeBackend,
+    DomainName,
+)
 from vibesys.context import create_run_context
-from vibesys.domains.base import DomainName  # noqa: TC001  # tracked: #288
 from vibesys.domains.registry import resolve_domain
 from vibesys.input_manifest import WorkspaceSource  # noqa: TC001  # tracked: #288
 from vibesys.loops.plain.render import render_all

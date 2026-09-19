@@ -173,7 +173,7 @@ roots = ["src", "libs", "scripts", "packaging", "sdk"]
 [tool.vibesys.file_length.allowlist]
 # The agent loop: round orchestration, agent invocation, and result handling in
 # one module. The largest single refactor target in the repo.
-"src/vibesys/loops/agent/loop.py" = 3704
+"src/vibesys/loops/agent/loop.py" = 3709
 # CLI entry point; every subcommand's argument wiring lives here.
 "src/entrypoints/headless.py" = 2663
 # Sandbox run environment: setup, execution, and teardown across strategies.

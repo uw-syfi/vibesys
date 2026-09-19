@@ -32,8 +32,8 @@ from vibesys.constants import (
     KNOWN_COMPUTE_BACKENDS,
     PROJECT_ROOT,
     ComputeBackend,
+    DomainName,
 )
-from vibesys.domains.base import DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.input_manifest import InputBundle, load_input_bundle, load_project_task

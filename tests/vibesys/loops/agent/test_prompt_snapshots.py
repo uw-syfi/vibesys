@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from vibesys.agents.cli_common import build_schema_hint
-from vibesys.domains.base import DomainName
+from vibesys.constants import DomainName
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.input_manifest import WorkspaceSource
