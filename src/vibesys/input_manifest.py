@@ -225,6 +225,27 @@ class AgentInput(BaseModel):
     domain: DomainName
 
 
+class ProfileGuidedInput(BaseModel):
+    """Framework-owned component-attribution settings for profile-guided search."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    command: tuple[str, ...]
+    timeout_seconds: int = Field(default=1800, gt=0)
+    result_protocol: Literal[1] = 1
+    min_measured_rounds: int = Field(default=2, gt=0)
+    min_relative_improvement: float = Field(default=0.02, ge=0)
+
+    @field_validator("command")
+    @classmethod
+    def _non_empty_command(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value:
+            raise ValueError("command must contain at least one argv element")  # noqa: TRY003
+        if any(not part for part in value):
+            raise ValueError("command elements must be non-empty strings")  # noqa: TRY003
+        return value
+
+
 class ModalEnvironmentInput(BaseModel):
     """Task-owned settings for a Modal run environment."""
 
@@ -262,6 +283,7 @@ class InputManifest(BaseModel):
 
     version: Literal[1]
     agent: AgentInput
+    profile_guided: ProfileGuidedInput | None = None
     accuracy: InputCommand
     benchmark: BenchmarkCommand
     resources: RunResourceRequest | None = None
@@ -309,9 +331,20 @@ def render_input_manifest(manifest: InputManifest) -> str:  # noqa: C901, PLR091
         "",
         "[agent]",
         f"domain = {toml_string(manifest.agent.domain.value)}",
-        "",
-        "[accuracy]",
     ]
+    if manifest.profile_guided is not None:
+        lines.extend(
+            [
+                "",
+                "[profile_guided]",
+                f"command = {toml_array(manifest.profile_guided.command)}",
+                f"timeout_seconds = {manifest.profile_guided.timeout_seconds}",
+                f"result_protocol = {manifest.profile_guided.result_protocol}",
+                f"min_measured_rounds = {manifest.profile_guided.min_measured_rounds}",
+                (f"min_relative_improvement = {manifest.profile_guided.min_relative_improvement}"),
+            ]
+        )
+    lines.extend(["", "[accuracy]"])
     if manifest.accuracy.command is not None:
         lines.append(f"command = {toml_array(manifest.accuracy.command)}")
     else:

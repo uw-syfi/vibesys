@@ -739,6 +739,125 @@ describe('session controller', () => {
     expect(controller.state.experimentLog?.entries[1]?.resolved_outcome).toBe('rejected');
   });
 
+  it('applies a revisioned replacement without dropping unchanged hypotheses', async () => {
+    const transport = new RevisionedExperimentsTransport([
+      entry('H-01', 1, 1, {resolved_outcome: 'proven'}),
+      entry('H-02', 2, 2, {active: true}),
+    ]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitExperimentChange(2, 2);
+    expect(transport.experimentInputs.at(-1)).toEqual({
+      type: 'query.experiments',
+      after: {run_id: 'run', projection_id: 'projection', revision: 1},
+    });
+    transport.resolveExperiment([entry('H-02', 2, 3, {resolved_outcome: 'rejected'})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      from_revision: 1,
+      through_revision: 2,
+      reset: false,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries.map(item => item.hypothesis_id)).toEqual([
+      'H-01',
+      'H-02',
+    ]);
+    expect(controller.state.experimentLog?.entries[1]?.resolved_outcome).toBe('rejected');
+  });
+
+  it('recovers from a delta whose base does not match the applied cursor', async () => {
+    const transport = new RevisionedExperimentsTransport([entry('H-old', 1, 1, {})]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitExperimentChange(2, 2);
+    transport.resolveExperiment([entry('H-wrong', 2, 2, {})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      from_revision: 0,
+      through_revision: 2,
+      reset: false,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(transport.experimentInputs.at(-1)).toEqual({type: 'query.experiments'});
+    transport.resolveExperiment([entry('H-current', 1, 2, {active: true})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      through_revision: 2,
+      reset: true,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries.map(item => item.hypothesis_id)).toEqual([
+      'H-current',
+    ]);
+  });
+
+  it('converges through a burst that advances while a delta is in flight', async () => {
+    const transport = new RevisionedExperimentsTransport([entry('H-01', 1, 1, {})]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitExperimentChange(2, 2);
+    transport.emitExperimentChange(3, 3);
+    transport.resolveExperiment([entry('H-01', 1, 2, {})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      from_revision: 1,
+      through_revision: 2,
+      reset: false,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(transport.experimentInputs.at(-1)).toEqual({
+      type: 'query.experiments',
+      after: {run_id: 'run', projection_id: 'projection', revision: 2},
+    });
+    transport.resolveExperiment([entry('H-01', 1, 3, {resolved_outcome: 'proven'})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      from_revision: 2,
+      through_revision: 3,
+      reset: false,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries[0]?.last_round).toBe(3);
+    expect(transport.experimentInputs).toHaveLength(3);
+  });
+
+  it('rejects an in-flight response when the same run id is attached from another project', async () => {
+    const transport = new RevisionedExperimentsTransport([entry('H-old', 1, 1, {})]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitExperimentChange(2, 2);
+    transport.emitProjectAttached(3);
+    transport.resolveExperiment([entry('H-stale', 1, 2, {})], {
+      run_id: 'run',
+      projection_id: 'old-project',
+      through_revision: 2,
+      reset: true,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries[0]?.hypothesis_id).toBe('H-old');
+    expect(transport.experimentInputs).toHaveLength(3);
+    transport.resolveExperiment([entry('H-new', 1, 1, {active: true})], {
+      run_id: 'run',
+      projection_id: 'new-project',
+      through_revision: 1,
+      reset: true,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries[0]?.hypothesis_id).toBe('H-new');
+  });
+
   it('does not refetch the log for events that cannot change it', async () => {
     const transport = new FakeTransport();
     const controller = new SocketSessionController(transport);
@@ -898,6 +1017,127 @@ describe('session controller', () => {
       'not available until a run is attached',
     );
     expect(controller.state.designLog).toBeNull();
+  });
+
+  it('opens the newest diffable round and fetches only the file on screen', async () => {
+    const transport = new FakeTransport();
+    transport.design = [
+      {
+        round: 1,
+        base: 'aaa1111',
+        commit: 'bbb2222',
+        files: [
+          {path: 'src/ring.rs', change: 'modified'},
+          {path: 'src/lib.rs', change: 'modified'},
+        ],
+      },
+      // Newer but not diffable: the opener walks back to round 1.
+      {round: 2, base: 'bbb2222', commit: 'ccc3333', files: []},
+    ];
+    transport.designPatchText = '@@ -1 +1 @@\n-old\n+new\n';
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    controller.openRoundDiff();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.diffViewer).toMatchObject({
+      round: 1,
+      base: 'aaa1111',
+      head: 'bbb2222',
+      index: 0,
+    });
+    // Lazy per file: opening asked for the visible file only.
+    expect(patchRequests(transport)).toEqual([
+      {type: 'query.design_patch', base: 'aaa1111', head: 'bbb2222', path: 'src/ring.rs'},
+    ]);
+    expect(controller.state.diffViewer?.patches['src/ring.rs']).toEqual({
+      kind: 'loaded',
+      patch: '@@ -1 +1 @@\n-old\n+new\n',
+      truncated: false,
+    });
+
+    // The next file costs one query; returning to a visited file costs none.
+    controller.moveDiffFile(1);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    controller.moveDiffFile(-1);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    expect(patchRequests(transport)).toHaveLength(2);
+    expect(patchRequests(transport).at(-1)).toMatchObject({path: 'src/lib.rs'});
+  });
+
+  it("diffs the drill-down's selected round rather than the newest one", async () => {
+    const transport = new FakeTransport();
+    transport.experiments = [
+      entry('H-01', 1, 2, {
+        rounds: [
+          {round: 1, passed: true, reviewed: true},
+          {round: 2, passed: true, reviewed: true},
+        ],
+      }),
+    ];
+    transport.design = [
+      {round: 1, base: 'aaa1111', commit: 'bbb2222', files: [{path: 'src/a.rs', change: 'added'}]},
+      {round: 2, base: 'bbb2222', commit: 'ccc3333', files: [{path: 'src/b.rs', change: 'added'}]},
+    ];
+    transport.designPatchText = '@@ -0,0 +1 @@\n+fn main() {}\n';
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    controller.enterExperimentDrilldown();
+    controller.moveHypothesisRoundSelection(-1);
+    expect(controller.state.hypothesisDetail?.selectedRound).toBe(1);
+
+    controller.openRoundDiff();
+    expect(controller.state.diffViewer).toMatchObject({round: 1, base: 'aaa1111'});
+    // The viewer replaced no overlay here, and closing restores the detail
+    // view untouched underneath.
+    controller.closeDiffViewer();
+    expect(controller.state.diffViewer).toBeNull();
+    expect(controller.state.hypothesisDetail?.selectedRound).toBe(1);
+  });
+
+  it('parks a failed patch query on the file, never the shared banner', async () => {
+    const transport = new FakeTransport();
+    transport.design = [
+      {round: 1, base: 'aaa1111', commit: 'bbb2222', files: [{path: 'src/a.rs', change: 'added'}]},
+    ];
+    transport.designPatchError = new ServerError('base does not name a commit');
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    controller.openRoundDiff();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.diffViewer?.patches['src/a.rs']).toEqual({
+      kind: 'error',
+      message: 'base does not name a commit',
+    });
+    expect(controller.state.errorBanner).toBeNull();
+  });
+
+  it('explains an undiffable request in the detail overlay instead of opening', async () => {
+    const transport = new FakeTransport();
+    transport.designReady = false;
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    controller.openRoundDiff();
+    expect(controller.state.diffViewer).toBeNull();
+    expect(controller.state.overlay?.content).toContain('No design rounds have loaded yet');
+
+    // With a log whose rounds recorded no changes, the wording is per round.
+    transport.design = [{round: 1, base: 'aaa1111', commit: 'bbb2222', files: []}];
+    transport.designReady = true;
+    await controller.submitCommand('/design');
+    controller.openRoundDiff(1);
+    expect(controller.state.diffViewer).toBeNull();
+    expect(controller.state.overlay?.content).toBe('Round 1 changed no workspace files.');
+    controller.openRoundDiff(9);
+    expect(controller.state.overlay?.content).toBe('Round 9 has no recorded design changes.');
   });
 
   it('keeps bootstrap pending until attached experiments become ready', async () => {
@@ -2005,12 +2245,18 @@ describe('stream reconnect', () => {
     const transport = new ReconnectTransport();
     const controller = new SocketSessionController(transport, undefined, undefined, [0]);
     await controller.start();
+    const experimentRequests = transport.requests.filter(
+      request => request.type === 'query.experiments',
+    ).length;
     // A tail bootstrap: everything at or below sequence 5 is unread history.
     transport.emitBatch([event(6, 'agent_output_chunk', 'six\n')], 5);
     expect(controller.state.core.historyAfterSequence).toBe(5);
 
     transport.sever();
     await settle();
+    expect(transport.requests.filter(request => request.type === 'query.experiments')).toHaveLength(
+      experimentRequests + 1,
+    );
     // The resumed stream declares no floor of its own; taking its 0 literally
     // would claim the unread history below 5 is already loaded.
     transport.emitBatch([event(7, 'agent_output_chunk', 'seven\n')], 0);
@@ -2120,6 +2366,11 @@ class FakeTransport implements ServerTransport {
   experimentsReady = true;
   design: NonNullable<ProtocolResponse['design']> = [];
   designReady = true;
+  /** Patch text `query.design_patch` echoes back; null omits the field. */
+  designPatchText: string | null = null;
+  designPatchTruncated = false;
+  /** When set, only `query.design_patch` requests fail with it. */
+  designPatchError: Error | null = null;
   readonly requests: RequestInput[] = [];
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
@@ -2134,6 +2385,9 @@ class FakeTransport implements ServerTransport {
   request(input: RequestInput): Promise<ProtocolResponse> {
     this.requests.push(input);
     if (this.responseError) return Promise.reject(this.responseError);
+    if (input.type === 'query.design_patch' && this.designPatchError) {
+      return Promise.reject(this.designPatchError);
+    }
     return Promise.resolve({
       protocol_version: 1,
       request_id: 'request',
@@ -2151,6 +2405,19 @@ class FakeTransport implements ServerTransport {
               question: input.text,
               answer: 'The implementer is running.',
               effect: 'none' as const,
+            },
+          }
+        : {}),
+      // Echoing the request triple is what the real server does, so tests
+      // only choose the text; a null text is a detached server's answer.
+      ...(input.type === 'query.design_patch' && this.designPatchText !== null
+        ? {
+            design_patch: {
+              base: input.base,
+              head: input.head,
+              path: input.path,
+              patch: this.designPatchText,
+              truncated: this.designPatchTruncated,
             },
           }
         : {}),
@@ -2294,6 +2561,101 @@ class DeferredExperimentsTransport implements ServerTransport {
 
   emit(runEvent: RunEvent): void {
     this.#message?.({type: 'event', event: runEvent});
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+class RevisionedExperimentsTransport implements ServerTransport {
+  readonly experimentInputs: RequestInput[] = [];
+  readonly #pending: Array<(response: ProtocolResponse) => void> = [];
+  #message: ((message: ServerMessage) => void) | null = null;
+
+  constructor(private readonly initial: NonNullable<ProtocolResponse['experiments']>) {}
+
+  request(input: RequestInput): Promise<ProtocolResponse> {
+    const base = {
+      protocol_version: 1 as const,
+      request_id: 'request',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: true,
+    };
+    if (input.type === 'query.snapshot') {
+      return Promise.resolve({
+        ...base,
+        snapshot: {run_id: 'run', status: 'running', sequence: 0},
+      });
+    }
+    if (input.type !== 'query.experiments') return Promise.resolve(base);
+    this.experimentInputs.push(input);
+    if (this.experimentInputs.length === 1) {
+      return Promise.resolve({
+        ...base,
+        experiments: this.initial,
+        experiments_ready: true,
+        experiment_update: {
+          run_id: 'run',
+          projection_id: 'projection',
+          through_revision: 1,
+          reset: true,
+        },
+      });
+    }
+    return new Promise(resolve => this.#pending.push(resolve));
+  }
+
+  resolveExperiment(
+    experiments: NonNullable<ProtocolResponse['experiments']>,
+    update: NonNullable<ProtocolResponse['experiment_update']>,
+  ): void {
+    const resolve = this.#pending.shift();
+    if (!resolve) throw new Error('No pending experiment request');
+    resolve({
+      protocol_version: 1,
+      request_id: 'request',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: true,
+      experiments,
+      experiments_ready: true,
+      experiment_update: update,
+    });
+  }
+
+  subscribe(
+    _afterSequence: number,
+    onMessage: (message: ServerMessage) => void,
+    _onDisconnect: (error: Error) => void,
+  ): Promise<EventSubscription> {
+    this.#message = onMessage;
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  emitExperimentChange(sequence: number, revision: number): void {
+    this.#message?.({
+      type: 'event',
+      event: {
+        sequence,
+        run_id: 'run',
+        timestamp: '2026-01-01T00:00:00Z',
+        type: 'experiments_changed',
+        data: {kind: 'experiments_changed', reason: 'round_persisted', revision},
+      },
+    });
+  }
+
+  emitProjectAttached(sequence: number): void {
+    this.#message?.({
+      type: 'event',
+      event: {
+        sequence,
+        run_id: 'run',
+        timestamp: '2026-01-01T00:00:00Z',
+        type: 'experiments_changed',
+        data: {kind: 'experiments_changed', reason: 'project_attached'},
+      },
+    });
   }
 
   close(): Promise<void> {
@@ -2624,6 +2986,10 @@ function roundFinished(sequence: number, round: number): RunEvent {
 
 function perfRequests(transport: FakeTransport): number {
   return transport.requests.filter(request => request.type === 'query.performance').length;
+}
+
+function patchRequests(transport: FakeTransport): RequestInput[] {
+  return transport.requests.filter(request => request.type === 'query.design_patch');
 }
 
 function designQueries(transport: DeferredDesignTransport): number {

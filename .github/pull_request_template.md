@@ -1,3 +1,5 @@
+<!-- PR title: <type>(<optional scope>): <imperative summary>, e.g. "fix(ui): keep the cursor in view after resize". Types: feat, fix, docs, refactor, perf, test, build, ci, chore. -->
+
 ## Problem
 
 <!--

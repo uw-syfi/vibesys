@@ -1,4 +1,4 @@
-"""vibesys — agent, plain, and evolve outer-loop drivers.
+"""VibeSys outer-loop drivers and supporting runtime.
 
 This package's ``__init__.py`` is intentionally empty so that submodules
 with lightweight import footprints (notably ``vs_issue_board.mcp``,

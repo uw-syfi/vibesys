@@ -13,9 +13,14 @@ export type RunStatus = RunSnapshot['status'];
 export type ServerMessage = ProtocolDocument['server_message'];
 export type Diagnostic = NonNullable<ProtocolResponse['diagnostic']>;
 export type HypothesisEntry = NonNullable<ProtocolResponse['experiments']>[number];
+export type ExperimentUpdate = NonNullable<ProtocolResponse['experiment_update']>;
+export type ExperimentCursor = NonNullable<
+  Extract<ProtocolRequest, {type?: 'query.experiments'}>['after']
+>;
 export type HypothesisRound = NonNullable<HypothesisEntry['rounds']>[number];
 export type DesignRound = NonNullable<ProtocolResponse['design']>[number];
 export type DesignFileChange = NonNullable<DesignRound['files']>[number];
+export type DesignPatch = NonNullable<ProtocolResponse['design_patch']>;
 export type ChatOptions = NonNullable<ProtocolResponse['chat_options']>;
 export type ChatProviderOptions = NonNullable<ChatOptions['providers']>[number];
 export type ChatModelOption = NonNullable<ChatProviderOptions['models']>[number];

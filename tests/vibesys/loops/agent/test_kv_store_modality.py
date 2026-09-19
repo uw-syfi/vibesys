@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from entrypoints.headless import _MODALITIES
-from vibesys.input_manifest import load_input_bundle
+from vibesys.input_manifest import load_project_task
 from vibesys.prompts import PROMPTS_DIR, render_template
+from vs_project import Project
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -17,7 +18,8 @@ def test_kv_store_is_a_registered_modality():  # noqa: ANN201  # tracked: #288
 
 
 def test_kv_store_input_bundle_loads():  # noqa: ANN201  # tracked: #288
-    bundle = load_input_bundle(_PROJECT_ROOT / "examples" / "kv-store")
+    project = Project.open(_PROJECT_ROOT / "examples" / "kv-store")
+    bundle = load_project_task(project, project.select_task("default"))
     assert bundle.domain.value == "generic"
     assert bundle.benchmark_result is not None
     assert bundle.benchmark_result.metric == "throughput_ops_per_sec"
@@ -37,8 +39,6 @@ def test_kv_store_judge_prompt_mentions_resp2_not_http():  # noqa: ANN201  # tra
         runtime_notes="",
         profile_execution="local",
         objective="OBJ",
-        accuracy_checker_path="accuracy_checker",
-        bench_path="benchmark",
         pareto_archive_conflict=None,
     )
     assert "RESP2" in output
@@ -57,14 +57,23 @@ def test_kv_store_linux_cpu_profiler_gets_resp2_specific_guidance():  # noqa: AN
         "profilers/linux_cpu.j2",
         template_dir=_TEMPLATE_DIR,
         profile_focus="",
-        benchmark_command="uv run python benchmark/benchmark.py",
+        benchmark_command="uv run python .vibesys/tasks/default/benchmark/benchmark.py",
         modality="kv_store",
         domain_profiler="",
         runtime_notes="",
         objective="OBJ",
         profiler_support_name="linux_cpu_profiler",
         profiler_mcp_name="vibesys-linux-cpu-profiler",
-        bench_path="benchmark",
     )
     assert "RESP2" in output
     assert "py-spy record" in output
+    assert "uv run python .vibesys/tasks/default/benchmark/benchmark.py --port 6380" in output
+
+
+def test_kv_store_implementer_prompt_points_at_workspace_reference():  # noqa: ANN201  # tracked: #288
+    output = render_template(
+        "_modality/kv_store/implementer.j2",
+        template_dir=_TEMPLATE_DIR,
+        reference_path=".vibesys/tasks/default/reference/seed_server.py",
+    )
+    assert "`.vibesys/tasks/default/reference/seed_server.py` is a reference baseline" in output

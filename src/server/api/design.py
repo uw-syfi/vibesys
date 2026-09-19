@@ -9,7 +9,8 @@ File lists come from a read-only ``git diff`` over each round's net commit
 range in the run's workspace, filtered down to the system under optimization:
 the framework's own bookkeeping paths (run state, roadmap, progress notes) are
 excluded, derived from the modules that own those layouts rather than restated
-here.
+here. Per-file patch text is served on demand from the same ranges, gated by
+the same filtered file lists.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal
 
-from server.api.protocol import DesignFileChange, DesignRound
+from server.api.protocol import DesignFileChange, DesignPatch, DesignRound
 from vibesys.loops.agent.issue_board import framework_memory_paths
 from vs_project import is_project_state_path
 
@@ -38,6 +39,16 @@ _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{7,64}$")
 #: very long run cannot grow the cache without limit.
 _CACHE_CAPACITY = 512
 
+#: Cached per-file patches. Entries can each reach the character limit, so
+#: this bound is what caps the cache's memory, not the entry count itself.
+_PATCH_CACHE_CAPACITY = 64
+
+#: Upper bound on one patch's text. Big enough for any hand-reviewable
+#: change, small enough that a response and its terminal rendering stay
+#: cheap; the truncation is marked so a client can point at the exact
+#: ``git diff`` command for the rest.
+_PATCH_CHAR_LIMIT = 200_000
+
 _CHANGE_BY_STATUS: dict[str, Literal["added", "modified", "deleted"]] = {
     "A": "added",
     "D": "deleted",
@@ -49,15 +60,21 @@ _PAIRED_STATUS_FIELDS = 3
 DiffNameStatus = Callable[[str, str], str | None]
 """Read-only ``git diff --name-status -z`` between two commits, or None."""
 
+DiffPatch = Callable[[str, str, tuple[str, ...]], str | None]
+"""Read-only ``git diff`` patch between two commits for given paths, or None."""
+
 
 class DesignLog:
     """Per-round file changes for one attached run, with a bounded diff cache.
 
-    The projection is pure apart from ``diff``, which is the run's own
-    :class:`~vibesys.run.git_tracker.GitTracker` read method. Results are
-    cached by ``(base, head)``: both are immutable checkpoints, so a cached
-    range stays correct and nothing invalidates it. Only successful diffs are
-    cached, so a transient git failure does not become permanent.
+    The projection is pure apart from ``diff`` and ``patch``, the two
+    read-only git callables it is wired with (the run's own
+    :class:`~vibesys.run.git_tracker.GitTracker` name-status read and the
+    server's :class:`~server.api.workspace_git.WorkspacePatchReader`).
+    Results are cached by ``(base, head)`` and ``(base, head, path)``: all
+    are immutable checkpoints, so a cached entry stays correct and nothing
+    invalidates it. Only successes are cached, so a transient git failure
+    does not become permanent.
     """
 
     def __init__(
@@ -65,13 +82,16 @@ class DesignLog:
         *,
         workspace: Path,
         diff: DiffNameStatus,
+        patch: DiffPatch,
         capacity: int = _CACHE_CAPACITY,
     ) -> None:
-        """Bind the projection to one workspace and its git read path."""
+        """Bind the projection to one workspace and its git read paths."""
         self._diff = diff
+        self._diff_patch = patch
         self._capacity = capacity
         self._framework_paths = _framework_prefixes(workspace)
         self._cache: OrderedDict[tuple[str, str], list[DesignFileChange]] = OrderedDict()
+        self._patch_cache: OrderedDict[tuple[str, str, str], DesignPatch] = OrderedDict()
 
     def rounds(self, state: AgentRunState, *, baseline: str) -> list[DesignRound]:
         """Return one entry per recorded round, in round order.
@@ -97,11 +117,64 @@ class DesignLog:
                     else None
                 )
                 entries.append(
-                    DesignRound(round=record.round_number, commit=_text(record.commit), files=files)
+                    DesignRound(
+                        round=record.round_number,
+                        commit=_text(record.commit),
+                        base=base,
+                        files=files,
+                    )
                 )
                 if commit is not None:
                     previous = commit
         return sorted(entries, key=lambda entry: entry.round)
+
+    def patch(self, base: str, head: str, path: str) -> DesignPatch:
+        """Return one file's bounded patch from an already-published range.
+
+        ``base`` and ``head`` must be plain commit object names, and ``path``
+        must be one of the files :meth:`rounds` listed for that range;
+        anything else raises ``ValueError``. Routing the membership check
+        through the same filtered file list keeps the framework-path
+        exclusion authoritative: a filtered path is indistinguishable from
+        one the range never touched, and no unvetted path reaches git.
+        """
+        for value in (base, head):
+            if _COMMIT_PATTERN.fullmatch(value) is None:
+                raise ValueError(f"not a commit object name: {value!r}")  # noqa: TRY003  # Names the rejected value.
+        changes = self._changed_files(base, head)
+        if changes is None:
+            # The range's file list itself is unreadable (repository gone or
+            # never held these objects). There is nothing to validate the
+            # path against and no patch to read; report the absence so the
+            # client can explain it instead of failing the request.
+            return DesignPatch(base=base, head=head, path=path)
+        change = next((entry for entry in changes if entry.path == path), None)
+        if change is None:
+            raise ValueError(f"path is not in the round's change list: {path!r}")  # noqa: TRY003  # Names the rejected value.
+        key = (base, head, path)
+        cached = self._patch_cache.get(key)
+        if cached is not None:
+            self._patch_cache.move_to_end(key)
+            return cached
+        # A rename needs both sides in the pathspec for git to pair them
+        # into one patch instead of reporting an unrelated delete.
+        paths = (path,) if change.renamed_from is None else (change.renamed_from, path)
+        output = self._diff_patch(base, head, paths)
+        if output is None:
+            return DesignPatch(base=base, head=head, path=path, renamed_from=change.renamed_from)
+        text, truncated = _truncate_patch(output)
+        result = DesignPatch(
+            base=base,
+            head=head,
+            path=path,
+            renamed_from=change.renamed_from,
+            patch=text,
+            truncated=truncated,
+        )
+        self._patch_cache[key] = result
+        while len(self._patch_cache) > _PATCH_CACHE_CAPACITY:
+            self._patch_cache.popitem(last=False)
+        return result
 
     def _changed_files(self, base: str, commit: str) -> list[DesignFileChange] | None:
         key = (base, commit)
@@ -202,4 +275,13 @@ def _text(value: str | None) -> str | None:
     return value or None
 
 
-__all__ = ["DesignLog", "DiffNameStatus"]
+def _truncate_patch(output: str) -> tuple[str, bool]:
+    """Cut a patch at the size bound, on a line boundary, flagged when cut."""
+    if len(output) <= _PATCH_CHAR_LIMIT:
+        return output, False
+    kept = output[:_PATCH_CHAR_LIMIT]
+    newline = kept.rfind("\n")
+    return (kept[: newline + 1] if newline >= 0 else kept), True
+
+
+__all__ = ["DesignLog", "DiffNameStatus", "DiffPatch"]

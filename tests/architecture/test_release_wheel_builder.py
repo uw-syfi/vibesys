@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from scripts.build_release_wheel import (
+from build_release_wheel import (
     BuildEnvironment,
     ReleaseBuildError,
     build_release_wheel,
@@ -35,7 +35,7 @@ def test_build_release_wheel_preserves_the_public_positional_interface() -> None
 def test_build_script_can_be_invoked_by_file_path(tmp_path: Path) -> None:
     """The documented ``python scripts/...`` entry point must import its helpers."""
     result = subprocess.run(  # noqa: S603
-        [sys.executable, str(PROJECT_ROOT / "scripts/build_release_wheel.py"), "--help"],
+        [sys.executable, str(PROJECT_ROOT / "packaging/build_release_wheel.py"), "--help"],
         cwd=tmp_path,
         check=False,
         capture_output=True,

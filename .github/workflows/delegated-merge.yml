@@ -6,7 +6,7 @@ on:
 
 permissions:
   actions: read
-  contents: write
+  contents: read
   issues: write
   pull-requests: read
 
@@ -31,7 +31,24 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
-      - name: Authorize and merge
+      # GITHUB_TOKEN-created queue entries do not start the merge_group CI, so
+      # landing writes (enqueue, async merge, direct merge) use a short-lived App
+      # installation token. Reads, the role check, and audit comments keep
+      # GITHUB_TOKEN. The job `if:` above limits this step to '/merge-' comments
+      # on pull requests. MERGE_QUEUE_APP_ID holds the app's Client ID (not the
+      # numeric App ID), which is what the `client-id` input takes.
+      - name: Mint landing token
+        id: landing-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.MERGE_QUEUE_APP_ID }}
+          private-key: ${{ secrets.MERGE_QUEUE_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+          permission-contents: write
+
+      - name: Authorize and merge or enqueue
         env:
           GH_TOKEN: ${{ github.token }}
+          LANDING_GH_TOKEN: ${{ steps.landing-token.outputs.token }}
         run: python3 scripts/delegated_merge.py --event "$GITHUB_EVENT_PATH"

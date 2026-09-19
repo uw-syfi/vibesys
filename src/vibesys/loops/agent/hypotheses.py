@@ -248,6 +248,10 @@ def start_hypothesis(
         )
     )
     updated.active_hypothesis_id = identifier
+    _advance_experiment_revision(
+        updated,
+        {identifier, *(change.hypothesis_id for change in plan.hypothesis_updates)},
+    )
     return _validated_state(updated)
 
 
@@ -301,6 +305,7 @@ def append_round(
     updated.hypotheses[index] = projected
     if not keep_active:
         updated.active_hypothesis_id = None
+    _advance_experiment_revision(updated, {projected.hypothesis_id})
     return _validated_state(updated)
 
 
@@ -309,7 +314,10 @@ def finish_hypothesis(state: AgentRunState) -> AgentRunState:
     if state.active_hypothesis_id is None:
         return state.clone()
     updated = state.clone()
+    active_id = updated.active_hypothesis_id
     updated.active_hypothesis_id = None
+    assert active_id is not None  # noqa: S101  # checked above
+    _advance_experiment_revision(updated, {active_id})
     return _validated_state(updated)
 
 
@@ -460,7 +468,23 @@ def adopt_metric_space(state: AgentRunState, space: MetricSpace) -> AgentRunStat
     """
     updated = state.clone()
     updated.metrics = space
-    return reproject_run_evidence(updated)
+    reprojected = reproject_run_evidence(updated)
+    changed = {
+        current.hypothesis_id
+        for current, previous in zip(reprojected.hypotheses, state.hypotheses, strict=True)
+        if current != previous
+    }
+    if changed:
+        _advance_experiment_revision(reprojected, changed)
+    return _validated_state(reprojected)
+
+
+def _advance_experiment_revision(state: AgentRunState, hypothesis_ids: set[str]) -> None:
+    """Advance the persisted projection revision and mark its changed rows."""
+    state.experiment_revision += 1
+    for hypothesis in state.hypotheses:
+        if hypothesis.hypothesis_id in hypothesis_ids:
+            hypothesis.last_experiment_revision = state.experiment_revision
 
 
 def reproject_run_evidence(state: AgentRunState) -> AgentRunState:

@@ -1,0 +1,194 @@
+context: kind-vibesys-k8s-train
+namespace_prefix: vibesys-train
+kind_cluster: vibesys-k8s-train
+timeout_seconds: 900
+manifests:
+- manifest.yaml
+image_builds:
+- name: config
+  image: vibesys-config-${NAMESPACE}:latest
+  context: train-ticket
+  dockerfile: ${CONFIG_DIR}/Dockerfile
+  build_args:
+    MODULE: ts-config-service
+- name: station
+  image: vibesys-station-${NAMESPACE}:latest
+  context: train-ticket
+  dockerfile: ${CONFIG_DIR}/Dockerfile
+  build_args:
+    MODULE: ts-station-service
+- name: train
+  image: vibesys-train-${NAMESPACE}:latest
+  context: train-ticket
+  dockerfile: ${CONFIG_DIR}/Dockerfile
+  build_args:
+    MODULE: ts-train-service
+- name: travel
+  image: vibesys-travel-${NAMESPACE}:latest
+  context: train-ticket
+  dockerfile: ${CONFIG_DIR}/Dockerfile
+  build_args:
+    MODULE: ts-travel-service
+- name: route
+  image: vibesys-route-${NAMESPACE}:latest
+  context: train-ticket
+  dockerfile: ${CONFIG_DIR}/Dockerfile
+  build_args:
+    MODULE: ts-route-service
+- name: price
+  image: vibesys-price-${NAMESPACE}:latest
+  context: train-ticket
+  dockerfile: ${CONFIG_DIR}/Dockerfile
+  build_args:
+    MODULE: ts-price-service
+image_overrides:
+- resource: deployment/ts-config-service
+  container: ts-config-service
+  image: ${IMAGE:config}
+- resource: deployment/ts-station-service
+  container: ts-station-service
+  image: ${IMAGE:station}
+- resource: deployment/ts-train-service
+  container: ts-train-service
+  image: ${IMAGE:train}
+- resource: deployment/ts-travel-service
+  container: ts-travel-service
+  image: ${IMAGE:travel}
+- resource: deployment/ts-route-service
+  container: ts-route-service
+  image: ${IMAGE:route}
+- resource: deployment/ts-price-service
+  container: ts-price-service
+  image: ${IMAGE:price}
+rollouts:
+- deployment/ts-config-mongo
+- deployment/ts-station-mongo
+- deployment/ts-train-mongo
+- deployment/ts-travel-mongo
+- deployment/ts-route-mongo
+- deployment/ts-price-mongo
+- deployment/ts-config-service
+- deployment/ts-station-service
+- deployment/ts-train-service
+- deployment/ts-travel-service
+- deployment/ts-route-service
+- deployment/ts-price-service
+restart_deployments:
+- name: ts-config-service
+  pod_selector: app=ts-config-service
+- name: ts-station-service
+  pod_selector: app=ts-station-service
+- name: ts-train-service
+  pod_selector: app=ts-train-service
+- name: ts-travel-service
+  pod_selector: app=ts-travel-service
+- name: ts-route-service
+  pod_selector: app=ts-route-service
+- name: ts-price-service
+  pod_selector: app=ts-price-service
+forwards:
+- name: config
+  resource: service/ts-config-service
+  remote_port: 15679
+  local_port: 25679
+- name: station
+  resource: service/ts-station-service
+  remote_port: 12345
+  local_port: 22345
+- name: train
+  resource: service/ts-train-service
+  remote_port: 14567
+  local_port: 24567
+- name: travel
+  resource: service/ts-travel-service
+  remote_port: 12346
+  local_port: 22346
+- name: route
+  resource: service/ts-route-service
+  remote_port: 11178
+  local_port: 21178
+- name: price
+  resource: service/ts-price-service
+  remote_port: 16579
+  local_port: 26579
+primary_endpoint: config
+http_probes:
+- endpoint: config
+  path: /api/v1/configservice/configs
+  json_contains:
+    data:
+    - name: DirectTicketAllocationProportion
+- endpoint: station
+  path: /api/v1/stationservice/stations
+  json_contains:
+    data:
+    - id: beijing
+    - id: hangzhou
+    - id: jiaxingnan
+    - id: jinan
+    - id: nanjing
+    - id: shanghai
+    - id: shanghaihongqiao
+    - id: shijiazhuang
+    - id: suzhou
+    - id: taiyuan
+    - id: wuxi
+    - id: xuzhou
+    - id: zhenjiang
+- endpoint: train
+  path: /api/v1/trainservice/trains
+  json_contains:
+    data:
+    - id: TeKuai
+    - id: ZhiDa
+    - id: DongCheOne
+    - id: GaoTieTwo
+    - id: GaoTieOne
+    - id: KuaiSu
+- endpoint: travel
+  path: /api/v1/travelservice/trips
+  json_contains:
+    data:
+    - tripId:
+        type: G
+        number: '1234'
+    - tripId:
+        type: G
+        number: '1237'
+    - tripId:
+        type: G
+        number: '1235'
+    - tripId:
+        type: D
+        number: '1345'
+    - tripId:
+        type: G
+        number: '1236'
+- endpoint: route
+  path: /api/v1/routeservice/routes
+  json_contains:
+    data:
+    - id: 92708982-77af-4318-be25-57ccb0ff69ad
+    - id: 20eb7122-3a11-423f-b10a-be0dc5bce7db
+    - id: 1367db1f-461e-4ab7-87ad-2bcc05fd9cb7
+    - id: a3f256c1-0e43-4f7d-9c21-121bf258101f
+    - id: aefcef3f-3f42-46e8-afd7-6cb2a928bd3d
+    - id: d693a2c5-ef87-4a3c-bef8-600b43f62c68
+    - id: 0b23bd3e-876a-4af3-b920-c50a90c90b04
+    - id: 9fc9c261-3263-4bfa-82f8-bb44e06b2f52
+    - id: 084837bb-53c8-4438-87c8-0321a4d09917
+    - id: f3d4d4ef-693b-4456-8eed-59c0d717dd08
+- endpoint: price
+  path: /api/v1/priceservice/prices
+  json_contains:
+    data:
+    - id: 0eb474c9-f8be-4119-8681-eb538a404a6a
+    - id: dd0e572e-7443-420c-8280-7d8215636069
+    - id: 8b059dc5-01a2-4f8f-8f94-6c886b38bb34
+    - id: 8fb01829-393f-4af4-9e96-f72866f94d14
+    - id: b90a6ad7-ffad-4624-9655-48e9e185fa6c
+    - id: 6d20b8cb-039c-474c-ae25-b6177ea41152
+    - id: d5c4523a-827c-468c-95be-e9024a40572e
+    - id: c5679b7e-4a54-4f52-9939-1ae86ba16fa7
+    - id: 7de18cf8-bb17-4bb2-aeb4-85d8176d3a93
+    - id: 719287d6-d3e7-4b54-9a92-71d039748b22

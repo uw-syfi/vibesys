@@ -29,6 +29,7 @@ const DEPENDENCY_SECTIONS = [
   'peerDependencies',
 ];
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
 export async function manifestErrors(root) {
   const errors = [];
   const workspaceNames = new Set(Object.keys(PACKAGES));

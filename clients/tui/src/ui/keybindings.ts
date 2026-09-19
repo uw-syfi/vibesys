@@ -5,9 +5,23 @@ import {
   chatPaneVisible,
   experimentLogVisible,
   focusedPane,
+  type RoundFocus,
   todoListFocused,
+  visiblePhases,
 } from '../session-model.js';
+import {
+  agentGraphMinWidth,
+  agentPaneWidthWithOverride,
+  agentsPaneVisible,
+  clampGraphWidthOverride,
+  graphFits,
+  STACKED_WIDTH,
+} from './agent-map.js';
+import {chatPaneWidthWithOverride, clampChatWidthOverride} from './chat-pane.js';
 import type {ClipboardCopyResult, SelectionClipboard} from './clipboard.js';
+import {PANE_WIDTH_STEP} from './pane-resize.js';
+import {rightPaneWidth, splitFits} from './right-pane.js';
+import {roundRailColumns} from './round-rail.js';
 
 export interface KeybindingActions {
   completeInput(): boolean;
@@ -29,6 +43,10 @@ export interface KeybindingActions {
   selectNextRound(): void;
   selectPreviousRound(): void;
   toggleTodos(): void;
+  /** `<`/`>`: the Agents pane's explicit column width, already clamped; `=`: null. */
+  setGraphWidthOverride(width: number | null): void;
+  /** `<`/`>`: the docked chat pane's explicit column width, already clamped; `=`: null. */
+  setChatWidthOverride(width: number | null): void;
   scrollRightPane(delta: number): void;
   scrollChatPane(delta: number): void;
   scrollExperimentDetail(delta: number): void;
@@ -38,6 +56,7 @@ export interface KeybindingActions {
   showClipboardStatus(result: Exclude<ClipboardCopyResult, 'no-selection'>): void;
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
 export function bindKeybindings(
   renderer: CliRenderer,
   controller: SessionController,
@@ -45,6 +64,8 @@ export function bindKeybindings(
   clipboard: SelectionClipboard,
   actions: KeybindingActions,
 ): () => void {
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
   const onKey = (key: KeyEvent): void => {
     if (key.ctrl && !key.shift && key.name === 'c') {
       key.preventDefault();
@@ -58,6 +79,7 @@ export function bindKeybindings(
       key.name === 'f4' &&
       controller.state.chatOpen === false &&
       controller.state.overlay === null &&
+      controller.state.diffViewer === null &&
       controller.state.themePicker === null &&
       controller.state.chatMenu === null
     ) {
@@ -80,7 +102,7 @@ export function bindKeybindings(
       return;
     }
     // The command input's own error clears the same way: Esc goes back one
-    // level (tui-conventions.md), and a stale input error is a level to leave
+    // level (tui/conventions.md), and a stale input error is a level to leave
     // just as much as the banner is.
     if (controller.state.inputError !== null && key.name === 'escape') {
       controller.clearInputError();
@@ -121,10 +143,12 @@ export function bindKeybindings(
     }
     // The focused pane takes the scroll keys. Escape belongs to the modal/pane
     // ladder below, so a right pane's own Escape waits until any modal chat in
-    // front of it has already closed.
+    // front of it has already closed. The diff viewer opens over this pane
+    // with the focus unmoved, so while it is up the scroll keys are its.
     if (
       controller.state.layout.focus === 'right' &&
       controller.state.layout.right !== null &&
+      controller.state.diffViewer === null &&
       (key.name === 'pageup' || key.name === 'pagedown')
     ) {
       actions.scrollRightPane(key.name === 'pageup' ? -1 : 1);
@@ -145,6 +169,23 @@ export function bindKeybindings(
       else if (key.name === 'return' || key.name === 'enter') controller.applySelectedTheme();
       // The picker is modal: keys it does not use are swallowed here so they
       // cannot move panes or type into the still-focused input behind it.
+      key.preventDefault();
+      return;
+    }
+    // The diff viewer sits in front of the command overlay in the ladder: its
+    // Escape closes only the viewer, where the overlay's Escape below returns
+    // to the live view and would tear down the drill-down under the diff.
+    if (controller.state.diffViewer !== null) {
+      if (key.name === 'escape') controller.closeDiffViewer();
+      else if (key.name === 'left') controller.moveDiffFile(-1);
+      else if (key.name === 'right') controller.moveDiffFile(1);
+      else if (key.name === 'up') controller.moveDiffHunk(-1);
+      else if (key.name === 'down') controller.moveDiffHunk(1);
+      else if (key.name === 'pageup' || key.name === 'pagedown') {
+        actions.scrollOverlay(key.name === 'pageup' ? -1 : 1);
+      }
+      // Modal like the overlay below: everything it does not handle is
+      // swallowed so keys cannot reach the panes or the command input.
       key.preventDefault();
       return;
     }
@@ -194,6 +235,19 @@ export function bindKeybindings(
       key.preventDefault();
       return;
     }
+    // The design pane summarizes each round's files; `d` opens the newest
+    // round's patches in the diff viewer. Typing keeps priority, so a command
+    // with a `d` in it is never hijacked.
+    if (
+      key.name === 'd' &&
+      controller.state.layout.focus === 'right' &&
+      controller.state.layout.right?.view === 'design' &&
+      actions.inputIsEmpty()
+    ) {
+      controller.openRoundDiff();
+      key.preventDefault();
+      return;
+    }
     if (chatPaneFocused(controller.state)) {
       if (key.name === 'pageup' || key.name === 'pagedown' || key.name === 'escape') {
         if (key.name === 'escape') controller.focusPane('left');
@@ -212,6 +266,63 @@ export function bindKeybindings(
         if (actions.completeChatInput()) key.preventDefault();
         return;
       }
+      // Falls through to the composer's own editor uncaught, on purpose: a
+      // person typing a question must be able to type `<`, `>`, or `=`
+      // literally, so the resize block below never runs while this pane holds
+      // the cursor.
+      return;
+    }
+    // Resizes the docked chat pane by columns, the same mechanism the Agents
+    // pane uses below: `<` shrinks and `>` grows by `PANE_WIDTH_STEP`, and `=`
+    // drops the override back to automatic sizing (`chatPaneWidth`). The
+    // experiment log is `chatPaneWidthWithOverride`'s complement: it is never
+    // given a width of its own, so whatever the chat does not take is exactly
+    // what the log gets, and a resize moves the one column between them
+    // rather than a share of the terminal a floor could round away.
+    //
+    // The pane-visible predicate is `experimentLogVisible(state) &&
+    // chatPaneVisible(state)`, which never overlaps the Agents pane's own
+    // guard below: `agentsPaneVisible` returns false wherever
+    // `experimentLogVisible` is true, so at most one of the two blocks ever
+    // claims a given press. This has to run before `experimentLogVisible`'s
+    // own navigation below, whose final `else return` does not call
+    // `key.preventDefault()`: reaching it with `<`/`>`/`=` unclaimed would
+    // leave the raw key to be typed into the command input instead of
+    // resizing anything.
+    if (
+      (key.name === '>' || key.name === '<' || key.name === '=') &&
+      actions.inputIsEmpty() &&
+      controller.state.layout.zoomedPane === null &&
+      experimentLogVisible(controller.state) &&
+      chatPaneVisible(controller.state)
+    ) {
+      const terminalWidth = renderer.terminalWidth;
+      // A split beside the log takes the same columns off the chat that it
+      // takes off the table (`app.ts` computes `chatWidth` from this same
+      // `rightWidth`), so the override has to clamp against what's actually
+      // left rather than the whole terminal.
+      const rightWidth =
+        controller.state.layout.right !== null && splitFits(terminalWidth)
+          ? rightPaneWidth(terminalWidth)
+          : 0;
+      if (key.name === '=') {
+        actions.setChatWidthOverride(null);
+      } else {
+        const current = chatPaneWidthWithOverride(
+          terminalWidth,
+          rightWidth,
+          controller.state.chatWidthOverride,
+        );
+        const step = key.name === '>' ? PANE_WIDTH_STEP : -PANE_WIDTH_STEP;
+        const next = clampChatWidthOverride(current + step, terminalWidth, rightWidth);
+        // A press that moves nothing stores nothing, the same rule the Agents
+        // pane keeps below: trying the keys can never arm an override the
+        // operator cannot see. It covers a terminal at the low or high clamp
+        // bound already, and a chat pane too narrow to have room to shrink or
+        // grow beside a split.
+        if (next !== current) actions.setChatWidthOverride(next);
+      }
+      key.preventDefault();
       return;
     }
     // The experiment surface owns navigation while it is on screen. The index
@@ -242,6 +353,10 @@ export function bindKeybindings(
         // behind it must not move the operator somewhere they cannot see.
         if (!actions.inputIsEmpty()) return;
         if (controller.state.overlay === null) controller.enterExperimentDrilldown();
+      } else if (key.name === 'd' && detailOpen) {
+        // The selected round's diff. Typing keeps priority, like Enter above.
+        if (!actions.inputIsEmpty()) return;
+        if (controller.state.overlay === null) controller.openRoundDiff();
       } else return;
       key.preventDefault();
       return;
@@ -280,18 +395,37 @@ export function bindKeybindings(
     // Like Enter above, pane focus and round navigation yield to a typed
     // command: cursor keys and brackets belong to a non-empty input.
     if ((key.name === 'left' || key.name === 'right') && actions.inputIsEmpty()) {
-      // The round view is two panes, agents then transcript, so each arrow names
-      // its side and holds there at the edge. The round tabs are not a pane.
-      controller.focusRound(key.name === 'left' ? 'agents' : 'transcript');
+      // Left to right, the round view drills rounds -> agents -> transcript, so
+      // the arrows step across that order and clamp at the ends. The rail joins
+      // the order only when it is on screen; narrower than that the view is just
+      // agents and transcript, as before.
+      const order: RoundFocus[] =
+        roundRailColumns(controller.state, renderer.terminalWidth) > 0
+          ? ['rounds', 'agents', 'transcript']
+          : ['agents', 'transcript'];
+      const current = order.indexOf(controller.state.roundFocus);
+      const base = current === -1 ? order.indexOf('agents') : current;
+      const next = Math.min(order.length - 1, Math.max(0, base + (key.name === 'left' ? -1 : 1)));
+      controller.focusRound(order[next] as RoundFocus);
       key.preventDefault();
       return;
     }
     if (key.name === 'up' || key.name === 'down') {
       if (!actions.navigateSuggestions(key.name === 'up' ? -1 : 1)) {
-        // `roundFocus` can sit parked on the agents pane while a visualization
-        // hides it, so the keys follow the pane that is actually on screen:
-        // the same authority the focus border reads.
-        if (focusedPane(controller.state) === 'agents') {
+        // A resize can hide the rail while focus still reads `rounds`; stepping it
+        // then would move an invisible selection. Only drive the rail while it is
+        // on screen, otherwise `rounds` coerces to the agents pane (the side
+        // `focusedPane` already reports it as) so the keys stay on a live surface.
+        const railFocused =
+          controller.state.roundFocus === 'rounds' &&
+          roundRailColumns(controller.state, renderer.terminalWidth) > 0;
+        if (railFocused) {
+          if (key.name === 'down') controller.selectNextRound();
+          else controller.selectPreviousRound();
+        } else if (focusedPane(controller.state) === 'agents') {
+          // `roundFocus` can sit parked on the agents pane while a visualization
+          // hides it, so the keys follow the pane that is actually on screen:
+          // the same authority the focus border reads.
           if (key.name === 'down') controller.selectNextAgent();
           else controller.selectPreviousAgent();
         } else {
@@ -338,6 +472,80 @@ export function bindKeybindings(
     if (key.name === '[' && actions.inputIsEmpty()) {
       actions.selectPreviousRound();
       viewport.scrollTo(viewport.scrollHeight);
+      key.preventDefault();
+      return;
+    }
+    // Resizes the Agents pane by columns, the way a vim/LazyVim window resize
+    // does: `<` shrinks and `>` grows by `PANE_WIDTH_STEP` each press, and `=`
+    // drops the override so the pane follows the terminal again, which is
+    // vim's `<C-w>=`. An override is otherwise sticky for the life of the
+    // process, so without `=` a single press would cost the pane its automatic
+    // sizing, its no-truncation guarantee, and its growth as agent names get
+    // longer, with no way back.
+    //
+    // The keys belong to the Agents pane, so they are claimed wherever it holds
+    // the content row (`agentsPaneVisible` is the same test `app.ts` renders
+    // `showAgents` from) and left alone everywhere else, rather than typing a
+    // stray character into the command input. While the pane is zoomed they are
+    // claimed by nobody: a zoomed pane takes the whole terminal and ignores
+    // `graphWidthOverride`, so the key must not mutate a number that would
+    // change nothing on screen.
+    if (
+      (key.name === '>' || key.name === '<' || key.name === '=') &&
+      actions.inputIsEmpty() &&
+      controller.state.layout.zoomedPane === null &&
+      agentsPaneVisible(controller.state, renderer.terminalWidth)
+    ) {
+      const phases = visiblePhases(controller.state);
+      // The rail keeps its fixed width and the keys only move the panes, so the
+      // graph sizes against the room the rail leaves, as `AgentMapView` does.
+      const terminalWidth =
+        renderer.terminalWidth - roundRailColumns(controller.state, renderer.terminalWidth);
+      if (key.name === '=') actions.setGraphWidthOverride(null);
+      // A terminal too narrow for even the narrowest graph is the stacked list
+      // whatever the override says, so a press there would store a width this
+      // terminal never drew and then surprise the operator with it on the next
+      // resize. Nothing is stored instead.
+      else if (graphFits(terminalWidth, phases)) {
+        const current = agentPaneWidthWithOverride(
+          terminalWidth,
+          phases,
+          controller.state.graphWidthOverride,
+        );
+        // `null` is the stacked list, which is both what the pane is drawn at
+        // and the narrowest it goes. The gap up to a graph is 26 columns at
+        // three stages, 7 at two, and none at one, so it is never a step.
+        const width = current ?? STACKED_WIDTH;
+        const step = key.name === '>' ? PANE_WIDTH_STEP : -PANE_WIDTH_STEP;
+        // From the stacked list, `>` is the operator asking for the graph that
+        // automatic sizing declined to draw, at the only width it has.
+        const next =
+          current === null
+            ? step > 0
+              ? agentGraphMinWidth(phases)
+              : width
+            : clampGraphWidthOverride(current + step, terminalWidth, phases);
+        // A press that moves nothing stores nothing, so trying the keys can
+        // never arm an override the operator cannot see. That is the whole rule
+        // and it covers more than a shrink key at its floor: a round with no
+        // phases yet and a round of one short-named stage both have a clamp
+        // band one width wide, and a terminal wide enough that automatic sizing
+        // already sits at the ceiling has nowhere for `>` to go. Each of those
+        // would otherwise convert automatic sizing into a sticky override at
+        // the identical width, and pin every later round in the session to it.
+        //
+        // This compares widths, and it stands for "nothing changes on screen"
+        // only because `agentGraphMinWidth(phases) > STACKED_WIDTH` wherever the
+        // stacked fallback can appear at all. The two come apart in one
+        // transition, list to graph at an unchanged width, which needs the two
+        // to be equal while the list is showing: one stage whose kind name runs
+        // past 20 characters. The role vocabulary is closed and its longest name
+        // is 12 (`src/vibesys/loops/roles.py`), so that state is unreachable.
+        // Adding a long role, lowering `NODE_WIDTH_MIN`, or raising
+        // `STACKED_WIDTH` is what would make this a presentation test that has
+        // to be written as one.
+        if (next !== width) actions.setGraphWidthOverride(next);
+      }
       key.preventDefault();
       return;
     }

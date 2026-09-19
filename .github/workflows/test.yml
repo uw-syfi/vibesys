@@ -12,6 +12,10 @@ on:
       - '.github/workflows/website.yml'
   pull_request:
     branches: [main]
+  # GitHub merge queue: Required PR CI must report on the queue's temporary
+  # gh-readonly-queue/... branch or the queue waits for it until timeout.
+  merge_group:
+    types: [checks_requested]
 
 env:
   # Wall-clock budget for a whole run, enforced as a warning by `ci-budget`
@@ -38,6 +42,8 @@ jobs:
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
+          # merge_group is handled natively by paths-filter (diffs the queue
+          # branch head_sha against the group's base_sha).
           filters: |
             # What `python-checks` actually reads: `ruff`/`lint-imports`'s
             # source roots (`[tool.ruff] src` in pyproject.toml), the dirs
@@ -52,6 +58,7 @@ jobs:
               - 'libs/**'
               - 'sdk/**'
               - 'scripts/**'
+              - 'packaging/**'
               - '.github/delegated-merge.toml'
               - '.github/workflows/delegated-merge.yml'
               - 'examples/**'
@@ -75,14 +82,14 @@ jobs:
               - 'src/server/controller.py'
               - 'src/server/diagnostics.py'
               - 'src/server/settings.py'
-              - 'scripts/fetch_bun.py'
+              - 'packaging/fetch_bun.py'
               - 'scripts/check_ts_architecture.test.mjs'
               - 'scripts/check_ts_package_manifests.mjs'
               - '.github/workflows/test.yml'
             # What `validate-examples` checks: the example repositories
             # themselves (a submodule bump shows up as a change to the gitlink
             # path under examples/), the two validators, and the fetcher that
-            # materializes the overlays.
+            # materializes the external repositories.
             examples:
               - 'examples/**'
               - '.gitmodules'
@@ -93,7 +100,13 @@ jobs:
               - 'scripts/example_repositories.py'
               - 'tests/vibesys/test_microservice_inputs.py'
               - 'tests/vibesys/test_input_sources.py'
-              - '.github/workflows/test.yml'
+              - 'tests/architecture/test_example_registry.py'
+              - 'tests/support/example_registry.py'
+              - 'src/vibesys/run/project_policy.py'
+              # Scanned for stale `examples/...` path references.
+              - 'docs/**'
+              - 'README.md'
+              - '.github/workflows/*.yml'
             # The agent image build: its Dockerfile, the module that builds
             # it, and the version pins it takes as build args.
             agent_image:
@@ -146,6 +159,13 @@ jobs:
 
       - name: Check Python lint
         run: ./scripts/check_lint.sh
+
+      # Ruff bounds individual functions (C901, PL) but not module size, so a
+      # file can grow without bound while every function in it stays legal.
+      # Ratchets against the allowlist in [tool.vibesys.file_length]; the
+      # TypeScript counterpart rides `pnpm check:ts` in the `tui` job.
+      - name: Check Python file length
+        run: uv run python scripts/check_file_length.py
 
       - name: Check Python package boundaries
         run: uv run lint-imports
@@ -220,7 +240,7 @@ jobs:
 
       - name: Set up verified Bun 1.3.9 for OpenTUI
         run: |
-          python3 scripts/fetch_bun.py --target linux-x86_64 --output "$RUNNER_TEMP/bun/bin/bun"
+          python3 packaging/fetch_bun.py --target linux-x86_64 --output "$RUNNER_TEMP/bun/bin/bun"
           echo "$RUNNER_TEMP/bun/bin" >> "$GITHUB_PATH"
 
       - name: Install uv
@@ -390,13 +410,13 @@ jobs:
           VIBESYS_REQUIRE_MANAGED_CANDIDATE_TESTS: "1"
         run: go test -race ./...
 
-  # Owns everything that needs a repository-native example's `.vibesys` overlay,
-  # so no other job pays for one. It fetches the overlay alone (blob-filtered,
+  # Owns everything that needs a repository-native example's external repository `.vibesys` directory,
+  # so no other job pays for one. It fetches `.vibesys/` alone (blob-filtered,
   # depth-1, sparse) at the pinned gitlink rather than checking the submodule
   # out: ~7s and ~8MB for all four examples, against ~95s for one full
   # submodule clone.
   #
-  # Data-driven over .gitmodules and over each overlay's own tasks, so a new
+  # Data-driven over .gitmodules and over each external repository's own tasks, so a new
   # example repository or a new task needs no edit here. The `servicebench`
   # workload checks below stay explicit because their flags differ per task.
   validate-examples:
@@ -425,36 +445,37 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Fetch repository-native example overlays
+      - name: Fetch external example repositories
         run: uv run python scripts/example_repositories.py
 
-      - name: Validate example tasks
-        run: |
-          set -euo pipefail
-          for manifest in examples/*/repositories/*/.vibesys/tasks/*/vibesys.input.toml; do
-            repository="${manifest%%/.vibesys/*}"
-            task="$(basename "$(dirname "$manifest")")"
-            echo "::group::$repository --task $task"
-            uv run python -m entrypoints.headless validate "$repository" --task "$task"
-            echo "::endgroup::"
-          done
+      # Iterates examples/registry.toml, not a glob: every registered example
+      # (both layouts, every task) is validated through `vibesys validate`,
+      # its trust policy and path references are checked, and an example that
+      # is not registered fails the build. External repositories are fetched above, so a
+      # missing one must fail rather than skip.
+      - name: Check registered examples
+        env:
+          VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS: "1"
+        run: uv run python -m pytest tests/architecture/test_example_registry.py -v --no-cov
 
-      # The overlay is present here and nowhere else, so force the module to
+      # The external repository is present here and nowhere else, so force the module to
       # fail rather than skip if the fetch above ever stops producing it.
       - name: Check microservice input contracts
         env:
-          VIBESYS_REQUIRE_EXAMPLE_OVERLAYS: "1"
+          VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS: "1"
         run: uv run python -m pytest tests/vibesys/test_microservice_inputs.py tests/vibesys/test_input_sources.py -v --no-cov
 
       - name: Validate microservice workloads
         working-directory: resources/evaluators/microservice
         run: |
-          go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/train-ticket/benchmark/workload.toml" --validate-only
-          go run ./cmd/servicebench --mode accuracy --workload "$GITHUB_WORKSPACE/examples/microservices/train-ticket/benchmark/workload.toml" --validate-only
-          go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/train-ticket/benchmark/workload.toml" --profile offered-load --validate-only
+          go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" --validate-only
+          go run ./cmd/servicebench --mode accuracy --workload "$GITHUB_WORKSPACE/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" --validate-only
+          go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" --profile offered-load --validate-only
           go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/repositories/deathstarbench/.vibesys/tasks/social-network-read-timeline/benchmark/workload.toml" --validate-only
           go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml" --telemetry-command-json '["go","run","./cmd/otelcapture","--input-json","/tmp/vibesys-hotel-traces.otlp.ndjson","--settle-seconds","5"]' --telemetry-output /tmp/vibesys-hotel-telemetry.json --telemetry-timeout 60 --validate-only
           go run ./cmd/servicebench --mode accuracy --workload "$GITHUB_WORKSPACE/examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml" --validate-only
+          go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/hotel-correctness/.vibesys/tasks/compose/benchmark/workload.toml" --telemetry-command-json '["go","run","./cmd/otelcapture","--input-json","/tmp/vibesys-hotel-traces.otlp.ndjson","--settle-seconds","5"]' --telemetry-output /tmp/vibesys-hotel-telemetry.json --telemetry-timeout 60 --validate-only
+          go -C "$GITHUB_WORKSPACE/examples/microservices/hotel-correctness/.vibesys/tasks/compose/evaluator" run ./cmd/hotel-correctness --mode accuracy --workload "$GITHUB_WORKSPACE/examples/microservices/hotel-correctness/.vibesys/tasks/compose/benchmark/workload.toml" --validate-only
 
   # Builds the CPU agent image for real and runs every shipped CLI inside it
   # as the non-root `agent` user (issue #675). ubuntu-latest ships Docker, so

@@ -12,14 +12,12 @@ from wheel_targets import (
 EXPECTED_PLATFORMS = {
     "linux-x86_64": "manylinux_2_28_x86_64",
     "linux-aarch64": "manylinux_2_28_aarch64",
-    "macos-x86_64": "macosx_13_0_x86_64",
     "macos-arm64": "macosx_13_0_arm64",
 }
 
 EXPECTED_BUN_SHA256 = {
     "linux-x86_64": "104d4d037f4b35e10215c0507e1779691f39c57bd91ddeefe11cad781e3fc4b9",
     "linux-aarch64": "a2c2862bcc1fd1c0b3a8dcdc8c7efb5e2acd871eb20ed2f17617884ede81c844",
-    "macos-x86_64": "a6e15821aa60795f541ce18fce16bca9f2a94e193068b77f6f33330f4d0a3ad5",
     "macos-arm64": "cde6a4edf19cf64909158fa5a464a12026fd7f0d79a4a950c10cf0af04266d85",
 }
 

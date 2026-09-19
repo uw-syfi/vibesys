@@ -16,11 +16,11 @@ import {
   visibleRoundNumber,
 } from '../session-model.js';
 import {ActivityBarView} from './activity-bar.js';
-import {AgentMapView} from './agent-map.js';
+import {AgentMapView, agentsPaneVisible} from './agent-map.js';
 import {fillLayer} from './box-fill.js';
 import {createChatDraft} from './chat-composer.js';
 import {ChatOverlayView} from './chat-overlay.js';
-import {ChatPaneView, chatDockFits, chatPaneWidth} from './chat-pane.js';
+import {ChatPaneView, chatDockFits, chatPaneWidthWithOverride} from './chat-pane.js';
 import {RendererSelectionClipboard, type SelectionClipboard} from './clipboard.js';
 import {createCommandInputPanel} from './command-input.js';
 import {ConversationView} from './conversation.js';
@@ -37,7 +37,7 @@ import {
 import {bindKeybindings} from './keybindings.js';
 import {OverlayView} from './overlay.js';
 import {RightPaneView, rightPaneWidth, splitFits} from './right-pane.js';
-import {RoundTabsView} from './round-tabs.js';
+import {RoundRailView, roundRailColumns} from './round-rail.js';
 import {createMarkdownStyle} from './styles.js';
 import {resolveTheme, type ThemeName} from './theme.js';
 import {ThemePickerView} from './theme-picker.js';
@@ -50,12 +50,27 @@ export interface OpenTuiApp {
 /** Which of the client's editors currently holds the cursor. */
 type FocusTarget = 'command' | 'chat' | 'modal';
 
-const KEY_HELP = `←→: agents/transcript · ↑↓: within · Tab: complete · [/] or click: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
-const SCOPED_KEY_HELP = `←→: agents/transcript · ↑↓: within · Tab: complete · [/] or click: round · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
+// `help` is one row and clips rather than wraps, so a hint added here costs the
+// hints behind it on a narrow terminal, which is exactly where the resize keys
+// matter most. All three ride one token, and `or click` after `[/]: round` is
+// dropped to pay for it: a rail row looks clickable on its own, while `<>=` is
+// advertised nowhere else.
+const KEY_HELP = `←→: rounds/agents/transcript · ↑↓: within · [/]: round · <>=: width · Tab: complete · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Ctrl+L: live`;
+const SCOPED_KEY_HELP = `←→: rounds/agents/transcript · ↑↓: within · [/]: round · <>=: width · Tab: complete · F4: zoom · ${COMMAND_NAMES.todos} · ${COMMAND_NAMES.prompt} · Esc: back`;
 const LOG_KEY_HELP = `↑↓ or scroll: select · Enter/click: open hypothesis · Tab: complete · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
-const LOG_CHAT_KEY_HELP = `↑↓: select · Enter/click: hypothesis · Tab: complete · Ctrl+W: chat · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
+// The resize keys are guarded by `chatPaneVisible(state)` (`keybindings.ts`),
+// which is false in every state `LOG_KEY_HELP` covers, so `<>=: width` goes
+// only on this line, the one state where the keys can actually fire.
+// Advertising a binding that cannot fire is worse than not advertising it at
+// all: tui/conventions.md's "Bindings are visible" is about a person not
+// having to already know a binding, and a dead one on the help line breaks
+// that trust the same way a false error would break the banner's (#635).
+//
+// This line is one row and clips rather than wraps (see `KEY_HELP` above), so
+// the new token costs the tokens behind it on a narrow terminal.
+const LOG_CHAT_KEY_HELP = `↑↓: select · Enter/click: hypothesis · <>=: width · Tab: complete · Ctrl+W: chat · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
 const HYPOTHESIS_KEY_HELP =
-  '↑↓: select round · Enter/click: trajectory · Tab: complete · PgUp/PgDn: scroll · Esc: hypotheses';
+  '↑↓: select round · Enter/click: trajectory · d: diff · Tab: complete · PgUp/PgDn: scroll · Esc: hypotheses';
 /** Bezel, one content row, bezel. See the header frame below. */
 const HEADER_FRAME_HEIGHT = 3;
 
@@ -79,6 +94,7 @@ function emptyTranscriptMessage(state: SessionState): string {
   return 'Waiting for run events…';
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
 export function createOpenTuiApp(
   renderer: CliRenderer,
   controller: SessionController,
@@ -112,7 +128,7 @@ export function createOpenTuiApp(
     border: true,
     // Rounded, like the panes below it. The fill is on an inner layer, so
     // there is nothing in the corner cell to bleed past the arc
-    // (tui-conventions.md).
+    // (tui/conventions.md).
     borderStyle: 'rounded',
     borderColor: theme.border,
   });
@@ -223,7 +239,7 @@ export function createOpenTuiApp(
   let renderedKeyHelp = KEY_HELP;
   let transientStatus: string | null = null;
   let markdownStyle = createMarkdownStyle(theme);
-  const roundTabs = new RoundTabsView(renderer, controller, theme);
+  const roundRail = new RoundRailView(renderer, controller, theme);
   const todoStrip = new TodoStripView(renderer, controller, theme);
   const errorBanner = new ErrorBannerView(renderer, theme, () => controller.dismissErrorBanner());
   const agentMap = new AgentMapView(renderer, controller, theme);
@@ -305,7 +321,9 @@ export function createOpenTuiApp(
   // so both panes end on the same line and each keeps its own input inside its
   // own frame.
   main.add(chatPane.output);
-  // Drilling deeper into a round reads left to right: agents, then transcript.
+  // The rounds rail is the left edge of the round view; the agents graph and
+  // transcript follow to its right, so drilling deeper reads left to right.
+  main.add(roundRail.output);
   main.add(agentMap.output);
   main.add(transcriptFrame);
   // The log lives in the main pane rather than floating over it: it is the
@@ -319,9 +337,6 @@ export function createOpenTuiApp(
   hostCommandSurface(commandHost);
   root.add(headerFrame);
   root.add(errorBanner.output);
-  // The round tabs head both panes of the round view, outside every border:
-  // the selected tab's fill inside a rounded frame would be #642.
-  workspace.add(roundTabs.output);
   workspace.add(main);
   workspace.add(todoStrip.output);
   // The key-help line stays the width of the screen and under every pane. Inside
@@ -346,7 +361,7 @@ export function createOpenTuiApp(
     headerFill.backgroundColor = headerBackground(theme);
     transcriptFrame.borderColor = theme.border;
     help.fg = theme.textSubtle;
-    roundTabs.applyTheme(theme);
+    roundRail.applyTheme(theme);
     todoStrip.applyTheme(theme);
     errorBanner.applyTheme(theme);
     agentMap.applyTheme(theme);
@@ -364,6 +379,8 @@ export function createOpenTuiApp(
 
   let focusTarget: FocusTarget = 'command';
   let lastState: SessionState = controller.state;
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
   const render = (state: SessionState): void => {
     lastState = state;
     const previewName = state.themePicker?.selected ?? state.themeName;
@@ -405,7 +422,7 @@ export function createOpenTuiApp(
     const chatWidth = showChatPane
       ? zoomedPane === 'chat'
         ? renderer.terminalWidth
-        : chatPaneWidth(renderer.terminalWidth, rightWidth)
+        : chatPaneWidthWithOverride(renderer.terminalWidth, rightWidth, state.chatWidthOverride)
       : 0;
     const showExperimentLog = showLog && (zoomedPane === null || zoomedPane === 'experiments');
     paintHeader(renderHeader(state, showLog, renderer.terminalWidth - HEADER_CHROME));
@@ -424,29 +441,30 @@ export function createOpenTuiApp(
           ? KEY_HELP
           : SCOPED_KEY_HELP;
     help.content = transientStatus ?? renderedKeyHelp;
-    // The round tabs and agent map are per-round detail. They belong to a
-    // hypothesis trajectory, not to the list of claims.
-    const showAgents = !showLog && (zoomedPane === null ? !showSplit : zoomedPane === 'agents');
+    // The rounds rail and agent map are per-round detail. They belong to a
+    // hypothesis trajectory, not to the list of claims. `agentsPaneVisible` is
+    // this same decision, shared with the `<`/`>` resize keys so a layout
+    // change cannot leave the render and the keybinding guard disagreeing.
+    const showAgents = agentsPaneVisible(state, renderer.terminalWidth);
     const showTranscript = !showLog && (zoomedPane === null || zoomedPane === 'transcript');
-    // The tabs head the whole round view, so they give way wherever it is not
-    // on screen whole: a zoomed pane, or a split that takes the row's right side.
-    const showTabs = !showLog && zoomedPane === null && !showSplit;
+    // The rail takes a fixed column off the left of the round view. The agent
+    // map is sized against what is left so the transcript keeps its floor beside
+    // the rail rather than being squeezed by it.
     const errorHeight = state.errorBanner === null ? 0 : errorBanner.output.height;
+    const railWidth = roundRailColumns(state, renderer.terminalWidth);
     agentMap.output.visible = showAgents;
     transcriptFrame.visible = showTranscript;
+    roundRail.output.visible = railWidth > 0;
     todoStrip.output.visible = !showLog && zoomedPane === null;
-    // Hidden through the view rather than the box, so its live timer stops too
-    // instead of redrawing the bar back onto the screen a second later.
-    if (!showTabs) roundTabs.hide();
     if (!showLog) {
-      const tabRows = showTabs ? roundTabs.render(state, renderer.terminalWidth) : 0;
-      // The row budget the agents pane draws from, between the tab row above
-      // the main row and the todo strip below it. The strip's share comes from
-      // the height the state implies, not from `todoStrip.output.height`: the
+      // The row budget the main area draws from, shared by the rail and the
+      // agents pane because they are columns of the same row. It comes from the
+      // strip height the state implies, not from `todoStrip.output.height`: the
       // box height reflects the last committed layout, so reading it back in the
-      // same paint that expanded or collapsed the strip bills the pane the
-      // previous frame's height and leaves it a row long or short (clipping a
-      // graph node or its overflow count) until the next paint.
+      // same paint that expanded or collapsed the strip bills the panes the
+      // previous frame's height and leaves them a row long or short (clipping
+      // the selected late round, the overflow indicator, or a graph node) until
+      // the next paint.
       //
       // The command box is a column inside one of those panes now rather than a
       // band under them, so it takes no rows off this budget.
@@ -455,13 +473,13 @@ export function createOpenTuiApp(
         renderer.terminalHeight -
           headerFrame.height -
           errorHeight -
-          tabRows -
           todoStripHeight(state) -
           help.height,
       );
       agentMap.render(
         state,
         zoomedPane === 'agents' ? renderer.terminalWidth : undefined,
+        railWidth,
         mainRows,
       );
       // The todo box sits under the agent pane and stops where it stops: the
@@ -473,6 +491,7 @@ export function createOpenTuiApp(
         state,
         typeof agentWidth === 'number' ? todoStripWidth(agentWidth, renderer.terminalWidth) : null,
       );
+      if (railWidth > 0) roundRail.render(state, railWidth, mainRows);
       conversation.render(state);
     }
     // The agent map is the first thing to give up room: it is a summary the
@@ -487,8 +506,8 @@ export function createOpenTuiApp(
     // hidden renderable still reports a row of its own, so each is asked
     // whether it is on screen before its rows are counted.
     const rowsOn = (pane: BoxRenderable): number => (pane.visible ? pane.height : 0);
-    // The round tabs give way to a split, so only the header and the banner
-    // take rows off the top.
+    // The rounds rail is a column inside the main row, not a strip above it, so
+    // only the header and the banner take rows off the top.
     const above = headerFrame.height + rowsOn(errorBanner.output);
     const belowRows = rowsOn(todoStrip.output) + help.height;
     // Match the chat to the left pane's rectangle so it sits beside the
@@ -542,7 +561,12 @@ export function createOpenTuiApp(
     experimentLog.output.visible = showExperimentLog;
     rightPane.render(state, showRightPane, rightWidth);
     overlay.render(state, paneFallback);
-    overlay.renderScrim(state.overlay !== null || state.chatOpen || state.themePicker !== null);
+    overlay.renderScrim(
+      state.overlay !== null ||
+        state.diffViewer !== null ||
+        state.chatOpen ||
+        state.themePicker !== null,
+    );
     themePicker.render(state);
     chat.render(state);
     conversationActivityBar.render(state, !showLog);
@@ -595,6 +619,8 @@ export function createOpenTuiApp(
     selectNextRound: () => controller.selectNextRound(),
     selectPreviousRound: () => controller.selectPreviousRound(),
     toggleTodos: () => controller.toggleTodos(),
+    setGraphWidthOverride: width => controller.setGraphWidthOverride(width),
+    setChatWidthOverride: width => controller.setChatWidthOverride(width),
     scrollRightPane: delta => rightPane.scrollBy(delta),
     scrollChatPane: delta => chatPane.scrollBy(delta),
     scrollExperimentDetail: delta => experimentLog.scrollBy(delta),
@@ -626,7 +652,7 @@ export function createOpenTuiApp(
       unbindKeys();
       commandInput.destroy();
       conversationActivityBar.destroy();
-      roundTabs.destroy();
+      roundRail.destroy();
       agentMap.destroy();
       experimentLog.destroy();
       chat.destroy();

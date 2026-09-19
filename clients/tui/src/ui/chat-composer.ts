@@ -172,7 +172,7 @@ export class ChatComposerView {
       zIndex: 5,
       border: true,
       // Square with an outer fill, the overlay exception to the fill rule
-      // (tui-conventions.md): this menu floats over the composer, so the fill
+      // (tui/conventions.md): this menu floats over the composer, so the fill
       // has to reach the border ring or the text under it shows through there,
       // and a fill that reaches the ring can only be honest under a square
       // corner.

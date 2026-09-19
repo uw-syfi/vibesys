@@ -122,6 +122,10 @@ export function renderDesignSummary(views: readonly DesignRoundView[]): string {
       : designRoundHeading(view);
     lines.push(heading, summaryFileLine(view));
   }
-  lines.push('', 'Open a hypothesis and select a round for its full change list.');
+  lines.push(
+    '',
+    'Open a hypothesis and select a round for its full change list.',
+    "Press d for the newest round's diff.",
+  );
   return lines.join('\n');
 }

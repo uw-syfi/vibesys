@@ -27,7 +27,7 @@ Several flags look independent, but they combine into one execution contract:
 
 | Axis | Flag | Meaning |
 | --- | --- | --- |
-| Search loop | `--outer-loop` | Which outer-loop policy runs: `agent`, `plain`, or `evolve`. |
+| Search loop | `--outer-loop` | Which outer-loop policy runs: `agent`, `profile-guided`, `plain`, or `evolve`. |
 | Evaluation interface | `--interface` | Agent loop only. Whether evaluator-owned code invokes the candidate directly or communicates with a service. |
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, `rocm`, or `cpu`. |
 | Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, or a Docker container (the same container whether launched directly or via `--modal`/SkyPilot). |
@@ -50,6 +50,7 @@ come from the domain and input bundle, not the interface mode.
 | Value | Behavior | Notes |
 | --- | --- | --- |
 | `agent` | Orchestrator-driven loop with implementer, judge, and profiler roles. | Default. Supports `--interface` and `--inner-loop`. |
+| `profile-guided` | Agent lifecycle with framework-owned component attribution and focus selection. | Requires `[profile_guided]` in the input manifest. Supports the agent flags. |
 | `plain` | Issue-board loop with deterministic issue draining and perf evaluation. | Uses backend prompt fragments from `src/vibesys/prompts/backend/`. |
 | `evolve` | Evolutionary search over candidate implementations. | Uses domain-aware mutator, judge, and profiler roles. |
 
@@ -78,8 +79,8 @@ not a valid project root. An existing repository must have a baseline
 commit and a clean worktree. A directory outside Git is initialized with a
 baseline commit automatically.
 
-The `agent`, `plain`, and `evolve` loops, runtime environments, profilers, and
-agent backends all use the same project layout. A repository-shaped example
+All outer loops, runtime environments, profilers, and agent backends use the
+same project layout. A repository-shaped example
 nested below another Git root may use `--runs-dir` to materialize an isolated
 project. Legacy bundles and standalone `--input-*` synthesis also use this
 compatibility path.
@@ -397,6 +398,23 @@ debug information; `dsymutil`, `dwarfdump`, `nm`, and `atos` can validate or res
 symbols. Reports must state when unavailable Apple hardware counters limit conclusions.
 
 ## Domain and Modality
+
+The `profile-guided` loop reads a task-owned attribution command from the input
+manifest. The command receives `--vs-output PATH` and must write protocol v1:
+
+```toml
+[profile_guided]
+command = ["python", "profiler/attribute.py"]
+timeout_seconds = 1800
+result_protocol = 1
+min_measured_rounds = 2
+min_relative_improvement = 0.02
+```
+
+The result is JSON with `version = 1`, a `cost_unit`, and ranked `components`.
+Each component has `name`, nonnegative `cost`, `share` between zero and one, and
+an optional `evidence` string list. This configuration is task capability, not
+a modality. Other loops ignore it.
 
 `[agent].domain` in `vibesys.input.toml` supplies cross-cutting problem-space
 context for the agent and evolve loops. Registered domains include:

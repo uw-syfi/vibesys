@@ -34,7 +34,7 @@ const COMMAND_TITLE = 'Command';
 /**
  * The reserved row above the box is blank while no input error stands: it only
  * holds its height, so an error never moves the layout. Bindings belong on the
- * key-help line (tui-conventions.md, "Bindings are visible").
+ * key-help line (tui/conventions.md, "Bindings are visible").
  */
 const RESTING_HINT = '';
 
@@ -44,7 +44,7 @@ const BOX_CHROME = 3;
 /**
  * The box's own rows plus the hint row above it, mirroring `chat-composer.ts`'s
  * `COMPOSER_CHROME`. The row is reserved rather than inserted on demand: per
- * `tui-conventions.md`, a row that appears and disappears resizes everything
+ * `tui/conventions.md`, a row that appears and disappears resizes everything
  * under it, so it is always present and only its content and colour change.
  */
 const COMMAND_CHROME = BOX_CHROME + 1;
@@ -53,23 +53,17 @@ function commandSyntaxStyle(theme: Theme): SyntaxStyle {
   return SyntaxStyle.fromStyles({'slash-command': {fg: theme.accent, bold: true}});
 }
 
-export function createCommandInputPanel(
+interface CommandInputFrame {
+  output: BoxRenderable;
+  hint: TextRenderable;
+  box: BoxRenderable;
+}
+
+function createCommandInputFrame(
   renderer: CliRenderer,
-  onSubmit: (value: string) => void,
   theme: Theme,
-  /** Called when the box is clicked, so the pane focus follows the cursor. */
-  onFocusRequest: () => void = () => {},
-  /**
-   * Called on every keystroke (typed or deleted). A stale input error names a
-   * typo in text the operator is already retyping, so it clears as soon as
-   * they touch the box again rather than waiting for them to notice and
-   * dismiss it.
-   */
-  onChange: () => void = () => {},
-): CommandInputPanel {
-  let currentTheme = theme;
-  /** The last message `render` painted, or null at rest. Skips redundant repaints. */
-  let lastMessage: string | null = null;
+  onFocusRequest: () => void,
+): CommandInputFrame {
   const output = new BoxRenderable(renderer, {
     id: 'command-input-panel',
     width: '100%',
@@ -109,8 +103,22 @@ export function createCommandInputPanel(
     paddingRight: 1,
     onMouseUp: onFocusRequest,
   });
-  let syntaxStyle = commandSyntaxStyle(theme);
-  let commandStyleId = syntaxStyle.getStyleId('slash-command');
+  return {output, hint, box};
+}
+
+interface CommandInputControls {
+  input: InputRenderable;
+  suggestions: BoxRenderable;
+  suggestionList: TextRenderable;
+  syntaxStyle: SyntaxStyle;
+}
+
+function createCommandInputControls(
+  renderer: CliRenderer,
+  theme: Theme,
+  onFocusRequest: () => void,
+): CommandInputControls {
+  const syntaxStyle = commandSyntaxStyle(theme);
   const input = new InputRenderable(renderer, {
     id: 'command-input',
     width: '100%',
@@ -135,7 +143,7 @@ export function createCommandInputPanel(
     visible: false,
     zIndex: 5,
     border: true,
-    // Square with an outer fill, the overlay exception (tui-conventions.md):
+    // Square with an outer fill, the overlay exception (tui/conventions.md):
     // this popup floats over the panes above the command column, so its fill
     // has to reach the border ring to stop them showing through, and that is
     // only honest under a square corner.
@@ -155,6 +163,40 @@ export function createCommandInputPanel(
     content: '',
   });
   suggestions.add(suggestionList);
+  return {input, suggestions, suggestionList, syntaxStyle};
+}
+
+function mountCommandInput(frame: CommandInputFrame, controls: CommandInputControls): void {
+  frame.box.add(controls.input);
+  // Hint first, then the box, the same order as the chat composer on the
+  // other side of the landing view, so both columns end on a bordered input
+  // and the two boxes share a row (app.test.ts pins this).
+  frame.output.add(frame.hint);
+  frame.output.add(frame.box);
+}
+
+export function createCommandInputPanel(
+  renderer: CliRenderer,
+  onSubmit: (value: string) => void,
+  theme: Theme,
+  /** Called when the box is clicked, so the pane focus follows the cursor. */
+  onFocusRequest: () => void = () => {},
+  /**
+   * Called on every keystroke (typed or deleted). A stale input error names a
+   * typo in text the operator is already retyping, so it clears as soon as
+   * they touch the box again rather than waiting for them to notice and
+   * dismiss it.
+   */
+  onChange: () => void = () => {},
+): CommandInputPanel {
+  let currentTheme = theme;
+  /** The last message `render` painted, or null at rest. Skips redundant repaints. */
+  let lastMessage: string | null = null;
+  const {output, hint, box} = createCommandInputFrame(renderer, theme, onFocusRequest);
+  const controls = createCommandInputControls(renderer, theme, onFocusRequest);
+  const {input, suggestions, suggestionList} = controls;
+  let syntaxStyle = controls.syntaxStyle;
+  let commandStyleId = syntaxStyle.getStyleId('slash-command');
   const menu = new SuggestionMenu();
   let context: CommandContext = {};
 
@@ -184,12 +226,7 @@ export function createCommandInputPanel(
   };
   input.on(InputRenderableEvents.INPUT, handleInput);
   input.on(InputRenderableEvents.ENTER, submit);
-  box.add(input);
-  // Hint first, then the box, the same order as the chat composer on the
-  // other side of the landing view, so both columns end on a bordered input
-  // and the two boxes share a row (app.test.ts pins this).
-  output.add(hint);
-  output.add(box);
+  mountCommandInput({output, hint, box}, controls);
   return {
     output,
     suggestions,

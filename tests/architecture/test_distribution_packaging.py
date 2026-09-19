@@ -81,7 +81,7 @@ def _submodule_configuration() -> tuple[configparser.ConfigParser, list[str]]:
 
 def _is_repository_example(config: configparser.ConfigParser, section: str) -> bool:
     # One definition, shared with the CI fetcher that materializes these
-    # examples' task overlays.
+    # examples' external repositories.
     return is_example_repository_path(Path(config.get(section, "path")))
 
 
@@ -151,7 +151,7 @@ def test_tracked_submodule_initialization_commands_override_the_opt_out() -> Non
 
 
 def _load_packaging_support() -> ModuleType:
-    module_path = PROJECT_ROOT / "packaging_support.py"
+    module_path = PROJECT_ROOT / "packaging" / "packaging_support.py"
     assert module_path.is_file()
     spec = importlib.util.spec_from_file_location("packaging_support", module_path)
     assert spec is not None
@@ -284,6 +284,9 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path:
 
     assert "resources/evaluators/queue/vibesys.evaluator.toml" in members
     assert "resources/evaluators/microservice/vibesys.evaluator.toml" in members
+    assert "resources/evaluators/microservice/kubernetes_runtime/cli.py" in members
+    assert "resources/evaluators/microservice/kubernetes_runtime/control.py" in members
+    assert "resources/evaluators/microservice/kubernetes_runtime/runtime.py" in members
     assert "clients/backend-client/src/index.ts" in members
     assert "clients/core-state/src/index.ts" in members
     assert "clients/tui/src/index.ts" in members
