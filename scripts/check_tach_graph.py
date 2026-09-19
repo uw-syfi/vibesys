@@ -26,8 +26,8 @@ import sys
 from pathlib import Path
 
 DOC = Path("docs/contributing/architecture.md")
-START = "<!-- tach-graph:start -->"
-END = "<!-- tach-graph:end -->"
+START = "[//]: # (tach-graph:start)"
+END = "[//]: # (tach-graph:end)"
 
 # Modules of the known core cycle, using the exact names from tach.toml.
 CORE = frozenset(

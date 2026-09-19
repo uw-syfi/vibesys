@@ -16,7 +16,7 @@ Views: a package-level overview, the core strongly connected component (a
 known cycle that `tach.toml` tolerates until it is broken), and the full module
 graph.
 
-<!-- tach-graph:start -->
+[//]: # (tach-graph:start)
 ## Architecture overview
 
 Submodules such as `vibesys.agents` and `server.api` are collapsed into their top-level package.
@@ -217,4 +217,4 @@ graph TD
     vibesys.skypilot --> vs_project
     vs_project --> vs_loop_state
 ```
-<!-- tach-graph:end -->
+[//]: # (tach-graph:end)
