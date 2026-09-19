@@ -48,18 +48,27 @@ The shared prefix is **always 32 k tokens, always identical across all 20 reques
 
 ## Headline metric
 
-`aggregate_throughput_tok_per_sec` printed by `benchmark/benchmark.py` as the `Primary metric:` line. This is `total_output_tokens / wall_clock` across the 20 requests after warmup. This is the only number `perf_metric` should record.
+`aggregate_throughput_tok_per_sec` printed by `.vibesys/tasks/default/benchmark/benchmark.py` as the `Primary metric:` line. This is `total_output_tokens / wall_clock` across the 20 requests after warmup. This is the only number `perf_metric` should record.
 
 ## Notes
 
 - Text-generation, hybrid (linear-attn + full-attn) causal LM. **Single L4
-  (Ada, sm_89, 24 GB) target.** 
+  (Ada, sm_89, 24 GB) target.**
 - Implement model layers explicitly (own attention / linear-attention / MLP
   / norm / RoPE); use `transformers` only as a utility for config / tokenizer
-  / weight loading. The reference implementation in `reference/reference.py`
+  / weight loading. The reference implementation in `.vibesys/tasks/default/reference/reference.py`
   is the file copied from `transformers/models/olmo_hybrid/` — read it for
   correctness, then design serving on top.
 - The prompt the server receives is a list of token IDs (vLLM-style
   `prompt: list[int]`), not a string — the benchmark synthesises the 32 k
   shared prefix from random IDs and sends them directly. The server must
   accept `prompt` as either `str` or `list[int]`.
+
+## Starting point
+
+The workspace contains a checkout of **vLLM v0.26.0** at `vllm/` (pinned via
+`[[workspace.sources]]`; provenance in `_vibesys_sources.json`). Do not write
+the serving system from scratch: start from vLLM's OpenAI-compatible server,
+paged-KV prefix caching, and hybrid (attention + linear-attention/SSM) model
+support, adapting them to this workload. You may edit, prune, or vendor parts
+of the checkout freely — it is ordinary mutable workspace code.
