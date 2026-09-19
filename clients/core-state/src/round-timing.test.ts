@@ -1,4 +1,6 @@
 import {describe, expect, it} from 'bun:test';
+import {EventType} from '@vibesys/backend-client';
+import {makeEvent, timestampOf} from '@vibesys/backend-client/testing';
 import {
   closeActiveAgentTimings,
   finishAgentTiming,
@@ -9,8 +11,8 @@ import {
 
 describe('agent timing prefix merge', () => {
   it('joins a suffix finish to its prefix start', () => {
-    const older = startAgentTiming({}, event(1, 'agent_execution_started', 'exec-a'));
-    const newer = finishAgentTiming({}, event(2, 'agent_execution_finished', 'exec-a'));
+    const older = startAgentTiming({}, event(1, 'started', 'exec-a'));
+    const newer = finishAgentTiming({}, event(2, 'finished', 'exec-a'));
 
     expect(mergeAgentTimingPrefix(older, newer)).toEqual({
       agentIntervals: [{startedAt: timestamp(1), finishedAt: timestamp(2)}],
@@ -19,9 +21,9 @@ describe('agent timing prefix merge', () => {
   });
 
   it('retains an unmatched finish so a later prefix can supply its start', () => {
-    const finish = finishAgentTiming({}, event(3, 'agent_execution_finished', 'exec-a'));
+    const finish = finishAgentTiming({}, event(3, 'finished', 'exec-a'));
     const partial = mergeAgentTimingPrefix({}, finish);
-    const start = startAgentTiming({}, event(1, 'agent_execution_started', 'exec-a'));
+    const start = startAgentTiming({}, event(1, 'started', 'exec-a'));
 
     expect(mergeAgentTimingPrefix(start, partial)).toEqual({
       agentIntervals: [{startedAt: timestamp(1), finishedAt: timestamp(3)}],
@@ -31,16 +33,10 @@ describe('agent timing prefix merge', () => {
 
   it('orders replay by sequence when prefix and suffix timestamps collide', () => {
     const sharedTimestamp = timestamp(1);
-    const older = startAgentTiming(
-      {},
-      {...event(1, 'agent_execution_started', 'exec-a'), timestamp: sharedTimestamp},
-    );
+    const older = startAgentTiming({}, event(1, 'started', 'exec-a', sharedTimestamp));
     const newer = startAgentTiming(
-      finishAgentTiming(
-        {},
-        {...event(2, 'agent_execution_finished', 'exec-a'), timestamp: sharedTimestamp},
-      ),
-      {...event(3, 'agent_execution_started', 'exec-a'), timestamp: sharedTimestamp},
+      finishAgentTiming({}, event(2, 'finished', 'exec-a', sharedTimestamp)),
+      event(3, 'started', 'exec-a', sharedTimestamp),
     );
 
     expect(mergeAgentTimingPrefix(older, newer)).toEqual({
@@ -50,9 +46,9 @@ describe('agent timing prefix merge', () => {
   });
 
   it('deduplicates a compatibility finish after the modern finish', () => {
-    const older = startAgentTiming({}, event(1, 'agent_execution_started', 'exec-a'));
-    let newer = finishAgentTiming({}, event(2, 'agent_execution_finished', 'exec-a'));
-    newer = finishAgentTiming(newer, event(3, 'phase_finished', 'exec-a'));
+    const older = startAgentTiming({}, event(1, 'started', 'exec-a'));
+    let newer = finishAgentTiming({}, event(2, 'finished', 'exec-a'));
+    newer = finishAgentTiming(newer, event(3, 'compat_finished', 'exec-a'));
 
     expect(mergeAgentTimingPrefix(older, newer).agentIntervals).toEqual([
       {startedAt: timestamp(1), finishedAt: timestamp(2)},
@@ -60,11 +56,8 @@ describe('agent timing prefix merge', () => {
   });
 
   it('applies a suffix closeout to every active prefix timing', () => {
-    let older: RoundTimingState = startAgentTiming(
-      {},
-      event(1, 'agent_execution_started', 'exec-a'),
-    );
-    older = startAgentTiming(older, event(2, 'agent_execution_started', 'exec-b'));
+    let older: RoundTimingState = startAgentTiming({}, event(1, 'started', 'exec-a'));
+    older = startAgentTiming(older, event(2, 'started', 'exec-b'));
     const newer = closeActiveAgentTimings({}, timestamp(4), 4);
 
     expect(mergeAgentTimingPrefix(older, newer)).toEqual({
@@ -84,19 +77,25 @@ describe('agent timing prefix merge', () => {
 });
 
 function timestamp(sequence: number): string {
-  return `2026-01-01T00:00:0${sequence}Z`;
+  return `2026-01-01T00:00:0${sequence}.000Z`;
 }
+
+const eventTypes = {
+  started: EventType.AGENT_EXECUTION_STARTED,
+  finished: EventType.AGENT_EXECUTION_FINISHED,
+  compat_finished: EventType.PHASE_FINISHED,
+} as const;
 
 function event(
   sequence: number,
-  type: 'agent_execution_started' | 'agent_execution_finished' | 'phase_finished',
+  type: keyof typeof eventTypes,
   executionId: string,
+  at: string = timestamp(sequence),
 ) {
-  return {
+  return makeEvent(eventTypes[type], {
     sequence,
-    timestamp: timestamp(sequence),
-    type,
-    execution_id: executionId,
-    agent_kind: 'implementer',
-  };
+    timestamp: timestampOf(at),
+    executionId,
+    agentKind: 'implementer',
+  });
 }

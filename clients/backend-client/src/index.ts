@@ -6,31 +6,21 @@ export {
   type SubscribeOptions,
 } from './client.js';
 export {
+  buildRequest,
+  decodeResponse,
+  decodeRunEvent,
+  decodeServerMessage,
+  encodeRequest,
+  MAX_EVENTS_TIMEOUT_MS,
+  RequestValidationError,
+  timestampToIso,
+  validateRequest,
+} from './codec.js';
+export {
   PersistentEventStream,
   type PersistentEventStreamCallbacks,
   type PersistentEventStreamOptions,
   type StreamConnectionState,
   type StreamTransport,
 } from './persistent-event-stream.js';
-export type {
-  AgentStatusData,
-  ChatModelOption,
-  ChatOptions,
-  ChatProviderOptions,
-  DesignFileChange,
-  DesignPatch,
-  DesignRound,
-  Diagnostic,
-  ExperimentCursor,
-  ExperimentUpdate,
-  HypothesisEntry,
-  HypothesisRound,
-  ProtocolRequest,
-  ProtocolResponse,
-  RequestInput,
-  RunEvent,
-  RunSnapshot,
-  RunStatus,
-  ServerMessage,
-  TuiDefaults,
-} from './protocol.js';
+export * from './protocol.js';

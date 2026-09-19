@@ -1,4 +1,4 @@
-import type {RunEvent} from '@vibesys/backend-client';
+import {EventStatus, EventType, type RunEvent, timestampToIso} from '@vibesys/backend-client';
 import {
   activeTimingElapsedMs,
   closeActiveAgentTimings,
@@ -115,43 +115,46 @@ function applyIndexedRunMapEvent(
   abandonedAt: string | null,
 ): RunMapState {
   const internal = runMapInternal(state);
+  const timestamp = timestampToIso(event.timestamp);
   const seen: RunMapState = {
     outerLoop: state.outerLoop,
     expectedRoles: state.expectedRoles,
     rounds: internal.rounds,
     phases: internal.phases,
-    lastEventTimestamp: event.timestamp,
+    lastEventTimestamp: timestamp,
   };
   // Run-scoped terminal events say the run ended, not which agent ended it, so
   // they carry no `agent_kind` and no `round_label`. Every projection below is
   // keyed by that scope and would drop them, which is why the closeout runs
   // first and returns: one owner for "the run ended", sweeping the whole map
   // rather than the one round a label happened to name.
-  if (event.type === 'run_failed') {
-    return closeOpenRunState(seen, 'failed', event.timestamp, event.sequence ?? null);
+  if (event.type === EventType.RUN_FAILED) {
+    return closeOpenRunState(seen, 'failed', timestamp, event.sequence);
   }
-  if (event.type === 'run_interrupted') {
-    return closeOpenRunState(seen, 'interrupted', event.timestamp, event.sequence ?? null);
+  if (event.type === EventType.RUN_INTERRUPTED) {
+    return closeOpenRunState(seen, 'interrupted', timestamp, event.sequence);
   }
   const base =
-    event.type === 'run_started'
-      ? closeAbandonedRunState(seen, abandonedAt ?? state.lastEventTimestamp ?? event.timestamp)
+    event.type === EventType.RUN_STARTED
+      ? closeAbandonedRunState(seen, abandonedAt ?? state.lastEventTimestamp ?? timestamp)
       : seen;
   const started =
-    event.type === 'run_started' && event.data?.kind === 'run_started' ? event.data : null;
-  const outerLoop = started === null ? base.outerLoop : started.outer_loop;
+    event.type === EventType.RUN_STARTED && event.data.case === 'runStarted'
+      ? event.data.value
+      : null;
+  const outerLoop = started === null ? base.outerLoop : started.outerLoop;
   const expectedRoles =
-    started?.expected_roles !== undefined && started.expected_roles.length > 0
-      ? started.expected_roles
+    started !== null && started.expectedRoles.length > 0
+      ? started.expectedRoles
       : base.expectedRoles;
-  const rounds = applyRoundEvent(base.rounds, base.phases, event);
-  const phases = applyPhaseEvent({...base, outerLoop, expectedRoles, rounds}, event);
+  const rounds = applyRoundEvent(base.rounds, base.phases, event, timestamp);
+  const phases = applyPhaseEvent({...base, outerLoop, expectedRoles, rounds}, event, timestamp);
   return {
     outerLoop,
     expectedRoles,
     rounds,
     phases,
-    lastEventTimestamp: event.timestamp,
+    lastEventTimestamp: timestamp,
   };
 }
 
@@ -505,10 +508,10 @@ export function roundAgentElapsedMs(round: RoundSummary, now: Date): number {
   return activeTimingElapsedMs(round, now);
 }
 
-function applyPhaseEvent(state: RunMapState, event: RunEvent): AgentPhase[] {
-  const kind = event.agent_kind;
+function applyPhaseEvent(state: RunMapState, event: RunEvent, timestamp: string): AgentPhase[] {
+  const kind = event.agentKind;
   if (!kind) return state.phases;
-  const roundNumber = roundNumberFromLabel(event.round_label);
+  const roundNumber = roundNumberFromLabel(event.roundLabel);
   let phases = state.phases;
   const roles = expectedRolesForSeeding(state);
   if (roundNumber !== null && roles !== null) {
@@ -517,35 +520,44 @@ function applyPhaseEvent(state: RunMapState, event: RunEvent): AgentPhase[] {
   const transition = phaseTransition(event);
   if (transition === null) return ensurePhase(phases, kind, roundNumber);
   const started = transition === 'started';
-  const executionId = event.execution_id ?? event.invocation_id ?? undefined;
+  const executionId = event.executionId;
   const data = event.data;
   const runtime =
-    started && data?.kind === 'agent_execution_started'
-      ? {driver: data.driver ?? null, provider: data.provider ?? null, model: data.model ?? null}
+    started && data.case === 'agentExecutionStarted'
+      ? {
+          driver: data.value.driver ?? null,
+          provider: data.value.provider ?? null,
+          model: data.value.model ?? null,
+        }
       : {};
   return upsertPhase(phases, {
     kind,
     status: started ? 'active' : terminalPhaseStatus(event.status),
     roundNumber,
-    roundLabel: event.round_label ?? null,
+    roundLabel: event.roundLabel ?? null,
     ...(executionId ? {executionId, invocationId: executionId} : {}),
-    ...(started ? {startedAt: event.timestamp} : {finishedAt: event.timestamp}),
+    ...(started ? {startedAt: timestamp} : {finishedAt: timestamp}),
     ...runtime,
   });
 }
 
 function phaseTransition(event: RunEvent): 'started' | 'finished' | null {
-  if (event.type === 'agent_execution_started' || event.type === 'phase_started') return 'started';
-  if (event.type === 'agent_execution_finished' || event.type === 'phase_finished') {
+  if (event.type === EventType.AGENT_EXECUTION_STARTED || event.type === EventType.PHASE_STARTED) {
+    return 'started';
+  }
+  if (
+    event.type === EventType.AGENT_EXECUTION_FINISHED ||
+    event.type === EventType.PHASE_FINISHED
+  ) {
     return 'finished';
   }
   return null;
 }
 
 function terminalPhaseStatus(status: RunEvent['status']): AgentPhaseStatus {
-  if (status === 'failed') return 'failed';
-  if (status === 'cancelled') return 'cancelled';
-  if (status === 'interrupted') return 'interrupted';
+  if (status === EventStatus.FAILED) return 'failed';
+  if (status === EventStatus.CANCELLED) return 'cancelled';
+  if (status === EventStatus.INTERRUPTED) return 'interrupted';
   return 'completed';
 }
 
@@ -553,34 +565,35 @@ function applyRoundEvent(
   rounds: RoundSummary[],
   phases: AgentPhase[],
   event: RunEvent,
+  timestamp: string,
 ): RoundSummary[] {
-  const number = roundNumberFromLabel(event.round_label);
-  if (number === null || event.type === 'run_finished') return rounds;
+  const number = roundNumberFromLabel(event.roundLabel);
+  if (number === null || event.type === EventType.RUN_FINISHED) return rounds;
   const existingIndex = roundIndex(rounds, number);
   const existing = runMapArrayAt(rounds, existingIndex);
   // Run-scoped terminal events never reach here: `applyRunMapEvent` closes every
   // round for them, because the round a label names is not the only one open.
   const status =
-    event.type === 'round_finished'
-      ? event.status === 'failed'
+    event.type === EventType.ROUND_FINISHED
+      ? event.status === EventStatus.FAILED
         ? 'failed'
         : 'completed'
       : existing?.status === 'completed' || existing?.status === 'failed'
         ? existing.status
         : 'active';
-  const terminal = event.type === 'round_finished';
+  const terminal = event.type === EventType.ROUND_FINISHED;
   const patch: RoundSummary = {
     number,
     status,
     ...(terminal
-      ? {finishedAt: event.timestamp, closedByRoundFinished: true as const}
-      : {startedAt: event.timestamp}),
-    ...(terminal && event.data?.kind === 'round_finished' && event.data.profile_skipped === true
+      ? {finishedAt: timestamp, closedByRoundFinished: true as const}
+      : {startedAt: timestamp}),
+    ...(terminal && event.data.case === 'roundFinished' && event.data.value.profileSkipped
       ? {profileSkipped: true}
       : {}),
   };
   const round = existing ? mergeRound(existing, patch) : patch;
-  const updated = updateRoundAgentElapsed(round, phases, event);
+  const updated = updateRoundAgentElapsed(round, phases, event, timestamp);
   if (existing !== undefined && shallowEqual(existing, updated)) return rounds;
   return replaceRound(rounds, existingIndex, updated);
 }
@@ -730,27 +743,32 @@ function updateRoundAgentElapsed(
   round: RoundSummary,
   phases: AgentPhase[],
   event: RunEvent,
+  timestamp: string,
 ): RoundSummary {
-  const started = event.type === 'agent_execution_started' || event.type === 'phase_started';
-  const finished = event.type === 'agent_execution_finished' || event.type === 'phase_finished';
+  const started =
+    event.type === EventType.AGENT_EXECUTION_STARTED || event.type === EventType.PHASE_STARTED;
+  const finished =
+    event.type === EventType.AGENT_EXECUTION_FINISHED || event.type === EventType.PHASE_FINISHED;
   if (!started && !finished) {
-    if (event.type !== 'round_finished') return round;
-    return closeActiveAgentTimings(round, event.timestamp, event.sequence ?? null);
+    if (event.type !== EventType.ROUND_FINISHED) return round;
+    return closeActiveAgentTimings(round, timestamp, event.sequence);
   }
   if (compatibilityPhaseTimingAlreadyApplied(phases, event)) return round;
   return started ? startAgentTiming(round, event) : finishAgentTiming(round, event);
 }
 
 function compatibilityPhaseTimingAlreadyApplied(phases: AgentPhase[], event: RunEvent): boolean {
-  if (event.type !== 'phase_started' && event.type !== 'phase_finished') return false;
-  const executionId = event.execution_id ?? event.invocation_id;
-  if (executionId == null) return false;
+  if (event.type !== EventType.PHASE_STARTED && event.type !== EventType.PHASE_FINISHED) {
+    return false;
+  }
+  const executionId = event.executionId;
+  if (executionId === undefined) return false;
   const slot = phaseSlotFor(phaseIndexFor(phases), {
-    kind: event.agent_kind ?? '',
-    roundNumber: roundNumberFromLabel(event.round_label),
+    kind: event.agentKind ?? '',
+    roundNumber: roundNumberFromLabel(event.roundLabel),
   });
   const existingIndex = slot?.executions.get(executionId);
   const existing = existingIndex === undefined ? undefined : runMapArrayAt(phases, existingIndex);
-  if (event.type === 'phase_started') return existing?.status === 'active';
+  if (event.type === EventType.PHASE_STARTED) return existing?.status === 'active';
   return existing !== undefined && existing.status !== 'active';
 }

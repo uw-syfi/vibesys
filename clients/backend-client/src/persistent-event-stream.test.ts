@@ -6,20 +6,24 @@ import {
   type StreamConnectionState,
   type StreamTransport,
 } from './persistent-event-stream.js';
-import type {RunEvent, ServerMessage} from './protocol.js';
+import {AgentOutputChannel, EventType, type RunEvent, type ServerMessage} from './protocol.js';
+import {makeEvent, makeEventBatch} from './testing.js';
 
 /** Lets a zero-delay reconnect timer and its subscribe settle. */
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 1));
 
-function event(sequence: number, type: RunEvent['type'], content?: string): RunEvent {
-  return {
+function event(sequence: number, type: EventType, content?: string): RunEvent {
+  return makeEvent(type, {
     sequence,
-    timestamp: '2026-01-01T00:00:00Z',
-    type,
     ...(content === undefined
       ? {}
-      : {data: {kind: 'agent_output_chunk', channel: 'assistant', content}}),
-  };
+      : {
+          data: {
+            case: 'agentOutputChunk',
+            value: {channel: AgentOutputChannel.ASSISTANT, content},
+          },
+        }),
+  });
 }
 
 /** Mutable answers to the stream's `cursor`/`storeId`/`shouldReconnect` questions. */
@@ -110,11 +114,9 @@ class StubTransport implements StreamTransport {
     const armed = this.#armed;
     this.#armed = null;
     if (armed !== null) {
-      onMessage({
-        type: 'event_batch',
-        events: armed.events,
-        history_after_sequence: armed.historyAfterSequence,
-      });
+      onMessage(
+        makeEventBatch(armed.events, undefined, {historyAfterSequence: armed.historyAfterSequence}),
+      );
     }
     if (this.#deferNext) {
       this.#deferNext = false;
@@ -126,11 +128,7 @@ class StubTransport implements StreamTransport {
   }
 
   emitBatch(events: readonly RunEvent[], historyAfterSequence = 0): void {
-    this.#message?.({
-      type: 'event_batch',
-      events: [...events],
-      history_after_sequence: historyAfterSequence,
-    });
+    this.#message?.(makeEventBatch(events, undefined, {historyAfterSequence}));
   }
 
   sever(message = 'Server event stream disconnected'): void {
@@ -147,7 +145,7 @@ describe('PersistentEventStream', () => {
 
     expect(transport.subscribeCalls).toEqual([{afterSequence: 0, tail: 1_000, storeId: undefined}]);
 
-    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+    transport.emitBatch([event(1, EventType.AGENT_OUTPUT_CHUNK, 'one\n')]);
     expect(messages).toHaveLength(1);
     expect(messages[0]?.resumed).toBe(false);
     // A successful boot changes nothing: the stream is connected by default.
@@ -193,8 +191,8 @@ describe('PersistentEventStream', () => {
     const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
     transport.emitBatch([
-      event(1, 'agent_output_chunk', 'one\n'),
-      event(2, 'agent_output_chunk', 'two\n'),
+      event(1, EventType.AGENT_OUTPUT_CHUNK, 'one\n'),
+      event(2, EventType.AGENT_OUTPUT_CHUNK, 'two\n'),
     ]);
     env.cursor = 2;
 
@@ -211,7 +209,7 @@ describe('PersistentEventStream', () => {
     expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
 
     // The resumed stream's batches are tagged resumed.
-    transport.emitBatch([event(3, 'agent_output_chunk', 'three\n')]);
+    transport.emitBatch([event(3, EventType.AGENT_OUTPUT_CHUNK, 'three\n')]);
     expect(messages[messages.length - 1]?.resumed).toBe(true);
 
     // A success gives the next outage the full schedule again.
@@ -233,7 +231,7 @@ describe('PersistentEventStream', () => {
     const {callbacks} = harness(env);
     const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
-    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+    transport.emitBatch([event(1, EventType.AGENT_OUTPUT_CHUNK, 'one\n')]);
     env.cursor = 1;
     // The first batch named a store; the caller now folds under it.
     env.storeId = 'run-store';
@@ -256,7 +254,7 @@ describe('PersistentEventStream', () => {
     const {callbacks, states} = harness(env);
     const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
-    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+    transport.emitBatch([event(1, EventType.AGENT_OUTPUT_CHUNK, 'one\n')]);
     env.cursor = 1;
     env.storeId = 'run-store';
 
@@ -279,7 +277,7 @@ describe('PersistentEventStream', () => {
     const {callbacks, states} = harness(env);
     const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0, 0]});
     await stream.subscribe(callbacks);
-    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+    transport.emitBatch([event(1, EventType.AGENT_OUTPUT_CHUNK, 'one\n')]);
     env.cursor = 1;
 
     transport.refuseSubscribes = Number.POSITIVE_INFINITY;
@@ -300,7 +298,7 @@ describe('PersistentEventStream', () => {
     const {callbacks, states} = harness(env);
     const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
-    transport.emitBatch([event(1, 'run_finished')]);
+    transport.emitBatch([event(1, EventType.RUN_FINISHED)]);
     env.cursor = 1;
 
     // A finished run has nothing more to stream, so the drop is not an outage.
@@ -317,7 +315,7 @@ describe('PersistentEventStream', () => {
     const {callbacks} = harness(env);
     const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
-    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+    transport.emitBatch([event(1, EventType.AGENT_OUTPUT_CHUNK, 'one\n')]);
     env.cursor = 1;
 
     await stream.close();
@@ -332,18 +330,20 @@ describe('PersistentEventStream', () => {
     const {callbacks, messages} = harness(env);
     const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
-    transport.emitBatch([event(6, 'agent_output_chunk', 'six\n')], 5);
+    transport.emitBatch([event(6, EventType.AGENT_OUTPUT_CHUNK, 'six\n')], 5);
     env.cursor = 6;
 
     transport.sever();
     // The resume subscribe delivers `subscribed` + `event_batch` in one chunk,
     // before its promise resolves: the flag would be unset if it were raised
     // only after the await.
-    transport.deliverOnNextSubscribe([event(7, 'agent_output_chunk', 'seven\n')], 0);
+    transport.deliverOnNextSubscribe([event(7, EventType.AGENT_OUTPUT_CHUNK, 'seven\n')], 0);
     await settle();
 
     const resumed = messages.find(
-      entry => entry.message.type === 'event_batch' && entry.message.events[0]?.sequence === 7,
+      entry =>
+        entry.message.body.case === 'eventBatch' &&
+        entry.message.body.value.events[0]?.sequence === 7,
     );
     expect(resumed?.resumed).toBe(true);
   });
@@ -354,7 +354,7 @@ describe('PersistentEventStream', () => {
     const {callbacks} = harness(env);
     const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
-    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+    transport.emitBatch([event(1, EventType.AGENT_OUTPUT_CHUNK, 'one\n')]);
     env.cursor = 1;
 
     transport.deferNextSubscribe();

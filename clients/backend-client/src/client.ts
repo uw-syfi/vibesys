@@ -1,13 +1,17 @@
 import {randomUUID} from 'node:crypto';
 import {createConnection, type Socket} from 'node:net';
+import {buildRequest, decodeResponse, decodeServerMessage, encodeRequest} from './codec.js';
+import {protocolErrorToServerError, ServerError} from './errors.js';
 import {NewlineFramer} from './newline-framer.js';
 import type {
-  Diagnostic,
+  ProtocolErrorMessage,
   ProtocolRequest,
   ProtocolResponse,
-  RequestInput,
+  RequestBody,
   ServerMessage,
 } from './protocol.js';
+
+export {ServerError};
 
 export interface EventSubscription {
   close(): Promise<void>;
@@ -41,17 +45,6 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_CONNECT_RETRY_INTERVAL_MS = 25;
 /** Errors a not-yet-listening server produces; anything else is fatal. */
 const RETRYABLE_CONNECT_CODES = new Set(['ENOENT', 'ECONNREFUSED']);
-
-/** A failed server response, including its optional structured diagnostic. */
-export class ServerError extends Error {
-  constructor(
-    message: string,
-    readonly diagnostic: Diagnostic | null = null,
-  ) {
-    super(message);
-    this.name = 'ServerError';
-  }
-}
 
 export class ServerClient {
   readonly #socket: Socket;
@@ -140,25 +133,25 @@ export class ServerClient {
     });
   }
 
-  request(input: RequestInput): Promise<ProtocolResponse> {
+  request(body: RequestBody): Promise<ProtocolResponse> {
     if (this.#socket.destroyed) {
       return Promise.reject(new Error('Server is disconnected'));
     }
     const requestId = randomUUID();
-    const request = {
-      protocol_version: 1,
-      request_id: requestId,
-      timestamp: new Date().toISOString(),
-      ...input,
-    } as ProtocolRequest;
-    if (input.type === 'query.chat') return this.#requestLongRunning(request);
+    let request: ProtocolRequest;
+    try {
+      request = buildRequest(body, requestId);
+    } catch (error) {
+      return Promise.reject(toError(error));
+    }
+    if (body.case === 'chat') return this.#requestLongRunning(request);
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.#pending.delete(requestId);
         reject(new Error(`Server request timed out after ${this.#requestTimeoutMs}ms`));
       }, this.#requestTimeoutMs);
       this.#pending.set(requestId, {resolve, reject, timeout});
-      this.#socket.write(`${JSON.stringify(request)}\n`, error => {
+      this.#socket.write(`${encodeRequest(request)}\n`, error => {
         if (error) this.#rejectPending(requestId, error);
       });
     });
@@ -171,6 +164,8 @@ export class ServerClient {
     options: SubscribeOptions = {},
   ): Promise<EventSubscription> {
     return new Promise((resolve, reject) => {
+      // Validation throws here, before any socket is opened.
+      const request = subscribeRequest(afterSequence, options);
       const socket = createConnection(this.#path);
       const frames = new NewlineFramer();
       let subscribed = false;
@@ -189,47 +184,46 @@ export class ServerClient {
         if (subscribed) onDisconnect(error);
         else reject(error);
       };
+      const failHandshake = (error: Error): void => {
+        disconnect(error);
+        socket.destroy();
+      };
+      const settleSubscribed = (): void => {
+        subscribed = true;
+        clearTimeout(handshakeTimeout);
+        resolve({
+          close: () => {
+            closing = true;
+            clearTimeout(handshakeTimeout);
+            return closeSocket(socket);
+          },
+        });
+      };
+      const onProtocolError = (error: ProtocolErrorMessage): boolean => {
+        protocolErrorReceived = true;
+        if (subscribed) return true;
+        // A rejected handshake (for example an unsupported protocol version)
+        // is the caller's error, not a bare disconnect.
+        failHandshake(protocolErrorToServerError(error));
+        return false;
+      };
       const handleSubscriptionLine = (line: string): boolean => {
         if (!line) return true;
         let message: ServerMessage;
         try {
-          message = parseServerMessage(line);
+          message = decodeServerMessage(line);
           onMessage(message);
         } catch (error) {
-          disconnect(toError(error));
-          socket.destroy();
+          failHandshake(toError(error));
           return false;
         }
-        if (message.type === 'protocol_error') protocolErrorReceived = true;
-        if (!subscribed && message.type === 'subscribed') {
-          subscribed = true;
-          clearTimeout(handshakeTimeout);
-          resolve({
-            close: () => {
-              closing = true;
-              clearTimeout(handshakeTimeout);
-              return closeSocket(socket);
-            },
-          });
-        }
+        if (message.body.case === 'protocolError') return onProtocolError(message.body.value);
+        if (!subscribed && message.body.case === 'subscribed') settleSubscribed();
         return true;
       };
       socket.setEncoding('utf8');
       socket.once('connect', () => {
-        socket.write(
-          `${JSON.stringify({
-            protocol_version: 1,
-            request_id: randomUUID(),
-            timestamp: new Date().toISOString(),
-            type: 'subscribe',
-            after_sequence: afterSequence,
-            // Omitted rather than sent as null: an old server forbids unknown
-            // fields, so a default subscribe must stay byte-for-byte what it
-            // has always been.
-            ...(options.tail === undefined ? {} : {tail: options.tail}),
-            ...(options.storeId ? {store_id: options.storeId} : {}),
-          })}\n`,
-        );
+        socket.write(`${encodeRequest(request)}\n`);
       });
       socket.on('data', chunk => {
         for (const line of frames.push(chunk.toString())) {
@@ -292,7 +286,7 @@ export class ServerClient {
       const disconnected = (): void => fail(new Error('Server disconnected during chat'));
       const finish = (response: ProtocolResponse): void => {
         if (settled) return;
-        if (response.request_id !== request.request_id) {
+        if (response.requestId !== request.requestId) {
           fail(new Error('Server chat response has an unexpected request ID'));
           return;
         }
@@ -310,7 +304,7 @@ export class ServerClient {
       const handleChatResponseLine = (line: string): boolean => {
         if (!line) return false;
         try {
-          finish(parseProtocolResponse(line));
+          finish(decodeResponse(line));
         } catch (error) {
           fail(toError(error));
         }
@@ -320,7 +314,7 @@ export class ServerClient {
       socket.setEncoding('utf8');
       socket.once('connect', () => {
         clearTimeout(connectTimeout);
-        socket.write(`${JSON.stringify(request)}\n`, error => {
+        socket.write(`${encodeRequest(request)}\n`, error => {
           if (error) fail(error);
         });
       });
@@ -339,16 +333,16 @@ export class ServerClient {
       if (!line) continue;
       let response: ProtocolResponse;
       try {
-        response = parseProtocolResponse(line);
+        response = decodeResponse(line);
       } catch (error) {
         const parseError = error instanceof Error ? error : new Error(String(error));
         this.#rejectAll(parseError);
         this.#socket.destroy();
         return;
       }
-      const pending = this.#pending.get(response.request_id);
+      const pending = this.#pending.get(response.requestId);
       if (!pending) continue;
-      this.#pending.delete(response.request_id);
+      this.#pending.delete(response.requestId);
       clearTimeout(pending.timeout);
       if (response.ok) pending.resolve(response);
       else pending.reject(responseError(response));
@@ -370,6 +364,25 @@ export class ServerClient {
     clearTimeout(pending.timeout);
     pending.reject(error);
   }
+}
+
+/**
+ * The subscribe request. Optional fields stay unset rather than sent as
+ * defaults: an old server forbids unknown fields, so a default subscribe must
+ * stay exactly what it has always been.
+ */
+function subscribeRequest(afterSequence: number, options: SubscribeOptions): ProtocolRequest {
+  return buildRequest(
+    {
+      case: 'subscribe',
+      value: {
+        afterSequence,
+        ...(options.tail === undefined ? {} : {tail: options.tail}),
+        ...(options.storeId ? {storeId: options.storeId} : {}),
+      },
+    },
+    randomUUID(),
+  );
 }
 
 function isRetryableConnectError(error: unknown): error is Error {
@@ -396,58 +409,4 @@ function closeSocket(socket: Socket): Promise<void> {
     socket.once('close', resolve);
     socket.end();
   });
-}
-
-function parseProtocolResponse(line: string): ProtocolResponse {
-  const value = parseRecord(line, 'response');
-  if (value['protocol_version'] !== 1) throw new Error('Unsupported server protocol version');
-  if (typeof value['request_id'] !== 'string') {
-    throw new Error('Invalid server response: request_id must be a string');
-  }
-  if (typeof value['ok'] !== 'boolean') {
-    throw new Error('Invalid server response: ok must be a boolean');
-  }
-  return value as unknown as ProtocolResponse;
-}
-
-function parseServerMessage(line: string): ServerMessage {
-  const value = parseRecord(line, 'event-stream message');
-  const type = value['type'];
-  if (type === 'subscribed') {
-    if (
-      typeof value['request_id'] !== 'string' ||
-      typeof value['run_id'] !== 'string' ||
-      typeof value['latest_sequence'] !== 'number'
-    ) {
-      throw new Error('Invalid subscribed message');
-    }
-  } else if (type === 'event') {
-    if (!isRecord(value['event'])) throw new Error('Invalid event message');
-  } else if (type === 'event_batch') {
-    if (!Array.isArray(value['events'])) throw new Error('Invalid event batch message');
-  } else if (type === 'protocol_error') {
-    if (typeof value['code'] !== 'string' || typeof value['message'] !== 'string') {
-      throw new Error('Invalid protocol error message');
-    }
-  } else {
-    throw new Error(`Unknown server event-stream message: ${String(type)}`);
-  }
-  return value as unknown as ServerMessage;
-}
-
-function parseRecord(line: string, description: string): Record<string, unknown> {
-  let value: unknown;
-  try {
-    value = JSON.parse(line);
-  } catch (error) {
-    throw new Error(
-      `Invalid server ${description} JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  if (!isRecord(value)) throw new Error(`Invalid server ${description}: expected an object`);
-  return value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

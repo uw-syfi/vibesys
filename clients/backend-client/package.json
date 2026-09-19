@@ -13,6 +13,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
     }
   },
   "files": [
@@ -21,7 +25,6 @@
     "README.md"
   ],
   "scripts": {
-    "generate:protocol": "uv run --project ../.. python -m server.api.schema src/generated/protocol.schema.json && json2ts -i src/generated/protocol.schema.json -o src/generated/protocol.generated.ts --bannerComment '/* Generated from the Python protocol models. Do not edit. */'",
     "build": "node -e \"require('node:fs').rmSync('dist', {recursive: true, force: true})\" && tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.check.json",
     "test": "bun test --max-concurrency 1 src"
@@ -29,7 +32,6 @@
   "devDependencies": {
     "@types/bun": "1.3.9",
     "@types/node": "^24.0.0",
-    "json-schema-to-typescript": "^15.0.4",
     "typescript": "^5.8.3"
   },
   "dependencies": {

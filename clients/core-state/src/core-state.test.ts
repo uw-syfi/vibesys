@@ -1,5 +1,21 @@
 import {describe, expect, it} from 'bun:test';
-import type {RunEvent, RunSnapshot} from '@vibesys/backend-client';
+import {
+  type ActiveAgentExecution,
+  AgentOutputChannel,
+  DiagnosticRetryability,
+  DiagnosticScope,
+  DiagnosticSeverity,
+  EventStatus,
+  EventType,
+  ExecutionActivityMode,
+  ExperimentsChangeReason,
+  FrameworkSource,
+  GateKind,
+  RoundJudgeVerdict,
+  type RunEvent,
+  RunStatus,
+} from '@vibesys/backend-client';
+import {makeEvent, makeSnapshot, timestampOf} from '@vibesys/backend-client/testing';
 import {
   type CoreRunStatus,
   type CoreState,
@@ -18,14 +34,14 @@ import {executionStatusFor} from './execution-status.js';
 describe('core state projection', () => {
   it('projects snapshots without changing event-derived history', () => {
     const prior = reduceEvent(initialCoreState(), outputEvent(4, 'kept'));
-    const snapshot = {
-      run_id: 'run',
-      status: 'running',
+    const snapshot = makeSnapshot({
+      runId: 'run',
+      status: RunStatus.RUNNING,
       sequence: 9,
-      agent_kind: 'judge',
-      round_label: 'round-2-judge',
-      active_executions: [checkpoint('exec-1')],
-    } satisfies RunSnapshot;
+      agentKind: 'judge',
+      roundLabel: 'round-2-judge',
+      activeExecutions: [checkpoint('exec-1')],
+    });
 
     const state = reduceSnapshot(prior, snapshot);
 
@@ -37,33 +53,36 @@ describe('core state projection', () => {
 
   it('rejects a snapshot older than the projected event cursor', () => {
     const current = reduceEvent(initialCoreState(), outputEvent(5, 'current'));
-    const stale = {
-      run_id: 'run',
-      status: 'running',
+    const stale = makeSnapshot({
+      runId: 'run',
+      status: RunStatus.RUNNING,
       sequence: 4,
-      agent_kind: 'judge',
-      round_label: 'round-2-judge',
-      active_executions: [checkpoint('stale')],
-    } satisfies RunSnapshot;
+      agentKind: 'judge',
+      roundLabel: 'round-2-judge',
+      activeExecutions: [checkpoint('stale')],
+    });
 
     expect(reduceSnapshot(current, stale)).toBe(current);
   });
 
   it('registers the chat threads a snapshot projects', () => {
-    const state = reduceSnapshot(initialCoreState(), {
-      run_id: 'run',
-      status: 'running',
-      sequence: 1,
-      chat_threads: [
-        {
-          thread_id: 'thread-a',
-          title: 'Ring buffer sizing',
-          driver: 'agentshim',
-          provider: 'anthropic',
-          model: 'opus',
-        },
-      ],
-    } satisfies RunSnapshot);
+    const state = reduceSnapshot(
+      initialCoreState(),
+      makeSnapshot({
+        runId: 'run',
+        status: RunStatus.RUNNING,
+        sequence: 1,
+        chatThreads: [
+          {
+            threadId: 'thread-a',
+            title: 'Ring buffer sizing',
+            driver: 'agentshim',
+            provider: 'anthropic',
+            model: 'opus',
+          },
+        ],
+      }),
+    );
 
     expect(state.chatThreads).toEqual([
       {id: DEFAULT_CHAT_THREAD_ID, title: '', driver: null, provider: null, model: null},
@@ -84,14 +103,17 @@ describe('core state projection', () => {
   it('registers projected chat threads even from a stale snapshot', () => {
     const current = reduceEvent(initialCoreState(), outputEvent(5, 'current'));
 
-    const state = reduceSnapshot(current, {
-      run_id: 'run',
-      status: 'running',
-      sequence: 4,
-      chat_threads: [
-        {thread_id: 'thread-a', title: '', driver: 'agentshim', provider: 'codex', model: 'gpt-5'},
-      ],
-    } satisfies RunSnapshot);
+    const state = reduceSnapshot(
+      current,
+      makeSnapshot({
+        runId: 'run',
+        status: RunStatus.RUNNING,
+        sequence: 4,
+        chatThreads: [
+          {threadId: 'thread-a', title: '', driver: 'agentshim', provider: 'codex', model: 'gpt-5'},
+        ],
+      }),
+    );
 
     expect(state.status).toBe(current.status);
     expect(state.chatThreads.map(thread => thread.id)).toEqual([
@@ -102,7 +124,7 @@ describe('core state projection', () => {
 
   it('leaves a stale snapshot that projects no chat threads identity-preserving', () => {
     const current = reduceEvent(initialCoreState(), outputEvent(5, 'current'));
-    const stale = {run_id: 'run', status: 'running', sequence: 4} satisfies RunSnapshot;
+    const stale = makeSnapshot({runId: 'run', status: RunStatus.RUNNING, sequence: 4});
 
     expect(reduceSnapshot(current, stale)).toBe(current);
   });
@@ -111,27 +133,30 @@ describe('core state projection', () => {
     let current = reduceEvent(initialCoreState(), threadCreatedEvent(1, 'thread-a', 'anthropic'));
     current = reduceEvent(current, chatTitledEvent(2, 'thread-a', 'Replayed title'));
 
-    const state = reduceSnapshot(current, {
-      run_id: 'run',
-      status: 'running',
-      sequence: 3,
-      chat_threads: [
-        {
-          thread_id: 'thread-a',
-          title: '',
-          driver: 'agentshim',
-          provider: 'anthropic',
-          model: 'opus',
-        },
-        {
-          thread_id: 'thread-b',
-          title: 'Projected',
-          driver: 'agentshim',
-          provider: 'codex',
-          model: 'gpt-5',
-        },
-      ],
-    } satisfies RunSnapshot);
+    const state = reduceSnapshot(
+      current,
+      makeSnapshot({
+        runId: 'run',
+        status: RunStatus.RUNNING,
+        sequence: 3,
+        chatThreads: [
+          {
+            threadId: 'thread-a',
+            title: '',
+            driver: 'agentshim',
+            provider: 'anthropic',
+            model: 'opus',
+          },
+          {
+            threadId: 'thread-b',
+            title: 'Projected',
+            driver: 'agentshim',
+            provider: 'codex',
+            model: 'gpt-5',
+          },
+        ],
+      }),
+    );
 
     expect(state.chatThreads).toEqual([
       {id: DEFAULT_CHAT_THREAD_ID, title: '', driver: null, provider: null, model: null},
@@ -163,7 +188,7 @@ describe('core state projection', () => {
   it('preserves published run-map arrays through core-state clone paths', () => {
     const started = reduceEvent(
       initialCoreState(),
-      executionEvent(1, 'agent_execution_started', 'exec', startedData('Implement')),
+      executionEvent(1, EventType.AGENT_EXECUTION_STARTED, 'exec', startedData('Implement')),
     );
     const rounds = started.rounds;
     const phases = started.phases;
@@ -171,7 +196,7 @@ describe('core state projection', () => {
     const streamed = reduceEvent(started, outputEvent(2, 'working', 'exec'));
     const diagnosed = reduceEvent(
       streamed,
-      diagnosticEvent(3, 'agent_output_chunk', 'warning', 'warning', 'Check output'),
+      diagnosticEvent(3, EventType.AGENT_OUTPUT_CHUNK, 'warning', 'warning', 'Check output'),
     );
     const batched = reduceEventBatch(diagnosed, [outputEvent(4, 'still working', 'exec')]);
     const chatted = reduceEvent(batched, chatAnswerEvent(5, 'status'));
@@ -187,17 +212,14 @@ describe('core state projection', () => {
   });
 
   it('applies event batches before reconciling their execution checkpoint', () => {
-    const started = executionEvent(1, 'agent_execution_started', 'stale', {
-      kind: 'agent_execution_started',
-      stage: 'implementation',
-      attempt: 1,
-      system_prompt: '',
-      user_prompt: 'Implement the queue',
-      activity: {
-        kind: 'agent_execution_activity_changed',
-        mode: 'thinking',
-        summary: 'Inspecting',
-        tool: null,
+    const started = executionEvent(1, EventType.AGENT_EXECUTION_STARTED, 'stale', {
+      case: 'agentExecutionStarted',
+      value: {
+        stage: 'implementation',
+        attempt: 1,
+        systemPrompt: '',
+        userPrompt: 'Implement the queue',
+        activity: {mode: ExecutionActivityMode.THINKING, summary: 'Inspecting'},
       },
     });
 
@@ -218,26 +240,24 @@ describe('core state projection', () => {
     let state = initialCoreState();
     state = reduceEvent(
       state,
-      executionEvent(1, 'agent_execution_started', 'first', startedData('First')),
+      executionEvent(1, EventType.AGENT_EXECUTION_STARTED, 'first', startedData('First')),
     );
     state = reduceEvent(
       state,
-      executionEvent(2, 'agent_execution_started', 'second', startedData('Second')),
+      executionEvent(2, EventType.AGENT_EXECUTION_STARTED, 'second', startedData('Second')),
     );
     state = reduceEvent(
       state,
-      executionEvent(3, 'agent_execution_activity_changed', 'second', {
-        kind: 'agent_execution_activity_changed',
-        mode: 'tool',
-        summary: 'Running tests',
-        tool: 'Bash',
+      executionEvent(3, EventType.AGENT_EXECUTION_ACTIVITY_CHANGED, 'second', {
+        case: 'agentExecutionActivityChanged',
+        value: {mode: ExecutionActivityMode.TOOL, summary: 'Running tests', tool: 'Bash'},
       }),
     );
     state = reduceEvent(
       state,
-      executionEvent(4, 'agent_execution_finished', 'first', {
-        kind: 'agent_execution_finished',
-        error: null,
+      executionEvent(4, EventType.AGENT_EXECUTION_FINISHED, 'first', {
+        case: 'agentExecutionFinished',
+        value: {},
       }),
     );
 
@@ -253,30 +273,30 @@ describe('core state projection', () => {
     let state = initialCoreState();
     state = reduceEvent(
       state,
-      executionEvent(1, 'agent_execution_started', 'first', startedData('First')),
+      executionEvent(1, EventType.AGENT_EXECUTION_STARTED, 'first', startedData('First')),
     );
     state = reduceEvent(
       state,
-      executionEvent(2, 'agent_execution_started', 'second', startedData('Second')),
+      executionEvent(2, EventType.AGENT_EXECUTION_STARTED, 'second', startedData('Second')),
     );
     state = reduceEvent(
       state,
       statusEvent(3, 'first', 'agent_output_chunk', {
         progress: 'Round 1/3',
-        agent_label: 'Implementer',
-        elapsed_seconds: 12.5,
-        input_tokens: 8_000,
-        context_window: 200_000,
+        agentLabel: 'Implementer',
+        elapsedSeconds: 12.5,
+        inputTokens: 8_000,
+        contextWindow: 200_000,
       }),
     );
     state = reduceEvent(
       state,
       statusEvent(4, 'second', 'tool_call', {
         progress: 'Reviewing',
-        agent_label: 'Judge',
-        elapsed_seconds: 3,
-        input_tokens: 2_000,
-        context_window: 100_000,
+        agentLabel: 'Judge',
+        elapsedSeconds: 3,
+        inputTokens: 2_000,
+        contextWindow: 100_000,
       }),
     );
 
@@ -284,7 +304,7 @@ describe('core state projection', () => {
       first: {
         executionId: 'first',
         sequence: 3,
-        observedAt: '2026-01-01T00:00:03Z',
+        observedAt: '2026-01-01T00:00:03.000Z',
         progress: 'Round 1/3',
         agentLabel: 'Implementer',
         elapsedSeconds: 12.5,
@@ -294,7 +314,7 @@ describe('core state projection', () => {
       second: {
         executionId: 'second',
         sequence: 4,
-        observedAt: '2026-01-01T00:00:04Z',
+        observedAt: '2026-01-01T00:00:04.000Z',
         progress: 'Reviewing',
         agentLabel: 'Judge',
         elapsedSeconds: 3,
@@ -304,10 +324,7 @@ describe('core state projection', () => {
     });
     expect(state.usage).toEqual({inputTokens: 2_000, contextWindow: 100_000, model: null});
 
-    state = reduceEvent(
-      state,
-      statusEvent(5, 'first', 'agent_output_chunk', {input_tokens: 9_000}),
-    );
+    state = reduceEvent(state, statusEvent(5, 'first', 'agent_output_chunk', {inputTokens: 9_000}));
     expect(state.executionStatuses['first']).toMatchObject({
       sequence: 5,
       inputTokens: 9_000,
@@ -319,17 +336,17 @@ describe('core state projection', () => {
   it('treats a zero input-token status as no update, keeping the live reading', () => {
     let state = reduceEvent(
       initialCoreState(),
-      executionEvent(1, 'agent_execution_started', 'first', startedData('First')),
+      executionEvent(1, EventType.AGENT_EXECUTION_STARTED, 'first', startedData('First')),
     );
     state = reduceEvent(
       state,
-      statusEvent(2, 'first', 'agent_output_chunk', {input_tokens: 8_000, context_window: 200_000}),
+      statusEvent(2, 'first', 'agent_output_chunk', {inputTokens: 8_000, contextWindow: 200_000}),
     );
     expect(state.usage).toEqual({inputTokens: 8_000, contextWindow: 200_000, model: null});
 
     // The backend seeds input_tokens at 0 and emits that before the agent's
     // next completion; a 0 must not overwrite the live count or blank the meter.
-    state = reduceEvent(state, statusEvent(3, 'first', 'agent_output_chunk', {input_tokens: 0}));
+    state = reduceEvent(state, statusEvent(3, 'first', 'agent_output_chunk', {inputTokens: 0}));
     expect(state.executionStatuses['first']).toMatchObject({sequence: 3, inputTokens: 8_000});
     expect(state.usage).toEqual({inputTokens: 8_000, contextWindow: 200_000, model: null});
   });
@@ -343,16 +360,16 @@ describe('core state projection', () => {
 
     state = reduceEvent(
       state,
-      executionEvent(3, 'agent_execution_finished', 'first', {
-        kind: 'agent_execution_finished',
-        error: null,
+      executionEvent(3, EventType.AGENT_EXECUTION_FINISHED, 'first', {
+        case: 'agentExecutionFinished',
+        value: {},
       }),
     );
     expect(Object.keys(state.executionStatuses)).toEqual(['second']);
 
     state = reconcileActiveExecutions(
       state,
-      [checkpoint('second', {started_at: '2026-01-01T00:00:05Z'})],
+      [checkpoint('second', {startedAt: timestampOf('2026-01-01T00:00:05Z')})],
       3,
     );
     const restarted = state.activeExecutions['second'];
@@ -366,7 +383,7 @@ describe('core state projection', () => {
   it('leaves legacy output without structured status unchanged', () => {
     const started = reduceEvent(
       initialCoreState(),
-      executionEvent(1, 'agent_execution_started', 'first', startedData('First')),
+      executionEvent(1, EventType.AGENT_EXECUTION_STARTED, 'first', startedData('First')),
     );
     const projected = reduceEvent(started, outputEvent(2, 'legacy', 'first'));
 
@@ -386,16 +403,16 @@ describe('core state projection', () => {
       state,
       statusEvent(2, 'first', 'agent_output_chunk', {
         progress: 'sequenced',
-        input_tokens: 7_000,
-        context_window: 20_000,
+        inputTokens: 7_000,
+        contextWindow: 20_000,
       }),
     );
     state = reduceEvent(
       state,
       statusEvent(0, 'first', 'agent_output_chunk', {
         progress: 'stale unsequenced',
-        input_tokens: 1,
-        context_window: 2,
+        inputTokens: 1,
+        contextWindow: 2,
       }),
     );
     expect(state.executionStatuses['first']?.progress).toBe('sequenced');
@@ -405,11 +422,10 @@ describe('core state projection', () => {
 
   it('clears pending status when the run terminates before a checkpoint arrives', () => {
     const pending = reduceEvent(initialCoreState(), statusEvent(1, 'first', 'agent_output_chunk'));
-    const ended = reduceEvent(pending, {
-      ...baseEvent(2, 'run_failed'),
-      agent_kind: null,
-      round_label: null,
-    });
+    const ended = reduceEvent(
+      pending,
+      baseEvent(2, EventType.RUN_FAILED, {agentKind: undefined, roundLabel: undefined}),
+    );
 
     expect(ended.executionStatuses).toEqual({});
   });
@@ -417,12 +433,16 @@ describe('core state projection', () => {
   it('captures runtime identity from agent_execution_started when present', () => {
     const state = reduceEvent(
       initialCoreState(),
-      executionEvent(1, 'agent_execution_started', 'first', {
-        ...startedData('Implement the queue'),
-        driver: 'agentshim',
-        provider: 'codex',
-        model: 'gpt-5.1-codex-max',
-      }),
+      executionEvent(
+        1,
+        EventType.AGENT_EXECUTION_STARTED,
+        'first',
+        startedData('Implement the queue', {
+          driver: 'agentshim',
+          provider: 'codex',
+          model: 'gpt-5.1-codex-max',
+        }),
+      ),
     );
 
     expect(state.activeExecutions['first']).toMatchObject({
@@ -435,7 +455,12 @@ describe('core state projection', () => {
   it('defaults runtime identity to null when the event omits it', () => {
     const state = reduceEvent(
       initialCoreState(),
-      executionEvent(1, 'agent_execution_started', 'first', startedData('Implement the queue')),
+      executionEvent(
+        1,
+        EventType.AGENT_EXECUTION_STARTED,
+        'first',
+        startedData('Implement the queue'),
+      ),
     );
 
     expect(state.activeExecutions['first']).toMatchObject({
@@ -451,16 +476,16 @@ describe('core state projection', () => {
   // reconcileActiveExecutions), so if it dropped the identity fields, any
   // event_batch or reconnect would erase a label the live event had just set.
   it('carries runtime identity through a snapshot checkpoint', () => {
-    const snapshot = {
-      run_id: 'run',
-      status: 'running',
+    const snapshot = makeSnapshot({
+      runId: 'run',
+      status: RunStatus.RUNNING,
       sequence: 1,
-      agent_kind: 'judge',
-      round_label: 'round-2-judge',
-      active_executions: [
+      agentKind: 'judge',
+      roundLabel: 'round-2-judge',
+      activeExecutions: [
         checkpoint('exec-1', {driver: 'agentshim', provider: 'codex', model: 'gpt-5.1-codex-max'}),
       ],
-    } satisfies RunSnapshot;
+    });
 
     const state = reduceSnapshot(initialCoreState(), snapshot);
 
@@ -507,68 +532,82 @@ describe('core state projection', () => {
       text: 'x'.repeat(200),
       nested: {items: [1, {enabled: true, labels: ['alpha', 'beta']}]},
     };
-    let state = reduceEvent(initialCoreState(), {
-      ...baseEvent(1, 'tool_call'),
-      invocation_id: 'turn',
-      data: {kind: 'tool_call', tool: 'Edit', call_id: 'call-long', args: arguments_},
-    });
-    state = reduceEvent(state, {
-      ...baseEvent(2, 'tool_result'),
-      invocation_id: 'turn',
-      data: {
-        kind: 'tool_result',
-        tool: 'Edit',
-        call_id: 'call-long',
-        content: 'result '.repeat(40),
-        is_error: true,
-      },
-    });
+    let state = reduceEvent(
+      initialCoreState(),
+      baseEvent(1, EventType.TOOL_CALL, {
+        executionId: 'turn',
+        data: {
+          case: 'toolCall',
+          value: {tool: 'Edit', callId: 'call-long', args: arguments_},
+        },
+      }),
+    );
+    state = reduceEvent(
+      state,
+      baseEvent(2, EventType.TOOL_RESULT, {
+        executionId: 'turn',
+        data: {
+          case: 'toolResult',
+          value: {
+            tool: 'Edit',
+            callId: 'call-long',
+            content: 'result '.repeat(40),
+            isError: true,
+          },
+        },
+      }),
+    );
 
     expect(state.transcript[0]?.toolArguments).toEqual(arguments_);
-    expect(state.transcript[0]?.toolResult).toEqual({
-      kind: 'tool_result',
+    expect(state.transcript[0]?.toolResult).toMatchObject({
       tool: 'Edit',
-      call_id: 'call-long',
+      callId: 'call-long',
       content: 'result '.repeat(40),
-      is_error: true,
+      isError: true,
     });
     expect(state.transcript[0]?.toolCall).toBeUndefined();
     expect(state.transcript[0]?.toolResponse).toBeUndefined();
   });
 
   it('carries the typed result payload onto the merged transcript entry', () => {
-    let state = reduceEvent(initialCoreState(), {
-      ...baseEvent(1, 'tool_call'),
-      invocation_id: 'turn',
-      data: {kind: 'tool_call', tool: 'shell', call_id: 'call-1', args: {cmd: 'ls'}},
-    });
-    state = reduceEvent(state, {
-      ...baseEvent(2, 'tool_result'),
-      invocation_id: 'turn',
-      data: {
-        kind: 'tool_result',
-        tool: 'shell',
-        call_id: 'call-1',
-        content: 'file.txt',
-        payload: {kind: 'command', stdout: 'file.txt', stderr: '', exit_code: 0, duration: 0.1},
-      },
-    });
+    let state = reduceEvent(
+      initialCoreState(),
+      baseEvent(1, EventType.TOOL_CALL, {
+        executionId: 'turn',
+        data: {case: 'toolCall', value: {tool: 'shell', callId: 'call-1', args: {cmd: 'ls'}}},
+      }),
+    );
+    state = reduceEvent(
+      state,
+      baseEvent(2, EventType.TOOL_RESULT, {
+        executionId: 'turn',
+        data: {
+          case: 'toolResult',
+          value: {
+            tool: 'shell',
+            callId: 'call-1',
+            content: 'file.txt',
+            payload: {
+              case: 'command',
+              value: {stdout: 'file.txt', stderr: '', exitCode: 0, duration: 0.1},
+            },
+          },
+        },
+      }),
+    );
 
     expect(state.transcript).toHaveLength(1);
-    expect(state.transcript[0]?.toolResult?.payload).toEqual({
-      kind: 'command',
-      stdout: 'file.txt',
-      stderr: '',
-      exit_code: 0,
-      duration: 0.1,
+    expect(state.transcript[0]?.toolResult?.payload).toMatchObject({
+      case: 'command',
+      value: {stdout: 'file.txt', stderr: '', exitCode: 0, duration: 0.1},
     });
   });
 
   it('keeps chat-agent events out of the experiment transcript', () => {
     const chat = {
       ...outputEvent(1, 'answer'),
-      agent_kind: 'chat',
-      round_label: 'experiment-chat',
+      agentKind: 'chat',
+      roundLabel: 'experiment-chat',
     } satisfies RunEvent;
 
     const state = reduceEvent(initialCoreState(), chat);
@@ -693,10 +732,10 @@ describe('core state projection', () => {
   it('adopts the backend-derived title carried on a chat event', () => {
     let state = initialCoreState();
     state = reduceEvent(state, threadCreatedEvent(1, 'thread-a', 'claude'));
-    state = reduceEvent(state, {
-      ...chatAnswerEvent(2, 'first answer', 'thread-a'),
-      data: {kind: 'chat', answer: 'first answer', thread_title: 'why did r2 regress'},
-    });
+    state = reduceEvent(
+      state,
+      chatAnswerEvent(2, 'first answer', 'thread-a', undefined, 'why did r2 regress'),
+    );
 
     expect(state.chatThreads.find(thread => thread.id === 'thread-a')?.title).toBe(
       'why did r2 regress',
@@ -704,10 +743,10 @@ describe('core state projection', () => {
   });
 
   it('names a thread from a titled turn even when its creation replayed away', () => {
-    const state = reduceEvent(initialCoreState(), {
-      ...chatAnswerEvent(1, 'answer', 'thread-x'),
-      data: {kind: 'chat', answer: 'answer', thread_title: 'orphan thread'},
-    });
+    const state = reduceEvent(
+      initialCoreState(),
+      chatAnswerEvent(1, 'answer', 'thread-x', undefined, 'orphan thread'),
+    );
 
     expect(state.chatThreads.find(thread => thread.id === 'thread-x')?.title).toBe('orphan thread');
     expect(state.chatTranscripts['thread-x']?.map(entry => entry.content)).toEqual(['answer']);
@@ -715,16 +754,18 @@ describe('core state projection', () => {
 
   it('drops legacy chat tool chunks per thread once typed events appear', () => {
     let state = initialCoreState();
-    state = reduceEvent(state, {
-      ...baseEvent(1, 'tool_call'),
-      agent_kind: 'chat',
-      chat_thread_id: 'thread-a',
-      data: {kind: 'tool_call', tool: 'read_file', args: {}},
-    });
+    state = reduceEvent(
+      state,
+      baseEvent(1, EventType.TOOL_CALL, {
+        agentKind: 'chat',
+        chatThreadId: 'thread-a',
+        data: {case: 'toolCall', value: {tool: 'read_file', args: {}}},
+      }),
+    );
     // The default thread saw no typed events, so its legacy chunks survive.
     state = reduceEvent(state, {
       ...outputEvent(2, 'legacy default output'),
-      agent_kind: 'chat',
+      agentKind: 'chat',
     });
 
     expect(state.chatTypedToolEvents).toEqual({'thread-a': true});
@@ -744,10 +785,12 @@ describe('core state projection', () => {
   });
 
   it('retains semantic benchmark data independently of rendered charts', () => {
-    const state = reduceEvent(initialCoreState(), {
-      ...baseEvent(8, 'benchmark_result'),
-      data: {kind: 'benchmark_result', metric: 'ops', value: 42, unit: 'ops/s'},
-    });
+    const state = reduceEvent(
+      initialCoreState(),
+      baseEvent(8, EventType.BENCHMARK_RESULT, {
+        data: {case: 'benchmarkResult', value: {metric: 'ops', value: 42, unit: 'ops/s'}},
+      }),
+    );
 
     expect(state.benchmarks).toEqual([
       {sequence: 8, roundNumber: 1, metric: 'ops', value: 42, unit: 'ops/s'},
@@ -755,21 +798,21 @@ describe('core state projection', () => {
   });
 
   it('records structured diagnostics as durable facts', () => {
-    const state = reduceEvent(initialCoreState(), {
-      ...baseEvent(3, 'run_failed'),
-      diagnostic: {
-        id: 'diag-1',
-        code: 'agent_failed',
-        summary: 'Agent failed.',
-        detail: 'Exit 2',
-        hint: 'Retry.',
-        scope: 'run',
-        severity: 'fatal',
-        retryability: 'manual',
-        cause_id: null,
-        debug_ref: null,
-      },
-    });
+    const state = reduceEvent(
+      initialCoreState(),
+      baseEvent(3, EventType.RUN_FAILED, {
+        diagnostic: {
+          id: 'diag-1',
+          code: 'agent_failed',
+          summary: 'Agent failed.',
+          detail: 'Exit 2',
+          hint: 'Retry.',
+          scope: DiagnosticScope.RUN,
+          severity: DiagnosticSeverity.FATAL,
+          retryability: DiagnosticRetryability.MANUAL,
+        },
+      }),
+    );
 
     expect(hasRunEnded(state)).toBe(true);
     expect(state.diagnostics).toMatchObject([
@@ -778,28 +821,29 @@ describe('core state projection', () => {
   });
 
   it('prefers a structured diagnostic over a conflicting legacy failure envelope', () => {
-    const state = reduceEvent(initialCoreState(), {
-      ...baseEvent(3, 'configuration_failed'),
-      data: {
-        kind: 'configuration_failed',
-        code: 'legacy_code',
-        message: 'Legacy summary',
-        stage: 'configuration',
-        exit_code: 2,
-      },
-      diagnostic: {
-        id: 'diag-structured',
-        code: 'structured_code',
-        summary: 'Structured summary',
-        detail: 'Structured detail',
-        hint: null,
-        scope: 'run',
-        severity: 'error',
-        retryability: 'manual',
-        cause_id: null,
-        debug_ref: null,
-      },
-    });
+    const state = reduceEvent(
+      initialCoreState(),
+      baseEvent(3, EventType.CONFIGURATION_FAILED, {
+        data: {
+          case: 'configurationFailed',
+          value: {
+            code: 'legacy_code',
+            message: 'Legacy summary',
+            stage: 'configuration',
+            exitCode: 2,
+          },
+        },
+        diagnostic: {
+          id: 'diag-structured',
+          code: 'structured_code',
+          summary: 'Structured summary',
+          detail: 'Structured detail',
+          scope: DiagnosticScope.RUN,
+          severity: DiagnosticSeverity.ERROR,
+          retryability: DiagnosticRetryability.MANUAL,
+        },
+      }),
+    );
 
     expect(state.diagnostics).toMatchObject([
       {
@@ -814,22 +858,26 @@ describe('core state projection', () => {
   });
 
   it('classifies legacy invocation and run failure envelopes by scope', () => {
-    const invocation = reduceEvent(initialCoreState(), {
-      ...baseEvent(4, 'invocation_finished'),
-      status: 'failed',
-      data: {
-        kind: 'invocation_finished',
-        error: null,
-      },
-    });
-    const failed = reduceEvent(initialCoreState(), {
-      ...baseEvent(5, 'run_failed'),
-      text: 'worker exited',
-    });
-    const interrupted = reduceEvent(initialCoreState(), {
-      ...baseEvent(6, 'run_interrupted'),
-      data: {kind: 'run_interrupted', reason: 'launcher_terminated', signal: 'SIGTERM'},
-    });
+    const invocation = reduceEvent(
+      initialCoreState(),
+      baseEvent(4, EventType.INVOCATION_FINISHED, {
+        status: EventStatus.FAILED,
+        data: {case: 'invocationFinished', value: {}},
+      }),
+    );
+    const failed = reduceEvent(
+      initialCoreState(),
+      baseEvent(5, EventType.RUN_FAILED, {text: 'worker exited'}),
+    );
+    const interrupted = reduceEvent(
+      initialCoreState(),
+      baseEvent(6, EventType.RUN_INTERRUPTED, {
+        data: {
+          case: 'runInterrupted',
+          value: {reason: 'launcher_terminated', signal: 'SIGTERM'},
+        },
+      }),
+    );
 
     expect(invocation.diagnostics).toMatchObject([
       {scope: 'invocation', severity: 'error', summary: 'Agent invocation failed.'},
@@ -850,14 +898,13 @@ describe('core state projection', () => {
   it('promotes a repeated diagnostic id with richer terminal detail', () => {
     const initialFailure = reduceEvent(
       initialCoreState(),
-      diagnosticEvent(1, 'invocation_finished', 'diag-1', 'error', 'Agent failed.', {
+      diagnosticEvent(1, EventType.INVOCATION_FINISHED, 'diag-1', 'error', 'Agent failed.', {
         invocationId: 'invocation-1',
-        detail: null,
       }),
     );
     const state = reduceEvent(
       initialFailure,
-      diagnosticEvent(2, 'run_failed', 'diag-1', 'fatal', 'Agent failed terminally.', {
+      diagnosticEvent(2, EventType.RUN_FAILED, 'diag-1', 'fatal', 'Agent failed terminally.', {
         detail: 'Exit 2',
       }),
     );
@@ -879,13 +926,13 @@ describe('core state projection', () => {
   it('preserves distinct diagnostic ids from the same invocation', () => {
     let state = reduceEvent(
       initialCoreState(),
-      diagnosticEvent(1, 'invocation_finished', 'diag-1', 'error', 'First failure.', {
+      diagnosticEvent(1, EventType.INVOCATION_FINISHED, 'diag-1', 'error', 'First failure.', {
         invocationId: 'invocation-1',
       }),
     );
     state = reduceEvent(
       state,
-      diagnosticEvent(2, 'phase_finished', 'diag-2', 'error', 'Second failure.', {
+      diagnosticEvent(2, EventType.PHASE_FINISHED, 'diag-2', 'error', 'Second failure.', {
         invocationId: 'invocation-1',
       }),
     );
@@ -894,17 +941,21 @@ describe('core state projection', () => {
   });
 
   it('retains structured configuration failure detail in the transcript', () => {
-    const state = reduceEvent(initialCoreState(), {
-      ...baseEvent(3, 'configuration_failed'),
-      data: {
-        kind: 'configuration_failed',
-        code: 'resume_limit_exhausted',
-        message: 'This run has completed 30 rounds.',
-        usage: 'Use a larger limit.',
-        stage: 'configuration',
-        exit_code: 2,
-      },
-    });
+    const state = reduceEvent(
+      initialCoreState(),
+      baseEvent(3, EventType.CONFIGURATION_FAILED, {
+        data: {
+          case: 'configurationFailed',
+          value: {
+            code: 'resume_limit_exhausted',
+            message: 'This run has completed 30 rounds.',
+            usage: 'Use a larger limit.',
+            stage: 'configuration',
+            exitCode: 2,
+          },
+        },
+      }),
+    );
 
     expect(state.transcript[0]?.content).toContain('resume_limit_exhausted');
     expect(state.transcript[0]?.content).toContain('Use a larger limit.');
@@ -916,10 +967,15 @@ describe('core state projection', () => {
   });
 
   it('projects an interruption discriminator without presentation labels', () => {
-    const state = reduceEvent(initialCoreState(), {
-      ...baseEvent(3, 'run_interrupted'),
-      data: {kind: 'run_interrupted', reason: 'launcher_terminated', signal: 'SIGTERM'},
-    });
+    const state = reduceEvent(
+      initialCoreState(),
+      baseEvent(3, EventType.RUN_INTERRUPTED, {
+        data: {
+          case: 'runInterrupted',
+          value: {reason: 'launcher_terminated', signal: 'SIGTERM'},
+        },
+      }),
+    );
 
     expect(state.diagnostics[0]).toMatchObject({
       failureKind: 'run_interruption',
@@ -931,15 +987,17 @@ describe('core state projection', () => {
   });
 
   it('distinguishes failed and interrupted terminal transcript entries', () => {
-    const failed = reduceEvent(initialCoreState(), {
-      ...baseEvent(1, 'run_failed'),
-      text: '',
-    });
-    const interrupted = reduceEvent(initialCoreState(), {
-      ...baseEvent(1, 'run_interrupted'),
-      text: '',
-      data: {kind: 'run_interrupted', reason: 'Operator stopped the run', signal: 'SIGINT'},
-    });
+    const failed = reduceEvent(initialCoreState(), baseEvent(1, EventType.RUN_FAILED, {text: ''}));
+    const interrupted = reduceEvent(
+      initialCoreState(),
+      baseEvent(1, EventType.RUN_INTERRUPTED, {
+        text: '',
+        data: {
+          case: 'runInterrupted',
+          value: {reason: 'Operator stopped the run', signal: 'SIGINT'},
+        },
+      }),
+    );
 
     expect(failed.transcript.at(-1)).toMatchObject({
       content: 'Run failed.',
@@ -952,19 +1010,21 @@ describe('core state projection', () => {
   });
 
   it('keeps typed payload precedence over conflicting event-type fallbacks', () => {
-    const chat = reduceEvent(initialCoreState(), {
-      ...baseEvent(1, 'phase_started'),
-      data: {kind: 'chat', answer: 'typed answer'},
-    });
-    const gate = reduceEvent(initialCoreState(), {
-      ...baseEvent(2, 'run_failed'),
-      data: {
-        kind: 'gate_started',
-        gate: 'validation',
-        recipe: 'focused-tests',
-        command: 'bun test',
-      },
-    });
+    const chat = reduceEvent(
+      initialCoreState(),
+      baseEvent(1, EventType.PHASE_STARTED, {
+        data: {case: 'chat', value: {answer: 'typed answer'}},
+      }),
+    );
+    const gate = reduceEvent(
+      initialCoreState(),
+      baseEvent(2, EventType.RUN_FAILED, {
+        data: {
+          case: 'gateStarted',
+          value: {gate: GateKind.VALIDATION, recipe: 'focused-tests', command: 'bun test'},
+        },
+      }),
+    );
 
     expect(chat.transcript).toMatchObject([{kind: 'assistant', content: 'typed answer'}]);
     expect(gate.transcript).toMatchObject([
@@ -977,10 +1037,15 @@ describe('core state projection', () => {
   });
 
   it('exposes experiment changes only as stream-derived invalidation', () => {
-    const state = reduceEvent(initialCoreState(), {
-      ...baseEvent(12, 'experiments_changed'),
-      data: {kind: 'experiments_changed', reason: 'round_persisted'},
-    });
+    const state = reduceEvent(
+      initialCoreState(),
+      baseEvent(12, EventType.EXPERIMENTS_CHANGED, {
+        data: {
+          case: 'experimentsChanged',
+          value: {reason: ExperimentsChangeReason.ROUND_PERSISTED},
+        },
+      }),
+    );
 
     expect(state.experimentsRevision).toBe(12);
     expect('experimentLog' in state).toBe(false);
@@ -1003,7 +1068,7 @@ describe('whether a run has ended', () => {
   });
 
   it('reads an ended run from a bootstrapped snapshot', () => {
-    const snapshot = {run_id: 'run', status: 'completed', sequence: 4} satisfies RunSnapshot;
+    const snapshot = makeSnapshot({runId: 'run', status: RunStatus.COMPLETED, sequence: 4});
 
     const state = reduceSnapshot(initialCoreState(), snapshot);
 
@@ -1016,11 +1081,8 @@ describe('whether a run has ended', () => {
   // is live.
   it('has not ended after a resumed run replays a failure then a start', () => {
     const state = reduceEventBatch(initialCoreState(), [
-      baseEvent(1, 'run_failed'),
-      {
-        ...baseEvent(2, 'run_started'),
-        data: {kind: 'run_started', outer_loop: 'agent', input: '.', max_rounds: 3},
-      },
+      baseEvent(1, EventType.RUN_FAILED),
+      runStartedEvent(2),
     ]);
 
     expect(state.status).toBe('running');
@@ -1033,10 +1095,12 @@ describe('whether a run has ended', () => {
 // pause is visible for exactly as long as the backend says it lasts.
 describe('the run lifecycle', () => {
   const statusEvent = (sequence: number, status: CoreRunStatus, previous: CoreRunStatus) =>
-    ({
-      ...baseEvent(sequence, 'run_status_changed'),
-      data: {kind: 'run_status_changed', status, previous},
-    }) as RunEvent;
+    baseEvent(sequence, EventType.RUN_STATUS_CHANGED, {
+      data: {
+        case: 'runStatusChanged',
+        value: {status: wireRunStatus(status), previous: wireRunStatus(previous)},
+      },
+    });
 
   it('folds a pause request, its boundary, and the resume', () => {
     const requested = reduceEvent(initialCoreState(), statusEvent(1, 'pausing', 'running'));
@@ -1071,12 +1135,15 @@ describe('the run lifecycle', () => {
   });
 
   it('drops the active executions of an operator-stopped run', () => {
-    const running = reduceSnapshot(initialCoreState(), {
-      run_id: 'run',
-      status: 'stopping',
-      sequence: 1,
-      active_executions: [checkpoint('exec-1')],
-    } satisfies RunSnapshot);
+    const running = reduceSnapshot(
+      initialCoreState(),
+      makeSnapshot({
+        runId: 'run',
+        status: RunStatus.STOPPING,
+        sequence: 1,
+        activeExecutions: [checkpoint('exec-1')],
+      }),
+    );
 
     const state = reduceEvent(running, statusEvent(2, 'stopped', 'stopping'));
 
@@ -1095,12 +1162,15 @@ describe('the run lifecycle', () => {
   });
 
   it('drops the active executions of a run that ended while paused', () => {
-    const running = reduceSnapshot(initialCoreState(), {
-      run_id: 'run',
-      status: 'paused',
-      sequence: 1,
-      active_executions: [checkpoint('exec-1')],
-    } satisfies RunSnapshot);
+    const running = reduceSnapshot(
+      initialCoreState(),
+      makeSnapshot({
+        runId: 'run',
+        status: RunStatus.PAUSED,
+        sequence: 1,
+        activeExecutions: [checkpoint('exec-1')],
+      }),
+    );
 
     const state = reduceEvent(running, statusEvent(2, 'failed', 'paused'));
 
@@ -1111,14 +1181,17 @@ describe('the run lifecycle', () => {
     const ended = reduceEventBatch(initialCoreState(), [
       statusEvent(1, 'pausing', 'running'),
       statusEvent(2, 'completed', 'pausing'),
-      baseEvent(3, 'run_finished'),
+      baseEvent(3, EventType.RUN_FINISHED),
     ]);
 
-    const stale = reduceSnapshot(ended, {
-      run_id: 'run',
-      status: 'running',
-      sequence: 3,
-    } satisfies RunSnapshot);
+    const stale = reduceSnapshot(
+      ended,
+      makeSnapshot({
+        runId: 'run',
+        status: RunStatus.RUNNING,
+        sequence: 3,
+      }),
+    );
 
     expect(stale.status).toBe('completed');
   });
@@ -1126,7 +1199,7 @@ describe('the run lifecycle', () => {
   it('reads a resumed run as running from the transition after the replay', () => {
     const state = reduceEventBatch(initialCoreState(), [
       statusEvent(1, 'completed', 'running'),
-      baseEvent(2, 'run_finished'),
+      baseEvent(2, EventType.RUN_FINISHED),
       statusEvent(3, 'running', 'starting'),
     ]);
 
@@ -1140,14 +1213,7 @@ describe('the run lifecycle', () => {
 // re-bootstrapped at a tail of the run log. The two batches number different
 // logs, which is why the second supersedes the state the first built.
 describe('a re-bootstrapped stream', () => {
-  const runLog: RunEvent[] = [
-    {
-      ...baseEvent(1, 'run_started'),
-      data: {kind: 'run_started', outer_loop: 'agent', input: '.', max_rounds: 3},
-    },
-    outputEvent(2, 'two'),
-    outputEvent(3, 'three'),
-  ];
+  const runLog: RunEvent[] = [runStartedEvent(1), outputEvent(2, 'two'), outputEvent(3, 'three')];
 
   it('folds events the superseded cursor would have dropped', () => {
     const superseded = reduceEventBatch(initialCoreState(), [outputEvent(2, 'pre-attach')]);
@@ -1163,20 +1229,23 @@ describe('a re-bootstrapped stream', () => {
   });
 
   it('keeps the chat threads a concurrent snapshot registered', () => {
-    const superseded = reduceSnapshot(initialCoreState(), {
-      run_id: 'run',
-      status: 'running',
-      sequence: 1,
-      chat_threads: [
-        {
-          thread_id: 'thread-a',
-          title: 'Ring buffer sizing',
-          driver: 'agentshim',
-          provider: 'anthropic',
-          model: 'opus',
-        },
-      ],
-    } satisfies RunSnapshot);
+    const superseded = reduceSnapshot(
+      initialCoreState(),
+      makeSnapshot({
+        runId: 'run',
+        status: RunStatus.RUNNING,
+        sequence: 1,
+        chatThreads: [
+          {
+            threadId: 'thread-a',
+            title: 'Ring buffer sizing',
+            driver: 'agentshim',
+            provider: 'anthropic',
+            model: 'opus',
+          },
+        ],
+      }),
+    );
 
     const state = reduceEventRebootstrap(superseded, runLog, [], 3, 1);
 
@@ -1226,11 +1295,13 @@ describe('batched transcript folding', () => {
     const events = [
       toolEvent(1, 'tool_call', 'call-a', 'first'),
       toolEvent(2, 'tool_call', 'call-b', 'second'),
-      {
-        ...baseEvent(3, 'tool_result'),
-        invocation_id: 'turn',
-        data: {kind: 'tool_result', tool: 'Bash', content: 'anonymous result', is_error: false},
-      } satisfies RunEvent,
+      baseEvent(3, EventType.TOOL_RESULT, {
+        executionId: 'turn',
+        data: {
+          case: 'toolResult',
+          value: {tool: 'Bash', content: 'anonymous result', isError: false},
+        },
+      }),
     ];
 
     const state = reduceEventBatch(initialCoreState(), events);
@@ -1372,7 +1443,7 @@ describe('the framework-validation gate command adapter', () => {
 
 describe('the carried-forward profile flag', () => {
   it('lands on the round whose round_finished event skipped profiling', () => {
-    const state = reduceEvent(initialCoreState(), roundFinishedEvent(1, {profile_skipped: true}));
+    const state = reduceEvent(initialCoreState(), roundFinishedEvent(1, {profileSkipped: true}));
 
     expect(state.rounds).toHaveLength(1);
     expect(state.rounds[0]?.status).toBe('completed');
@@ -1393,14 +1464,12 @@ describe('typed framework events', () => {
       initialCoreState(),
       frameworkEvent(
         1,
-        'gate_started',
+        EventType.GATE_STARTED,
         {
-          kind: 'gate_started',
-          gate: 'validation',
-          recipe: 'focused-tests',
-          command: 'uv run pytest -q',
+          case: 'gateStarted',
+          value: {gate: GateKind.VALIDATION, recipe: 'focused-tests', command: 'uv run pytest -q'},
         },
-        {status: 'active'},
+        {status: EventStatus.ACTIVE},
       ),
     );
 
@@ -1423,9 +1492,9 @@ describe('typed framework events', () => {
       initialCoreState(),
       frameworkEvent(
         1,
-        'gate_started',
-        {kind: 'gate_started', gate: 'accuracy'},
-        {status: 'active'},
+        EventType.GATE_STARTED,
+        {case: 'gateStarted', value: {gate: GateKind.ACCURACY}},
+        {status: EventStatus.ACTIVE},
       ),
     );
 
@@ -1439,16 +1508,21 @@ describe('typed framework events', () => {
   it('never attributes a framework event to the active agent', () => {
     let state = reduceEvent(
       initialCoreState(),
-      executionEvent(1, 'agent_execution_started', 'exec-judge', startedData('Review the diff')),
+      executionEvent(
+        1,
+        EventType.AGENT_EXECUTION_STARTED,
+        'exec-judge',
+        startedData('Review the diff'),
+      ),
     );
     state = reduceEvent(state, {
       ...frameworkEvent(
         2,
-        'gate_started',
-        {kind: 'gate_started', gate: 'validation', recipe: 'focused-tests'},
-        {status: 'active'},
+        EventType.GATE_STARTED,
+        {case: 'gateStarted', value: {gate: GateKind.VALIDATION, recipe: 'focused-tests'}},
+        {status: EventStatus.ACTIVE},
       ),
-      agent_kind: 'judge',
+      agentKind: 'judge',
     });
 
     const entry = state.transcript.at(-1);
@@ -1461,27 +1535,27 @@ describe('typed framework events', () => {
       initialCoreState(),
       frameworkEvent(
         1,
-        'gate_finished',
-        {kind: 'gate_finished', gate: 'validation', recipe: 'focused-tests'},
-        {status: 'completed'},
+        EventType.GATE_FINISHED,
+        {case: 'gateFinished', value: {gate: GateKind.VALIDATION, recipe: 'focused-tests'}},
+        {status: EventStatus.COMPLETED},
       ),
     );
     const reused = reduceEvent(
       initialCoreState(),
       frameworkEvent(
         1,
-        'gate_finished',
-        {kind: 'gate_finished', gate: 'validation', recipe: 'lint', reused: true},
-        {status: 'completed'},
+        EventType.GATE_FINISHED,
+        {case: 'gateFinished', value: {gate: GateKind.VALIDATION, recipe: 'lint', reused: true}},
+        {status: EventStatus.COMPLETED},
       ),
     );
     const bare = reduceEvent(
       initialCoreState(),
       frameworkEvent(
         1,
-        'gate_finished',
-        {kind: 'gate_finished', gate: 'accuracy'},
-        {status: 'completed'},
+        EventType.GATE_FINISHED,
+        {case: 'gateFinished', value: {gate: GateKind.ACCURACY}},
+        {status: EventStatus.COMPLETED},
       ),
     );
 
@@ -1503,9 +1577,12 @@ describe('typed framework events', () => {
       initialCoreState(),
       frameworkEvent(
         1,
-        'gate_finished',
-        {kind: 'gate_finished', gate: 'accuracy', output_tail: 'assert 3 == 4\n1 failed'},
-        {status: 'failed'},
+        EventType.GATE_FINISHED,
+        {
+          case: 'gateFinished',
+          value: {gate: GateKind.ACCURACY, outputTail: 'assert 3 == 4\n1 failed'},
+        },
+        {status: EventStatus.FAILED},
       ),
     );
 
@@ -1524,15 +1601,12 @@ describe('typed framework events', () => {
       initialCoreState(),
       frameworkEvent(
         7,
-        'gate_finished',
+        EventType.GATE_FINISHED,
         {
-          kind: 'gate_finished',
-          gate: 'benchmark',
-          metric: 'tok_per_sec',
-          value: 42.5,
-          unit: 'tok/s',
+          case: 'gateFinished',
+          value: {gate: GateKind.BENCHMARK, metric: 'tok_per_sec', value: 42.5, unit: 'tok/s'},
         },
-        {status: 'completed'},
+        {status: EventStatus.COMPLETED},
       ),
     );
 
@@ -1545,21 +1619,25 @@ describe('typed framework events', () => {
   });
 
   it('describes each workspace snapshot aspect', () => {
-    type Snapshot = Extract<NonNullable<RunEvent['data']>, {kind?: 'workspace_snapshot'}>;
-    const aspects: Partial<Snapshot>[] = [
+    const aspects: {
+      label?: string;
+      commit?: string;
+      baseline?: string;
+      excludedPaths?: string[];
+    }[] = [
       {label: 'round-1-implementer', commit: '3e7d0a1b2c4d5e6f708192a3b4c5d6e7f8091a2b'},
-      {label: 'round-2-implementer', commit: null},
+      {label: 'round-2-implementer'},
       {baseline: '9f2c1d4e6a7b8091a2b3c4d5e6f7a8b9c0d1e2f3'},
-      {excluded_paths: ['logs/', 'artifacts/']},
+      {excludedPaths: ['logs/', 'artifacts/']},
     ];
     const contents = aspects.map(aspect => {
       const state = reduceEvent(
         initialCoreState(),
         frameworkEvent(
           1,
-          'workspace_snapshot',
-          {kind: 'workspace_snapshot', source: 'git_tracking', ...aspect},
-          {round_label: null},
+          EventType.WORKSPACE_SNAPSHOT,
+          {case: 'workspaceSnapshot', value: {source: FrameworkSource.GIT_TRACKING, ...aspect}},
+          {roundLabel: undefined},
         ),
       );
       return state.transcript[0];
@@ -1578,17 +1656,19 @@ describe('typed framework events', () => {
       initialCoreState(),
       frameworkEvent(
         1,
-        'run_configured',
+        EventType.RUN_CONFIGURED,
         {
-          kind: 'run_configured',
-          run_log_path: 'logs/run',
-          project_root: '/work/project',
-          model: 'claude-sonnet-4-5',
-          objective: 'Raise decode throughput',
-          search_policy: 'beam',
-          source: 'loop',
+          case: 'runConfigured',
+          value: {
+            runLogPath: 'logs/run',
+            projectRoot: '/work/project',
+            model: 'claude-sonnet-4-5',
+            objective: 'Raise decode throughput',
+            searchPolicy: 'beam',
+            source: FrameworkSource.LOOP,
+          },
         },
-        {round_label: null},
+        {roundLabel: undefined},
       ),
     );
 
@@ -1615,28 +1695,32 @@ describe('typed framework events', () => {
     const state = reduceEventBatch(initialCoreState(), [
       frameworkEvent(
         1,
-        'run_configured',
-        {kind: 'run_configured', run_log_path: 'logs/run', project_root: '/work', source: 'loop'},
-        {round_label: null},
+        EventType.RUN_CONFIGURED,
+        {
+          case: 'runConfigured',
+          value: {runLogPath: 'logs/run', projectRoot: '/work', source: FrameworkSource.LOOP},
+        },
+        {roundLabel: undefined},
       ),
       frameworkEvent(
         2,
-        'gate_started',
-        {kind: 'gate_started', gate: 'benchmark', command: 'uv run python bench.py'},
-        {status: 'active'},
+        EventType.GATE_STARTED,
+        {case: 'gateStarted', value: {gate: GateKind.BENCHMARK, command: 'uv run python bench.py'}},
+        {status: EventStatus.ACTIVE},
       ),
       frameworkEvent(
         3,
-        'gate_finished',
-        {kind: 'gate_finished', gate: 'benchmark', metric: 'ops', value: 9, unit: 'ops/s'},
-        {status: 'completed'},
+        EventType.GATE_FINISHED,
+        {
+          case: 'gateFinished',
+          value: {gate: GateKind.BENCHMARK, metric: 'ops', value: 9, unit: 'ops/s'},
+        },
+        {status: EventStatus.COMPLETED},
       ),
       frameworkWarningEvent(4),
-      frameworkEvent(5, 'workspace_snapshot', {
-        kind: 'workspace_snapshot',
-        label: 'round-1',
-        commit: 'abcdef0123456789',
-        source: 'git_tracking',
+      frameworkEvent(5, EventType.WORKSPACE_SNAPSHOT, {
+        case: 'workspaceSnapshot',
+        value: {label: 'round-1', commit: 'abcdef0123456789', source: FrameworkSource.GIT_TRACKING},
       }),
     ]);
 
@@ -1691,23 +1775,35 @@ function randomizedFoldEvent(sequence: number, choice: number): RunEvent {
   if (choice === 4) return todoEvent(sequence, `exec-${sequence % 4}`, `todo-${sequence}`);
   if (choice === 5) return statusEvent(sequence, `exec-${sequence % 4}`, 'agent_output_chunk');
   if (choice === 6) {
-    return frameworkEvent(sequence, 'gate_started', {
-      kind: 'gate_started',
-      gate: 'validation',
-      recipe: `recipe-${sequence}`,
-      command: 'bun test',
+    return frameworkEvent(sequence, EventType.GATE_STARTED, {
+      case: 'gateStarted',
+      value: {gate: GateKind.VALIDATION, recipe: `recipe-${sequence}`, command: 'bun test'},
     });
   }
   return roundOutputEvent(sequence, (sequence % 3) + 1);
 }
 
+type EventInit = Exclude<NonNullable<Parameters<typeof makeEvent>[1]>, RunEvent>;
+type EventData = Exclude<EventInit['data'], {case: undefined} | undefined>;
+
+function wireRunStatus(status: CoreRunStatus): RunStatus {
+  return RunStatus[status.toUpperCase() as keyof typeof RunStatus];
+}
+
+/** The fixed test clock: `sequence` seconds after the start of 2026-01-01. */
+function clockAt(sequence: number) {
+  return timestampOf(new Date(Date.UTC(2026, 0, 1, 0, 0, sequence)));
+}
+
 function roundOutputEvent(sequence: number, round: number): RunEvent {
-  return {
-    ...baseEvent(sequence, 'agent_output_chunk'),
-    round_label: `round-${round}-implementer`,
-    invocation_id: `turn-${sequence}`,
-    data: {kind: 'agent_output_chunk', channel: 'assistant', content: `entry ${sequence}`},
-  };
+  return baseEvent(sequence, EventType.AGENT_OUTPUT_CHUNK, {
+    roundLabel: `round-${round}-implementer`,
+    executionId: `turn-${sequence}`,
+    data: {
+      case: 'agentOutputChunk',
+      value: {channel: AgentOutputChannel.ASSISTANT, content: `entry ${sequence}`},
+    },
+  });
 }
 
 function roundToolEvent(
@@ -1718,33 +1814,40 @@ function roundToolEvent(
 ): RunEvent {
   return {
     ...toolEvent(sequence, kind, callId, content),
-    round_label: 'round-2-implementer',
+    roundLabel: 'round-2-implementer',
   };
 }
 
-function roundFinishedEvent(sequence: number, extra: {profile_skipped?: boolean}): RunEvent {
-  return {
-    ...baseEvent(sequence, 'round_finished'),
-    round_label: 'round-1',
+function roundFinishedEvent(sequence: number, extra: {profileSkipped?: boolean}): RunEvent {
+  return baseEvent(sequence, EventType.ROUND_FINISHED, {
+    roundLabel: 'round-1',
     data: {
-      kind: 'round_finished',
-      attempts: 1,
-      judge_verdict: 'pass',
-      perf_metric: 900,
-      perf_unit: 'ops/s',
-      ...extra,
+      case: 'roundFinished',
+      value: {
+        attempts: 1,
+        judgeVerdict: RoundJudgeVerdict.PASS,
+        perfMetric: 900,
+        perfUnit: 'ops/s',
+        ...extra,
+      },
     },
-  };
+  });
 }
 
-function baseEvent(sequence: number, type: RunEvent['type']): RunEvent {
-  return {
+function runStartedEvent(sequence: number): RunEvent {
+  return baseEvent(sequence, EventType.RUN_STARTED, {
+    data: {case: 'runStarted', value: {outerLoop: 'agent', input: '.', maxRounds: 3}},
+  });
+}
+
+function baseEvent(sequence: number, type: EventType, init: EventInit = {}): RunEvent {
+  return makeEvent(type, {
     sequence,
-    timestamp: `2026-01-01T00:00:0${sequence}Z`,
-    type,
-    agent_kind: 'implementer',
-    round_label: 'round-1-implementer',
-  };
+    timestamp: clockAt(sequence),
+    agentKind: 'implementer',
+    roundLabel: 'round-1-implementer',
+    ...init,
+  });
 }
 
 function chatAnswerEvent(
@@ -1752,55 +1855,46 @@ function chatAnswerEvent(
   answer: string,
   threadId?: string,
   invocationId?: string,
+  threadTitle?: string,
 ): RunEvent {
-  return {
-    ...baseEvent(sequence, 'chat'),
-    agent_kind: 'chat',
-    round_label: 'experiment-chat',
-    ...(threadId === undefined ? {} : {chat_thread_id: threadId}),
-    data: {
-      kind: 'chat',
-      answer,
-      ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
-    },
-  };
+  return baseEvent(sequence, EventType.CHAT, {
+    agentKind: 'chat',
+    roundLabel: 'experiment-chat',
+    chatThreadId: threadId,
+    data: {case: 'chat', value: {answer, invocationId, threadTitle}},
+  });
 }
 
 /** One assistant-channel chunk of a chat turn, as the chat agent streams it. */
 function chatStreamEvent(sequence: number, content: string, invocationId: string): RunEvent {
   return {
     ...outputEvent(sequence, content, invocationId),
-    agent_kind: 'chat',
-    round_label: 'experiment-chat',
+    agentKind: 'chat',
+    roundLabel: 'experiment-chat',
   };
 }
 
 function threadCreatedEvent(sequence: number, threadId: string, provider: string): RunEvent {
-  return {
-    ...baseEvent(sequence, 'chat_thread_created'),
-    agent_kind: 'chat',
-    round_label: 'experiment-chat',
-    chat_thread_id: threadId,
+  return baseEvent(sequence, EventType.CHAT_THREAD_CREATED, {
+    agentKind: 'chat',
+    roundLabel: 'experiment-chat',
+    chatThreadId: threadId,
     data: {
-      kind: 'chat_thread_created',
-      thread_id: threadId,
-      title: '',
-      driver: 'agentshim',
-      provider,
-      model: 'opus',
-      created_at: `2026-01-01T00:00:0${sequence}Z`,
+      case: 'chatThreadCreated',
+      value: {
+        threadId,
+        title: '',
+        driver: 'agentshim',
+        provider,
+        model: 'opus',
+        createdAt: clockAt(sequence),
+      },
     },
-  };
+  });
 }
 
 function chatTitledEvent(sequence: number, threadId: string, title: string): RunEvent {
-  return {
-    ...baseEvent(sequence, 'chat'),
-    agent_kind: 'chat',
-    round_label: 'experiment-chat',
-    chat_thread_id: threadId,
-    data: {kind: 'chat', answer: 'answer', thread_title: title},
-  };
+  return chatAnswerEvent(sequence, 'answer', threadId, undefined, title);
 }
 
 /** One `agent_output_chunk` on a named channel, all within a single turn. */
@@ -1809,28 +1903,36 @@ function channelEvent(
   channel: 'analysis' | 'diagnostic',
   content: string,
 ): RunEvent {
-  return {
-    ...baseEvent(sequence, 'agent_output_chunk'),
-    invocation_id: 'turn',
-    data: {kind: 'agent_output_chunk', channel, content},
-  };
+  return baseEvent(sequence, EventType.AGENT_OUTPUT_CHUNK, {
+    executionId: 'turn',
+    data: {
+      case: 'agentOutputChunk',
+      value: {
+        channel:
+          channel === 'analysis' ? AgentOutputChannel.ANALYSIS : AgentOutputChannel.DIAGNOSTIC,
+        content,
+      },
+    },
+  });
 }
 
 function outputEvent(sequence: number, content: string, invocationId = 'turn'): RunEvent {
-  return {
-    ...baseEvent(sequence, 'agent_output_chunk'),
-    invocation_id: invocationId,
-    data: {kind: 'agent_output_chunk', channel: 'assistant', content},
-  };
+  return baseEvent(sequence, EventType.AGENT_OUTPUT_CHUNK, {
+    executionId: invocationId,
+    data: {
+      case: 'agentOutputChunk',
+      value: {channel: AgentOutputChannel.ASSISTANT, content},
+    },
+  });
 }
 
 function executionEvent(
   sequence: number,
-  type: RunEvent['type'],
+  type: EventType,
   executionId: string,
-  data: NonNullable<RunEvent['data']>,
+  data: EventData,
 ): RunEvent {
-  return {...baseEvent(sequence, type), execution_id: executionId, data};
+  return baseEvent(sequence, type, {executionId, data});
 }
 
 function statusEvent(
@@ -1839,59 +1941,74 @@ function statusEvent(
   kind: 'agent_output_chunk' | 'tool_call',
   status: {
     progress?: string;
-    agent_label?: string;
-    elapsed_seconds?: number;
-    input_tokens?: number;
-    context_window?: number;
+    agentLabel?: string;
+    elapsedSeconds?: number;
+    inputTokens?: number;
+    contextWindow?: number;
   } = {progress: `step ${sequence}`},
 ): RunEvent {
-  return {
-    ...baseEvent(sequence, kind),
-    execution_id: executionId,
-    invocation_id: executionId,
-    data:
-      kind === 'agent_output_chunk'
-        ? {kind, channel: 'analysis', content: '', status}
-        : {kind, tool: 'Bash', call_id: `call-${sequence}`, args: {}, status},
-  };
+  return baseEvent(
+    sequence,
+    kind === 'agent_output_chunk' ? EventType.AGENT_OUTPUT_CHUNK : EventType.TOOL_CALL,
+    {
+      executionId,
+      data:
+        kind === 'agent_output_chunk'
+          ? {
+              case: 'agentOutputChunk',
+              value: {channel: AgentOutputChannel.ANALYSIS, content: '', status},
+            }
+          : {
+              case: 'toolCall',
+              value: {tool: 'Bash', callId: `call-${sequence}`, args: {}, status},
+            },
+    },
+  );
 }
 
-function startedData(assignment: string): NonNullable<RunEvent['data']> {
+function startedData(
+  assignment: string,
+  identity: {driver?: string; provider?: string; model?: string} = {},
+): EventData {
   return {
-    kind: 'agent_execution_started',
-    stage: 'implementation',
-    attempt: 1,
-    system_prompt: '',
-    user_prompt: assignment,
-    activity: {
-      kind: 'agent_execution_activity_changed',
-      mode: 'thinking',
-      summary: 'Starting',
-      tool: null,
+    case: 'agentExecutionStarted',
+    value: {
+      stage: 'implementation',
+      attempt: 1,
+      systemPrompt: '',
+      userPrompt: assignment,
+      activity: {mode: ExecutionActivityMode.THINKING, summary: 'Starting'},
+      ...identity,
     },
   };
 }
 
 function checkpoint(
   executionId: string,
-  overrides: Partial<NonNullable<RunSnapshot['active_executions']>[number]> = {},
-): NonNullable<RunSnapshot['active_executions']>[number] {
-  return {
-    execution_id: executionId,
-    agent_kind: 'judge',
-    round_label: 'round-2-judge',
-    stage: 'judging',
-    attempt: 1,
-    assignment: 'Review',
-    started_at: '2026-01-01T00:00:00Z',
-    activity: {
-      kind: 'agent_execution_activity_changed',
-      mode: 'thinking',
-      summary: 'Reviewing',
-      tool: null,
-    },
-    ...overrides,
-  };
+  overrides: {
+    driver?: string;
+    provider?: string;
+    model?: string;
+    startedAt?: ReturnType<typeof timestampOf>;
+  } = {},
+): ActiveAgentExecution {
+  const [execution] = makeSnapshot({
+    activeExecutions: [
+      {
+        executionId,
+        agentKind: 'judge',
+        roundLabel: 'round-2-judge',
+        stage: 'judging',
+        attempt: 1,
+        assignment: 'Review',
+        startedAt: timestampOf('2026-01-01T00:00:00Z'),
+        activity: {mode: ExecutionActivityMode.THINKING, summary: 'Reviewing'},
+        ...overrides,
+      },
+    ],
+  }).activeExecutions;
+  if (execution === undefined) throw new Error('checkpoint builder dropped its execution');
+  return execution;
 }
 
 function toolEvent(
@@ -1900,51 +2017,49 @@ function toolEvent(
   callId: string,
   content: string,
 ): RunEvent {
-  return {
-    ...baseEvent(sequence, kind),
-    invocation_id: 'turn',
+  return baseEvent(sequence, kind === 'tool_call' ? EventType.TOOL_CALL : EventType.TOOL_RESULT, {
+    executionId: 'turn',
     data:
       kind === 'tool_call'
-        ? {kind, tool: 'Bash', call_id: callId, args: {command: content}}
-        : {kind, tool: 'Bash', call_id: callId, content, is_error: false},
-  };
+        ? {case: 'toolCall', value: {tool: 'Bash', callId, args: {command: content}}}
+        : {case: 'toolResult', value: {tool: 'Bash', callId, content, isError: false}},
+  });
 }
 
 function todoEvent(sequence: number, executionId: string, content: string): RunEvent {
-  return {
-    ...baseEvent(sequence, 'todo_update'),
-    execution_id: executionId,
-    data: {kind: 'todo_update', todos: [{content, status: 'in_progress'}]},
-  };
+  return baseEvent(sequence, EventType.TODO_UPDATE, {
+    executionId,
+    data: {case: 'todoUpdate', value: {todos: [{content, status: 'in_progress'}]}},
+  });
 }
 
-/** A #692 framework event: `agent_kind` null on the wire, round context only. */
+/** A #692 framework event: no agent kind on the wire, round context only. */
 function frameworkEvent(
   sequence: number,
-  type: RunEvent['type'],
-  data: NonNullable<RunEvent['data']>,
-  overrides: Partial<RunEvent> = {},
+  type: EventType,
+  data: EventData,
+  overrides: EventInit = {},
 ): RunEvent {
-  return {
+  return makeEvent(type, {
     sequence,
-    timestamp: `2026-01-01T00:00:0${sequence}Z`,
-    type,
-    agent_kind: null,
-    round_label: 'round-1',
+    timestamp: clockAt(sequence),
+    roundLabel: 'round-1',
     ...overrides,
     data,
-  };
+  });
 }
 
 function frameworkWarningEvent(sequence: number): RunEvent {
   return frameworkEvent(
     sequence,
-    'framework_warning',
+    EventType.FRAMEWORK_WARNING,
     {
-      kind: 'framework_warning',
-      summary: 'profiler failed',
-      detail: 'nsys exited 1',
-      source: 'loop',
+      case: 'frameworkWarning',
+      value: {
+        summary: 'profiler failed',
+        detail: 'nsys exited 1',
+        source: FrameworkSource.LOOP,
+      },
     },
     {
       diagnostic: {
@@ -1952,40 +2067,39 @@ function frameworkWarningEvent(sequence: number): RunEvent {
         code: 'framework_warning',
         summary: 'profiler failed',
         detail: 'nsys exited 1',
-        hint: null,
-        scope: 'run',
-        severity: 'warning',
-        retryability: 'unknown',
-        cause_id: null,
-        debug_ref: null,
+        scope: DiagnosticScope.RUN,
+        severity: DiagnosticSeverity.WARNING,
+        retryability: DiagnosticRetryability.UNKNOWN,
         source: 'loop',
       },
     },
   );
 }
 
+const DIAGNOSTIC_SEVERITY = {
+  warning: DiagnosticSeverity.WARNING,
+  error: DiagnosticSeverity.ERROR,
+  fatal: DiagnosticSeverity.FATAL,
+} as const;
+
 function diagnosticEvent(
   sequence: number,
-  type: RunEvent['type'],
+  type: EventType,
   id: string,
-  severity: 'warning' | 'error' | 'fatal',
+  severity: keyof typeof DIAGNOSTIC_SEVERITY,
   summary: string,
-  options: {invocationId?: string; detail?: string | null} = {},
+  options: {invocationId?: string; detail?: string} = {},
 ): RunEvent {
-  return {
-    ...baseEvent(sequence, type),
-    ...(options.invocationId === undefined ? {} : {invocation_id: options.invocationId}),
+  return baseEvent(sequence, type, {
+    executionId: options.invocationId,
     diagnostic: {
       id,
       code: 'agent_failed',
       summary,
-      detail: options.detail ?? null,
-      hint: null,
-      scope: 'invocation',
-      severity,
-      retryability: 'manual',
-      cause_id: null,
-      debug_ref: null,
+      detail: options.detail,
+      scope: DiagnosticScope.INVOCATION,
+      severity: DIAGNOSTIC_SEVERITY[severity],
+      retryability: DiagnosticRetryability.MANUAL,
     },
-  };
+  });
 }

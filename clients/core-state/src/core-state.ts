@@ -1,4 +1,41 @@
-import type {Diagnostic, RunEvent, RunSnapshot, RunStatus} from '@vibesys/backend-client';
+import {
+  AgentOutputChannel,
+  type AgentOutputChunkData,
+  type ChatData,
+  type Diagnostic,
+  EventStatus,
+  EventType,
+  FrameworkSource,
+  type GateFinishedData,
+  GateKind,
+  type GateStartedData,
+  JudgeVerdict,
+  OutputStream,
+  type RoundFinishedData,
+  RoundJudgeVerdict,
+  type RunConfiguredData,
+  type RunEvent,
+  type RunSnapshot,
+  type ToolCallData,
+  type ToolResultData,
+  timestampToIso,
+  type ActiveAgentExecution as WireActiveExecution,
+  type WorkspaceSnapshotData,
+} from '@vibesys/backend-client';
+import {
+  type AgentExecutionMode,
+  activityFrom,
+  type CoreRunStatus,
+  coreRunStatus,
+  type DiagnosticScopeName,
+  type DiagnosticSeverityName,
+  enumWord,
+  scopeName,
+  severityName,
+} from './wire-names.js';
+
+export type {AgentExecutionMode, CoreRunStatus, DiagnosticScopeName, DiagnosticSeverityName};
+
 import {
   applyExecutionStatus,
   applyExecutionStatusUsage,
@@ -18,8 +55,6 @@ import {
   type RoundSummary,
   roundNumberFromLabel,
 } from './run-map.js';
-
-export type AgentExecutionMode = 'thinking' | 'responding' | 'tool' | 'waiting';
 
 export interface ActiveAgentExecution {
   executionId: string;
@@ -65,10 +100,9 @@ export interface BenchmarkRecord {
 /** A round as core state carries the run map's timing, status, and profile result. */
 export type RoundState = RoundSummary;
 
-type RunEventData = NonNullable<RunEvent['data']>;
-export type TypedToolResult = Extract<RunEventData, {kind?: 'tool_result'}>;
+export type TypedToolResult = ToolResultData;
 /** Typed structure a producer preserved alongside the raw tool-result text. */
-export type ToolResultPayload = NonNullable<TypedToolResult['payload']>;
+export type ToolResultPayload = Exclude<ToolResultData['payload'], {case: undefined}>;
 
 /** Thread id used for chat events recorded without one. */
 export const DEFAULT_CHAT_THREAD_ID = 'default';
@@ -125,12 +159,12 @@ export interface TranscriptEntry {
 export interface CoreDiagnostic {
   id: string | null;
   code: string | null;
-  failureKind: Diagnostic['scope'] | 'run_interruption';
+  failureKind: DiagnosticScopeName | 'run_interruption';
   summary: string;
   detail: string | null;
   hint: string | null;
-  severity: 'warning' | 'error' | 'fatal';
-  scope: Diagnostic['scope'];
+  severity: DiagnosticSeverityName;
+  scope: DiagnosticScopeName;
   /** Which subsystem raised it, e.g. `loop` on a framework warning (#692). */
   source: string | null;
   agentKind: string | null;
@@ -147,21 +181,15 @@ export interface RunLifetimeBoundary {
 
 function isRunLifetimeBoundary(event: RunEvent): boolean {
   switch (event.type) {
-    case 'run_started':
-    case 'run_finished':
-    case 'run_failed':
-    case 'run_interrupted':
+    case EventType.RUN_STARTED:
+    case EventType.RUN_FINISHED:
+    case EventType.RUN_FAILED:
+    case EventType.RUN_INTERRUPTED:
       return true;
     default:
       return false;
   }
 }
-
-/**
- * Run status as core state carries it: every status the backend reports, plus
- * the client-only `connecting` that precedes the first snapshot or event.
- */
-export type CoreRunStatus = RunStatus | 'connecting';
 
 /** The statuses a run never leaves. Named once; `terminate` writes only these. */
 export type EndedRunStatus = Extract<CoreRunStatus, 'completed' | 'failed' | 'stopped'>;
@@ -297,11 +325,11 @@ export function reduceSnapshot(state: CoreState, snapshot: RunSnapshot): CoreSta
   // Boot issues the snapshot query and the subscription concurrently, so the
   // batch usually lands first and the liveness guard below would otherwise drop
   // the registry entirely. Applying it to a stale snapshot is always safe.
-  const registered = (snapshot.chat_threads ?? []).reduce(
+  const registered = snapshot.chatThreads.reduce(
     (current, thread) =>
       upsertChatThread(current, {
-        id: thread.thread_id,
-        title: thread.title ?? '',
+        id: thread.threadId,
+        title: thread.title,
         driver: thread.driver,
         provider: thread.provider,
         model: thread.model,
@@ -315,15 +343,15 @@ export function reduceSnapshot(state: CoreState, snapshot: RunSnapshot): CoreSta
   // a genuinely newer one (a resumed run) still applies.
   if (hasRunEnded(registered) && snapshot.sequence <= registered.sequence) return registered;
   const next = cloneCoreStateWith(registered, {
-    status: snapshot.status,
-    agentKind: snapshot.agent_kind ?? null,
-    roundLabel: snapshot.round_label ?? null,
-    activeExecutions: activeExecutionsFromCheckpoint(snapshot.active_executions ?? []),
+    status: coreRunStatus(snapshot.status) ?? registered.status,
+    agentKind: snapshot.agentKind ?? null,
+    roundLabel: snapshot.roundLabel ?? null,
+    activeExecutions: activeExecutionsFromCheckpoint(snapshot.activeExecutions),
   });
   return next;
 }
 
-export type ActiveExecutionCheckpoint = NonNullable<RunSnapshot['active_executions']>;
+export type ActiveExecutionCheckpoint = readonly WireActiveExecution[];
 
 /** Checkpoints reconcile liveness without changing the event replay cursor. */
 export function reconcileActiveExecutions(
@@ -409,11 +437,9 @@ export function reduceEventPrefix(
   events: readonly RunEvent[],
   historyAfterSequence: number,
 ): CoreState {
-  const sequences = new Set(
-    events.map(event => event.sequence).filter(sequence => sequence !== undefined),
-  );
+  const sequences = new Set(events.map(event => event.sequence));
   const boundaries = state.runLifetimeBoundaries.filter(
-    boundary => boundary.event.sequence !== undefined && !sequences.has(boundary.event.sequence),
+    boundary => !sequences.has(boundary.event.sequence),
   );
   // Fold ordinary prefix data once. Run-level spine events may carry terminal
   // transcript and diagnostic facts that the tail already has, so replaying
@@ -426,7 +452,7 @@ export function reduceEventPrefix(
   const runMapReplay = reduceEventBatch(
     {...initialCoreState(), runLifetimeBoundaries: state.runLifetimeBoundaries},
     [...events, ...boundaries.map(boundary => boundary.event)].sort(
-      (left, right) => (left.sequence ?? 0) - (right.sequence ?? 0),
+      (left, right) => left.sequence - right.sequence,
     ),
   );
   const older = cloneCoreStateWith(olderData, {
@@ -698,7 +724,6 @@ function mergeRunLifetimeBoundaries(
   const merged = new Map<number, RunLifetimeBoundary>();
   for (const boundary of [...older, ...newer]) {
     const sequence = boundary.event.sequence;
-    if (sequence === undefined) continue;
     const existing = merged.get(sequence);
     if (
       existing === undefined ||
@@ -707,9 +732,7 @@ function mergeRunLifetimeBoundaries(
       merged.set(sequence, boundary);
     }
   }
-  return [...merged.values()].sort(
-    (left, right) => (left.event.sequence ?? 0) - (right.event.sequence ?? 0),
-  );
+  return [...merged.values()].sort((left, right) => left.event.sequence - right.event.sequence);
 }
 
 function boundaryFor(
@@ -718,7 +741,6 @@ function boundaryFor(
   state: CoreState,
 ): RunLifetimeBoundary {
   const sequence = event.sequence;
-  if (sequence === undefined) return {event, closeout: null};
   const known = boundaries.find(boundary => boundary.event.sequence === sequence);
   // Chat events return before the run map fold, so the map's last timestamp
   // and sequence, rather than the core cursor, identify the closeout point.
@@ -742,16 +764,16 @@ export function reduceEvent(state: CoreState, event: RunEvent): CoreState {
 }
 
 function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder | null): CoreState {
-  const sequence = event.sequence ?? 0;
+  const sequence = event.sequence;
   if (sequence > 0 && sequence <= state.sequence) return state;
   let next = cloneCoreState(state);
   next.sequence = Math.max(state.sequence, sequence);
   next = applyDiagnosticEvent(next, event);
   next = applyAgentExecutionEvent(next, event);
   next = applyAgentStatusEvent(next, event);
-  if (event.agent_kind === 'chat') return applyChatEvent(next, event, folder);
-  if (event.agent_kind) next.agentKind = event.agent_kind;
-  if (event.round_label) next.roundLabel = event.round_label;
+  if (event.agentKind === 'chat') return applyChatEvent(next, event, folder);
+  if (event.agentKind) next.agentKind = event.agentKind;
+  if (event.roundLabel) next.roundLabel = event.roundLabel;
   next = applyRunMapProjection(next, state, event, sequence);
   next = applyRunFacts(next, event, sequence);
   next = applyRunTranscript(next, event, folder);
@@ -765,7 +787,7 @@ function applyRunMapProjection(
   sequence: number,
 ): CoreState {
   const boundary =
-    event.type === 'run_started' && event.sequence !== undefined
+    event.type === EventType.RUN_STARTED
       ? boundaryFor(previous.runLifetimeBoundaries, event, previous)
       : isRunLifetimeBoundary(event)
         ? {event, closeout: null}
@@ -784,53 +806,67 @@ function applyRunMapProjection(
 
 function applyRunFacts(state: CoreState, event: RunEvent, sequence: number): CoreState {
   const data = event.data;
-  if (data?.kind === 'tool_call' || data?.kind === 'tool_result') state.typedToolEvents = true;
-  if (data?.kind === 'todo_update') state.todos = updateTodos(state.todos, event);
-  if (data?.kind === 'usage_update') {
-    state.usage = {
-      inputTokens: data.input_tokens,
-      contextWindow: data.context_window ?? null,
-      model: data.model ?? null,
-    };
+  switch (data.case) {
+    case 'toolCall':
+    case 'toolResult':
+      state.typedToolEvents = true;
+      break;
+    case 'todoUpdate':
+      state.todos = updateTodos(state.todos, event);
+      break;
+    case 'usageUpdate':
+      state.usage = {
+        inputTokens: data.value.inputTokens,
+        contextWindow: data.value.contextWindow ?? null,
+        model: data.value.model ?? null,
+      };
+      break;
+    case 'experimentsChanged':
+      state.experimentsRevision = sequence;
+      break;
+    default:
+      break;
   }
   const benchmark = benchmarkFromEvent(event, sequence);
   if (benchmark !== null) state.benchmarks = [...state.benchmarks, benchmark];
-  if (data?.kind === 'experiments_changed') state.experimentsRevision = sequence;
   // The backend owns the run's lifecycle and publishes every move through it,
   // so the projection folds the status it is told rather than inferring one.
-  if (data?.kind === 'run_status_changed') return applyRunStatus(state, data.status);
+  if (data.case === 'runStatusChanged') {
+    const status = coreRunStatus(data.value.status);
+    return status === undefined ? state : applyRunStatus(state, status);
+  }
   return state;
 }
 
 function benchmarkFromEvent(event: RunEvent, sequence: number): BenchmarkRecord | null {
   const data = event.data;
-  if (data?.kind === 'benchmark_result') {
+  if (data.case === 'benchmarkResult') {
     return {
       sequence,
-      roundNumber: roundNumberFromLabel(event.round_label),
-      metric: data.metric,
-      value: data.value,
-      unit: data.unit,
+      roundNumber: roundNumberFromLabel(event.roundLabel),
+      metric: data.value.metric,
+      value: data.value.value,
+      unit: data.value.unit,
     };
   }
   // A completed benchmark gate carries the measurement `benchmark_result`
   // used to, so it feeds the same fold; old journals have only the legacy
   // kind and new journals only this one (#692).
   if (
-    data?.kind !== 'gate_finished' ||
-    data.gate !== 'benchmark' ||
-    event.status === 'failed' ||
-    data.metric == null ||
-    data.value == null
+    data.case !== 'gateFinished' ||
+    data.value.gate !== GateKind.BENCHMARK ||
+    event.status === EventStatus.FAILED ||
+    data.value.metric === undefined ||
+    data.value.value === undefined
   ) {
     return null;
   }
   return {
     sequence,
-    roundNumber: roundNumberFromLabel(event.round_label),
-    metric: data.metric,
-    value: data.value,
-    unit: data.unit ?? data.metric,
+    roundNumber: roundNumberFromLabel(event.roundLabel),
+    metric: data.value.metric,
+    value: data.value.value,
+    unit: data.value.unit ?? data.value.metric,
   };
 }
 
@@ -841,7 +877,9 @@ function applyRunTranscript(
 ): CoreState {
   const data = event.data;
   const legacyToolChunk =
-    data?.kind === 'agent_output_chunk' && data.channel === 'tool' && state.typedToolEvents;
+    data.case === 'agentOutputChunk' &&
+    data.value.channel === AgentOutputChannel.TOOL &&
+    state.typedToolEvents;
   if (legacyToolChunk) return state;
   const entry = eventToTranscriptEntry(event);
   if (entry === null) return state;
@@ -852,13 +890,13 @@ function applyRunTranscript(
 
 function applyRunLifecycle(state: CoreState, event: RunEvent): CoreState {
   const data = event.data;
-  if (event.type === 'run_started') {
+  if (event.type === EventType.RUN_STARTED) {
     state.status = 'running';
-    if (data?.kind === 'run_started') state.maxRounds = data.max_rounds;
+    if (data.case === 'runStarted') state.maxRounds = data.value.maxRounds;
   }
-  if (event.type === 'configuration_failed') return terminate(state, 'failed');
-  if (event.type === 'run_finished') return terminate(state, 'completed');
-  if (event.type === 'run_failed' || event.type === 'run_interrupted') {
+  if (event.type === EventType.CONFIGURATION_FAILED) return terminate(state, 'failed');
+  if (event.type === EventType.RUN_FINISHED) return terminate(state, 'completed');
+  if (event.type === EventType.RUN_FAILED || event.type === EventType.RUN_INTERRUPTED) {
     return terminate(state, 'failed');
   }
   return state;
@@ -904,21 +942,17 @@ function activeExecutionsFromCheckpoint(
 ): Record<string, ActiveAgentExecution> {
   return Object.fromEntries(
     executions.map(execution => [
-      execution.execution_id,
+      execution.executionId,
       {
-        executionId: execution.execution_id,
-        agentKind: execution.agent_kind,
-        roundLabel: execution.round_label ?? null,
-        roundNumber: roundNumberFromLabel(execution.round_label),
+        executionId: execution.executionId,
+        agentKind: execution.agentKind,
+        roundLabel: execution.roundLabel || null,
+        roundNumber: roundNumberFromLabel(execution.roundLabel),
         stage: execution.stage,
         attempt: execution.attempt ?? null,
         assignment: execution.assignment,
-        startedAt: execution.started_at,
-        activity: {
-          mode: execution.activity.mode,
-          summary: execution.activity.summary,
-          tool: execution.activity.tool ?? null,
-        },
+        startedAt: timestampToIso(execution.startedAt),
+        activity: activityFrom(execution.activity),
         driver: execution.driver ?? null,
         provider: execution.provider ?? null,
         model: execution.model ?? null,
@@ -928,48 +962,41 @@ function activeExecutionsFromCheckpoint(
 }
 
 function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState {
-  const executionId = event.execution_id;
+  const executionId = event.executionId;
   const data = event.data;
-  if (executionId == null) return state;
-  if (data?.kind === 'agent_execution_started') {
+  if (executionId === undefined) return state;
+  if (data.case === 'agentExecutionStarted') {
     return cloneCoreStateWith(state, {
       activeExecutions: {
         ...state.activeExecutions,
         [executionId]: {
           executionId,
-          agentKind: event.agent_kind ?? 'agent',
-          roundLabel: event.round_label ?? null,
-          roundNumber: roundNumberFromLabel(event.round_label),
-          stage: data.stage,
-          attempt: data.attempt ?? null,
-          assignment: data.user_prompt ?? '',
-          startedAt: event.timestamp,
-          activity: {
-            mode: data.activity.mode,
-            summary: data.activity.summary,
-            tool: data.activity.tool ?? null,
-          },
-          driver: data.driver ?? null,
-          provider: data.provider ?? null,
-          model: data.model ?? null,
+          agentKind: event.agentKind ?? 'agent',
+          roundLabel: event.roundLabel ?? null,
+          roundNumber: roundNumberFromLabel(event.roundLabel),
+          stage: data.value.stage,
+          attempt: data.value.attempt ?? null,
+          assignment: data.value.userPrompt,
+          startedAt: timestampToIso(event.timestamp),
+          activity: activityFrom(data.value.activity),
+          driver: data.value.driver ?? null,
+          provider: data.value.provider ?? null,
+          model: data.value.model ?? null,
         },
       },
     });
   }
-  if (data?.kind === 'agent_execution_activity_changed') {
+  if (data.case === 'agentExecutionActivityChanged') {
     const current = state.activeExecutions[executionId];
     if (current === undefined) return state;
     return cloneCoreStateWith(state, {
       activeExecutions: {
         ...state.activeExecutions,
-        [executionId]: {
-          ...current,
-          activity: {mode: data.mode, summary: data.summary, tool: data.tool ?? null},
-        },
+        [executionId]: {...current, activity: activityFrom(data.value)},
       },
     });
   }
-  if (data?.kind === 'agent_execution_finished') {
+  if (data.case === 'agentExecutionFinished') {
     const {[executionId]: _finished, ...remaining} = state.activeExecutions;
     return cloneCoreStateWith(state, {activeExecutions: remaining});
   }
@@ -978,19 +1005,19 @@ function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState 
 
 function applyAgentStatusEvent(state: CoreState, event: RunEvent): CoreState {
   const data = event.data;
-  const executionId = event.execution_id;
+  const executionId = event.executionId;
   let executionStatuses =
     Object.keys(state.activeExecutions).length === 0
       ? state.executionStatuses
       : reconcileExecutionStatuses(state.executionStatuses, state.activeExecutions);
-  if (data?.kind === 'agent_execution_started') {
+  if (data.case === 'agentExecutionStarted') {
     executionStatuses = reconcileExecutionStatuses(executionStatuses, state.activeExecutions);
-  } else if (data?.kind === 'agent_execution_finished' && executionId != null) {
+  } else if (data.case === 'agentExecutionFinished' && executionId !== undefined) {
     executionStatuses = removeExecutionStatus(executionStatuses, executionId);
   } else if (
-    event.type === 'run_finished' ||
-    event.type === 'run_failed' ||
-    event.type === 'run_interrupted'
+    event.type === EventType.RUN_FINISHED ||
+    event.type === EventType.RUN_FAILED ||
+    event.type === EventType.RUN_INTERRUPTED
   ) {
     executionStatuses = {};
   } else {
@@ -1009,10 +1036,10 @@ function applyAgentStatusEvent(state: CoreState, event: RunEvent): CoreState {
 
 function updateTodos(previous: ExecutionTodos[], event: RunEvent): ExecutionTodos[] {
   const data = event.data;
-  if (data?.kind !== 'todo_update') return previous;
-  const agentKind = event.agent_kind ?? null;
-  const roundNumber = roundNumberFromLabel(event.round_label);
-  const executionId = event.execution_id ?? event.invocation_id ?? null;
+  if (data.case !== 'todoUpdate') return previous;
+  const agentKind = event.agentKind ?? null;
+  const roundNumber = roundNumberFromLabel(event.roundLabel);
+  const executionId = event.executionId ?? null;
   const retained = previous.filter(item =>
     executionId === null
       ? item.executionId != null || item.agentKind !== agentKind || item.roundNumber !== roundNumber
@@ -1024,10 +1051,7 @@ function updateTodos(previous: ExecutionTodos[], event: RunEvent): ExecutionTodo
       executionId,
       agentKind,
       roundNumber,
-      items: (data.todos ?? []).map(todo => ({
-        content: String(todo.content),
-        status: String(todo.status),
-      })),
+      items: data.value.todos.map(todo => ({content: todo.content, status: todo.status})),
     },
   ].slice(-100);
 }
@@ -1038,34 +1062,34 @@ function applyChatEvent(
   folder: TranscriptFolder | null,
 ): CoreState {
   const data = event.data;
-  const threadId = event.chat_thread_id ?? DEFAULT_CHAT_THREAD_ID;
-  if (data?.kind === 'chat_thread_created') {
+  const threadId = event.chatThreadId ?? DEFAULT_CHAT_THREAD_ID;
+  if (data.case === 'chatThreadCreated') {
     return upsertChatThread(state, {
-      id: data.thread_id,
-      title: data.title ?? '',
-      driver: data.driver,
-      provider: data.provider,
-      model: data.model,
+      id: data.value.threadId,
+      title: data.value.title,
+      driver: data.value.driver,
+      provider: data.value.provider,
+      model: data.value.model,
     });
   }
   let next = state;
-  const typed = data?.kind === 'tool_call' || data?.kind === 'tool_result';
+  const typed = data.case === 'toolCall' || data.case === 'toolResult';
   if (typed && next.chatTypedToolEvents[threadId] !== true) {
     next = cloneCoreStateWith(next, {
       chatTypedToolEvents: {...next.chatTypedToolEvents, [threadId]: true},
     });
   }
   const legacyToolChunk =
-    data?.kind === 'agent_output_chunk' &&
-    data.channel === 'tool' &&
+    data.case === 'agentOutputChunk' &&
+    data.value.channel === AgentOutputChannel.TOOL &&
     next.chatTypedToolEvents[threadId] === true;
   if (legacyToolChunk) return next;
-  if (data?.kind === 'chat' && data.thread_title) {
-    next = setChatThreadTitle(next, threadId, data.thread_title);
+  if (data.case === 'chat' && data.value.threadTitle) {
+    next = setChatThreadTitle(next, threadId, data.value.threadTitle);
   }
   const entry = eventToTranscriptEntry(event);
   if (entry === null || (entry.kind !== 'assistant' && entry.kind !== 'result')) return next;
-  return appendChatTranscript(next, threadId, entry, folder, data?.kind === 'chat');
+  return appendChatTranscript(next, threadId, entry, folder, data.case === 'chat');
 }
 
 /** Registers a replayed thread, or refreshes the record it already has. */
@@ -1209,9 +1233,7 @@ function diagnosticSeverityRank(severity: CoreDiagnostic['severity']): number {
 
 function diagnosticFromEvent(event: RunEvent): CoreDiagnostic | null {
   const diagnostic = event.diagnostic;
-  if (diagnostic !== null && diagnostic !== undefined) {
-    return fromProtocolDiagnostic(event, diagnostic);
-  }
+  if (diagnostic !== undefined) return fromProtocolDiagnostic(event, diagnostic);
   const fallback = fallbackDiagnosticFromEvent(event);
   return fallback === null
     ? null
@@ -1220,7 +1242,7 @@ function diagnosticFromEvent(event: RunEvent): CoreDiagnostic | null {
 
 interface FallbackDiagnostic {
   summary: string;
-  scope: Diagnostic['scope'];
+  scope: DiagnosticScopeName;
   severity: CoreDiagnostic['severity'];
   code?: string | null;
 }
@@ -1228,12 +1250,12 @@ interface FallbackDiagnostic {
 /** Classifies legacy failure envelopes that predate structured diagnostics. */
 function fallbackDiagnosticFromEvent(event: RunEvent): FallbackDiagnostic | null {
   const data = event.data;
-  if (data?.kind === 'configuration_failed') {
+  if (data.case === 'configurationFailed') {
     return {
-      summary: configurationFailureContent(data),
+      summary: configurationFailureContent(data.value),
       scope: 'configuration',
       severity: 'fatal',
-      code: data.code,
+      code: data.value.code,
     };
   }
   const invocation = invocationFallbackDiagnostic(event);
@@ -1244,57 +1266,59 @@ function fallbackDiagnosticFromEvent(event: RunEvent): FallbackDiagnostic | null
 function invocationFallbackDiagnostic(event: RunEvent): FallbackDiagnostic | null {
   const data = event.data;
   if (
-    data?.kind !== 'invocation_finished' ||
-    ((data.error === null || data.error === undefined) && event.status !== 'failed')
+    data.case !== 'invocationFinished' ||
+    (data.value.error === undefined && event.status !== EventStatus.FAILED)
   ) {
     return null;
   }
   return {
-    summary: data.error || event.text || 'Agent invocation failed.',
+    summary: data.value.error || event.text || 'Agent invocation failed.',
     scope: 'invocation',
     severity: 'error',
   };
 }
 
 function runFallbackDiagnostic(event: RunEvent): FallbackDiagnostic | null {
-  if (event.type !== 'run_failed' && event.type !== 'run_interrupted') return null;
-  const data = event.data;
-  const interruption =
-    data?.kind === 'run_interrupted'
-      ? `${data.reason}${data.signal === null ? '' : ` (${data.signal})`}`
-      : '';
+  if (event.type !== EventType.RUN_FAILED && event.type !== EventType.RUN_INTERRUPTED) return null;
   return {
     summary:
       event.text ||
-      interruption ||
-      (event.type === 'run_failed' ? 'Run failed.' : 'Run interrupted.'),
+      interruptionText(event) ||
+      (event.type === EventType.RUN_FAILED ? 'Run failed.' : 'Run interrupted.'),
     scope: 'run',
     severity: 'fatal',
   };
 }
 
+function interruptionText(event: RunEvent): string {
+  const data = event.data;
+  if (data.case !== 'runInterrupted') return '';
+  return `${data.value.reason}${data.value.signal === undefined ? '' : ` (${data.value.signal})`}`;
+}
+
 function fromProtocolDiagnostic(event: RunEvent, diagnostic: Diagnostic): CoreDiagnostic {
+  const scope = scopeName(diagnostic.scope);
   return {
-    id: diagnostic.id ?? null,
-    code: diagnostic.code ?? null,
-    failureKind: failureKind(diagnostic.scope, event.type),
+    id: diagnostic.id || null,
+    code: diagnostic.code || null,
+    failureKind: failureKind(scope, event.type),
     summary: diagnostic.summary,
     detail: diagnostic.detail ?? null,
     hint: diagnostic.hint ?? null,
-    severity: diagnostic.severity ?? 'error',
-    scope: diagnostic.scope,
+    severity: severityName(diagnostic.severity),
+    scope,
     source: diagnostic.source ?? null,
-    agentKind: event.agent_kind ?? null,
-    roundLabel: event.round_label ?? null,
-    invocationId: event.invocation_id ?? null,
-    sequence: event.sequence ?? 0,
+    agentKind: event.agentKind ?? null,
+    roundLabel: event.roundLabel ?? null,
+    invocationId: event.executionId ?? null,
+    sequence: event.sequence,
   };
 }
 
 function fallbackDiagnostic(
   event: RunEvent,
   summary: string,
-  scope: Diagnostic['scope'],
+  scope: DiagnosticScopeName,
   severity: CoreDiagnostic['severity'],
   code: string | null = null,
 ): CoreDiagnostic {
@@ -1308,18 +1332,18 @@ function fallbackDiagnostic(
     severity,
     scope,
     source: null,
-    agentKind: event.agent_kind ?? null,
-    roundLabel: event.round_label ?? null,
-    invocationId: event.invocation_id ?? null,
-    sequence: event.sequence ?? 0,
+    agentKind: event.agentKind ?? null,
+    roundLabel: event.roundLabel ?? null,
+    invocationId: event.executionId ?? null,
+    sequence: event.sequence,
   };
 }
 
 function failureKind(
-  scope: Diagnostic['scope'],
-  eventType: RunEvent['type'],
+  scope: DiagnosticScopeName,
+  eventType: EventType,
 ): CoreDiagnostic['failureKind'] {
-  return eventType === 'run_interrupted' ? 'run_interruption' : scope;
+  return eventType === EventType.RUN_INTERRUPTED ? 'run_interruption' : scope;
 }
 
 function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
@@ -1335,12 +1359,12 @@ interface TranscriptFields {
 }
 
 function transcriptFields(event: RunEvent): TranscriptFields {
-  const roundNumber = roundNumberFromLabel(event.round_label);
+  const roundNumber = roundNumberFromLabel(event.roundLabel);
   return {
-    id: String(event.sequence ?? `${event.timestamp}-${event.type}`),
-    agentFields: event.agent_kind ? {agentKind: event.agent_kind} : {},
+    id: String(event.sequence),
+    agentFields: event.agentKind ? {agentKind: event.agentKind} : {},
     roundFields: {
-      ...(event.round_label ? {roundLabel: event.round_label} : {}),
+      ...(event.roundLabel ? {roundLabel: event.roundLabel} : {}),
       ...(roundNumber === null ? {} : {roundNumber}),
     },
   };
@@ -1352,61 +1376,80 @@ function eventDataToTranscriptEntry(
   fields: TranscriptFields,
 ): TranscriptEntry | null | undefined {
   const data = event.data;
-  if (data?.kind === 'configuration_failed') {
-    return {
-      id: fields.id,
-      kind: 'result',
-      content: configurationFailureContent(data),
-      label: 'Configuration failed',
-      tone: 'failure',
-    };
+  switch (data.case) {
+    case 'configurationFailed':
+      return {
+        id: fields.id,
+        kind: 'result',
+        content: configurationFailureContent(data.value),
+        label: 'Configuration failed',
+        tone: 'failure',
+      };
+    case 'chat':
+      return chatTranscriptEntry(data.value, fields);
+    case 'agentOutputChunk':
+      return outputTranscriptEntry(event, data.value, fields);
+    case 'toolCall':
+      return toolCallTranscriptEntry(event, data.value, fields);
+    case 'toolResult':
+      return toolResultTranscriptEntry(event, data.value, fields);
+    case 'subprocessOutput':
+      return {
+        id: fields.id,
+        kind: 'subprocess',
+        content: data.value.content,
+        label: `${data.value.processKind} · ${enumWord(OutputStream, data.value.stream)}`,
+        ...fields.agentFields,
+        ...fields.roundFields,
+      };
+    // The warning rides the envelope's `diagnostic`, which `applyDiagnosticEvent`
+    // has already folded into `diagnostics`; it is not transcript prose.
+    case 'frameworkWarning':
+      return null;
+    case 'judgeResult':
+      return judgeResultEntry(data.value, fields);
+    case 'benchmarkResult':
+      return {
+        id: fields.id,
+        kind: 'result',
+        content: `${data.value.metric}: ${data.value.value} ${data.value.unit}`,
+        label: 'Benchmark',
+        tone: 'success',
+        ...fields.agentFields,
+        ...fields.roundFields,
+      };
+    case 'roundFinished':
+      return roundFinishedEntry(event, data.value, fields);
+    case 'gateStarted':
+      return gateStartedEntry(event, data.value, fields);
+    case 'gateFinished':
+      return gateFinishedEntry(event, data.value, fields.id, fields.roundFields);
+    case 'workspaceSnapshot':
+      return {
+        id: fields.id,
+        kind: 'status',
+        content: workspaceSnapshotContent(data.value),
+        label: frameworkLabel(frameworkSourceName(data.value.source, undefined), event),
+        ...fields.roundFields,
+      };
+    case 'runConfigured':
+      return {
+        id: fields.id,
+        kind: 'status',
+        content: runConfiguredContent(data.value),
+        label: frameworkLabel(frameworkSourceName(data.value.source, undefined), event),
+        ...fields.roundFields,
+      };
+    default:
+      return undefined;
   }
-  if (data?.kind === 'chat') {
-    return chatTranscriptEntry(data, fields);
-  }
-  if (data?.kind === 'agent_output_chunk') {
-    return outputTranscriptEntry(event, data, fields);
-  }
-  if (data?.kind === 'tool_call' || data?.kind === 'tool_result') {
-    return toolTranscriptEntry(event, data, fields);
-  }
-  if (data?.kind === 'subprocess_output') {
-    return {
-      id: fields.id,
-      kind: 'subprocess',
-      content: data.content,
-      label: `${data.process_kind} · ${data.stream}`,
-      ...fields.agentFields,
-      ...fields.roundFields,
-    };
-  }
-  // The warning rides the envelope's `diagnostic`, which `applyDiagnosticEvent`
-  // has already folded into `diagnostics`; it is not transcript prose.
-  if (data?.kind === 'framework_warning') return null;
-  if (
-    data?.kind === 'judge_result' ||
-    data?.kind === 'benchmark_result' ||
-    data?.kind === 'round_finished'
-  ) {
-    return resultTranscriptEntry(event, data, fields);
-  }
-  if (
-    data?.kind === 'gate_started' ||
-    data?.kind === 'gate_finished' ||
-    data?.kind === 'workspace_snapshot' ||
-    data?.kind === 'run_configured'
-  ) {
-    return frameworkTranscriptEntry(event, data, fields);
-  }
-  return undefined;
 }
 
 function eventTypeToTranscriptEntry(
   event: RunEvent,
   fields: TranscriptFields,
 ): TranscriptEntry | null {
-  const data = event.data;
-  if (event.type === 'phase_started') {
+  if (event.type === EventType.PHASE_STARTED) {
     return {
       id: fields.id,
       kind: 'status',
@@ -1416,16 +1459,13 @@ function eventTypeToTranscriptEntry(
       ...fields.roundFields,
     };
   }
-  if (event.type === 'run_failed' || event.type === 'run_interrupted') {
-    const interrupted = event.type === 'run_interrupted';
-    const interruption =
-      data?.kind === 'run_interrupted'
-        ? `${data.reason}${data.signal === null ? '' : ` (${data.signal})`}`
-        : '';
+  if (event.type === EventType.RUN_FAILED || event.type === EventType.RUN_INTERRUPTED) {
+    const interrupted = event.type === EventType.RUN_INTERRUPTED;
     return {
       id: fields.id,
       kind: 'result',
-      content: event.text || interruption || (interrupted ? 'Run interrupted.' : 'Run failed.'),
+      content:
+        event.text || interruptionText(event) || (interrupted ? 'Run interrupted.' : 'Run failed.'),
       label: interrupted ? 'Run interrupted' : 'Run failed',
       tone: 'failure',
       ...fields.agentFields,
@@ -1435,13 +1475,10 @@ function eventTypeToTranscriptEntry(
   return null;
 }
 
-function chatTranscriptEntry(
-  data: Extract<RunEventData, {kind?: 'chat'}>,
-  fields: TranscriptFields,
-): TranscriptEntry {
+function chatTranscriptEntry(data: ChatData, fields: TranscriptFields): TranscriptEntry {
   // The invocation id names the turn this answer closes. Records written before
   // the field existed carry none.
-  const invocationId = data.invocation_id ?? undefined;
+  const invocationId = data.invocationId;
   return {
     id: fields.id,
     kind: 'assistant',
@@ -1455,17 +1492,17 @@ function chatTranscriptEntry(
 
 function outputTranscriptEntry(
   event: RunEvent,
-  data: Extract<RunEventData, {kind?: 'agent_output_chunk'}>,
+  data: AgentOutputChunkData,
   fields: TranscriptFields,
 ): TranscriptEntry {
   const kind = outputKind(data.channel);
-  const invocationId = event.invocation_id ?? undefined;
+  const invocationId = event.executionId;
   const gate = kind === 'diagnostic' ? splitFrameworkValidationCommand(data.content) : null;
   return {
     id: fields.id,
     kind,
     content: gate?.content ?? data.content,
-    label: labelFor(event, data.channel),
+    label: labelFor(event, enumWord(AgentOutputChannel, data.channel)),
     ...fields.agentFields,
     ...fields.roundFields,
     turnId: invocationId ?? fields.id,
@@ -1477,184 +1514,107 @@ function outputTranscriptEntry(
   };
 }
 
-/**
- * `kind` is optional on the wire (older records predate the field), so a plain
- * `data.kind === 'tool_call'` check narrows the matching branch but not the
- * fallthrough: structurally, a `ToolResultData` with `kind` omitted still
- * satisfies `ToolCallData`, so TypeScript can't rule it out of the remainder.
- * A type predicate is authoritative instead of inferred, so it narrows both
- * sides.
- */
-function isToolCallData(
-  data: Extract<RunEventData, {kind?: 'tool_call' | 'tool_result'}>,
-): data is Extract<RunEventData, {kind?: 'tool_call'}> {
-  return data.kind === 'tool_call';
-}
-
-function toolTranscriptEntry(
+function toolCallTranscriptEntry(
   event: RunEvent,
-  data: Extract<RunEventData, {kind?: 'tool_call' | 'tool_result'}>,
+  data: ToolCallData,
   fields: TranscriptFields,
 ): TranscriptEntry {
-  const invocationId = event.invocation_id ?? undefined;
-  if (isToolCallData(data)) {
-    return {
-      id: fields.id,
-      kind: 'tool',
-      content: '',
-      label: labelFor(event, 'tool'),
-      ...fields.agentFields,
-      ...fields.roundFields,
-      turnId: invocationId ?? fields.id,
-      ...(invocationId === undefined ? {} : {invocationId}),
-      startsTurn: true,
-      toolName: data.tool,
-      toolArguments: data.args ?? {},
-      ...(data.call_id == null ? {} : {toolCallId: data.call_id}),
-    };
-  }
+  const invocationId = event.executionId;
+  return {
+    id: fields.id,
+    kind: 'tool',
+    content: '',
+    label: labelFor(event, 'tool'),
+    ...fields.agentFields,
+    ...fields.roundFields,
+    turnId: invocationId ?? fields.id,
+    ...(invocationId === undefined ? {} : {invocationId}),
+    startsTurn: true,
+    toolName: data.tool,
+    toolArguments: data.args ?? {},
+    ...(data.callId === undefined ? {} : {toolCallId: data.callId}),
+  };
+}
+
+function toolResultTranscriptEntry(
+  event: RunEvent,
+  data: ToolResultData,
+  fields: TranscriptFields,
+): TranscriptEntry {
+  const invocationId = event.executionId;
   return {
     id: fields.id,
     kind: 'tool',
     content: data.content,
     label: labelFor(event, 'tool'),
-    ...(data.is_error ? {tone: 'failure' as const} : {}),
+    ...(data.isError ? {tone: 'failure' as const} : {}),
     ...fields.agentFields,
     ...fields.roundFields,
     turnId: invocationId ?? fields.id,
     toolName: data.tool,
     toolResult: data,
-    ...(data.call_id == null ? {} : {toolCallId: data.call_id}),
+    ...(data.callId === undefined ? {} : {toolCallId: data.callId}),
     ...(invocationId === undefined ? {} : {invocationId}),
   };
 }
 
-/** See `isToolCallData`: a type predicate, because the optional `kind` field
- * defeats plain-comparison narrowing of the non-matching branches. */
-function isJudgeResultData(
-  data: Extract<RunEventData, {kind?: 'judge_result' | 'benchmark_result' | 'round_finished'}>,
-): data is Extract<RunEventData, {kind?: 'judge_result'}> {
-  return data.kind === 'judge_result';
-}
-
-/** See `isToolCallData`. */
-function isBenchmarkResultData(
-  data: Extract<RunEventData, {kind?: 'benchmark_result' | 'round_finished'}>,
-): data is Extract<RunEventData, {kind?: 'benchmark_result'}> {
-  return data.kind === 'benchmark_result';
-}
-
-function resultTranscriptEntry(
-  event: RunEvent,
-  data: Extract<RunEventData, {kind?: 'judge_result' | 'benchmark_result' | 'round_finished'}>,
+function judgeResultEntry(
+  data: {verdict: JudgeVerdict; feedback: string},
   fields: TranscriptFields,
 ): TranscriptEntry {
-  if (isJudgeResultData(data)) {
-    return {
-      id: fields.id,
-      kind: 'result',
-      content: data.feedback || `Judge returned ${data.verdict}.`,
-      label: `Judge · ${data.verdict.toUpperCase()}`,
-      tone: data.verdict === 'pass' ? 'success' : 'failure',
-      ...fields.agentFields,
-      ...fields.roundFields,
-    };
-  }
-  if (isBenchmarkResultData(data)) {
-    return {
-      id: fields.id,
-      kind: 'result',
-      content: `${data.metric}: ${data.value} ${data.unit}`,
-      label: 'Benchmark',
-      tone: 'success',
-      ...fields.agentFields,
-      ...fields.roundFields,
-    };
-  }
+  const verdict = enumWord(JudgeVerdict, data.verdict);
+  return {
+    id: fields.id,
+    kind: 'result',
+    content: data.feedback || `Judge returned ${verdict}.`,
+    label: `Judge · ${verdict.toUpperCase()}`,
+    tone: data.verdict === JudgeVerdict.PASS ? 'success' : 'failure',
+    ...fields.agentFields,
+    ...fields.roundFields,
+  };
+}
+
+function roundFinishedEntry(
+  event: RunEvent,
+  data: RoundFinishedData,
+  fields: TranscriptFields,
+): TranscriptEntry {
   const tone =
-    data.judge_verdict === 'pass'
+    data.judgeVerdict === RoundJudgeVerdict.PASS
       ? 'success'
-      : data.judge_verdict === 'fail'
+      : data.judgeVerdict === RoundJudgeVerdict.FAIL
         ? 'failure'
         : 'normal';
   return {
     id: fields.id,
     kind: 'result',
     content: `${data.attempts} attempt(s)`,
-    label: `${event.round_label ?? 'Round'} · ${data.judge_verdict.toUpperCase()}`,
+    label: `${event.roundLabel ?? 'Round'} · ${enumWord(RoundJudgeVerdict, data.judgeVerdict).toUpperCase()}`,
     tone,
     ...fields.agentFields,
     ...fields.roundFields,
   };
 }
 
-/** See `isToolCallData`. */
-function isGateStartedData(
-  data: Extract<
-    RunEventData,
-    {kind?: 'gate_started' | 'gate_finished' | 'workspace_snapshot' | 'run_configured'}
-  >,
-): data is Extract<RunEventData, {kind?: 'gate_started'}> {
-  return data.kind === 'gate_started';
-}
-
-/** See `isToolCallData`. */
-function isGateFinishedData(
-  data: Extract<RunEventData, {kind?: 'gate_finished' | 'workspace_snapshot' | 'run_configured'}>,
-): data is GateFinishedData {
-  return data.kind === 'gate_finished';
-}
-
-/** See `isToolCallData`. */
-function isWorkspaceSnapshotData(
-  data: Extract<RunEventData, {kind?: 'workspace_snapshot' | 'run_configured'}>,
-): data is WorkspaceSnapshotData {
-  return data.kind === 'workspace_snapshot';
-}
-
-function frameworkTranscriptEntry(
+function gateStartedEntry(
   event: RunEvent,
-  data: Extract<
-    RunEventData,
-    {kind?: 'gate_started' | 'gate_finished' | 'workspace_snapshot' | 'run_configured'}
-  >,
+  data: GateStartedData,
   fields: TranscriptFields,
 ): TranscriptEntry {
-  if (isGateStartedData(data)) {
-    const recipe = data.recipe == null ? '' : ` ${data.recipe}`;
-    return {
-      id: fields.id,
-      kind: 'status',
-      content: `running${recipe}`,
-      label: frameworkLabel(`framework-${data.gate}`, event),
-      ...fields.roundFields,
-      ...(data.command == null ? {} : {command: data.command}),
-    };
-  }
-  if (isGateFinishedData(data)) {
-    return gateFinishedEntry(event, data, fields.id, fields.roundFields);
-  }
-  if (isWorkspaceSnapshotData(data)) {
-    return {
-      id: fields.id,
-      kind: 'status',
-      content: workspaceSnapshotContent(data),
-      label: frameworkLabel(frameworkSourceName(data.source, null), event),
-      ...fields.roundFields,
-    };
-  }
+  const recipe = data.recipe === undefined ? '' : ` ${data.recipe}`;
   return {
     id: fields.id,
     kind: 'status',
-    content: runConfiguredContent(data),
-    label: frameworkLabel(frameworkSourceName(data.source, null), event),
+    content: `running${recipe}`,
+    label: frameworkLabel(`framework-${enumWord(GateKind, data.gate)}`, event),
     ...fields.roundFields,
+    ...(data.command === undefined ? {} : {command: data.command}),
   };
 }
 
 function configurationFailureContent(data: {
   message: string;
-  usage?: string | null;
+  usage?: string | undefined;
   code: string;
   stage: string;
 }): string {
@@ -1692,24 +1652,25 @@ function splitFrameworkValidationCommand(content: string): {content: string; com
   return {content: content.slice(0, content.length - raw.length), command};
 }
 
-function outputKind(channel: string): TranscriptEntry['kind'] {
-  if (channel === 'assistant') return 'assistant';
-  if (channel === 'prompt') return 'prompt';
-  if (channel === 'analysis') return 'analysis';
-  if (channel === 'tool') return 'tool';
-  return 'diagnostic';
+function outputKind(channel: AgentOutputChannel): TranscriptEntry['kind'] {
+  switch (channel) {
+    case AgentOutputChannel.ASSISTANT:
+      return 'assistant';
+    case AgentOutputChannel.PROMPT:
+      return 'prompt';
+    case AgentOutputChannel.ANALYSIS:
+      return 'analysis';
+    case AgentOutputChannel.TOOL:
+      return 'tool';
+    default:
+      return 'diagnostic';
+  }
 }
 
 function labelFor(event: RunEvent, fallback: string): string {
-  const phase = event.agent_kind ?? fallback;
-  return event.round_label ? `${phase} · ${event.round_label}` : phase;
+  const phase = event.agentKind ?? fallback;
+  return event.roundLabel ? `${phase} · ${event.roundLabel}` : phase;
 }
-
-type GateFinishedData = Extract<RunEventData, {kind?: 'gate_finished'}>;
-type WorkspaceSnapshotData = Extract<RunEventData, {kind?: 'workspace_snapshot'}>;
-type RunConfiguredData = Extract<RunEventData, {kind?: 'run_configured'}>;
-/** The generated closed set of framework subsystems, never a local copy. */
-type FrameworkSource = NonNullable<GateFinishedData['source']>;
 
 type RoundFields = Partial<Pick<TranscriptEntry, 'roundLabel' | 'roundNumber'>>;
 
@@ -1719,21 +1680,21 @@ type RoundFields = Partial<Pick<TranscriptEntry, 'roundLabel' | 'roundNumber'>>;
  * as the escape hatch the `other` member carries.
  */
 function frameworkSourceName(
-  source: FrameworkSource | undefined,
+  source: FrameworkSource,
   sourceLabel: string | null | undefined,
 ): string {
   switch (source) {
-    case 'git_tracking':
+    case FrameworkSource.GIT_TRACKING:
       return 'git-tracking';
-    case 'gpu':
+    case FrameworkSource.GPU:
       return 'gpu';
-    case 'skypilot':
+    case FrameworkSource.SKYPILOT:
       return 'skypilot';
-    case 'other':
+    case FrameworkSource.OTHER:
       return sourceLabel ?? 'framework';
-    case 'gates':
-    case 'loop':
-    case undefined:
+    case FrameworkSource.GATES:
+    case FrameworkSource.LOOP:
+    case FrameworkSource.UNSPECIFIED:
       return 'framework';
     default: {
       const unhandled: never = source;
@@ -1744,7 +1705,7 @@ function frameworkSourceName(
 
 /** `labelFor`'s round suffix without its agent fallback: framework, not agent. */
 function frameworkLabel(base: string, event: RunEvent): string {
-  return event.round_label ? `${base} · ${event.round_label}` : base;
+  return event.roundLabel ? `${base} · ${event.roundLabel}` : base;
 }
 
 /**
@@ -1758,23 +1719,23 @@ function gateFinishedEntry(
   id: string,
   roundFields: RoundFields,
 ): TranscriptEntry {
-  const label = frameworkLabel(`framework-${data.gate}`, event);
-  if (event.status === 'failed') {
-    const heading = data.recipe == null ? 'FAIL' : `FAIL: ${data.recipe}`;
+  const label = frameworkLabel(`framework-${enumWord(GateKind, data.gate)}`, event);
+  if (event.status === EventStatus.FAILED) {
+    const heading = data.recipe === undefined ? 'FAIL' : `FAIL: ${data.recipe}`;
     return {
       id,
       kind: 'diagnostic',
-      content: data.output_tail ? `${heading}\n${data.output_tail}` : heading,
+      content: data.outputTail ? `${heading}\n${data.outputTail}` : heading,
       label,
       tone: 'failure',
       ...roundFields,
     };
   }
   const measurement =
-    data.metric != null && data.value != null
+    data.metric !== undefined && data.value !== undefined
       ? `${data.metric}: ${data.value} ${data.unit ?? data.metric}`
       : null;
-  if (data.gate === 'benchmark' && measurement !== null && data.reused !== true) {
+  if (data.gate === GateKind.BENCHMARK && measurement !== null && !data.reused) {
     return {
       id,
       kind: 'result',
@@ -1784,7 +1745,7 @@ function gateFinishedEntry(
       ...roundFields,
     };
   }
-  const passed = data.reused === true ? 'reused PASS' : 'PASS';
+  const passed = data.reused ? 'reused PASS' : 'PASS';
   const detail = data.recipe ?? measurement;
   return {
     id,
@@ -1798,13 +1759,13 @@ function gateFinishedEntry(
 
 /** Exactly one aspect is populated per event; see `WorkspaceSnapshotData`. */
 function workspaceSnapshotContent(data: WorkspaceSnapshotData): string {
-  if (data.baseline != null) return `trusted input baseline: ${shortCommit(data.baseline)}`;
-  const excluded = data.excluded_paths ?? [];
+  if (data.baseline !== undefined) return `trusted input baseline: ${shortCommit(data.baseline)}`;
+  const excluded = data.excludedPaths;
   if (excluded.length > 0) {
     return `excluded ${excluded.length} path${excluded.length === 1 ? '' : 's'} from snapshots`;
   }
-  if (data.commit == null) return `no changes to commit for '${data.label ?? ''}'`;
-  return `snapshot '${data.label ?? ''}' at ${shortCommit(data.commit)}`;
+  if (data.commit === undefined) return `no changes to commit for '${data.label}'`;
+  return `snapshot '${data.label}' at ${shortCommit(data.commit)}`;
 }
 
 function shortCommit(commit: string): string {
@@ -1815,7 +1776,7 @@ function runConfiguredContent(data: RunConfiguredData): string {
   const lines: string[] = [];
   if (data.objective) lines.push(`objective: ${data.objective}`);
   if (data.model) lines.push(`model: ${data.model}`);
-  if (data.search_policy) lines.push(`search policy: ${data.search_policy}`);
+  if (data.searchPolicy) lines.push(`search policy: ${data.searchPolicy}`);
   return lines.length > 0 ? lines.join('\n') : 'run configured';
 }
 

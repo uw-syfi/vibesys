@@ -1,4 +1,4 @@
-import type {AgentStatusData, RunEvent} from '@vibesys/backend-client';
+import {type AgentStatusData, type RunEvent, timestampToIso} from '@vibesys/backend-client';
 
 export interface ExecutionStatus {
   executionId: string;
@@ -53,11 +53,9 @@ export function executionStatusFor(
 /** Applies one status-bearing presentation event to its execution. */
 export function applyExecutionStatus(statuses: StatusMap, event: RunEvent): StatusMap {
   const executionId = executionIdentity(event);
-  const data = event.data;
-  const status =
-    data?.kind === 'agent_output_chunk' || data?.kind === 'tool_call' ? data.status : null;
-  if (executionId == null || status == null) return statuses;
-  const sequence = event.sequence ?? 0;
+  const status = executionStatusData(event);
+  if (executionId === null || status === null) return statuses;
+  const sequence = event.sequence;
   const current = statuses[executionId];
   if (
     current !== undefined &&
@@ -71,12 +69,12 @@ export function applyExecutionStatus(statuses: StatusMap, event: RunEvent): Stat
     [executionId]: {
       executionId,
       sequence,
-      observedAt: event.timestamp,
+      observedAt: timestampToIso(event.timestamp),
       progress: status.progress ?? current?.progress ?? null,
-      agentLabel: status.agent_label ?? current?.agentLabel ?? null,
-      elapsedSeconds: status.elapsed_seconds ?? current?.elapsedSeconds ?? null,
-      inputTokens: reportedInputTokens(status.input_tokens) ?? current?.inputTokens ?? null,
-      contextWindow: status.context_window ?? current?.contextWindow ?? null,
+      agentLabel: status.agentLabel ?? current?.agentLabel ?? null,
+      elapsedSeconds: status.elapsedSeconds,
+      inputTokens: reportedInputTokens(status.inputTokens) ?? current?.inputTokens ?? null,
+      contextWindow: status.contextWindow ?? current?.contextWindow ?? null,
     },
   };
 }
@@ -91,13 +89,13 @@ export function applyExecutionStatusUsage(
 ): ExecutionUsage | null {
   const raw = executionStatusData(event);
   if (raw === null) return current;
-  const rawInputTokens = reportedInputTokens(raw.input_tokens);
+  const rawInputTokens = reportedInputTokens(raw.inputTokens);
   if (rawInputTokens == null) return current;
   const executionId = executionIdentity(event);
   if (executionId === null) {
     const usage: ExecutionUsage = {
       inputTokens: rawInputTokens,
-      contextWindow: raw.context_window ?? current?.contextWindow ?? null,
+      contextWindow: raw.contextWindow ?? current?.contextWindow ?? null,
       model: current?.model ?? null,
     };
     if (needsModelBackfill(current)) unresolvedStatusUsageModels.add(usage);
@@ -272,13 +270,13 @@ function mergeStatus(older: ExecutionStatus | undefined, newer: ExecutionStatus)
 /** Reads structured status from the two protocol events that carry it. */
 export function executionStatusData(event: RunEvent): AgentStatusData | null {
   const data = event.data;
-  return data?.kind === 'agent_output_chunk' || data?.kind === 'tool_call'
-    ? (data.status ?? null)
+  return data.case === 'agentOutputChunk' || data.case === 'toolCall'
+    ? (data.value.status ?? null)
     : null;
 }
 
 function executionIdentity(event: RunEvent): string | null {
-  return event.execution_id ?? event.invocation_id ?? null;
+  return event.executionId ?? null;
 }
 
 /**
@@ -300,14 +298,14 @@ function latestExecutionStart(
   let startedAt: string | null = null;
   let latestSequence = -1;
   for (const event of events) {
-    if (event.execution_id !== executionId || event.data?.kind !== 'agent_execution_started') {
+    if (event.executionId !== executionId || event.data.case !== 'agentExecutionStarted') {
       continue;
     }
-    const sequence = event.sequence ?? 0;
+    const sequence = event.sequence;
     if (throughSequence > 0 && sequence > throughSequence) continue;
     if (sequence >= latestSequence) {
       latestSequence = sequence;
-      startedAt = event.timestamp;
+      startedAt = timestampToIso(event.timestamp);
     }
   }
   return startedAt;

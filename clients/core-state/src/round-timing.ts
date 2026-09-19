@@ -1,3 +1,5 @@
+import {EventType, type RunEvent, timestampToIso} from '@vibesys/backend-client';
+
 export interface AgentTimingInterval {
   startedAt: string;
   finishedAt: string;
@@ -44,14 +46,10 @@ export interface RoundTimingState {
   activeAgentStarts?: Record<string, string>;
 }
 
-export interface AgentTimingEvent {
-  agent_kind?: string | null;
-  invocation_id?: string | null;
-  execution_id?: string | null;
-  timestamp: string;
-  sequence?: number;
-  type?: string;
-}
+export type AgentTimingEvent = Pick<
+  RunEvent,
+  'agentKind' | 'executionId' | 'timestamp' | 'sequence' | 'type'
+>;
 
 const timingProvenances = new WeakMap<object, AgentTimingProvenance>();
 
@@ -61,15 +59,15 @@ export function startAgentTiming<T extends RoundTimingState>(state: T, event: Ag
   const provenance = timingProvenance(state);
   const next = {
     ...state,
-    activeAgentStarts: {...(state.activeAgentStarts ?? {}), [key]: event.timestamp},
+    activeAgentStarts: {...(state.activeAgentStarts ?? {}), [key]: timestampToIso(event.timestamp)},
   };
   recordTimingProvenance(next, {
     ...provenance,
     activeStarts: {
       ...provenance.activeStarts,
       [key]: {
-        sequence: event.sequence ?? null,
-        compatibility: event.type === 'phase_started',
+        sequence: event.sequence,
+        compatibility: event.type === EventType.PHASE_STARTED,
       },
     },
   });
@@ -81,7 +79,7 @@ export function finishAgentTiming<T extends RoundTimingState>(
   event: AgentTimingEvent,
 ): T {
   const exactKey = timingKey(event);
-  const agentKind = event.agent_kind;
+  const agentKind = event.agentKind;
   if (exactKey === null || !agentKind) return state;
   const provenance = timingProvenance(state);
   const activeAgentStarts = {...(state.activeAgentStarts ?? {})};
@@ -100,7 +98,7 @@ export function finishAgentTiming<T extends RoundTimingState>(
       : {
           agentIntervals: [
             ...(state.agentIntervals ?? []),
-            {startedAt, finishedAt: event.timestamp},
+            {startedAt, finishedAt: timestampToIso(event.timestamp)},
           ],
         }),
     activeAgentStarts,
@@ -118,8 +116,8 @@ export function finishAgentTiming<T extends RoundTimingState>(
               startCompatibility: startProvenance?.compatibility ?? false,
               finishKey: exactKey,
               agentKind,
-              finishSequence: event.sequence ?? null,
-              finishCompatibility: event.type === 'phase_finished',
+              finishSequence: event.sequence,
+              finishCompatibility: event.type === EventType.PHASE_FINISHED,
             },
           ],
     unmatchedFinishes:
@@ -129,9 +127,9 @@ export function finishAgentTiming<T extends RoundTimingState>(
             {
               key: exactKey,
               agentKind,
-              finishedAt: event.timestamp,
-              sequence: event.sequence ?? null,
-              compatibility: event.type === 'phase_finished',
+              finishedAt: timestampToIso(event.timestamp),
+              sequence: event.sequence,
+              compatibility: event.type === EventType.PHASE_FINISHED,
             },
           ]
         : provenance.unmatchedFinishes,
@@ -477,8 +475,8 @@ function compareTaggedIntervals(left: TaggedInterval, right: TaggedInterval): nu
 }
 
 function timingKey(event: AgentTimingEvent): string | null {
-  if (!event.agent_kind) return null;
-  return `${event.agent_kind}:${event.execution_id ?? event.invocation_id ?? ''}`;
+  if (!event.agentKind) return null;
+  return `${event.agentKind}:${event.executionId ?? ''}`;
 }
 
 function agentKindFromKey(key: string): string {
@@ -492,8 +490,8 @@ function findActiveTimingKey(
   exactKey: string,
 ): string | null {
   if (activeAgentStarts[exactKey] !== undefined) return exactKey;
-  if (!event.agent_kind) return null;
-  const prefix = `${event.agent_kind}:`;
+  if (!event.agentKind) return null;
+  const prefix = `${event.agentKind}:`;
   const candidates = Object.entries(activeAgentStarts)
     .filter(([key]) => key.startsWith(prefix))
     .sort(([, left], [, right]) => new Date(left).getTime() - new Date(right).getTime());

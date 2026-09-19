@@ -1,4 +1,5 @@
-import type {RunEvent} from '@vibesys/backend-client';
+import {EventStatus, EventType, type RunEvent} from '@vibesys/backend-client';
+import {makeEvent, timestampOf} from '@vibesys/backend-client/testing';
 import type {CoreState} from '../src/core-state.js';
 import type {RunMapState} from '../src/run-map.js';
 
@@ -13,6 +14,10 @@ const {initialCoreState, reduceEvent, reduceEventBatch} = (await import(
 
 const ROLES = ['orchestrator', 'implementer', 'judge', 'profiler'] as const;
 const LIVE_SAMPLES = 5_000;
+const finishedTypes: ReadonlySet<RunEvent['type']> = new Set([
+  EventType.AGENT_EXECUTION_FINISHED,
+  EventType.PHASE_FINISHED,
+]);
 
 interface Measurement {
   readonly kind:
@@ -83,7 +88,7 @@ function measureLiveOutput(base: RunMapState, round: number): Measurement {
   for (let sample = 0; sample < LIVE_SAMPLES; sample += 1) {
     state = applyRunMapEvent(
       state,
-      scopedEvent(100_000 + sample, round, 'implementer', 'agent_output_chunk'),
+      scopedEvent(100_000 + sample, round, 'implementer', EventType.AGENT_OUTPUT_CHUNK),
     );
   }
   return measurement(
@@ -97,16 +102,14 @@ function measureLiveOutput(base: RunMapState, round: number): Measurement {
 
 function measureLivePhaseReplacement(base: RunMapState, round: number): Measurement {
   let state = applyRunMapEvent(base, {
-    ...scopedEvent(90_000, round, 'implementer', 'phase_started'),
-    execution_id: 'live-phase',
-    invocation_id: 'live-phase',
+    ...scopedEvent(90_000, round, 'implementer', EventType.PHASE_STARTED),
+    executionId: 'live-phase',
   });
   const startedAt = performance.now();
   for (let sample = 0; sample < LIVE_SAMPLES; sample += 1) {
     state = applyRunMapEvent(state, {
-      ...scopedEvent(100_000 + sample, round, 'implementer', 'phase_started'),
-      execution_id: 'live-phase',
-      invocation_id: 'live-phase',
+      ...scopedEvent(100_000 + sample, round, 'implementer', EventType.PHASE_STARTED),
+      executionId: 'live-phase',
     });
   }
   return measurement(
@@ -124,7 +127,12 @@ function measureCoreNoop(base: CoreState, round: number): Measurement {
   for (let sample = 0; sample < LIVE_SAMPLES; sample += 1) {
     state = reduceEvent(
       state,
-      scopedEvent(100_000 + sample, round, 'implementer', 'agent_execution_activity_changed'),
+      scopedEvent(
+        100_000 + sample,
+        round,
+        'implementer',
+        EventType.AGENT_EXECUTION_ACTIVITY_CHANGED,
+      ),
     );
   }
   return measurement('core live no-op', round, state, performance.now() - startedAt, LIVE_SAMPLES);
@@ -132,16 +140,14 @@ function measureCoreNoop(base: CoreState, round: number): Measurement {
 
 function measureCorePhaseReplacement(base: CoreState, round: number): Measurement {
   let state = reduceEvent(base, {
-    ...scopedEvent(90_000, round, 'implementer', 'agent_execution_started'),
-    execution_id: 'live-phase',
-    invocation_id: 'live-phase',
+    ...scopedEvent(90_000, round, 'implementer', EventType.AGENT_EXECUTION_STARTED),
+    executionId: 'live-phase',
   });
   const startedAt = performance.now();
   for (let sample = 0; sample < LIVE_SAMPLES; sample += 1) {
     state = reduceEvent(state, {
-      ...scopedEvent(100_000 + sample, round, 'implementer', 'agent_execution_started'),
-      execution_id: 'live-phase',
-      invocation_id: 'live-phase',
+      ...scopedEvent(100_000 + sample, round, 'implementer', EventType.AGENT_EXECUTION_STARTED),
+      executionId: 'live-phase',
     });
   }
   return measurement(
@@ -193,17 +199,17 @@ function replayEvents(count: number, rounds: number): RunEvent[] {
     const eventsThisRound = perRound + (remainder > 0 ? 1 : 0);
     remainder -= remainder > 0 ? 1 : 0;
     for (const role of ROLES) {
-      events.push(scopedEvent(sequence, round, role, 'agent_execution_started'));
+      events.push(scopedEvent(sequence, round, role, EventType.AGENT_EXECUTION_STARTED));
       sequence += 1;
     }
     const outputCount = Math.max(0, eventsThisRound - ROLES.length * 2);
     for (let offset = 0; offset < outputCount; offset += 1) {
       const role = ROLES[offset % ROLES.length] ?? 'implementer';
-      events.push(scopedEvent(sequence, round, role, 'agent_output_chunk'));
+      events.push(scopedEvent(sequence, round, role, EventType.AGENT_OUTPUT_CHUNK));
       sequence += 1;
     }
     for (const role of ROLES) {
-      events.push(scopedEvent(sequence, round, role, 'agent_execution_finished'));
+      events.push(scopedEvent(sequence, round, role, EventType.AGENT_EXECUTION_FINISHED));
       sequence += 1;
     }
   }
@@ -211,19 +217,20 @@ function replayEvents(count: number, rounds: number): RunEvent[] {
 }
 
 function runStarted(rounds: number): RunEvent {
-  return {
+  return makeEvent(EventType.RUN_STARTED, {
     sequence: 1,
     timestamp: timestamp(1),
-    type: 'run_started',
-    status: 'active',
+    status: EventStatus.ACTIVE,
     data: {
-      kind: 'run_started',
-      outer_loop: 'agent',
-      input: '/benchmark',
-      max_rounds: rounds,
-      expected_roles: [...ROLES],
+      case: 'runStarted',
+      value: {
+        outerLoop: 'agent',
+        input: '/benchmark',
+        maxRounds: rounds,
+        expectedRoles: [...ROLES],
+      },
     },
-  };
+  });
 }
 
 function scopedEvent(
@@ -232,21 +239,18 @@ function scopedEvent(
   role: string,
   type: RunEvent['type'],
 ): RunEvent {
-  const executionId = `${round}-${role}`;
-  return {
+  return makeEvent(type, {
     sequence,
     timestamp: timestamp(sequence),
-    type,
-    status: type.endsWith('_finished') ? 'completed' : 'active',
-    agent_kind: role,
-    round_label: `round-${round}-${role}`,
-    execution_id: executionId,
-    invocation_id: executionId,
-  };
+    status: finishedTypes.has(type) ? EventStatus.COMPLETED : EventStatus.ACTIVE,
+    agentKind: role,
+    roundLabel: `round-${round}-${role}`,
+    executionId: `${round}-${role}`,
+  });
 }
 
-function timestamp(sequence: number): string {
-  return new Date(1_767_225_600_000 + sequence).toISOString();
+function timestamp(sequence: number) {
+  return timestampOf(new Date(1_767_225_600_000 + sequence));
 }
 
 function emptyRunMap(): RunMapState {

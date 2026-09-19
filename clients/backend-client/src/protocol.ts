@@ -1,33 +1,23 @@
-import type {ProtocolDocument} from './generated/protocol.generated.js';
+import type {MessageInitShape} from '@bufbuild/protobuf';
+import type {RequestSchema} from './gen/server/wire/v2/requests_pb.js';
 
-export type ProtocolRequest = ProtocolDocument['request'];
-export type ProtocolResponse = ProtocolDocument['response'];
-export type RunEvent = ProtocolDocument['event'];
-/** Structured status carried by streamed agent output and tool calls. */
-export type AgentStatusData = NonNullable<
-  Extract<NonNullable<RunEvent['data']>, {channel: unknown}>['status']
->;
-export type RunSnapshot = ProtocolDocument['snapshot'];
-/** Run lifecycle statuses the backend reports. Source: `RunStatus` in `src/server/run_lifecycle.py`. */
-export type RunStatus = RunSnapshot['status'];
-export type ServerMessage = ProtocolDocument['server_message'];
-export type Diagnostic = NonNullable<ProtocolResponse['diagnostic']>;
-export type HypothesisEntry = NonNullable<ProtocolResponse['experiments']>[number];
-export type ExperimentUpdate = NonNullable<ProtocolResponse['experiment_update']>;
-export type ExperimentCursor = NonNullable<
-  Extract<ProtocolRequest, {type?: 'query.experiments'}>['after']
->;
-export type HypothesisRound = NonNullable<HypothesisEntry['rounds']>[number];
-export type DesignRound = NonNullable<ProtocolResponse['design']>[number];
-export type DesignFileChange = NonNullable<DesignRound['files']>[number];
-export type DesignPatch = NonNullable<ProtocolResponse['design_patch']>;
-export type ChatOptions = NonNullable<ProtocolResponse['chat_options']>;
-export type ChatProviderOptions = NonNullable<ChatOptions['providers']>[number];
-export type ChatModelOption = NonNullable<ChatProviderOptions['models']>[number];
-export type TuiDefaults = NonNullable<ProtocolResponse['tui_defaults']>;
+/** Version of the wire contract in `proto/server/wire/v2`. Carried on every envelope. */
+export const PROTOCOL_VERSION = 2;
 
-export type RequestInput = ProtocolRequest extends infer Request
-  ? Request extends ProtocolRequest
-    ? Omit<Request, 'protocol_version' | 'request_id' | 'timestamp'>
-    : never
-  : never;
+export * from './gen/server/wire/v2/common_pb.js';
+export * from './gen/server/wire/v2/events_pb.js';
+export type {Request as ProtocolRequest} from './gen/server/wire/v2/requests_pb.js';
+export * from './gen/server/wire/v2/requests_pb.js';
+export type {Response as ProtocolResponse} from './gen/server/wire/v2/responses_pb.js';
+export * from './gen/server/wire/v2/responses_pb.js';
+export * from './gen/server/wire/v2/server_messages_pb.js';
+export * from './gen/server/wire/v2/snapshot_pb.js';
+
+/**
+ * One request body as callers write it: a oneof case with the body message's
+ * init shape, for example `{case: 'steer', value: {text: 'go'}}`.
+ */
+export type RequestBody = Exclude<
+  NonNullable<MessageInitShape<typeof RequestSchema>['body']>,
+  {case: undefined}
+>;

@@ -1,5 +1,18 @@
 import {describe, expect, it} from 'bun:test';
-import type {RunEvent} from '@vibesys/backend-client';
+import {
+  AgentOutputChannel,
+  DiagnosticRetryability,
+  DiagnosticScope,
+  DiagnosticSeverity,
+  EventStatus,
+  EventType,
+  ExecutionActivityMode,
+  ExperimentsChangeReason,
+  JudgeVerdict,
+  RoundJudgeVerdict,
+  type RunEvent,
+} from '@vibesys/backend-client';
+import {makeEvent, makeSnapshot, timestampOf} from '@vibesys/backend-client/testing';
 import {
   type CoreState,
   DEFAULT_CHAT_THREAD_ID,
@@ -45,7 +58,7 @@ describe('prefix backfill equivalence', () => {
   it('reproduces a full fold exactly, timings included, on round boundaries', () => {
     const events = generateRunEvents(9, {typedTools: true});
     const boundaries = events.flatMap((event, index) =>
-      event.type === 'round_finished' ? [index + 1] : [],
+      event.type === EventType.ROUND_FINISHED ? [index + 1] : [],
     );
     expect(boundaries.length).toBeGreaterThan(2);
 
@@ -58,7 +71,7 @@ describe('prefix backfill equivalence', () => {
   it('keeps the tail fold a suffix of the full transcript at a round boundary', () => {
     const events = generateRunEvents(3, {typedTools: true});
     const roundEnds = events.flatMap((event, index) =>
-      event.type === 'round_finished' ? [index + 1] : [],
+      event.type === EventType.ROUND_FINISHED ? [index + 1] : [],
     );
     // One round short of the end, so the tail carries real transcript content.
     const boundary = roundEnds.at(-2) as number;
@@ -130,30 +143,27 @@ describe('prefix merges across the chunk boundary', () => {
       executionStartedEvent(1, 'active'),
       executionStatusEvent(2, 'active', 'agent_output_chunk', {
         progress: 'Inspecting',
-        agent_label: 'Implementer',
-        elapsed_seconds: 2,
-        input_tokens: 4_000,
-        context_window: 200_000,
+        agentLabel: 'Implementer',
+        elapsedSeconds: 2,
+        inputTokens: 4_000,
+        contextWindow: 200_000,
       }),
-      executionStatusEvent(3, 'active', 'tool_call', {input_tokens: 9_000}),
+      executionStatusEvent(3, 'active', 'tool_call', {inputTokens: 9_000}),
     ];
-    const checkpoint = [
-      {
-        execution_id: 'active',
-        agent_kind: 'implementer',
-        round_label: 'round-1-implementer',
-        stage: 'implementation',
-        attempt: 1,
-        assignment: 'Implement',
-        started_at: timestamp(1),
-        activity: {
-          kind: 'agent_execution_activity_changed' as const,
-          mode: 'thinking' as const,
-          summary: 'Working',
-          tool: null,
+    const {activeExecutions: checkpoint} = makeSnapshot({
+      activeExecutions: [
+        {
+          executionId: 'active',
+          agentKind: 'implementer',
+          roundLabel: 'round-1-implementer',
+          stage: 'implementation',
+          attempt: 1,
+          assignment: 'Implement',
+          startedAt: timestamp(1),
+          activity: {mode: ExecutionActivityMode.THINKING, summary: 'Working'},
         },
-      },
-    ];
+      ],
+    });
     const full = reduceEventBatch(initialCoreState(), events, checkpoint, 3);
     const tail = reduceEventBatch(initialCoreState(), events.slice(2), checkpoint, 3, 2);
     const merged = reduceEventPrefix(tail, events.slice(0, 2), 0);
@@ -175,13 +185,13 @@ describe('prefix merges across the chunk boundary', () => {
       executionStartedEvent(1, 'reused'),
       executionStatusEvent(2, 'reused', 'agent_output_chunk', {
         progress: 'Old work',
-        agent_label: 'Old implementer',
-        context_window: 200_000,
+        agentLabel: 'Old implementer',
+        contextWindow: 200_000,
       }),
     ];
     const tail = [
       executionStartedEvent(4, 'reused'),
-      executionStatusEvent(5, 'reused', 'tool_call', {input_tokens: 7_000}),
+      executionStatusEvent(5, 'reused', 'tool_call', {inputTokens: 7_000}),
     ];
     const full = reduceEventBatch(initialCoreState(), [
       ...older,
@@ -204,13 +214,13 @@ describe('prefix merges across the chunk boundary', () => {
     const older = [
       executionStartedEvent(1, 'reused'),
       executionStatusEvent(2, 'reused', 'agent_output_chunk', {
-        input_tokens: 4_000,
-        context_window: 200_000,
+        inputTokens: 4_000,
+        contextWindow: 200_000,
       }),
     ];
     const tail = [
       executionStartedEvent(4, 'reused'),
-      executionStatusEvent(5, 'reused', 'tool_call', {input_tokens: 7_000}),
+      executionStatusEvent(5, 'reused', 'tool_call', {inputTokens: 7_000}),
       executionFinishedEvent(6, 'reused'),
     ];
     const full = reduceEventBatch(initialCoreState(), [
@@ -231,24 +241,20 @@ describe('prefix merges across the chunk boundary', () => {
         executionStartedEvent(1, 'active'),
         executionStatusEvent(2, 'active', 'agent_output_chunk', {
           progress: 'Inspecting',
-          agent_label: 'Implementer',
-          input_tokens: 4_000,
-          context_window: 200_000,
+          agentLabel: 'Implementer',
+          inputTokens: 4_000,
+          contextWindow: 200_000,
         }),
       ];
       const terminal =
         ending === 'execution finish'
           ? executionFinishedEvent(4, 'active')
-          : ({
-              ...baseEvent(4, 'run_failed'),
-              agent_kind: null,
-              round_label: null,
-              status: 'failed',
-            } satisfies RunEvent);
-      const tail = [
-        executionStatusEvent(3, 'active', 'tool_call', {input_tokens: 9_000}),
-        terminal,
-      ];
+          : baseEvent(4, EventType.RUN_FAILED, {
+              agentKind: undefined,
+              roundLabel: undefined,
+              status: EventStatus.FAILED,
+            });
+      const tail = [executionStatusEvent(3, 'active', 'tool_call', {inputTokens: 9_000}), terminal];
       const full = reduceEventBatch(initialCoreState(), [...older, ...tail]);
       const merged = reduceEventPrefix(reduceEventBatch(initialCoreState(), tail), older, 0);
 
@@ -261,27 +267,23 @@ describe('prefix merges across the chunk boundary', () => {
   it('retains an earlier usage model when a later status owns terminal usage', () => {
     const events: RunEvent[] = [
       executionStartedEvent(1, 'active'),
-      {
-        ...baseEvent(2, 'usage_update'),
-        execution_id: 'active',
+      baseEvent(2, EventType.USAGE_UPDATE, {
+        executionId: 'active',
         data: {
-          kind: 'usage_update',
-          input_tokens: 4_000,
-          context_window: 200_000,
-          model: 'gpt-5.6-sol',
+          case: 'usageUpdate',
+          value: {inputTokens: 4_000, contextWindow: 200_000, model: 'gpt-5.6-sol'},
         },
-      },
+      }),
       executionStatusEvent(3, 'active', 'agent_output_chunk', {
-        input_tokens: 9_000,
-        context_window: 200_000,
+        inputTokens: 9_000,
+        contextWindow: 200_000,
       }),
       executionFinishedEvent(4, 'active'),
-      {
-        ...baseEvent(5, 'run_finished'),
-        agent_kind: null,
-        round_label: null,
-        status: 'completed',
-      },
+      baseEvent(5, EventType.RUN_FINISHED, {
+        agentKind: undefined,
+        roundLabel: undefined,
+        status: EventStatus.COMPLETED,
+      }),
     ];
     const full = reduceEventBatch(initialCoreState(), events, [], 5);
     const merged = backfill(events, 1, 1);
@@ -298,37 +300,30 @@ describe('prefix merges across the chunk boundary', () => {
   it('keeps an explicit null model from the newest preceding usage update', () => {
     const events: RunEvent[] = [
       executionStartedEvent(1, 'active'),
-      {
-        ...baseEvent(2, 'usage_update'),
-        execution_id: 'active',
+      baseEvent(2, EventType.USAGE_UPDATE, {
+        executionId: 'active',
         data: {
-          kind: 'usage_update',
-          input_tokens: 4_000,
-          context_window: 200_000,
-          model: 'older-model',
+          case: 'usageUpdate',
+          value: {inputTokens: 4_000, contextWindow: 200_000, model: 'older-model'},
         },
-      },
-      {
-        ...baseEvent(3, 'usage_update'),
-        execution_id: 'active',
+      }),
+      baseEvent(3, EventType.USAGE_UPDATE, {
+        executionId: 'active',
         data: {
-          kind: 'usage_update',
-          input_tokens: 5_000,
-          context_window: 200_000,
-          model: null,
+          case: 'usageUpdate',
+          value: {inputTokens: 5_000, contextWindow: 200_000, model: undefined},
         },
-      },
+      }),
       executionStatusEvent(4, 'active', 'agent_output_chunk', {
-        input_tokens: 9_000,
-        context_window: 200_000,
+        inputTokens: 9_000,
+        contextWindow: 200_000,
       }),
       executionFinishedEvent(5, 'active'),
-      {
-        ...baseEvent(6, 'run_finished'),
-        agent_kind: null,
-        round_label: null,
-        status: 'completed',
-      },
+      baseEvent(6, EventType.RUN_FINISHED, {
+        agentKind: undefined,
+        roundLabel: undefined,
+        status: EventStatus.COMPLETED,
+      }),
     ];
     const full = reduceEventBatch(initialCoreState(), events, [], 6);
     const merged = backfill(events, 1, 1);
@@ -339,7 +334,7 @@ describe('prefix merges across the chunk boundary', () => {
 
   it('does not mutate status provenance shared by divergent prefix forks', () => {
     const tailEvents = [
-      executionStatusEvent(4, 'active', 'agent_output_chunk', {input_tokens: 9_000}),
+      executionStatusEvent(4, 'active', 'agent_output_chunk', {inputTokens: 9_000}),
     ];
     const tail = reduceEventBatch(initialCoreState(), tailEvents, undefined, undefined, 3);
     const pristineTail = reduceEventBatch(initialCoreState(), tailEvents, undefined, undefined, 3);
@@ -347,8 +342,8 @@ describe('prefix merges across the chunk boundary', () => {
     reduceEventPrefix(tail, [executionStartedEvent(3, 'active')], 2);
     const olderStatus = [
       executionStatusEvent(2, 'active', 'agent_output_chunk', {
-        input_tokens: 4_000,
-        context_window: 200_000,
+        inputTokens: 4_000,
+        contextWindow: 200_000,
       }),
     ];
     const forked = reduceEventPrefix(tail, olderStatus, 1);
@@ -372,13 +367,9 @@ describe('prefix merges across the chunk boundary', () => {
     ];
     const floor = 8;
     const spine = events.filter(
-      event =>
-        event.sequence !== undefined && event.sequence <= floor && event.type === 'run_started',
+      event => event.sequence <= floor && event.type === EventType.RUN_STARTED,
     );
-    const tail = [
-      ...spine,
-      ...events.filter(event => event.sequence !== undefined && event.sequence > floor),
-    ];
+    const tail = [...spine, ...events.filter(event => event.sequence > floor)];
 
     const full = reduceEventBatch(initialCoreState(), events);
     const bootstrapped = reduceEventBatch(initialCoreState(), tail, undefined, undefined, floor);
@@ -410,7 +401,7 @@ describe('prefix merges across the chunk boundary', () => {
       {executionId: 'resumed-attempt', status: 'active'},
     ]);
     expect(merged.phases.find(phase => phase.executionId === 'old-attempt')?.finishedAt).toBe(
-      timestamp(6),
+      iso(6),
     );
     expect(reduceEventPrefix(merged, [], 0)).toEqual(merged);
   });
@@ -446,12 +437,12 @@ describe('prefix merges across the chunk boundary', () => {
       expect(merged.rounds).toMatchObject([
         {
           status: 'failed',
-          finishedAt: timestamp(3),
+          finishedAt: iso(3),
           agentIntervals: [
-            {startedAt: timestamp(2), finishedAt: timestamp(3)},
-            {startedAt: timestamp(5), finishedAt: timestamp(6)},
+            {startedAt: iso(2), finishedAt: iso(3)},
+            {startedAt: iso(5), finishedAt: iso(6)},
           ],
-          activeAgentStarts: {'implementer:latest-attempt': timestamp(8)},
+          activeAgentStarts: {'implementer:latest-attempt': iso(8)},
         },
       ]);
     }
@@ -475,7 +466,7 @@ describe('prefix merges across the chunk boundary', () => {
 
     expect({...merged, activeExecutions: {}}).toEqual({...full, activeExecutions: {}});
     expect(merged.rounds).toMatchObject([
-      {status: 'completed', finishedAt: timestamp(7), closedByRoundFinished: true},
+      {status: 'completed', finishedAt: iso(7), closedByRoundFinished: true},
     ]);
   });
 
@@ -489,7 +480,7 @@ describe('prefix merges across the chunk boundary', () => {
         runStartedEvent(1),
         executionStartedEvent(2, 'old-attempt'),
         chunkEvent(3, 'old attempt last output'),
-        {sequence: 4, timestamp: timestamp(4), type: terminal},
+        makeEvent(TERMINAL_TYPES[terminal], {sequence: 4, timestamp: timestamp(4)}),
         runStartedEvent(5),
         executionStartedEvent(6, 'resumed-attempt'),
         chunkEvent(7, 'tail after resume'),
@@ -497,14 +488,15 @@ describe('prefix merges across the chunk boundary', () => {
       const floor = 6;
       const spine = events.filter(
         event =>
-          event.sequence !== undefined &&
           event.sequence <= floor &&
-          ['run_started', 'run_finished', 'run_failed', 'run_interrupted'].includes(event.type),
+          [
+            EventType.RUN_STARTED,
+            EventType.RUN_FINISHED,
+            EventType.RUN_FAILED,
+            EventType.RUN_INTERRUPTED,
+          ].includes(event.type),
       );
-      const tail = [
-        ...spine,
-        ...events.filter(event => event.sequence !== undefined && event.sequence > floor),
-      ];
+      const tail = [...spine, ...events.filter(event => event.sequence > floor)];
       const full = reduceEventBatch(initialCoreState(), events);
       const bootstrapped = reduceEventBatch(initialCoreState(), tail, undefined, undefined, floor);
       const merged = reduceEventPrefix(
@@ -518,7 +510,7 @@ describe('prefix merges across the chunk boundary', () => {
       expect({...merged, activeExecutions: {}}).toEqual({...full, activeExecutions: {}});
       expect(merged.phases.find(phase => phase.executionId === 'old-attempt')).toMatchObject({
         status: expectedStatus,
-        finishedAt: timestamp(4),
+        finishedAt: iso(4),
       });
     });
   }
@@ -541,7 +533,7 @@ describe('prefix merges across the chunk boundary', () => {
       toolName: 'Bash',
       toolCallId: 'call-a',
       toolArguments: {command: 'call-a'},
-      toolResult: {call_id: 'call-a', content: 'first result'},
+      toolResult: {callId: 'call-a', content: 'first result'},
     });
     expect(merged.transcript.map(entry => entry.toolResult?.content)).toEqual([
       'first result',
@@ -648,8 +640,8 @@ describe('prefix merges across the chunk boundary', () => {
       {
         number: 1,
         status: 'completed',
-        startedAt: timestamp(1),
-        finishedAt: timestamp(2),
+        startedAt: iso(1),
+        finishedAt: iso(2),
         closedByRoundFinished: true,
         agentIntervals: [],
         activeAgentStarts: {},
@@ -660,8 +652,8 @@ describe('prefix merges across the chunk boundary', () => {
   it('keeps the carried-forward flag on a round the chunk finished', () => {
     const events = [
       chunkEvent(1, 'work'),
-      roundFinishedEvent(2, {profile_skipped: true}),
-      {...chunkEvent(3, 'next'), round_label: 'round-2-implementer'},
+      roundFinishedEvent(2, {profileSkipped: true}),
+      {...chunkEvent(3, 'next'), roundLabel: 'round-2-implementer'},
     ];
 
     // The flag lands in the chunk fold; the tail only touches round 2, so the
@@ -675,8 +667,8 @@ describe('prefix merges across the chunk boundary', () => {
 
   it('merges a chunk diagnostic with its tail update by id', () => {
     const events = [
-      diagnosticEvent(1, 'diag-1', 'warning', 'Agent stalled', null),
-      diagnosticEvent(2, 'diag-1', 'error', 'Agent failed', 'exit 1'),
+      diagnosticEvent(1, 'diag-1', DiagnosticSeverity.WARNING, 'Agent stalled', undefined),
+      diagnosticEvent(2, 'diag-1', DiagnosticSeverity.ERROR, 'Agent failed', 'exit 1'),
     ];
 
     const merged = foldAsPrefix(events, 1);
@@ -718,12 +710,8 @@ describe('prefix merges across the chunk boundary', () => {
     const merged = foldAsPrefix(events, 1);
 
     expect(merged).toEqual(full);
-    expect(full.rounds[0]?.agentIntervals).toEqual([
-      {startedAt: timestamp(1), finishedAt: timestamp(2)},
-    ]);
-    expect(merged.rounds[0]?.agentIntervals).toEqual([
-      {startedAt: timestamp(1), finishedAt: timestamp(2)},
-    ]);
+    expect(full.rounds[0]?.agentIntervals).toEqual([{startedAt: iso(1), finishedAt: iso(2)}]);
+    expect(merged.rounds[0]?.agentIntervals).toEqual([{startedAt: iso(1), finishedAt: iso(2)}]);
     expect(merged.rounds[0]?.activeAgentStarts).toEqual({});
   });
 
@@ -732,16 +720,14 @@ describe('prefix merges across the chunk boundary', () => {
       const terminalEvent: RunEvent =
         terminal === 'round_finished'
           ? roundFinishedEvent(2)
-          : {sequence: 2, timestamp: timestamp(2), type: terminal};
+          : makeEvent(TERMINAL_TYPES[terminal], {sequence: 2, timestamp: timestamp(2)});
       const events = [executionStartedEvent(1, 'exec-a'), terminalEvent];
 
       const merged = foldAsPrefix(events, 1);
       const full = reduceEventBatch(initialCoreState(), events);
 
       expect({...merged, activeExecutions: {}}).toEqual({...full, activeExecutions: {}});
-      expect(merged.rounds[0]?.agentIntervals).toEqual([
-        {startedAt: timestamp(1), finishedAt: timestamp(2)},
-      ]);
+      expect(merged.rounds[0]?.agentIntervals).toEqual([{startedAt: iso(1), finishedAt: iso(2)}]);
       expect(merged.rounds[0]?.activeAgentStarts).toEqual({});
     });
   }
@@ -758,13 +744,12 @@ describe('prefix merges across the chunk boundary', () => {
     const full = reduceEventBatch(initialCoreState(), events);
 
     expect(merged.rounds).toEqual(full.rounds);
-    expect(merged.rounds[0]?.agentIntervals).toEqual([
-      {startedAt: timestamp(1), finishedAt: timestamp(2)},
-    ]);
+    expect(merged.rounds[0]?.agentIntervals).toEqual([{startedAt: iso(1), finishedAt: iso(2)}]);
   });
 
   it('reconciles a reused legacy key across more than two prefix chunks', () => {
     const sharedTimestamp = timestamp(9);
+    const sharedIso = iso(9);
     const events = [
       {...legacyExecutionEvent(1, 'agent_execution_started'), timestamp: sharedTimestamp},
       {...legacyExecutionEvent(2, 'agent_execution_finished'), timestamp: sharedTimestamp},
@@ -776,15 +761,15 @@ describe('prefix merges across the chunk boundary', () => {
 
     expect(merged.rounds).toEqual(full.rounds);
     expect(merged.rounds[0]?.agentIntervals).toEqual([
-      {startedAt: sharedTimestamp, finishedAt: sharedTimestamp},
+      {startedAt: sharedIso, finishedAt: sharedIso},
     ]);
-    expect(merged.rounds[0]?.activeAgentStarts).toEqual({'implementer:': sharedTimestamp});
+    expect(merged.rounds[0]?.activeAgentStarts).toEqual({'implementer:': sharedIso});
   });
 
   it('retains timing provenance when profileSkipped copies the round', () => {
     const events = [
       executionStartedEvent(1, 'exec-a'),
-      roundFinishedEvent(2, {profile_skipped: true}),
+      roundFinishedEvent(2, {profileSkipped: true}),
     ];
 
     const merged = foldAsPrefix(events, 1);
@@ -793,7 +778,7 @@ describe('prefix merges across the chunk boundary', () => {
     expect({...merged, activeExecutions: {}}).toEqual({...full, activeExecutions: {}});
     expect(merged.rounds[0]).toMatchObject({
       profileSkipped: true,
-      agentIntervals: [{startedAt: timestamp(1), finishedAt: timestamp(2)}],
+      agentIntervals: [{startedAt: iso(1), finishedAt: iso(2)}],
       activeAgentStarts: {},
     });
   });
@@ -882,16 +867,15 @@ function foldWithSpineBackfill(
 ): CoreState {
   const spine = events.filter(
     event =>
-      event.sequence !== undefined &&
       event.sequence <= floor &&
-      (event.type === 'run_started' ||
-        event.type === 'run_finished' ||
-        event.type === 'run_failed' ||
-        event.type === 'run_interrupted'),
+      (event.type === EventType.RUN_STARTED ||
+        event.type === EventType.RUN_FINISHED ||
+        event.type === EventType.RUN_FAILED ||
+        event.type === EventType.RUN_INTERRUPTED),
   );
   let state = reduceEventBatch(
     initialCoreState(),
-    [...spine, ...events.filter(event => event.sequence !== undefined && event.sequence > floor)],
+    [...spine, ...events.filter(event => event.sequence > floor)],
     undefined,
     undefined,
     floor,
@@ -899,9 +883,7 @@ function foldWithSpineBackfill(
   for (const chunk of chunks) {
     state = reduceEventPrefix(
       state,
-      events.filter(
-        event => event.sequence !== undefined && chunk.sequences.includes(event.sequence),
-      ),
+      events.filter(event => chunk.sequences.includes(event.sequence)),
       chunk.floor,
     );
   }
@@ -944,7 +926,16 @@ const WORDS =
 
 const AGENT_KINDS = ['orchestrator', 'implementer', 'judge', 'profiler'] as const;
 const TOOLS = ['bash', 'read_file', 'edit_file', 'grep', 'write_file'] as const;
-const CHANNELS = ['assistant', 'assistant', 'assistant', 'analysis', 'prompt'] as const;
+const CHANNELS = [
+  AgentOutputChannel.ASSISTANT,
+  AgentOutputChannel.ASSISTANT,
+  AgentOutputChannel.ASSISTANT,
+  AgentOutputChannel.ANALYSIS,
+  AgentOutputChannel.PROMPT,
+] as const;
+
+type Timestamp = ReturnType<typeof timestampOf>;
+type EventInit = NonNullable<Parameters<typeof makeEvent>[1]>;
 
 /**
  * A synthetic run log shaped like a real one: rounds of agent executions with
@@ -968,22 +959,23 @@ function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds 
   const threadIds = ['thread-a', 'thread-b', 'thread-c'];
   let clock = 0;
 
-  const emit = (event: Omit<RunEvent, 'sequence' | 'timestamp'>): void => {
+  const emit = (type: EventType, init: EventInit = {}): void => {
     clock += rng.int(5, 400);
-    events.push({...event, sequence: events.length + 1, timestamp: isoAt(clock)} as RunEvent);
+    events.push(makeEvent(type, {...init, sequence: events.length + 1, timestamp: isoAt(clock)}));
   };
 
-  emit({type: 'server_started', status: 'active'});
-  emit({type: 'server_ready', data: {kind: 'server_ready'}});
-  emit({
-    type: 'run_started',
-    status: 'active',
+  emit(EventType.SERVER_STARTED, {status: EventStatus.ACTIVE});
+  emit(EventType.SERVER_READY, {data: {case: 'serverReady', value: {}}});
+  emit(EventType.RUN_STARTED, {
+    status: EventStatus.ACTIVE,
     data: {
-      kind: 'run_started',
-      outer_loop: 'agent',
-      input: '/synthetic/target',
-      max_rounds: rounds,
-      expected_roles: [...AGENT_KINDS],
+      case: 'runStarted',
+      value: {
+        outerLoop: 'agent',
+        input: '/synthetic/target',
+        maxRounds: rounds,
+        expectedRoles: [...AGENT_KINDS],
+      },
     },
   });
 
@@ -992,178 +984,166 @@ function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds 
     for (const kind of AGENT_KINDS) {
       const executionId = `exec-${round}-${kind}`;
       const prompt = words(rng, 5, 20);
-      const context = {agent_kind: kind, round_label: roundLabel, execution_id: executionId};
-      emit({
+      const context = {agentKind: kind, roundLabel, executionId};
+      emit(EventType.AGENT_EXECUTION_STARTED, {
         ...context,
-        type: 'agent_execution_started',
-        status: 'active',
+        status: EventStatus.ACTIVE,
         data: {
-          kind: 'agent_execution_started',
-          stage: kind,
-          attempt: null,
-          system_prompt: prompt,
-          user_prompt: prompt,
-          activity: {
-            kind: 'agent_execution_activity_changed',
-            mode: 'thinking',
-            summary: 'Thinking',
-            tool: null,
+          case: 'agentExecutionStarted',
+          value: {
+            stage: kind,
+            systemPrompt: prompt,
+            userPrompt: prompt,
+            activity: {mode: ExecutionActivityMode.THINKING, summary: 'Thinking'},
+            driver: 'agentshim',
+            provider: 'anthropic',
+            model: 'claude-sonnet',
           },
-          driver: 'agentshim',
-          provider: 'anthropic',
-          model: 'claude-sonnet',
         },
       });
-      emit({
+      emit(EventType.PHASE_STARTED, {
         ...context,
-        type: 'phase_started',
-        status: 'active',
-        data: {kind: 'phase', phase: kind, attempt: null},
+        status: EventStatus.ACTIVE,
+        data: {case: 'phase', value: {phase: kind}},
       });
-      emit({
+      emit(EventType.INVOCATION_STARTED, {
         ...context,
-        type: 'invocation_started',
-        status: 'active',
-        data: {kind: 'invocation_started', system_prompt: prompt, user_prompt: prompt},
+        status: EventStatus.ACTIVE,
+        data: {case: 'invocationStarted', value: {systemPrompt: prompt, userPrompt: prompt}},
       });
 
       const turns = rng.int(4, 12);
       for (let turn = 0; turn < turns; turn += 1) {
-        emit({
+        emit(EventType.AGENT_OUTPUT_CHUNK, {
           ...context,
-          invocation_id: executionId,
-          type: 'agent_output_chunk',
           data: {
-            kind: 'agent_output_chunk',
-            channel: rng.pick(CHANNELS),
-            content: words(rng, 3, 25),
+            case: 'agentOutputChunk',
+            value: {channel: rng.pick(CHANNELS), content: words(rng, 3, 25)},
           },
         });
         if (rng.float() < 0.35) {
           const callId = `${executionId}-call-${turn}`;
           const tool = rng.pick(TOOLS);
           if (options.typedTools) {
-            emit({
+            emit(EventType.TOOL_CALL, {
               ...context,
-              invocation_id: executionId,
-              type: 'tool_call',
-              data: {kind: 'tool_call', tool, call_id: callId, args: {pattern: words(rng, 2, 5)}},
+              data: {case: 'toolCall', value: {tool, callId, args: {pattern: words(rng, 2, 5)}}},
             });
-            emit({
+            emit(EventType.TOOL_RESULT, {
               ...context,
-              invocation_id: executionId,
-              type: 'tool_result',
               data: {
-                kind: 'tool_result',
-                tool,
-                call_id: callId,
-                content: words(rng, 5, 40),
-                is_error: rng.float() < 0.05,
+                case: 'toolResult',
+                value: {
+                  tool,
+                  callId,
+                  content: words(rng, 5, 40),
+                  isError: rng.float() < 0.05,
+                },
               },
             });
           } else {
-            emit({
+            emit(EventType.AGENT_OUTPUT_CHUNK, {
               ...context,
-              invocation_id: executionId,
-              type: 'agent_output_chunk',
               data: {
-                kind: 'agent_output_chunk',
-                channel: 'tool',
-                content: `→ ${tool} ${words(rng, 2, 5)}`,
+                case: 'agentOutputChunk',
+                value: {
+                  channel: AgentOutputChannel.TOOL,
+                  content: `→ ${tool} ${words(rng, 2, 5)}`,
+                },
               },
             });
-            emit({
+            emit(EventType.AGENT_OUTPUT_CHUNK, {
               ...context,
-              invocation_id: executionId,
-              type: 'agent_output_chunk',
-              data: {kind: 'agent_output_chunk', channel: 'tool', content: words(rng, 5, 40)},
+              data: {
+                case: 'agentOutputChunk',
+                value: {channel: AgentOutputChannel.TOOL, content: words(rng, 5, 40)},
+              },
             });
           }
         }
         if (rng.float() < 0.1) {
-          emit({
+          emit(EventType.TODO_UPDATE, {
             ...context,
-            type: 'todo_update',
             data: {
-              kind: 'todo_update',
-              todos: ['completed', 'in_progress', 'pending'].map(status => ({
-                content: words(rng, 2, 6),
-                status,
-              })),
+              case: 'todoUpdate',
+              value: {
+                todos: ['completed', 'in_progress', 'pending'].map(status => ({
+                  content: words(rng, 2, 6),
+                  status,
+                })),
+              },
             },
           });
         }
         if (rng.float() < 0.15) {
-          emit({
+          emit(EventType.USAGE_UPDATE, {
             ...context,
-            type: 'usage_update',
             data: {
-              kind: 'usage_update',
-              input_tokens: rng.int(2000, 180000),
-              context_window: 200000,
-              model: 'claude-sonnet',
+              case: 'usageUpdate',
+              value: {
+                inputTokens: rng.int(2000, 180000),
+                contextWindow: 200000,
+                model: 'claude-sonnet',
+              },
             },
           });
         }
       }
 
-      emit({
+      emit(EventType.AGENT_EXECUTION_FINISHED, {
         ...context,
-        type: 'agent_execution_finished',
-        status: 'completed',
-        data: {kind: 'agent_execution_finished', error: null},
+        status: EventStatus.COMPLETED,
+        data: {case: 'agentExecutionFinished', value: {}},
       });
-      emit({
+      emit(EventType.INVOCATION_FINISHED, {
         ...context,
-        invocation_id: executionId,
-        type: 'invocation_finished',
-        status: 'completed',
-        data: {kind: 'invocation_finished', error: null},
+        status: EventStatus.COMPLETED,
+        data: {case: 'invocationFinished', value: {}},
       });
-      emit({
+      emit(EventType.PHASE_FINISHED, {
         ...context,
-        type: 'phase_finished',
-        status: 'completed',
-        data: {kind: 'phase', phase: kind, attempt: null},
+        status: EventStatus.COMPLETED,
+        data: {case: 'phase', value: {phase: kind}},
       });
     }
 
-    emit({
-      type: 'judge_result',
-      round_label: roundLabel,
+    emit(EventType.JUDGE_RESULT, {
+      roundLabel,
       data: {
-        kind: 'judge_result',
-        verdict: rng.float() < 0.7 ? 'pass' : 'fail',
-        feedback: words(rng, 5, 20),
-        attempt: 1,
+        case: 'judgeResult',
+        value: {
+          verdict: rng.float() < 0.7 ? JudgeVerdict.PASS : JudgeVerdict.FAIL,
+          feedback: words(rng, 5, 20),
+          attempt: 1,
+        },
       },
     });
-    emit({
-      type: 'benchmark_result',
-      round_label: roundLabel,
+    emit(EventType.BENCHMARK_RESULT, {
+      roundLabel,
       data: {
-        kind: 'benchmark_result',
-        metric: 'throughput',
-        value: rng.int(100000, 5000000),
-        unit: 'ops/s',
+        case: 'benchmarkResult',
+        value: {metric: 'throughput', value: rng.int(100000, 5000000), unit: 'ops/s'},
       },
     });
-    emit({
-      type: 'round_finished',
-      round_label: roundLabel,
-      status: 'completed',
+    emit(EventType.ROUND_FINISHED, {
+      roundLabel,
+      status: EventStatus.COMPLETED,
       data: {
-        kind: 'round_finished',
-        attempts: 1,
-        judge_verdict: rng.float() < 0.7 ? 'pass' : 'fail',
-        perf_metric: rng.int(100000, 5000000),
-        perf_unit: 'ops/s',
+        case: 'roundFinished',
+        value: {
+          attempts: 1,
+          judgeVerdict: rng.float() < 0.7 ? RoundJudgeVerdict.PASS : RoundJudgeVerdict.FAIL,
+          perfMetric: rng.int(100000, 5000000),
+          perfUnit: 'ops/s',
+        },
       },
     });
     if (rng.float() < 0.3) {
-      emit({
-        type: 'experiments_changed',
-        data: {kind: 'experiments_changed', reason: 'round_persisted'},
+      emit(EventType.EXPERIMENTS_CHANGED, {
+        data: {
+          case: 'experimentsChanged',
+          value: {reason: ExperimentsChangeReason.ROUND_PERSISTED},
+        },
       });
     }
     if (rng.float() < 0.5) {
@@ -1171,22 +1151,23 @@ function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds 
       // occasionally the implicit default thread with no id at all.
       const threadId = rng.float() < 0.2 ? undefined : rng.pick(threadIds);
       const chatContext = {
-        agent_kind: 'chat',
-        round_label: 'experiment-chat',
-        ...(threadId === undefined ? {} : {chat_thread_id: threadId}),
+        agentKind: 'chat',
+        roundLabel: 'experiment-chat',
+        ...(threadId === undefined ? {} : {chatThreadId: threadId}),
       };
       if (threadId !== undefined) {
-        emit({
+        emit(EventType.CHAT_THREAD_CREATED, {
           ...chatContext,
-          type: 'chat_thread_created',
           data: {
-            kind: 'chat_thread_created',
-            thread_id: threadId,
-            title: '',
-            driver: 'agentshim',
-            provider: 'anthropic',
-            model: 'claude-sonnet',
-            created_at: isoAt(clock),
+            case: 'chatThreadCreated',
+            value: {
+              threadId,
+              title: '',
+              driver: 'agentshim',
+              provider: 'anthropic',
+              model: 'claude-sonnet',
+              createdAt: isoAt(clock),
+            },
           },
         });
       }
@@ -1198,36 +1179,35 @@ function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds 
       const streamed = rng.float() < 0.6;
       if (streamed) {
         for (let chunk = rng.int(1, 3); chunk > 0; chunk -= 1) {
-          emit({
+          emit(EventType.AGENT_OUTPUT_CHUNK, {
             ...chatContext,
-            type: 'agent_output_chunk',
-            invocation_id: invocationId,
+            executionId: invocationId,
             data: {
-              kind: 'agent_output_chunk',
-              channel: 'assistant',
-              content: `${words(rng, 2, 6)} `,
+              case: 'agentOutputChunk',
+              value: {channel: AgentOutputChannel.ASSISTANT, content: `${words(rng, 2, 6)} `},
             },
           });
         }
       }
       const abandoned = streamed && rng.float() < 0.25;
       if (!abandoned) {
-        emit({
+        emit(EventType.CHAT, {
           ...chatContext,
-          type: 'chat',
-          status: 'answered',
+          status: EventStatus.ANSWERED,
           data: {
-            kind: 'chat',
-            answer: words(rng, 5, 30),
-            ...(rng.float() < 0.5 ? {thread_title: words(rng, 2, 4)} : {}),
-            ...(streamed || rng.float() < 0.5 ? {invocation_id: invocationId} : {}),
+            case: 'chat',
+            value: {
+              answer: words(rng, 5, 30),
+              ...(rng.float() < 0.5 ? {threadTitle: words(rng, 2, 4)} : {}),
+              ...(streamed || rng.float() < 0.5 ? {invocationId} : {}),
+            },
           },
         });
       }
     }
   }
 
-  emit({type: 'run_finished', status: 'completed'});
+  emit(EventType.RUN_FINISHED, {status: EventStatus.COMPLETED});
   return events;
 }
 
@@ -1238,30 +1218,35 @@ function words(rng: Rng, min: number, max: number): string {
   return chosen.join(' ');
 }
 
-function isoAt(millis: number): string {
-  return new Date(Date.UTC(2026, 7, 20) + millis).toISOString();
+function isoAt(millis: number): Timestamp {
+  return timestampOf(new Date(Date.UTC(2026, 7, 20) + millis));
 }
 
-function timestamp(sequence: number): string {
-  return `2026-01-01T00:00:0${sequence}Z`;
+/** The wire timestamp of event `sequence`. */
+function timestamp(sequence: number): Timestamp {
+  return timestampOf(new Date(Date.UTC(2026, 0, 1, 0, 0, sequence)));
 }
 
-function baseEvent(sequence: number, type: RunEvent['type']): RunEvent {
-  return {
+/** The ISO string core-state derives from `timestamp(sequence)`. */
+function iso(sequence: number): string {
+  return new Date(Date.UTC(2026, 0, 1, 0, 0, sequence)).toISOString();
+}
+
+function baseEvent(sequence: number, type: EventType, init: EventInit = {}): RunEvent {
+  return makeEvent(type, {
     sequence,
     timestamp: timestamp(sequence),
-    type,
-    agent_kind: 'implementer',
-    round_label: 'round-1-implementer',
-  };
+    agentKind: 'implementer',
+    roundLabel: 'round-1-implementer',
+    ...init,
+  });
 }
 
 function chunkEvent(sequence: number, content = `entry ${sequence}`): RunEvent {
-  return {
-    ...baseEvent(sequence, 'agent_output_chunk'),
-    invocation_id: 'turn',
-    data: {kind: 'agent_output_chunk', channel: 'assistant', content},
-  };
+  return baseEvent(sequence, EventType.AGENT_OUTPUT_CHUNK, {
+    executionId: 'turn',
+    data: {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content}},
+  });
 }
 
 function executionStatusEvent(
@@ -1270,115 +1255,108 @@ function executionStatusEvent(
   kind: 'agent_output_chunk' | 'tool_call',
   status: {
     progress?: string;
-    agent_label?: string;
-    elapsed_seconds?: number;
-    input_tokens?: number;
-    context_window?: number;
+    agentLabel?: string;
+    elapsedSeconds?: number;
+    inputTokens?: number;
+    contextWindow?: number;
   },
 ): RunEvent {
-  return {
-    ...baseEvent(sequence, kind),
-    execution_id: executionId,
-    invocation_id: executionId,
-    data:
-      kind === 'agent_output_chunk'
-        ? {kind, channel: 'analysis', content: status.progress ?? '', status}
-        : {kind, tool: 'Bash', call_id: `call-${sequence}`, args: {}, status},
-  };
+  return baseEvent(
+    sequence,
+    kind === 'agent_output_chunk' ? EventType.AGENT_OUTPUT_CHUNK : EventType.TOOL_CALL,
+    {
+      executionId,
+      data:
+        kind === 'agent_output_chunk'
+          ? {
+              case: 'agentOutputChunk',
+              value: {
+                channel: AgentOutputChannel.ANALYSIS,
+                content: status.progress ?? '',
+                status,
+              },
+            }
+          : {case: 'toolCall', value: {tool: 'Bash', callId: `call-${sequence}`, args: {}, status}},
+    },
+  );
 }
 
 function toolCallEvent(sequence: number, callId: string): RunEvent {
-  return {
-    ...baseEvent(sequence, 'tool_call'),
-    invocation_id: 'turn',
-    data: {kind: 'tool_call', tool: 'Bash', call_id: callId, args: {command: callId}},
-  };
+  return baseEvent(sequence, EventType.TOOL_CALL, {
+    executionId: 'turn',
+    data: {case: 'toolCall', value: {tool: 'Bash', callId, args: {command: callId}}},
+  });
 }
 
 function toolResultEvent(sequence: number, callId: string, content: string): RunEvent {
-  return {
-    ...baseEvent(sequence, 'tool_result'),
-    invocation_id: 'turn',
-    data: {kind: 'tool_result', tool: 'Bash', call_id: callId, content, is_error: false},
-  };
+  return baseEvent(sequence, EventType.TOOL_RESULT, {
+    executionId: 'turn',
+    data: {case: 'toolResult', value: {tool: 'Bash', callId, content, isError: false}},
+  });
 }
 
 function legacyToolChunkEvent(sequence: number, content: string): RunEvent {
-  return {
-    ...baseEvent(sequence, 'agent_output_chunk'),
-    invocation_id: 'legacy-turn',
-    data: {kind: 'agent_output_chunk', channel: 'tool', content},
-  };
+  return baseEvent(sequence, EventType.AGENT_OUTPUT_CHUNK, {
+    executionId: 'legacy-turn',
+    data: {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content}},
+  });
 }
 
 function runStartedEvent(sequence: number): RunEvent {
-  return {
+  return makeEvent(EventType.RUN_STARTED, {
     sequence,
     timestamp: timestamp(sequence),
-    type: 'run_started',
-    status: 'active',
-    data: {kind: 'run_started', outer_loop: 'plain', input: '/target', max_rounds: 3},
-  };
+    status: EventStatus.ACTIVE,
+    data: {case: 'runStarted', value: {outerLoop: 'plain', input: '/target', maxRounds: 3}},
+  });
 }
 
-function roundFinishedEvent(sequence: number, extra: {profile_skipped?: boolean} = {}): RunEvent {
-  return {
+function roundFinishedEvent(sequence: number, extra: {profileSkipped?: boolean} = {}): RunEvent {
+  return makeEvent(EventType.ROUND_FINISHED, {
     sequence,
     timestamp: timestamp(sequence),
-    type: 'round_finished',
-    status: 'completed',
-    round_label: 'round-1',
+    status: EventStatus.COMPLETED,
+    roundLabel: 'round-1',
     data: {
-      kind: 'round_finished',
-      attempts: 1,
-      judge_verdict: 'pass',
-      perf_metric: null,
-      perf_unit: null,
-      ...extra,
+      case: 'roundFinished',
+      value: {attempts: 1, judgeVerdict: RoundJudgeVerdict.PASS, ...extra},
     },
-  };
+  });
 }
 
 function executionStartedEvent(sequence: number, executionId: string): RunEvent {
-  return {
-    ...baseEvent(sequence, 'agent_execution_started'),
-    round_label: 'round-1',
-    execution_id: executionId,
-    status: 'active',
+  return baseEvent(sequence, EventType.AGENT_EXECUTION_STARTED, {
+    roundLabel: 'round-1',
+    executionId,
+    status: EventStatus.ACTIVE,
     data: {
-      kind: 'agent_execution_started',
-      stage: 'implementation',
-      attempt: null,
-      system_prompt: '',
-      user_prompt: 'Implement the queue',
-      activity: {
-        kind: 'agent_execution_activity_changed',
-        mode: 'thinking',
-        summary: 'Starting',
-        tool: null,
+      case: 'agentExecutionStarted',
+      value: {
+        stage: 'implementation',
+        systemPrompt: '',
+        userPrompt: 'Implement the queue',
+        activity: {mode: ExecutionActivityMode.THINKING, summary: 'Starting'},
       },
     },
-  };
+  });
 }
 
 function executionFinishedEvent(sequence: number, executionId: string): RunEvent {
-  return {
-    ...baseEvent(sequence, 'agent_execution_finished'),
-    round_label: 'round-1',
-    execution_id: executionId,
-    status: 'completed',
-    data: {kind: 'agent_execution_finished', error: null},
-  };
+  return baseEvent(sequence, EventType.AGENT_EXECUTION_FINISHED, {
+    roundLabel: 'round-1',
+    executionId,
+    status: EventStatus.COMPLETED,
+    data: {case: 'agentExecutionFinished', value: {}},
+  });
 }
 
 function phaseFinishedEvent(sequence: number, executionId: string): RunEvent {
-  return {
-    ...baseEvent(sequence, 'phase_finished'),
-    round_label: 'round-1',
-    execution_id: executionId,
-    status: 'completed',
-    data: {kind: 'phase', phase: 'implementer', attempt: null},
-  };
+  return baseEvent(sequence, EventType.PHASE_FINISHED, {
+    roundLabel: 'round-1',
+    executionId,
+    status: EventStatus.COMPLETED,
+    data: {case: 'phase', value: {phase: 'implementer'}},
+  });
 }
 
 function legacyExecutionEvent(
@@ -1389,26 +1367,26 @@ function legacyExecutionEvent(
     type === 'agent_execution_started'
       ? executionStartedEvent(sequence, 'discarded')
       : executionFinishedEvent(sequence, 'discarded');
-  const {execution_id: _discarded, ...legacy} = event;
-  return legacy;
+  return {...event, executionId: undefined};
 }
 
 function threadCreatedEvent(sequence: number, threadId: string): RunEvent {
-  return {
-    ...baseEvent(sequence, 'chat_thread_created'),
-    agent_kind: 'chat',
-    round_label: 'experiment-chat',
-    chat_thread_id: threadId,
+  return baseEvent(sequence, EventType.CHAT_THREAD_CREATED, {
+    agentKind: 'chat',
+    roundLabel: 'experiment-chat',
+    chatThreadId: threadId,
     data: {
-      kind: 'chat_thread_created',
-      thread_id: threadId,
-      title: '',
-      driver: 'agentshim',
-      provider: 'anthropic',
-      model: 'opus',
-      created_at: timestamp(sequence),
+      case: 'chatThreadCreated',
+      value: {
+        threadId,
+        title: '',
+        driver: 'agentshim',
+        provider: 'anthropic',
+        model: 'opus',
+        createdAt: timestamp(sequence),
+      },
     },
-  };
+  });
 }
 
 function chatEvent(
@@ -1418,19 +1396,13 @@ function chatEvent(
   title?: string,
   invocationId?: string,
 ): RunEvent {
-  return {
-    ...baseEvent(sequence, 'chat'),
-    agent_kind: 'chat',
-    round_label: 'experiment-chat',
-    chat_thread_id: threadId,
-    status: 'answered',
-    data: {
-      kind: 'chat',
-      answer,
-      ...(title === undefined ? {} : {thread_title: title}),
-      ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
-    },
-  };
+  return baseEvent(sequence, EventType.CHAT, {
+    agentKind: 'chat',
+    roundLabel: 'experiment-chat',
+    chatThreadId: threadId,
+    status: EventStatus.ANSWERED,
+    data: {case: 'chat', value: {answer, threadTitle: title, invocationId}},
+  });
 }
 
 function chatChunkEvent(
@@ -1439,45 +1411,45 @@ function chatChunkEvent(
   content: string,
   invocationId?: string,
 ): RunEvent {
-  return {
-    ...baseEvent(sequence, 'agent_output_chunk'),
-    agent_kind: 'chat',
-    round_label: 'experiment-chat',
-    chat_thread_id: threadId,
-    invocation_id: invocationId ?? `${threadId}-turn`,
-    data: {kind: 'agent_output_chunk', channel: 'assistant', content},
-  };
+  return baseEvent(sequence, EventType.AGENT_OUTPUT_CHUNK, {
+    agentKind: 'chat',
+    roundLabel: 'experiment-chat',
+    chatThreadId: threadId,
+    executionId: invocationId ?? `${threadId}-turn`,
+    data: {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content}},
+  });
 }
 
 function todoEvent(sequence: number, executionId: string, content: string): RunEvent {
-  return {
-    ...baseEvent(sequence, 'todo_update'),
-    execution_id: executionId,
-    data: {kind: 'todo_update', todos: [{content, status: 'in_progress'}]},
-  };
+  return baseEvent(sequence, EventType.TODO_UPDATE, {
+    executionId,
+    data: {case: 'todoUpdate', value: {todos: [{content, status: 'in_progress'}]}},
+  });
 }
 
 function diagnosticEvent(
   sequence: number,
   id: string,
-  severity: 'warning' | 'error' | 'fatal',
+  severity: DiagnosticSeverity,
   summary: string,
-  detail: string | null,
+  detail: string | undefined,
 ): RunEvent {
-  return {
-    ...baseEvent(sequence, 'invocation_finished'),
-    invocation_id: 'turn',
+  return baseEvent(sequence, EventType.INVOCATION_FINISHED, {
+    executionId: 'turn',
     diagnostic: {
       id,
       code: 'agent_failed',
       summary,
       detail,
-      hint: null,
-      scope: 'invocation',
+      scope: DiagnosticScope.INVOCATION,
       severity,
-      retryability: 'manual',
-      cause_id: null,
-      debug_ref: null,
+      retryability: DiagnosticRetryability.MANUAL,
     },
-  };
+  });
 }
+
+const TERMINAL_TYPES = {
+  run_failed: EventType.RUN_FAILED,
+  run_interrupted: EventType.RUN_INTERRUPTED,
+  run_finished: EventType.RUN_FINISHED,
+} as const;

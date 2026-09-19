@@ -228,7 +228,7 @@ export class PersistentEventStream {
 
   #deliver(message: ServerMessage, resumed: boolean, token: number): void {
     if (this.#closed || token !== this.#connectionSeq) return;
-    if (!resumed && message.type === 'event_batch') this.#bootstrapped = true;
+    if (!resumed && message.body.case === 'eventBatch') this.#bootstrapped = true;
     this.#active().onMessage(message, {resumed});
   }
 
