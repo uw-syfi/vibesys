@@ -671,7 +671,7 @@ def test_complete_merge_rechecks_head_and_sends_atomic_squash_request(
     _use_test_policy(monkeypatch)
     api = FakeGitHubAPI()
 
-    assert run(event_path, api=api) == Merged("merge456")
+    assert run(event_path, api=api, landing_api=api) == Merged("merge456")
     assert api.pull_reads == 2
     assert api.writes == [
         (
@@ -691,7 +691,7 @@ def test_complete_merge_refuses_head_change_before_write(
     api = FakeGitHubAPI(refreshed_sha="new789")
 
     with pytest.raises(MergeRefusalError, match="changed during validation"):
-        run(event_path, api=api)
+        run(event_path, api=api, landing_api=api)
 
     assert api.writes == []
 
@@ -767,7 +767,7 @@ def test_queue_required_enqueues_after_all_checks_without_a_merge_write(
     _use_test_policy(monkeypatch)
     api = FakeGitHubAPI(queue={"id": "Q"})
 
-    assert run(event_path, api=api) == Enqueued()
+    assert run(event_path, api=api, landing_api=api) == Enqueued()
     assert api.pull_reads == 2
     assert api.writes == []
     assert api.graphql_calls[-1][1] == {"id": "PR_node", "sha": "abc123"}
@@ -782,12 +782,12 @@ def test_queue_mode_keeps_scope_and_head_refusals(
 
     stale = FakeGitHubAPI(queue={"id": "Q"}, refreshed_sha="new789")
     with pytest.raises(MergeRefusalError, match="changed during validation"):
-        run(event_path, api=stale)
+        run(event_path, api=stale, landing_api=stale)
     assert not any("enqueuePullRequest" in query for query, _ in stale.graphql_calls)
 
     out_of_scope = FakeGitHubAPI(queue={"id": "Q"}, filename="elsewhere/file.py")
     with pytest.raises(MergeRefusalError, match="does not match"):
-        run(event_path, api=out_of_scope)
+        run(event_path, api=out_of_scope, landing_api=out_of_scope)
     assert len(out_of_scope.graphql_calls) == 1
     assert out_of_scope.writes == []
 
@@ -800,7 +800,7 @@ def test_already_queued_pull_request_is_a_noop(
     _use_test_policy(monkeypatch)
     api = FakeGitHubAPI(queue={"id": "Q"}, in_queue=True)
 
-    assert run(event_path, api=api) == AlreadyQueued()
+    assert run(event_path, api=api, landing_api=api) == AlreadyQueued()
     assert api.writes == []
     assert len(api.graphql_calls) == 1
 
@@ -814,7 +814,7 @@ def test_queue_lookup_failure_never_merges_or_enqueues(
     api = FakeGitHubAPI(graphql_error=True)
 
     with pytest.raises(GitHubAPIError):
-        run(event_path, api=api)
+        run(event_path, api=api, landing_api=api)
     assert api.writes == []
 
 
@@ -829,7 +829,7 @@ def test_stacked_bottom_pull_request_uses_the_async_api_pinned_to_the_head(
     _use_test_policy(monkeypatch)
     api = FakeGitHubAPI(queue={"id": "Q"}, stack=STACK_BOTTOM)
 
-    assert run(event_path, api=api) == Enqueued()
+    assert run(event_path, api=api, landing_api=api) == Enqueued()
     assert api.pull_reads == 2
     assert api.writes == [
         (
@@ -849,10 +849,10 @@ def test_stacked_mode_keeps_scope_and_head_refusals(
     _use_test_policy(monkeypatch)
     stale = FakeGitHubAPI(queue={"id": "Q"}, stack=STACK_BOTTOM, refreshed_sha="new789")
     with pytest.raises(MergeRefusalError, match="changed during validation"):
-        run(event_path, api=stale)
+        run(event_path, api=stale, landing_api=stale)
     out_of_scope = FakeGitHubAPI(queue={"id": "Q"}, stack=STACK_BOTTOM, filename="elsewhere/x.py")
     with pytest.raises(MergeRefusalError, match="does not match"):
-        run(event_path, api=out_of_scope)
+        run(event_path, api=out_of_scope, landing_api=out_of_scope)
     assert stale.writes == out_of_scope.writes == []
 
 
@@ -875,7 +875,7 @@ def test_stacked_pull_requests_fail_closed_unless_bottom_with_a_queue(
     api = FakeGitHubAPI(queue=queue, stack=stack)
 
     with pytest.raises(MergeRefusalError, match=match):
-        run(event_path, api=api)
+        run(event_path, api=api, landing_api=api)
     assert api.writes == []
     assert not any("enqueuePullRequest" in query for query, _ in api.graphql_calls)
 
@@ -948,6 +948,7 @@ def test_async_failure_names_the_step_and_never_leaks_the_response_body(
     monkeypatch.setattr("sys.argv", ["delegated_merge", "--event", str(event_path)])
     api = AsyncFails(queue={"id": "Q"}, stack=STACK_BOTTOM)
     monkeypatch.setattr(delegated_merge, "GitHubAPI", lambda: api)
+    monkeypatch.setattr(delegated_merge, "landing_client", lambda: api)
 
     assert delegated_merge.main() == 1
     captured = capsys.readouterr()
@@ -1004,6 +1005,7 @@ def test_api_failure_names_the_failing_step_and_still_refuses(  # noqa: PLR0913
     error = GitHubAPIError.request_failed("read GitHub state", detail="HTTP 403")
     api = _FailingAPI(fail_on=fail_on, error=error, queue=queue)
     monkeypatch.setattr(delegated_merge, "GitHubAPI", lambda: api)
+    monkeypatch.setattr(delegated_merge, "landing_client", lambda: api)
 
     code = delegated_merge.main()
 
@@ -1034,7 +1036,7 @@ def test_pull_request_refresh_failure_is_named(
     api = RefreshFails(queue={"id": "Q"})
 
     with pytest.raises(GitHubAPIError) as caught:
-        run(event_path, api=api)
+        run(event_path, api=api, landing_api=api)
     assert caught.value.step == "PR refresh"
     assert api.writes == []
 
@@ -1112,6 +1114,7 @@ def test_main_reports_enqueue_distinctly_from_merge(
     )
     for api in fakes:
         monkeypatch.setattr(delegated_merge, "GitHubAPI", lambda api=api: api)
+        monkeypatch.setattr(delegated_merge, "landing_client", lambda api=api: api)
         code = delegated_merge.main()
         results.append((api, code, capsys.readouterr().out))
 
@@ -1137,9 +1140,9 @@ def test_workflow_uses_trusted_default_branch_and_pinned_actions() -> None:
     assert "types: [created]" in text
     assert workflow["permissions"] == {
         "actions": "read",
-        "contents": "write",
+        "contents": "read",
         "issues": "write",
-        "pull-requests": "write",
+        "pull-requests": "read",
     }
     assert "github.event.repository.default_branch" in text
     assert "startsWith(github.event.comment.body, '/merge-')" in text
@@ -1151,8 +1154,21 @@ def test_workflow_uses_trusted_default_branch_and_pinned_actions() -> None:
         if "uses" in step:
             reference = step["uses"].split("@", maxsplit=1)[1].split()[0]
             assert re.fullmatch(r"[0-9a-f]{40}", reference)
-    assert "actions/create-github-app-token" not in text
-    assert steps[-1]["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    mint = next(step for step in steps if step.get("id") == "landing-token")
+    assert mint["uses"].startswith("actions/create-github-app-token@")
+    assert mint["with"] == {
+        "app-id": "${{ secrets.MERGE_QUEUE_APP_ID }}",
+        "private-key": "${{ secrets.MERGE_QUEUE_APP_PRIVATE_KEY }}",
+        "repositories": "${{ github.event.repository.name }}",
+        "permission-pull-requests": "write",
+        "permission-contents": "write",
+    }
+    assert steps.index(mint) < len(steps) - 1
+    assert steps[-1]["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "LANDING_GH_TOKEN": "${{ steps.landing-token.outputs.token }}",
+    }
+    assert "secrets." not in "\n".join(step.get("run", "") for step in steps)
 
 
 def test_test_workflow_exposes_required_ci_and_compatibility_alias() -> None:
@@ -1165,3 +1181,92 @@ def test_test_workflow_exposes_required_ci_and_compatibility_alias() -> None:
     alias = workflow["jobs"]["scoped-merge-gate"]
     assert alias["needs"] == "required-pr-ci"
     assert alias["name"] == "Scoped merge gate"
+
+
+def test_landing_writes_use_the_landing_client_and_reads_use_the_read_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    _use_test_policy(monkeypatch)
+    reader = FakeGitHubAPI(queue={"id": "Q"})
+    lander = FakeGitHubAPI(queue={"id": "Q"})
+
+    assert run(event_path, api=reader, landing_api=lander) == Enqueued()
+
+    assert reader.writes == []
+    assert not any("enqueuePullRequest" in query for query, _ in reader.graphql_calls)
+    assert reader.pull_reads == 2
+    assert [q for q, _ in lander.graphql_calls if "enqueuePullRequest" in q]
+    assert lander.pull_reads == 0
+
+    stacked_reader = FakeGitHubAPI(queue={"id": "Q"}, stack=STACK_BOTTOM)
+    stacked_lander = FakeGitHubAPI(queue={"id": "Q"}, stack=STACK_BOTTOM)
+    run(event_path, api=stacked_reader, landing_api=stacked_lander)
+    assert stacked_reader.writes == []
+    assert [endpoint for endpoint, _, _ in stacked_lander.writes] == [
+        "repos/uw-syfi/vibesys/pulls/42/merge-async"
+    ]
+
+    direct_reader = FakeGitHubAPI()
+    direct_lander = FakeGitHubAPI()
+    run(event_path, api=direct_reader, landing_api=direct_lander)
+    assert direct_reader.writes == []
+    assert len(direct_lander.writes) == 1
+
+
+def test_missing_landing_token_refuses_without_any_landing_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    _use_test_policy(monkeypatch)
+    for fake in (FakeGitHubAPI(queue={"id": "Q"}), FakeGitHubAPI()):
+        with pytest.raises(MergeRefusalError, match="landing token"):
+            run(event_path, api=fake, landing_api=None)
+        assert fake.writes == []
+        assert not any("enqueuePullRequest" in query for query, _ in fake.graphql_calls)
+
+
+def test_landing_client_requires_a_non_empty_token() -> None:
+    assert delegated_merge.landing_client({}) is None
+    assert delegated_merge.landing_client({"LANDING_GH_TOKEN": "  "}) is None
+    assert delegated_merge.landing_client({"GH_TOKEN": "read-only"}) is None
+    assert delegated_merge.landing_client({"LANDING_GH_TOKEN": "t"}) is not None
+
+
+def test_landing_client_authenticates_only_its_own_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GH_TOKEN", "read-token")
+    seen: list[str | None] = []
+
+    def runner(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        env = kwargs.get("env")
+        seen.append(env["GH_TOKEN"] if isinstance(env, dict) else None)
+        return subprocess.CompletedProcess(["gh"], 0, stdout="{}", stderr="")
+
+    GitHubAPI(_runner=runner).get("repos/x/y")
+    GitHubAPI(_runner=runner, _token="app-token").write("repos/x/y", method="PUT", payload={})  # noqa: S106
+    assert seen == [None, "app-token"]
+    assert "app-token" not in repr(GitHubAPI(_token="app-token"))  # noqa: S106
+
+
+def test_missing_landing_token_message_and_logs_carry_no_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    _use_test_policy(monkeypatch)
+    monkeypatch.setattr("sys.argv", ["delegated_merge", "--event", str(event_path)])
+    monkeypatch.setenv("GH_TOKEN", "ghs_READTOKEN")
+    monkeypatch.setenv("LANDING_GH_TOKEN", "")
+    api = FakeGitHubAPI(queue={"id": "Q"})
+    monkeypatch.setattr(delegated_merge, "GitHubAPI", lambda: api)
+
+    assert delegated_merge.main() == 1
+    captured = capsys.readouterr()
+    assert "landing token" in captured.err
+    assert "ghs_READTOKEN" not in captured.err + captured.out + str(api.writes)
+    assert not any("enqueuePullRequest" in query for query, _ in api.graphql_calls)
+    assert all(endpoint.endswith("/comments") for endpoint, _, _ in api.writes)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -21,6 +22,7 @@ MAX_CHANGED_FILES = 3_000
 MAX_GITHUB_LOGIN_LENGTH = 39
 MAX_GRAPHQL_ERROR_TYPES = 5
 API_TIMEOUT_SECONDS = 30
+LANDING_TOKEN_ENV = "LANDING_GH_TOKEN"  # noqa: S105  # env var name, not a secret
 HARD_DENIED_PATHS = frozenset(
     {
         ".github/delegated-merge.toml",
@@ -182,6 +184,7 @@ class GitHubAPI:
     """Small, injectable adapter for authenticated ``gh api`` calls."""
 
     _runner: Runner = field(default=subprocess.run, repr=False, compare=False)
+    _token: str | None = field(default=None, repr=False, compare=False)
 
     def get(self, endpoint: str, *, paginate: bool = False) -> object:
         """Read and decode one endpoint."""
@@ -212,6 +215,8 @@ class GitHubAPI:
         return root.get("data")
 
     def _run_json(self, command: Sequence[str], *, operation: str, **kwargs: object) -> object:
+        if self._token is not None:
+            kwargs["env"] = {**os.environ, "GH_TOKEN": self._token}
         try:
             result = self._runner(
                 command,
@@ -230,6 +235,17 @@ class GitHubAPI:
             return json.loads(result.stdout)
         except json.JSONDecodeError as exc:
             raise GitHubAPIError.malformed_json() from exc
+
+
+def landing_client(environ: Mapping[str, str] = os.environ) -> GitHubAPI | None:
+    """Build the write client for landing from ``LANDING_GH_TOKEN``, or None if unset.
+
+    The landing token is a GitHub App installation token: pull requests
+    enqueued with ``GITHUB_TOKEN`` do not start the merge queue's CI. It is
+    never derived from, or replaced by, the read token.
+    """
+    token = environ.get(LANDING_TOKEN_ENV, "").strip()
+    return GitHubAPI(_token=token) if token else None
 
 
 def _graphql_error_detail(document: object) -> str:
@@ -701,8 +717,13 @@ def choose_strategy(
     return StackedQueueEnqueue(api)
 
 
-def run(event_path: Path, *, api: GitHubClient) -> LandOutcome:
-    """Validate every gate, then land through the strategy the base branch needs."""
+def run(event_path: Path, *, api: GitHubClient, landing_api: GitHubClient | None) -> LandOutcome:
+    """Validate every gate, then land through the strategy the base branch needs.
+
+    ``api`` performs every read and the audit comment. ``landing_api`` performs
+    only the landing writes. Without it the command is refused after
+    authorization and before any landing write; there is no fallback to ``api``.
+    """
     policy = load_policy()
     event = parse_event(json.loads(event_path.read_text()))
     authorize_event(event, policy)
@@ -749,7 +770,12 @@ def run(event_path: Path, *, api: GitHubClient) -> LandOutcome:
     refreshed_sha = authorize_pull_request(refreshed, policy=policy, expected_number=event.number)
     if refreshed_sha != head_sha:
         _refuse("the pull request changed during validation; rerun the command")
-    strategy = choose_strategy(queue, api, stack_position=read_stack_position(refreshed))
+    if landing_api is None:
+        _refuse(
+            f"the landing token is not configured ({LANDING_TOKEN_ENV} is empty); "
+            "see .github/delegated-merge.md, Setup"
+        )
+    strategy = choose_strategy(queue, landing_api, stack_position=read_stack_position(refreshed))
     return strategy.land(
         LandingRequest(
             repository=policy.repository,
@@ -865,12 +891,13 @@ def main() -> int:
     """Run the merge command and leave one audit comment."""
     args = _parse_args()
     api = GitHubAPI()
+    landing_api = landing_client()
     event: Event | None = None
     try:
         event = parse_event(json.loads(args.event.read_text()))
         if event.body.strip() != load_policy().command:
             return 0
-        outcome = run(args.event, api=api)
+        outcome = run(args.event, api=api, landing_api=landing_api)
     except MergeRefusalError as exc:
         message = f"Scoped merge refused: {exc}."
     except GitHubAPIError as exc:

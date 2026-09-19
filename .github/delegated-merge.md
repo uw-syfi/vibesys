@@ -112,6 +112,33 @@ GitHub suppresses most workflow events caused by `GITHUB_TOKEN`. The PR test
 workflow has already passed before the merge, but the resulting update to
 `main` does not start workflows configured only for `push`.
 
+## Setup
+
+GitHub does not start workflows for events created with `GITHUB_TOKEN`. A merge
+queue entry created with it never gets its `merge_group` CI run, so the entry
+stalls. The landing writes (`enqueuePullRequest`, `PUT .../merge-async`, and the
+direct `PUT .../merge`) therefore use an installation token minted by
+`actions/create-github-app-token` in the `Mint landing token` step. Reads, the
+role check, and audit comments keep `GITHUB_TOKEN`.
+
+1. Create a GitHub App owned by the `uw-syfi` organization. Repository
+   permissions: Pull requests read and write, Contents read and write, Metadata
+   read. Leave every other permission unset. Disable the webhook. Do not add
+   the app to any branch protection or ruleset bypass list.
+2. Install it on this repository only.
+3. Add repository secrets `MERGE_QUEUE_APP_ID` (the app id) and
+   `MERGE_QUEUE_APP_PRIVATE_KEY` (the full PEM, including the header and footer
+   lines).
+
+To rotate the key, generate a new private key in the app settings, replace
+`MERGE_QUEUE_APP_PRIVATE_KEY`, run `/merge-scoped` on a small in-scope pull
+request to confirm, then delete the old key in the app settings.
+
+If either secret is missing, the mint step fails and the job stops before the
+script runs, so nothing is landed. If the step is skipped or produces an empty
+token, the script refuses with a message naming the landing token, before any
+landing write. It never falls back to `GITHUB_TOKEN`.
+
 ## Migration from the scoped TUI bot
 
 1. Land this change while the existing `Scoped merge gate` branch-protection
