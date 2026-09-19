@@ -17,7 +17,8 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
 _FORMAT = "vibesys-event-index"
-_VERSION = 2
+_VERSION = 3
+"""Bumped to 3 when stored event types changed from ``chat`` to ``EVENT_TYPE_CHAT``."""
 _FINGERPRINT_BYTES = 64 * 1024
 _SAMPLE_COUNT = 8
 _SAMPLE_BYTES = 4 * 1024

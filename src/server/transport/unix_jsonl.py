@@ -1,4 +1,14 @@
-"""Local JSONL transport for presentation clients."""
+"""Local JSONL transport for presentation clients.
+
+Every line in either direction is one proto3 JSON message (``server.wire.codec``).
+A request line that is not valid JSON, is not a well-formed version 2 request, or
+carries a field this server does not know is answered with a ``protocol_error``
+server message whose ``code`` is the :class:`~server.wire.codec.WireError` code
+(``invalid_json``, ``invalid_message``, ``protocol_version_unsupported``) and the
+connection stays open. Rejecting unknown fields is deliberate: a client probes
+for an optional capability (``subscribe.tail``, ``subscribe.store_id``) by
+sending the field, and a server that predates it answers ``invalid_message``.
+"""
 
 from __future__ import annotations
 
@@ -12,23 +22,16 @@ from contextlib import suppress
 from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, TypeAdapter
-
-from server.api.protocol import (
-    EventBatchMessage,
-    ProtocolErrorMessage,
-    ProtocolRequest,
-    Response,
-    SubscribedMessage,
-    SubscribeRequest,
-)
+from server.api.errors import error_response, protocol_error
 from server.transport.subscriptions import SubscriptionTracker
+from server.wire import codec
+from server.wire.v2 import requests_pb2, server_messages_pb2
 from vibesys.unix_socket import validate_socket_path
 
 if TYPE_CHECKING:
-    from server.api.service import RunApi, SubscriptionBootstrap
+    from google.protobuf.message import Message
 
-_REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
+    from server.api.service import RunApi, SubscriptionBootstrap
 
 # Polling slack on the teardown path. After the last client hangs up, the
 # server exits only once the stream loop notices the closed peer, the
@@ -47,15 +50,23 @@ class _RequestHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
         api = self.server.api
         for line in self.rfile:
-            request_id = "unknown"
             try:
-                raw = json.loads(line)
-                request_id = str(raw.get("request_id", request_id))
-                request = _REQUEST_ADAPTER.validate_python(raw)
-                if isinstance(request, SubscribeRequest):
+                request = codec.parse_request(line)
+            except codec.WireError as error:
+                self._write_message(
+                    protocol_error(
+                        error,
+                        request_id=_request_id_of(line),
+                        code=error.code,
+                        message=error.message,
+                    )
+                )
+                continue
+            try:
+                if request.WhichOneof("body") == "subscribe":
                     with self.server.subscriptions.track():
                         try:
-                            self._stream(request)
+                            self._stream(request.request_id, request.subscribe)
                         except (BrokenPipeError, ConnectionResetError):
                             pass
                         except Exception as exc:  # noqa: BLE001  # tracked: #288
@@ -63,19 +74,15 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                     return
                 response = api.execute(request)
             except Exception as exc:  # noqa: BLE001  # tracked: #288
-                response = Response.from_exception(
-                    request_id,
-                    exc,
-                    operation="Request",
-                )
-            self.wfile.write(response.model_dump_json().encode() + b"\n")
-            self.wfile.flush()
+                response = error_response(request.request_id, exc, operation="Request")
+            self._write_message(response)
 
-    def _stream(self, request: SubscribeRequest) -> None:
+    def _stream(self, request_id: str, request: requests_pb2.SubscribeRequest) -> None:
         api = self.server.api
+        tail = request.tail if request.HasField("tail") else None
         try:
             bootstrap = api.subscription_bootstrap(
-                request.after_sequence, request.tail, store_id=request.store_id
+                request.after_sequence, tail, store_id=request.store_id
             )
         except Exception:
             # A bootstrap failure must not reject the dial: the client probes
@@ -86,18 +93,22 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             # stream error, exactly as it did when the replay was read after
             # the handshake.
             self._write_message(
-                SubscribedMessage(
-                    request_id=request.request_id,
-                    run_id=api.snapshot().run_id,
-                    latest_sequence=api.latest_sequence,
+                server_messages_pb2.ServerMessage(
+                    subscribed=server_messages_pb2.SubscribedMessage(
+                        request_id=request_id,
+                        run_id=api.snapshot().run_id,
+                        latest_sequence=api.latest_sequence,
+                    )
                 )
             )
             raise
         self._write_message(
-            SubscribedMessage(
-                request_id=request.request_id,
-                run_id=bootstrap.run_id,
-                latest_sequence=bootstrap.through_sequence,
+            server_messages_pb2.ServerMessage(
+                subscribed=server_messages_pb2.SubscribedMessage(
+                    request_id=request_id,
+                    run_id=bootstrap.run_id,
+                    latest_sequence=bootstrap.through_sequence,
+                )
             )
         )
         cursor, reported_floor, store_id = self._write_bootstrap(request, bootstrap)
@@ -107,7 +118,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                     return
                 time.sleep(0.05)
                 continue
-            if request.tail is not None and api.latest_sequence - cursor > request.tail:
+            if tail is not None and api.latest_sequence - cursor > tail:
                 # More live output landed in one wait than the tail bound was
                 # willing to replay. Bootstrap again at a fresh tail rather
                 # than deliver a window the bound was meant to exclude.
@@ -126,8 +137,8 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 # that is live now; the client re-folds from the batch's id.
                 cursor, reported_floor, store_id = self._rebootstrap(request)
                 continue
-            self._write_message(
-                EventBatchMessage(
+            self._write_batch(
+                server_messages_pb2.EventBatchMessage(
                     events=checkpoint.events,
                     through_sequence=checkpoint.through_sequence,
                     active_executions=checkpoint.active_executions,
@@ -137,19 +148,21 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             )
             cursor = checkpoint.through_sequence
 
-    def _rebootstrap(self, request: SubscribeRequest) -> tuple[int, int, str]:
+    def _rebootstrap(self, request: requests_pb2.SubscribeRequest) -> tuple[int, int, str]:
         """Restart this subscription's replay against the journal's live state."""
         api = self.server.api
         return self._write_bootstrap(
             request,
             api.subscription_bootstrap(
-                request.after_sequence, request.tail, store_id=request.store_id
+                request.after_sequence,
+                request.tail if request.HasField("tail") else None,
+                store_id=request.store_id,
             ),
         )
 
     def _write_bootstrap(
         self,
-        request: SubscribeRequest,
+        request: requests_pb2.SubscribeRequest,
         bootstrap: SubscriptionBootstrap,
     ) -> tuple[int, int, str]:
         """Send one tail-bounded replay batch; return the cursor, floor, and store.
@@ -158,9 +171,9 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         everything from its own cursor onward, so nothing was withheld and old
         clients see the field's default.
         """
-        reported_floor = 0 if request.tail is None else bootstrap.floor
-        self._write_message(
-            EventBatchMessage(
+        reported_floor = bootstrap.floor if request.HasField("tail") else 0
+        self._write_batch(
+            server_messages_pb2.EventBatchMessage(
                 events=bootstrap.events,
                 through_sequence=bootstrap.through_sequence,
                 active_executions=bootstrap.active_executions,
@@ -172,14 +185,14 @@ class _RequestHandler(socketserver.StreamRequestHandler):
 
     def _write_stream_error(self, request_id: str, error: Exception) -> None:
         """Report a replay or stream failure without hiding a live connection."""
-        protocol_error = ProtocolErrorMessage.from_exception(
+        message = protocol_error(
             error,
             operation="Event stream",
             code="stream_failed",
             request_id=request_id,
         )
         with suppress(BrokenPipeError, ConnectionResetError):
-            self._write_message(protocol_error)
+            self._write_message(message)
 
     def _client_disconnected(self) -> bool:
         try:
@@ -189,10 +202,27 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         except OSError:
             return True
 
-    def _write_message(self, message: BaseModel) -> None:
-        payload = message.model_dump_json()
+    def _write_message(self, message: Message) -> None:
+        self._write_line(codec.dumps(message))
+
+    def _write_batch(self, batch: server_messages_pb2.EventBatchMessage) -> None:
+        """Send a batch as a ``ServerMessage`` without copying its events again."""
+        self._write_line('{"event_batch":' + codec.dumps(batch) + "}")
+
+    def _write_line(self, payload: str) -> None:
         self.wfile.write(payload.encode() + b"\n")
         self.wfile.flush()
+
+
+def _request_id_of(line: bytes) -> str | None:
+    """Best-effort request id of a line that failed to parse, for the error reply."""
+    try:
+        record = json.loads(line)
+    except ValueError:
+        return None
+    if isinstance(record, dict) and isinstance(record.get("request_id"), str):
+        return record["request_id"]
+    return None
 
 
 class _JsonlUnixServer(socketserver.ThreadingUnixStreamServer):

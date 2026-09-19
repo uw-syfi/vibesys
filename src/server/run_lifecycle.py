@@ -16,9 +16,10 @@ from typing import Final
 class RunStatus(StrEnum):
     """Lifecycle status of one run, as frontends observe it.
 
-    This is the authoritative closed set for the ``status`` field of
-    ``RunSnapshot`` and of ``RunStatusChangedData``; the generated TypeScript
-    protocol types derive their union from it.
+    Domain view of the wire ``RunStatus`` enum (``common.proto``), which owns
+    the closed set for the ``status`` field of ``RunSnapshot`` and of
+    ``RunStatusChangedData``; ``server.wire.enums`` maps between the two by
+    member name.
 
     ``PAUSING`` and ``PAUSED`` are distinct because a pause is only applied at
     an invocation boundary: ``/pause`` records the request, and the run keeps

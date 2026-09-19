@@ -1,73 +1,62 @@
-"""Presentation-neutral diagnostics shared by server protocol models."""
+"""Presentation-neutral diagnostics carried on the wire as ``Diagnostic`` messages."""
 
 from __future__ import annotations
 
 import re
 import uuid
-from enum import StrEnum
-from typing import Literal
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from server.wire.v2 import common_pb2
 
+if TYPE_CHECKING:
+    from server.wire.v2.common_pb2 import Diagnostic
 
-class DiagnosticScope(StrEnum):
-    """Boundary at which a diagnostic was raised."""
-
-    CONFIGURATION = "configuration"
-    INVOCATION = "invocation"
-    PHASE = "phase"
-    RUN = "run"
-    REQUEST = "request"
-    PROTOCOL = "protocol"
-    TRANSPORT = "transport"
+DiagnosticScope = common_pb2.DiagnosticScope
+DiagnosticSeverity = common_pb2.DiagnosticSeverity
+DiagnosticRetryability = common_pb2.DiagnosticRetryability
+"""Proto enums, re-exported so callers write ``DiagnosticScope.DIAGNOSTIC_SCOPE_RUN``."""
 
 
-class DiagnosticSeverity(StrEnum):
-    """Operator-visible seriousness of a diagnostic."""
+def make_diagnostic(  # noqa: PLR0913  # independent contract dimensions
+    *,
+    code: str,
+    summary: str,
+    scope: DiagnosticScope.ValueType,
+    severity: DiagnosticSeverity.ValueType = DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
+    retryability: DiagnosticRetryability.ValueType = (
+        DiagnosticRetryability.DIAGNOSTIC_RETRYABILITY_UNKNOWN
+    ),
+    detail: str | None = None,
+    hint: str | None = None,
+    cause_id: str | None = None,
+    debug_ref: str | None = None,
+    source: str | None = None,
+    id: str | None = None,  # noqa: A002  # the wire field is named ``id``
+) -> Diagnostic:
+    """Build a diagnostic with a fresh id and credential redaction applied.
 
-    WARNING = "warning"
-    ERROR = "error"
-    FATAL = "fatal"
-
-
-class DiagnosticRetryability(StrEnum):
-    """Whether retrying the failed operation is expected to help."""
-
-    AUTOMATIC = "automatic"
-    MANUAL = "manual"
-    NEVER = "never"
-    UNKNOWN = "unknown"
-
-
-class Diagnostic(BaseModel):
-    """Structured, provider-neutral description of an operator diagnostic.
-
-    Frozen for the same reason as ``RunEvent``: diagnostics ride along on
-    replayed events, which readers share rather than copy.
+    ``summary``, ``detail``, and ``hint`` are redacted here, at construction,
+    which is where the Pydantic model applied the same rule.
     """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
-    code: str
-    summary: str
-    detail: str | None = None
-    hint: str | None = None
-    scope: DiagnosticScope
-    severity: DiagnosticSeverity = DiagnosticSeverity.ERROR
-    retryability: DiagnosticRetryability = DiagnosticRetryability.UNKNOWN
-    cause_id: str | None = None
-    debug_ref: str | None = None
-    # Which subsystem raised the diagnostic (e.g. "git_tracking", "skills").
-    # Optional and additive: events recorded before the field existed omit it.
-    source: str | None = None
-
-    @field_validator("summary", "detail", "hint", mode="before")
-    @classmethod
-    def _redact_text(cls, value: object) -> object:
-        if isinstance(value, str):
-            return redact_diagnostic_text(value)
-        return value
+    diagnostic = common_pb2.Diagnostic(
+        id=id or uuid.uuid4().hex,
+        code=code,
+        summary=redact_diagnostic_text(summary),
+        scope=scope,
+        severity=severity,
+        retryability=retryability,
+    )
+    if detail is not None:
+        diagnostic.detail = redact_diagnostic_text(detail)
+    if hint is not None:
+        diagnostic.hint = redact_diagnostic_text(hint)
+    if cause_id is not None:
+        diagnostic.cause_id = cause_id
+    if debug_ref is not None:
+        diagnostic.debug_ref = debug_ref
+    if source is not None:
+        diagnostic.source = source
+    return diagnostic
 
 
 _SECRET_ASSIGNMENT = re.compile(
@@ -106,32 +95,25 @@ def exception_summary(error: BaseException, operation: str = "Operation") -> str
 def exception_to_diagnostic(  # noqa: PLR0913  # independent contract dimensions
     error: BaseException,
     *,
-    scope: DiagnosticScope
-    | Literal[
-        "configuration",
-        "invocation",
-        "phase",
-        "run",
-        "request",
-        "protocol",
-        "transport",
-    ],
+    scope: DiagnosticScope.ValueType,
     operation: str = "Operation",
     summary: str | None = None,
     code: str | None = None,
     hint: str | None = None,
-    severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
-    retryability: DiagnosticRetryability = DiagnosticRetryability.UNKNOWN,
+    severity: DiagnosticSeverity.ValueType = DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
+    retryability: DiagnosticRetryability.ValueType = (
+        DiagnosticRetryability.DIAGNOSTIC_RETRYABILITY_UNKNOWN
+    ),
     cause_id: str | None = None,
     debug_ref: str | None = None,
 ) -> Diagnostic:
     """Map an exception to the canonical diagnostic contract."""
-    return Diagnostic(
+    return make_diagnostic(
         code=code or _default_code(error),
         summary=summary or exception_summary(error, operation),
         detail=exception_detail(error),
         hint=hint,
-        scope=DiagnosticScope(scope),
+        scope=scope,
         severity=severity,
         retryability=retryability,
         cause_id=cause_id,

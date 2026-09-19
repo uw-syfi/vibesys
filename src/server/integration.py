@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel
 
 from server.chat.factory import (
     ChatAgentBuilder,
@@ -15,19 +15,14 @@ from server.chat.factory import (
     build_chat_agent,
 )
 from server.chat.options import ChatRunSettings
-from server.diagnostics import Diagnostic, DiagnosticScope, DiagnosticSeverity
-from server.events import (
-    AgentExecutionFinishedData,
-    EventData,
-    EventStatus,
-    EventType,
-    FrameworkSource,
-    FrameworkWarningData,
-    InvocationFinishedData,
-    PhaseData,
-    RunEvent,
+from server.diagnostics import (
+    DiagnosticScope,
+    DiagnosticSeverity,
+    make_diagnostic,
 )
 from server.run_lifecycle import RunTrigger
+from server.wire import codec, enums, messages, upgrade
+from server.wire.v2 import events_pb2
 from vibesys.agents.factory import supported_cli_providers
 from vibesys.render.sink import output_sink
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
@@ -41,19 +36,27 @@ from vibesys.run.integration import (
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+    from google.protobuf.message import Message
+
     from server.chat.manager import ChatManager
     from server.controller import ProjectRunState, RunController
     from server.execution import ExecutionTracker
     from server.journal import EventJournal as WireEventJournal
+    from server.wire.v2.common_pb2 import Diagnostic
     from vibesys.events import CoreEvent
     from vs_project import Project
 
 CommittedStateListener = Callable[[str, Path, str, BaseModel, tuple[str, ...] | None], None]
 
-_EVENT_DATA_ADAPTER = TypeAdapter(EventData)
-_TERMINAL_TRIGGERS: dict[EventType, RunTrigger] = {
-    EventType.RUN_FINISHED: RunTrigger.COMPLETED,
-    EventType.RUN_FAILED: RunTrigger.FAILED,
+EventType = events_pb2.EventType
+EventStatus = events_pb2.EventStatus
+_PAYLOAD_TYPES: dict[str, type[Message]] = {
+    field.name: type(getattr(events_pb2.RunEvent(), field.name))
+    for field in events_pb2.RunEvent.DESCRIPTOR.oneofs_by_name["data"].fields
+}
+_TERMINAL_TRIGGERS: dict[EventType.ValueType, RunTrigger] = {
+    EventType.EVENT_TYPE_RUN_FINISHED: RunTrigger.COMPLETED,
+    EventType.EVENT_TYPE_RUN_FAILED: RunTrigger.FAILED,
 }
 """How a core terminal event ends the run the server reports.
 
@@ -63,32 +66,46 @@ the status change ahead of it in the journal.
 """
 _PRESENTATION_EVENTS = frozenset(
     {
-        EventType.AGENT_OUTPUT_CHUNK,
-        EventType.TOOL_CALL,
-        EventType.TOOL_RESULT,
-        EventType.TODO_UPDATE,
-        EventType.USAGE_UPDATE,
+        EventType.EVENT_TYPE_AGENT_OUTPUT_CHUNK,
+        EventType.EVENT_TYPE_TOOL_CALL,
+        EventType.EVENT_TYPE_TOOL_RESULT,
+        EventType.EVENT_TYPE_TODO_UPDATE,
+        EventType.EVENT_TYPE_USAGE_UPDATE,
     }
 )
-_CORE_FAILURE_CONTEXTS: dict[EventType, tuple[DiagnosticScope, DiagnosticSeverity, str]] = {
-    EventType.CONFIGURATION_FAILED: (
-        DiagnosticScope.CONFIGURATION,
-        DiagnosticSeverity.FATAL,
+_CORE_FAILURE_CONTEXTS: dict[
+    EventType.ValueType, tuple[DiagnosticScope.ValueType, DiagnosticSeverity.ValueType, str]
+] = {
+    EventType.EVENT_TYPE_CONFIGURATION_FAILED: (
+        DiagnosticScope.DIAGNOSTIC_SCOPE_CONFIGURATION,
+        DiagnosticSeverity.DIAGNOSTIC_SEVERITY_FATAL,
         "Configuration failed",
     ),
-    EventType.INVOCATION_FINISHED: (
-        DiagnosticScope.INVOCATION,
-        DiagnosticSeverity.ERROR,
+    EventType.EVENT_TYPE_INVOCATION_FINISHED: (
+        DiagnosticScope.DIAGNOSTIC_SCOPE_INVOCATION,
+        DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
         "Agent execution failed",
     ),
-    EventType.AGENT_EXECUTION_FINISHED: (
-        DiagnosticScope.INVOCATION,
-        DiagnosticSeverity.ERROR,
+    EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED: (
+        DiagnosticScope.DIAGNOSTIC_SCOPE_INVOCATION,
+        DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
         "Agent execution failed",
     ),
-    EventType.PHASE_FINISHED: (DiagnosticScope.PHASE, DiagnosticSeverity.ERROR, "Phase failed"),
-    EventType.RUN_FAILED: (DiagnosticScope.RUN, DiagnosticSeverity.FATAL, "Run failed"),
-    EventType.RUN_INTERRUPTED: (DiagnosticScope.RUN, DiagnosticSeverity.FATAL, "Run interrupted"),
+    EventType.EVENT_TYPE_PHASE_FINISHED: (
+        DiagnosticScope.DIAGNOSTIC_SCOPE_PHASE,
+        DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR,
+        "Phase failed",
+    ),
+    EventType.EVENT_TYPE_RUN_FAILED: (
+        DiagnosticScope.DIAGNOSTIC_SCOPE_RUN,
+        DiagnosticSeverity.DIAGNOSTIC_SEVERITY_FATAL,
+        "Run failed",
+    ),
+    EventType.EVENT_TYPE_RUN_INTERRUPTED: (
+        DiagnosticScope.DIAGNOSTIC_SCOPE_RUN,
+        DiagnosticSeverity.DIAGNOSTIC_SEVERITY_FATAL,
+        "Run interrupted",
+    ),
 }
 """Scope, severity, and fallback summary per operational failure event.
 
@@ -100,9 +117,9 @@ fatal, per-invocation and per-phase failures are errors.
 """
 _EXECUTION_FAILURE_EVENTS = frozenset(
     {
-        EventType.AGENT_EXECUTION_FINISHED,
-        EventType.INVOCATION_FINISHED,
-        EventType.PHASE_FINISHED,
+        EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED,
+        EventType.EVENT_TYPE_INVOCATION_FINISHED,
+        EventType.EVENT_TYPE_PHASE_FINISHED,
     }
 )
 """The failure cascade one invocation emits, all stamped with its execution_id.
@@ -113,24 +130,28 @@ and stand on their own.
 """
 
 
-def _framework_warning_diagnostic(data: FrameworkWarningData) -> Diagnostic:
+def _framework_warning_diagnostic(data: events_pb2.FrameworkWarningData) -> Diagnostic:
     """Lift a framework warning into the run-scoped diagnostic surface.
 
     The full payload still rides on the event's ``data``; the diagnostic is
     the projection frontends already know how to surface.
     """
-    return Diagnostic(
+    return make_diagnostic(
         code="framework_warning",
         summary=data.summary,
-        detail=data.detail,
-        scope=DiagnosticScope.RUN,
-        severity=DiagnosticSeverity.WARNING,
-        source=data.source_label or data.source.value,
+        detail=data.detail if data.HasField("detail") else None,
+        scope=DiagnosticScope.DIAGNOSTIC_SCOPE_RUN,
+        severity=DiagnosticSeverity.DIAGNOSTIC_SEVERITY_WARNING,
+        source=(
+            data.source_label
+            if data.HasField("source_label")
+            else enums.text(events_pb2.FrameworkSource, data.source)
+        ),
     )
 
 
 def _core_failure_diagnostic(
-    event_type: EventType, text: str, data: EventData | None
+    event_type: EventType.ValueType, text: str, data: Message | None
 ) -> Diagnostic:
     """Build a structured diagnostic for a failed core event that lacks one.
 
@@ -142,33 +163,43 @@ def _core_failure_diagnostic(
     """
     scope, severity, fallback = _CORE_FAILURE_CONTEXTS[event_type]
     error_text: str | None = None
-    if isinstance(data, (AgentExecutionFinishedData, InvocationFinishedData)):
-        error_text = data.error
-    elif isinstance(data, PhaseData):
+    if isinstance(data, (events_pb2.AgentExecutionFinishedData, events_pb2.InvocationFinishedData)):
+        error_text = data.error if data.HasField("error") else None
+    elif isinstance(data, events_pb2.PhaseData):
         fallback = f"Phase {data.phase} failed"
     summary = text or error_text or fallback
-    return Diagnostic(
+    return make_diagnostic(
         code="core_failure",
         summary=summary,
         detail=error_text if error_text is not None and error_text != summary else None,
         scope=scope,
         severity=severity,
-        source=FrameworkSource.LOOP.value,
+        source=enums.text(events_pb2.FrameworkSource, events_pb2.FRAMEWORK_SOURCE_LOOP),
     )
 
 
 def _core_event_diagnostic(
-    event_type: EventType,
+    event_type: EventType.ValueType,
     text: str,
-    status: EventStatus | None,
-    data: EventData | None,
+    status: EventStatus.ValueType | None,
+    data: Message | None,
 ) -> Diagnostic | None:
     """Return the diagnostic a projected core event must carry, if any."""
-    if isinstance(data, FrameworkWarningData):
+    if isinstance(data, events_pb2.FrameworkWarningData):
         return _framework_warning_diagnostic(data)
-    if event_type in _CORE_FAILURE_CONTEXTS and status is EventStatus.FAILED:
+    if event_type in _CORE_FAILURE_CONTEXTS and status == EventStatus.EVENT_STATUS_FAILED:
         return _core_failure_diagnostic(event_type, text, data)
     return None
+
+
+def _wire_payload(data: BaseModel) -> Message:
+    """Convert a core event payload to its wire message.
+
+    The core payloads are presentation-neutral and dump to the version 1
+    JSON shape, which the upgrade maps onto the typed ``data`` oneof.
+    """
+    ((field, body),) = upgrade.upgrade_payload(data.model_dump(mode="json")).items()
+    return codec.from_dict(_PAYLOAD_TYPES[field], body)
 
 
 class ServerInvocationLifecycle:
@@ -416,31 +447,31 @@ class RunIntegrationAdapter:
 
     def record(
         self,
-        event_type: EventType,
+        event_type: EventType.ValueType,
         text: str = "",
         *,
-        data: EventData | None = None,
+        data: Message | None = None,
         **fields: Any,  # noqa: ANN401
-    ) -> RunEvent:
+    ) -> events_pb2.RunEvent:
         """Record a server-only wire event."""
         return self.journal.record(event_type, text, data=data, **fields)
 
     def read_events(
         self, after_sequence: int = 0, before_sequence: int | None = None
-    ) -> list[RunEvent]:
+    ) -> list[events_pb2.RunEvent]:
         """Read canonical wire events within an optional cursor range."""
         return self.journal.read(after_sequence, before_sequence)
 
-    def read_history_events(self) -> list[RunEvent]:
+    def read_history_events(self) -> list[events_pb2.RunEvent]:
         """Read canonical wire history for inspector queries."""
         return self.journal.read_history()
 
     def _event_diagnostic(
         self,
-        event_type: EventType,
+        event_type: EventType.ValueType,
         text: str,
-        status: EventStatus | None,
-        data: EventData | None,
+        status: EventStatus.ValueType | None,
+        data: Message | None,
         execution_id: str | None,
     ) -> Diagnostic | None:
         """Project a core event's diagnostic, folding an execution's failure cascade.
@@ -457,7 +488,7 @@ class RunIntegrationAdapter:
         diagnostic = _core_event_diagnostic(event_type, text, status, data)
         if diagnostic is None or execution_id is None:
             return diagnostic
-        if status is not EventStatus.FAILED or event_type not in _EXECUTION_FAILURE_EVENTS:
+        if status != EventStatus.EVENT_STATUS_FAILED or event_type not in _EXECUTION_FAILURE_EVENTS:
             return diagnostic
         cached = self._failure_diagnostics.get(execution_id)
         if cached is not None:
@@ -466,12 +497,8 @@ class RunIntegrationAdapter:
         return diagnostic
 
     def _project_core_event(self, event: CoreEvent) -> None:
-        event_type = EventType(event.type.value)
-        data = (
-            None
-            if event.data is None
-            else _EVENT_DATA_ADAPTER.validate_python(event.data.model_dump(mode="python"))
-        )
+        event_type = enums.number(events_pb2.EventType, event.type.value)
+        data = None if event.data is None else _wire_payload(event.data)
         if event_type in _PRESENTATION_EVENTS and data is not None:
             self.executions.publish_presentation(
                 event_type,
@@ -484,22 +511,25 @@ class RunIntegrationAdapter:
         terminal_trigger = _TERMINAL_TRIGGERS.get(event_type)
         if terminal_trigger is not None:
             self.controller.settle(terminal_trigger)
-        status = EventStatus(event.status.value) if event.status is not None else None
-        self.journal.append(
-            RunEvent(
-                timestamp=event.timestamp,
-                type=event_type,
-                text=event.text,
-                diagnostic=self._event_diagnostic(
-                    event_type, event.text, status, data, event.execution_id
-                ),
-                status=status,
-                round_label=event.round_label,
-                agent_kind=event.agent_kind,
-                execution_id=event.execution_id,
-                data=data,
-            )
+        status = (
+            enums.number(events_pb2.EventStatus, event.status.value)
+            if event.status is not None
+            else None
         )
+        wire = messages.make_event(
+            event_type,
+            event.text,
+            data=data,
+            diagnostic=self._event_diagnostic(
+                event_type, event.text, status, data, event.execution_id
+            ),
+            status=status,
+            round_label=event.round_label,
+            agent_kind=event.agent_kind,
+            execution_id=event.execution_id,
+        )
+        wire.timestamp.CopyFrom(messages.from_datetime(event.timestamp))
+        self.journal.append(wire)
 
     def _route_output_event(self, event: CoreEvent) -> None:
         if event.agent_kind == "chat":

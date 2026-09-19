@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING
 
-from server.events import ConfigurationFailedData, EventStatus, EventType, RunEvent
+from server.wire import codec
+from server.wire.v2 import events_pb2
+
+EventType = events_pb2.EventType
+EventStatus = events_pb2.EventStatus
 
 if TYPE_CHECKING:
     from server.integration import RunIntegrationAdapter
@@ -36,7 +40,7 @@ class RunInspector:
         if any(word in query for word in ("doing", "current", "status", "now")):
             return self._status_answer(question, self.integration.status())
         if any(word in query for word in ("failed", "failure", "why")):
-            failed = self._latest_execution(status=EventStatus.FAILED)
+            failed = self._latest_execution(status=EventStatus.EVENT_STATUS_FAILED)
             answer = (
                 "Latest failed agent execution:\n" + failed
                 if failed
@@ -99,7 +103,7 @@ class RunInspector:
         return None
 
     def _status_answer(self, question: str, answer: str) -> str:
-        self.integration.record(EventType.STATUS_QUERY, question)
+        self.integration.record(EventType.EVENT_TYPE_STATUS_QUERY, question)
         return answer
 
     def _history_documents(self) -> list[_HistoryDocument]:
@@ -139,12 +143,12 @@ class RunInspector:
         return f"No {label} has been persisted yet."
 
     def _latest_execution(
-        self, *, status: EventStatus | None = None, agent_kind: str | None = None
+        self, *, status: EventStatus.ValueType | None = None, agent_kind: str | None = None
     ) -> str | None:
         for event in reversed(self.integration.read_events()):
-            if event.type is not EventType.AGENT_EXECUTION_FINISHED:
+            if event.type != EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED:
                 continue
-            if status is not None and event.status is not status:
+            if status is not None and event.status != status:
                 continue
             if agent_kind is not None and event.agent_kind != agent_kind:
                 continue
@@ -153,11 +157,11 @@ class RunInspector:
 
     def _latest_configuration_failure(self) -> str | None:
         for event in reversed(self.integration.read_history_events()):
-            if event.type is not EventType.CONFIGURATION_FAILED:
+            if event.type != EventType.EVENT_TYPE_CONFIGURATION_FAILED:
                 continue
-            data = event.data
-            if not isinstance(data, ConfigurationFailedData):
+            if not event.HasField("configuration_failed"):
                 continue
+            data = event.configuration_failed
             answer = f"Experiment configuration failed during {data.stage}: {data.message}"
             if data.usage:
                 answer += f"\n\n{data.usage}"
@@ -172,5 +176,5 @@ class RunInspector:
         return max(numbers) if numbers else None
 
     @staticmethod
-    def _format_event(event: RunEvent) -> str:
-        return json.dumps(event.model_dump(mode="json"), indent=2, ensure_ascii=False)
+    def _format_event(event: events_pb2.RunEvent) -> str:
+        return json.dumps(codec.to_dict(event), indent=2, ensure_ascii=False)

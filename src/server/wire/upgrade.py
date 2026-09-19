@@ -117,4 +117,3 @@ def _convert_one(field: FieldDescriptor, value: Any) -> Any:  # noqa: ANN401
     ):
         return _convert(field.message_type, value)
     return value
-

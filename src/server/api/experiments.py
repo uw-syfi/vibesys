@@ -10,15 +10,21 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from threading import RLock
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from server.api.protocol import ExperimentCursor, ExperimentUpdate, HypothesisEntry, HypothesisRound
+from server.wire import enums
+from server.wire.v2 import events_pb2, responses_pb2
 from vibesys.loops.agent.hypotheses import measurement_delta_reason
 from vibesys.loops.agent.model import HypothesisResolution
 from vibesys.schemas import CandidateDisposition, HypothesisOutcome, derive_hypothesis_title
 
+HypothesisEntry = responses_pb2.HypothesisEntry
+HypothesisRound = responses_pb2.HypothesisRound
+ExperimentUpdate = responses_pb2.ExperimentUpdate
+
 if TYPE_CHECKING:
+    from server.wire.v2 import requests_pb2
     from vibesys.loops.agent.model import AgentRunState, Hypothesis
     from vs_loop_state import RoundRecord
 
@@ -57,15 +63,23 @@ def build_experiment_entry(hypothesis: Hypothesis, *, active_id: str | None) -> 
         perf_unit=_text(measurement.unit) if measurement is not None else None,
         perf_delta_pct=measurement.delta_pct if measurement is not None else None,
         perf_metric_name=_text(measurement.metric) if measurement is not None else None,
-        perf_direction=measurement.direction if measurement is not None else None,
+        perf_direction=(
+            enums.optional_number(responses_pb2.ObjectiveDirection, measurement.direction)
+            if measurement is not None
+            else None
+        ),
         perf_baseline_value=measurement.baseline_value if measurement is not None else None,
         perf_baseline_round=measurement.baseline_round if measurement is not None else None,
         perf_baseline_commit=(
             _text(measurement.baseline_commit) if measurement is not None else None
         ),
-        perf_delta_reason=measurement_delta_reason(hypothesis),
+        perf_delta_reason=enums.optional_number(
+            responses_pb2.PerfDeltaReason, measurement_delta_reason(hypothesis)
+        ),
         kept=hypothesis.candidate_retained,
-        strategy_disposition=hypothesis.strategy.value,
+        strategy_disposition=enums.number(
+            responses_pb2.StrategyDisposition, hypothesis.strategy.value
+        ),
         strategy_reason=hypothesis.strategy_reason,
         active=hypothesis.hypothesis_id == active_id,
     )
@@ -180,7 +194,7 @@ class ExperimentProjection:
         self,
         run_id: str,
         projection_id: str,
-        cursor: ExperimentCursor | None,
+        cursor: requests_pb2.ExperimentCursor | None,
     ) -> ExperimentQueryResult | ExperimentLoadToken:
         """Return a cached result or a token for one authoritative reload."""
         with self._lock:
@@ -364,14 +378,18 @@ def _round(record: RoundRecord) -> HypothesisRound:
         round=record.round_number,
         passed=record.passed,
         reviewed=record.reviewed,
-        hypothesis_outcome=_outcome(record.hypothesis_outcome),
-        judge_verdict=record.judge_verdict,
+        hypothesis_outcome=enums.optional_number(
+            responses_pb2.HypothesisOutcome, _outcome(record.hypothesis_outcome)
+        ),
+        judge_verdict=enums.optional_number(responses_pb2.RoundReviewVerdict, record.judge_verdict),
         perf_metric=record.perf_metric,
         perf_unit=_text(record.perf_unit),
         perf_delta_pct=record.perf_delta_pct,
         commit=_text(record.commit),
         official_evaluation=record.official_evaluation,
-        candidate_disposition=_disposition(record.candidate_disposition),
+        candidate_disposition=enums.optional_number(
+            responses_pb2.CandidateDisposition, _disposition(record.candidate_disposition)
+        ),
     )
 
 
@@ -400,9 +418,9 @@ def _disposition(value: str | None) -> CandidateDisposition | None:
     return member if member is not None and member.value == value else None
 
 
-def _judge_verdict(hypothesis: Hypothesis) -> Literal["pass", "fail"] | None:
+def _judge_verdict(hypothesis: Hypothesis) -> events_pb2.JudgeVerdict.ValueType | None:
     value = hypothesis.review.value
-    return value if value in ("pass", "fail") else None
+    return enums.number(events_pb2.JudgeVerdict, value) if value in ("pass", "fail") else None
 
 
 def _text(value: str | None) -> str | None:

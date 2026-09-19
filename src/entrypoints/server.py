@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from entrypoints import headless
-from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
+from server.settings import TuiTheme, load_tui_theme
+from server.wire import codec, enums
+from server.wire.v2 import responses_pb2
 from vibesys.errors import ConfigurationError
 from vibesys.repository import (
     generate_experiment_name,
@@ -65,7 +67,7 @@ def _resolve_tui_defaults(  # noqa: PLR0913  # tracked: #288
     experiment_name: str | None = None,
     theme: TuiTheme | None = None,
     directory_only: bool = False,
-) -> InteractiveSetupDefaults:
+) -> responses_pb2.TuiDefaults:
     """Resolve launcher-facing defaults from local configuration."""
     config = headless._load_config_or_stub_default(  # noqa: SLF001
         config_path,
@@ -78,24 +80,24 @@ def _resolve_tui_defaults(  # noqa: PLR0913  # tracked: #288
     resolved_input = input_path.expanduser().resolve() if input_path is not None else None
     resolved_runs_dir = (runs_dir or Path.cwd() / "exp_env").expanduser().resolve()
     resolved_name = experiment_name or generate_experiment_name(resolved_input)
-    return InteractiveSetupDefaults(
+    return responses_pb2.TuiDefaults(
         runs_dir=str(resolved_runs_dir),
         input_path=str(resolved_input) if resolved_input is not None else "",
         experiment_name=resolved_name,
         repository_owner=None if directory_only else _suggest_repository_owner(config),
         repository_name=repository_name_from_experiment(resolved_name),
-        visibility=config.repository.visibility,
-        theme=theme or load_tui_theme(launch_config_path),
+        visibility=enums.number(responses_pb2.RepositoryVisibility, config.repository.visibility),
+        theme=enums.number(responses_pb2.TuiTheme, theme or load_tui_theme(launch_config_path)),
     )
 
 
-def _tui_defaults_from_argv(argv: list[str]) -> Callable[[], InteractiveSetupDefaults]:
+def _tui_defaults_from_argv(argv: list[str]) -> Callable[[], responses_pb2.TuiDefaults]:
     """Build the lazy defaults provider exposed over the control socket."""
     config = headless._option_from_argv(argv, "--config")  # noqa: SLF001
     theme = headless._option_from_argv(argv, "--theme")  # noqa: SLF001
     stub_agent = "--stub-agent" in argv
 
-    def provide() -> InteractiveSetupDefaults:
+    def provide() -> responses_pb2.TuiDefaults:
         return _resolve_tui_defaults(
             config_path=Path(config) if config is not None else None,
             stub_agent=stub_agent,
@@ -139,7 +141,7 @@ def _run_tui_defaults(argv: list[str]) -> None:
             code="config_load_failed",
             stage="config_loading",
         )
-    print(defaults.model_dump_json())  # noqa: T201  # tracked: #288
+    print(codec.dumps(defaults))  # noqa: T201  # tracked: #288
 
 
 def _missing_control_socket() -> NoReturn:

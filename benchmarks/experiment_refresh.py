@@ -11,8 +11,9 @@ import threading
 import time
 from pathlib import Path
 
-from server.api.experiments import build_experiment_log
 from server.api.protocol import ExperimentCursor, ExperimentQuery, HypothesisEntry
+
+from server.api.experiments import build_experiment_log
 from server.api.service import RunApi
 from server.chat.manager import ChatManager
 from server.controller import RunController

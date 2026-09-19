@@ -8,34 +8,28 @@ import threading
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
-
-from pydantic import BaseModel, ConfigDict
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from server.diagnostics import DiagnosticScope
-from server.events import (
-    AgentExecutionActivityData,
-    AgentExecutionFinishedData,
-    AgentExecutionStartedData,
-    AgentOutputChannel,
-    AgentOutputChunkData,
-    EventData,
-    EventStatus,
-    EventType,
-    InvocationFinishedData,
-    InvocationStartedData,
-    PhaseData,
-    TodoUpdateData,
-    ToolCallData,
-    ToolResultData,
-    json_value,
-)
+from server.events import to_value
+from server.wire import enums, messages
+from server.wire.v2 import events_pb2, snapshot_pb2
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+    from google.protobuf.message import Message
+
     from server.journal import EventJournal
+
+EventType = events_pb2.EventType
+EventStatus = events_pb2.EventStatus
+ActiveAgentExecution = snapshot_pb2.ActiveAgentExecution
+AgentExecutionActivityData = snapshot_pb2.AgentExecutionActivityData
+_MODE = snapshot_pb2.ExecutionActivityMode
+_Finished = TypeVar(
+    "_Finished", events_pb2.AgentExecutionFinishedData, events_pb2.InvocationFinishedData
+)
 
 
 @dataclass(frozen=True)
@@ -46,22 +40,14 @@ class ExecutionHandle:
     user_prompt: str
 
 
-class ActiveAgentExecution(BaseModel):
-    """Authoritative activity checkpoint for one running agent execution."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    execution_id: str
-    agent_kind: str
-    round_label: str
-    stage: str
-    attempt: int | None = None
-    assignment: str
-    started_at: datetime
-    activity: AgentExecutionActivityData
-    driver: str | None = None
-    provider: str | None = None
-    model: str | None = None
+def activity(
+    mode: str, summary: str, tool: str | None = None
+) -> snapshot_pb2.AgentExecutionActivityData:
+    """Build an activity from its domain mode string (``thinking``, ``tool``, ...)."""
+    result = AgentExecutionActivityData(mode=enums.number(_MODE, mode), summary=summary)
+    if tool is not None:
+        result.tool = tool
+    return result
 
 
 class ExecutionTracker:
@@ -93,13 +79,13 @@ class ExecutionTracker:
 
     def active_locked(self) -> list[ActiveAgentExecution]:
         """Copy active execution snapshots while the shared lock is held."""
-        return [execution.model_copy(deep=True) for execution in self._active.values()]
+        return [messages.replace(execution) for execution in self._active.values()]
 
     def publish_agent_output(
         self,
         content: str,
         *,
-        channel: AgentOutputChannel = "assistant",
+        channel: str = "assistant",
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
@@ -107,8 +93,10 @@ class ExecutionTracker:
         """Publish an assistant output chunk when content is nonempty."""
         if content:
             self.publish_presentation(
-                EventType.AGENT_OUTPUT_CHUNK,
-                AgentOutputChunkData(channel=channel, content=content),
+                EventType.EVENT_TYPE_AGENT_OUTPUT_CHUNK,
+                events_pb2.AgentOutputChunkData(
+                    channel=enums.number(events_pb2.AgentOutputChannel, channel), content=content
+                ),
                 agent_kind=agent_kind,
                 round_label=round_label,
                 invocation_id=invocation_id,
@@ -116,8 +104,8 @@ class ExecutionTracker:
 
     def publish_presentation(
         self,
-        event_type: EventType,
-        data: EventData,
+        event_type: EventType.ValueType,
+        data: Message,
         *,
         agent_kind: str | None = None,
         round_label: str | None = None,
@@ -130,9 +118,9 @@ class ExecutionTracker:
         scoped_chat_thread = getattr(self._presentation_local, "chat_thread_id", None)
         execution_id = invocation_id or scoped_invocation
         if execution_id is not None:
-            activity = self._activity_for_presentation(event_type, data, execution_id)
-            if activity is not None:
-                self.update_activity(execution_id, activity)
+            current = self._activity_for_presentation(event_type, data, execution_id)
+            if current is not None:
+                self.update_activity(execution_id, current)
         with self._condition:
             current_kind, current_round = self.current_locked()
         self._journal.record(
@@ -144,21 +132,23 @@ class ExecutionTracker:
             data=data,
         )
 
-    def update_activity(self, execution_id: str, activity: AgentExecutionActivityData) -> None:
+    def update_activity(
+        self, execution_id: str, current: snapshot_pb2.AgentExecutionActivityData
+    ) -> None:
         """Update one active execution when its activity has changed."""
         with self._condition:
             active = self._active.get(execution_id)
-            if active is None or active.activity == activity:
+            if active is None or active.activity == current:
                 return
             self._journal.record(
-                EventType.AGENT_EXECUTION_ACTIVITY_CHANGED,
-                status=EventStatus.ACTIVE,
+                EventType.EVENT_TYPE_AGENT_EXECUTION_ACTIVITY_CHANGED,
+                status=EventStatus.EVENT_STATUS_ACTIVE,
                 agent_kind=active.agent_kind,
                 round_label=active.round_label,
                 execution_id=execution_id,
-                data=activity,
+                data=current,
             )
-            self._active[execution_id] = active.model_copy(update={"activity": activity})
+            self._active[execution_id] = messages.replace(active, activity=current)
 
     def start_locked(  # noqa: PLR0913
         self,
@@ -176,57 +166,49 @@ class ExecutionTracker:
         """Allocate and track an execution while the shared lock is held."""
         execution_id = uuid.uuid4().hex
         attempt = _attempt_from_label(round_label)
-        activity = AgentExecutionActivityData(
-            mode="thinking", summary=_initial_activity_summary(kind)
-        )
+        initial = activity("thinking", _initial_activity_summary(kind))
         active = ActiveAgentExecution(
             execution_id=execution_id,
             agent_kind=kind,
             round_label=round_label,
             stage=kind,
-            attempt=attempt,
             assignment=effective_prompt,
-            started_at=datetime.now(UTC),
-            activity=activity,
-            driver=driver,
-            provider=provider,
-            model=model,
+            started_at=messages.now(),
+            activity=initial,
         )
+        for name, value in (
+            ("attempt", attempt),
+            ("driver", driver),
+            ("provider", provider),
+            ("model", model),
+        ):
+            if value is not None:
+                setattr(active, name, value)
         if emit_lifecycle:
             self._journal.record(
-                EventType.AGENT_EXECUTION_STARTED,
-                status=EventStatus.ACTIVE,
+                EventType.EVENT_TYPE_AGENT_EXECUTION_STARTED,
+                status=EventStatus.EVENT_STATUS_ACTIVE,
                 agent_kind=kind,
                 round_label=round_label,
                 execution_id=execution_id,
-                data=AgentExecutionStartedData(
-                    stage=kind,
-                    attempt=attempt,
-                    system_prompt=system_prompt,
-                    user_prompt=effective_prompt,
-                    activity=activity,
-                    driver=driver,
-                    provider=provider,
-                    model=model,
-                ),
+                data=_started_data(active, system_prompt),
             )
             self._journal.record(
-                EventType.PHASE_STARTED,
-                status=EventStatus.ACTIVE,
+                EventType.EVENT_TYPE_PHASE_STARTED,
+                status=EventStatus.EVENT_STATUS_ACTIVE,
                 agent_kind=kind,
                 round_label=round_label,
                 execution_id=execution_id,
-                data=PhaseData(phase=kind, attempt=attempt),
+                data=_phase_data(kind, attempt),
             )
             self._journal.record(
-                EventType.INVOCATION_STARTED,
-                status=EventStatus.ACTIVE,
+                EventType.EVENT_TYPE_INVOCATION_STARTED,
+                status=EventStatus.EVENT_STATUS_ACTIVE,
                 agent_kind=kind,
                 round_label=round_label,
                 execution_id=execution_id,
-                data=InvocationStartedData(
-                    system_prompt=system_prompt,
-                    user_prompt=effective_prompt,
+                data=events_pb2.InvocationStartedData(
+                    system_prompt=system_prompt, user_prompt=effective_prompt
                 ),
             )
         if participates_in_run_control:
@@ -244,7 +226,7 @@ class ExecutionTracker:
         *,
         result: Any = None,  # noqa: ANN401
         error: BaseException | None = None,
-    ) -> tuple[ActiveAgentExecution | None, bool]:
+    ) -> tuple[snapshot_pb2.ActiveAgentExecution | None, bool]:
         """Finish a tracked execution while the shared lock is held."""
         active = self._active.get(execution_id)
         if active is None:
@@ -255,17 +237,19 @@ class ExecutionTracker:
             self._discard_locked(execution_id)
             return active, controlled
         terminal_status = (
-            _execution_error_status(error) if error is not None else EventStatus.COMPLETED
+            _execution_error_status(error)
+            if error is not None
+            else EventStatus.EVENT_STATUS_COMPLETED
         )
         if error is not None:
             execution_event = self._journal.record_failure(
-                EventType.AGENT_EXECUTION_FINISHED,
+                EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED,
                 error,
-                scope=DiagnosticScope.INVOCATION,
+                scope=DiagnosticScope.DIAGNOSTIC_SCOPE_INVOCATION,
                 operation="Agent execution",
                 status=terminal_status,
-                data_factory=lambda diagnostic: AgentExecutionFinishedData(
-                    result=json_value(result), error=diagnostic.summary
+                data_factory=lambda diagnostic: _finished_data(
+                    events_pb2.AgentExecutionFinishedData, result, diagnostic.summary
                 ),
                 agent_kind=active.agent_kind,
                 round_label=active.round_label,
@@ -274,30 +258,31 @@ class ExecutionTracker:
             diagnostic = execution_event.diagnostic
         else:
             self._journal.record(
-                EventType.AGENT_EXECUTION_FINISHED,
-                status=EventStatus.COMPLETED,
-                data=AgentExecutionFinishedData(result=json_value(result)),
+                EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED,
+                status=EventStatus.EVENT_STATUS_COMPLETED,
+                data=_finished_data(events_pb2.AgentExecutionFinishedData, result),
                 agent_kind=active.agent_kind,
                 round_label=active.round_label,
                 execution_id=execution_id,
             )
             diagnostic = None
-        legacy_finished = InvocationFinishedData(
-            result=json_value(result),
-            error=diagnostic.summary if diagnostic else None,
+        legacy_finished = _finished_data(
+            events_pb2.InvocationFinishedData,
+            result,
+            diagnostic.summary if diagnostic else None,
         )
         if error is not None:
             for event_type, data in (
-                (EventType.INVOCATION_FINISHED, legacy_finished),
+                (EventType.EVENT_TYPE_INVOCATION_FINISHED, legacy_finished),
                 (
-                    EventType.PHASE_FINISHED,
-                    PhaseData(phase=active.stage, attempt=active.attempt),
+                    EventType.EVENT_TYPE_PHASE_FINISHED,
+                    _phase_data(active.stage, _attempt(active)),
                 ),
             ):
                 self._journal.record_failure(
                     event_type,
                     error,
-                    scope=DiagnosticScope.INVOCATION,
+                    scope=DiagnosticScope.DIAGNOSTIC_SCOPE_INVOCATION,
                     operation="Agent execution",
                     status=terminal_status,
                     data=data,
@@ -308,20 +293,20 @@ class ExecutionTracker:
                 )
         else:
             self._journal.record(
-                EventType.INVOCATION_FINISHED,
-                status=EventStatus.COMPLETED,
+                EventType.EVENT_TYPE_INVOCATION_FINISHED,
+                status=EventStatus.EVENT_STATUS_COMPLETED,
                 agent_kind=active.agent_kind,
                 round_label=active.round_label,
                 execution_id=execution_id,
                 data=legacy_finished,
             )
             self._journal.record(
-                EventType.PHASE_FINISHED,
-                status=EventStatus.COMPLETED,
+                EventType.EVENT_TYPE_PHASE_FINISHED,
+                status=EventStatus.EVENT_STATUS_COMPLETED,
                 agent_kind=active.agent_kind,
                 round_label=active.round_label,
                 execution_id=execution_id,
-                data=PhaseData(phase=active.stage, attempt=active.attempt),
+                data=_phase_data(active.stage, _attempt(active)),
             )
         self._discard_locked(execution_id)
         return active, controlled
@@ -333,29 +318,29 @@ class ExecutionTracker:
                 continue
             message = "Run ended before the agent execution completed"
             self._journal.record(
-                EventType.AGENT_EXECUTION_FINISHED,
+                EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED,
                 message,
-                status=EventStatus.INTERRUPTED,
-                data=AgentExecutionFinishedData(error=message),
+                status=EventStatus.EVENT_STATUS_INTERRUPTED,
+                data=_finished_data(events_pb2.AgentExecutionFinishedData, None, message),
                 agent_kind=active.agent_kind,
                 round_label=active.round_label,
                 execution_id=execution_id,
             )
             self._discard_locked(execution_id)
             self._journal.record(
-                EventType.INVOCATION_FINISHED,
+                EventType.EVENT_TYPE_INVOCATION_FINISHED,
                 message,
-                status=EventStatus.INTERRUPTED,
-                data=InvocationFinishedData(error=message),
+                status=EventStatus.EVENT_STATUS_INTERRUPTED,
+                data=_finished_data(events_pb2.InvocationFinishedData, None, message),
                 agent_kind=active.agent_kind,
                 round_label=active.round_label,
                 execution_id=execution_id,
             )
             self._journal.record(
-                EventType.PHASE_FINISHED,
+                EventType.EVENT_TYPE_PHASE_FINISHED,
                 message,
-                status=EventStatus.INTERRUPTED,
-                data=PhaseData(phase=active.stage, attempt=active.attempt),
+                status=EventStatus.EVENT_STATUS_INTERRUPTED,
+                data=_phase_data(active.stage, _attempt(active)),
                 agent_kind=active.agent_kind,
                 round_label=active.round_label,
                 execution_id=execution_id,
@@ -418,20 +403,24 @@ class ExecutionTracker:
         self._active_tools.pop(execution_id, None)
 
     def _activity_for_presentation(  # noqa: C901, PLR0911
-        self, event_type: EventType, data: EventData, execution_id: str
-    ) -> AgentExecutionActivityData | None:
-        if event_type is EventType.AGENT_OUTPUT_CHUNK and isinstance(data, AgentOutputChunkData):
+        self, event_type: EventType.ValueType, data: Message, execution_id: str
+    ) -> snapshot_pb2.AgentExecutionActivityData | None:
+        if event_type == EventType.EVENT_TYPE_AGENT_OUTPUT_CHUNK and isinstance(
+            data, events_pb2.AgentOutputChunkData
+        ):
             with self._condition:
                 if self._active_tools.get(execution_id):
                     return None
             return _text_activity(data)
-        if event_type is EventType.TOOL_CALL and isinstance(data, ToolCallData):
+        if event_type == EventType.EVENT_TYPE_TOOL_CALL and isinstance(
+            data, events_pb2.ToolCallData
+        ):
             with self._condition:
                 self._active_tools.setdefault(execution_id, []).append(data.tool)
-            return AgentExecutionActivityData(
-                mode="tool", summary=f"Using {data.tool}", tool=data.tool
-            )
-        if event_type is EventType.TODO_UPDATE and isinstance(data, TodoUpdateData):
+            return activity("tool", f"Using {data.tool}", data.tool)
+        if event_type == EventType.EVENT_TYPE_TODO_UPDATE and isinstance(
+            data, events_pb2.TodoUpdateData
+        ):
             current = next(
                 (todo.content for todo in data.todos if todo.status == "in_progress"),
                 None,
@@ -441,12 +430,14 @@ class ExecutionTracker:
                     self._todo_summaries.pop(execution_id, None)
                     if self._active_tools.get(execution_id):
                         return None
-                    return AgentExecutionActivityData(mode="thinking", summary="Thinking")
+                    return activity("thinking", "Thinking")
                 self._todo_summaries[execution_id] = current
                 if self._active_tools.get(execution_id):
                     return None
-            return AgentExecutionActivityData(mode="thinking", summary=current)
-        if event_type is EventType.TOOL_RESULT and isinstance(data, ToolResultData):
+            return activity("thinking", current)
+        if event_type == EventType.EVENT_TYPE_TOOL_RESULT and isinstance(
+            data, events_pb2.ToolResultData
+        ):
             with self._condition:
                 if execution_id not in self._active:
                     return None
@@ -456,10 +447,8 @@ class ExecutionTracker:
                 remaining_tool = tools[-1] if tools else None
                 todo_summary = self._todo_summaries.get(execution_id)
             if remaining_tool is not None:
-                return AgentExecutionActivityData(
-                    mode="tool", summary=f"Using {remaining_tool}", tool=remaining_tool
-                )
-            return AgentExecutionActivityData(mode="thinking", summary=todo_summary or "Thinking")
+                return activity("tool", f"Using {remaining_tool}", remaining_tool)
+            return activity("thinking", todo_summary or "Thinking")
         return None
 
 
@@ -468,12 +457,52 @@ def _attempt_from_label(round_label: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _execution_error_status(error: BaseException) -> EventStatus:
+def _execution_error_status(error: BaseException) -> EventStatus.ValueType:
     if isinstance(error, asyncio.CancelledError) or type(error).__name__ == "CancelledError":
-        return EventStatus.CANCELLED
+        return EventStatus.EVENT_STATUS_CANCELLED
     if isinstance(error, (KeyboardInterrupt, SystemExit)):
-        return EventStatus.INTERRUPTED
-    return EventStatus.FAILED
+        return EventStatus.EVENT_STATUS_INTERRUPTED
+    return EventStatus.EVENT_STATUS_FAILED
+
+
+def _attempt(active: snapshot_pb2.ActiveAgentExecution) -> int | None:
+    return active.attempt if active.HasField("attempt") else None
+
+
+def _phase_data(phase: str, attempt: int | None) -> events_pb2.PhaseData:
+    data = events_pb2.PhaseData(phase=phase)
+    if attempt is not None:
+        data.attempt = attempt
+    return data
+
+
+def _started_data(
+    active: snapshot_pb2.ActiveAgentExecution, system_prompt: str
+) -> events_pb2.AgentExecutionStartedData:
+    data = events_pb2.AgentExecutionStartedData(
+        stage=active.stage,
+        system_prompt=system_prompt,
+        user_prompt=active.assignment,
+        activity=active.activity,
+    )
+    for name in ("attempt", "driver", "provider", "model"):
+        if active.HasField(name):
+            setattr(data, name, getattr(active, name))
+    return data
+
+
+def _finished_data(
+    data_type: type[_Finished],
+    result: Any,  # noqa: ANN401
+    error: str | None = None,
+) -> _Finished:
+    """Build a finished payload; ``None`` leaves ``result`` and ``error`` unset."""
+    data = data_type()
+    if result is not None:
+        data.result.CopyFrom(to_value(result))
+    if error is not None:
+        data.error = error
+    return data
 
 
 def _initial_activity_summary(kind: str) -> str:
@@ -491,9 +520,11 @@ def _initial_activity_summary(kind: str) -> str:
     return f"Running {kind}"
 
 
-def _text_activity(data: AgentOutputChunkData) -> AgentExecutionActivityData | None:
-    if data.channel == "analysis":
-        return AgentExecutionActivityData(mode="thinking", summary="Thinking")
-    if data.channel == "assistant":
-        return AgentExecutionActivityData(mode="responding", summary="Responding")
+def _text_activity(
+    data: events_pb2.AgentOutputChunkData,
+) -> snapshot_pb2.AgentExecutionActivityData | None:
+    if data.channel == events_pb2.AgentOutputChannel.AGENT_OUTPUT_CHANNEL_ANALYSIS:
+        return activity("thinking", "Thinking")
+    if data.channel == events_pb2.AgentOutputChannel.AGENT_OUTPUT_CHANNEL_ASSISTANT:
+        return activity("responding", "Responding")
     return None

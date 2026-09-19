@@ -10,17 +10,16 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeAlias
 
-from server.events import (
-    ChatData,
-    ChatThreadCreatedData,
-    EventHeader,
-    EventStatus,
-    EventType,
-    RunEvent,
-)
+from server.wire import messages
+from server.wire.v2 import events_pb2
+
+ChatData = events_pb2.ChatData
+ChatThreadCreatedData = events_pb2.ChatThreadCreatedData
+RunEvent = events_pb2.RunEvent
 
 if TYPE_CHECKING:
     from server.chat.options import ChatRunSettings
+    from server.events import EventHeader
     from server.journal import EventJournal
     from server.run_lifecycle import RunStatus
 
@@ -124,30 +123,29 @@ class ChatManager:
     @staticmethod
     def replay_filter(header: EventHeader) -> bool:
         """Select persisted events needed to reconstruct chat thread metadata."""
-        return header.type is EventType.CHAT_THREAD_CREATED or (
-            header.type is EventType.CHAT and header.chat_thread_id is not None
+        return header.type == events_pb2.EVENT_TYPE_CHAT_THREAD_CREATED or (
+            header.type == events_pb2.EVENT_TYPE_CHAT and header.chat_thread_id is not None
         )
 
     def apply_replayed_event(self, event: RunEvent) -> None:
         """Fold chat metadata from a live append or resumed journal."""
         captures = self._chat_response_local.captures
-        if event.type is EventType.CHAT and captures:
+        if event.type == events_pb2.EVENT_TYPE_CHAT and captures:
             captures[-1] = event
-        if event.type is EventType.CHAT_THREAD_CREATED and isinstance(
-            event.data, ChatThreadCreatedData
-        ):
-            self._thread_specs.setdefault(event.data.thread_id, event.data)
+        payload = messages.payload_of(event)
+        if isinstance(payload, ChatThreadCreatedData):
+            self._thread_specs.setdefault(payload.thread_id, payload)
             return
         if (
-            event.type is EventType.CHAT
-            and event.chat_thread_id is not None
-            and isinstance(event.data, ChatData)
-            and event.data.thread_title
+            isinstance(payload, ChatData)
+            and event.HasField("chat_thread_id")
+            and payload.HasField("thread_title")
+            and payload.thread_title
         ):
             spec = self._thread_specs.get(event.chat_thread_id)
             if spec is not None and not spec.title:
-                self._thread_specs[event.chat_thread_id] = spec.model_copy(
-                    update={"title": event.data.thread_title}
+                self._thread_specs[event.chat_thread_id] = messages.replace(
+                    spec, title=payload.thread_title
                 )
 
     def set_fallback_answer(self, answer: Callable[[str], str]) -> None:
@@ -185,9 +183,9 @@ class ChatManager:
             else:
                 answer = handler(text)
             self._journal.record(
-                EventType.CHAT,
+                events_pb2.EVENT_TYPE_CHAT,
                 text,
-                status=EventStatus.ANSWERED,
+                status=events_pb2.EVENT_STATUS_ANSWERED,
                 agent_kind="chat",
                 round_label="experiment-chat",
                 data=ChatData(answer=answer.text, invocation_id=answer.invocation_id),
@@ -231,7 +229,7 @@ class ChatManager:
             handle = factory(uuid.uuid4().hex, driver, provider, model)
             spec = handle.spec
             if title is not None and title.strip():
-                spec = spec.model_copy(update={"title": title.strip()})
+                spec = messages.replace(spec, title=title.strip())
             with self._condition:
                 accepting = self._thread_factory is factory
                 if accepting:
@@ -243,7 +241,7 @@ class ChatManager:
                 handle.close()
                 raise _ThreadsDrainingError(self._thread_unavailable_message())
             self._journal.record(
-                EventType.CHAT_THREAD_CREATED,
+                events_pb2.EVENT_TYPE_CHAT_THREAD_CREATED,
                 agent_kind="chat",
                 round_label="experiment-chat",
                 chat_thread_id=spec.thread_id,
@@ -260,7 +258,9 @@ class ChatManager:
     def threads(self) -> list[ChatThreadCreatedData]:
         """Return known chat threads ordered by creation time."""
         with self._condition:
-            return sorted(self._thread_specs.values(), key=lambda spec: spec.created_at)
+            return sorted(
+                self._thread_specs.values(), key=lambda spec: messages.to_datetime(spec.created_at)
+            )
 
     def set_thread_factory(self, factory: ChatThreadFactory | None) -> None:
         """Set or remove the factory used to create and restore thread agents."""
@@ -344,9 +344,9 @@ class ChatManager:
             answer = handler(text)
             thread_title = self._title_thread_if_needed(thread_id, text)
             self._journal.record(
-                EventType.CHAT,
+                events_pb2.EVENT_TYPE_CHAT,
                 text,
-                status=EventStatus.ANSWERED,
+                status=events_pb2.EVENT_STATUS_ANSWERED,
                 agent_kind="chat",
                 round_label="experiment-chat",
                 chat_thread_id=thread_id,
@@ -480,7 +480,7 @@ class ChatManager:
             title = _chat_thread_title(question)
             if not title:
                 return None
-            self._thread_specs[thread_id] = spec.model_copy(update={"title": title})
+            self._thread_specs[thread_id] = messages.replace(spec, title=title)
             return title
 
     def _release_default_call(self) -> None:

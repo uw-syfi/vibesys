@@ -6,16 +6,22 @@ from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003
 from typing import TYPE_CHECKING, Any
 
-from server.diagnostics import Diagnostic, DiagnosticScope, DiagnosticSeverity
-from server.events import EventStatus, EventType, RunStatusChangedData
+from server.diagnostics import DiagnosticScope, DiagnosticSeverity
 from server.run_lifecycle import RunStatus, RunTrigger, transition
+from server.wire import enums, messages
+from server.wire.v2 import common_pb2, events_pb2
 
 if TYPE_CHECKING:
     import threading
 
+    from server.diagnostics import Diagnostic
     from server.execution import ExecutionHandle, ExecutionTracker
     from server.journal import EventJournal
     from vs_project import Project, StateSnapshot
+
+
+EventType = events_pb2.EventType
+EventStatus = events_pb2.EventStatus
 
 
 class RunStopped(BaseException):
@@ -110,8 +116,11 @@ class RunController:
             return current
         self._status = current
         self._journal.record(
-            EventType.RUN_STATUS_CHANGED,
-            data=RunStatusChangedData(status=current, previous=previous),
+            EventType.EVENT_TYPE_RUN_STATUS_CHANGED,
+            data=events_pb2.RunStatusChangedData(
+                status=enums.number(common_pb2.RunStatus, current),
+                previous=enums.number(common_pb2.RunStatus, previous),
+            ),
             agent_kind=agent_kind,
             round_label=round_label,
             execution_id=execution_id,
@@ -123,25 +132,35 @@ class RunController:
         """Request a pause after the current controlled invocation finishes."""
         with self._condition:
             self._apply_locked(RunTrigger.PAUSE_REQUESTED)
-            self._journal.record(EventType.CONTROL, "/pause", status=EventStatus.PENDING)
+            self._journal.record(
+                EventType.EVENT_TYPE_CONTROL, "/pause", status=EventStatus.EVENT_STATUS_PENDING
+            )
 
     def stop_after_call(self) -> None:
         """Request a stop at the next controlled invocation boundary."""
         with self._condition:
             self._apply_locked(RunTrigger.STOP_REQUESTED)
-            self._journal.record(EventType.CONTROL, "/stop", status=EventStatus.PENDING)
+            self._journal.record(
+                EventType.EVENT_TYPE_CONTROL, "/stop", status=EventStatus.EVENT_STATUS_PENDING
+            )
 
     def resume(self) -> None:
         """Resume controlled invocations and clear a pending pause or stop."""
         with self._condition:
             self._apply_locked(RunTrigger.RESUMED)
-            self._journal.record(EventType.CONTROL, "/resume", status=EventStatus.CONSUMED)
+            self._journal.record(
+                EventType.EVENT_TYPE_CONTROL, "/resume", status=EventStatus.EVENT_STATUS_CONSUMED
+            )
 
     def steer(self, text: str) -> None:
         """Queue operator guidance for the next controlled invocation."""
         with self._condition:
             self._pending_steer.append(text)
-            self._journal.record(EventType.CONTROL, f"/steer: {text}", status=EventStatus.PENDING)
+            self._journal.record(
+                EventType.EVENT_TYPE_CONTROL,
+                f"/steer: {text}",
+                status=EventStatus.EVENT_STATUS_PENDING,
+            )
 
     def start_agent_execution(  # noqa: PLR0913
         self,
@@ -182,9 +201,9 @@ class RunController:
             )
             if steering:
                 self._journal.record(
-                    EventType.CONTROL,
+                    EventType.EVENT_TYPE_CONTROL,
                     "/steer",
-                    status=EventStatus.CONSUMED,
+                    status=EventStatus.EVENT_STATUS_CONSUMED,
                     agent_kind=kind,
                     round_label=round_label,
                     execution_id=execution.execution_id,
@@ -254,9 +273,9 @@ class RunController:
         if reached not in (RunStatus.PAUSED, RunStatus.STOPPED):
             return
         self._journal.record(
-            EventType.CONTROL,
+            EventType.EVENT_TYPE_CONTROL,
             "/pause" if reached is RunStatus.PAUSED else "/stop",
-            status=EventStatus.CONSUMED,
+            status=EventStatus.EVENT_STATUS_CONSUMED,
             agent_kind=agent_kind,
             round_label=round_label,
             execution_id=execution_id,
@@ -273,7 +292,9 @@ class RunController:
         """
         if self._status is RunStatus.STOPPING:
             self._apply_locked(RunTrigger.INVOCATION_FINISHED)
-            self._journal.record(EventType.CONTROL, "/stop", status=EventStatus.CONSUMED)
+            self._journal.record(
+                EventType.EVENT_TYPE_CONTROL, "/stop", status=EventStatus.EVENT_STATUS_CONSUMED
+            )
         if self._status is RunStatus.STOPPED:
             raise RunStopped
 
@@ -326,25 +347,27 @@ class RunController:
             return
         event_diagnostic = diagnostic
         if error is not None and event_diagnostic is not None:
-            event_diagnostic = event_diagnostic.model_copy(
-                update={"severity": DiagnosticSeverity.FATAL}
+            event_diagnostic = messages.replace(
+                event_diagnostic, severity=DiagnosticSeverity.DIAGNOSTIC_SEVERITY_FATAL
             )
         try:
             if not record_event:
                 return
             if error is not None and event_diagnostic is None:
                 self._journal.record_terminal_failure(
-                    EventType.RUN_FAILED,
+                    EventType.EVENT_TYPE_RUN_FAILED,
                     error,
-                    scope=DiagnosticScope.RUN,
+                    scope=DiagnosticScope.DIAGNOSTIC_SCOPE_RUN,
                     operation="Run",
-                    severity=DiagnosticSeverity.FATAL,
+                    severity=DiagnosticSeverity.DIAGNOSTIC_SEVERITY_FATAL,
                 )
                 return
             self._journal.record(
-                EventType.RUN_FAILED if error else EventType.RUN_FINISHED,
+                EventType.EVENT_TYPE_RUN_FAILED if error else EventType.EVENT_TYPE_RUN_FINISHED,
                 event_diagnostic.summary if event_diagnostic else "",
-                status=EventStatus.FAILED if error else EventStatus.COMPLETED,
+                status=EventStatus.EVENT_STATUS_FAILED
+                if error
+                else EventStatus.EVENT_STATUS_COMPLETED,
                 diagnostic=event_diagnostic,
             )
         finally:

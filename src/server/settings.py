@@ -1,4 +1,7 @@
-"""Configuration contracts exposed to frontend clients."""
+"""Domain configuration that frontend-facing defaults are built from.
+
+The wire form of the launch defaults is ``responses_pb2.TuiDefaults``.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +10,6 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
-
-from vibesys.repository import RepositoryVisibility
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,17 +53,3 @@ def load_tui_theme(path: Path | None) -> TuiTheme:
     if table is None:
         return DEFAULT_TUI_THEME
     return _TuiSettings.model_validate(table).theme
-
-
-class InteractiveSetupDefaults(BaseModel):
-    """JSON contract passed to the interactive launch form."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    runs_dir: str
-    input_path: str
-    experiment_name: str
-    repository_owner: str | None
-    repository_name: str
-    visibility: RepositoryVisibility
-    theme: TuiTheme

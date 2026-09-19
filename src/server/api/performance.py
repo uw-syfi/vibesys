@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from server.api.protocol import PerformanceContext
+from server.wire import enums
+from server.wire.v2 import responses_pb2
 
 if TYPE_CHECKING:
     from vibesys.loops.agent.model import AgentRunState, HypothesisMeasurement
@@ -23,7 +24,7 @@ def build_performance_context(
     *,
     objectives: tuple[str, ...],
     objective_description: str | None = None,
-) -> PerformanceContext | None:
+) -> responses_pb2.PerformanceContext | None:
     """Assemble the /perf context, preferring the newest official measurement.
 
     Before any measurement exists the manifest objectives alone can name the
@@ -36,10 +37,10 @@ def build_performance_context(
     direction = measurement.direction if measurement is not None else None
     if direction is None and metric is not None:
         direction = metric_directions(objectives).get(metric)
-    return PerformanceContext(
+    return responses_pb2.PerformanceContext(
         objective_metric=metric,
         objective_unit=measurement.unit if measurement is not None else None,
-        objective_direction=direction,
+        objective_direction=enums.optional_number(responses_pb2.ObjectiveDirection, direction),
         # Baseline facts are copied as one tuple from the same measurement so
         # the value can never pair with another comparison's round or commit.
         objective_baseline_value=measurement.baseline_value if measurement is not None else None,

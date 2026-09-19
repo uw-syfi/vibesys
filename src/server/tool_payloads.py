@@ -9,11 +9,18 @@ from __future__ import annotations
 
 import json
 
-from server.events import JsonResultPayload, ToolResultPayload
+from google.protobuf import json_format
+
+from server.wire.v2 import events_pb2
 
 
-def classify_tool_result(content: str) -> ToolResultPayload | None:
-    """Return a typed payload for *content* when it is a JSON object or array.
+def _reject_constant(name: str) -> None:
+    """Refuse ``NaN`` and ``Infinity``: they are not JSON and not finite."""
+    raise ValueError(name)
+
+
+def classify_tool_result(content: str) -> events_pb2.JsonResultPayload | None:
+    """Return a JSON payload for *content* when it is a JSON object or array.
 
     Scalars, text with trailing garbage, and anything that fails strict
     parsing stay unclassified so the raw text renders unchanged.
@@ -22,9 +29,11 @@ def classify_tool_result(content: str) -> ToolResultPayload | None:
     if not trimmed.startswith(("{", "[")):
         return None
     try:
-        value = json.loads(trimmed)
-    except json.JSONDecodeError:
+        value = json.loads(trimmed, parse_constant=_reject_constant)
+    except ValueError:
         return None
     if not isinstance(value, (dict, list)):
         return None
-    return JsonResultPayload(value=value)
+    payload = events_pb2.JsonResultPayload()
+    json_format.ParseDict(value, payload.value)
+    return payload

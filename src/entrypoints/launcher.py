@@ -47,12 +47,10 @@ _MIN_NODE_MAJOR = 20
 #: the repository root. Mirrors the staleness check the old ``./vs`` script used.
 #:
 #: Principle: watch only inputs to the *shipped bundle* (``clients/tui/dist``),
-#: not everything that happens to live nearby. On the Python side that means
-#: the modules that actually shape ``ProtocolDocument`` in
-#: ``server.api.schema`` -- ``events.py``, ``protocol.py``, and
-#: ``diagnostics.py`` -- not all of ``src/server``. None of the other server
-#: modules feed the Pydantic models serialized into the schema, so changes to
-#: them cannot change the generated output and are deliberately excluded here.
+#: not everything that happens to live nearby. The protocol types the bundle
+#: consumes are generated from ``proto/`` and committed under
+#: ``clients/backend-client/src/gen``, so a protocol change reaches the bundle
+#: through that watched directory and no Python module is an input.
 _REBUILD_WATCH_FILES: tuple[str, ...] = (
     "clients/backend-client/package.json",
     "clients/backend-client/tsconfig.json",
@@ -67,15 +65,6 @@ _REBUILD_WATCH_FILES: tuple[str, ...] = (
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
     "biome.json",
-    # Inputs to `generate:protocol` (python -m server.api.schema), which
-    # feeds clients/backend-client's generated types and, downstream, the TUI
-    # bundle. See the principle above for why this is the full set, no more.
-    "src/server/api/schema.py",
-    "src/server/events.py",
-    "src/server/api/protocol.py",
-    "src/server/controller.py",
-    "src/server/diagnostics.py",
-    "src/server/settings.py",
 )
 _REBUILD_WATCH_DIRS: tuple[str, ...] = (
     "clients/backend-client/src",
@@ -291,7 +280,7 @@ _INSTALL_STAMP_REL = "node_modules/.vibesys-install-stamp"
 
 
 def _needs_install(root: Path) -> bool:
-    """Whether `pnpm install --frozen-lockfile` must run before codegen/build.
+    """Whether `pnpm install --frozen-lockfile` must run before the build.
 
     Skipped when `node_modules` already exists and the lockfile is no newer
     than the stamp file written after the last successful install.
@@ -335,20 +324,15 @@ def _run_pnpm_install(pnpm: list[str], root: Path) -> bool:
     return True
 
 
-def _run_codegen_and_build(pnpm: list[str], root: Path) -> bool:
-    steps = (
-        [*pnpm, "--dir", "clients/backend-client", "generate:protocol"],
-        [*pnpm, "build:clients"],
+def _run_build(pnpm: list[str], root: Path) -> bool:
+    result = subprocess.run(  # noqa: S603  # tracked: #288
+        [*pnpm, "build:clients"], cwd=str(root), capture_output=True, text=True, check=False
     )
-    for command in steps:
-        result = subprocess.run(  # noqa: S603  # tracked: #288
-            command, cwd=str(root), capture_output=True, text=True, check=False
-        )
-        if result.returncode != 0:
-            sys.stderr.write("vibesys: failed to build the interactive client:\n")
-            sys.stderr.write(result.stdout)
-            sys.stderr.write(result.stderr)
-            return False
+    if result.returncode != 0:
+        sys.stderr.write("vibesys: failed to build the interactive client:\n")
+        sys.stderr.write(result.stdout)
+        sys.stderr.write(result.stderr)
+        return False
     return True
 
 
@@ -364,7 +348,7 @@ def _ensure_source_tui_built(root: Path) -> bool:
 
     if _needs_install(root) and not _run_pnpm_install(pnpm, root):
         return False
-    if _run_codegen_and_build(pnpm, root):
+    if _run_build(pnpm, root):
         return True
 
     # The build failed even though the install-skip heuristic considered
@@ -374,7 +358,7 @@ def _ensure_source_tui_built(root: Path) -> bool:
         "vibesys: build failed; retrying after a full dependency install...",
         file=sys.stderr,
     )
-    return _run_pnpm_install(pnpm, root) and _run_codegen_and_build(pnpm, root)
+    return _run_pnpm_install(pnpm, root) and _run_build(pnpm, root)
 
 
 def _run_source_tui(root: Path, args: list[str]) -> int:

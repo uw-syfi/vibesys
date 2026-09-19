@@ -18,11 +18,15 @@ from __future__ import annotations
 import re
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
-from server.api.protocol import DesignFileChange, DesignPatch, DesignRound
+from server.wire.v2 import responses_pb2
 from vibesys.loops.agent.issue_board import framework_memory_paths
 from vs_project import is_project_state_path
+
+DesignFileChange = responses_pb2.DesignFileChange
+DesignPatch = responses_pb2.DesignPatch
+DesignRound = responses_pb2.DesignRound
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -49,9 +53,9 @@ _PATCH_CACHE_CAPACITY = 64
 #: ``git diff`` command for the rest.
 _PATCH_CHAR_LIMIT = 200_000
 
-_CHANGE_BY_STATUS: dict[str, Literal["added", "modified", "deleted"]] = {
-    "A": "added",
-    "D": "deleted",
+_CHANGE_BY_STATUS: dict[str, responses_pb2.DesignChange.ValueType] = {
+    "A": responses_pb2.DESIGN_CHANGE_ADDED,
+    "D": responses_pb2.DESIGN_CHANGE_DELETED,
 }
 
 #: A ``git diff --name-status`` record for a rename or copy carries two paths.
@@ -121,7 +125,7 @@ class DesignLog:
                         round=record.round_number,
                         commit=_text(record.commit),
                         base=base,
-                        files=files,
+                        files=None if files is None else responses_pb2.DesignFiles(changes=files),
                     )
                 )
                 if commit is not None:
@@ -158,16 +162,17 @@ class DesignLog:
             return cached
         # A rename needs both sides in the pathspec for git to pair them
         # into one patch instead of reporting an unrelated delete.
-        paths = (path,) if change.renamed_from is None else (change.renamed_from, path)
+        renamed_from = change.renamed_from if change.HasField("renamed_from") else None
+        paths = (path,) if renamed_from is None else (renamed_from, path)
         output = self._diff_patch(base, head, paths)
         if output is None:
-            return DesignPatch(base=base, head=head, path=path, renamed_from=change.renamed_from)
+            return DesignPatch(base=base, head=head, path=path, renamed_from=renamed_from)
         text, truncated = _truncate_patch(output)
         result = DesignPatch(
             base=base,
             head=head,
             path=path,
-            renamed_from=change.renamed_from,
+            renamed_from=renamed_from,
             patch=text,
             truncated=truncated,
         )
@@ -200,7 +205,7 @@ class DesignLog:
         is framework bookkeeping just as much as moving one in.
         """
         paths = [change.path]
-        if change.renamed_from is not None:
+        if change.HasField("renamed_from"):
             paths.append(change.renamed_from)
         return any(self._is_framework_path(path) for path in paths)
 
@@ -253,16 +258,18 @@ def _parse_name_status(output: str) -> list[DesignFileChange]:
         if status.startswith(("R", "C")) and index + _PAIRED_STATUS_FIELDS <= len(tokens):
             renamed_from, path = tokens[index + 1], tokens[index + 2]
             index += _PAIRED_STATUS_FIELDS
-            change: Literal["added", "modified", "deleted", "renamed"] = (
-                "renamed" if status.startswith("R") else "added"
+            change = (
+                responses_pb2.DESIGN_CHANGE_RENAMED
+                if status.startswith("R")
+                else responses_pb2.DESIGN_CHANGE_ADDED
             )
-            if change != "renamed":
+            if change != responses_pb2.DESIGN_CHANGE_RENAMED:
                 renamed_from = ""
         elif index + 1 < len(tokens):
             path = tokens[index + 1]
             renamed_from = ""
             index += 2
-            change = _CHANGE_BY_STATUS.get(status[:1], "modified")
+            change = _CHANGE_BY_STATUS.get(status[:1], responses_pb2.DESIGN_CHANGE_MODIFIED)
         else:
             break
         changes.append(

@@ -1,4 +1,9 @@
-"""Typed, append-only event contract exposed to frontend clients."""
+"""Append-only event store for the run journal.
+
+The event contract itself is the generated ``server.wire.v2`` messages; this
+module owns durable storage of them as JSONL, one canonical JSON object per
+line, with lazy parsing and a sidecar offset index.
+"""
 
 from __future__ import annotations
 
@@ -7,21 +12,21 @@ import threading
 import uuid
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from enum import StrEnum
 from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError, model_validator
+from google.protobuf import json_format, struct_pb2
+from pydantic import BaseModel
 
-from server.diagnostics import Diagnostic
 from server.event_index import (
     EventIndexRecord,
     load_event_index,
     source_stat,
     write_event_index,
 )
-from server.run_lifecycle import RunStatus
+from server.wire import PROTOCOL_VERSION, codec, messages, upgrade, validate
+from server.wire.codec import WireError
+from server.wire.v2 import events_pb2
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -29,512 +34,42 @@ if TYPE_CHECKING:
 
     from server.event_index import SourceStat
 
+EventTypeValue = events_pb2.EventType.ValueType
 
-class EventType(StrEnum):  # noqa: D101  # tracked: #288
-    SERVER_STARTED = "server_started"
-    SERVER_READY = "server_ready"
-    CONFIGURATION_FAILED = "configuration_failed"
-    RUN_STARTED = "run_started"
-    EXPERIMENTS_CHANGED = "experiments_changed"
-    RUN_INTERRUPTED = "run_interrupted"
-    RUN_STATUS_CHANGED = "run_status_changed"
-    CHAT = "chat"
-    CHAT_THREAD_CREATED = "chat_thread_created"
-    STATUS_QUERY = "status_query"
-    CONTROL = "control"
-    INVOCATION_STARTED = "invocation_started"
-    INVOCATION_FINISHED = "invocation_finished"
-    AGENT_EXECUTION_STARTED = "agent_execution_started"
-    AGENT_EXECUTION_ACTIVITY_CHANGED = "agent_execution_activity_changed"
-    AGENT_EXECUTION_FINISHED = "agent_execution_finished"
-    PHASE_STARTED = "phase_started"
-    PHASE_FINISHED = "phase_finished"
-    AGENT_OUTPUT_CHUNK = "agent_output_chunk"
-    SUBPROCESS_OUTPUT = "subprocess_output"
-    JUDGE_RESULT = "judge_result"
-    BENCHMARK_RESULT = "benchmark_result"
-    ROUND_FINISHED = "round_finished"
-    RUN_FINISHED = "run_finished"
-    RUN_FAILED = "run_failed"
-    OUTPUT = "output"
-    TOOL_CALL = "tool_call"
-    TOOL_RESULT = "tool_result"
-    TODO_UPDATE = "todo_update"
-    USAGE_UPDATE = "usage_update"
-    GATE_STARTED = "gate_started"
-    GATE_FINISHED = "gate_finished"
-    WORKSPACE_SNAPSHOT = "workspace_snapshot"
-    RUN_CONFIGURED = "run_configured"
-    FRAMEWORK_WARNING = "framework_warning"
+_V1_TYPE_NUMBERS: dict[str, int] = {
+    value.name.removeprefix("EVENT_TYPE_").lower(): value.number
+    for value in events_pb2.EventType.DESCRIPTOR.values
+    if value.number != 0
+}
+_V2_TYPE_NUMBERS: dict[str, int] = {
+    value.name: value.number
+    for value in events_pb2.EventType.DESCRIPTOR.values
+    if value.number != 0
+}
 
 
-class EventStatus(StrEnum):  # noqa: D101  # tracked: #288
-    ACTIVE = "active"
-    ANSWERED = "answered"
-    PENDING = "pending"
-    CONSUMED = "consumed"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    INTERRUPTED = "interrupted"
+def parse_event(raw: str | bytes) -> events_pb2.RunEvent:
+    """Parse and validate one journal line, upgrading a version 1 record.
 
-
-OutputStream = Literal["stdout", "stderr"]
-"""Which host stream a captured line of server output came from."""
-
-AgentOutputChannel = Literal["assistant", "analysis", "tool", "diagnostic", "prompt"]
-"""Presentation channel for streamed agent output."""
-
-
-class GateKind(StrEnum):
-    """Closed set of framework-owned gates a candidate passes through."""
-
-    VALIDATION = "validation"
-    ACCURACY = "accuracy"
-    BENCHMARK = "benchmark"
-
-
-class FrameworkSource(StrEnum):
-    """Closed set of framework subsystems that emit framework events."""
-
-    GATES = "gates"
-    GIT_TRACKING = "git_tracking"
-    LOOP = "loop"
-    GPU = "gpu"
-    SKYPILOT = "skypilot"
-    OTHER = "other"
-
-
-class EventPayload(BaseModel):
-    """Immutable base for every structured event payload.
-
-    Payloads are frozen so ``EventStore`` can hand the same stored object to
-    every reader instead of copying the whole history on each replay. Producers
-    build new payloads; ``model_copy(update=...)`` still works on frozen models.
+    Raises :class:`WireError` for anything that is not a valid event, so a
+    caller distinguishes corruption with one exception type.
     """
-
-    model_config = ConfigDict(frozen=True)
-
-
-class ChatData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["chat"] = "chat"
-    answer: str
-    # The authoritative thread title, set by the server on the turn that
-    # titles a previously untitled thread so clients learn it from replay.
-    thread_title: str | None = None
-    # Identity of the turn this answer closes: the same id the turn's streamed
-    # chunks carried, so clients fold the terminal answer over exactly that
-    # turn and never over an abandoned one. None on records written before the
-    # field existed, for which clients keep the last-open-turn heuristic.
-    invocation_id: str | None = None
-
-
-class ChatThreadCreatedData(EventPayload):
-    """Identity and resolved agent settings for one experiment-chat thread.
-
-    Replayed by clients to rebuild the thread list; the default thread is
-    implicit and never records one of these.
-    """
-
-    kind: Literal["chat_thread_created"] = "chat_thread_created"
-    thread_id: str
-    title: str = ""
-    driver: str
-    provider: str
-    model: str
-    created_at: datetime
-
-
-class InvocationStartedData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["invocation_started"] = "invocation_started"
-    system_prompt: str
-    user_prompt: str
-
-
-class InvocationFinishedData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["invocation_finished"] = "invocation_finished"
-    result: Any = None
-    error: str | None = None
-
-
-ExecutionActivityMode = Literal["thinking", "responding", "tool", "waiting"]
-
-
-class AgentExecutionActivityData(EventPayload):
-    """Complete current activity for an active agent execution."""
-
-    kind: Literal["agent_execution_activity_changed"] = "agent_execution_activity_changed"
-    mode: ExecutionActivityMode
-    summary: str
-    tool: str | None = None
-
-
-class AgentExecutionStartedData(EventPayload):
-    """Semantic context for one prompt-to-result agent execution."""
-
-    kind: Literal["agent_execution_started"] = "agent_execution_started"
-    stage: str
-    attempt: int | None = None
-    system_prompt: str = ""
-    user_prompt: str = ""
-    activity: AgentExecutionActivityData
-    driver: str | None = None
-    provider: str | None = None
-    model: str | None = None
-
-
-class AgentExecutionFinishedData(EventPayload):
-    """Terminal result for one agent execution."""
-
-    kind: Literal["agent_execution_finished"] = "agent_execution_finished"
-    result: Any = None
-    error: str | None = None
-
-
-class OutputData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["output"] = "output"
-    stream: OutputStream
-    source: str = "backend"
-    content: str
-
-
-class ServerReadyData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["server_ready"] = "server_ready"
-    socket_protocol: Literal["jsonl"] = "jsonl"
-
-
-class RunStartedData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["run_started"] = "run_started"
-    outer_loop: str
-    input: str
-    max_rounds: int
-    # The agent roles the loop can run per round (vibesys.loops.roles), so
-    # frontends seed placeholders from the contract instead of a client-side
-    # table. Empty on events recorded before the field existed.
-    expected_roles: tuple[str, ...] = ()
-
-
-class RunInterruptedData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["run_interrupted"] = "run_interrupted"
-    reason: str
-    signal: str | None = None
-
-
-class RunStatusChangedData(EventPayload):
-    """One move of the run through its lifecycle.
-
-    Carries the whole transition so a client folds the status instead of
-    inferring it: ``status`` is the new value and ``previous`` the one it
-    replaced. Which invocation boundary a pause landed on is on the event
-    envelope (``agent_kind``, ``round_label``, ``execution_id``) like every
-    other execution-scoped fact, not repeated here.
-    """
-
-    kind: Literal["run_status_changed"] = "run_status_changed"
-    status: RunStatus
-    previous: RunStatus
-
-
-class ExperimentsChangedData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["experiments_changed"] = "experiments_changed"
-    reason: Literal["project_attached", "active_hypothesis_changed", "round_persisted"]
-    revision: int | None = Field(default=None, ge=0)
-
-
-class ConfigurationFailedData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["configuration_failed"] = "configuration_failed"
-    code: str
-    stage: str
-    message: str
-    usage: str | None = None
-    exit_code: int
-
-
-class PhaseData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["phase"] = "phase"
-    phase: str
-    attempt: int | None = None
-
-
-class AgentStatusData(EventPayload):
-    """Structured progress readings for one agent invocation.
-
-    Carried on presentation events so renderers can format their own status
-    prefix (e.g. ``[Round 3/24 | Implementer | 12.3s | 20k/1.0M]``) without
-    the server baking any layout or styling into the payload.
-    """
-
-    progress: str | None = None
-    agent_label: str | None = None
-    elapsed_seconds: float = 0.0
-    input_tokens: int = 0
-    context_window: int | None = None
-
-
-class AgentOutputChunkData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["agent_output_chunk"] = "agent_output_chunk"
-    channel: AgentOutputChannel
-    content: str
-    status: AgentStatusData | None = None
-
-
-class ToolCallData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["tool_call"] = "tool_call"
-    tool: str
-    call_id: str | None = None
-    args: dict[str, Any] = Field(default_factory=dict)
-    status: AgentStatusData | None = None
-
-
-class CommandResultPayload(EventPayload):
-    """Structured result of a command-style tool execution."""
-
-    kind: Literal["command"] = "command"
-    stdout: str
-    stderr: str
-    exit_code: int | None = None
-    duration: float | None = None
-    """Wall-clock execution time in seconds."""
-
-
-class JsonResultPayload(EventPayload):
-    """A tool result that is a JSON object or array, already parsed."""
-
-    kind: Literal["json"] = "json"
-    value: dict[str, Any] | list[Any]
-
-
-ToolResultPayload = Annotated[
-    CommandResultPayload | JsonResultPayload,
-    Field(discriminator="kind"),
-]
-"""Typed structure a producer preserved alongside the raw result text."""
-
-
-class ToolResultData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["tool_result"] = "tool_result"
-    tool: str
-    call_id: str | None = None
-    content: str
-    is_error: bool = False
-    # ``content`` stays the raw, always-present text (fidelity, logs, replay).
-    # Frontends render ``payload`` when present and fall back to ``content``.
-    payload: ToolResultPayload | None = None
-
-
-class TodoItemData(EventPayload):  # noqa: D101  # tracked: #288
-    content: str
-    # Expected values are "pending" / "in_progress" / "completed", but the
-    # field stays open: todo payloads originate from agent tool calls, and an
-    # unknown status must degrade in the renderer, not fail event emission.
-    status: str
-
-
-class TodoUpdateData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["todo_update"] = "todo_update"
-    todos: list[TodoItemData] = Field(default_factory=list)
-
-
-class UsageUpdateData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["usage_update"] = "usage_update"
-    input_tokens: int
-    context_window: int | None = None
-    model: str | None = None
-
-
-class SubprocessOutputData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["subprocess_output"] = "subprocess_output"
-    process_id: str
-    process_kind: str
-    stream: OutputStream
-    content: str
-
-
-class JudgeResultData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["judge_result"] = "judge_result"
-    verdict: Literal["pass", "fail"]
-    feedback: str
-    attempt: int
-
-
-class BenchmarkResultData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["benchmark_result"] = "benchmark_result"
-    metric: str
-    value: FiniteFloat
-    unit: str
-
-
-class RoundFinishedData(EventPayload):  # noqa: D101  # tracked: #288
-    kind: Literal["round_finished"] = "round_finished"
-    attempts: int
-    judge_verdict: Literal["pass", "fail", "skipped"]
-    perf_metric: FiniteFloat | None = None
-    perf_unit: str | None = None
-    # True when no fresh profile ran this round; such a round records no perf
-    # reading (perf_metric stays None). Defaults False so legacy persisted
-    # events stay valid.
-    profile_skipped: bool = False
-
-
-class GateStartedData(EventPayload):
-    """One framework gate began evaluating the current candidate."""
-
-    kind: Literal["gate_started"] = "gate_started"
-    gate: GateKind
-    # The validation recipe being executed; None for accuracy and benchmark.
-    recipe: str | None = None
-    # The trusted command the gate runs, when one is configured.
-    command: str | None = None
-    source: FrameworkSource = FrameworkSource.GATES
-    source_label: str | None = None
-
-
-class GateFinishedData(EventPayload):
-    """Outcome of one framework gate; envelope status carries pass or fail.
-
-    ``metric``/``value``/``unit`` are set only on a passing benchmark gate.
-    ``unit`` keeps the historical fallback of the metric name when the
-    contract declares no unit. ``output_tail`` carries the trailing command
-    output on failure.
-    """
-
-    kind: Literal["gate_finished"] = "gate_finished"
-    gate: GateKind
-    recipe: str | None = None
-    # True when a prior PASS for the exact same input was reused instead of
-    # re-running the command.
-    reused: bool = False
-    metric: str | None = None
-    value: FiniteFloat | None = None
-    unit: str | None = None
-    output_tail: str | None = None
-    source: FrameworkSource = FrameworkSource.GATES
-    source_label: str | None = None
-
-
-class WorkspaceSnapshotData(EventPayload):
-    """A Git tracker outcome: a snapshot, baseline, or exclusion change.
-
-    Exactly one aspect is populated per event: a snapshot attempt carries
-    ``label`` (``commit`` is None when there was nothing to commit), a
-    trusted-input baseline carries ``baseline``, and a snapshot-exclusion
-    change carries ``excluded_paths``.
-    """
-
-    kind: Literal["workspace_snapshot"] = "workspace_snapshot"
-    label: str = ""
-    commit: str | None = None
-    baseline: str | None = None
-    excluded_paths: tuple[str, ...] = ()
-    source: FrameworkSource = FrameworkSource.GIT_TRACKING
-
-
-class RunConfiguredData(EventPayload):
-    """One per run: the resolved configuration a loop starts with."""
-
-    kind: Literal["run_configured"] = "run_configured"
-    run_log_path: str
-    project_root: str
-    model: str | None = None
-    # First line of the objective only; the full text lives in run state.
-    objective: str | None = None
-    search_policy: str | None = None
-    benchmark_contract: bool = False
-    pareto_objectives: str | None = None
-    source: FrameworkSource = FrameworkSource.LOOP
-
-
-class FrameworkWarningData(EventPayload):
-    """A non-fatal framework fault an operator should see.
-
-    The server projection also lifts this payload into the wire event's
-    ``diagnostic`` field so diagnostic-oriented clients need no new handling.
-    """
-
-    kind: Literal["framework_warning"] = "framework_warning"
-    summary: str
-    detail: str | None = None
-    source: FrameworkSource = FrameworkSource.OTHER
-    source_label: str | None = None
-
-
-EventData = Annotated[
-    ChatData
-    | ChatThreadCreatedData
-    | InvocationStartedData
-    | InvocationFinishedData
-    | AgentExecutionStartedData
-    | AgentExecutionActivityData
-    | AgentExecutionFinishedData
-    | OutputData
-    | ServerReadyData
-    | RunStartedData
-    | RunInterruptedData
-    | RunStatusChangedData
-    | ExperimentsChangedData
-    | ConfigurationFailedData
-    | PhaseData
-    | AgentOutputChunkData
-    | SubprocessOutputData
-    | JudgeResultData
-    | BenchmarkResultData
-    | RoundFinishedData
-    | ToolCallData
-    | ToolResultData
-    | TodoUpdateData
-    | UsageUpdateData
-    | GateStartedData
-    | GateFinishedData
-    | WorkspaceSnapshotData
-    | RunConfiguredData
-    | FrameworkWarningData,
-    Field(discriminator="kind"),
-]
-
-
-class RunEvent(BaseModel):
-    """One reproducible human, control, or invocation event.
-
-    Frozen: a recorded event is a durable fact. Readers that need a variant
-    build one with ``model_copy(update=...)`` rather than mutating a shared
-    object, which lets ``EventStore`` replay history without copying it.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    protocol_version: Literal[1] = 1
-    sequence: int = Field(default=0, ge=0)
-    run_id: str = ""
-    timestamp: datetime
-    type: EventType
-    text: str = ""
-    diagnostic: Diagnostic | None = None
-    status: EventStatus | None = None
-    round_label: str | None = None
-    agent_kind: str | None = None
-    invocation_id: str | None = None
-    execution_id: str | None = None
-    # Which experiment-chat thread a chat event belongs to. None is the
-    # default thread, preserving events written before threads existed.
-    chat_thread_id: str | None = None
-    data: EventData | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _execution_identity_compatibility(cls, value: Any) -> Any:  # noqa: ANN401
-        """Expose legacy invocation identity through the canonical field."""
-        if not isinstance(value, dict):
-            return value
-        result = dict(value)
-        execution_id = result.get("execution_id")
-        invocation_id = result.get("invocation_id")
-        if execution_id is None and invocation_id is not None:
-            result["execution_id"] = invocation_id
-        elif invocation_id is None and execution_id is not None:
-            # Retain the old field during the protocol migration so older
-            # presentation clients can still correlate streamed output.
-            result["invocation_id"] = execution_id
-        return result
+    try:
+        record = json.loads(raw)
+    except ValueError as error:
+        raise WireError("invalid_json", f"Event is not valid JSON: {error}") from error
+    if not isinstance(record, dict):
+        raise WireError("invalid_message", "Event must be a JSON object")
+    try:
+        event = (
+            upgrade.event_from_legacy(record)
+            if upgrade.is_legacy(record)
+            else codec.from_dict(events_pb2.RunEvent, record)
+        )
+    except (TypeError, AttributeError, KeyError) as error:
+        raise WireError("invalid_message", f"Malformed event record: {error!r}") from error
+    validate.validate_event(event)
+    return event
 
 
 _EAGER_TAIL_RECORDS = 1024
@@ -552,11 +87,11 @@ class EventHeader:
 
     ``sequence`` is the repaired cursor value ``read`` will report, not
     necessarily the integer on disk. ``execution_id`` already folds in the
-    legacy ``invocation_id`` field the same way :class:`RunEvent` does.
+    version 1 ``invocation_id`` field the same way the upgrade does.
     """
 
     sequence: int
-    type: EventType
+    type: EventTypeValue
     execution_id: str | None
     chat_thread_id: str | None
 
@@ -578,17 +113,17 @@ class _StoredRecord:
     offset: int
     length: int
     raw_sequence: int
-    event: RunEvent | None = None
+    event: events_pb2.RunEvent | None = None
 
 
 class EventStore:
     """Serialize event access so readers never observe partial JSONL writes.
 
     Read contract: reads return the stored ``RunEvent`` objects themselves, in
-    a fresh list. ``RunEvent`` and its payloads are frozen, so readers project
-    history with ``model_copy(update=...)`` instead of mutating what they read.
-    Copying every event per read cost ~1.9s on a 72k-event history, paid again
-    on each new subscription's full replay.
+    a fresh list. Generated messages are mutable, so a reader must treat them
+    as read-only and project history with :func:`server.wire.messages.replace`
+    instead of mutating what it reads. Copying every event per read cost ~1.9s
+    on a 72k-event history, paid again on each new subscription's full replay.
 
     Construction only scans the log with ``json.loads`` (measured ~2.6x cheaper
     than full validation) to learn each record's byte range and header fields,
@@ -621,7 +156,7 @@ class EventStore:
         self._sequences = [record.header.sequence for record in self._records]
         self._next_sequence = self._sequences[-1] + 1 if self._sequences else 1
 
-    def append(self, event: RunEvent) -> RunEvent:  # noqa: D102  # tracked: #288
+    def append(self, event: events_pb2.RunEvent) -> events_pb2.RunEvent:  # noqa: D102  # tracked: #288
         with self._changed:
             if self._malformed_tail_offset is not None:
                 with self.path.open("r+b") as stream:
@@ -637,15 +172,13 @@ class EventStore:
                     with self.path.open("a", encoding="utf-8") as stream:
                         stream.write("\n")
                 self._missing_tail_newline = False
-            event = event.model_copy(
-                update={"sequence": self._next_sequence, "run_id": self.run_id}
-            )
+            event = messages.replace(event, sequence=self._next_sequence, run_id=self.run_id)
             with self.path.open("a", encoding="utf-8") as stream:
-                stream.write(event.model_dump_json() + "\n")
+                stream.write(codec.dumps(event) + "\n")
             self._next_sequence += 1
             self._records.append(
                 _StoredRecord(
-                    header=_header_from_event(event, event.sequence),
+                    header=header_from_event(event, event.sequence),
                     offset=_UNLOCATED,
                     length=0,
                     raw_sequence=event.sequence,
@@ -683,11 +216,11 @@ class EventStore:
 
     def read(  # noqa: D102  # tracked: #288
         self, after_sequence: int = 0, before_sequence: int | None = None
-    ) -> list[RunEvent]:
+    ) -> list[events_pb2.RunEvent]:
         with self._lock:
             return self._events_after_unlocked(after_sequence, before_sequence)
 
-    def read_sequences(self, sequences: Iterable[int]) -> list[RunEvent]:
+    def read_sequences(self, sequences: Iterable[int]) -> list[events_pb2.RunEvent]:
         """Return the records at the given cursor values, in the order asked.
 
         Unknown sequences are skipped. Only the named records are validated,
@@ -703,7 +236,7 @@ class EventStore:
             self._force_parse_unlocked(records)
             return [record.event for record in records if record.event is not None]
 
-    def wait(self, after_sequence: int, timeout: float | None = None) -> list[RunEvent]:
+    def wait(self, after_sequence: int, timeout: float | None = None) -> list[events_pb2.RunEvent]:
         """Block until replayable events exist after a client's cursor."""
         with self._changed:
             events = self._events_after_unlocked(after_sequence)
@@ -737,7 +270,7 @@ class EventStore:
 
     def _events_after_unlocked(
         self, after_sequence: int, before_sequence: int | None = None
-    ) -> list[RunEvent]:
+    ) -> list[events_pb2.RunEvent]:
         start = bisect_right(self._sequences, after_sequence)
         stop = (
             len(self._records)
@@ -782,11 +315,11 @@ class EventStore:
 
     def _parse_record(self, record: _StoredRecord, raw: bytes) -> None:
         self._parsed_records += 1
-        event = RunEvent.model_validate_json(raw)
-        if record.header.sequence != record.raw_sequence:
-            # Only a legacy out-of-order or duplicate sequence needs the copy;
-            # every other record is handed out exactly as it was written.
-            event = event.model_copy(update={"sequence": record.header.sequence})
+        event = parse_event(raw)
+        # The parse is fresh, so it is safe to set. Only a legacy out-of-order
+        # or duplicate sequence differs; every other record is handed out
+        # exactly as it was written.
+        event.sequence = record.header.sequence
         record.event = event
 
     def _scan_unlocked(self) -> tuple[list[_StoredRecord], int | None]:
@@ -868,19 +401,18 @@ class EventStore:
                     break
                 try:
                     self._parsed_records += 1
-                    event = RunEvent.model_validate_json(line)
-                except ValidationError as error:
+                    event = parse_event(line)
+                except WireError as error:
                     if not is_final:
                         raise
                     raise _complete_invalid_tail_error(self.path, record_offset) from error
                 raw_sequence = event.sequence
                 sequence = raw_sequence if raw_sequence > last_sequence else last_sequence + 1
-                if sequence != raw_sequence:
-                    event = event.model_copy(update={"sequence": sequence})
+                event.sequence = sequence
                 last_sequence = sequence
                 records.append(
                     _StoredRecord(
-                        header=_header_from_event(event, sequence),
+                        header=header_from_event(event, sequence),
                         offset=record_offset,
                         length=len(line),
                         raw_sequence=raw_sequence,
@@ -933,22 +465,22 @@ class EventStore:
             begin = record.offset - base
             try:
                 self._parse_record(record, raw[begin : begin + record.length])
-            except ValidationError as error:
+            except WireError as error:
                 position = start + relative_position
                 if position != len(records) - 1 or malformed_tail_offset is not None:
                     raise
                 raise _complete_invalid_tail_error(self.path, record.offset) from error
 
-    def _read_unlocked(self) -> tuple[list[RunEvent], int | None]:
+    def _read_unlocked(self) -> tuple[list[events_pb2.RunEvent], int | None]:
         if not self.path.exists():
             return [], None
-        events: list[RunEvent] = []
+        events: list[events_pb2.RunEvent] = []
         for record_offset, line, is_final in _stream_lines(self.path, start=0):
             try:
                 self._parsed_records += 1
-                event = RunEvent.model_validate_json(line)
+                event = parse_event(line)
                 events.append(event)
-            except ValidationError as error:
+            except WireError as error:
                 if not is_final:
                     raise
                 if _starts_with_complete_json(line):
@@ -977,7 +509,7 @@ def _stored_record_from_index(record: EventIndexRecord) -> _StoredRecord:
     return _StoredRecord(
         header=EventHeader(
             sequence=record.sequence,
-            type=EventType(record.event_type),
+            type=_type_from_index(record.event_type),
             execution_id=record.execution_id,
             chat_thread_id=record.chat_thread_id,
         ),
@@ -987,6 +519,14 @@ def _stored_record_from_index(record: EventIndexRecord) -> _StoredRecord:
     )
 
 
+def _type_from_index(name: str) -> EventTypeValue:
+    """Map a sidecar's stored type name back to the enum, or raise ``ValueError``."""
+    number = _V2_TYPE_NUMBERS.get(name)
+    if number is None:
+        raise ValueError(f"unknown event type {name!r} in event index")  # noqa: TRY003
+    return number
+
+
 def _index_record_from_stored(record: _StoredRecord) -> EventIndexRecord:
     """Project one scanned record into the sidecar's primitive representation."""
     return EventIndexRecord(
@@ -994,19 +534,21 @@ def _index_record_from_stored(record: _StoredRecord) -> EventIndexRecord:
         length=record.length,
         raw_sequence=record.raw_sequence,
         sequence=record.header.sequence,
-        event_type=record.header.type.value,
+        event_type=events_pb2.EventType.Name(record.header.type),
         execution_id=record.header.execution_id,
         chat_thread_id=record.header.chat_thread_id,
     )
 
 
-def _scan_header_fields(line: bytes) -> tuple[int, EventType, str | None, str | None] | None:
+def _scan_header_fields(line: bytes) -> tuple[int, EventTypeValue, str | None, str | None] | None:
     """Recover one record's header fields cheaply, or None if anything is off.
 
-    Every rejection here (non-object record, absent or non-integer
-    ``sequence``, unknown ``type``, non-string identity) is a case where
-    :class:`RunEvent` validation could disagree with the scan, so the caller
-    must reparse the history the strict way rather than guess.
+    Understands both spellings: version 1 records carry a lower-case ``type``
+    and fold ``invocation_id`` into the execution identity; version 2 records
+    carry ``EVENT_TYPE_*`` names. Every rejection here (non-object record,
+    non-integer ``sequence``, unknown ``type``, non-string identity, another
+    protocol version) is a case where full parsing could disagree with the
+    scan, so the caller must parse the record the strict way rather than guess.
     """
     try:
         record = json.loads(line)
@@ -1014,20 +556,27 @@ def _scan_header_fields(line: bytes) -> tuple[int, EventType, str | None, str | 
         return None
     if not isinstance(record, dict):
         return None
-    sequence = record.get("sequence")
-    # ``type is not int`` also rejects bool, which pydantic would coerce.
-    if type(sequence) is not int or sequence < 0:
+    version = record.get("protocol_version", 1)
+    # An absent ``sequence`` is the proto3 default of 0, as in a version 1 model.
+    sequence = record.get("sequence", 0)
+    # ``type is not int`` also rejects bool.
+    if type(version) is not int or type(sequence) is not int or sequence < 0:
         return None
-    try:
-        event_type = EventType(record.get("type"))
-    except ValueError:
+    name = record.get("type")
+    if version == 1:
+        event_type = _V1_TYPE_NUMBERS.get(name) if isinstance(name, str) else None
+        execution_id = record.get("execution_id") or record.get("invocation_id") or None
+    elif version == PROTOCOL_VERSION:
+        event_type = _V2_TYPE_NUMBERS.get(name) if isinstance(name, str) else None
+        execution_id = record.get("execution_id")
+    else:
         return None
-    execution_id = record.get("execution_id")
-    if execution_id is None:
-        # RunEvent exposes legacy invocation identity through execution_id.
-        execution_id = record.get("invocation_id")
     chat_thread_id = record.get("chat_thread_id")
-    if not _is_optional_str(execution_id) or not _is_optional_str(chat_thread_id):
+    if (
+        event_type is None
+        or not _is_optional_str(execution_id)
+        or not _is_optional_str(chat_thread_id)
+    ):
         return None
     return sequence, event_type, execution_id, chat_thread_id
 
@@ -1078,20 +627,21 @@ def _complete_invalid_tail_error(path: Path, offset: int) -> ValueError:
     return ValueError(f"complete final record at byte offset {offset} in {path} failed validation")
 
 
-def _header_from_event(event: RunEvent, sequence: int) -> EventHeader:
+def header_from_event(event: events_pb2.RunEvent, sequence: int | None = None) -> EventHeader:
+    """Project a parsed event to its header, with ``sequence`` overriding the stored one."""
     return EventHeader(
-        sequence=sequence,
+        sequence=event.sequence if sequence is None else sequence,
         type=event.type,
-        execution_id=event.execution_id,
-        chat_thread_id=event.chat_thread_id,
+        execution_id=event.execution_id if event.HasField("execution_id") else None,
+        chat_thread_id=event.chat_thread_id if event.HasField("chat_thread_id") else None,
     )
 
 
-def _records_from_events(events: list[RunEvent]) -> list[_StoredRecord]:
+def _records_from_events(events: list[events_pb2.RunEvent]) -> list[_StoredRecord]:
     """Wrap already-validated events as stored records with no disk location."""
     return [
         _StoredRecord(
-            header=_header_from_event(event, event.sequence),
+            header=header_from_event(event, event.sequence),
             offset=_UNLOCATED,
             length=0,
             raw_sequence=event.sequence,
@@ -1101,13 +651,13 @@ def _records_from_events(events: list[RunEvent]) -> list[_StoredRecord]:
     ]
 
 
-def _repair_legacy_sequences(events: list[RunEvent]) -> list[RunEvent]:
+def _repair_legacy_sequences(events: list[events_pb2.RunEvent]) -> list[events_pb2.RunEvent]:
     """Expose a stable, strictly increasing cursor without rewriting the audit log."""
-    repaired: list[RunEvent] = []
+    repaired: list[events_pb2.RunEvent] = []
     last_sequence = 0
     for event in events:
         repaired_event = (
-            event.model_copy(update={"sequence": last_sequence + 1})
+            messages.replace(event, sequence=last_sequence + 1)
             if event.sequence <= last_sequence
             else event
         )
@@ -1116,15 +666,18 @@ def _repair_legacy_sequences(events: list[RunEvent]) -> list[RunEvent]:
     return repaired
 
 
-def make_event(event_type: EventType, text: str = "", **fields: Any) -> RunEvent:  # noqa: ANN401, D103  # tracked: #288
-    return RunEvent(timestamp=datetime.now(UTC), type=event_type, text=text, **fields)
-
-
-def json_value(value: Any) -> Any:  # noqa: ANN401, D103  # tracked: #288
+def json_value(value: Any) -> Any:  # noqa: ANN401
+    """Return a JSON-safe form of ``value``, falling back to ``repr``."""
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     try:
-        json.dumps(value)
-        return value  # noqa: TRY300  # tracked: #288
-    except TypeError:
+        return json.loads(json.dumps(value, allow_nan=False))
+    except (TypeError, ValueError):
         return repr(value)
+
+
+def to_value(value: Any) -> struct_pb2.Value:  # noqa: ANN401
+    """Convert an arbitrary producer result to a protobuf ``Value``."""
+    converted = struct_pb2.Value()
+    json_format.ParseDict(json_value(value), converted)
+    return converted

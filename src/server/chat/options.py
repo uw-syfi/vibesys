@@ -12,36 +12,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
-
+from server.wire import enums
+from server.wire.v2 import responses_pb2
 from vibesys.agents.factory import supported_cli_providers
 
 ChatModelSource = Literal["run", "role", "suggested"]
-
-
-class _ChatOptionModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class ChatModelOption(_ChatOptionModel):
-    """One offered chat model and the source of its suggestion."""
-
-    model: str
-    source: ChatModelSource
-    default: bool = False
-
-
-class ChatProviderOptions(_ChatOptionModel):
-    """One supported chat provider and its suggested models."""
-
-    provider: str
-    models: list[ChatModelOption] = Field(default_factory=list)
-
-
-class ChatOptions(_ChatOptionModel):
-    """All offered chat selections grouped by provider."""
-
-    providers: list[ChatProviderOptions] = Field(default_factory=list)
+"""Where a suggested model came from; mirrors ``responses_pb2.ChatModelSource``."""
 
 
 # A deployment default, not the library's: this is the opencode model VibeSys
@@ -87,29 +63,31 @@ class ChatRunSettings:
     role_models: tuple[str, ...] = field(default=())
 
 
-def build_chat_options(settings: ChatRunSettings) -> ChatOptions:
+def build_chat_options(settings: ChatRunSettings) -> responses_pb2.ChatOptions:
     """Enumerate the providers and model suggestions this run's chat offers.
 
     Only the run's configured driver is considered, so a client never has to
     know that drivers exist. The run's own model is always present and is the
     single option marked ``default``.
     """
-    return ChatOptions(
+    return responses_pb2.ChatOptions(
         providers=[
-            ChatProviderOptions(provider=provider, models=_models_for(provider, settings))
+            responses_pb2.ChatProviderOptions(
+                provider=provider, models=_models_for(provider, settings)
+            )
             for provider in supported_cli_providers(settings.driver)
         ]
     )
 
 
-def _models_for(provider: str, settings: ChatRunSettings) -> list[ChatModelOption]:
+def _models_for(provider: str, settings: ChatRunSettings) -> list[responses_pb2.ChatModelOption]:
     """Order one provider's options: run model, role overrides, suggestions.
 
     The run model and role overrides are configured against the run's own
     provider, so they are offered only there; another provider gets its
     suggestion list alone.
     """
-    options: list[ChatModelOption] = []
+    options: list[responses_pb2.ChatModelOption] = []
     seen: set[str] = set()
 
     def add(model: str, source: ChatModelSource, *, default: bool = False) -> None:
@@ -117,7 +95,13 @@ def _models_for(provider: str, settings: ChatRunSettings) -> list[ChatModelOptio
         if not name or name in seen:
             return
         seen.add(name)
-        options.append(ChatModelOption(model=name, source=source, default=default))
+        options.append(
+            responses_pb2.ChatModelOption(
+                model=name,
+                source=enums.number(responses_pb2.ChatModelSource, source),
+                default=default,
+            )
+        )
 
     if provider == settings.provider:
         add(settings.model, "run", default=True)

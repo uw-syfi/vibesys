@@ -5,9 +5,10 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from server.api.design import DesignLog
+from server.api.errors import error_response
 from server.api.experiments import (
     ExperimentProjection,
     ExperimentQueryResult,
@@ -18,37 +19,11 @@ from server.api.performance import (
     metric_directions,
     summarize_objective,
 )
-from server.api.protocol import (
-    ChatOptionsQuery,
-    ChatQuery,
-    ChatResult,
-    ChatThreadCreateQuery,
-    ChatThreadInfo,
-    CommandAck,
-    DesignPatch,
-    DesignPatchQuery,
-    DesignQuery,
-    DesignRound,
-    EventsQuery,
-    ExperimentQuery,
-    HistoryQuery,
-    HypothesisEntry,
-    PauseCommand,
-    PerformanceContext,
-    PerformanceQuery,
-    PerformanceRound,
-    ProtocolRequest,
-    Response,
-    ResumeCommand,
-    RunSnapshot,
-    SnapshotQuery,
-    SteerCommand,
-    StopCommand,
-    TuiDefaultsQuery,
-)
 from server.api.workspace_git import WorkspacePatchReader
-from server.chat.options import ChatOptions, build_chat_options
-from server.events import EventType, RunEvent
+from server.chat.options import build_chat_options
+from server.wire import PROTOCOL_VERSION, enums, messages, validate
+from server.wire.codec import WireError
+from server.wire.v2 import common_pb2, events_pb2, requests_pb2, responses_pb2, snapshot_pb2
 from vibesys.loops.agent.hypotheses import reproject_run_evidence
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.metrics import MetricSpace, Objective
@@ -64,10 +39,9 @@ if TYPE_CHECKING:
 
     from server.chat.manager import ChatManager
     from server.controller import ProjectRunState, RunController
-    from server.execution import ActiveAgentExecution, ExecutionTracker
+    from server.execution import ExecutionTracker
     from server.integration import RunIntegrationAdapter
     from server.journal import EventJournal
-    from server.settings import InteractiveSetupDefaults
     from vibesys.loops.agent.model import AgentRunState
     from vs_project import Project
 
@@ -80,8 +54,8 @@ class SubscriptionBootstrap:
     store_id: str
     floor: int
     through_sequence: int
-    events: list[RunEvent]
-    active_executions: list[ActiveAgentExecution]
+    events: list[events_pb2.RunEvent]
+    active_executions: list[snapshot_pb2.ActiveAgentExecution]
 
 
 @dataclass(frozen=True)
@@ -95,8 +69,8 @@ class SubscriptionCheckpoint:
 
     store_id: str
     through_sequence: int
-    events: list[RunEvent]
-    active_executions: list[ActiveAgentExecution]
+    events: list[events_pb2.RunEvent]
+    active_executions: list[snapshot_pb2.ActiveAgentExecution]
 
 
 class _DesignLogGitEvents(NullGitTrackerEvents):
@@ -129,7 +103,7 @@ class RunApi:
         chat: ChatManager,
         integration: RunIntegrationAdapter,
         *,
-        tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
+        tui_defaults: Callable[[], responses_pb2.TuiDefaults] | None = None,
     ) -> None:
         """Initialize the API with the components that own each request surface."""
         self._condition = condition
@@ -139,13 +113,14 @@ class RunApi:
         self._chat = chat
         self._integration = integration
         self._tui_defaults_provider = tui_defaults
-        self._tui_defaults: InteractiveSetupDefaults | None = None
+        self._tui_defaults: responses_pb2.TuiDefaults | None = None
         self._tui_defaults_lock = threading.Lock()
         # Keyed by the attached run so the projection's diff cache survives
         # across requests but never outlives the run it was built for.
         self._design: tuple[tuple[Path, str], DesignLog] | None = None
         self._design_lock = threading.Lock()
         self._experiment_projection = ExperimentProjection()
+        self._handlers = self._dispatch_table()
         self._experiment_run_kind: tuple[tuple[Path, str], bool] | None = None
         self._experiment_run_kind_lock = threading.Lock()
         self._journal.add_listener(
@@ -154,122 +129,154 @@ class RunApi:
         )
         self._integration.add_committed_state_listener(self._observe_committed_state)
 
-    def execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911
-        """Execute one typed request and return its protocol response."""
-        if isinstance(request, (PauseCommand, ResumeCommand, SteerCommand, StopCommand)):
-            return self._execute_command(request)
-        if isinstance(request, ChatQuery):
-            return self._execute_chat(request)
-        if isinstance(request, ChatThreadCreateQuery):
-            return self._execute_chat_thread_create(request)
-        if isinstance(request, ChatOptionsQuery):
-            return Response(request_id=request.request_id, chat_options=self.chat_options())
-        if isinstance(request, TuiDefaultsQuery):
-            return Response(request_id=request.request_id, tui_defaults=self.tui_defaults())
-        if isinstance(request, HistoryQuery):
-            self._journal.record(EventType.STATUS_QUERY, "/history")
-            return Response(request_id=request.request_id, events=self.history_events())
-        if isinstance(request, PerformanceQuery):
-            self._journal.record(EventType.STATUS_QUERY, "/perf")
-            return Response(
-                request_id=request.request_id,
-                performance=self.performance_rounds(),
-                performance_context=self.performance_context(),
-            )
-        if isinstance(request, ExperimentQuery):
-            self._journal.record(EventType.STATUS_QUERY, "/experiments")
-            project_run = self._controller.project_run
-            ready = project_run is not None
-            result = (
-                self._query_experiments(project_run, request) if project_run is not None else None
-            )
-            return Response(
-                request_id=request.request_id,
-                experiments=result.entries if result is not None else [],
-                experiment_update=result.update if result is not None else None,
-                experiments_ready=ready,
-            )
-        if isinstance(request, DesignQuery):
-            self._journal.record(EventType.STATUS_QUERY, "/design")
-            ready = self._controller.project_run is not None
-            return Response(
-                request_id=request.request_id,
-                design=self.design_rounds() if ready else [],
-                design_ready=ready,
-            )
-        if isinstance(request, DesignPatchQuery):
-            # Deliberately not journaled as a STATUS_QUERY: a diff viewer
-            # issues one of these per file navigated, and that cadence would
-            # spam the run journal without recording anything about the run.
-            return Response(
-                request_id=request.request_id,
-                design_patch=self.design_patch(request.base, request.head, request.path),
-            )
-        if isinstance(request, SnapshotQuery):
-            return Response(request_id=request.request_id, snapshot=self.snapshot())
-        if isinstance(request, EventsQuery):
-            timeout = request.timeout_ms / 1000 if request.timeout_ms else None
-            events = (
-                self.wait_for_events(request.after_sequence, timeout, request.before_sequence)
-                if timeout is not None
-                else self.events(request.after_sequence, request.before_sequence)
-            )
-            return Response(request_id=request.request_id, events=events)
-        raise TypeError(  # noqa: TRY003  # Include the invalid protocol model in the error.
-            f"Unsupported protocol request: {type(request).__name__}"
+    def execute(self, request: requests_pb2.Request) -> responses_pb2.Response:
+        """Execute one typed request and return its protocol response.
+
+        The response is validated on the way out (finite doubles, no unset
+        enums), so a value the contract forbids becomes an error response
+        rather than reaching the client.
+        """
+        body = request.WhichOneof("body")
+        handler = self._handlers.get(body) if body is not None else None
+        if handler is None:
+            raise TypeError(f"Unsupported protocol request body: {body!r}")  # noqa: TRY003  # Names the invalid body.
+        response = handler(request)
+        try:
+            validate.validate_message(response)
+        except WireError as error:
+            return error_response(request.request_id, error, operation="Response")
+        return response
+
+    def _dispatch_table(
+        self,
+    ) -> dict[str, Callable[[requests_pb2.Request], responses_pb2.Response]]:
+        return {
+            "pause": self._execute_pause,
+            "resume": self._execute_resume,
+            "steer": self._execute_steer,
+            "stop": self._execute_stop,
+            "snapshot": lambda request: _respond(request, snapshot=self.snapshot()),
+            "chat": self._execute_chat,
+            "chat_thread_create": self._execute_chat_thread_create,
+            "chat_options": lambda request: _respond(request, chat_options=self.chat_options()),
+            "tui_defaults": lambda request: _respond(request, tui_defaults=self.tui_defaults()),
+            "history": self._execute_history,
+            "performance": self._execute_performance,
+            "experiments": self._execute_experiments,
+            "design": self._execute_design,
+            "design_patch": self._execute_design_patch,
+            "events": self._execute_events,
+        }
+
+    def _execute_history(self, request: requests_pb2.Request) -> responses_pb2.Response:
+        self._journal.record(events_pb2.EVENT_TYPE_STATUS_QUERY, "/history")
+        return _respond(request, events=self.history_events())
+
+    def _execute_performance(self, request: requests_pb2.Request) -> responses_pb2.Response:
+        self._journal.record(events_pb2.EVENT_TYPE_STATUS_QUERY, "/perf")
+        return _respond(
+            request,
+            performance=self.performance_rounds(),
+            performance_context=self.performance_context(),
         )
 
-    def _execute_command(
-        self, request: PauseCommand | ResumeCommand | SteerCommand | StopCommand
-    ) -> Response:
-        if isinstance(request, PauseCommand):
-            self._controller.pause_after_call()
-            ack = CommandAck(action="pause", status="pending")
-        elif isinstance(request, ResumeCommand):
-            self._controller.resume()
-            ack = CommandAck(action="resume", status="consumed")
-        elif isinstance(request, StopCommand):
-            self._controller.stop_after_call()
-            ack = CommandAck(action="stop", status="pending")
-        else:
-            self._controller.steer(request.text)
-            ack = CommandAck(action="steer", status="pending")
-        return Response(request_id=request.request_id, ack=ack)
+    def _execute_experiments(self, request: requests_pb2.Request) -> responses_pb2.Response:
+        self._journal.record(events_pb2.EVENT_TYPE_STATUS_QUERY, "/experiments")
+        project_run = self._controller.project_run
+        result = (
+            self._query_experiments(project_run, request.experiments)
+            if project_run is not None
+            else None
+        )
+        return _respond(
+            request,
+            experiments=result.entries if result is not None else [],
+            experiment_update=result.update if result is not None else None,
+            experiments_ready=project_run is not None,
+        )
 
-    def _execute_chat(self, request: ChatQuery) -> Response:
-        answer, event = self._chat.chat_with_event(request.text, thread_id=request.thread_id)
-        return Response(
-            request_id=request.request_id,
-            chat=ChatResult(question=request.text, answer=answer, thread_id=request.thread_id),
+    def _execute_design(self, request: requests_pb2.Request) -> responses_pb2.Response:
+        self._journal.record(events_pb2.EVENT_TYPE_STATUS_QUERY, "/design")
+        ready = self._controller.project_run is not None
+        return _respond(request, design=self.design_rounds() if ready else [], design_ready=ready)
+
+    def _execute_design_patch(self, request: requests_pb2.Request) -> responses_pb2.Response:
+        # Deliberately not journaled as a STATUS_QUERY: a diff viewer
+        # issues one of these per file navigated, and that cadence would
+        # spam the run journal without recording anything about the run.
+        query = request.design_patch
+        return _respond(request, design_patch=self.design_patch(query.base, query.head, query.path))
+
+    def _execute_events(self, request: requests_pb2.Request) -> responses_pb2.Response:
+        query = request.events
+        before = query.before_sequence if query.HasField("before_sequence") else None
+        timeout = query.timeout_ms / 1000 if query.timeout_ms else None
+        events = (
+            self.wait_for_events(query.after_sequence, timeout, before)
+            if timeout is not None
+            else self.events(query.after_sequence, before)
+        )
+        return _respond(request, events=events)
+
+    def _execute_pause(self, request: requests_pb2.Request) -> responses_pb2.Response:
+        self._controller.pause_after_call()
+        return _ack(
+            request, responses_pb2.COMMAND_ACTION_PAUSE, responses_pb2.COMMAND_ACK_STATUS_PENDING
+        )
+
+    def _execute_resume(self, request: requests_pb2.Request) -> responses_pb2.Response:
+        self._controller.resume()
+        return _ack(
+            request, responses_pb2.COMMAND_ACTION_RESUME, responses_pb2.COMMAND_ACK_STATUS_CONSUMED
+        )
+
+    def _execute_stop(self, request: requests_pb2.Request) -> responses_pb2.Response:
+        self._controller.stop_after_call()
+        return _ack(
+            request, responses_pb2.COMMAND_ACTION_STOP, responses_pb2.COMMAND_ACK_STATUS_PENDING
+        )
+
+    def _execute_steer(self, request: requests_pb2.Request) -> responses_pb2.Response:
+        self._controller.steer(request.steer.text)
+        return _ack(
+            request, responses_pb2.COMMAND_ACTION_STEER, responses_pb2.COMMAND_ACK_STATUS_PENDING
+        )
+
+    def _execute_chat(self, request: requests_pb2.Request) -> responses_pb2.Response:
+        query = request.chat
+        thread_id = query.thread_id if query.HasField("thread_id") else None
+        answer, event = self._chat.chat_with_event(query.text, thread_id=thread_id)
+        return _respond(
+            request,
+            chat=responses_pb2.ChatResult(question=query.text, answer=answer, thread_id=thread_id),
             events=[] if event is None else [event],
         )
 
-    def _execute_chat_thread_create(self, request: ChatThreadCreateQuery) -> Response:
+    def _execute_chat_thread_create(self, request: requests_pb2.Request) -> responses_pb2.Response:
+        query = request.chat_thread_create
         sequence = self._journal.latest_sequence
         spec = self._chat.create_thread(
-            driver=request.driver,
-            provider=request.provider,
-            model=request.model,
-            title=request.title,
-        )
-        return Response(
-            request_id=request.request_id,
-            chat_thread=ChatThreadInfo(
-                thread_id=spec.thread_id,
-                title=spec.title,
-                driver=spec.driver,
-                provider=spec.provider,
-                model=spec.model,
+            driver=(
+                enums.text(requests_pb2.ChatDriver, query.driver)
+                if query.HasField("driver")
+                else None
             ),
+            provider=query.provider if query.HasField("provider") else None,
+            model=query.model if query.HasField("model") else None,
+            title=query.title if query.HasField("title") else None,
+        )
+        return _respond(
+            request,
+            chat_thread=_thread_info(spec),
             events=self._journal.read(sequence),
         )
 
-    def chat_options(self) -> ChatOptions | None:
+    def chat_options(self) -> responses_pb2.ChatOptions | None:
         """Return the agent choices available for experiment chat."""
         settings = self._chat.run_settings
         return None if settings is None else build_chat_options(settings)
 
-    def tui_defaults(self) -> InteractiveSetupDefaults | None:
+    def tui_defaults(self) -> responses_pb2.TuiDefaults | None:
         """Load and cache defaults for the interactive setup form."""
         if self._tui_defaults_provider is None:
             return None
@@ -278,27 +285,19 @@ class RunApi:
                 self._tui_defaults = self._tui_defaults_provider()
             return self._tui_defaults
 
-    def snapshot(self) -> RunSnapshot:
+    def snapshot(self) -> snapshot_pb2.RunSnapshot:
         """Return a consistent snapshot of run and frontend-facing state."""
         with self._condition:
             kind, round_label = self._executions.current_locked()
-            return RunSnapshot(
+            return snapshot_pb2.RunSnapshot(
+                protocol_version=PROTOCOL_VERSION,
                 run_id=self._journal.run_id_locked(),
                 sequence=self._journal.latest_sequence_locked(),
-                status=self._controller.status_locked(),
+                status=enums.number(common_pb2.RunStatus, self._controller.status_locked()),
                 agent_kind=kind,
                 round_label=round_label,
                 active_executions=self._executions.active_locked(),
-                chat_threads=[
-                    ChatThreadInfo(
-                        thread_id=spec.thread_id,
-                        title=spec.title,
-                        driver=spec.driver,
-                        provider=spec.provider,
-                        model=spec.model,
-                    )
-                    for spec in self._chat.threads_locked()
-                ],
+                chat_threads=[_thread_info(spec) for spec in self._chat.threads_locked()],
             )
 
     def subscription_checkpoint(
@@ -360,21 +359,23 @@ class RunApi:
                 active_executions=self._executions.active_locked(),
             )
 
-    def events(self, after_sequence: int = 0, before_sequence: int | None = None) -> list[RunEvent]:
+    def events(
+        self, after_sequence: int = 0, before_sequence: int | None = None
+    ) -> list[events_pb2.RunEvent]:
         """Read journal events within the requested sequence bounds."""
         return self._journal.read(after_sequence, before_sequence)
 
-    def history_events(self) -> list[RunEvent]:
+    def history_events(self) -> list[events_pb2.RunEvent]:
         """Read the canonical event history used by frontend clients."""
         return self._journal.read_history()
 
-    def performance_rounds(self) -> list[PerformanceRound]:
+    def performance_rounds(self) -> list[responses_pb2.PerformanceRound]:
         """Build the recorded round-level performance series."""
         state = self._agent_run_state()
         if state is None:
             return []
         return [
-            PerformanceRound(
+            responses_pb2.PerformanceRound(
                 round=record.round_number,
                 perf_metric=record.perf_metric,
                 perf_unit=record.perf_unit,
@@ -385,7 +386,7 @@ class RunApi:
             if record.perf_metric is not None and record.perf_unit is not None
         ]
 
-    def performance_context(self) -> PerformanceContext | None:
+    def performance_context(self) -> responses_pb2.PerformanceContext | None:
         """Build objective and measurement context for performance rendering."""
         project_run = self._controller.project_run
         if project_run is None:
@@ -399,12 +400,12 @@ class RunApi:
             objective_description=self._objective_description(),
         )
 
-    def experiments(self) -> list[HypothesisEntry]:
+    def experiments(self) -> list[responses_pb2.HypothesisEntry]:
         """Build the experiment log for an agent outer loop."""
         state = self._agent_run_state()
         return [] if state is None else build_experiment_log(state)
 
-    def design_rounds(self) -> list[DesignRound]:
+    def design_rounds(self) -> list[responses_pb2.DesignRound]:
         """Project the per-round design log for the attached run."""
         project_run = self._controller.project_run
         state = self._agent_run_state()
@@ -414,7 +415,7 @@ class RunApi:
         manifest = project_run.project.state.load_run(project_run.run_id)
         return design.rounds(state, baseline=manifest.trusted_input_baseline)
 
-    def design_patch(self, base: str, head: str, path: str) -> DesignPatch | None:
+    def design_patch(self, base: str, head: str, path: str) -> responses_pb2.DesignPatch | None:
         """Read one file's patch for a published design range, None unattached."""
         project_run = self._controller.project_run
         if project_run is None:
@@ -470,7 +471,7 @@ class RunApi:
         after_sequence: int,
         timeout: float | None = None,
         before_sequence: int | None = None,
-    ) -> list[RunEvent]:
+    ) -> list[events_pb2.RunEvent]:
         """Wait for and read events newer than the supplied sequence."""
         return self._journal.wait_for_events(after_sequence, timeout, before_sequence)
 
@@ -500,7 +501,7 @@ class RunApi:
     def _query_experiments(
         self,
         project_run: ProjectRunState,
-        request: ExperimentQuery,
+        request: requests_pb2.ExperimentQuery,
     ) -> ExperimentQueryResult | None:
         """Answer from memory, loading once outside projection locks if needed."""
         while self._is_agent_run(project_run.project, project_run.run_id):
@@ -508,7 +509,7 @@ class RunApi:
             cached = self._experiment_projection.query(
                 project_run.run_id,
                 projection_id,
-                request.after,
+                request.after if request.HasField("after") else None,
             )
             if isinstance(cached, ExperimentQueryResult):
                 return cached
@@ -627,17 +628,47 @@ class RunApi:
             changed_keys=changed_keys,
         )
 
-    def _observe_experiment_change(self, event: RunEvent) -> None:
-        data = event.data
-        if event.type is not EventType.EXPERIMENTS_CHANGED or data is None:
+    def _observe_experiment_change(self, event: events_pb2.RunEvent) -> None:
+        if event.type != events_pb2.EVENT_TYPE_EXPERIMENTS_CHANGED:
             return
-        if data.kind == "experiments_changed":
-            project_run = self._controller.project_run
-            if project_run is None or project_run.run_id != event.run_id:
-                return
-            projection_id = self._experiment_projection_id(project_run)
-            self._experiment_projection.invalidate(
-                event.run_id,
-                projection_id,
-                data.revision,
-            )
+        if event.WhichOneof("data") != "experiments_changed":
+            return
+        project_run = self._controller.project_run
+        if project_run is None or project_run.run_id != event.run_id:
+            return
+        data = event.experiments_changed
+        self._experiment_projection.invalidate(
+            event.run_id,
+            self._experiment_projection_id(project_run),
+            data.revision if data.HasField("revision") else None,
+        )
+
+
+def _respond(request: requests_pb2.Request, **sections: Any) -> responses_pb2.Response:  # noqa: ANN401
+    """Build a successful response; ``None`` sections stay absent."""
+    return responses_pb2.Response(
+        protocol_version=PROTOCOL_VERSION,
+        request_id=request.request_id,
+        timestamp=messages.now(),
+        ok=True,
+        **sections,
+    )
+
+
+def _ack(
+    request: requests_pb2.Request,
+    action: responses_pb2.CommandAction.ValueType,
+    status: responses_pb2.CommandAckStatus.ValueType,
+) -> responses_pb2.Response:
+    return _respond(request, ack=responses_pb2.CommandAck(action=action, status=status))
+
+
+def _thread_info(spec: events_pb2.ChatThreadCreatedData) -> snapshot_pb2.ChatThreadInfo:
+    """Project a recorded thread's identity onto its wire form."""
+    return snapshot_pb2.ChatThreadInfo(
+        thread_id=spec.thread_id,
+        title=spec.title,
+        driver=spec.driver,
+        provider=spec.provider,
+        model=spec.model,
+    )

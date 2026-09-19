@@ -11,35 +11,35 @@ from server.api.service import RunApi
 from server.chat.manager import ChatManager
 from server.controller import RunController, RunStopped
 from server.diagnostics import (
-    Diagnostic,
     DiagnosticRetryability,
     DiagnosticScope,
     DiagnosticSeverity,
     exception_to_diagnostic,
-)
-from server.events import (
-    ConfigurationFailedData,
-    EventStatus,
-    EventType,
-    RunInterruptedData,
-    ServerReadyData,
+    make_diagnostic,
 )
 from server.execution import ExecutionTracker
 from server.integration import RunIntegrationAdapter
 from server.journal import EventJournal
 from server.read_model import RunInspector
 from server.transport.unix_jsonl import UnixJsonlServer
+from server.wire.v2 import events_pb2
 from vibesys.errors import ConfigurationError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from server.settings import InteractiveSetupDefaults
+    from server.wire.v2.responses_pb2 import TuiDefaults
 
 
+EventType = events_pb2.EventType
+EventStatus = events_pb2.EventStatus
 _TERMINAL_EVENT_TYPES = frozenset(
-    {EventType.RUN_FINISHED, EventType.RUN_FAILED, EventType.RUN_INTERRUPTED}
+    {
+        EventType.EVENT_TYPE_RUN_FINISHED,
+        EventType.EVENT_TYPE_RUN_FAILED,
+        EventType.EVENT_TYPE_RUN_INTERRUPTED,
+    }
 )
 
 
@@ -50,7 +50,7 @@ class ServerRuntime:
         self,
         *,
         socket_path: Path,
-        tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
+        tui_defaults: Callable[[], TuiDefaults] | None = None,
     ) -> None:
         """Compose all server components around one shared condition."""
         self.socket_path = socket_path
@@ -96,9 +96,9 @@ class ServerRuntime:
         signal.signal(signal.SIGTERM, interrupt_from_launcher)
         self.controller.attach(self.socket_path.parent)
         self.journal.record(
-            EventType.SERVER_READY,
-            status=EventStatus.ACTIVE,
-            data=ServerReadyData(),
+            EventType.EVENT_TYPE_SERVER_READY,
+            status=EventStatus.EVENT_STATUS_ACTIVE,
+            data=events_pb2.ServerReadyData(socket_protocol="jsonl"),
         )
         run_error: BaseException | None = None
         try:
@@ -124,7 +124,7 @@ class ServerRuntime:
                     return None
                 except ConfigurationError as exc:
                     configuration_diagnostic = exc.diagnostic
-                    event_diagnostic = Diagnostic(
+                    event_diagnostic = make_diagnostic(
                         code=configuration_diagnostic.code,
                         summary=configuration_diagnostic.message,
                         detail=(
@@ -132,9 +132,9 @@ class ServerRuntime:
                             f"Exit code: {configuration_diagnostic.exit_code}"
                         ),
                         hint=configuration_diagnostic.usage,
-                        scope=DiagnosticScope.CONFIGURATION,
-                        severity=DiagnosticSeverity.FATAL,
-                        retryability=DiagnosticRetryability.NEVER,
+                        scope=DiagnosticScope.DIAGNOSTIC_SCOPE_CONFIGURATION,
+                        severity=DiagnosticSeverity.DIAGNOSTIC_SEVERITY_FATAL,
+                        retryability=DiagnosticRetryability.DIAGNOSTIC_RETRYABILITY_NEVER,
                     )
                     self.controller.finish(
                         exc,
@@ -142,14 +142,16 @@ class ServerRuntime:
                         diagnostic=event_diagnostic,
                     )
                     self.journal.record(
-                        EventType.CONFIGURATION_FAILED,
+                        EventType.EVENT_TYPE_CONFIGURATION_FAILED,
                         event_diagnostic.summary,
-                        status=EventStatus.FAILED,
-                        data=ConfigurationFailedData(
+                        status=EventStatus.EVENT_STATUS_FAILED,
+                        data=events_pb2.ConfigurationFailedData(
                             code=configuration_diagnostic.code,
                             stage=configuration_diagnostic.stage,
                             message=event_diagnostic.summary,
-                            usage=event_diagnostic.hint,
+                            usage=event_diagnostic.hint
+                            if event_diagnostic.HasField("hint")
+                            else None,
                             exit_code=configuration_diagnostic.exit_code,
                         ),
                         diagnostic=event_diagnostic,
@@ -196,12 +198,12 @@ class ServerRuntime:
         launcher_error = RuntimeError("launcher_terminated (SIGTERM)")
         event_diagnostic = exception_to_diagnostic(
             launcher_error,
-            scope=DiagnosticScope.RUN,
+            scope=DiagnosticScope.DIAGNOSTIC_SCOPE_RUN,
             operation="Run",
             summary="Run interrupted",
             code="interrupted",
-            severity=DiagnosticSeverity.FATAL,
-            retryability=DiagnosticRetryability.NEVER,
+            severity=DiagnosticSeverity.DIAGNOSTIC_SEVERITY_FATAL,
+            retryability=DiagnosticRetryability.DIAGNOSTIC_RETRYABILITY_NEVER,
         )
         terminal_recorded = self._terminal_recorded_after(terminal_cursor)
         # End the run before its terminal event is recorded, so no
@@ -214,9 +216,9 @@ class ServerRuntime:
         )
         if not terminal_recorded:
             self.journal.record(
-                EventType.RUN_INTERRUPTED,
-                status=EventStatus.FAILED,
-                data=RunInterruptedData(
+                EventType.EVENT_TYPE_RUN_INTERRUPTED,
+                status=EventStatus.EVENT_STATUS_FAILED,
+                data=events_pb2.RunInterruptedData(
                     reason="launcher_terminated",
                     signal="SIGTERM",
                 ),

@@ -5,7 +5,6 @@ from __future__ import annotations
 import threading
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from server.chat.evidence import TrajectoryEvidence
@@ -18,7 +17,8 @@ from server.chat.session import (
     ExperimentChatDependencies,
     ExperimentChatSession,
 )
-from server.events import ChatThreadCreatedData
+from server.wire import messages
+from server.wire.v2.events_pb2 import ChatThreadCreatedData
 from vibesys.agents import build_agent_client
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.domains.environment import EnvironmentBindMount
@@ -276,7 +276,7 @@ class ExperimentChatFactory:
                 driver=selection.driver,
                 provider=selection.provider,
                 model=selection.model,
-                created_at=datetime.now(UTC),
+                created_at=messages.now(),
             ),
             handler=session.ask,
             close=session.close,
