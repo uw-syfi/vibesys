@@ -1,5 +1,19 @@
 import {describe, expect, it, test} from 'bun:test';
-import type {RunEvent, RunStatus} from '@vibesys/backend-client';
+import {create, type MessageInitShape} from '@bufbuild/protobuf';
+import {
+  AgentOutputChannel,
+  DiagnosticRetryability,
+  DiagnosticScope,
+  DiagnosticSeverity,
+  EventStatus,
+  EventType,
+  type HypothesisEntry,
+  HypothesisEntrySchema,
+  type RunEvent,
+  RunEventSchema,
+  type RunStatus,
+} from '@vibesys/backend-client';
+import {makeEvent} from '@vibesys/backend-client/testing';
 import {hasRunEnded} from '@vibesys/core-state';
 import type {SessionState} from './session-model.js';
 import {
@@ -102,9 +116,9 @@ describe('error report normalization', () => {
         summary: 'The worker failed.',
         detail: 'Exit code: 2',
         hint: 'Inspect the worker log.',
-        scope: 'invocation',
-        severity: 'fatal',
-        retryability: 'manual',
+        scope: DiagnosticScope.INVOCATION,
+        severity: DiagnosticSeverity.FATAL,
+        retryability: DiagnosticRetryability.MANUAL,
       },
       agentKind: 'implementer',
       invocationId: 'invocation-1',
@@ -180,20 +194,18 @@ describe('event batch projection', () => {
 
     const state = applyEventBatch(before, [
       {
-        ...event(1, 'run_failed'),
+        ...event(1, EventType.RUN_FAILED),
         diagnostic: {
           code: 'interrupted',
           summary: 'Previous process was interrupted.',
-          scope: 'run',
-          severity: 'fatal',
-          retryability: 'never',
+          scope: DiagnosticScope.RUN,
+          severity: DiagnosticSeverity.FATAL,
+          retryability: DiagnosticRetryability.NEVER,
         },
       },
-      event(2, 'run_started', {
-        kind: 'run_started',
-        outer_loop: 'agent',
-        input: '.',
-        max_rounds: 3,
+      event(2, EventType.RUN_STARTED, {
+        case: 'runStarted',
+        value: {outerLoop: 'agent', input: '.', maxRounds: 3},
       }),
     ]);
 
@@ -205,20 +217,18 @@ describe('event batch projection', () => {
 
   it('surfaces the final diagnostic when a batch ends in failure', () => {
     const state = applyEventBatch(initialSessionState(), [
-      event(1, 'run_started', {
-        kind: 'run_started',
-        outer_loop: 'agent',
-        input: '.',
-        max_rounds: 3,
+      event(1, EventType.RUN_STARTED, {
+        case: 'runStarted',
+        value: {outerLoop: 'agent', input: '.', maxRounds: 3},
       }),
       {
-        ...event(2, 'run_failed'),
+        ...event(2, EventType.RUN_FAILED),
         diagnostic: {
           code: 'run_failed',
           summary: 'The current run failed.',
-          scope: 'run',
-          severity: 'fatal',
-          retryability: 'never',
+          scope: DiagnosticScope.RUN,
+          severity: DiagnosticSeverity.FATAL,
+          retryability: DiagnosticRetryability.NEVER,
         },
       },
     ]);
@@ -229,37 +239,33 @@ describe('event batch projection', () => {
 
   it('banners the failure even when a warning diagnostic lands after it', () => {
     const state = applyEventBatch(initialSessionState(), [
-      event(1, 'run_started', {
-        kind: 'run_started',
-        outer_loop: 'agent',
-        input: '.',
-        max_rounds: 3,
+      event(1, EventType.RUN_STARTED, {
+        case: 'runStarted',
+        value: {outerLoop: 'agent', input: '.', maxRounds: 3},
       }),
       {
-        ...event(2, 'run_failed'),
+        ...event(2, EventType.RUN_FAILED),
         diagnostic: {
           id: 'failure-1',
           code: 'run_failed',
           summary: 'The current run failed.',
-          scope: 'run',
-          severity: 'fatal',
-          retryability: 'never',
+          scope: DiagnosticScope.RUN,
+          severity: DiagnosticSeverity.FATAL,
+          retryability: DiagnosticRetryability.NEVER,
         },
       },
       {
-        ...event(3, 'framework_warning', {
-          kind: 'framework_warning',
-          summary: 'profiler failed',
-          detail: 'nsys exited 1',
-          source: 'loop',
+        ...event(3, EventType.FRAMEWORK_WARNING, {
+          case: 'frameworkWarning',
+          value: {summary: 'profiler failed', detail: 'nsys exited 1', source: 'loop'},
         }),
-        agent_kind: null,
+        agentKind: null,
         diagnostic: {
           id: 'warn-1',
           code: 'framework_warning',
           summary: 'profiler failed',
-          scope: 'run',
-          severity: 'warning',
+          scope: DiagnosticScope.RUN,
+          severity: DiagnosticSeverity.WARNING,
           source: 'loop',
         },
       },
@@ -333,15 +339,15 @@ describe('hypothesis planning activity', () => {
 
   it('does not present a phase as planning after its round has a hypothesis', () => {
     const entries = [
-      {
-        hypothesis_id: 'H-03',
+      hyp({
+        hypothesisId: 'H-03',
         identified: true,
-        first_round: 3,
-        last_round: 3,
+        firstRound: 3,
+        lastRound: 3,
         rounds: [],
         kept: false,
         active: true,
-      },
+      }),
     ] as Parameters<typeof setExperiments>[1];
 
     expect(
@@ -385,15 +391,15 @@ describe('hypothesis planning activity', () => {
         },
       },
       [
-        {
-          hypothesis_id: 'H-02',
+        hyp({
+          hypothesisId: 'H-02',
           identified: true,
-          first_round: 2,
-          last_round: 2,
+          firstRound: 2,
+          lastRound: 2,
           rounds: [{round: 2, passed: true, reviewed: true}],
           kept: true,
           active: false,
-        },
+        }),
       ],
     );
 
@@ -452,31 +458,31 @@ describe('hypothesis planning activity', () => {
         },
       },
       [
-        {
-          hypothesis_id: 'H-03',
+        hyp({
+          hypothesisId: 'H-03',
           identified: true,
-          first_round: 3,
-          last_round: 3,
+          firstRound: 3,
+          lastRound: 3,
           rounds: [],
           kept: false,
           active: false,
-        },
-        {
-          hypothesis_id: 'H-01',
+        }),
+        hyp({
+          hypothesisId: 'H-01',
           identified: true,
-          first_round: 1,
-          last_round: 1,
+          firstRound: 1,
+          lastRound: 1,
           rounds: [],
           kept: true,
           active: false,
-        },
+        }),
       ],
     );
 
     expect(
       experimentIndexItems(state).map(item =>
         item.kind === 'hypothesis'
-          ? item.entry.hypothesis_id
+          ? item.entry.hypothesisId
           : item.kind === 'round'
             ? `round-${item.roundNumber}`
             : `planning-${item.activity.roundNumber}`,
@@ -506,15 +512,15 @@ describe('hypothesis planning activity', () => {
       },
     };
     state = setExperiments(state, [
-      {
-        hypothesis_id: 'H-03',
+      hyp({
+        hypothesisId: 'H-03',
         identified: true,
-        first_round: 3,
-        last_round: 3,
+        firstRound: 3,
+        lastRound: 3,
         rounds: [],
         kept: false,
         active: true,
-      },
+      }),
     ]);
 
     expect(state.experimentLog).toMatchObject({
@@ -530,21 +536,21 @@ describe('experiment refresh reconciliation', () => {
     id: string,
     round: number,
     active = false,
-  ): Parameters<typeof setExperiments>[1][number] => ({
-    hypothesis_id: id,
+  ): Parameters<typeof setExperiments>[1][number] => (hyp({
+    hypothesisId: id,
     identified: true,
-    first_round: round,
-    last_round: round,
+    firstRound: round,
+    lastRound: round,
     rounds: [{round, passed: true, reviewed: true}],
     kept: false,
     active,
-  });
+  }));
 
   it('keeps the current hypothesis selected across response reordering', () => {
     const current = setExperiments(initialSessionState(), [entry('H-01', 1), entry('H-02', 2)]);
     const refreshed = setExperiments(current, [entry('H-02', 2, true), entry('H-01', 1)]);
 
-    expect(refreshed.experimentLog?.entries.map(item => item.hypothesis_id)).toEqual([
+    expect(refreshed.experimentLog?.entries.map(item => item.hypothesisId)).toEqual([
       'H-01',
       'H-02',
     ]);
@@ -569,16 +575,16 @@ describe('experiment refresh reconciliation', () => {
 describe('hypothesis scope label', () => {
   it('prefers the backend-supplied title over the hypothesis id', () => {
     const state = setExperiments(initialSessionState(), [
-      {
-        hypothesis_id: 'H-01',
+      hyp({
+        hypothesisId: 'H-01',
         identified: true,
         title: 'Batch decode requests',
-        first_round: 1,
-        last_round: 1,
+        firstRound: 1,
+        lastRound: 1,
         rounds: [{round: 1, passed: true, reviewed: true}],
         kept: false,
         active: false,
-      },
+      }),
     ]);
 
     const opened = enterExperimentRound(state, 1);
@@ -591,15 +597,15 @@ describe('hypothesis scope label', () => {
 
   it('falls back to the hypothesis id when there is no title', () => {
     const state = setExperiments(initialSessionState(), [
-      {
-        hypothesis_id: 'H-01',
+      hyp({
+        hypothesisId: 'H-01',
         identified: true,
-        first_round: 1,
-        last_round: 1,
+        firstRound: 1,
+        lastRound: 1,
         rounds: [{round: 1, passed: true, reviewed: true}],
         kept: false,
         active: false,
-      },
+      }),
     ]);
 
     const opened = enterExperimentRound(state, 1);
@@ -640,15 +646,15 @@ describe('unowned rounds', () => {
 
   it('does not assign invalid zero-based ranges to a hypothesis', () => {
     const state = setExperiments(initialSessionState(), [
-      {
-        hypothesis_id: 'H-invalid',
+      hyp({
+        hypothesisId: 'H-invalid',
         identified: true,
-        first_round: 0,
-        last_round: 0,
+        firstRound: 0,
+        lastRound: 0,
         rounds: [],
         kept: false,
         active: false,
-      },
+      }),
     ]);
 
     expect(enterExperimentRound(state, 0)).toBeNull();
@@ -665,16 +671,18 @@ describe('session event model', () => {
         'agent_execution_started',
         'impl-1',
         {
-          kind: 'agent_execution_started',
-          stage: 'implementation',
-          attempt: 1,
-          system_prompt: '',
-          user_prompt: 'Implement the queue',
-          activity: {
-            kind: 'agent_execution_activity_changed',
-            mode: 'thinking',
-            summary: 'Inspecting the queue',
-            tool: null,
+          case: 'agentExecutionStarted',
+          value: {
+            stage: 'implementation',
+            attempt: 1,
+            systemPrompt: '',
+            userPrompt: 'Implement the queue',
+            activity: {
+              kind: 'agent_execution_activity_changed',
+              mode: ExecutionActivityMode.THINKING,
+              summary: 'Inspecting the queue',
+              tool: null,
+            },
           },
         },
         'implementer',
@@ -687,16 +695,18 @@ describe('session event model', () => {
         'agent_execution_started',
         'review-1',
         {
-          kind: 'agent_execution_started',
-          stage: 'review',
-          attempt: null,
-          system_prompt: '',
-          user_prompt: 'Review the diff',
-          activity: {
-            kind: 'agent_execution_activity_changed',
-            mode: 'waiting',
-            summary: 'Waiting for the implementation',
-            tool: null,
+          case: 'agentExecutionStarted',
+          value: {
+            stage: 'review',
+            attempt: null,
+            systemPrompt: '',
+            userPrompt: 'Review the diff',
+            activity: {
+              kind: 'agent_execution_activity_changed',
+              mode: ExecutionActivityMode.WAITING,
+              summary: 'Waiting for the implementation',
+              tool: null,
+            },
           },
         },
         'reviewer',
@@ -709,10 +719,8 @@ describe('session event model', () => {
         'agent_execution_activity_changed',
         'impl-1',
         {
-          kind: 'agent_execution_activity_changed',
-          mode: 'tool',
-          summary: 'Running queue tests',
-          tool: 'Bash',
+          case: 'agentExecutionActivityChanged',
+          value: {mode: ExecutionActivityMode.TOOL, summary: 'Running queue tests', tool: 'Bash'},
         },
         'implementer',
       ),
@@ -720,7 +728,7 @@ describe('session event model', () => {
 
     expect(Object.keys(state.core.activeExecutions)).toEqual(['impl-1', 'review-1']);
     expect(state.core.activeExecutions['impl-1']?.activity).toEqual({
-      mode: 'tool',
+      mode: ExecutionActivityMode.TOOL,
       summary: 'Running queue tests',
       tool: 'Bash',
     });
@@ -734,10 +742,7 @@ describe('session event model', () => {
         4,
         'agent_execution_finished',
         'impl-1',
-        {
-          kind: 'agent_execution_finished',
-          error: null,
-        },
+        {case: 'agentExecutionFinished', value: {error: null}},
         'implementer',
       ),
     );
@@ -752,16 +757,18 @@ describe('session event model', () => {
         'agent_execution_started',
         'impl-1',
         {
-          kind: 'agent_execution_started',
-          stage: 'implementation',
-          attempt: 1,
-          system_prompt: '',
-          user_prompt: 'Implement the queue',
-          activity: {
-            kind: 'agent_execution_activity_changed',
-            mode: 'thinking',
-            summary: 'Inspecting the queue',
-            tool: null,
+          case: 'agentExecutionStarted',
+          value: {
+            stage: 'implementation',
+            attempt: 1,
+            systemPrompt: '',
+            userPrompt: 'Implement the queue',
+            activity: {
+              kind: 'agent_execution_activity_changed',
+              mode: ExecutionActivityMode.THINKING,
+              summary: 'Inspecting the queue',
+              tool: null,
+            },
           },
         },
         'implementer',
@@ -779,15 +786,15 @@ describe('session event model', () => {
     const state = applyActiveExecutionCheckpoint(initialSessionState(), [
       {
         execution_id: 'judge-2',
-        agent_kind: 'judge',
-        round_label: 'round-2-judge',
+        agentKind: 'judge',
+        roundLabel: 'round-2-judge',
         stage: 'evaluation',
         attempt: 1,
         assignment: 'Evaluate the candidate',
         started_at: '2026-01-01T00:00:00Z',
         activity: {
           kind: 'agent_execution_activity_changed',
-          mode: 'thinking',
+          mode: ExecutionActivityMode.THINKING,
           summary: 'Inspecting the diff',
           tool: null,
         },
@@ -821,16 +828,18 @@ describe('session event model', () => {
         'agent_execution_started',
         'impl-1',
         {
-          kind: 'agent_execution_started',
-          stage: 'implementation',
-          attempt: 1,
-          system_prompt: '',
-          user_prompt: 'Implement the queue',
-          activity: {
-            kind: 'agent_execution_activity_changed',
-            mode: 'thinking',
-            summary: 'Inspecting the queue',
-            tool: null,
+          case: 'agentExecutionStarted',
+          value: {
+            stage: 'implementation',
+            attempt: 1,
+            systemPrompt: '',
+            userPrompt: 'Implement the queue',
+            activity: {
+              kind: 'agent_execution_activity_changed',
+              mode: ExecutionActivityMode.THINKING,
+              summary: 'Inspecting the queue',
+              tool: null,
+            },
           },
         },
         'implementer',
@@ -840,7 +849,7 @@ describe('session event model', () => {
       sequence: 2,
       timestamp: '2026-01-01T00:00:01Z',
       type: 'run_interrupted',
-      data: {kind: 'run_interrupted', reason: 'SIGINT', signal: 'SIGINT'},
+      data: {case: 'runInterrupted', value: {reason: 'SIGINT', signal: 'SIGINT'}},
     });
 
     expect(interrupted.core.activeExecutions).toEqual({});
@@ -854,16 +863,18 @@ describe('session event model', () => {
         'agent_execution_started',
         'chat-execution',
         {
-          kind: 'agent_execution_started',
-          stage: 'chat',
-          attempt: null,
-          system_prompt: '',
-          user_prompt: 'What is running?',
-          activity: {
-            kind: 'agent_execution_activity_changed',
-            mode: 'thinking',
-            summary: 'Inspecting the run',
-            tool: null,
+          case: 'agentExecutionStarted',
+          value: {
+            stage: 'chat',
+            attempt: null,
+            systemPrompt: '',
+            userPrompt: 'What is running?',
+            activity: {
+              kind: 'agent_execution_activity_changed',
+              mode: ExecutionActivityMode.THINKING,
+              summary: 'Inspecting the run',
+              tool: null,
+            },
           },
         },
         'chat',
@@ -879,7 +890,7 @@ describe('session event model', () => {
         2,
         'agent_execution_finished',
         'chat-execution',
-        {kind: 'agent_execution_finished', error: null},
+        {case: 'agentExecutionFinished', value: {error: null}},
         'chat',
       ),
     );
@@ -890,27 +901,20 @@ describe('session event model', () => {
     let state = initialSessionState();
     state = applyEvent(
       state,
-      event(1, 'phase_started', {
-        kind: 'phase',
-        phase: 'judge',
-        attempt: 2,
+      event(1, EventType.PHASE_STARTED, {case: 'phase', value: {phase: 'judge', attempt: 2}}),
+    );
+    state = applyEvent(
+      state,
+      event(2, EventType.AGENT_OUTPUT_CHUNK, {
+        case: 'agentOutputChunk',
+        value: {channel: AgentOutputChannel.ASSISTANT, content: 'checking accuracy\n'},
       }),
     );
     state = applyEvent(
       state,
-      event(2, 'agent_output_chunk', {
-        kind: 'agent_output_chunk',
-        channel: 'assistant',
-        content: 'checking accuracy\n',
-      }),
-    );
-    state = applyEvent(
-      state,
-      event(3, 'judge_result', {
-        kind: 'judge_result',
-        verdict: 'pass',
-        feedback: '',
-        attempt: 2,
+      event(3, EventType.JUDGE_RESULT, {
+        case: 'judgeResult',
+        value: {verdict: JudgeVerdict.PASS, feedback: '', attempt: 2},
       }),
     );
 
@@ -925,12 +929,9 @@ describe('session event model', () => {
   it('renders a deferred round as provisional rather than failed', () => {
     const state = applyEvent(
       initialSessionState(),
-      event(1, 'round_finished', {
-        kind: 'round_finished',
-        attempts: 1,
-        judge_verdict: 'skipped',
-        perf_metric: null,
-        perf_unit: null,
+      event(1, EventType.ROUND_FINISHED, {
+        case: 'roundFinished',
+        value: {attempts: 1, judgeVerdict: RoundJudgeVerdict.SKIPPED, perfMetric: null, perfUnit: null},
       }),
     );
 
@@ -941,8 +942,8 @@ describe('session event model', () => {
   });
 
   it('ignores replayed events and recognizes an ended run', () => {
-    let state = applyEvent(initialSessionState(), event(4, 'run_finished'));
-    state = applyEvent(state, event(3, 'run_failed'));
+    let state = applyEvent(initialSessionState(), event(4, EventType.RUN_FINISHED));
+    state = applyEvent(state, event(3, EventType.RUN_FAILED));
 
     expect(state.core.status).toBe('completed');
     expect(state.core.sequence).toBe(4);
@@ -952,13 +953,15 @@ describe('session event model', () => {
   it('shows structured configuration failures as terminal conversation entries', () => {
     const state = applyEvent(
       initialSessionState(),
-      event(1, 'configuration_failed', {
-        kind: 'configuration_failed',
-        code: 'resume_limit_exhausted',
-        stage: 'resume_resolution',
-        message: 'This run has completed 30 rounds.',
-        usage: null,
-        exit_code: 2,
+      event(1, EventType.CONFIGURATION_FAILED, {
+        case: 'configurationFailed',
+        value: {
+          code: 'resume_limit_exhausted',
+          stage: 'resume_resolution',
+          message: 'This run has completed 30 rounds.',
+          usage: null,
+          exitCode: 2,
+        },
       }),
     );
 
@@ -977,12 +980,12 @@ describe('session event model', () => {
 
   it('promotes an invocation failure to one terminal error banner', () => {
     let state = applyEvent(initialSessionState(), {
-      ...event(1, 'invocation_finished', {
-        kind: 'invocation_finished',
-        error: 'RuntimeError: app-server initialization was denied',
+      ...event(1, EventType.INVOCATION_FINISHED, {
+        case: 'invocationFinished',
+        value: {error: 'RuntimeError: app-server initialization was denied'},
       }),
       status: 'failed',
-      invocation_id: 'invocation-1',
+      executionId: 'invocation-1',
     });
 
     expect(state.errorBanner).toMatchObject({
@@ -991,7 +994,7 @@ describe('session event model', () => {
       invocationId: 'invocation-1',
     });
     state = applyEvent(state, {
-      ...event(2, 'run_failed'),
+      ...event(2, EventType.RUN_FAILED),
       text: 'RuntimeError: app-server initialization was denied',
     });
 
@@ -1018,29 +1021,29 @@ describe('session event model', () => {
 
   it('resurfaces a dismissed diagnostic when core projects its terminal promotion', () => {
     let state = applyEvent(initialSessionState(), {
-      ...event(1, 'invocation_finished'),
-      invocation_id: 'invocation-1',
+      ...event(1, EventType.INVOCATION_FINISHED),
+      executionId: 'invocation-1',
       diagnostic: {
         id: 'failure-1',
         code: 'agent_failed',
         summary: 'The worker failed.',
         detail: null,
-        scope: 'invocation',
-        severity: 'error',
-        retryability: 'manual',
+        scope: DiagnosticScope.INVOCATION,
+        severity: DiagnosticSeverity.ERROR,
+        retryability: DiagnosticRetryability.MANUAL,
       },
     });
     state = dismissErrorBanner(state);
     state = applyEvent(state, {
-      ...event(2, 'run_failed'),
+      ...event(2, EventType.RUN_FAILED),
       diagnostic: {
         id: 'failure-1',
         code: 'agent_failed',
         summary: 'The worker failed.',
         detail: 'Exit code: 2',
-        scope: 'invocation',
-        severity: 'fatal',
-        retryability: 'manual',
+        scope: DiagnosticScope.INVOCATION,
+        severity: DiagnosticSeverity.FATAL,
+        retryability: DiagnosticRetryability.MANUAL,
       },
     });
 
@@ -1054,9 +1057,9 @@ describe('session event model', () => {
 
   it('prefers structured diagnostics and deduplicates their ids across terminal events', () => {
     let state = applyEvent(initialSessionState(), {
-      ...event(1, 'invocation_finished', {
-        kind: 'invocation_finished',
-        error: 'legacy invocation error',
+      ...event(1, EventType.INVOCATION_FINISHED, {
+        case: 'invocationFinished',
+        value: {error: 'legacy invocation error'},
       }),
       text: 'legacy invocation text',
       diagnostic: {
@@ -1065,13 +1068,13 @@ describe('session event model', () => {
         summary: 'The worker could not start.',
         detail: 'PermissionError: sandbox rejected the worker.',
         hint: 'Check the sandbox permissions.',
-        scope: 'invocation',
-        severity: 'error',
-        retryability: 'manual',
+        scope: DiagnosticScope.INVOCATION,
+        severity: DiagnosticSeverity.ERROR,
+        retryability: DiagnosticRetryability.MANUAL,
       },
     });
     state = applyEvent(state, {
-      ...event(2, 'run_failed'),
+      ...event(2, EventType.RUN_FAILED),
       text: 'legacy terminal text',
       diagnostic: {
         id: 'failure-1',
@@ -1079,9 +1082,9 @@ describe('session event model', () => {
         summary: 'The worker could not start.',
         detail: 'PermissionError: sandbox rejected the worker.\nExit code: 1',
         hint: 'Check the sandbox permissions.',
-        scope: 'invocation',
-        severity: 'fatal',
-        retryability: 'manual',
+        scope: DiagnosticScope.INVOCATION,
+        severity: DiagnosticSeverity.FATAL,
+        retryability: DiagnosticRetryability.MANUAL,
       },
     });
 
@@ -1098,24 +1101,24 @@ describe('session event model', () => {
 
   it('keeps the more detailed terminal message when a failure is deduplicated', () => {
     let state = applyEvent(initialSessionState(), {
-      ...event(1, 'invocation_finished', {
-        kind: 'invocation_finished',
-        error: 'RuntimeError: app-server initialization was denied',
+      ...event(1, EventType.INVOCATION_FINISHED, {
+        case: 'invocationFinished',
+        value: {error: 'RuntimeError: app-server initialization was denied'},
       }),
-      invocation_id: 'invocation-1',
+      executionId: 'invocation-1',
     });
     const terminalMessage =
       'RuntimeError: app-server initialization was denied\nOperation not permitted (os error 1)';
-    state = applyEvent(state, {...event(2, 'run_failed'), text: terminalMessage});
+    state = applyEvent(state, {...event(2, EventType.RUN_FAILED), text: terminalMessage});
 
     expect(state.errorBanner).toMatchObject({count: 2, message: terminalMessage});
   });
 
   it('uses an error-bearing invocation result even when the status is absent', () => {
     const state = applyEvent(initialSessionState(), {
-      ...event(1, 'invocation_finished', {
-        kind: 'invocation_finished',
-        error: 'The agent process could not start.',
+      ...event(1, EventType.INVOCATION_FINISHED, {
+        case: 'invocationFinished',
+        value: {error: 'The agent process could not start.'},
       }),
       status: null,
     });
@@ -1127,8 +1130,8 @@ describe('session event model', () => {
   });
 
   it('uses the terminal event type for an empty failure message', () => {
-    const failed = applyEvent(initialSessionState(), event(1, 'run_failed'));
-    const interrupted = applyEvent(initialSessionState(), event(1, 'run_interrupted'));
+    const failed = applyEvent(initialSessionState(), event(1, EventType.RUN_FAILED));
+    const interrupted = applyEvent(initialSessionState(), event(1, EventType.RUN_INTERRUPTED));
 
     expect(failed.errorBanner?.message).toBe('Run failed.');
     expect(interrupted.errorBanner?.message).toBe('Run interrupted.');
@@ -1136,19 +1139,18 @@ describe('session event model', () => {
 
   it('shows structured interruption details when no event text is present', () => {
     const state = applyEvent(initialSessionState(), {
-      ...event(1, 'run_interrupted', {
-        kind: 'run_interrupted',
-        reason: 'launcher_terminated',
-        signal: 'SIGTERM',
+      ...event(1, EventType.RUN_INTERRUPTED, {
+        case: 'runInterrupted',
+        value: {reason: 'launcher_terminated', signal: 'SIGTERM'},
       }),
       diagnostic: {
         id: 'interrupted-1',
         code: 'interrupted',
         summary: 'Run interrupted',
         detail: 'RuntimeError: launcher_terminated (SIGTERM)',
-        scope: 'run',
-        severity: 'fatal',
-        retryability: 'never',
+        scope: DiagnosticScope.RUN,
+        severity: DiagnosticSeverity.FATAL,
+        retryability: DiagnosticRetryability.NEVER,
       },
     });
 
@@ -1162,20 +1164,18 @@ describe('session event model', () => {
 
   it('keeps warning diagnostics off the banner without blocking later errors', () => {
     const warned = applyEvent(initialSessionState(), {
-      ...event(1, 'framework_warning', {
-        kind: 'framework_warning',
-        summary: 'profiler failed',
-        detail: 'nsys exited 1',
-        source: 'loop',
+      ...event(1, EventType.FRAMEWORK_WARNING, {
+        case: 'frameworkWarning',
+        value: {summary: 'profiler failed', detail: 'nsys exited 1', source: 'loop'},
       }),
-      agent_kind: null,
+      agentKind: null,
       diagnostic: {
         id: 'warn-1',
         code: 'framework_warning',
         summary: 'profiler failed',
         detail: 'nsys exited 1',
-        scope: 'run',
-        severity: 'warning',
+        scope: DiagnosticScope.RUN,
+        severity: DiagnosticSeverity.WARNING,
         source: 'loop',
       },
     });
@@ -1186,14 +1186,14 @@ describe('session event model', () => {
     expect(warned.errorBanner).toBeNull();
 
     const failed = applyEvent(warned, {
-      ...event(2, 'run_failed'),
+      ...event(2, EventType.RUN_FAILED),
       diagnostic: {
         id: 'failure-1',
         code: 'run_failed',
         summary: 'The current run failed.',
-        scope: 'run',
-        severity: 'fatal',
-        retryability: 'never',
+        scope: DiagnosticScope.RUN,
+        severity: DiagnosticSeverity.FATAL,
+        retryability: DiagnosticRetryability.NEVER,
       },
     });
 
@@ -1207,36 +1207,28 @@ describe('session event model', () => {
     let state = initialSessionState();
     state = applyEvent(
       state,
-      chatEvent(1, 'agent_output_chunk', {
-        kind: 'agent_output_chunk',
-        channel: 'analysis',
-        content: 'Inspecting the latest round',
+      chatEvent(1, EventType.AGENT_OUTPUT_CHUNK, {
+        case: 'agentOutputChunk',
+        value: {channel: AgentOutputChannel.ANALYSIS, content: 'Inspecting the latest round'},
       }),
     );
     state = applyEvent(
       state,
-      chatEvent(2, 'tool_call', {
-        kind: 'tool_call',
-        tool: 'read_file',
-        args: {path: 'progress.md'},
-        status: null,
+      chatEvent(2, EventType.TOOL_CALL, {
+        case: 'toolCall',
+        value: {tool: 'read_file', args: {path: 'progress.md'}, status: null},
       }),
     );
     state = applyEvent(
       state,
-      chatEvent(3, 'tool_result', {
-        kind: 'tool_result',
-        tool: 'read_file',
-        content: 'Round 2 improved throughput.',
-        is_error: false,
+      chatEvent(3, EventType.TOOL_RESULT, {
+        case: 'toolResult',
+        value: {tool: 'read_file', content: 'Round 2 improved throughput.', isError: false},
       }),
     );
     state = applyEvent(
       state,
-      chatEvent(4, 'chat', {
-        kind: 'chat',
-        answer: 'Round 2 improved throughput.',
-      }),
+      chatEvent(4, EventType.CHAT, {case: 'chat', value: {answer: 'Round 2 improved throughput.'}}),
     );
 
     expect(state.core.transcript).toEqual([]);
@@ -1253,11 +1245,7 @@ describe('session event model', () => {
       event(
         1,
         'agent_output_chunk',
-        {
-          kind: 'agent_output_chunk',
-          channel: 'assistant',
-          content: 'hello ',
-        },
+        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content: 'hello '}},
         'invocation-1',
       ),
     );
@@ -1266,11 +1254,7 @@ describe('session event model', () => {
       event(
         2,
         'agent_output_chunk',
-        {
-          kind: 'agent_output_chunk',
-          channel: 'assistant',
-          content: 'world',
-        },
+        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content: 'world'}},
         'invocation-1',
       ),
     );
@@ -1279,11 +1263,7 @@ describe('session event model', () => {
       event(
         3,
         'agent_output_chunk',
-        {
-          kind: 'agent_output_chunk',
-          channel: 'tool',
-          content: '→ Bash(command="first")\n',
-        },
+        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: '→ Bash(command="first")\n'}},
         'invocation-1',
       ),
     );
@@ -1292,11 +1272,7 @@ describe('session event model', () => {
       event(
         4,
         'agent_output_chunk',
-        {
-          kind: 'agent_output_chunk',
-          channel: 'tool',
-          content: 'first result',
-        },
+        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: 'first result'}},
         'invocation-1',
       ),
     );
@@ -1305,11 +1281,7 @@ describe('session event model', () => {
       event(
         5,
         'agent_output_chunk',
-        {
-          kind: 'agent_output_chunk',
-          channel: 'tool',
-          content: '→ Bash(command="second")\n',
-        },
+        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: '→ Bash(command="second")\n'}},
         'invocation-1',
       ),
     );
@@ -1318,11 +1290,7 @@ describe('session event model', () => {
       event(
         6,
         'agent_output_chunk',
-        {
-          kind: 'agent_output_chunk',
-          channel: 'tool',
-          content: 'second result',
-        },
+        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: 'second result'}},
         'invocation-1',
       ),
     );
@@ -1342,27 +1310,37 @@ describe('session event model', () => {
     let state = initialSessionState();
     state = applyEvent(
       state,
-      event(1, 'tool_call', {kind: 'tool_call', tool: 'Bash', args: {command: 'first'}}, 'inv-1'),
+      event(
+        1,
+        EventType.TOOL_CALL,
+        {case: 'toolCall', value: {tool: 'Bash', args: {command: 'first'}}},
+        'inv-1',
+      ),
     );
     state = applyEvent(
       state,
       event(
         2,
         'tool_result',
-        {kind: 'tool_result', tool: 'Bash', content: 'first result'},
+        {case: 'toolResult', value: {tool: 'Bash', content: 'first result'}},
         'inv-1',
       ),
     );
     state = applyEvent(
       state,
-      event(3, 'tool_call', {kind: 'tool_call', tool: 'Bash', args: {command: 'second'}}, 'inv-1'),
+      event(
+        3,
+        EventType.TOOL_CALL,
+        {case: 'toolCall', value: {tool: 'Bash', args: {command: 'second'}}},
+        'inv-1',
+      ),
     );
     state = applyEvent(
       state,
       event(
         4,
         'tool_result',
-        {kind: 'tool_result', tool: 'Bash', content: 'second result'},
+        {case: 'toolResult', value: {tool: 'Bash', content: 'second result'}},
         'inv-1',
       ),
     );
@@ -1386,7 +1364,7 @@ describe('session event model', () => {
       event(
         1,
         'tool_call',
-        {kind: 'tool_call', tool: 'Read', call_id: 'call-a', args: {path: 'a'}},
+        {case: 'toolCall', value: {tool: 'Read', callId: 'call-a', args: {path: 'a'}}},
         'inv-1',
       ),
     );
@@ -1395,7 +1373,7 @@ describe('session event model', () => {
       event(
         2,
         'tool_call',
-        {kind: 'tool_call', tool: 'Read', call_id: 'call-b', args: {path: 'b'}},
+        {case: 'toolCall', value: {tool: 'Read', callId: 'call-b', args: {path: 'b'}}},
         'inv-1',
       ),
     );
@@ -1404,7 +1382,7 @@ describe('session event model', () => {
       event(
         3,
         'tool_result',
-        {kind: 'tool_result', tool: 'Read', call_id: 'call-b', content: 'result b'},
+        {case: 'toolResult', value: {tool: 'Read', callId: 'call-b', content: 'result b'}},
         'inv-1',
       ),
     );
@@ -1413,7 +1391,7 @@ describe('session event model', () => {
       event(
         4,
         'tool_result',
-        {kind: 'tool_result', tool: 'Read', call_id: 'call-a', content: 'result a'},
+        {case: 'toolResult', value: {tool: 'Read', callId: 'call-a', content: 'result a'}},
         'inv-1',
       ),
     );
@@ -1428,7 +1406,10 @@ describe('session event model', () => {
     const longArg = 'x'.repeat(200);
     const state = applyEvent(
       initialSessionState(),
-      event(1, 'tool_call', {kind: 'tool_call', tool: 'Edit', args: {text: longArg, count: 3}}),
+      event(1, EventType.TOOL_CALL, {
+        case: 'toolCall',
+        value: {tool: 'Edit', args: {text: longArg, count: 3}},
+      }),
     );
 
     expect(state.core.transcript[0]?.toolArguments).toEqual({text: longArg, count: 3});
@@ -1439,7 +1420,12 @@ describe('session event model', () => {
     let state = initialSessionState();
     state = applyEvent(
       state,
-      event(1, 'tool_call', {kind: 'tool_call', tool: 'Bash', args: {command: 'ls'}}, 'inv-1'),
+      event(
+        1,
+        EventType.TOOL_CALL,
+        {case: 'toolCall', value: {tool: 'Bash', args: {command: 'ls'}}},
+        'inv-1',
+      ),
     );
     // A legacy duplicate of the same call must not render a second turn.
     state = applyEvent(
@@ -1447,7 +1433,7 @@ describe('session event model', () => {
       event(
         2,
         'agent_output_chunk',
-        {kind: 'agent_output_chunk', channel: 'tool', content: '→ Bash(command="ls")\n'},
+        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.TOOL, content: '→ Bash(command="ls")\n'}},
         'inv-1',
       ),
     );
@@ -1460,12 +1446,14 @@ describe('session event model', () => {
   it('stores todo updates as per-phase data instead of transcript text', () => {
     const state = applyEvent(
       initialSessionState(),
-      event(1, 'todo_update', {
-        kind: 'todo_update',
-        todos: [
-          {content: 'Set up project', status: 'completed'},
-          {content: 'Add tests', status: 'pending'},
-        ],
+      event(1, EventType.TODO_UPDATE, {
+        case: 'todoUpdate',
+        value: {
+          todos: [
+            {content: 'Set up project', status: 'completed'},
+            {content: 'Add tests', status: 'pending'},
+          ],
+        },
       }),
     );
 
@@ -1489,25 +1477,25 @@ describe('session event model', () => {
       sequence: 1,
       timestamp: '2026-01-01T00:00:00Z',
       type: 'todo_update',
-      agent_kind: 'implementer',
-      round_label: 'round-1',
-      data: {kind: 'todo_update', todos: [{content: 'Edit files', status: 'in_progress'}]},
+      agentKind: 'implementer',
+      roundLabel: 'round-1',
+      data: {case: 'todoUpdate', value: {todos: [{content: 'Edit files', status: 'in_progress'}]}},
     });
     state = applyEvent(state, {
       sequence: 2,
       timestamp: '2026-01-01T00:01:00Z',
       type: 'todo_update',
-      agent_kind: 'judge',
-      round_label: 'round-1',
-      data: {kind: 'todo_update', todos: [{content: 'Check behavior', status: 'pending'}]},
+      agentKind: 'judge',
+      roundLabel: 'round-1',
+      data: {case: 'todoUpdate', value: {todos: [{content: 'Check behavior', status: 'pending'}]}},
     });
     state = applyEvent(state, {
       sequence: 3,
       timestamp: '2026-01-01T00:02:00Z',
       type: 'todo_update',
-      agent_kind: 'implementer',
-      round_label: 'round-2',
-      data: {kind: 'todo_update', todos: [{content: 'Fix regression', status: 'pending'}]},
+      agentKind: 'implementer',
+      roundLabel: 'round-2',
+      data: {case: 'todoUpdate', value: {todos: [{content: 'Fix regression', status: 'pending'}]}},
     });
 
     // Live view follows the currently active agent (round-2 implementer).
@@ -1529,8 +1517,8 @@ describe('session event model', () => {
         'todo_update',
         'impl-a',
         {
-          kind: 'todo_update',
-          todos: [{content: 'Edit implementation A', status: 'in_progress'}],
+          case: 'todoUpdate',
+          value: {todos: [{content: 'Edit implementation A', status: 'in_progress'}]},
         },
         'implementer',
       ),
@@ -1542,8 +1530,8 @@ describe('session event model', () => {
         'todo_update',
         'impl-b',
         {
-          kind: 'todo_update',
-          todos: [{content: 'Edit implementation B', status: 'in_progress'}],
+          case: 'todoUpdate',
+          value: {todos: [{content: 'Edit implementation B', status: 'in_progress'}]},
         },
         'implementer',
       ),
@@ -1562,9 +1550,9 @@ describe('session event model', () => {
       sequence: 1,
       timestamp: '2026-01-01T00:00:00Z',
       type: 'todo_update',
-      agent_kind: 'implementer',
-      round_label: 'round-1',
-      data: {kind: 'todo_update', todos: [{content: 'Edit files', status: 'completed'}]},
+      agentKind: 'implementer',
+      roundLabel: 'round-1',
+      data: {case: 'todoUpdate', value: {todos: [{content: 'Edit files', status: 'completed'}]}},
     });
     // The judge phase starts without emitting todos; the implementer's
     // leftovers must not linger in the live view.
@@ -1572,8 +1560,8 @@ describe('session event model', () => {
       sequence: 2,
       timestamp: '2026-01-01T00:01:00Z',
       type: 'phase_started',
-      agent_kind: 'judge',
-      round_label: 'round-1',
+      agentKind: 'judge',
+      roundLabel: 'round-1',
     });
 
     expect(visibleTodos(state)).toEqual([]);
@@ -1582,9 +1570,9 @@ describe('session event model', () => {
   it('preserves unknown todo statuses for the renderer to degrade', () => {
     const state = applyEvent(
       initialSessionState(),
-      event(1, 'todo_update', {
-        kind: 'todo_update',
-        todos: [{content: 'Mystery step', status: 'deferred'}],
+      event(1, EventType.TODO_UPDATE, {
+        case: 'todoUpdate',
+        value: {todos: [{content: 'Mystery step', status: 'deferred'}]},
       }),
     );
 
@@ -1612,10 +1600,9 @@ describe('session event model', () => {
 
   it('reads a pause from the backend and drops it when the run ends', () => {
     const statusChange = (sequence: number, status: RunStatus, previous: RunStatus) =>
-      event(sequence, 'run_status_changed', {
-        kind: 'run_status_changed',
-        status,
-        previous,
+      event(sequence, EventType.RUN_STATUS_CHANGED, {
+        case: 'runStatusChanged',
+        value: {status, previous},
       });
 
     let state = applyEvent(initialSessionState(), statusChange(1, 'pausing', 'running'));
@@ -1632,11 +1619,9 @@ describe('session event model', () => {
     expect(usageText(state)).toBeNull();
     state = applyEvent(
       state,
-      event(1, 'usage_update', {
-        kind: 'usage_update',
-        input_tokens: 20_100,
-        context_window: 1_000_000,
-        model: 'claude-sonnet-4-6',
+      event(1, EventType.USAGE_UPDATE, {
+        case: 'usageUpdate',
+        value: {inputTokens: 20_100, contextWindow: 1_000_000, model: 'claude-sonnet-4-6'},
       }),
     );
 
@@ -1655,11 +1640,7 @@ describe('session event model', () => {
       event(
         1,
         'agent_output_chunk',
-        {
-          kind: 'agent_output_chunk',
-          channel: 'prompt',
-          content: '# Task\n\nUse `pytest`.',
-        },
+        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.PROMPT, content: '# Task\n\nUse `pytest`.'}},
         'invocation-1',
       ),
     );
@@ -1675,22 +1656,26 @@ describe('session event model', () => {
   it('derives round-scoped agent flow from run and phase events', () => {
     let state = applyEvent(
       initialSessionState(),
-      event(1, 'run_started', {
-        kind: 'run_started',
-        outer_loop: 'agent',
-        input: 'examples/kv-store',
-        max_rounds: 5,
+      event(1, EventType.RUN_STARTED, {
+        case: 'runStarted',
+        value: {outerLoop: 'agent', input: 'examples/kv-store', maxRounds: 5},
       }),
     );
     expect(state.core.phases).toEqual([]);
 
     state = applyEvent(state, {
-      ...event(2, 'phase_started', {kind: 'phase', phase: 'orchestrator', attempt: null}),
-      agent_kind: 'orchestrator',
+      ...event(2, EventType.PHASE_STARTED, {
+        case: 'phase',
+        value: {phase: 'orchestrator', attempt: null},
+      }),
+      agentKind: 'orchestrator',
     });
     state = applyEvent(state, {
-      ...event(3, 'phase_finished', {kind: 'phase', phase: 'orchestrator', attempt: null}),
-      agent_kind: 'orchestrator',
+      ...event(3, EventType.PHASE_FINISHED, {
+        case: 'phase',
+        value: {phase: 'orchestrator', attempt: null},
+      }),
+      agentKind: 'orchestrator',
     });
 
     expect(state.core.rounds).toMatchObject([{number: 1, status: 'active'}]);
@@ -1715,11 +1700,7 @@ describe('session event model', () => {
       event(
         1,
         'agent_output_chunk',
-        {
-          kind: 'agent_output_chunk',
-          channel: 'assistant',
-          content: 'judge output',
-        },
+        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content: 'judge output'}},
         'judge-1',
       ),
     );
@@ -1727,27 +1708,22 @@ describe('session event model', () => {
       ...event(
         2,
         'agent_output_chunk',
-        {
-          kind: 'agent_output_chunk',
-          channel: 'assistant',
-          content: 'profiler output',
-        },
+        {case: 'agentOutputChunk', value: {channel: AgentOutputChannel.ASSISTANT, content: 'profiler output'}},
         'profiler-1',
       ),
-      agent_kind: 'profiler',
+      agentKind: 'profiler',
     });
     state = applyEvent(state, {
       ...event(
         3,
         'agent_output_chunk',
         {
-          kind: 'agent_output_chunk',
-          channel: 'assistant',
-          content: 'round two judge output',
+          case: 'agentOutputChunk',
+          value: {channel: AgentOutputChannel.ASSISTANT, content: 'round two judge output'},
         },
         'judge-2',
       ),
-      round_label: 'round-2',
+      roundLabel: 'round-2',
     });
 
     state = selectNextAgent(state);
@@ -1767,19 +1743,19 @@ describe('session event model', () => {
 });
 
 describe('hypothesis detail navigation', () => {
-  const hypothesis = {
-    hypothesis_id: 'H-01',
+  const hypothesis = hyp({
+    hypothesisId: 'H-01',
     identified: true,
     claim: 'A complete causal hypothesis that must never be truncated in its detail view.',
-    first_round: 1,
-    last_round: 2,
+    firstRound: 1,
+    lastRound: 2,
     rounds: [
       {round: 1, passed: true, reviewed: true},
       {round: 2, passed: false, reviewed: true},
     ],
     kept: false,
     active: false,
-  };
+  });
 
   it('moves from index to hypothesis to round and unwinds one level at a time', () => {
     const landing = setExperiments(initialSessionState(), [hypothesis]);
@@ -1812,7 +1788,7 @@ describe('hypothesis detail navigation', () => {
     const refreshed = setExperiments(detail, [
       {
         ...hypothesis,
-        first_round: 2,
+        firstRound: 2,
         rounds: [{round: 2, passed: false, reviewed: true}],
       },
     ]);
@@ -1822,15 +1798,15 @@ describe('hypothesis detail navigation', () => {
 });
 
 describe('docked experiment chat', () => {
-  const entry = {
-    hypothesis_id: 'H-01',
+  const entry = hyp({
+    hypothesisId: 'H-01',
     identified: true,
-    first_round: 1,
-    last_round: 1,
+    firstRound: 1,
+    lastRound: 1,
     rounds: [{round: 1, passed: true, reviewed: true}],
     kept: false,
     active: false,
-  };
+  });
 
   it('docks beside the log and nowhere else', () => {
     const landing = setExperiments(initialSessionState(), [entry]);
@@ -2003,50 +1979,42 @@ describe('right pane layout', () => {
   });
 });
 
+type EventData = MessageInitShape<typeof RunEventSchema>['data'];
+
+function hyp(init: MessageInitShape<typeof HypothesisEntrySchema>): HypothesisEntry {
+  return create(HypothesisEntrySchema, init);
+}
+
 function event(
   sequence: number,
-  type: RunEvent['type'],
-  data?: RunEvent['data'],
+  type: EventType,
+  data?: EventData,
   invocationId?: string,
 ): RunEvent {
-  return {
+  return makeEvent(type, {
     sequence,
-    timestamp: '2026-01-01T00:00:00Z',
-    type,
-    round_label: 'round-1',
-    ...(type === 'run_started' ? {} : {agent_kind: 'judge'}),
-    ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
+    roundLabel: 'round-1',
+    ...(type === EventType.RUN_STARTED ? {} : {agentKind: 'judge'}),
+    ...(invocationId === undefined ? {} : {executionId: invocationId}),
     ...(data === undefined ? {} : {data}),
-  };
+  });
 }
 
 function executionEvent(
   sequence: number,
-  type: RunEvent['type'],
+  type: EventType,
   executionId: string,
-  data: NonNullable<RunEvent['data']>,
+  data: NonNullable<EventData>,
   agentKind: string,
 ): RunEvent {
-  return {
-    sequence,
-    timestamp: '2026-01-01T00:00:00Z',
-    type,
-    execution_id: executionId,
-    round_label: 'round-1',
-    agent_kind: agentKind,
-    data,
-  };
+  return makeEvent(type, {sequence, executionId, roundLabel: 'round-1', agentKind, data});
 }
 
-function chatEvent(
-  sequence: number,
-  type: RunEvent['type'],
-  data: NonNullable<RunEvent['data']>,
-): RunEvent {
+function chatEvent(sequence: number, type: EventType, data: NonNullable<EventData>): RunEvent {
   return {
     ...event(sequence, type, data, 'chat-1'),
-    agent_kind: 'chat',
-    round_label: 'experiment-chat',
+    agentKind: 'chat',
+    roundLabel: 'experiment-chat',
   };
 }
 
@@ -2093,12 +2061,12 @@ describe('theme picker', () => {
 });
 
 describe('re-entering a round after leaving it', () => {
-  const hypothesis = {
-    hypothesis_id: 'H1',
-    first_round: 1,
-    last_round: 2,
+  const hypothesis = hyp({
+    hypothesisId: 'H1',
+    firstRound: 1,
+    lastRound: 2,
     rounds: [{round: 1}, {round: 2}],
-  } as never;
+  });
 
   function scoped() {
     const base: SessionState = {
@@ -2152,13 +2120,12 @@ describe('a long run', () => {
           sequence: round * 100 + turn,
           timestamp: '2026-01-01T00:00:00Z',
           type: 'agent_output_chunk',
-          agent_kind: 'implementer',
-          round_label: `round-${round}-implementer`,
-          invocation_id: `impl-${round}-${turn}`,
+          agentKind: 'implementer',
+          roundLabel: `round-${round}-implementer`,
+          executionId: `impl-${round}-${turn}`,
           data: {
-            kind: 'agent_output_chunk',
-            channel: 'assistant',
-            content: `round ${round} turn ${turn}`,
+            case: 'agentOutputChunk',
+            value: {channel: AgentOutputChannel.ASSISTANT, content: `round ${round} turn ${turn}`},
           },
         } as RunEvent);
       }
@@ -2177,29 +2144,29 @@ describe('a long run', () => {
 });
 
 describe('scope follows round navigation', () => {
-  const hypothesisA = {
-    hypothesis_id: 'H-A',
+  const hypothesisA = hyp({
+    hypothesisId: 'H-A',
     identified: true,
     title: 'Batch decode requests',
-    first_round: 1,
-    last_round: 2,
+    firstRound: 1,
+    lastRound: 2,
     rounds: [
       {round: 1, passed: true, reviewed: true},
       {round: 2, passed: true, reviewed: true},
     ],
     kept: true,
     active: false,
-  };
-  const hypothesisB = {
-    hypothesis_id: 'H-B',
+  });
+  const hypothesisB = hyp({
+    hypothesisId: 'H-B',
     identified: true,
     title: 'Cache the tokenizer',
-    first_round: 3,
-    last_round: 3,
+    firstRound: 3,
+    lastRound: 3,
     rounds: [{round: 3, passed: false, reviewed: true}],
     kept: false,
     active: true,
-  };
+  });
 
   function runWith(entries: Parameters<typeof setExperiments>[1]): SessionState {
     return setExperiments(
@@ -2269,7 +2236,7 @@ describe('scope follows round navigation', () => {
       hypothesisA,
       {
         ...hypothesisB,
-        last_round: 4,
+        lastRound: 4,
         rounds: [...hypothesisB.rounds, {round: 4, passed: true, reviewed: false}],
       },
     ]);

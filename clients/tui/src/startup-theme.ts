@@ -1,4 +1,5 @@
-import type {ProtocolResponse} from '@vibesys/backend-client';
+import {type ProtocolResponse, TuiTheme} from '@vibesys/backend-client';
+import {enumWord} from './ui/enum-word.js';
 import {resolveTheme, type ThemeName} from './ui/theme.js';
 
 export interface StartupThemeOptions {
@@ -39,7 +40,8 @@ export async function resolveStartupTheme(
   });
   try {
     const response = await Promise.race([pending.catch(() => undefined), expiry]);
-    return resolveTheme(response?.tui_defaults?.theme).name;
+    return resolveTheme(enumWord(TuiTheme, response?.tuiDefaults?.theme)?.replaceAll('_', '-'))
+      .name;
   } finally {
     if (timer) clearTimeout(timer);
   }

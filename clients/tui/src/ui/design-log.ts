@@ -1,5 +1,12 @@
-import type {DesignFileChange} from '@vibesys/backend-client';
+import {
+  CandidateDisposition,
+  DesignChange,
+  type DesignFileChange,
+  HypothesisOutcome,
+  RoundReviewVerdict,
+} from '@vibesys/backend-client';
 import type {DesignRoundView} from '../session-model.js';
+import {enumWord} from './enum-word.js';
 
 /**
  * Pure formatting for the per-round design log.
@@ -17,16 +24,16 @@ const SUMMARY_FILE_LIMIT = 4;
 const CHECKPOINT_WIDTH = 10;
 
 export function fileChangeGlyph(change: DesignFileChange['change']): string {
-  if (change === 'added') return '+';
-  if (change === 'deleted') return '-';
-  if (change === 'renamed') return '→';
+  if (change === DesignChange.ADDED) return '+';
+  if (change === DesignChange.DELETED) return '-';
+  if (change === DesignChange.RENAMED) return '→';
   return '~';
 }
 
 export function formatFileChange(change: DesignFileChange): string {
   const glyph = fileChangeGlyph(change.change);
-  if (change.change === 'renamed' && change.renamed_from) {
-    return `${glyph} ${change.path} (was ${change.renamed_from})`;
+  if (change.change === DesignChange.RENAMED && change.renamedFrom) {
+    return `${glyph} ${change.path} (was ${change.renamedFrom})`;
   }
   return `${glyph} ${change.path}`;
 }
@@ -34,10 +41,10 @@ export function formatFileChange(change: DesignFileChange): string {
 /** Compact per-kind tally, e.g. `+2 ~1 →1`, or null when nothing changed. */
 export function fileChangeCounts(files: readonly DesignFileChange[]): string | null {
   const order: ReadonlyArray<DesignFileChange['change']> = [
-    'added',
-    'modified',
-    'deleted',
-    'renamed',
+    DesignChange.ADDED,
+    DesignChange.MODIFIED,
+    DesignChange.DELETED,
+    DesignChange.RENAMED,
   ];
   const parts = order.flatMap(kind => {
     const count = files.filter(file => file.change === kind).length;
@@ -57,10 +64,13 @@ export function designStageSummary(view: DesignRoundView): string | null {
   const record = view.record;
   if (record === null) return null;
   const parts: string[] = [];
-  if (record.hypothesis_outcome) parts.push(`Outcome ${record.hypothesis_outcome}`);
-  if (record.judge_verdict) parts.push(`Judge ${record.judge_verdict}`);
-  if (record.official_evaluation === true) parts.push('Official evaluation');
-  if (record.candidate_disposition) parts.push(`Candidate ${record.candidate_disposition}`);
+  const outcome = enumWord(HypothesisOutcome, record.hypothesisOutcome);
+  if (outcome) parts.push(`Outcome ${outcome}`);
+  const verdict = enumWord(RoundReviewVerdict, record.judgeVerdict);
+  if (verdict) parts.push(`Judge ${verdict}`);
+  if (record.officialEvaluation === true) parts.push('Official evaluation');
+  const disposition = enumWord(CandidateDisposition, record.candidateDisposition);
+  if (disposition) parts.push(`Candidate ${disposition}`);
   if (record.commit) parts.push(`Checkpoint ${record.commit.slice(0, CHECKPOINT_WIDTH)}`);
   return parts.length > 0 ? parts.join(' · ') : null;
 }
@@ -76,12 +86,12 @@ export function designRoundHeading(view: DesignRoundView): string {
 
 function measuredLabel(view: DesignRoundView): string | null {
   const record = view.record;
-  if (record === null || typeof record.perf_metric !== 'number') return null;
-  const value = Number.isInteger(record.perf_metric)
-    ? String(record.perf_metric)
-    : record.perf_metric.toFixed(2).replace(/\.?0+$/, '');
-  const unit = record.perf_unit ? ` ${record.perf_unit}` : '';
-  const delta = record.perf_delta_pct;
+  if (record === null || typeof record.perfMetric !== 'number') return null;
+  const value = Number.isInteger(record.perfMetric)
+    ? String(record.perfMetric)
+    : record.perfMetric.toFixed(2).replace(/\.?0+$/, '');
+  const unit = record.perfUnit ? ` ${record.perfUnit}` : '';
+  const delta = record.perfDeltaPct;
   const deltaLabel =
     typeof delta === 'number'
       ? ` (${delta > 0 ? '+' : ''}${delta.toFixed(Math.abs(delta) >= 10 ? 0 : 1)}%)`

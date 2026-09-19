@@ -1,5 +1,14 @@
 import {describe, expect, it} from 'bun:test';
-import type {DesignFileChange, DesignRound} from '@vibesys/backend-client';
+import {create} from '@bufbuild/protobuf';
+import {
+  DesignChange,
+  type DesignFileChange,
+  DesignFileChangeSchema,
+  type DesignPatch,
+  DesignPatchSchema,
+  type DesignRound,
+  DesignRoundSchema,
+} from '@vibesys/backend-client';
 import {
   applyDiffPatch,
   closeDiffViewer,
@@ -26,13 +35,38 @@ import {
 } from './session-model.js';
 
 const FILES: DesignFileChange[] = [
-  {path: 'src/lib.rs', change: 'modified'},
-  {path: 'src/new.rs', change: 'added'},
-  {path: 'src/moved.rs', change: 'renamed', renamed_from: 'src/old.rs'},
+  create(DesignFileChangeSchema, {path: 'src/lib.rs', change: DesignChange.MODIFIED}),
+  create(DesignFileChangeSchema, {path: 'src/new.rs', change: DesignChange.ADDED}),
+  create(DesignFileChangeSchema, {
+    path: 'src/moved.rs',
+    change: DesignChange.RENAMED,
+    renamedFrom: 'src/old.rs',
+  }),
 ];
 
-function designRound(overrides: Partial<DesignRound> = {}): DesignRound {
-  return {round: 3, base: 'aaa1111', commit: 'bbb2222', files: FILES, ...overrides};
+interface RoundOverrides {
+  base?: string | undefined;
+  commit?: string | undefined;
+  files?: {changes: DesignFileChange[]} | undefined;
+}
+
+function designRound(overrides: RoundOverrides = {}): DesignRound {
+  return create(DesignRoundSchema, {
+    round: 3,
+    base: 'aaa1111',
+    commit: 'bbb2222',
+    files: {changes: FILES},
+    ...overrides,
+  });
+}
+
+function designPatch(init: {
+  path?: string;
+  base?: string;
+  patch?: string;
+  truncated?: boolean;
+}): DesignPatch {
+  return create(DesignPatchSchema, {base: 'aaa1111', head: 'bbb2222', path: 'src/lib.rs', ...init});
 }
 
 /** A two-hunk patch shaped like real `git diff` output, trailing newline included. */
@@ -66,13 +100,7 @@ function viewerOf(state: SessionState): DiffViewerState {
 /** The loaded-patch state most render tests start from. */
 function loadedState(patch: string = PATCH, truncated = false): SessionState {
   const state = markDiffPatchLoading(openedState(), 'src/lib.rs');
-  return applyDiffPatch(state, {
-    base: 'aaa1111',
-    head: 'bbb2222',
-    path: 'src/lib.rs',
-    patch,
-    truncated,
-  });
+  return applyDiffPatch(state, designPatch({patch, truncated}));
 }
 
 describe('diffRoundRange', () => {
@@ -87,17 +115,17 @@ describe('diffRoundRange', () => {
 
   it('declines rounds missing any leg of the range, each with its own wording', () => {
     // Cheapest first: the round ran but touched nothing.
-    const empty = designRound({files: []});
+    const empty = designRound({files: {changes: []}});
     expect(diffRoundRange(empty)).toBeNull();
     expect(diffRangeExplanation(empty)).toBe('Round 3 changed no workspace files.');
 
     // The server could not read the repository: the null file list is the
     // same degradation the change list itself shows.
-    const unread = designRound({files: null});
+    const unread = designRound({files: undefined});
     expect(diffRoundRange(unread)).toBeNull();
     expect(diffRangeExplanation(unread)).toContain('file changes are not recorded');
 
-    for (const partial of [designRound({base: null}), designRound({commit: null})]) {
+    for (const partial of [designRound({base: undefined}), designRound({commit: undefined})]) {
       expect(diffRoundRange(partial)).toBeNull();
       expect(diffRangeExplanation(partial)).toBe('Round 3 has no commit range to diff.');
     }
@@ -168,14 +196,10 @@ describe('patch slots', () => {
     const loaded = viewerOf(loadedState()).patches['src/lib.rs'];
     expect(loaded).toEqual({kind: 'loaded', patch: PATCH, truncated: false});
 
-    // `patch: null` is the repository failing to produce text, not an empty
+    // An absent patch is the repository failing to produce text, not an empty
     // diff; the slot keeps the distinction for the renderer.
     const state = markDiffPatchLoading(openedState(), 'src/lib.rs');
-    const unavailable = applyDiffPatch(state, {
-      base: 'aaa1111',
-      head: 'bbb2222',
-      path: 'src/lib.rs',
-    });
+    const unavailable = applyDiffPatch(state, designPatch({}));
     expect(viewerOf(unavailable).patches['src/lib.rs']).toEqual({
       kind: 'loaded',
       patch: null,
@@ -185,11 +209,7 @@ describe('patch slots', () => {
 
   it('records a failed query against the file, not a global banner', () => {
     const state = markDiffPatchLoading(openedState(), 'src/lib.rs');
-    const failed = failDiffPatch(
-      state,
-      {base: 'aaa1111', head: 'bbb2222', path: 'src/lib.rs'},
-      'The request failed.',
-    );
+    const failed = failDiffPatch(state, designPatch({}), 'The request failed.');
     expect(viewerOf(failed).patches['src/lib.rs']).toEqual({
       kind: 'error',
       message: 'The request failed.',
@@ -198,10 +218,10 @@ describe('patch slots', () => {
 
   it('drops responses whose request the current viewer did not send', () => {
     const state = markDiffPatchLoading(openedState(), 'src/lib.rs');
-    const patch = {base: 'aaa1111', head: 'bbb2222', path: 'src/lib.rs', patch: PATCH};
+    const patch = designPatch({patch: PATCH});
 
     // Reopened on another round's range while the query was in flight.
-    const otherRange = {...patch, base: 'ccc3333'};
+    const otherRange = designPatch({patch: PATCH, base: 'ccc3333'});
     expect(applyDiffPatch(state, otherRange)).toBe(state);
     expect(failDiffPatch(state, otherRange, 'stale')).toBe(state);
 
@@ -211,7 +231,7 @@ describe('patch slots', () => {
 
     // Already resolved: the answer that arrived first wins.
     const resolved = applyDiffPatch(state, patch);
-    expect(applyDiffPatch(resolved, {...patch, patch: 'other'})).toBe(resolved);
+    expect(applyDiffPatch(resolved, designPatch({patch: 'other'}))).toBe(resolved);
   });
 });
 
@@ -247,7 +267,7 @@ describe('diffViewerLines', () => {
   it('shows the query error against the file with the external fallback', () => {
     const failed = failDiffPatch(
       markDiffPatchLoading(openedState(), 'src/lib.rs'),
-      {base: 'aaa1111', head: 'bbb2222', path: 'src/lib.rs'},
+      designPatch({}),
       'The run has not attached yet.',
     );
     const texts = diffViewerLines(viewerOf(failed)).map(line => line.text);
@@ -257,11 +277,10 @@ describe('diffViewerLines', () => {
   });
 
   it('explains a null patch as the repository going away, not an empty diff', () => {
-    const unavailable = applyDiffPatch(markDiffPatchLoading(openedState(), 'src/lib.rs'), {
-      base: 'aaa1111',
-      head: 'bbb2222',
-      path: 'src/lib.rs',
-    });
+    const unavailable = applyDiffPatch(
+      markDiffPatchLoading(openedState(), 'src/lib.rs'),
+      designPatch({}),
+    );
     const texts = diffViewerLines(viewerOf(unavailable)).map(line => line.text);
     expect(texts).toContain('The workspace repository could not produce this patch.');
     expect(texts).toContain('From the workspace checkout: git diff aaa1111 bbb2222 -- src/lib.rs');

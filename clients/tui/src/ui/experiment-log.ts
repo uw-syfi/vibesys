@@ -1,5 +1,13 @@
 import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} from '@opentui/core';
-import type {HypothesisEntry, HypothesisRound} from '@vibesys/backend-client';
+import {
+  DesignChange,
+  type HypothesisEntry,
+  type HypothesisRound,
+  JudgeVerdict,
+  ObjectiveDirection,
+  PerfDeltaReason,
+  RoundReviewVerdict,
+} from '@vibesys/backend-client';
 import type {SessionController} from '../session-controller.js';
 import {
   designRoundFor,
@@ -17,6 +25,7 @@ import {
 } from '../session-model.js';
 import {fillLayer} from './box-fill.js';
 import {formatFileChange} from './design-log.js';
+import {enumWord} from './enum-word.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {elapsedLabel} from './previews.js';
 import {displayWidth, padToWidth, truncateToWidth} from './text-width.js';
@@ -217,7 +226,7 @@ export class ExperimentLogView {
     applyPaneFocus(
       this.output,
       this.#theme,
-      detail === null ? EXPERIMENTS_TITLE : `Hypothesis ${detail.hypothesis_id}`,
+      detail === null ? EXPERIMENTS_TITLE : `Hypothesis ${detail.hypothesisId}`,
       focusedPane(state) === 'experiments',
     );
     const width = this.#availableWidth ?? this.renderer.terminalWidth;
@@ -371,7 +380,7 @@ export class ExperimentLogView {
     if (design === null) return;
     this.#line('', this.#theme.textPrimary);
     this.#line(`ROUND ${design.round} CHANGES`, this.#theme.textSubtle);
-    const files = design.files ?? null;
+    const files = design.files?.changes ?? null;
     if (files === null) {
       this.#line('File changes are not recorded for this round.', this.#theme.textSubtle);
       return;
@@ -382,9 +391,9 @@ export class ExperimentLogView {
     }
     for (const file of files) {
       const color =
-        file.change === 'added'
+        file.change === DesignChange.ADDED
           ? this.#theme.success
-          : file.change === 'deleted'
+          : file.change === DesignChange.DELETED
             ? this.#theme.error
             : this.#theme.textPrimary;
       this.#line(formatFileChange(file), color);
@@ -713,7 +722,7 @@ export function entryCells(
   const marker = entryLeadingMarker(entry, isSelected);
   const leading = [
     fitColumn(
-      `${marker}${truncate(entry.hypothesis_id, ID_WIDTH - displayWidth(marker))}`,
+      `${marker}${truncate(entry.hypothesisId, ID_WIDTH - displayWidth(marker))}`,
       ID_WIDTH,
       ID_ALIGN,
     ),
@@ -818,7 +827,7 @@ export function entryRow(entry: HypothesisEntry, columns: Columns, isSelected = 
  * framework measured nothing to decide it with.
  */
 export function outcomeColor(theme: Theme, entry: HypothesisEntry): string {
-  const outcome = entry.resolved_outcome ?? null;
+  const outcome = entry.resolvedOutcome ?? null;
   if (entry.active === true) return theme.warning;
   if (outcome === null) return theme.textPrimary;
   if (outcome === 'proven') return theme.success;
@@ -829,9 +838,9 @@ export function outcomeColor(theme: Theme, entry: HypothesisEntry): string {
 /** Map backend resolution terms to concise operator-facing hypothesis decisions. */
 export function outcomeLabel(entry: HypothesisEntry): string {
   if (entry.active === true) return 'Active';
-  if (entry.resolved_outcome === 'proven') return 'Accepted';
-  if (entry.resolved_outcome === 'disproven') return 'Rejected';
-  return sentenceCase(entry.resolved_outcome ?? PLACEHOLDER);
+  if (entry.resolvedOutcome === 'proven') return 'Accepted';
+  if (entry.resolvedOutcome === 'disproven') return 'Rejected';
+  return sentenceCase(entry.resolvedOutcome ?? PLACEHOLDER);
 }
 
 /** Capitalises a wire value for display without touching the rest of it. */
@@ -842,26 +851,26 @@ export function sentenceCase(value: string): string {
 }
 
 export function formatRounds(entry: HypothesisEntry): string {
-  return entry.first_round === entry.last_round
-    ? String(entry.first_round)
-    : `${entry.first_round}-${entry.last_round}`;
+  return entry.firstRound === entry.lastRound
+    ? String(entry.firstRound)
+    : `${entry.firstRound}-${entry.lastRound}`;
 }
 
 /**
  * Delta wins when present. `not_framework_measured` is checked next, before
- * the metric fallback, because the entry-level `perf_metric` is null in that
+ * the metric fallback, because the entry-level `perfMetric` is null in that
  * case anyway. A `baseline_unresolved` absolute value gets a `? ` prefix, not
  * a suffix, so the MEASURED_WIDTH truncation in `fitColumn` can never cut it
  * off. `no_baseline_yet` and a legacy entry with no reason keep the bare
  * value: a first measurement is itself a deliberate absolute display.
  */
 export function formatMeasured(entry: HypothesisEntry): string {
-  const delta = entry.perf_delta_pct;
+  const delta = entry.perfDeltaPct;
   if (typeof delta === 'number') return formatDelta(delta);
-  if (entry.perf_delta_reason === 'not_framework_measured') return 'self-reported';
-  if (typeof entry.perf_metric === 'number') {
-    const marker = entry.perf_delta_reason === 'baseline_unresolved' ? '? ' : '';
-    return `${marker}${trimNumber(entry.perf_metric)}${entry.perf_unit ? ` ${entry.perf_unit}` : ''}`;
+  if (entry.perfDeltaReason === PerfDeltaReason.NOT_FRAMEWORK_MEASURED) return 'self-reported';
+  if (typeof entry.perfMetric === 'number') {
+    const marker = entry.perfDeltaReason === PerfDeltaReason.BASELINE_UNRESOLVED ? '? ' : '';
+    return `${marker}${trimNumber(entry.perfMetric)}${entry.perfUnit ? ` ${entry.perfUnit}` : ''}`;
   }
   return PLACEHOLDER;
 }
@@ -879,7 +888,12 @@ function formatDelta(delta: number): string {
 export function measuredDirection(entries: readonly HypothesisEntry[]): 'max' | 'min' | null {
   let direction: 'max' | 'min' | null = null;
   for (const entry of entries) {
-    const candidate = entry.perf_direction ?? null;
+    const candidate =
+      entry.perfDirection === ObjectiveDirection.MAX
+        ? 'max'
+        : entry.perfDirection === ObjectiveDirection.MIN
+          ? 'min'
+          : null;
     if (candidate === null) continue;
     if (direction === null) direction = candidate;
     else if (direction !== candidate) return null;
@@ -889,9 +903,8 @@ export function measuredDirection(entries: readonly HypothesisEntry[]): 'max' | 
 
 export function hypothesisMetadata(entry: HypothesisEntry): string {
   const parts = [`Rounds ${formatRounds(entry)}`];
-  if (entry.judge_verdict !== null && entry.judge_verdict !== undefined) {
-    parts.push(`Judge ${sentenceCase(entry.judge_verdict)}`);
-  }
+  const verdict = enumWord(JudgeVerdict, entry.judgeVerdict);
+  if (verdict !== null) parts.push(`Judge ${sentenceCase(verdict)}`);
   parts.push(`Decision ${outcomeLabel(entry)}`);
   if (entry.kept === true) parts.push('Candidate kept');
   else if (entry.kept === false) parts.push('Candidate reverted');
@@ -907,29 +920,29 @@ export function hypothesisMetadata(entry: HypothesisEntry): string {
 
 function measurementMetadata(entry: HypothesisEntry): string[] {
   const parts: string[] = [];
-  const name = entry.perf_metric_name ?? null;
-  const direction = measurementDirection(entry.perf_direction);
+  const name = entry.perfMetricName ?? null;
+  const direction = measurementDirection(entry.perfDirection);
   if (name !== null) parts.push(`Metric ${name}${direction === null ? '' : ` (${direction})`}`);
   else if (direction !== null) parts.push(`Direction ${direction}`);
   // Legacy rounds recorded the metric name as the unit; once the name clause
   // carries that identity, repeating it after each number is noise.
-  const unit = entry.perf_unit && entry.perf_unit !== name ? ` ${entry.perf_unit}` : '';
-  if (typeof entry.perf_metric === 'number') {
-    parts.push(`Measured ${trimNumber(entry.perf_metric)}${unit}`);
+  const unit = entry.perfUnit && entry.perfUnit !== name ? ` ${entry.perfUnit}` : '';
+  if (typeof entry.perfMetric === 'number') {
+    parts.push(`Measured ${trimNumber(entry.perfMetric)}${unit}`);
   }
-  if (typeof entry.perf_baseline_value === 'number') {
-    parts.push(`Baseline ${trimNumber(entry.perf_baseline_value)}${unit}`);
+  if (typeof entry.perfBaselineValue === 'number') {
+    parts.push(`Baseline ${trimNumber(entry.perfBaselineValue)}${unit}`);
   }
-  if (typeof entry.perf_baseline_round === 'number') {
-    parts.push(`Baseline round ${entry.perf_baseline_round}`);
+  if (typeof entry.perfBaselineRound === 'number') {
+    parts.push(`Baseline round ${entry.perfBaselineRound}`);
   }
-  if (entry.perf_baseline_commit) {
-    parts.push(`Baseline commit ${entry.perf_baseline_commit.slice(0, 7)}`);
+  if (entry.perfBaselineCommit) {
+    parts.push(`Baseline commit ${entry.perfBaselineCommit.slice(0, 7)}`);
   }
-  if (typeof entry.perf_delta_pct === 'number') {
-    parts.push(`Delta ${formatDelta(entry.perf_delta_pct)}`);
+  if (typeof entry.perfDeltaPct === 'number') {
+    parts.push(`Delta ${formatDelta(entry.perfDeltaPct)}`);
   }
-  const reason = deltaReasonLabel(entry.perf_delta_reason);
+  const reason = deltaReasonLabel(entry.perfDeltaReason);
   if (reason !== null) parts.push(reason);
   return parts;
 }
@@ -1019,27 +1032,27 @@ function tableRowsForItem(
 }
 
 function measurementDirection(
-  direction: HypothesisEntry['perf_direction'],
+  direction: HypothesisEntry['perfDirection'],
 ): 'maximize' | 'minimize' | null {
-  if (direction === 'max') return 'maximize';
-  if (direction === 'min') return 'minimize';
+  if (direction === ObjectiveDirection.MAX) return 'maximize';
+  if (direction === ObjectiveDirection.MIN) return 'minimize';
   return null;
 }
 
 /**
- * Spells out why `perf_delta_pct` is absent. Exhaustive over the wire union
+ * Spells out why `perfDeltaPct` is absent. Exhaustive over the wire union
  * with no default case, so a reason value the client does not yet know how
  * to word fails the build instead of silently rendering nothing.
  */
-function deltaReasonLabel(reason: HypothesisEntry['perf_delta_reason']): string | null {
+function deltaReasonLabel(reason: HypothesisEntry['perfDeltaReason']): string | null {
   switch (reason) {
-    case 'no_baseline_yet':
+    case PerfDeltaReason.NO_BASELINE_YET:
       return 'No baseline existed yet';
-    case 'baseline_unresolved':
+    case PerfDeltaReason.BASELINE_UNRESOLVED:
       return 'No trusted baseline resolved';
-    case 'not_framework_measured':
+    case PerfDeltaReason.NOT_FRAMEWORK_MEASURED:
       return 'Self-reported, not framework-measured';
-    case null:
+    case PerfDeltaReason.UNSPECIFIED:
     case undefined:
       return null;
   }
@@ -1048,19 +1061,20 @@ function deltaReasonLabel(reason: HypothesisEntry['perf_delta_reason']): string 
 function roundMetadata(roundNumber: number, round: HypothesisRound | undefined): string {
   const parts = [`Round ${roundNumber}`];
   if (round !== undefined) parts.push(`Judge ${judgeLabel(round)}`);
-  if (typeof round?.perf_metric === 'number') {
-    parts.push(`${trimNumber(round.perf_metric)}${round.perf_unit ? ` ${round.perf_unit}` : ''}`);
+  if (typeof round?.perfMetric === 'number') {
+    parts.push(`${trimNumber(round.perfMetric)}${round.perfUnit ? ` ${round.perfUnit}` : ''}`);
   }
   return parts.join(' · ');
 }
 
 /**
- * The round's own review state. `judge_verdict` is authoritative; a record
+ * The round's own review state. `judgeVerdict` is authoritative; a record
  * written before the framework stored one carries only `reviewed`, and
  * `passed` is the closest thing it has to a verdict.
  */
 function judgeLabel(round: HypothesisRound): string {
-  if (round.judge_verdict) return round.judge_verdict;
+  const verdict = enumWord(RoundReviewVerdict, round.judgeVerdict);
+  if (verdict !== null) return verdict;
   return round.reviewed ? (round.passed ? 'pass' : 'fail') : 'pending';
 }
 

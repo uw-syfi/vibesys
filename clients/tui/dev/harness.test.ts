@@ -23,13 +23,20 @@ import {createConnection, type Socket} from 'node:net';
 import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import type {RunEvent, RunSnapshot} from '@vibesys/backend-client';
+import {type JsonObject, toJson} from '@bufbuild/protobuf';
 import {
-  type ActiveExecutionCheckpoint,
-  initialCoreState,
-  reduceEventBatch,
-  reduceSnapshot,
-} from '@vibesys/core-state';
+  buildRequest,
+  decodeResponse,
+  decodeServerMessage,
+  encodeRequest,
+  type EventBatchMessage,
+  EventType,
+  type ProtocolResponse,
+  type RequestBody,
+  type RunEvent,
+  RunEventSchema,
+} from '@vibesys/backend-client';
+import {initialCoreState, reduceEventBatch, reduceSnapshot} from '@vibesys/core-state';
 import {canonicalJournalEvents, readJournalRecords} from './journal.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -144,11 +151,11 @@ function connect(socketPath: string): Promise<Socket> {
   });
 }
 
-/** Resolves with the first message the server writes that `match` accepts. */
-function nextMessage(
+/** Resolves with the first line the server writes that `match` accepts, as raw JSON. */
+function nextLine(
   socket: Socket,
   match: (message: Record<string, unknown>) => boolean,
-): Promise<Record<string, unknown>> {
+): Promise<string> {
   return new Promise(resolve => {
     let buffer = '';
     socket.setEncoding('utf8');
@@ -158,15 +165,19 @@ function nextMessage(
       buffer = lines.pop() ?? '';
       for (const line of lines) {
         if (!line) continue;
-        const message = JSON.parse(line) as Record<string, unknown>;
-        if (match(message)) resolve(message);
+        if (match(JSON.parse(line) as Record<string, unknown>)) resolve(line);
       }
     });
   });
 }
 
-function request(socket: Socket, payload: Record<string, unknown>): void {
-  socket.write(`${JSON.stringify({protocol_version: 1, ...payload})}\n`);
+/** Resolves with the reply to `requestId`, decoded with the client's own codec. */
+async function nextResponse(socket: Socket, requestId: string): Promise<ProtocolResponse> {
+  return decodeResponse(await nextLine(socket, message => message['request_id'] === requestId));
+}
+
+function request(socket: Socket, requestId: string, body: RequestBody): void {
+  socket.write(`${encodeRequest(buildRequest(body, requestId))}\n`);
 }
 
 /** Starts a mock server bound to `socketPath` and waits for it to accept. */
@@ -181,14 +192,16 @@ async function startMockServer(socketPath: string, args: string[]): Promise<void
 }
 
 /** Subscribes on its own connection and resolves with the bootstrap batch. */
-async function bootstrapBatch(socketPath: string): Promise<Record<string, unknown>> {
+async function bootstrapBatch(socketPath: string): Promise<EventBatchMessage> {
   const stream = await connect(socketPath);
-  const batch = nextMessage(stream, message => message['type'] === 'event_batch');
-  request(stream, {request_id: 'sub-1', type: 'subscribe'});
-  return batch;
+  const line = nextLine(stream, message => 'event_batch' in message);
+  request(stream, 'sub-1', {case: 'subscribe', value: {}});
+  const message = decodeServerMessage(await line);
+  if (message.body.case !== 'eventBatch') throw new Error('expected an event batch');
+  return message.body.value;
 }
 
-function countByType(events: readonly RunEvent[], type: string): number {
+function countByType(events: readonly RunEvent[], type: EventType): number {
   return events.filter(event => event.type === type).length;
 }
 
@@ -247,25 +260,26 @@ test(
     // A second connection, the way the TUI queries while its stream runs. Boot
     // issues both concurrently, so this answer can land after the batch.
     const control = await connect(socketPath);
-    const snapshotMessage = nextMessage(control, message => message['request_id'] === 'snap-1');
-    request(control, {request_id: 'snap-1', type: 'query.snapshot'});
-    const snapshot = (await snapshotMessage)['snapshot'] as RunSnapshot;
+    const snapshotResponse = nextResponse(control, 'snap-1');
+    request(control, 'snap-1', {case: 'snapshot', value: {}});
+    const snapshot = (await snapshotResponse).snapshot;
+    if (snapshot === undefined) throw new Error('expected a snapshot');
 
-    const throughSequence = batch['through_sequence'] as number;
+    const throughSequence = batch.throughSequence;
     // The bootstrap counts events, not sequences, and the two stopped agreeing
     // when the replay started applying the server's legacy translation: this
     // capture records both spellings of each lifecycle boundary, and the
     // superseded legacy one is dropped before it reaches the wire.
-    expect(batch['events']).toHaveLength(MID_EXECUTION_BOOTSTRAP);
+    expect(batch.events).toHaveLength(MID_EXECUTION_BOOTSTRAP);
     // The equal-sequence case is the one `reduceSnapshot` accepts.
     expect(snapshot.sequence).toBe(throughSequence);
 
     const folded = reduceEventBatch(
       initialCoreState(),
-      batch['events'] as RunEvent[],
-      batch['active_executions'] as ActiveExecutionCheckpoint | undefined,
+      batch.events,
+      batch.activeExecutions,
       throughSequence,
-      batch['history_after_sequence'] as number,
+      batch.historyAfterSequence,
     );
     // Precondition: the bootstrap really does stop inside an invocation.
     const running = Object.keys(folded.activeExecutions);
@@ -289,13 +303,13 @@ test(
       '--paused',
     ]);
     const batch = await bootstrapBatch(socketPath);
-    const events = batch['events'] as RunEvent[];
+    const events = batch.events;
 
     // The capture records `invocation_started` and carries the execution
     // identity under `invocation_id` alone, so both of these are the
     // translation's doing and neither held before it.
-    expect(countByType(events, 'invocation_started')).toBe(0);
-    expect(countByType(events, 'agent_execution_started')).toBe(1);
+    expect(countByType(events, EventType.INVOCATION_STARTED)).toBe(0);
+    expect(countByType(events, EventType.AGENT_EXECUTION_STARTED)).toBe(1);
 
     // Folded with no checkpoint, so what this proves is that the delivered
     // events open the execution, not that the mock also described one.
@@ -303,8 +317,8 @@ test(
       initialCoreState(),
       events,
       undefined,
-      batch['through_sequence'] as number,
-      batch['history_after_sequence'] as number,
+      batch.throughSequence,
+      batch.historyAfterSequence,
     );
     const executions = Object.values(folded.activeExecutions);
     expect(executions).toHaveLength(1);
@@ -316,21 +330,21 @@ test(
     const reconciled = reduceEventBatch(
       initialCoreState(),
       events,
-      batch['active_executions'] as ActiveExecutionCheckpoint,
-      batch['through_sequence'] as number,
-      batch['history_after_sequence'] as number,
+      batch.activeExecutions,
+      batch.throughSequence,
+      batch.historyAfterSequence,
     );
     expect(reconciled.activeExecutions).toEqual(folded.activeExecutions);
 
     // The whole capture, over the backfill query, which reads the same replay.
     const control = await connect(socketPath);
-    const answer = nextMessage(control, message => message['request_id'] === 'events-1');
-    request(control, {request_id: 'events-1', type: 'query.events', after_sequence: 0});
-    const all = (await answer)['events'] as RunEvent[];
-    expect(countByType(all, 'agent_execution_started')).toBe(3);
-    expect(countByType(all, 'agent_execution_finished')).toBe(3);
-    expect(countByType(all, 'invocation_started')).toBe(0);
-    expect(countByType(all, 'invocation_finished')).toBe(0);
+    const answer = nextResponse(control, 'events-1');
+    request(control, 'events-1', {case: 'events', value: {afterSequence: 0}});
+    const all = (await answer).events;
+    expect(countByType(all, EventType.AGENT_EXECUTION_STARTED)).toBe(3);
+    expect(countByType(all, EventType.AGENT_EXECUTION_FINISHED)).toBe(3);
+    expect(countByType(all, EventType.INVOCATION_STARTED)).toBe(0);
+    expect(countByType(all, EventType.INVOCATION_FINISHED)).toBe(0);
   },
   TEST_TIMEOUT_MS,
 );
@@ -384,19 +398,14 @@ test(
  * Python, and the golden it reads is the only place the two languages meet.
  */
 test('canonicalizes recorded journals the way the backend read path does', () => {
-  const golden = JSON.parse(readFileSync(CANONICAL_GOLDEN, 'utf8')) as Record<string, unknown[][]>;
+  const golden = JSON.parse(readFileSync(CANONICAL_GOLDEN, 'utf8')) as Record<string, JsonObject[]>;
   expect(Object.keys(golden)).not.toHaveLength(0);
   for (const [fixture, expected] of Object.entries(golden)) {
-    const records = readJournalRecords(join(FIXTURE_DIR, fixture));
-    const recordedType = new Map(records.map(record => [record.sequence, record.type]));
-    // The same projection `_canonical_projection` writes: identity and order for
-    // every delivered event, and the whole payload for the ones the translation
-    // rebuilt, which are exactly those whose type no longer matches the record.
-    const projection = canonicalJournalEvents(records).map(event => {
-      const entry: unknown[] = [event.sequence, event.type, event.execution_id ?? null];
-      if (event.type !== recordedType.get(event.sequence)) entry.push(event.data ?? null);
-      return entry;
-    });
+    // The version 2 canonical JSON of every event a client receives, in order,
+    // with proto field names, as `codec.to_dict` writes it.
+    const projection = canonicalJournalEvents(readJournalRecords(join(FIXTURE_DIR, fixture))).map(
+      event => toJson(RunEventSchema, event, {useProtoFieldName: true}),
+    );
     expect(projection).toEqual(expected);
   }
 });

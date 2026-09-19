@@ -1,9 +1,11 @@
 import {
+  CommandAckStatus,
+  CommandAction,
   type EventSubscription,
-  type ExperimentCursor,
+  EventType,
   PersistentEventStream,
   type ProtocolResponse,
-  type RequestInput,
+  type RequestBody,
   type RunEvent,
   ServerError,
   type ServerMessage,
@@ -123,6 +125,7 @@ import {
   updateChatConversation,
 } from './session-model.js';
 import {renderDesignSummary} from './ui/design-log.js';
+import {enumWord} from './ui/enum-word.js';
 import {DEFAULT_THEME_NAME, type ThemeName} from './ui/theme.js';
 
 export interface SessionController {
@@ -220,7 +223,7 @@ export interface SessionController {
 }
 
 export interface ServerTransport {
-  request(input: RequestInput): Promise<ProtocolResponse>;
+  request(input: RequestBody): Promise<ProtocolResponse>;
   subscribe(
     afterSequence: number,
     onMessage: (message: ServerMessage) => void,
@@ -248,8 +251,14 @@ const BACKFILL_CHUNK = 1_000;
  * outage gets the full schedule again.
  */
 const RECONNECT_DELAYS_MS: readonly number[] = [500, 1_000, 2_000, 4_000, 8_000];
-type EventBatchMessage = Extract<ServerMessage, {events: RunEvent[]}>;
-type ProtocolErrorMessage = Extract<ServerMessage, {message: string}>;
+/** The projection position the client last applied, sent back as the next query's `after`. */
+interface ExperimentCursorState {
+  runId: string;
+  projectionId: string;
+  revision: number;
+}
+
+type EventBatchMessage = Extract<NonNullable<ServerMessage['body']>, {case: 'eventBatch'}>['value'];
 
 export class SocketSessionController implements SessionController {
   #state: SessionState;
@@ -262,9 +271,9 @@ export class SocketSessionController implements SessionController {
   #experimentFetch: Promise<void> | null = null;
   #experimentRefreshPending = false;
   /** Last server projection applied completely to the local experiment log. */
-  #experimentCursor: ExperimentCursor | null = null;
+  #experimentCursor: ExperimentCursorState | null = null;
   /** Highest semantic invalidation observed while connected. */
-  #experimentTarget: Pick<ExperimentCursor, 'run_id' | 'revision'> | null = null;
+  #experimentTarget: Pick<ExperimentCursorState, 'runId' | 'revision'> | null = null;
   #experimentForceRefresh = false;
   /** Changes whenever an unknown invalidation makes an in-flight answer stale. */
   #experimentRefreshGeneration = 0;
@@ -398,7 +407,7 @@ export class SocketSessionController implements SessionController {
 
   async #loadSnapshot(): Promise<void> {
     try {
-      const response = await this.client.request({type: 'query.snapshot'});
+      const response = await this.client.request({case: 'snapshot', value: {}});
       if (response.snapshot) this.#setState(applySnapshot(this.#state, response.snapshot));
     } catch (error) {
       this.#setState(reportCaughtError(this.#state, error, 'request'));
@@ -428,17 +437,17 @@ export class SocketSessionController implements SessionController {
     const nextFloor = Math.max(0, floor - BACKFILL_CHUNK);
     try {
       const response = await this.client.request({
-        type: 'query.events',
-        after_sequence: nextFloor,
-        // Every folded event has `sequence > floor`, so the range has to
-        // include the floor itself and stops one above it.
-        before_sequence: floor + 1,
+        case: 'events',
+        value: {
+          afterSequence: nextFloor,
+          // Every folded event has `sequence > floor`, so the range has to
+          // include the floor itself and stops one above it.
+          beforeSequence: floor + 1,
+        },
       });
       // Spine events replayed with the tail fall inside this range; folding
       // them a second time would duplicate their transcript entries.
-      const events = (response.events ?? []).filter(
-        event => event.sequence === undefined || !this.#foldedBelowFloor.has(event.sequence),
-      );
+      const events = response.events.filter(event => !this.#foldedBelowFloor.has(event.sequence));
       this.#setState(applyEventPrefix(this.#state, events, this.#lowerHistoryFloor(nextFloor)));
       return true;
     } catch (error) {
@@ -618,8 +627,8 @@ export class SocketSessionController implements SessionController {
   async openChatModelMenu(): Promise<void> {
     this.#setState(openChatModelMenu(this.#state));
     try {
-      const response = await this.client.request({type: 'query.chat_options'});
-      const options = response.chat_options;
+      const response = await this.client.request({case: 'chatOptions', value: {}});
+      const options = response.chatOptions;
       this.#setState(
         options === null || options === undefined
           ? failChatMenu(this.#state, 'This run has not reported its chat options yet.')
@@ -684,12 +693,12 @@ export class SocketSessionController implements SessionController {
   async #createChatThread(settings: ChatThreadSettings | null): Promise<void> {
     try {
       const response = await this.client.request({
-        type: 'query.chat_thread_create',
-        ...(settings === null ? {} : {provider: settings.provider, model: settings.model}),
+        case: 'chatThreadCreate',
+        value: settings === null ? {} : {provider: settings.provider, model: settings.model},
       });
       let state = closeChatMenu(this.#state);
       for (const event of response.events ?? []) state = applyEvent(state, event);
-      const threadId = response.chat_thread?.thread_id;
+      const threadId = response.chatThread?.threadId;
       this.#setState(threadId === undefined ? state : switchChatThread(state, threadId));
     } catch (error) {
       this.#setState(reportCaughtError(this.#state, error, 'request'));
@@ -829,11 +838,11 @@ export class SocketSessionController implements SessionController {
   }
 
   async #renderPerfPane(): Promise<string> {
-    const response = await this.client.request({type: 'query.performance'});
+    const response = await this.client.request({case: 'performance', value: {}});
     return renderPerformanceCurve(
       response.performance ?? [],
       response.events ?? [],
-      response.performance_context,
+      response.performanceContext,
     );
   }
 
@@ -843,8 +852,8 @@ export class SocketSessionController implements SessionController {
    * round, so the pane and the drill-down cannot disagree about a round.
    */
   async #renderDesignPane(): Promise<string> {
-    const response = await this.client.request({type: 'query.design'});
-    if (response.design_ready === false) {
+    const response = await this.client.request({case: 'design', value: {}});
+    if (response.designReady === false) {
       return 'The design log is not available until a run is attached.';
     }
     const rounds = response.design ?? [];
@@ -861,9 +870,9 @@ export class SocketSessionController implements SessionController {
     if (right === null) return;
     const relevant = events.some(
       event =>
-        event.type === 'round_finished' ||
-        event.type === 'benchmark_result' ||
-        event.data?.kind === 'benchmark_result',
+        event.type === EventType.ROUND_FINISHED ||
+        event.type === EventType.BENCHMARK_RESULT ||
+        event.data.case === 'benchmarkResult',
     );
     if (relevant) void this.#loadPane(right.view);
   }
@@ -961,8 +970,8 @@ export class SocketSessionController implements SessionController {
     const key: DiffPatchKey = {base: viewer.base, head: viewer.head, path: file.path};
     this.#setState(markDiffPatchLoading(this.#state, file.path));
     try {
-      const response = await this.client.request({type: 'query.design_patch', ...key});
-      const patch = response.design_patch ?? null;
+      const response = await this.client.request({case: 'designPatch', value: key});
+      const patch = response.designPatch ?? null;
       this.#setState(
         patch === null
           ? failDiffPatch(this.#state, key, 'The run has not attached yet.')
@@ -991,12 +1000,12 @@ export class SocketSessionController implements SessionController {
     const generation = this.#experimentRefreshGeneration;
     try {
       const response = await this.client.request({
-        type: 'query.experiments',
-        ...(this.#experimentCursor === null ? {} : {after: this.#experimentCursor}),
+        case: 'experiments',
+        value: this.#experimentCursor === null ? {} : {after: this.#experimentCursor},
       });
-      if (response.experiments_ready === false) return;
+      if (response.experimentsReady === false) return;
       const entries = response.experiments ?? [];
-      const update = response.experiment_update;
+      const update = response.experimentUpdate;
       if (this.#experimentResponseStale(generation, update)) {
         this.#experimentRefreshPending = true;
         return;
@@ -1008,17 +1017,17 @@ export class SocketSessionController implements SessionController {
         this.#setState(setExperiments(this.#state, entries));
       } else if (update.reset) {
         this.#experimentCursor = {
-          run_id: update.run_id,
-          projection_id: update.projection_id,
-          revision: update.through_revision,
+          runId: update.runId,
+          projectionId: update.projectionId,
+          revision: update.throughRevision,
         };
         this.#clearSatisfiedExperimentTarget();
         this.#setState(setExperiments(this.#state, entries));
       } else if (
         this.#experimentCursor === null ||
-        this.#experimentCursor.run_id !== update.run_id ||
-        this.#experimentCursor.projection_id !== update.projection_id ||
-        this.#experimentCursor.revision !== update.from_revision
+        this.#experimentCursor.runId !== update.runId ||
+        this.#experimentCursor.projectionId !== update.projectionId ||
+        this.#experimentCursor.revision !== update.fromRevision
       ) {
         // Never apply a delta to an unproven base. The queued cursor-free
         // request deterministically recovers with a full server snapshot.
@@ -1028,15 +1037,15 @@ export class SocketSessionController implements SessionController {
         return;
       } else {
         this.#experimentCursor = {
-          run_id: update.run_id,
-          projection_id: update.projection_id,
-          revision: update.through_revision,
+          runId: update.runId,
+          projectionId: update.projectionId,
+          revision: update.throughRevision,
         };
         this.#clearSatisfiedExperimentTarget();
         const merged = mergeExperimentEntries(
           this.#state.experimentLog?.entries ?? [],
           entries,
-          update.removed_hypothesis_ids ?? [],
+          update.removedHypothesisIds ?? [],
         );
         this.#setState(setExperiments(this.#state, merged));
       }
@@ -1067,8 +1076,8 @@ export class SocketSessionController implements SessionController {
 
   async #requestDesignLog(): Promise<void> {
     try {
-      const response = await this.client.request({type: 'query.design'});
-      if (response.design_ready === false) return;
+      const response = await this.client.request({case: 'design', value: {}});
+      if (response.designReady === false) return;
       this.#setState(setDesignLog(this.#state, response.design ?? []));
     } catch {
       // Supplemental data: no banner, no experiment-log error state.
@@ -1205,14 +1214,13 @@ export class SocketSessionController implements SessionController {
   async #requestChat(text: string, threadId: string): Promise<void> {
     try {
       const response = await this.client.request({
-        type: 'query.chat',
-        text,
-        ...(threadId === DEFAULT_CHAT_THREAD_ID ? {} : {thread_id: threadId}),
+        case: 'chat',
+        value: {text, ...(threadId === DEFAULT_CHAT_THREAD_ID ? {} : {threadId})},
       });
       const answer = response.chat?.answer ?? 'No chat answer was returned.';
       let state = this.#state;
       for (const event of response.events ?? []) state = applyEvent(state, event);
-      if (!(response.events ?? []).some(event => event.data?.kind === 'chat')) {
+      if (!(response.events ?? []).some(event => event.data.case === 'chat')) {
         state = updateChatConversation(state, threadId, entries => [
           ...entries,
           {
@@ -1318,24 +1326,26 @@ export class SocketSessionController implements SessionController {
   }
 
   #dispatchMessage(message: ServerMessage, resumed: boolean): readonly RunEvent[] | null {
-    if ('event' in message) {
-      this.#setState(applyEvent(this.#state, message.event));
-      return [message.event];
+    const body = message.body;
+    switch (body.case) {
+      case 'event':
+        this.#setState(applyEvent(this.#state, body.value));
+        return [body.value];
+      case 'eventBatch':
+        this.#reconcileBatch(body.value, resumed);
+        return body.value.events;
+      case 'protocolError':
+        this.#streamProtocolError = true;
+        this.#setState(
+          reportError(markEventStreamUnavailable(this.#state), body.value.message, {
+            scope: 'protocol',
+            diagnostic: body.value.diagnostic ?? null,
+          }),
+        );
+        return null;
+      default:
+        return null;
     }
-    if ('events' in message) {
-      this.#reconcileBatch(message, resumed);
-      return message.events;
-    }
-    if (!('message' in message)) return null;
-    const protocolError = message as ProtocolErrorMessage;
-    this.#streamProtocolError = true;
-    this.#setState(
-      reportError(markEventStreamUnavailable(this.#state), protocolError.message, {
-        scope: 'protocol',
-        diagnostic: protocolError.diagnostic ?? null,
-      }),
-    );
-    return null;
   }
 
   #reconcileBatch(message: EventBatchMessage, resumed: boolean): void {
@@ -1347,20 +1357,20 @@ export class SocketSessionController implements SessionController {
   }
 
   #reconcileResumedBatch(message: EventBatchMessage): void {
-    const store = message.store_id ?? '';
+    const store = message.storeId;
     const knownStoreChanged = Boolean(this.#storeId && store && store !== this.#storeId);
     if (knownStoreChanged) {
       // A changed store invalidates the cursor and its folded state. The
       // resumed batch is therefore a fresh bootstrap, including spine tracking.
-      const declared = message.history_after_sequence ?? 0;
+      const declared = message.historyAfterSequence;
       this.#storeId = store;
       this.#declaredFloor = declared;
       this.#setState(
         applyEventRebootstrap(
           this.#state,
           message.events,
-          message.active_executions,
-          message.through_sequence,
+          message.activeExecutions,
+          message.throughSequence,
           this.#resetHistoryFloor(declared),
         ),
       );
@@ -1374,16 +1384,16 @@ export class SocketSessionController implements SessionController {
       applyEventBatch(
         this.#state,
         message.events,
-        message.active_executions,
-        message.through_sequence,
+        message.activeExecutions,
+        message.throughSequence,
         this.#state.core.historyAfterSequence,
       ),
     );
   }
 
   #reconcileFreshBatch(message: EventBatchMessage): void {
-    const declared = message.history_after_sequence ?? 0;
-    const store = message.store_id ?? '';
+    const declared = message.historyAfterSequence;
+    const store = message.storeId;
     const rebootstrap =
       (this.#storeId !== null && store !== this.#storeId) ||
       (this.#declaredFloor !== null && declared > this.#declaredFloor);
@@ -1396,8 +1406,8 @@ export class SocketSessionController implements SessionController {
       (rebootstrap ? applyEventRebootstrap : applyEventBatch)(
         this.#state,
         message.events,
-        message.active_executions,
-        message.through_sequence,
+        message.activeExecutions,
+        message.throughSequence,
         floor,
       ),
     );
@@ -1454,7 +1464,7 @@ export class SocketSessionController implements SessionController {
     if (this.#state.experimentLog === null) return;
     let relevant = false;
     for (const event of events) {
-      if (event.type !== 'experiments_changed') continue;
+      if (event.type !== EventType.EXPERIMENTS_CHANGED) continue;
       relevant = true;
       this.#noteExperimentsChanged(event);
     }
@@ -1466,29 +1476,30 @@ export class SocketSessionController implements SessionController {
   /** True when a response was fetched for an older refresh or for another run's cursor. */
   #experimentResponseStale(
     generation: number,
-    update: {run_id: string} | null | undefined,
+    update: {runId: string} | null | undefined,
   ): boolean {
     return (
       generation !== this.#experimentRefreshGeneration ||
       (update !== undefined &&
         update !== null &&
         this.#experimentTarget !== null &&
-        this.#experimentTarget.run_id !== update.run_id)
+        this.#experimentTarget.runId !== update.runId)
     );
   }
 
   #noteExperimentsChanged(event: RunEvent): void {
-    const revision = event.data?.kind === 'experiments_changed' ? event.data.revision : null;
-    const runId = event.run_id ?? this.#experimentCursor?.run_id;
-    if (revision === undefined || revision === null || runId === undefined) {
+    const revision =
+      event.data.case === 'experimentsChanged' ? event.data.value.revision : undefined;
+    const runId = event.runId !== '' ? event.runId : this.#experimentCursor?.runId;
+    if (revision === undefined || runId === undefined) {
       this.#experimentRefreshGeneration += 1;
       this.#experimentForceRefresh = true;
     } else if (
       this.#experimentTarget === null ||
-      this.#experimentTarget.run_id !== runId ||
+      this.#experimentTarget.runId !== runId ||
       revision > this.#experimentTarget.revision
     ) {
-      this.#experimentTarget = {run_id: runId, revision};
+      this.#experimentTarget = {runId, revision};
     }
   }
 
@@ -1496,7 +1507,7 @@ export class SocketSessionController implements SessionController {
     if (this.#experimentForceRefresh) return true;
     if (this.#experimentTarget === null || this.#experimentCursor === null) return true;
     return (
-      this.#experimentTarget.run_id !== this.#experimentCursor.run_id ||
+      this.#experimentTarget.runId !== this.#experimentCursor.runId ||
       this.#experimentTarget.revision > this.#experimentCursor.revision
     );
   }
@@ -1507,7 +1518,7 @@ export class SocketSessionController implements SessionController {
     if (
       cursor !== null &&
       target !== null &&
-      cursor.run_id === target.run_id &&
+      cursor.runId === target.runId &&
       cursor.revision >= target.revision
     ) {
       this.#experimentTarget = null;
@@ -1545,16 +1556,19 @@ function assertNever(value: never): never {
 }
 
 function renderResponse(
-  request: RequestInput,
+  request: RequestBody,
   response: ProtocolResponse,
   responseView?: 'perf',
 ): string | null {
-  if (response.ack) return `${response.ack.action}: ${response.ack.status}`;
-  if (request.type === 'query.performance' || responseView === 'perf') {
+  if (response.ack) {
+    const {action, status} = response.ack;
+    return `${enumWord(CommandAction, action) ?? 'unspecified'}: ${enumWord(CommandAckStatus, status) ?? 'unspecified'}`;
+  }
+  if (request.case === 'performance' || responseView === 'perf') {
     return renderPerformanceCurve(
       response.performance ?? [],
       response.events ?? [],
-      response.performance_context,
+      response.performanceContext,
     );
   }
   return null;

@@ -1,4 +1,5 @@
 import {BoxRenderable, type CliRenderer, TextRenderable} from '@opentui/core';
+import {RoundReviewVerdict} from '@vibesys/backend-client';
 import {hasActiveAgentTiming, type RoundState, roundAgentElapsedMs} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
@@ -68,7 +69,8 @@ function roundOutcome(round: RoundState, state: SessionState): RoundOutcome {
     case 'failed':
       return 'fail';
     case 'completed':
-      if (hypothesisRoundFor(state, round.number)?.judge_verdict === 'fail') return 'fail';
+      if (hypothesisRoundFor(state, round.number)?.judgeVerdict === RoundReviewVerdict.FAIL)
+        return 'fail';
       return round.profileSkipped === true ? 'skipped' : 'done';
   }
 }
@@ -400,7 +402,7 @@ export class RoundRailView {
 function roundMetric(round: RoundState, state: SessionState, now: Date): string {
   if (round.status === 'planned') return '';
   if (round.status === 'active') return elapsedLabel(roundAgentElapsedMs(round, now));
-  const delta = hypothesisRoundFor(state, round.number)?.perf_delta_pct;
+  const delta = hypothesisRoundFor(state, round.number)?.perfDeltaPct;
   if (typeof delta === 'number') {
     return `${delta > 0 ? '+' : ''}${delta.toFixed(Math.abs(delta) >= 10 ? 0 : 1)}%`;
   }

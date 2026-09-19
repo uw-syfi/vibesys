@@ -12,42 +12,55 @@
  *
  * `mock-ui.sh` wraps both halves.
  *
- * The protocol is newline-delimited JSON in both directions with no handshake:
- * the client says nothing on connect and correlates purely by `request_id`.
- * Every response must carry `protocol_version: 1`, `request_id`, and `ok`, or
- * the client destroys the socket. The TUI opens three connections to this one
- * path (control, event stream, and one per chat question), so connections are
- * handled independently and none of them is closed early.
+ * The protocol is newline-delimited proto3 JSON (`proto/server/wire/v2`, proto
+ * field names) in both directions with no handshake: the client says nothing on
+ * connect and correlates purely by `request_id`. Every response must carry
+ * `protocol_version: 2`, `request_id`, and `ok`, or the client destroys the
+ * socket. The TUI opens three connections to this one path (control, event
+ * stream, and one per chat question), so connections are handled independently
+ * and none of them is closed early.
  *
  * The response bodies live in `mock-responses.json` rather than in this file so
  * `tests/server/test_tui_dev_harness.py` can validate the exact bytes that go
- * on the wire against the Python protocol contract.
+ * on the wire against the protocol contract.
  *
  * What goes on the wire is the recorded journal as the server's read path would
  * have served it, not as it was recorded: `journal.ts` applies the same legacy
- * translation before anything is replayed.
+ * translation and version upgrade before anything is replayed.
  */
 
 import {readFileSync, unlinkSync} from 'node:fs';
 import {createServer, type Socket} from 'node:net';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import type {ActiveExecutionCheckpoint} from '@vibesys/core-state';
 import {
-  canonicalJournalEvents,
-  optionalString,
-  type RunEventRecord,
-  readJournalRecords,
-  stringOr,
-} from './journal.js';
+  create,
+  fromJson,
+  fromJsonString,
+  type JsonObject,
+  toJsonString,
+} from '@bufbuild/protobuf';
+import {timestampFromDate, timestampMs} from '@bufbuild/protobuf/wkt';
+import {
+  type ActiveAgentExecution,
+  ActiveAgentExecutionSchema,
+  EventType,
+  type HypothesisEntry,
+  HypothesisEntrySchema,
+  PROTOCOL_VERSION,
+  type ProtocolRequest,
+  type ProtocolResponse,
+  RequestSchema,
+  ResponseSchema,
+  type RunEvent,
+  RunStatus,
+  type ServerMessage,
+  ServerMessageSchema,
+  TuiTheme,
+} from '@vibesys/backend-client';
+import {canonicalJournalEvents, readJournalRecords, upgradeRecord} from './journal.js';
 
-/**
- * One entry of the liveness checkpoint the real server puts on a snapshot and
- * on every event batch. Taken from the generated protocol types, so a field
- * added to `ActiveAgentExecution` is a typecheck error here rather than a
- * silently thinner checkpoint on the wire.
- */
-type ExecutionCheckpoint = ActiveExecutionCheckpoint[number];
+const JSON_OPTIONS = {useProtoFieldName: true} as const;
 
 interface Options {
   socketPath: string;
@@ -87,31 +100,27 @@ const DEFAULT_FIXTURE = join(FIXTURE_DIR, 'bad-cpp-round1.jsonl');
  */
 const RESPONSE_BODIES = JSON.parse(
   readFileSync(join(HERE, 'mock-responses.json'), 'utf8'),
-) as Record<string, Record<string, unknown>>;
-
-function responseBody(type: string): Record<string, unknown> {
-  const body = RESPONSE_BODIES[type];
-  if (body === undefined) throw new Error(`mock-responses.json has no body for ${type}`);
-  return body;
-}
+) as Record<string, JsonObject>;
 
 /**
- * `base` with the runtime `values` merged over it.
+ * The static reply to a request of `type`, as a typed `Response`.
  *
- * A value whose key the checked-in body does not already carry is an error:
- * the file is what the protocol test validates, so a call site writing a key
- * the file lacks would put something unchecked on the wire, which is exactly
- * how a renamed protocol field would go unnoticed here.
+ * Parsed with the generated schema, so a body the contract rejects fails here
+ * as well as in the Python test. Runtime values (run id, sequence, status,
+ * theme, backfilled events) are then set on the typed message, where the
+ * compiler checks the field names.
  */
-function withValues(base: unknown, values: Record<string, unknown>): Record<string, unknown> {
-  if (typeof base !== 'object' || base === null || Array.isArray(base)) {
-    throw new Error(`mock-responses.json holds ${JSON.stringify(base)} where an object is needed`);
-  }
-  const merged = base as Record<string, unknown>;
-  for (const key of Object.keys(values)) {
-    if (!(key in merged)) throw new Error(`mock-responses.json body has no key ${key}`);
-  }
-  return {...merged, ...values};
+function answer(type: string, requestId: string): ProtocolResponse {
+  const body = RESPONSE_BODIES[type];
+  if (body === undefined) throw new Error(`mock-responses.json has no body for ${type}`);
+  const response = fromJson(ResponseSchema, {
+    protocol_version: PROTOCOL_VERSION,
+    request_id: requestId,
+    ok: true,
+    ...body,
+  });
+  response.timestamp = timestampFromDate(new Date());
+  return response;
 }
 
 function parseOptions(argv: string[]): Options {
@@ -181,29 +190,30 @@ function resolveFixture(name: string): string {
  * `run_status_changed` and states the status outright; one recorded before it
  * has only the coarse start and end events, which map onto the same set.
  */
-function replayRunStatus(delivered: RunEventRecord[]): string {
+function replayRunStatus(delivered: RunEvent[]): RunStatus {
   for (let index = delivered.length - 1; index >= 0; index -= 1) {
     const event = delivered[index];
     if (event === undefined) continue;
-    if (event.type === 'run_status_changed') {
-      const status = event.data?.['status'];
-      if (typeof status === 'string') return status;
+    if (event.type === EventType.RUN_STATUS_CHANGED && event.data.case === 'runStatusChanged') {
+      return event.data.value.status;
     }
-    if (event.type === 'run_finished') return 'completed';
-    if (event.type === 'run_failed' || event.type === 'run_interrupted') return 'failed';
-    if (event.type === 'run_started') return 'running';
+    if (event.type === EventType.RUN_FINISHED) return RunStatus.COMPLETED;
+    if (event.type === EventType.RUN_FAILED || event.type === EventType.RUN_INTERRUPTED) {
+      return RunStatus.FAILED;
+    }
+    if (event.type === EventType.RUN_STARTED) return RunStatus.RUNNING;
   }
   // Nothing delivered yet, so the run has started but reported nothing.
-  return 'starting';
+  return RunStatus.STARTING;
 }
 
 /** Run-ending event types, the same set the client's `foldEvent` terminates on. */
-function isRunTerminal(type: string | undefined): boolean {
+function isRunTerminal(type: EventType): boolean {
   return (
-    type === 'run_finished' ||
-    type === 'run_failed' ||
-    type === 'run_interrupted' ||
-    type === 'configuration_failed'
+    type === EventType.RUN_FINISHED ||
+    type === EventType.RUN_FAILED ||
+    type === EventType.RUN_INTERRUPTED ||
+    type === EventType.CONFIGURATION_FAILED
   );
 }
 
@@ -223,47 +233,42 @@ function isRunTerminal(type: string | undefined): boolean {
  */
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
-function activeExecutionsFrom(delivered: RunEventRecord[]): ActiveExecutionCheckpoint {
-  const active = new Map<string, ExecutionCheckpoint>();
+function activeExecutionsFrom(delivered: RunEvent[]): ActiveAgentExecution[] {
+  const active = new Map<string, ActiveAgentExecution>();
   for (const event of delivered) {
     if (isRunTerminal(event.type)) active.clear();
-    // `execution_id` only, never the legacy `invocation_id`: the checkpoint has
-    // to describe the state the client folded, and the client keys executions
-    // by `execution_id` alone. A capture that predates the field still reaches
-    // here with one, because `journal.ts` has already applied the same
-    // execution-identity translation the server's read path applies.
-    const executionId = event.execution_id;
+    // `executionId` only: the checkpoint has to describe the state the client
+    // folded, and the client keys executions by it alone. A capture that
+    // predates the field still reaches here with one, because `journal.ts` has
+    // already applied the execution-identity translation the server applies.
+    const executionId = event.executionId;
     const data = event.data;
-    if (typeof executionId !== 'string' || !data) continue;
-    if (data['kind'] === 'agent_execution_started') {
-      const agentKind = stringOr(event.agent_kind, 'agent');
-      active.set(executionId, {
-        execution_id: executionId,
-        agent_kind: agentKind,
-        round_label: stringOr(event.round_label, ''),
-        stage: stringOr(data['stage'], agentKind),
-        attempt: typeof data['attempt'] === 'number' ? data['attempt'] : null,
-        assignment: stringOr(data['user_prompt'], ''),
-        started_at: stringOr(event.timestamp, ''),
-        // Carried through, not rebuilt: `test_tui_dev_harness.py` validates
-        // every fixture line as a `RunEvent`, so a recorded payload is already
-        // an `AgentExecutionActivityData`, closed `mode` set included, and a
-        // translated one was built as that type in `journal.ts`.
-        activity: data['activity'] as ExecutionCheckpoint['activity'],
-        driver: optionalString(data['driver']),
-        provider: optionalString(data['provider']),
-        model: optionalString(data['model']),
-      });
+    if (!executionId) continue;
+    if (data.case === 'agentExecutionStarted') {
+      active.set(
+        executionId,
+        create(ActiveAgentExecutionSchema, {
+          executionId,
+          agentKind: event.agentKind ?? 'agent',
+          roundLabel: event.roundLabel ?? '',
+          stage: data.value.stage,
+          attempt: data.value.attempt,
+          assignment: data.value.userPrompt,
+          startedAt: event.timestamp,
+          activity: data.value.activity,
+          driver: data.value.driver,
+          provider: data.value.provider,
+          model: data.value.model,
+        }),
+      );
     }
-    if (data['kind'] === 'agent_execution_activity_changed') {
+    if (data.case === 'agentExecutionActivityChanged') {
       const current = active.get(executionId);
       // The activity event's own payload is the activity, so it replaces the
       // stored one whole rather than being copied field by field.
-      if (current !== undefined) {
-        active.set(executionId, {...current, activity: data as ExecutionCheckpoint['activity']});
-      }
+      if (current !== undefined) active.set(executionId, {...current, activity: data.value});
     }
-    if (data['kind'] === 'agent_execution_finished') active.delete(executionId);
+    if (data.case === 'agentExecutionFinished') active.delete(executionId);
   }
   return [...active.values()];
 }
@@ -277,31 +282,40 @@ function activeExecutionsFrom(delivered: RunEventRecord[]): ActiveExecutionCheck
  * stream. A sidecar keeps that title pinnable without inventing event types the
  * backend never emits.
  */
-function loadExperiments(fixturePath: string): unknown[] {
+function loadExperiments(fixturePath: string): HypothesisEntry[] {
   const sidecar = `${fixturePath.replace(/\.gz$/, '').replace(/\.jsonl$/, '')}.experiments.json`;
+  let records: Record<string, unknown>[];
   try {
-    return JSON.parse(readFileSync(sidecar, 'utf8')) as unknown[];
+    records = JSON.parse(readFileSync(sidecar, 'utf8')) as Record<string, unknown>[];
   } catch {
     return [];
   }
+  // The sidecar is kept in the version 1 shape, like the fixtures.
+  return records.map(record => fromJson(HypothesisEntrySchema, upgradeRecord(HypothesisEntrySchema, record)));
 }
 
 /** Milliseconds to wait before `next`, from the recorded timestamps. */
-function gapMs(previous: RunEventRecord, next: RunEventRecord, options: Options): number {
-  if (options.speed === 0) return 0;
-  const from = Date.parse(previous.timestamp ?? '');
-  const to = Date.parse(next.timestamp ?? '');
-  if (!Number.isFinite(from) || !Number.isFinite(to)) return 0;
-  return Math.min(Math.max(to - from, 0) / options.speed, options.maxGapMs);
+function gapMs(previous: RunEvent, next: RunEvent, options: Options): number {
+  if (options.speed === 0 || !previous.timestamp || !next.timestamp) return 0;
+  const gap = timestampMs(next.timestamp) - timestampMs(previous.timestamp);
+  return Math.min(Math.max(gap, 0) / options.speed, options.maxGapMs);
 }
 
-function writeLine(socket: Socket, payload: unknown): void {
+function writeLine(socket: Socket, json: string): void {
   if (socket.destroyed) return;
-  socket.write(`${JSON.stringify(payload)}\n`);
+  socket.write(`${json}\n`);
+}
+
+function writeMessage(socket: Socket, message: ServerMessage): void {
+  writeLine(socket, toJsonString(ServerMessageSchema, message, JSON_OPTIONS));
+}
+
+function writeResponse(socket: Socket, response: ProtocolResponse): void {
+  writeLine(socket, toJsonString(ResponseSchema, response, JSON_OPTIONS));
 }
 
 /** The client's read loop, mirrored: split on newline, keep the partial tail. */
-function readLines(socket: Socket, onLine: (line: Record<string, unknown>) => void): void {
+function readLines(socket: Socket, onLine: (line: string) => void): void {
   let buffer = '';
   socket.setEncoding('utf8');
   socket.on('data', chunk => {
@@ -311,7 +325,7 @@ function readLines(socket: Socket, onLine: (line: Record<string, unknown>) => vo
     for (const line of lines) {
       if (!line) continue;
       try {
-        onLine(JSON.parse(line) as Record<string, unknown>);
+        onLine(line);
       } catch {
         // A malformed request line is the client's problem; staying up is
         // more useful here than mirroring the real server's strictness.
@@ -322,7 +336,7 @@ function readLines(socket: Socket, onLine: (line: Record<string, unknown>) => vo
 }
 
 class Replay {
-  readonly events: RunEventRecord[];
+  readonly events: RunEvent[];
   readonly #options: Options;
   readonly #subscribers = new Set<Socket>();
   #cursor = 0;
@@ -330,14 +344,14 @@ class Replay {
   #paused: boolean;
   #timer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(events: RunEventRecord[], options: Options) {
+  constructor(events: RunEvent[], options: Options) {
     this.events = events;
     this.#options = options;
     this.#paused = options.startPaused;
   }
 
   get runId(): string {
-    return this.events[0]?.run_id ?? 'mock-run';
+    return this.events[0]?.runId ?? 'mock-run';
   }
 
   /**
@@ -364,25 +378,24 @@ class Replay {
     return this.events[this.#cursor - 1]?.sequence ?? 0;
   }
 
-  get delivered(): RunEventRecord[] {
+  get delivered(): RunEvent[] {
     return this.events.slice(0, this.#cursor);
   }
 
   /** Liveness checkpoint for everything delivered so far. */
-  get activeExecutions(): ActiveExecutionCheckpoint {
+  get activeExecutions(): ActiveAgentExecution[] {
     return activeExecutionsFrom(this.delivered);
   }
 
   /**
    * Backfill range, in current-pass numbering. The stream advertises
-   * `history_after_sequence: 0`, so the client should never need this; it is
+   * `historyAfterSequence: 0`, so the client should never need this; it is
    * answered correctly rather than left to disagree with the live stream.
    */
-  eventsInRange(after: number, before: number | null): RunEventRecord[] {
-    return this.events.filter(event => {
-      const sequence = event.sequence ?? 0;
-      return sequence > after && (before === null || sequence < before);
-    });
+  eventsInRange(after: number, before: number | undefined): RunEvent[] {
+    return this.events.filter(
+      event => event.sequence > after && (before === undefined || event.sequence < before),
+    );
   }
 
   /** Called once the last event-stream subscriber has gone. */
@@ -399,8 +412,8 @@ class Replay {
     });
   }
 
-  broadcast(message: unknown): void {
-    for (const socket of this.#subscribers) writeLine(socket, message);
+  broadcast(message: ServerMessage): void {
+    for (const socket of this.#subscribers) writeMessage(socket, message);
   }
 
   pause(): void {
@@ -453,13 +466,19 @@ class Replay {
     const event = this.events[this.#cursor];
     if (event === undefined) return;
     this.#cursor += 1;
-    this.broadcast({
-      type: 'event_batch',
-      events: [event],
-      through_sequence: event.sequence,
-      active_executions: this.activeExecutions,
-      store_id: this.storeId,
-    });
+    this.broadcast(
+      create(ServerMessageSchema, {
+        body: {
+          case: 'eventBatch',
+          value: {
+            events: [event],
+            throughSequence: event.sequence,
+            activeExecutions: this.activeExecutions,
+            storeId: this.storeId,
+          },
+        },
+      }),
+    );
     if (this.#options.verbose) {
       process.stderr.write(`mock: seq ${String(event.sequence)} ${String(event.type)}\n`);
     }
@@ -485,14 +504,156 @@ function processExists(pid: number): boolean {
   }
 }
 
-function ok(requestId: unknown, body: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    protocol_version: 1,
-    request_id: requestId,
-    timestamp: new Date().toISOString(),
-    ok: true,
-    ...body,
-  };
+/** `chatOptions` as `chat_options`, the spelling `mock-responses.json` keys use. */
+function snakeCase(name: string): string {
+  return name.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+}
+
+/** The `TuiTheme` a `VIBESYS_THEME` name (`solarized-dark`) selects, if it names one. */
+function themeFromName(name: string): TuiTheme | undefined {
+  const key = name.toUpperCase().replaceAll('-', '_');
+  return key in TuiTheme && key !== 'UNSPECIFIED' ? TuiTheme[key as keyof typeof TuiTheme] : undefined;
+}
+
+/** Answers a request that has a static body, with the reply `mock-responses.json` holds. */
+function respondStatic(socket: Socket, type: string, requestId: string): void {
+  writeResponse(socket, answer(type, requestId));
+}
+
+/** The replay's answer to `snapshot`. */
+function snapshotResponse(requestId: string, replay: Replay): ProtocolResponse {
+  const response = answer('query.snapshot', requestId);
+  const snapshot = response.snapshot;
+  if (snapshot === undefined) throw new Error('mock-responses.json has no snapshot');
+  const last = replay.delivered.at(-1);
+  snapshot.runId = replay.runId;
+  snapshot.sequence = replay.latestSequence;
+  snapshot.status = replayRunStatus(replay.delivered);
+  snapshot.agentKind = last?.agentKind;
+  snapshot.roundLabel = last?.roundLabel;
+  // Boot queries the snapshot and subscribes concurrently, so this answer can
+  // land after the bootstrap batch at the same sequence, where the client
+  // accepts it. Left static and empty it then erased an execution the batch
+  // had just opened.
+  snapshot.activeExecutions = replay.activeExecutions;
+  return response;
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
+function handleRequest(
+  socket: Socket,
+  request: ProtocolRequest,
+  replay: Replay,
+  experiments: HypothesisEntry[],
+): void {
+  const id = request.requestId;
+  const body = request.body;
+  switch (body.case) {
+    case 'subscribe': {
+      // Order matters: `subscribed` resolves the client's promise, and the
+      // bootstrap batch must follow it on the same connection.
+      replay.addSubscriber(socket);
+      // Prime first: `latestSequence` and the bootstrap batch must both
+      // describe the same set of events.
+      replay.primeBootstrap();
+      writeMessage(
+        socket,
+        create(ServerMessageSchema, {
+          body: {
+            case: 'subscribed',
+            value: {requestId: id, runId: replay.runId, latestSequence: replay.latestSequence},
+          },
+        }),
+      );
+      writeMessage(
+        socket,
+        create(ServerMessageSchema, {
+          body: {
+            case: 'eventBatch',
+            value: {
+              events: replay.delivered,
+              throughSequence: replay.latestSequence,
+              activeExecutions: replay.activeExecutions,
+              storeId: replay.storeId,
+              // 0 means the stream carries its whole history, so the TUI never
+              // asks for a backfill it cannot get.
+              historyAfterSequence: 0,
+            },
+          },
+        }),
+      );
+      replay.start();
+      return;
+    }
+    case 'snapshot': {
+      writeResponse(socket, snapshotResponse(id, replay));
+      return;
+    }
+    case 'tuiDefaults': {
+      const response = answer('query.tui_defaults', id);
+      const name = process.env['VIBESYS_THEME'];
+      const theme = name === undefined ? undefined : themeFromName(name);
+      if (response.tuiDefaults !== undefined && theme !== undefined) {
+        response.tuiDefaults.theme = theme;
+      }
+      writeResponse(socket, response);
+      return;
+    }
+    case 'experiments': {
+      const response = answer('query.experiments', id);
+      response.experiments = experiments;
+      writeResponse(socket, response);
+      return;
+    }
+    case 'events': {
+      const response = answer('query.events', id);
+      response.events = replay.eventsInRange(body.value.afterSequence, body.value.beforeSequence);
+      writeResponse(socket, response);
+      return;
+    }
+    case 'performance':
+    case 'chatOptions':
+    case 'chatThreadCreate': {
+      respondStatic(socket, `query.${snakeCase(body.case)}`, id);
+      return;
+    }
+    case 'chat': {
+      // Answered on its own connection, which the client ends afterward.
+      // `ChatResult` echoes the question, so the mock does too rather than
+      // sending a reply that claims nothing was asked.
+      const response = answer('query.chat', id);
+      if (response.chat !== undefined) response.chat.question = body.value.text;
+      writeResponse(socket, response);
+      return;
+    }
+    // The run controls double as replay controls, so the replay is driven from
+    // inside the TUI with the real keybindings. `CommandAck` status is
+    // `pending | consumed`; anything else renders in the client as
+    // `undefined: <status>`.
+    case 'pause':
+    case 'stop':
+      replay.pause();
+      respondStatic(socket, `command.${body.case}`, id);
+      return;
+    case 'resume':
+      replay.resume();
+      respondStatic(socket, 'command.resume', id);
+      return;
+    case 'steer':
+      respondStatic(socket, 'command.steer', id);
+      return;
+    default: {
+      const response = create(ResponseSchema, {
+        protocolVersion: PROTOCOL_VERSION,
+        requestId: id,
+        timestamp: timestampFromDate(new Date()),
+        ok: false,
+        error: `mock server does not implement ${String(body.case)}`,
+      });
+      writeResponse(socket, response);
+    }
+  }
 }
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
@@ -513,147 +674,8 @@ function main(): void {
 
   // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
   const server = createServer(socket => {
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
-    // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
-    readLines(socket, request => {
-      const id = request['request_id'];
-      const type = request['type'];
-      switch (type) {
-        case 'subscribe': {
-          // Order matters: `subscribed` resolves the client's promise, and the
-          // bootstrap batch must follow it on the same connection.
-          replay.addSubscriber(socket);
-          // Prime first: `latest_sequence` and the bootstrap batch must both
-          // describe the same set of events.
-          replay.primeBootstrap();
-          writeLine(socket, {
-            type: 'subscribed',
-            request_id: id,
-            run_id: replay.runId,
-            latest_sequence: replay.latestSequence,
-          });
-          writeLine(socket, {
-            type: 'event_batch',
-            events: replay.delivered,
-            through_sequence: replay.latestSequence,
-            active_executions: replay.activeExecutions,
-            store_id: replay.storeId,
-            // 0 means the stream carries its whole history, so the TUI never
-            // asks for a backfill it cannot get.
-            history_after_sequence: 0,
-          });
-          replay.start();
-          return;
-        }
-        case 'query.snapshot': {
-          const last = replay.delivered.at(-1);
-          const template = responseBody(type)['snapshot'];
-          writeLine(
-            socket,
-            ok(id, {
-              snapshot: withValues(template, {
-                run_id: replay.runId,
-                sequence: replay.latestSequence,
-                status: replayRunStatus(replay.delivered),
-                agent_kind: last?.agent_kind ?? null,
-                round_label: last?.round_label ?? null,
-                // Boot queries the snapshot and subscribes concurrently, so
-                // this answer can land after the bootstrap batch at the same
-                // sequence, where the client accepts it. Left static and empty
-                // it then erased an execution the batch had just opened.
-                active_executions: replay.activeExecutions,
-              }),
-            }),
-          );
-          return;
-        }
-        case 'query.tui_defaults': {
-          const theme = process.env['VIBESYS_THEME'];
-          const template = responseBody(type)['tui_defaults'];
-          writeLine(
-            socket,
-            ok(id, {
-              tui_defaults: withValues(template, theme === undefined ? {} : {theme}),
-            }),
-          );
-          return;
-        }
-        case 'query.experiments': {
-          writeLine(
-            socket,
-            ok(id, withValues(responseBody(type), {experiments, experiments_ready: true})),
-          );
-          return;
-        }
-        case 'query.events': {
-          const after = Number(request['after_sequence'] ?? 0);
-          const beforeRaw = request['before_sequence'];
-          const before = typeof beforeRaw === 'number' ? beforeRaw : null;
-          writeLine(
-            socket,
-            ok(id, withValues(responseBody(type), {events: replay.eventsInRange(after, before)})),
-          );
-          return;
-        }
-        case 'query.performance': {
-          writeLine(socket, ok(id, responseBody(type)));
-          return;
-        }
-        case 'query.chat_options': {
-          writeLine(socket, ok(id, responseBody(type)));
-          return;
-        }
-        case 'query.chat_thread_create': {
-          writeLine(socket, ok(id, responseBody(type)));
-          return;
-        }
-        case 'query.chat': {
-          // Answered on its own connection, which the client ends afterward.
-          // `ChatResult` echoes the question, so the mock does too rather than
-          // sending a reply that claims nothing was asked.
-          const question = request['question'];
-          writeLine(
-            socket,
-            ok(id, {
-              chat: withValues(responseBody(type)['chat'], {
-                question: typeof question === 'string' ? question : '',
-              }),
-            }),
-          );
-          return;
-        }
-        // The run controls double as replay controls, so the replay is driven
-        // from inside the TUI with the real keybindings.
-        // `CommandAck` is {action, status} with status in `pending | consumed`.
-        // Anything else renders in the client as `undefined: <status>`.
-        case 'command.pause': {
-          replay.pause();
-          writeLine(socket, ok(id, responseBody(type)));
-          return;
-        }
-        case 'command.resume': {
-          replay.resume();
-          writeLine(socket, ok(id, responseBody(type)));
-          return;
-        }
-        case 'command.stop': {
-          replay.pause();
-          writeLine(socket, ok(id, responseBody(type)));
-          return;
-        }
-        case 'command.steer': {
-          writeLine(socket, ok(id, responseBody(type)));
-          return;
-        }
-        default: {
-          writeLine(socket, {
-            protocol_version: 1,
-            request_id: id,
-            ok: false,
-            error: `mock server does not implement ${String(type)}`,
-          });
-        }
-      }
+    readLines(socket, line => {
+      handleRequest(socket, fromJsonString(RequestSchema, line), replay, experiments);
     });
   });
 

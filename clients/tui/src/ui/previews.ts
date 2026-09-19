@@ -1,4 +1,28 @@
-import type {ToolResultPayload} from '@vibesys/core-state';
+import type {JsonResultPayload, ToolResultData} from '@vibesys/backend-client';
+
+type ProtoValue = NonNullable<JsonResultPayload['value']>;
+type ToolResultPayload = ToolResultData['payload'];
+
+/** A protobuf `Value` as the plain JSON value it encodes. */
+function valueToJson(value: ProtoValue | undefined): unknown {
+  const kind = value?.kind;
+  switch (kind?.case) {
+    case 'nullValue':
+      return null;
+    case 'numberValue':
+    case 'stringValue':
+    case 'boolValue':
+      return kind.value;
+    case 'structValue':
+      return Object.fromEntries(
+        Object.entries(kind.value.fields).map(([key, field]) => [key, valueToJson(field)]),
+      );
+    case 'listValue':
+      return kind.value.values.map(item => valueToJson(item));
+    case undefined:
+      return undefined;
+  }
+}
 
 const MAX_TOOL_OUTPUT_LINES = 6;
 const MAX_TOOL_OUTPUT_CHARACTERS = 600;
@@ -207,7 +231,7 @@ export function toolResultPreview(
   payload: ToolResultPayload | null | undefined,
   expanded = false,
 ): CollapsiblePreview {
-  if (payload == null) return toolOutputPreview(content, expanded);
+  if (payload == null || payload.case === undefined) return toolOutputPreview(content, expanded);
   const full = formatToolResultPayload(payload, content);
   const summary = payloadSummary(payload, full);
   if (summary === null) {
@@ -223,18 +247,24 @@ export function toolResultPreview(
  * a command lays out stdout, a separated stderr section, and its exit code;
  * a JSON value is pretty-printed. Both are word-wrapped by the caller.
  */
-function formatToolResultPayload(payload: ToolResultPayload, fallback: string): string {
-  if (payload.kind === 'json') return JSON.stringify(payload.value, null, 2) ?? fallback;
-  if (payload.kind === 'command') {
+function formatToolResultPayload(
+  payload: Exclude<ToolResultPayload, {case: undefined}>,
+  fallback: string,
+): string {
+  if (payload.case === 'json') {
+    return JSON.stringify(valueToJson(payload.value.value), null, 2) ?? fallback;
+  }
+  if (payload.case === 'command') {
+    const command = payload.value;
     const sections: string[] = [];
-    if (payload.stdout !== '') sections.push(payload.stdout.replace(/\n+$/, ''));
+    if (command.stdout !== '') sections.push(command.stdout.replace(/\n+$/, ''));
     // A blank line before the label so a failure's stderr reads as its own
     // section rather than as the tail of stdout.
-    if (payload.stderr !== '') {
+    if (command.stderr !== '') {
       const separated = sections.length > 0 ? '\n' : '';
-      sections.push(`${separated}stderr:\n${payload.stderr.replace(/\n+$/, '')}`);
+      sections.push(`${separated}stderr:\n${command.stderr.replace(/\n+$/, '')}`);
     }
-    if (payload.exit_code != null) sections.push(`exit code: ${payload.exit_code}`);
+    if (command.exitCode !== undefined) sections.push(`exit code: ${command.exitCode}`);
     if (sections.length > 0) return sections.join('\n');
   }
   return fallback;
@@ -248,15 +278,20 @@ function formatToolResultPayload(payload: ToolResultPayload, fallback: string): 
  * reports its shape. Both answer "did this work, and how much is there" in one
  * row, which is what the reader scanning a transcript is asking.
  */
-function payloadSummary(payload: ToolResultPayload, full: string): string | null {
-  if (payload.kind === 'json') return jsonShapeSummary(payload.value);
-  if (payload.kind !== 'command') return null;
+function payloadSummary(
+  payload: Exclude<ToolResultPayload, {case: undefined}>,
+  full: string,
+): string | null {
+  if (payload.case === 'json') return jsonShapeSummary(valueToJson(payload.value.value));
+  const command = payload.value;
   // An empty command payload fell back to the raw content, which has no shape
   // to summarize.
-  if (payload.stdout === '' && payload.stderr === '' && payload.exit_code == null) return null;
+  if (command.stdout === '' && command.stderr === '' && command.exitCode === undefined) {
+    return null;
+  }
   const parts: string[] = [];
-  if (payload.exit_code != null) parts.push(`exit ${payload.exit_code}`);
-  if (payload.duration != null) parts.push(`${payload.duration.toFixed(1)}s`);
+  if (command.exitCode !== undefined) parts.push(`exit ${command.exitCode}`);
+  if (command.duration !== undefined) parts.push(`${command.duration.toFixed(1)}s`);
   // Without an exit code or a wall time there is no status to report, and a
   // bare size says nothing about what happened, so the output speaks for
   // itself instead.
@@ -264,7 +299,7 @@ function payloadSummary(payload: ToolResultPayload, full: string): string | null
     const first = firstNonEmptyLine(full);
     if (first !== '') parts.push(truncateText(first, MAX_SUMMARY_LINE));
   }
-  const lines = countLines(payload.stdout) + countLines(payload.stderr);
+  const lines = countLines(command.stdout) + countLines(command.stderr);
   if (lines > 0) parts.push(`${lines} line${lines === 1 ? '' : 's'}`);
   return parts.join(' · ');
 }

@@ -1,4 +1,9 @@
-import type {DesignFileChange, DesignPatch, DesignRound} from '@vibesys/backend-client';
+import {
+  DesignChange,
+  type DesignFileChange,
+  type DesignPatch,
+  type DesignRound,
+} from '@vibesys/backend-client';
 import type {DiffPatchSlot, DiffViewerState, SessionState} from './session-model.js';
 import {formatFileChange} from './ui/design-log.js';
 
@@ -24,14 +29,14 @@ export type DiffRoundRange = Pick<DiffViewerState, 'round' | 'base' | 'head' | '
 export function diffRoundRange(round: DesignRound): DiffRoundRange | null {
   const base = round.base ?? null;
   const head = round.commit ?? null;
-  const files = round.files ?? null;
+  const files = round.files?.changes ?? null;
   if (base === null || head === null || files === null || files.length === 0) return null;
   return {round: round.round, base, head, files};
 }
 
 /** Why `diffRoundRange` returned null, worded for the detail overlay. */
 export function diffRangeExplanation(round: DesignRound): string {
-  const files = round.files ?? null;
+  const files = round.files?.changes ?? null;
   if (files !== null && files.length === 0) {
     return `Round ${round.round} changed no workspace files.`;
   }
@@ -149,7 +154,7 @@ export function diffViewerTitle(viewer: DiffViewerState): string {
  * same pathspecs the server hands its own `git diff`.
  */
 export function diffExternalCommand(viewer: DiffViewerState, file: DesignFileChange): string {
-  const paths = file.renamed_from ? `${file.renamed_from} ${file.path}` : file.path;
+  const paths = file.renamedFrom ? `${file.renamedFrom} ${file.path}` : file.path;
   return `git diff ${viewer.base} ${viewer.head} -- ${paths}`;
 }
 
@@ -281,8 +286,8 @@ const META_PREFIXES = [
 ];
 
 function fileHeaderTone(change: DesignFileChange['change']): DiffLineTone {
-  if (change === 'added') return 'add';
-  if (change === 'deleted') return 'remove';
+  if (change === DesignChange.ADDED) return 'add';
+  if (change === DesignChange.DELETED) return 'remove';
   return 'meta';
 }
 

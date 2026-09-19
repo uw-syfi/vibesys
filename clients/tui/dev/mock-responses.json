@@ -1,12 +1,10 @@
 {
   "query.snapshot": {
     "snapshot": {
-      "protocol_version": 1,
+      "protocol_version": 2,
       "run_id": "mock-run",
       "sequence": 0,
-      "status": "starting",
-      "agent_kind": null,
-      "round_label": null,
+      "status": "RUN_STATUS_STARTING",
       "active_executions": [],
       "chat_threads": []
     }
@@ -16,10 +14,9 @@
       "runs_dir": "/tmp/vibesys-runs",
       "input_path": "mock",
       "experiment_name": "mock",
-      "repository_owner": null,
       "repository_name": "mock",
-      "visibility": "private",
-      "theme": "dark"
+      "visibility": "REPOSITORY_VISIBILITY_PRIVATE",
+      "theme": "TUI_THEME_DARK"
     }
   },
   "query.experiments": {
@@ -30,8 +27,7 @@
     "events": []
   },
   "query.performance": {
-    "performance": [],
-    "performance_context": null
+    "performance": []
   },
   "query.chat_options": {
     "chat_options": {
@@ -55,26 +51,26 @@
   },
   "command.pause": {
     "ack": {
-      "action": "pause",
-      "status": "pending"
+      "action": "COMMAND_ACTION_PAUSE",
+      "status": "COMMAND_ACK_STATUS_PENDING"
     }
   },
   "command.resume": {
     "ack": {
-      "action": "resume",
-      "status": "consumed"
+      "action": "COMMAND_ACTION_RESUME",
+      "status": "COMMAND_ACK_STATUS_CONSUMED"
     }
   },
   "command.stop": {
     "ack": {
-      "action": "stop",
-      "status": "pending"
+      "action": "COMMAND_ACTION_STOP",
+      "status": "COMMAND_ACK_STATUS_PENDING"
     }
   },
   "command.steer": {
     "ack": {
-      "action": "steer",
-      "status": "consumed"
+      "action": "COMMAND_ACTION_STEER",
+      "status": "COMMAND_ACK_STATUS_CONSUMED"
     }
   }
 }

@@ -1,4 +1,10 @@
-import type {ProtocolResponse, RunEvent} from '@vibesys/backend-client';
+import {
+  EventStatus,
+  GateKind,
+  ObjectiveDirection,
+  type ProtocolResponse,
+  type RunEvent,
+} from '@vibesys/backend-client';
 import {roundNumberFromLabel} from '@vibesys/core-state';
 
 interface PerfPoint {
@@ -8,7 +14,7 @@ interface PerfPoint {
   unit: string;
 }
 
-type PerformanceContext = NonNullable<ProtocolResponse['performance_context']>;
+type PerformanceContext = NonNullable<ProtocolResponse['performanceContext']>;
 
 const PLOT_HEIGHT = 8;
 /**
@@ -21,7 +27,7 @@ const CONTEXT_LABEL_WIDTH = 10;
 export function renderPerformanceCurve(
   performance: ProtocolResponse['performance'] | undefined,
   events?: RunEvent[],
-  context?: ProtocolResponse['performance_context'],
+  context?: ProtocolResponse['performanceContext'],
 ): string {
   const points = performancePoints(performance, events);
   const contextLines = contextSection(context ?? null);
@@ -32,7 +38,7 @@ export function renderPerformanceCurve(
   // Points are still keyed by the recorded unit string; the backend context
   // only names the series, so it must not change which points are plotted.
   const series = latestMetric(points);
-  const metric = context?.objective_metric ?? series;
+  const metric = context?.objectiveMetric ?? series;
   const visible = points.filter(point => point.metric === series);
   const values = visible.map(point => point.value);
   const minValue = Math.min(...values);
@@ -67,7 +73,7 @@ export function renderPerformanceCurve(
   // "best" follows the objective direction: for a minimizing objective the
   // lowest value wins. Without a recorded direction the historical
   // higher-is-better reading stands.
-  const minimize = context?.objective_direction === 'min';
+  const minimize = context?.objectiveDirection === ObjectiveDirection.MIN;
   const best = visible.reduce((current, point) =>
     (minimize ? point.value < current.value : point.value > current.value) ? point : current,
   );
@@ -88,13 +94,13 @@ function performancePoints(
   for (const round of performance ?? []) {
     byRound.set(round.round, {
       round: round.round,
-      metric: round.perf_unit,
-      value: round.perf_metric,
-      unit: round.perf_unit,
+      metric: round.perfUnit,
+      value: round.perfMetric,
+      unit: round.perfUnit,
     });
   }
   for (const event of events ?? []) {
-    const round = roundNumberFromLabel(event.round_label);
+    const round = roundNumberFromLabel(event.roundLabel);
     if (round === null) continue;
     const point = performancePointFromEvent(event, round);
     if (point !== null) byRound.set(round, point);
@@ -104,29 +110,30 @@ function performancePoints(
 
 function performancePointFromEvent(event: RunEvent, round: number): PerfPoint | null {
   const data = event.data;
-  if (data?.kind === 'benchmark_result') {
-    return {round, metric: data.metric, value: data.value, unit: data.unit};
+  if (data.case === 'benchmarkResult') {
+    const {metric, value, unit} = data.value;
+    return {round, metric, value, unit};
   }
   // The measurement `benchmark_result` used to carry rides a completed
   // benchmark gate on new journals (#692). The caller's map keyed by round
   // keeps a journal carrying both kinds from double-counting.
   if (
-    data?.kind === 'gate_finished' &&
-    data.gate === 'benchmark' &&
-    event.status !== 'failed' &&
-    data.metric != null &&
-    data.value != null
+    data.case === 'gateFinished' &&
+    data.value.gate === GateKind.BENCHMARK &&
+    event.status !== EventStatus.FAILED &&
+    data.value.metric !== undefined &&
+    data.value.value !== undefined
   ) {
     return {
       round,
-      metric: data.metric,
-      value: data.value,
-      unit: data.unit ?? data.metric,
+      metric: data.value.metric,
+      value: data.value.value,
+      unit: data.value.unit ?? data.value.metric,
     };
   }
-  if (data?.kind === 'round_finished' && typeof data.perf_metric === 'number') {
-    const unit = data.perf_unit ?? 'performance';
-    return {round, metric: unit, value: data.perf_metric, unit};
+  if (data.case === 'roundFinished' && data.value.perfMetric !== undefined) {
+    const unit = data.value.perfUnit ?? 'performance';
+    return {round, metric: unit, value: data.value.perfMetric, unit};
   }
   return null;
 }
@@ -143,13 +150,13 @@ function latestMetric(points: PerfPoint[]): string {
 function contextSection(context: PerformanceContext | null): string[] {
   if (context === null) return [];
   const lines: string[] = [];
-  if (context.objective_metric) {
-    lines.push(contextLine('Metric', metricSummary(context.objective_metric, context)));
+  if (context.objectiveMetric) {
+    lines.push(contextLine('Metric', metricSummary(context.objectiveMetric, context)));
   }
   const baseline = baselineSummary(context);
   if (baseline !== null) lines.push(contextLine('Baseline', baseline));
-  if (context.objective_description) {
-    lines.push(contextLine('Measures', context.objective_description));
+  if (context.objectiveDescription) {
+    lines.push(contextLine('Measures', context.objectiveDescription));
   }
   if (lines.length === 0) return [];
   lines.push('');
@@ -164,21 +171,23 @@ function metricSummary(metric: string, context: PerformanceContext): string {
   const parts = [metric];
   // Legacy rounds record the metric name in the unit slot; repeating it as a
   // parenthesized unit would read as noise.
-  if (context.objective_unit && context.objective_unit !== metric) {
-    parts.push(`(${context.objective_unit})`);
+  if (context.objectiveUnit && context.objectiveUnit !== metric) {
+    parts.push(`(${context.objectiveUnit})`);
   }
   const summary = parts.join(' ');
-  if (context.objective_direction === 'max') return `${summary} · maximize ↑`;
-  if (context.objective_direction === 'min') return `${summary} · minimize ↓`;
+  if (context.objectiveDirection === ObjectiveDirection.MAX) return `${summary} · maximize ↑`;
+  if (context.objectiveDirection === ObjectiveDirection.MIN) return `${summary} · minimize ↓`;
   return summary;
 }
 
 function baselineSummary(context: PerformanceContext): string | null {
   const parts: string[] = [];
-  if (context.objective_baseline_value != null) parts.push(trim(context.objective_baseline_value));
-  if (context.objective_baseline_round != null) parts.push(`r${context.objective_baseline_round}`);
-  if (context.objective_baseline_commit) {
-    parts.push(`commit ${context.objective_baseline_commit.slice(0, 7)}`);
+  if (context.objectiveBaselineValue !== undefined)
+    parts.push(trim(context.objectiveBaselineValue));
+  if (context.objectiveBaselineRound !== undefined)
+    parts.push(`r${context.objectiveBaselineRound}`);
+  if (context.objectiveBaselineCommit) {
+    parts.push(`commit ${context.objectiveBaselineCommit.slice(0, 7)}`);
   }
   return parts.length > 0 ? parts.join(' · ') : null;
 }

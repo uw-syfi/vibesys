@@ -17,8 +17,13 @@
  * the subscription checkpoint the TUI's `subscribe` consumes. Replaying a
  * fixture without them made the harness the one place a client meets a raw
  * legacy line: `applyAgentExecutionEvent` returns the state unchanged when
- * `execution_id` is null, so `bad-cpp-round1.jsonl`, the default fixture,
+ * `execution_id` is unset, so `bad-cpp-round1.jsonl`, the default fixture,
  * replayed with no agent executions at all.
+ *
+ * The fixtures are protocol version 1 journals. Each canonicalized line is then
+ * upgraded to the version 2 wire form (`src/server/wire/upgrade.py`), driven by
+ * the proto descriptors through protobuf-es reflection, and parsed as a
+ * `RunEvent`.
  *
  * This is a hand port, because the harness is TypeScript and cannot import the
  * Python. `test_canonical_events_match_the_backend_read_path` in
@@ -38,15 +43,22 @@
 
 import {readFileSync} from 'node:fs';
 import {gunzipSync} from 'node:zlib';
-import type {RunEvent} from '@vibesys/backend-client';
+import {
+  type DescEnum,
+  type DescField,
+  type DescMessage,
+  fromJson,
+  type JsonObject,
+} from '@bufbuild/protobuf';
+import {PROTOCOL_VERSION, type RunEvent, RunEventSchema} from '@vibesys/backend-client';
 
 /**
- * One recorded journal line.
+ * One recorded journal line, in the version 1 shape it was written with.
  *
  * Deliberately weaker than the generated `RunEvent`: a legacy capture omits
- * fields today's model defaults in, and the harness validates nothing at
- * runtime. `tests/server/test_tui_dev_harness.py` is what holds every fixture
- * line to the real model.
+ * fields today's model defaults in, and nothing is validated until the
+ * upgraded line is parsed. `tests/server/test_tui_dev_harness.py` is what holds
+ * every fixture line to the real model.
  */
 export interface RunEventRecord {
   sequence?: number;
@@ -62,29 +74,17 @@ export interface RunEventRecord {
   [key: string]: unknown;
 }
 
-/**
- * The payload the translation builds for a rewritten `invocation_started`.
- *
- * Taken from the generated protocol types, so a field added to or renamed in
- * `AgentExecutionStartedData` is a typecheck error here rather than a payload
- * the client silently reads nothing out of.
- */
-type AgentExecutionStartedData = Extract<
-  NonNullable<RunEvent['data']>,
-  {kind?: 'agent_execution_started'}
->;
-
 /** Lifecycle event types in the spelling the client folds. */
 const CANONICAL_LIFECYCLE_TYPES = new Set(['agent_execution_started', 'agent_execution_finished']);
 
 /** The same two boundaries under the names they were recorded with earlier. */
 const LEGACY_LIFECYCLE_TYPES = new Set(['invocation_started', 'invocation_finished']);
 
-export function stringOr(value: unknown, fallback: string): string {
+function stringOr(value: unknown, fallback: string): string {
   return typeof value === 'string' ? value : fallback;
 }
 
-export function optionalString(value: unknown): string | null {
+function optionalString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
@@ -157,13 +157,11 @@ function nonEmptyOr(value: string | null | undefined, fallback: string): string 
 }
 
 /**
- * The events a client would receive for `records`.
- *
- * Both stages of the server's read path, in its order: execution identity
- * first, because the lifecycle translation keys off `execution_id`, then the
- * lifecycle translation itself.
+ * Both stages of the server's read path on version 1 records, in its order:
+ * execution identity first, because the lifecycle translation keys off
+ * `execution_id`, then the lifecycle translation itself.
  */
-export function canonicalJournalEvents(records: RunEventRecord[]): RunEventRecord[] {
+function canonicalRecords(records: RunEventRecord[]): RunEventRecord[] {
   const events = records.map(withExecutionIdentity);
   const canonicalIds = lifecycleExecutionIds(events, CANONICAL_LIFECYCLE_TYPES);
   const canonical: RunEventRecord[] = [];
@@ -182,42 +180,37 @@ export function canonicalJournalEvents(records: RunEventRecord[]): RunEventRecor
     if (supersededLegacy) continue;
     if (type === 'invocation_started' && data?.['kind'] === 'invocation_started') {
       const agentKind = nonEmptyOr(event.agent_kind, 'agent');
-      const started: AgentExecutionStartedData = {
-        kind: 'agent_execution_started',
-        stage: agentKind,
-        attempt: attemptFromLabel(event.round_label ?? ''),
-        // Defaulted rather than read strictly: `AgentExecutionStartedData`
-        // defaults both to "", and a record missing them is a record the
-        // Python model would have rejected outright, which is what
-        // `test_fixture_validates_as_run_events` covers.
-        system_prompt: stringOr(data['system_prompt'], ''),
-        user_prompt: stringOr(data['user_prompt'], ''),
-        // Synthesized, not recovered: the legacy payload carries no activity,
-        // and the field is required. The real adapter derives the same opening
-        // summary from the agent kind.
-        activity: {
-          kind: 'agent_execution_activity_changed',
-          mode: 'thinking',
-          summary: initialActivitySummary(agentKind),
-          tool: null,
+      canonical.push({
+        ...event,
+        type: 'agent_execution_started',
+        data: {
+          kind: 'agent_execution_started',
+          stage: agentKind,
+          attempt: attemptFromLabel(event.round_label ?? ''),
+          system_prompt: stringOr(data['system_prompt'], ''),
+          user_prompt: stringOr(data['user_prompt'], ''),
+          // Synthesized, not recovered: the legacy payload carries no activity,
+          // and the field is required. The real adapter derives the same opening
+          // summary from the agent kind.
+          activity: {
+            kind: 'agent_execution_activity_changed',
+            mode: 'thinking',
+            summary: initialActivitySummary(agentKind),
+            tool: null,
+          },
+          // A legacy journal records no driver, provider, or model anywhere, and
+          // the adapter invents none.
+          driver: null,
+          provider: null,
+          model: null,
         },
-        // A legacy journal records no driver, provider, or model anywhere, and
-        // the adapter invents none. The client renders each as absent.
-        driver: null,
-        provider: null,
-        model: null,
-      };
-      canonical.push({...event, type: 'agent_execution_started', data: started});
+      });
       continue;
     }
     if (type === 'invocation_finished' && data?.['kind'] === 'invocation_finished') {
       canonical.push({
         ...event,
         type: 'agent_execution_finished',
-        // Not typed against the generated `AgentExecutionFinishedData`: its
-        // `result` is generated from `Any`, so the schema types it as an
-        // object and cannot express the null the server puts on the wire for a
-        // finish that carries no result.
         data: {
           kind: 'agent_execution_finished',
           result: data['result'] ?? null,
@@ -229,4 +222,117 @@ export function canonicalJournalEvents(records: RunEventRecord[]): RunEventRecor
     canonical.push(event);
   }
   return canonical;
+}
+
+/** Mirrors `upgrade._DATA_FIELDS`: the `data` oneof of `RunEvent`, by payload kind. */
+const DATA_FIELDS = new Map<string, DescField>(
+  RunEventSchema.oneofs.find(oneof => oneof.name === 'data')?.fields.map(f => [f.name, f]) ?? [],
+);
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function without(record: Record<string, unknown>, ...keys: string[]): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !keys.includes(key)));
+}
+
+/** Mirrors `enums.prefix`: the first value's name minus `UNSPECIFIED`. */
+function enumPrefix(desc: DescEnum): string {
+  return (desc.values[0]?.name ?? '').replace(/UNSPECIFIED$/, '');
+}
+
+function fieldEnum(field: DescField): DescEnum | undefined {
+  if (field.fieldKind === 'enum') return field.enum;
+  if (field.fieldKind === 'list' && field.listKind === 'enum') return field.enum;
+  return undefined;
+}
+
+function fieldMessage(field: DescField): DescMessage | undefined {
+  if (field.fieldKind === 'message') return field.message;
+  if (field.fieldKind === 'list' && field.listKind === 'message') return field.message;
+  return undefined;
+}
+
+function convertOne(field: DescField, value: unknown): unknown {
+  const enumDesc = fieldEnum(field);
+  if (enumDesc !== undefined && typeof value === 'string') {
+    const name = enumPrefix(enumDesc) + value.toUpperCase().replaceAll('-', '_');
+    if (!enumDesc.values.some(candidate => candidate.name === name)) {
+      throw new Error(`${JSON.stringify(value)} is not a ${enumDesc.name}`);
+    }
+    return name;
+  }
+  const message = fieldMessage(field);
+  if (message && !message.typeName.startsWith('google.protobuf.') && isObject(value)) {
+    return convert(message, value);
+  }
+  return value;
+}
+
+/** Mirrors `upgrade._convert`: drop nulls and prefix enum strings, recursively. */
+function convert(desc: DescMessage, record: Record<string, unknown>): Record<string, unknown> {
+  const converted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (value === null || value === undefined) continue;
+    const field = desc.fields.find(candidate => candidate.name === key);
+    // A version 1 discriminator constant on a nested payload.
+    if (field === undefined && key === 'kind') continue;
+    if (field === undefined) converted[key] = value;
+    else if (field.fieldKind === 'list' && Array.isArray(value)) {
+      converted[key] = value.map(item => convertOne(field, item));
+    } else converted[key] = convertOne(field, value);
+  }
+  return converted;
+}
+
+/** Mirrors `upgrade._tool_result_body`: the `payload` union becomes two typed keys. */
+function toolResultBody(input: Record<string, unknown>): Record<string, unknown> {
+  const {payload, ...body} = input;
+  if (payload === null || payload === undefined) return body;
+  if (!isObject(payload)) throw new Error('tool result payload is not an object');
+  if (payload['kind'] === 'command') return {...body, command: without(payload, 'kind')};
+  if (payload['kind'] === 'json') return {...body, json: {value: payload['value'] ?? null}};
+  throw new Error(`unknown tool result payload kind ${JSON.stringify(payload['kind'])}`);
+}
+
+/**
+ * A version 1 record of any message type, upgraded the way `upgradeEvent`
+ * upgrades an event: nulls dropped, enum strings prefixed. For data the harness
+ * keeps in version 1 form, such as an experiments sidecar.
+ */
+export function upgradeRecord(desc: DescMessage, record: Record<string, unknown>): JsonObject {
+  return convert(desc, record) as JsonObject;
+}
+
+/** Mirrors `upgrade.upgrade_event`: the version 2 JSON object for a version 1 record. */
+export function upgradeEvent(record: RunEventRecord): JsonObject {
+  if (record.protocol_version === PROTOCOL_VERSION) return record as JsonObject;
+  const upgraded = convert(RunEventSchema, without(record, 'data', 'invocation_id'));
+  upgraded['protocol_version'] = PROTOCOL_VERSION;
+  // v1 mirrored the two ids in both directions; v2 keeps the canonical one.
+  const executionId = record.execution_id || record.invocation_id;
+  if (executionId) upgraded['execution_id'] = executionId;
+  const data = record.data;
+  if (data !== null && data !== undefined) {
+    const kind = data['kind'];
+    const field = typeof kind === 'string' ? DATA_FIELDS.get(kind) : undefined;
+    if (field === undefined || field.fieldKind !== 'message') {
+      throw new Error(`unknown event payload kind ${JSON.stringify(kind)}`);
+    }
+    const body = without(data, 'kind');
+    upgraded[field.name] = convert(
+      field.message,
+      kind === 'tool_result' ? toolResultBody(body) : body,
+    );
+  }
+  return upgraded as JsonObject;
+}
+
+/**
+ * The events a client would receive for `records`, as version 2 messages:
+ * canonicalized as the server's read path does, then upgraded and parsed.
+ */
+export function canonicalJournalEvents(records: RunEventRecord[]): RunEvent[] {
+  return canonicalRecords(records).map(record => fromJson(RunEventSchema, upgradeEvent(record)));
 }

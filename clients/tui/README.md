@@ -341,7 +341,7 @@ From the repository root:
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm --dir clients/backend-client generate:protocol
+pnpm proto:generate
 pnpm check:ts-architecture
 pnpm check:clients
 pnpm test:clients

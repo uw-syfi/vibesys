@@ -1,11 +1,18 @@
 import {describe, expect, it} from 'bun:test';
-import type {ProtocolResponse} from '@vibesys/backend-client';
+import {create} from '@bufbuild/protobuf';
+import {
+  PROTOCOL_VERSION,
+  type ProtocolResponse,
+  RepositoryVisibility,
+  ResponseSchema,
+  TuiTheme,
+} from '@vibesys/backend-client';
 import {resolveStartupTheme} from './startup-theme.js';
 
 describe('resolveStartupTheme', () => {
   it('applies the theme the backend resolved from configuration', async () => {
     await expect(
-      resolveStartupTheme(Promise.resolve(defaultsResponse('solarized-light'))),
+      resolveStartupTheme(Promise.resolve(defaultsResponse(TuiTheme.SOLARIZED_LIGHT))),
     ).resolves.toBe('solarized-light');
   });
 
@@ -13,7 +20,7 @@ describe('resolveStartupTheme', () => {
     let asked = false;
     const pending = (async () => {
       asked = true;
-      return defaultsResponse('light');
+      return defaultsResponse(TuiTheme.LIGHT);
     })();
 
     await expect(resolveStartupTheme(pending, {explicitTheme: 'catppuccin-latte'})).resolves.toBe(
@@ -39,37 +46,35 @@ describe('resolveStartupTheme', () => {
   });
 
   it('falls back to the default theme for defaults it cannot render', async () => {
-    await expect(resolveStartupTheme(Promise.resolve(defaultsResponse('gruvbox')))).resolves.toBe(
-      'dark',
-    );
     await expect(
-      resolveStartupTheme(Promise.resolve({...emptyResponse(), tui_defaults: null})),
+      resolveStartupTheme(Promise.resolve(defaultsResponse(99 as TuiTheme))),
     ).resolves.toBe('dark');
+    await expect(resolveStartupTheme(Promise.resolve(emptyResponse()))).resolves.toBe('dark');
   });
 });
 
 function emptyResponse(): ProtocolResponse {
-  return {
-    protocol_version: 1,
-    request_id: 'defaults-1',
-    timestamp: '1970-01-01T00:00:00Z',
+  return create(ResponseSchema, {
+    protocolVersion: PROTOCOL_VERSION,
+    requestId: 'defaults-1',
     ok: true,
-  } as ProtocolResponse;
+  });
 }
 
-function defaultsResponse(theme: string): ProtocolResponse {
-  return {
-    ...emptyResponse(),
-    tui_defaults: {
-      runs_dir: '/runs',
-      input_path: '',
-      experiment_name: 'experiment-1',
-      repository_owner: null,
-      repository_name: 'experiment-1',
-      visibility: 'private',
+function defaultsResponse(theme: TuiTheme): ProtocolResponse {
+  return create(ResponseSchema, {
+    protocolVersion: PROTOCOL_VERSION,
+    requestId: 'defaults-1',
+    ok: true,
+    tuiDefaults: {
+      runsDir: '/runs',
+      inputPath: '',
+      experimentName: 'experiment-1',
+      repositoryName: 'experiment-1',
+      visibility: RepositoryVisibility.PRIVATE,
       theme,
     },
-  } as ProtocolResponse;
+  });
 }
 
 function never(): Promise<ProtocolResponse> {

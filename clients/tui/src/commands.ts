@@ -1,8 +1,8 @@
-import type {RequestInput} from '@vibesys/backend-client';
+import type {RequestBody} from '@vibesys/backend-client';
 import type {PaneView} from './session-model.js';
 import {isThemeName, THEME_NAMES, type ThemeName} from './ui/theme.js';
 
-type CommandRequest = Exclude<RequestInput, {type: 'query.chat'}>;
+type CommandRequest = Exclude<RequestBody, {case: 'chat'}>;
 
 /** Every input surface that resolves slash commands through this registry. */
 export type CommandSurface = 'command' | 'chat';
@@ -153,7 +153,7 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
     args: 'none',
     surfaces: BOTH,
     section: 'run',
-    parse: () => ({kind: 'request', request: {type: 'command.pause'}}),
+    parse: () => ({kind: 'request', request: {case: 'pause', value: {}}}),
   },
   {
     id: 'resume',
@@ -162,7 +162,7 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
     args: 'none',
     surfaces: BOTH,
     section: 'run',
-    parse: () => ({kind: 'request', request: {type: 'command.resume'}}),
+    parse: () => ({kind: 'request', request: {case: 'resume', value: {}}}),
   },
   {
     id: 'stop',
@@ -171,7 +171,7 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
     args: 'none',
     surfaces: BOTH,
     section: 'run',
-    parse: () => ({kind: 'request', request: {type: 'command.stop'}}),
+    parse: () => ({kind: 'request', request: {case: 'stop', value: {}}}),
   },
   {
     id: 'steer',
@@ -183,7 +183,7 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
     section: 'run',
     parse: argument =>
       argument
-        ? {kind: 'request', request: {type: 'command.steer', text: argument}}
+        ? {kind: 'request', request: {case: 'steer', value: {text: argument}}}
         : {kind: 'error', error: 'Usage: /steer <message>'},
   },
   {
@@ -217,7 +217,7 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
     section: 'view',
     parse: () => ({
       kind: 'request',
-      request: {type: 'query.performance'},
+      request: {case: 'performance', value: {}},
       responseView: 'perf',
       paneView: 'perf',
     }),
@@ -229,7 +229,7 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
     args: 'none',
     surfaces: BOTH,
     section: 'view',
-    parse: () => ({kind: 'request', request: {type: 'query.design'}, paneView: 'design'}),
+    parse: () => ({kind: 'request', request: {case: 'design', value: {}}, paneView: 'design'}),
   },
   {
     id: 'todos',

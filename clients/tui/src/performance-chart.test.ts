@@ -1,5 +1,17 @@
 import {describe, expect, it} from 'bun:test';
-import type {ProtocolResponse, RunEvent} from '@vibesys/backend-client';
+import {create} from '@bufbuild/protobuf';
+import {
+  EventStatus,
+  EventType,
+  GateKind,
+  ObjectiveDirection,
+  type PerformanceContext,
+  PerformanceContextSchema,
+  type PerformanceRound,
+  PerformanceRoundSchema,
+  type RunEvent,
+} from '@vibesys/backend-client';
+import {makeEvent} from '@vibesys/backend-client/testing';
 import {PLOT_WIDTH, renderPerformanceCurve} from './performance-chart.js';
 
 describe('renderPerformanceCurve', () => {
@@ -67,16 +79,15 @@ describe('renderPerformanceCurve', () => {
   });
 
   it('ignores failed and measurement-free benchmark gates', () => {
-    const failed: RunEvent = {...benchmarkGate(1, 1, 1000), status: 'failed'};
-    const bare = benchmarkGate(2, 2, 1000);
-    if (bare.data?.kind === 'gate_finished') bare.data = {...bare.data, metric: null, value: null};
+    const failed = benchmarkGate(1, 1, 1000, {status: EventStatus.FAILED});
+    const bare = benchmarkGate(2, 2, 1000, {metric: undefined, value: undefined});
 
     expect(renderPerformanceCurve([], [failed, bare])).toBe('No performance data yet.');
   });
 
   it('titles the plot with the backend metric name instead of the unit', () => {
-    const record = {...performance(1, 1000), perf_unit: 'ops/s'};
-    const chart = renderPerformanceCurve([record], [], context({objective_unit: 'ops/s'}));
+    const record = {...performance(1, 1000), perfUnit: 'ops/s'};
+    const chart = renderPerformanceCurve([record], [], context({objectiveUnit: 'ops/s'}));
 
     expect(chart).toContain('Performance · total_ops_per_sec');
     expect(chart).not.toContain('Performance · ops/s');
@@ -88,12 +99,12 @@ describe('renderPerformanceCurve', () => {
       [performance(1, 1000), performance(2, 2000)],
       [],
       context({
-        objective_unit: 'ops/s',
-        objective_direction: 'max',
-        objective_baseline_value: 1234.5,
-        objective_baseline_round: 1,
-        objective_baseline_commit: 'e17fce8123abc',
-        objective_description: 'Throughput of the MPMC queue benchmark.',
+        objectiveUnit: 'ops/s',
+        objectiveDirection: ObjectiveDirection.MAX,
+        objectiveBaselineValue: 1234.5,
+        objectiveBaselineRound: 1,
+        objectiveBaselineCommit: 'e17fce8123abc',
+        objectiveDescription: 'Throughput of the MPMC queue benchmark.',
       }),
     );
 
@@ -106,7 +117,7 @@ describe('renderPerformanceCurve', () => {
     const chart = renderPerformanceCurve(
       [performance(1, 1000)],
       [],
-      context({objective_metric: 'p99_latency_us', objective_direction: 'min'}),
+      context({objectiveMetric: 'p99_latency_us', objectiveDirection: ObjectiveDirection.MIN}),
     );
 
     expect(chart).toContain('Metric    p99_latency_us · minimize ↓');
@@ -116,7 +127,7 @@ describe('renderPerformanceCurve', () => {
     const chart = renderPerformanceCurve(
       [performance(1, 1000), performance(2, 2000), performance(3, 1500)],
       [],
-      context({objective_metric: 'p99_latency_us', objective_direction: 'min'}),
+      context({objectiveMetric: 'p99_latency_us', objectiveDirection: ObjectiveDirection.MIN}),
     );
 
     expect(chart).toContain('best r1 1k total_ops_per_sec');
@@ -127,7 +138,7 @@ describe('renderPerformanceCurve', () => {
     const chart = renderPerformanceCurve(
       [performance(1, 1000), performance(2, 2000), performance(3, 1500)],
       [],
-      context({objective_direction: 'max'}),
+      context({objectiveDirection: ObjectiveDirection.MAX}),
     );
 
     expect(chart).toContain('best r2 2k total_ops_per_sec');
@@ -147,7 +158,7 @@ describe('renderPerformanceCurve', () => {
     const chart = renderPerformanceCurve(
       [performance(1, 1000)],
       [],
-      context({objective_unit: 'total_ops_per_sec'}),
+      context({objectiveUnit: 'total_ops_per_sec'}),
     );
 
     expect(chart).not.toContain('(total_ops_per_sec)');
@@ -155,7 +166,7 @@ describe('renderPerformanceCurve', () => {
 
   it('renders a description-only context when only the prose is known', () => {
     const chart = renderPerformanceCurve([], [], {
-      objective_description: 'Maximize queue throughput.',
+      objectiveDescription: 'Maximize queue throughput.',
     });
 
     expect(chart).toContain('Measures  Maximize queue throughput.');
@@ -167,7 +178,10 @@ describe('renderPerformanceCurve', () => {
     const chart = renderPerformanceCurve(
       [],
       [],
-      context({objective_direction: 'max', objective_description: 'Ops per second.'}),
+      context({
+        objectiveDirection: ObjectiveDirection.MAX,
+        objectiveDescription: 'Ops per second.',
+      }),
     );
 
     expect(chart).toContain('Metric    total_ops_per_sec · maximize ↑');
@@ -237,55 +251,51 @@ describe('chart geometry', () => {
   });
 });
 
-function context(
-  overrides: Partial<NonNullable<ProtocolResponse['performance_context']>>,
-): NonNullable<ProtocolResponse['performance_context']> {
-  return {objective_metric: 'total_ops_per_sec', ...overrides};
+function context(overrides: Partial<PerformanceContext>): PerformanceContext {
+  return create(PerformanceContextSchema, {objectiveMetric: 'total_ops_per_sec', ...overrides});
 }
 
-function performance(
-  round: number,
-  value: number,
-): NonNullable<ProtocolResponse['performance']>[number] {
-  return {
+function performance(round: number, value: number): PerformanceRound {
+  return create(PerformanceRoundSchema, {
     round,
-    perf_metric: value,
-    perf_unit: 'total_ops_per_sec',
+    perfMetric: value,
+    perfUnit: 'total_ops_per_sec',
     passed: true,
-    profile_skipped: false,
-  };
+    profileSkipped: false,
+  });
 }
 
 function benchmark(sequence: number, round: number, value: number): RunEvent {
-  return {
+  return makeEvent(EventType.BENCHMARK_RESULT, {
     sequence,
-    timestamp: '2026-01-01T00:00:00Z',
-    type: 'benchmark_result',
-    round_label: `round-${round}`,
+    roundLabel: `round-${round}`,
     data: {
-      kind: 'benchmark_result',
-      metric: 'total_ops_per_sec',
-      value,
-      unit: 'ops/s',
+      case: 'benchmarkResult',
+      value: {metric: 'total_ops_per_sec', value, unit: 'ops/s'},
     },
-  };
+  });
 }
 
 /** The measurement as a completed `gate_finished` benchmark carries it (#692). */
-function benchmarkGate(sequence: number, round: number, value: number): RunEvent {
-  return {
+function benchmarkGate(
+  sequence: number,
+  round: number,
+  value: number,
+  overrides: {status?: EventStatus; metric?: string | undefined; value?: number | undefined} = {},
+): RunEvent {
+  const metric = 'metric' in overrides ? overrides.metric : 'total_ops_per_sec';
+  return makeEvent(EventType.GATE_FINISHED, {
     sequence,
-    timestamp: '2026-01-01T00:00:00Z',
-    type: 'gate_finished',
-    status: 'completed',
-    agent_kind: null,
-    round_label: `round-${round}`,
+    status: overrides.status ?? EventStatus.COMPLETED,
+    roundLabel: `round-${round}`,
     data: {
-      kind: 'gate_finished',
-      gate: 'benchmark',
-      metric: 'total_ops_per_sec',
-      value,
-      unit: 'ops/s',
+      case: 'gateFinished',
+      value: {
+        gate: GateKind.BENCHMARK,
+        metric,
+        value: 'value' in overrides ? overrides.value : value,
+        unit: 'ops/s',
+      },
     },
-  };
+  });
 }

@@ -20,7 +20,7 @@ const explicitTheme = process.env['VIBESYS_THEME'];
 // In flight while the renderer starts, so the configured theme costs no
 // extra wall clock before the first frame.
 const themeRequest =
-  explicitTheme === undefined ? client.request({type: 'query.tui_defaults'}) : undefined;
+  explicitTheme === undefined ? client.request({case: 'tuiDefaults', value: {}}) : undefined;
 // VibeSys owns Ctrl+C so a nonempty OpenTUI selection can be copied before the
 // same chord falls back to exiting. Enabling OpenTUI's parallel exit handler
 // would make those two outcomes race.

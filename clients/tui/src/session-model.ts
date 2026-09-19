@@ -1,11 +1,13 @@
-import type {
-  DesignFileChange,
-  DesignRound,
-  Diagnostic,
-  HypothesisEntry,
-  HypothesisRound,
-  RunEvent,
-  RunSnapshot,
+import {
+  type DesignFileChange,
+  type DesignRound,
+  type Diagnostic,
+  DiagnosticScope,
+  DiagnosticSeverity,
+  type HypothesisEntry,
+  type HypothesisRound,
+  type RunEvent,
+  type RunSnapshot,
 } from '@vibesys/backend-client';
 import {
   type ActiveAgentExecution,
@@ -412,8 +414,8 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
  */
 export function entryKey(entry: HypothesisEntry, index: number): string {
   return entry.identified === false
-    ? `${entry.hypothesis_id}#${entry.first_round}`
-    : entry.hypothesis_id || `#${index}`;
+    ? `${entry.hypothesisId}#${entry.firstRound}`
+    : entry.hypothesisId || `#${index}`;
 }
 
 /**
@@ -712,8 +714,8 @@ export function mergeExperimentEntries(
   replacements: readonly HypothesisEntry[],
   removedIds: readonly string[],
 ): HypothesisEntry[] {
-  const entries = new Map(current.map(entry => [entry.hypothesis_id, entry]));
-  for (const entry of replacements) entries.set(entry.hypothesis_id, entry);
+  const entries = new Map(current.map(entry => [entry.hypothesisId, entry]));
+  for (const entry of replacements) entries.set(entry.hypothesisId, entry);
   for (const hypothesisId of removedIds) entries.delete(hypothesisId);
   return [...entries.values()];
 }
@@ -782,8 +784,8 @@ export function designRoundViews(
     const owner = owners.get(design.round) ?? null;
     return {
       round: design.round,
-      files: design.files ?? null,
-      hypothesisId: owner?.entry.hypothesis_id ?? null,
+      files: design.files?.changes ?? null,
+      hypothesisId: owner?.entry.hypothesisId ?? null,
       title: owner?.entry.title ?? owner?.entry.claim ?? null,
       record: owner?.record ?? null,
     };
@@ -949,7 +951,7 @@ function scopeStateForRound(
   const entryKeyValue = entryKey(entry, entryIndex);
   return {
     hypothesisScope: reuseScope(state.hypothesisScope, {
-      id: entry.hypothesis_id,
+      id: entry.hypothesisId,
       label: hypothesisLabel(entry),
       title: hypothesisTitle(entry),
       rounds: scopeRounds(entry),
@@ -1031,10 +1033,10 @@ function scopeRounds(entry: HypothesisEntry): number[] {
   if (listed.length > 0) return [...listed].sort((a, b) => a - b);
   // A record can summarize a continuation before its per-round outcomes have
   // been persisted. Its declared range is still the server's ownership claim.
-  if (entry.first_round <= 0 || entry.last_round < entry.first_round) return [];
+  if (entry.firstRound <= 0 || entry.lastRound < entry.firstRound) return [];
   return Array.from(
-    {length: Math.max(0, entry.last_round - entry.first_round + 1)},
-    (_, index) => entry.first_round + index,
+    {length: Math.max(0, entry.lastRound - entry.firstRound + 1)},
+    (_, index) => entry.firstRound + index,
   );
 }
 
@@ -1045,14 +1047,14 @@ export function hypothesisRoundNumbers(entry: HypothesisEntry): number[] {
 
 /** The claim itself, falling back to its id when the record carries no title. */
 function hypothesisTitle(entry: HypothesisEntry): string {
-  return entry.title ?? entry.hypothesis_id;
+  return entry.title ?? entry.hypothesisId;
 }
 
 function hypothesisLabel(entry: HypothesisEntry): string {
   const range =
-    entry.first_round === entry.last_round
-      ? `r${entry.first_round}`
-      : `r${entry.first_round}-${entry.last_round}`;
+    entry.firstRound === entry.lastRound
+      ? `r${entry.firstRound}`
+      : `r${entry.firstRound}-${entry.lastRound}`;
   return `${hypothesisTitle(entry)} · ${range}`;
 }
 
@@ -1101,16 +1103,16 @@ export function experimentIndexItems(state: SessionState): ExperimentIndexItem[]
 }
 
 function experimentItemRound(item: ExperimentIndexItem): number {
-  if (item.kind === 'hypothesis') return item.entry.first_round;
+  if (item.kind === 'hypothesis') return item.entry.firstRound;
   if (item.kind === 'round') return item.roundNumber;
   return item.activity.roundNumber;
 }
 
 function compareHypothesisEntries(left: HypothesisEntry, right: HypothesisEntry): number {
   return (
-    left.first_round - right.first_round ||
-    left.last_round - right.last_round ||
-    left.hypothesis_id.localeCompare(right.hypothesis_id)
+    left.firstRound - right.firstRound ||
+    left.lastRound - right.lastRound ||
+    left.hypothesisId.localeCompare(right.hypothesisId)
   );
 }
 
@@ -1886,7 +1888,7 @@ export function reportError(
 /** Normalize the report boundary into the complete state consumed by the banner view. */
 function errorBannerFromReport(message: string, report: ErrorReport): ErrorBannerState {
   const diagnostic = report.diagnostic ?? null;
-  const scope = diagnostic?.scope ?? report.scope;
+  const scope = diagnostic === null ? report.scope : errorScope(diagnostic.scope);
   const severity = diagnosticSeverity(diagnostic?.severity) ?? report.severity ?? 'recoverable';
   return {
     title: report.title ?? errorTitle(scope),
@@ -1984,11 +1986,28 @@ function errorTitle(scope: ErrorScope): string {
   return titles[scope];
 }
 
-function diagnosticSeverity(
-  severity: Diagnostic['severity'] | undefined,
-): ErrorSeverity | undefined {
+function errorScope(scope: DiagnosticScope): ErrorScope {
+  switch (scope) {
+    case DiagnosticScope.CONFIGURATION:
+      return 'configuration';
+    case DiagnosticScope.INVOCATION:
+      return 'invocation';
+    case DiagnosticScope.PHASE:
+      return 'phase';
+    case DiagnosticScope.REQUEST:
+      return 'request';
+    case DiagnosticScope.PROTOCOL:
+      return 'protocol';
+    case DiagnosticScope.TRANSPORT:
+      return 'transport';
+    default:
+      return 'run';
+  }
+}
+
+function diagnosticSeverity(severity: DiagnosticSeverity | undefined): ErrorSeverity | undefined {
   if (severity === undefined) return undefined;
-  return severity === 'fatal' ? 'fatal' : 'recoverable';
+  return severity === DiagnosticSeverity.FATAL ? 'fatal' : 'recoverable';
 }
 
 /**
