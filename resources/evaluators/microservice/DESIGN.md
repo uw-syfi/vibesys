@@ -79,17 +79,23 @@ Candidate launch settings are accuracy-run inputs, not application semantics.
 
 ### Stable ownership boundary
 
-The framework owns scheduling, transport, lifecycle containment, generic
-validation mechanics, cleanup bookkeeping, property enforcement, measurement,
-and reporting. Adding an application must not require changes to those
-components. It should require only:
+The shared evaluator owns API contracts, scheduling, transport, lifecycle
+containment, generic validation mechanics, cleanup bookkeeping, property
+enforcement, measurement, and reporting. Application-specific correctness and
+the executable that selects it belong to the task or example. Adding a task
+must not require an import or registration in the generic `cmd/servicebench`
+command. It should require only:
 
-1. a benchmark implementation of `api.Application` under `apps/<name>`;
-2. an independent correctness implementation of `api.AccuracyApplication`
-   under `accuracyapps/<name>`;
-3. optional mode-neutral helpers under `appsupport/<name>`; and
-4. explicit registrations in the `servicebench` wiring layer plus workload
-   configuration.
+1. a benchmark implementation of `api.Application`, using a bundled adapter
+   under `apps/` when one fits;
+2. a task-owned independent implementation of `api.AccuracyApplication`;
+3. optional mode-neutral helpers for topology, requests, or input grammars;
+4. a task-owned command that calls `servicebenchcli.Run` with explicit
+   `composition.Registration` values; and
+5. workload configuration selecting the registered names.
+
+`accuracyapps/` contains bundled compatibility adapters retained for existing
+workloads. It is not the default home for new task-specific correctness code.
 
 The benchmark implementation owns fixture setup and cleanup, randomized
 operation plans, request payloads, and fast per-operation acceptance checks. It
@@ -113,7 +119,10 @@ accuracy runner, and applications protocol-neutral.
 The dependency rule is:
 
 ```text
-cmd/servicebench -> concrete applications, drivers, and reusable runners
+task/example command -> task correctness, composition, and servicebenchcli
+cmd/servicebench -> legacy bundled registrations and servicebenchcli
+servicebenchcli -> composition, config, reusable runners, lifecycle, and reporting
+composition -> api and registry only
 engine -> api interfaces, probing, registry, and transport
 accuracy runner -> api interfaces, probing, registry, sampling, and transport
 benchmark application -> api plus optional mode-neutral app support
@@ -125,7 +134,46 @@ statistics and results -> common observations only
 Application code must not schedule workers or calculate headline metrics. A
 driver must not know application operation names. Reusable runners must not
 branch on an application or protocol name. Concrete selection belongs only in
-the composition layer and registries.
+executable composition roots and their registry registrations. Shared runners
+and generic composition helpers do not own concrete application imports.
+
+### Accuracy event model
+
+The generic accuracy layer represents a correctness experiment as a versioned,
+replayable event program. Its events are a sequential call, a barrier-delimited
+group of concurrent calls, a candidate crash, or a candidate start. Programs
+contain stimuli only. Expected responses are derived independently from an
+application-owned reference state machine, so persisted test input cannot bless
+the candidate behavior it is meant to check.
+
+The reference model defines the canonical result and next logical state for one
+atomic application action. The same model is used for all execution shapes:
+
+- sequential calls advance it directly;
+- parallel calls are checked by searching for a legal serialization whose
+  identified observations match the candidate trace and whose order respects
+  invocation/completion precedence; and
+- crashes apply the application's durability transition before execution
+  resumes.
+
+At a parallel barrier, the framework retains every matching successor state.
+Correctness requires at least one ordering that explains both the concurrent
+observations and the rest of the program. This prevents the verifier from
+rejecting a valid trace merely because it selected a locally valid ordering
+that conflicts with a later observation.
+
+Lifecycle events are quiescent in the initial contract. All calls before a
+crash have completed, and calls after it wait for a corresponding start. This
+gives acknowledged writes an unambiguous durability meaning. Crashing with
+requests in flight would require the application contract to specify ambiguous
+delivery and acknowledgement outcomes and is not represented yet.
+
+The framework owns program validation, scheduling, trace collection,
+linearization search, lifecycle dispatch, and counterexample reporting. The
+application owns the action language, generator, request adapter, response
+normalization, reference state and transitions, observation equivalence, and
+durability policy. Detailed API and replay rules are in
+[`accuracy/PROGRAMS.md`](accuracy/PROGRAMS.md).
 
 ### Fail-closed lifecycle
 

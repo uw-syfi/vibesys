@@ -477,7 +477,12 @@ class ProfilerSummary(BaseModel):
     )
     perf_metric: FiniteFloat | None = Field(
         default=None,
-        description="Primary performance metric collected during profiling (higher is better). None when unavailable.",
+        description=(
+            "Uninverted primary performance metric collected during profiling. "
+            "The configured primary objective determines whether lower or higher is better. "
+            "Without configured objectives, scalar selection assumes higher is better. "
+            "None when unavailable."
+        ),
     )
     perf_unit: str | None = Field(
         default=None,

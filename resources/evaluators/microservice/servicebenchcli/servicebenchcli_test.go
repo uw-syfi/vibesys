@@ -1,10 +1,97 @@
-package main
+package servicebenchcli
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/sdk/vs-evaluator/vseval"
+
+	"vibesys/microservice-evaluator/api"
+	"vibesys/microservice-evaluator/composition"
 )
+
+type cliAccuracyApplication struct{}
+
+func (cliAccuracyApplication) Name() string { return "custom" }
+func (cliAccuracyApplication) Properties() []api.AccuracyProperty {
+	return []api.AccuracyProperty{{Name: "required", Required: true}}
+}
+func (cliAccuracyApplication) ReadinessProbes() []api.ReadinessProbe { return nil }
+func (cliAccuracyApplication) PreflightProbes() []api.ReadinessProbe { return nil }
+func (cliAccuracyApplication) PreflightProperties() []string         { return []string{"required"} }
+func (cliAccuracyApplication) CasePolicy() api.AccuracyCasePolicy {
+	return api.AccuracyCasePolicy{MinimumCases: 1}
+}
+func (cliAccuracyApplication) Check(
+	context.Context,
+	api.Runtime,
+	api.AccuracyContext,
+	api.AccuracyRecorder,
+) error {
+	return nil
+}
+
+type cliDriver struct{}
+
+func (cliDriver) Protocol() string { return "custom" }
+func (cliDriver) Open(context.Context, api.Target) (api.Client, error) {
+	return nil, nil
+}
+
+func TestRunRejectsEmptyEngineVersion(t *testing.T) {
+	if err := Run(nil, ""); err == nil {
+		t.Fatal("Run accepted an empty engine version")
+	}
+}
+
+func TestRunUsesSuppliedRegistrationsAndFreshFlagSet(t *testing.T) {
+	workloadPath := filepath.Join(t.TempDir(), "workload.toml")
+	workload := `
+version = 1
+name = "custom"
+application = "custom"
+
+[load]
+rate = 1
+duration_seconds = 1
+
+[[targets]]
+name = "api"
+protocol = "custom"
+address = "custom://api"
+
+[[operations]]
+name = "read"
+target = "api"
+weight = 1
+
+[objective]
+name = "latency"
+metric = "latency_ms.p50"
+direction = "minimize"
+unit = "ms"
+`
+	if err := os.WriteFile(workloadPath, []byte(workload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registrations := []composition.Registration{
+		composition.Driver(cliDriver{}),
+		composition.AccuracyApplication(
+			"custom",
+			func(api.Workload) (api.AccuracyApplication, error) {
+				return cliAccuracyApplication{}, nil
+			},
+		),
+	}
+	args := []string{"--mode", "accuracy", "--workload", workloadPath, "--validate-only"}
+	for invocation := 0; invocation < 2; invocation++ {
+		if err := Run(args, "test", registrations...); err != nil {
+			t.Fatalf("Run() invocation %d: %v", invocation, err)
+		}
+	}
+}
 
 func TestParseCommandJSONRejectsMalformedAndEmptyArguments(t *testing.T) {
 	for _, raw := range []string{

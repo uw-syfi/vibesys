@@ -103,6 +103,37 @@ export function agentPaneWidth(terminalWidth: number, phases: AgentPhase[]): num
   return Math.min(ceiling, room, Math.max(floor, share));
 }
 
+export interface AgentMapLayout {
+  paneWidth: number;
+  graphWidth: number | null;
+  graphRows: number;
+}
+
+/**
+ * Resolve the pane geometry once, before rendering chooses an empty, stacked,
+ * or graph presentation. An explicit width comes from zoom mode: it always
+ * owns the pane width, but still falls back to the stacked presentation when
+ * the graph cannot name every agent in full.
+ */
+export function agentMapLayout(
+  terminalWidth: number,
+  phases: AgentPhase[],
+  widthOverride: number | undefined,
+  rows: number,
+): AgentMapLayout {
+  const graphWidth =
+    widthOverride === undefined
+      ? agentPaneWidth(terminalWidth, phases)
+      : widthOverride >= graphPaneBounds(phases, selectedLabelWidth).min
+        ? widthOverride
+        : null;
+  return {
+    paneWidth: widthOverride ?? graphWidth ?? STACKED_WIDTH,
+    graphWidth,
+    graphRows: Math.max(0, rows - PANE_VCHROME - HEADING_ROWS),
+  };
+}
+
 const AGENTS_TITLE = 'Agents';
 
 export class AgentMapView {
@@ -164,6 +195,7 @@ export class AgentMapView {
    * pane; callers that manage their own height (tests driving the view
    * directly) can omit it and get the unclamped graph.
    */
+
   render(state: SessionState, widthOverride?: number, rows = Number.POSITIVE_INFINITY): void {
     const phases = visiblePhases(state);
     // The pane's width follows the terminal, so a resize has to redraw even
@@ -172,16 +204,10 @@ export class AgentMapView {
     // name.
     // Null either way means the stacked list: the pane is drawn at `paneWidth`
     // whatever that decides.
-    const graphWidth =
-      widthOverride === undefined
-        ? agentPaneWidth(this.renderer.terminalWidth, phases)
-        : widthOverride >= graphPaneBounds(phases, selectedLabelWidth).min
-          ? widthOverride
-          : null;
-    const paneWidth = widthOverride ?? graphWidth ?? STACKED_WIDTH;
+    const layout = agentMapLayout(this.renderer.terminalWidth, phases, widthOverride, rows);
     if (
       state === this.#renderedState &&
-      paneWidth === this.#renderedWidth &&
+      layout.paneWidth === this.#renderedWidth &&
       rows === this.#renderedRows
     ) {
       return;
@@ -189,9 +215,9 @@ export class AgentMapView {
     // Selection and focus are drawn into the nodes, so a change to either is a
     // reason to redraw even when the phases are identical.
     this.#renderedState = state;
-    this.#renderedWidth = paneWidth;
+    this.#renderedWidth = layout.paneWidth;
     this.#renderedRows = rows;
-    this.output.width = paneWidth;
+    this.output.width = layout.paneWidth;
     // The pane that owns the arrow keys says so, the way every other focusable
     // surface in the client does. `focusedPane` is that single authority:
     // reading `roundFocus` directly lit this pane while a visualization too
@@ -199,26 +225,36 @@ export class AgentMapView {
     applyPaneFocus(this.output, this.#theme, AGENTS_TITLE, focusedPane(state) === 'agents');
     this.#clear();
     if (phases.length === 0) {
-      // A round the run has not reached has no agents, and never will until it
-      // runs. "Waiting" would suggest something is on its way.
-      const roundNumber = visibleRoundNumber(state);
-      const round =
-        roundNumber === null
-          ? null
-          : (stripRounds(state).find(item => item.number === roundNumber) ?? null);
-      this.#content.add(
-        new TextRenderable(this.renderer, {
-          content:
-            round?.status === 'planned'
-              ? `Round ${roundNumber} has not run yet.`
-              : 'Waiting for phases…',
-          fg: this.#theme.textSubtle,
-          width: '100%',
-        }),
-      );
+      this.#renderEmptyState(state);
       return;
     }
 
+    this.#renderHeading(state, phases, layout.paneWidth);
+    this.#renderPhases(phases, state.selectedAgentKind, layout);
+    this.#syncElapsedTimer();
+  }
+
+  #renderEmptyState(state: SessionState): void {
+    // A round the run has not reached has no agents, and never will until it
+    // runs. "Waiting" would suggest something is on its way.
+    const roundNumber = visibleRoundNumber(state);
+    const round =
+      roundNumber === null
+        ? null
+        : (stripRounds(state).find(item => item.number === roundNumber) ?? null);
+    this.#content.add(
+      new TextRenderable(this.renderer, {
+        content:
+          round?.status === 'planned'
+            ? `Round ${roundNumber} has not run yet.`
+            : 'Waiting for phases…',
+        fg: this.#theme.textSubtle,
+        width: '100%',
+      }),
+    );
+  }
+
+  #renderHeading(state: SessionState, phases: AgentPhase[], paneWidth: number): void {
     const roundNumber = visibleRoundNumber(state);
     const round =
       roundNumber === null
@@ -253,16 +289,13 @@ export class AgentMapView {
     // Elapsed time only advances while an agent is running, so the heading
     // ticks for exactly as long as one is.
     if (round !== null && hasActiveAgentTiming(round)) this.#runningRound = {round, text: heading};
-    if (graphWidth === null) this.#renderStacked(phases, state.selectedAgentKind);
+  }
+
+  #renderPhases(phases: AgentPhase[], selectedKind: string | null, layout: AgentMapLayout): void {
+    if (layout.graphWidth === null) this.#renderStacked(phases, selectedKind);
     else {
-      this.#renderGraph(
-        phases,
-        state.selectedAgentKind,
-        graphWidth,
-        Math.max(0, rows - PANE_VCHROME - HEADING_ROWS),
-      );
+      this.#renderGraph(phases, selectedKind, layout.graphWidth, layout.graphRows);
     }
-    this.#syncElapsedTimer();
   }
 
   destroy(): void {

@@ -1,9 +1,15 @@
 # `servicebench` command
 
-This package is the CLI entry point for benchmarking or accuracy-checking a
-microservice application. It is the composition root that registers the
-built-in HTTP driver and the separate benchmark and accuracy adapters before
-invoking the selected shared runner.
+This package is the legacy bundled CLI entry point for benchmarking or
+accuracy-checking a microservice application. It is a thin composition root:
+it declares the bundled driver and adapter registrations, then calls
+`servicebenchcli.Run`, which owns the command behavior described below.
+
+Task-specific correctness adapters are not added here. Their task or example
+owns a small command that imports the adapter and passes
+`composition.AccuracyApplication` to `servicebenchcli.Run`. The shared
+`composition` package owns only typed registration helpers and imports no
+concrete applications.
 
 The command is responsible for:
 
@@ -24,8 +30,10 @@ candidate mode additionally proves that every readiness endpoint stops before
 restarting after an OS-contained crash. Managed candidates require Bubblewrap;
 the command fails closed when a dedicated PID namespace cannot be created.
 
-It should contain orchestration only. Protocol behavior belongs in `drivers/`,
-application behavior in `apps/`, and measurement behavior in `engine/`.
+This package should contain registrations and process exit handling only.
+Reusable CLI orchestration belongs in `servicebenchcli/`, protocol behavior in
+`drivers/`, benchmark application behavior in `apps/`, and measurement behavior
+in `engine/`.
 
 ## Trace Graph
 

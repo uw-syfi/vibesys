@@ -14,6 +14,7 @@ from vs_project._layout import (
     TasksRoot,
     UnsafeProjectPathError,
 )
+from vs_project._resume import ResumeConfigurationComparison, compare_resume_configurations
 from vs_project._state import (
     PROJECT_SCHEMA_VERSION,
     RUN_SCHEMA_VERSION,
@@ -67,6 +68,7 @@ __all__ = [
     "ProjectRootNotFoundError",
     "ProjectSandboxPaths",
     "ProjectStateError",
+    "ResumeConfigurationComparison",
     "RunConfiguration",
     "RunEnvironmentRecord",
     "RunManifest",
@@ -83,6 +85,7 @@ __all__ = [
     "TaskNotFoundError",
     "TasksRoot",
     "UnsafeProjectPathError",
+    "compare_resume_configurations",
     "generate_run_id",
     "is_project_state_path",
     "serialize_round",

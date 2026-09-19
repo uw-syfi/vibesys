@@ -41,6 +41,15 @@ def test_the_axis_supplies_the_direction_a_reading_omits() -> None:
     assert space.direction(None) is None
 
 
+def test_signed_primary_orients_headline_values_for_ranking() -> None:
+    maximizing = MetricSpace(objectives=(_OPS,))
+    minimizing = MetricSpace(objectives=(_LATENCY,))
+
+    assert maximizing.signed_primary(12.0) == 12.0
+    assert minimizing.signed_primary(12.0) == -12.0
+    assert MetricSpace().signed_primary(12.0) == 12.0
+
+
 @pytest.mark.parametrize("direction", ["max", "min"])
 def test_a_delta_exactly_at_the_tolerance_is_within_noise(
     direction: Literal["max", "min"],

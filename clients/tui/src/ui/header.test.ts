@@ -521,6 +521,7 @@ describe('header hierarchy', () => {
 });
 
 describe('header contrast', () => {
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
   it('clears the floor of every theme for every role, in all eight', () => {
     const themes = listThemes();
     expect(themes).toHaveLength(8);

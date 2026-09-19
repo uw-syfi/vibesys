@@ -302,9 +302,9 @@ function applyPhaseEvent(state: RunMapState, event: RunEvent): AgentPhase[] {
   if (roundNumber !== null && roles !== null) {
     phases = seedExpectedPhases(roles, phases, roundNumber);
   }
-  const started = event.type === 'agent_execution_started' || event.type === 'phase_started';
-  const finished = event.type === 'agent_execution_finished' || event.type === 'phase_finished';
-  if (!started && !finished) return ensurePhase(phases, kind, roundNumber);
+  const transition = phaseTransition(event);
+  if (transition === null) return ensurePhase(phases, kind, roundNumber);
+  const started = transition === 'started';
   const executionId = event.execution_id ?? event.invocation_id ?? undefined;
   const data = event.data;
   const runtime =
@@ -320,6 +320,14 @@ function applyPhaseEvent(state: RunMapState, event: RunEvent): AgentPhase[] {
     ...(started ? {startedAt: event.timestamp} : {finishedAt: event.timestamp}),
     ...runtime,
   });
+}
+
+function phaseTransition(event: RunEvent): 'started' | 'finished' | null {
+  if (event.type === 'agent_execution_started' || event.type === 'phase_started') return 'started';
+  if (event.type === 'agent_execution_finished' || event.type === 'phase_finished') {
+    return 'finished';
+  }
+  return null;
 }
 
 function terminalPhaseStatus(status: RunEvent['status']): AgentPhaseStatus {
@@ -485,21 +493,20 @@ function updateRoundAgentElapsed(
     if (event.type !== 'round_finished') return round;
     return closeActiveAgentTimings(round, event.timestamp, event.sequence ?? null);
   }
-  if (event.type === 'phase_started' || event.type === 'phase_finished') {
-    const executionId = event.execution_id ?? event.invocation_id;
-    const existing = phases.find(
-      phase =>
-        executionId != null &&
-        phase.executionId === executionId &&
-        phase.kind === event.agent_kind &&
-        phase.roundNumber === roundNumberFromLabel(event.round_label),
-    );
-    if (
-      (started && existing?.status === 'active') ||
-      (finished && existing !== undefined && existing.status !== 'active')
-    ) {
-      return round;
-    }
-  }
+  if (compatibilityPhaseTimingAlreadyApplied(phases, event)) return round;
   return started ? startAgentTiming(round, event) : finishAgentTiming(round, event);
+}
+
+function compatibilityPhaseTimingAlreadyApplied(phases: AgentPhase[], event: RunEvent): boolean {
+  if (event.type !== 'phase_started' && event.type !== 'phase_finished') return false;
+  const executionId = event.execution_id ?? event.invocation_id;
+  if (executionId == null) return false;
+  const existing = phases.find(
+    phase =>
+      phase.executionId === executionId &&
+      phase.kind === event.agent_kind &&
+      phase.roundNumber === roundNumberFromLabel(event.round_label),
+  );
+  if (event.type === 'phase_started') return existing?.status === 'active';
+  return existing !== undefined && existing.status !== 'active';
 }

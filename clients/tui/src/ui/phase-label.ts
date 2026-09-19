@@ -66,6 +66,71 @@ const EVOLVE_CANDIDATE = /^gen-(\d+)-cand-(\d+)-(.+)$/;
 const PLAIN_ISSUE = /^(impl|judge)\s+issue\s+#(\S+)\s+att(\d+)$/;
 const PLAIN_PERF = /^perf_eval\s+iter\s+(.+)$/;
 
+interface PhaseContext {
+  label: string;
+  kind: string;
+}
+
+type PhaseParser = (context: PhaseContext) => PhaseDescription | null;
+
+function parseChat({label, kind}: PhaseContext): PhaseDescription | null {
+  // The chat runs beside the loop rather than inside it, and labels itself in
+  // words already. Both spellings appear in recorded runs.
+  if (label !== 'experiment chat' && label !== 'experiment-chat' && kind !== 'chat') return null;
+  return {activity: 'answering', attempt: null, subject: null};
+}
+
+function parseEvolveCandidate({label, kind}: PhaseContext): PhaseDescription | null {
+  const match = EVOLVE_CANDIDATE.exec(label);
+  if (match === null) return null;
+  const [, , candidate, stage] = match;
+  return {
+    activity: STAGE_WORDS[stage ?? ''] ?? fallbackActivity(stage, kind),
+    attempt: null,
+    subject: candidate === undefined ? null : `candidate ${candidate}`,
+  };
+}
+
+function parsePlainIssue({label}: PhaseContext): PhaseDescription | null {
+  const match = PLAIN_ISSUE.exec(label);
+  if (match === null) return null;
+  const [, stage, id, attempt] = match;
+  return {
+    activity: stage === 'judge' ? 'judging' : 'implementing',
+    attempt: attemptOrNull(attempt),
+    subject: id === undefined ? null : `issue #${id}`,
+  };
+}
+
+function parsePlainPerformance({label}: PhaseContext): PhaseDescription | null {
+  return PLAIN_PERF.test(label) ? {activity: 'measuring', attempt: null, subject: null} : null;
+}
+
+function parseAgentRound({label, kind}: PhaseContext): PhaseDescription | null {
+  const match = AGENT_ROUND.exec(label);
+  if (match === null) return null;
+  const [, , retry, stage] = match;
+  return {
+    // `round-N` and `round-N-retry-R` carry no stage; the kind names the
+    // agent that is between stages.
+    activity:
+      stage === undefined
+        ? fallbackActivity(null, kind)
+        : (STAGE_WORDS[stage] ?? fallbackActivity(stage, kind)),
+    attempt: attemptOrNull(retry),
+    subject: null,
+  };
+}
+
+/** Label families in precedence order. Chat kind intentionally overrides every label. */
+const PHASE_PARSERS: readonly PhaseParser[] = [
+  parseChat,
+  parseEvolveCandidate,
+  parsePlainIssue,
+  parsePlainPerformance,
+  parseAgentRound,
+];
+
 /**
  * Describes what is running, from the round label and the agent kind.
  *
@@ -73,6 +138,7 @@ const PLAIN_PERF = /^perf_eval\s+iter\s+(.+)$/;
  * covers (an orchestrator plans in `round-N-plan` and prepares in
  * `round-N-pre`), which the kind alone cannot.
  */
+
 export function describePhase(
   roundLabel: string | null,
   agentKind: string | null,
@@ -81,49 +147,10 @@ export function describePhase(
   const kind = agentKind?.trim() ?? '';
   if (label === '' && kind === '') return null;
 
-  // The chat runs beside the loop rather than inside it, and labels itself in
-  // words already. Both spellings appear in recorded runs.
-  if (label === 'experiment chat' || label === 'experiment-chat' || kind === 'chat') {
-    return {activity: 'answering', attempt: null, subject: null};
-  }
-
-  const evolve = EVOLVE_CANDIDATE.exec(label);
-  if (evolve) {
-    const [, , candidate, stage] = evolve;
-    return {
-      activity: STAGE_WORDS[stage ?? ''] ?? fallbackActivity(stage, kind),
-      attempt: null,
-      subject: candidate === undefined ? null : `candidate ${candidate}`,
-    };
-  }
-
-  const issue = PLAIN_ISSUE.exec(label);
-  if (issue) {
-    const [, stage, id, attempt] = issue;
-    return {
-      activity: stage === 'judge' ? 'judging' : 'implementing',
-      attempt: attemptOrNull(attempt),
-      subject: id === undefined ? null : `issue #${id}`,
-    };
-  }
-
-  if (PLAIN_PERF.test(label)) {
-    return {activity: 'measuring', attempt: null, subject: null};
-  }
-
-  const round = AGENT_ROUND.exec(label);
-  if (round) {
-    const [, , retry, stage] = round;
-    return {
-      // `round-N` and `round-N-retry-R` carry no stage; the kind names the
-      // agent that is between stages.
-      activity:
-        stage === undefined
-          ? fallbackActivity(null, kind)
-          : (STAGE_WORDS[stage] ?? fallbackActivity(stage, kind)),
-      attempt: attemptOrNull(retry),
-      subject: null,
-    };
+  const context = {label, kind};
+  for (const parse of PHASE_PARSERS) {
+    const phase = parse(context);
+    if (phase !== null) return phase;
   }
 
   // An unrecognized label is a loop we do not know about. Falling back to the
