@@ -235,7 +235,7 @@ describe('conversation entry row cost (#565)', () => {
     for (const card of rest) {
       expect(card.height).toBe(1);
       // `false`, not an empty side list: OpenTUI turns a border back on if a
-      // style or colour is passed beside it (tui-conventions.md).
+      // style or colour is passed beside it (tui/conventions.md).
       expect(card.border).toBe(false);
     }
     for (const entry of run.slice(1))
@@ -306,7 +306,7 @@ describe('conversation entry row cost (#565)', () => {
     // An entry inside a run draws no heading, so it has no marker cell and no
     // `textStrong` label to carry the cursor. A rule down its left edge is a
     // channel every entry has, and it is a glyph rather than a colour, which
-    // is what WCAG 1.4.1 asks for (tui-conventions.md).
+    // is what WCAG 1.4.1 asks for (tui/conventions.md).
     expect(card.border).toEqual(['left']);
     expect(selected.testRenderer.captureCharFrame()).toContain('│two');
     // It costs no row and shifts no text: the column it draws into is the one
@@ -363,7 +363,7 @@ describe('every run opener draws the divider', () => {
     ];
     const {view} = await renderEntries(entries);
     expect(cardOf(view, 'b1').border).toEqual(['top']);
-    // `false`, not an empty side list (tui-conventions.md).
+    // `false`, not an empty side list (tui/conventions.md).
     expect(cardOf(view, 'b2').border).toBe(false);
   });
 });

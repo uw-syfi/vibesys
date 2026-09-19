@@ -80,7 +80,7 @@ export class OverlayView {
       paddingLeft: 1,
       paddingRight: 1,
       border: true,
-      // Square with an outer fill, the overlay exception (tui-conventions.md):
+      // Square with an outer fill, the overlay exception (tui/conventions.md):
       // the fill is what makes this modal opaque over whatever it covers, ring
       // included, and a fill that reaches the ring needs a square corner.
       borderStyle: 'single',
@@ -179,7 +179,7 @@ export class OverlayView {
     applyPaneFocus(this.output, this.#theme, pane.title, focusedPane(state) === 'performance');
     // `applyPaneFocus` also stamps the pane frame, which is rounded. This box
     // is an overlay in both of its roles, so it keeps the outer fill and with
-    // it the square corner (tui-conventions.md), and takes only the title and
+    // it the square corner (tui/conventions.md), and takes only the title and
     // the border colour from the pane treatment. Frame weight was never one of
     // the focus channels anyway; `PANE_BORDER` says why.
     this.output.borderStyle = 'single';

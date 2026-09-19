@@ -409,7 +409,7 @@ export class AgentMapView {
       // "implementer" and "implement…" at the widths a four-stage round leaves.
       border: true,
       // Square, and not because of the fill: that sits on an inner layer
-      // (tui-conventions.md), so the shape is free either way and this is a
+      // (tui/conventions.md), so the shape is free either way and this is a
       // look decision. A stage reads as a slot in a pipeline rather than as a
       // card, and the map's edges arrive at its sides. Unconditional rather
       // than square-only-when-selected, because swapping the shape on

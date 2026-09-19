@@ -103,7 +103,7 @@ export class ChatPaneView {
     // The surface every other pane sits on. Without it this box falls through
     // to the root's canvas, a lighter shade, so the chat read as a pale band
     // beside panes that did not match it. On its own layer, so the pane keeps
-    // the rounded frame `PANE_BORDER` argues for (tui-conventions.md).
+    // the rounded frame `PANE_BORDER` argues for (tui/conventions.md).
     this.#fill = fillLayer(this.output, 'chat-pane-fill', theme.canvas);
     this.#scroll = new ScrollBoxRenderable(renderer, {
       id: 'chat-pane-scroll',

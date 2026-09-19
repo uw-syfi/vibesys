@@ -282,6 +282,33 @@ def test_checked_in_policy_loads_and_hard_denies() -> None:
 
 
 @pytest.mark.parametrize(
+    "filenames",
+    [
+        ["docs/contributing/tui/README.md"],
+        ["docs/contributing/tui/conventions.md"],
+        ["docs/contributing/tui-conventions.md", "clients/tui/src/app.ts"],
+    ],
+)
+def test_checked_in_policy_lets_tui_members_land_tui_docs(filenames: list[str]) -> None:
+    policy = load_policy()
+    entries = [{"filename": name} for name in filenames]
+
+    capabilities, _checks = authorize_files([entries], changed_files=len(entries), policy=policy)
+
+    assert capabilities == {"tui"}
+    assert {"ayanbinrafaih", "nano-ai"} <= policy.capabilities["tui"].members
+
+
+def test_checked_in_policy_keeps_other_contributing_docs_out_of_scope() -> None:
+    policy = load_policy()
+
+    with pytest.raises(MergeRefusalError, match="does not match"):
+        authorize_files(
+            [[{"filename": "docs/contributing/other.md"}]], changed_files=1, policy=policy
+        )
+
+
+@pytest.mark.parametrize(
     ("old", "new", "message"),
     [
         ("schema_version = 1", "schema_version = 2", "schema_version"),
