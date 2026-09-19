@@ -110,10 +110,18 @@ Run all package checks from `clients/`, the TypeScript workspace root:
 ```bash
 cd clients
 pnpm check:ts-architecture
+pnpm check:knip
 pnpm check:clients
 pnpm test:clients
 pnpm build:clients
 ```
+
+`pnpm check:knip` (knip, configured in `clients/knip.jsonc`) fails on unused files, exports,
+dependencies, and unlisted or unresolved imports. Entry points are the package `bin` and `exports`
+plus the declared test, harness, and benchmark files; an export used nowhere in the workspace should
+lose its `export` or be deleted. `backend-client/src/generated/` is ignored because the generator
+exports every schema type, and the `index.ts` of each library package is its public API. Add an
+entry point to `knip.jsonc` (with a comment saying who runs it) rather than suppressing a finding.
 
 Each package also supports its own `check`, `test`, and `build` scripts. Package builds consume only
 public workspace exports. The release build uses the same dependency-aware build chain before pnpm

@@ -407,7 +407,7 @@ function* fencedBlocks(renderable: Renderable): Generator<CodeRenderable> {
  * routes end on the same surface, and `styles.test.ts` pins the mode that
  * decides which one runs.
  */
-export function createMarkdownCodeRenderer(theme: Theme): MarkdownRenderNode {
+function createMarkdownCodeRenderer(theme: Theme): MarkdownRenderNode {
   const surface = codeSurface(theme);
   return asCodeBlockOnly((token, context) => {
     if (token.type === 'code') {

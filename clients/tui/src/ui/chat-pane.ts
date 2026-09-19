@@ -22,7 +22,7 @@ import type {Theme} from './theme.js';
  * Columns the chat needs before a question and its answer read as prose rather
  * than as a column of fragments.
  */
-export const CHAT_PANE_MIN = 25;
+const CHAT_PANE_MIN = 25;
 /**
  * Ceiling for automatic sizing. An explicit `<`/`>` override is allowed past
  * it (`clampChatWidthOverride`): asking for a specific width past what

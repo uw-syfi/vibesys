@@ -1,11 +1,5 @@
 import {chatPaneFocused, type SessionState} from './session-model.js';
 
-/** The palette's typed filter and highlighted row; the match list is derived, not stored. */
-export interface CommandPaletteState {
-  readonly query: string;
-  readonly selected: number;
-}
-
 /** Which composer holds the keys, and so which one the palette opened over. */
 export function activeCommandSurface(state: SessionState): 'command' | 'chat' {
   return state.chatOpen || chatPaneFocused(state) ? 'chat' : 'command';

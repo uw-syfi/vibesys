@@ -344,6 +344,7 @@ cd clients
 pnpm install --frozen-lockfile
 pnpm --dir backend-client generate:protocol
 pnpm check:ts-architecture
+pnpm check:knip
 pnpm check:clients
 pnpm test:clients
 pnpm build:clients

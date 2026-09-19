@@ -76,7 +76,7 @@ const PRIORITY = {
 } as const;
 
 /** What a segment is. `headerSegments` emits at most one segment per role. */
-export type HeaderRole = keyof typeof PRIORITY;
+type HeaderRole = keyof typeof PRIORITY;
 
 /** A drawn run of the header: one segment, or one separator between two. */
 export type HeaderSpanRole = HeaderRole | 'separator';

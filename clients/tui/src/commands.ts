@@ -68,7 +68,7 @@ export interface SlashCommand {
 }
 
 /** How many arguments a command accepts, enforced before its parser runs. */
-export type CommandArity = 'none' | 'optional' | 'required';
+type CommandArity = 'none' | 'optional' | 'required';
 
 /**
  * A command's declared contract, without its handler. This is what the

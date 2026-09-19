@@ -11,7 +11,6 @@ import {
   type ActiveAgentExecution,
   type ActiveExecutionCheckpoint,
   type AgentPhase,
-  type ChatThread,
   type CoreDiagnostic,
   type CoreRunStatus,
   type CoreState,
@@ -125,8 +124,8 @@ export interface SessionState {
   inputError: string | null;
 }
 
-export type ErrorSeverity = 'recoverable' | 'fatal';
-export type ErrorScope =
+type ErrorSeverity = 'recoverable' | 'fatal';
+type ErrorScope =
   | 'configuration'
   | 'invocation'
   | 'phase'
@@ -160,7 +159,7 @@ export type RoundFocus = 'rounds' | 'agents' | 'transcript';
  * hypothesis id rather than a row index so a refresh that inserts rows keeps
  * the operator on the same hypothesis.
  */
-export interface ExperimentLogState {
+interface ExperimentLogState {
   entries: HypothesisEntry[];
   selectedId: string | null;
   /** The transient planning activity is selected instead of a recorded claim. */
@@ -174,7 +173,7 @@ export interface ExperimentLogState {
 }
 
 /** UI-only navigation state for the selected hypothesis summary. */
-export interface HypothesisDetail {
+interface HypothesisDetail {
   entryKey: string;
   selectedRound: number | null;
 }
@@ -197,7 +196,7 @@ export type ExperimentIndexItem =
  * client shows the ordinary per-round trajectory, filtered to these rounds,
  * and the log table steps aside without losing its selection.
  */
-export interface HypothesisScope {
+interface HypothesisScope {
   id: string;
   label: string;
   /**
@@ -233,7 +232,7 @@ export interface RightPane {
  */
 export type PaneFocus = 'chat' | 'left' | 'right';
 
-export interface LayoutState {
+interface LayoutState {
   /** null means no visualization pane: the left side has the rest of the row. */
   right: RightPane | null;
   focus: PaneFocus;
@@ -250,7 +249,7 @@ export interface LayoutState {
  */
 export type PaneId = 'agents' | 'chat' | 'experiments' | 'performance' | 'todos' | 'transcript';
 
-export interface ThemePicker {
+interface ThemePicker {
   selected: ThemeName;
 }
 
@@ -275,7 +274,7 @@ export type ChatMenuRow =
  * `query.chat_options` response verbatim. The reducers live in
  * `chat-menu.ts`.
  */
-export interface ChatMenu {
+interface ChatMenu {
   kind: 'model' | 'resume';
   title: string;
   rows: ChatMenuRow[];
@@ -453,10 +452,6 @@ export function chatPaneFocused(state: SessionState): boolean {
   return chatPaneVisible(state) && state.layout.focus === 'chat';
 }
 
-export function rightPaneFocused(state: SessionState): boolean {
-  return state.layout.right !== null && state.layout.focus === 'right';
-}
-
 export function setChatDockFits(state: SessionState, fits: boolean): SessionState {
   if (state.chatDockFits === fits) return state;
   const layout =
@@ -485,11 +480,6 @@ function deriveActiveChat(state: SessionState): SessionState {
     return state;
   }
   return {...state, chatConversation, chatPending};
-}
-
-/** Every thread the run knows about, the implicit default first. */
-export function chatThreads(state: SessionState): ChatThread[] {
-  return state.core.chatThreads;
 }
 
 /**
@@ -526,7 +516,7 @@ export function chatThreadHeading(
  * The active thread's runtime, e.g. `"Codex (GPT 5.5)"`. Null for a thread the
  * backend has not described, which is the default thread before any answer.
  */
-export function chatThreadRuntimeLabel(
+function chatThreadRuntimeLabel(
   state: SessionState,
   threadId: string = state.activeChatThreadId,
 ): string | null {
@@ -1056,7 +1046,7 @@ function hypothesisLabel(entry: HypothesisEntry): string {
   return `${hypothesisTitle(entry)} · ${range}`;
 }
 
-export function selectedExperiment(state: SessionState): HypothesisEntry | null {
+function selectedExperiment(state: SessionState): HypothesisEntry | null {
   const log = state.experimentLog;
   if (log === null || log.selectedId === null) return null;
   const index = log.entries.map(entryKey).indexOf(log.selectedId);
@@ -1234,7 +1224,7 @@ function planningStage(
   return null;
 }
 
-export const PANE_TITLES: Record<PaneView, string> = {
+const PANE_TITLES: Record<PaneView, string> = {
   perf: 'Performance',
   design: 'Design changes',
 };
@@ -1392,7 +1382,7 @@ export function todoListFocused(state: SessionState): boolean {
  * focus only moves to a pane this returns true for, so the keys and the agent
  * filter can never land on a pane the operator cannot see.
  */
-export function roundPaneVisible(state: SessionState, pane: RoundFocus): boolean {
+function roundPaneVisible(state: SessionState, pane: RoundFocus): boolean {
   if (experimentLogVisible(state)) return false;
   const zoomed = state.layout.zoomedPane;
   if (pane === 'agents') {
@@ -1448,7 +1438,7 @@ export function togglePaneZoom(state: SessionState): SessionState {
  * Every pane the content row can be given to in the active view. The expanded
  * todo list is deliberately absent: it can hold the keys, but not the row.
  */
-export function visiblePaneIds(state: SessionState): PaneId[] {
+function visiblePaneIds(state: SessionState): PaneId[] {
   if (experimentLogVisible(state)) {
     return [
       ...(chatPaneVisible(state) ? (['chat'] as const) : []),

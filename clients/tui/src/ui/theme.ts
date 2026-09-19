@@ -13,7 +13,7 @@ export type ThemeName = (typeof THEME_NAMES)[number];
 
 export const DEFAULT_THEME_NAME: ThemeName = 'dark';
 
-export type Appearance = 'light' | 'dark';
+type Appearance = 'light' | 'dark';
 
 export type ConversationRole =
   | 'assistant'
@@ -55,12 +55,12 @@ export interface ConversationRoleColors {
   content: string;
 }
 
-export interface BandColors {
+interface BandColors {
   foreground: string;
   background: string;
 }
 
-export interface MarkdownColors {
+interface MarkdownColors {
   default: string;
   heading: string;
   strong: string;
