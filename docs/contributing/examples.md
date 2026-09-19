@@ -27,6 +27,15 @@ examples and are not registered.
 `validated` may only require `overlay`, which the `validate-examples` job
 fetches. Anything needing docker, a cluster, a GPU, or weights is `live-only`.
 
+Status never turns a static check off. `validated` and `live-only` entries get
+exactly the same checks below; `live-only` only records that a live run is not
+covered because CI lacks something the example needs. `known-failing` runs the
+same checks and expects the listed ones to fail. The only thing that stops a
+static check is an overlay that is not fetched, which fails in CI and skips
+locally. Two limits apply by layout: trust policy runs only for `task`
+layout (legacy inputs use a fixed trusted list), and path references are
+skipped for `overlay` examples (the checkout has no candidate source).
+
 ## What CI checks for each entry
 
 | Check | Catches | Fails as |

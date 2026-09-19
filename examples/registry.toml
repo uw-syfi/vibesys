@@ -90,7 +90,7 @@ reason = "needs a Kubernetes cluster"
 
 [[example]]
 path = "examples/microservices/train-ticket"
-layout = "legacy"
+layout = "task"
 requires = ["docker"]
 status = "live-only"
 reason = "needs docker compose and the candidate repository build"
