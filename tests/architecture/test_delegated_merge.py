@@ -799,8 +799,8 @@ def test_queue_lookup_failure_never_merges_or_enqueues(
 class _FailingAPI(FakeGitHubAPI):
     """Fail one call, chosen by endpoint fragment or GraphQL operation."""
 
-    def __init__(self, *, fail_on: str, error: GitHubAPIError, **kwargs: object) -> None:
-        super().__init__(**kwargs)  # type: ignore[arg-type]
+    def __init__(self, *, fail_on: str, error: GitHubAPIError, queue: object = None) -> None:
+        super().__init__(queue=queue)
         self.fail_on = fail_on
         self.error = error
 
