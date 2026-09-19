@@ -8,7 +8,7 @@ permissions:
   actions: read
   contents: write
   issues: write
-  pull-requests: read
+  pull-requests: write
 
 concurrency:
   group: delegated-merge-${{ github.event.issue.number }}
@@ -31,7 +31,10 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
-      - name: Authorize and merge
+      # Direct merge needs contents: write. Enqueueing when the base branch has a
+      # merge queue uses the enqueuePullRequest GraphQL mutation, which needs
+      # pull-requests: write. The queue, not this token, performs the merge.
+      - name: Authorize and merge or enqueue
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/delegated_merge.py --event "$GITHUB_EVENT_PATH"
