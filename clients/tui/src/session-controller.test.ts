@@ -1019,6 +1019,127 @@ describe('session controller', () => {
     expect(controller.state.designLog).toBeNull();
   });
 
+  it('opens the newest diffable round and fetches only the file on screen', async () => {
+    const transport = new FakeTransport();
+    transport.design = [
+      {
+        round: 1,
+        base: 'aaa1111',
+        commit: 'bbb2222',
+        files: [
+          {path: 'src/ring.rs', change: 'modified'},
+          {path: 'src/lib.rs', change: 'modified'},
+        ],
+      },
+      // Newer but not diffable: the opener walks back to round 1.
+      {round: 2, base: 'bbb2222', commit: 'ccc3333', files: []},
+    ];
+    transport.designPatchText = '@@ -1 +1 @@\n-old\n+new\n';
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    controller.openRoundDiff();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.diffViewer).toMatchObject({
+      round: 1,
+      base: 'aaa1111',
+      head: 'bbb2222',
+      index: 0,
+    });
+    // Lazy per file: opening asked for the visible file only.
+    expect(patchRequests(transport)).toEqual([
+      {type: 'query.design_patch', base: 'aaa1111', head: 'bbb2222', path: 'src/ring.rs'},
+    ]);
+    expect(controller.state.diffViewer?.patches['src/ring.rs']).toEqual({
+      kind: 'loaded',
+      patch: '@@ -1 +1 @@\n-old\n+new\n',
+      truncated: false,
+    });
+
+    // The next file costs one query; returning to a visited file costs none.
+    controller.moveDiffFile(1);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    controller.moveDiffFile(-1);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    expect(patchRequests(transport)).toHaveLength(2);
+    expect(patchRequests(transport).at(-1)).toMatchObject({path: 'src/lib.rs'});
+  });
+
+  it("diffs the drill-down's selected round rather than the newest one", async () => {
+    const transport = new FakeTransport();
+    transport.experiments = [
+      entry('H-01', 1, 2, {
+        rounds: [
+          {round: 1, passed: true, reviewed: true},
+          {round: 2, passed: true, reviewed: true},
+        ],
+      }),
+    ];
+    transport.design = [
+      {round: 1, base: 'aaa1111', commit: 'bbb2222', files: [{path: 'src/a.rs', change: 'added'}]},
+      {round: 2, base: 'bbb2222', commit: 'ccc3333', files: [{path: 'src/b.rs', change: 'added'}]},
+    ];
+    transport.designPatchText = '@@ -0,0 +1 @@\n+fn main() {}\n';
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    controller.enterExperimentDrilldown();
+    controller.moveHypothesisRoundSelection(-1);
+    expect(controller.state.hypothesisDetail?.selectedRound).toBe(1);
+
+    controller.openRoundDiff();
+    expect(controller.state.diffViewer).toMatchObject({round: 1, base: 'aaa1111'});
+    // The viewer replaced no overlay here, and closing restores the detail
+    // view untouched underneath.
+    controller.closeDiffViewer();
+    expect(controller.state.diffViewer).toBeNull();
+    expect(controller.state.hypothesisDetail?.selectedRound).toBe(1);
+  });
+
+  it('parks a failed patch query on the file, never the shared banner', async () => {
+    const transport = new FakeTransport();
+    transport.design = [
+      {round: 1, base: 'aaa1111', commit: 'bbb2222', files: [{path: 'src/a.rs', change: 'added'}]},
+    ];
+    transport.designPatchError = new ServerError('base does not name a commit');
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    controller.openRoundDiff();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.diffViewer?.patches['src/a.rs']).toEqual({
+      kind: 'error',
+      message: 'base does not name a commit',
+    });
+    expect(controller.state.errorBanner).toBeNull();
+  });
+
+  it('explains an undiffable request in the detail overlay instead of opening', async () => {
+    const transport = new FakeTransport();
+    transport.designReady = false;
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    controller.openRoundDiff();
+    expect(controller.state.diffViewer).toBeNull();
+    expect(controller.state.overlay?.content).toContain('No design rounds have loaded yet');
+
+    // With a log whose rounds recorded no changes, the wording is per round.
+    transport.design = [{round: 1, base: 'aaa1111', commit: 'bbb2222', files: []}];
+    transport.designReady = true;
+    await controller.submitCommand('/design');
+    controller.openRoundDiff(1);
+    expect(controller.state.diffViewer).toBeNull();
+    expect(controller.state.overlay?.content).toBe('Round 1 changed no workspace files.');
+    controller.openRoundDiff(9);
+    expect(controller.state.overlay?.content).toBe('Round 9 has no recorded design changes.');
+  });
+
   it('keeps bootstrap pending until attached experiments become ready', async () => {
     const transport = new FakeTransport();
     transport.experimentsReady = false;
@@ -2245,6 +2366,11 @@ class FakeTransport implements ServerTransport {
   experimentsReady = true;
   design: NonNullable<ProtocolResponse['design']> = [];
   designReady = true;
+  /** Patch text `query.design_patch` echoes back; null omits the field. */
+  designPatchText: string | null = null;
+  designPatchTruncated = false;
+  /** When set, only `query.design_patch` requests fail with it. */
+  designPatchError: Error | null = null;
   readonly requests: RequestInput[] = [];
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
@@ -2259,6 +2385,9 @@ class FakeTransport implements ServerTransport {
   request(input: RequestInput): Promise<ProtocolResponse> {
     this.requests.push(input);
     if (this.responseError) return Promise.reject(this.responseError);
+    if (input.type === 'query.design_patch' && this.designPatchError) {
+      return Promise.reject(this.designPatchError);
+    }
     return Promise.resolve({
       protocol_version: 1,
       request_id: 'request',
@@ -2276,6 +2405,19 @@ class FakeTransport implements ServerTransport {
               question: input.text,
               answer: 'The implementer is running.',
               effect: 'none' as const,
+            },
+          }
+        : {}),
+      // Echoing the request triple is what the real server does, so tests
+      // only choose the text; a null text is a detached server's answer.
+      ...(input.type === 'query.design_patch' && this.designPatchText !== null
+        ? {
+            design_patch: {
+              base: input.base,
+              head: input.head,
+              path: input.path,
+              patch: this.designPatchText,
+              truncated: this.designPatchTruncated,
             },
           }
         : {}),
@@ -2844,6 +2986,10 @@ function roundFinished(sequence: number, round: number): RunEvent {
 
 function perfRequests(transport: FakeTransport): number {
   return transport.requests.filter(request => request.type === 'query.performance').length;
+}
+
+function patchRequests(transport: FakeTransport): RequestInput[] {
+  return transport.requests.filter(request => request.type === 'query.design_patch');
 }
 
 function designQueries(transport: DeferredDesignTransport): number {

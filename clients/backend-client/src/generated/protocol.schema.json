@@ -928,6 +928,106 @@
       "title": "DesignFileChange",
       "type": "object"
     },
+    "DesignPatch": {
+      "additionalProperties": false,
+      "description": "One file's unified patch text from a round's commit range.\n\n``patch`` is the raw ``git diff`` output for the one file (rename\ndetection on, so a renamed file arrives as a single patch spanning both\npaths). None means the workspace repository could not produce the text\n(repository missing or unreadable), which is distinct from an empty\nstring, a file the range lists but whose content did not change.\n\n``truncated`` marks a patch cut at the server's size bound. The echoed\nrange and paths let a client show the exact ``git diff`` command that\nreproduces the full output externally.",
+      "properties": {
+        "base": {
+          "title": "Base",
+          "type": "string"
+        },
+        "head": {
+          "title": "Head",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "renamed_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Renamed From"
+        },
+        "patch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Patch"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "base",
+        "head",
+        "path"
+      ],
+      "title": "DesignPatch",
+      "type": "object"
+    },
+    "DesignPatchQuery": {
+      "additionalProperties": false,
+      "description": "Request one file's unified patch from a round's commit range.\n\n``base`` and ``head`` are a round's own range exactly as ``query.design``\npublished it (``DesignRound.base`` and ``DesignRound.commit``), and\n``path`` must be one of that round's listed file changes. The server\nvalidates all three, so a client cannot diff arbitrary revisions or read\npaths the design log filtered out.",
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "query.design_patch",
+          "default": "query.design_patch",
+          "title": "Type",
+          "type": "string"
+        },
+        "base": {
+          "title": "Base",
+          "type": "string"
+        },
+        "head": {
+          "title": "Head",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "base",
+        "head",
+        "path"
+      ],
+      "title": "DesignPatchQuery",
+      "type": "object"
+    },
     "DesignQuery": {
       "additionalProperties": false,
       "description": "Request the per-round design log for the attached run.\n\nThe design log is the operator's view of what each round changed in the\nsystem under optimization: the files the round touched and how each stage\nof the round concluded.",
@@ -976,6 +1076,18 @@
           ],
           "default": null,
           "title": "Commit"
+        },
+        "base": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base"
         },
         "files": {
           "anyOf": [
@@ -2797,6 +2909,17 @@
           ],
           "default": null,
           "title": "Design Ready"
+        },
+        "design_patch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DesignPatch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -3908,6 +4031,7 @@
           "query.chat_options": "#/$defs/ChatOptionsQuery",
           "query.chat_thread_create": "#/$defs/ChatThreadCreateQuery",
           "query.design": "#/$defs/DesignQuery",
+          "query.design_patch": "#/$defs/DesignPatchQuery",
           "query.events": "#/$defs/EventsQuery",
           "query.experiments": "#/$defs/ExperimentQuery",
           "query.history": "#/$defs/HistoryQuery",
@@ -3954,6 +4078,9 @@
         },
         {
           "$ref": "#/$defs/DesignQuery"
+        },
+        {
+          "$ref": "#/$defs/DesignPatchQuery"
         },
         {
           "$ref": "#/$defs/EventsQuery"

@@ -13,6 +13,20 @@ import {
 import {DEFAULT_CHAT_THREAD_ID, hasRunEnded} from '@vibesys/core-state';
 import type {StartupTrace} from './boot-trace.js';
 import {chatHelpText, helpText, type ParsedCommand, parseCommand} from './commands.js';
+import {
+  applyDiffPatch,
+  closeDiffViewer,
+  currentDiffFile,
+  type DiffPatchKey,
+  type DiffRoundRange,
+  diffRangeExplanation,
+  diffRoundRange,
+  failDiffPatch,
+  markDiffPatchLoading,
+  moveDiffFile,
+  moveDiffHunk,
+  openDiffViewer,
+} from './diff-viewer.js';
 import {renderPerformanceCurve} from './performance-chart.js';
 import {
   activeChatThreadSettings,
@@ -157,6 +171,17 @@ export interface SessionController {
   enterExperimentDrilldown(): void;
   leaveExperimentDrilldown(): void;
   leaveHypothesisDetail(): void;
+  /**
+   * `d`: the diff viewer on one round's recorded commit range. Without a
+   * round it opens the drill-down's selected round, or the newest round the
+   * design log can diff.
+   */
+  openRoundDiff(roundNumber?: number): void;
+  closeDiffViewer(): void;
+  /** `←`/`→` in the diff viewer: the previous/next changed file. */
+  moveDiffFile(delta: number): void;
+  /** `↑`/`↓` in the diff viewer: the previous/next hunk of the patch. */
+  moveDiffHunk(delta: number): void;
   openThemePicker(): void;
   moveThemeSelection(delta: number): void;
   applySelectedTheme(): void;
@@ -796,6 +821,83 @@ export class SocketSessionController implements SessionController {
 
   leaveHypothesisDetail(): void {
     this.#setState(leaveHypothesisDetail(this.#state));
+  }
+
+  openRoundDiff(roundNumber?: number): void {
+    const resolved = this.#resolveDiffRange(roundNumber);
+    if (typeof resolved === 'string') {
+      // Nothing to diff is an answer, not an error: the explanation goes in
+      // the same detail overlay a command's answer would.
+      this.#setState(showDetail(this.#state, resolved));
+      return;
+    }
+    this.#setState(openDiffViewer(this.#state, resolved));
+    void this.#ensureDiffPatch();
+  }
+
+  closeDiffViewer(): void {
+    this.#setState(closeDiffViewer(this.#state));
+  }
+
+  moveDiffFile(delta: number): void {
+    this.#setState(moveDiffFile(this.#state, delta));
+    void this.#ensureDiffPatch();
+  }
+
+  moveDiffHunk(delta: number): void {
+    this.#setState(moveDiffHunk(this.#state, delta));
+  }
+
+  /**
+   * The round the viewer opens: the named round, else the drill-down's
+   * selected round, else the newest round the design log can diff. Returns
+   * the explanation to show instead when no range can be diffed.
+   */
+  #resolveDiffRange(roundNumber: number | undefined): DiffRoundRange | string {
+    const rounds = this.#state.designLog;
+    if (rounds === null || rounds.length === 0) {
+      return 'No design rounds have loaded yet, so there is no diff to open.';
+    }
+    const selected = roundNumber ?? this.#state.hypothesisDetail?.selectedRound ?? null;
+    if (selected !== null) {
+      const round = rounds.find(candidate => candidate.round === selected);
+      if (round === undefined) return `Round ${selected} has no recorded design changes.`;
+      return diffRoundRange(round) ?? diffRangeExplanation(round);
+    }
+    for (let index = rounds.length - 1; index >= 0; index -= 1) {
+      const round = rounds[index];
+      if (round === undefined) continue;
+      const range = diffRoundRange(round);
+      if (range !== null) return range;
+    }
+    return 'No recorded round has a commit range to diff.';
+  }
+
+  /**
+   * Fetches the patch for the file the viewer is on, at most once per file:
+   * the slot `markDiffPatchLoading` claims doubles as the in-flight guard, so
+   * revisiting a file rerenders what it already holds and only an unvisited
+   * file costs a query. A failure lands in the slot as an explanation rather
+   * than the error banner: the viewer is modal, so its own body is where the
+   * operator is looking.
+   */
+  async #ensureDiffPatch(): Promise<void> {
+    const viewer = this.#state.diffViewer;
+    const file = viewer === null ? null : currentDiffFile(viewer);
+    if (viewer === null || file === null || viewer.patches[file.path] !== undefined) return;
+    const key: DiffPatchKey = {base: viewer.base, head: viewer.head, path: file.path};
+    this.#setState(markDiffPatchLoading(this.#state, file.path));
+    try {
+      const response = await this.client.request({type: 'query.design_patch', ...key});
+      const patch = response.design_patch ?? null;
+      this.#setState(
+        patch === null
+          ? failDiffPatch(this.#state, key, 'The run has not attached yet.')
+          : applyDiffPatch(this.#state, patch),
+      );
+    } catch (error) {
+      this.#setState(failDiffPatch(this.#state, key, errorMessage(error)));
+    }
   }
 
   async #loadExperiments(): Promise<void> {

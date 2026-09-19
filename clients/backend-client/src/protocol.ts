@@ -20,6 +20,7 @@ export type ExperimentCursor = NonNullable<
 export type HypothesisRound = NonNullable<HypothesisEntry['rounds']>[number];
 export type DesignRound = NonNullable<ProtocolResponse['design']>[number];
 export type DesignFileChange = NonNullable<DesignRound['files']>[number];
+export type DesignPatch = NonNullable<ProtocolResponse['design_patch']>;
 export type ChatOptions = NonNullable<ProtocolResponse['chat_options']>;
 export type ChatProviderOptions = NonNullable<ChatOptions['providers']>[number];
 export type ChatModelOption = NonNullable<ChatProviderOptions['models']>[number];

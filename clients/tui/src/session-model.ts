@@ -53,6 +53,11 @@ export interface SessionState {
    */
   roundFocus: RoundFocus;
   overlay: OverlayPanel | null;
+  /**
+   * The modal per-round diff viewer, layered over the overlay in the key
+   * ladder so its Escape closes only the viewer. Null while closed.
+   */
+  diffViewer: DiffViewerState | null;
   chatOpen: boolean;
   /** The thread the chat surfaces show and the composer submits to. */
   activeChatThreadId: string;
@@ -291,6 +296,38 @@ export interface OverlayPanel {
   content: string;
 }
 
+/**
+ * One file's patch as the diff viewer holds it. `patch: null` is the server
+ * reporting that the workspace repository could not produce text, which is a
+ * different fact from an empty patch, so the viewer explains the absence
+ * instead of rendering nothing.
+ */
+export type DiffPatchSlot =
+  | {kind: 'loading'}
+  | {kind: 'loaded'; patch: string | null; truncated: boolean}
+  | {kind: 'error'; message: string};
+
+/**
+ * The modal per-round diff viewer. One file is on screen at a time; `files`
+ * is the round's change list exactly as the design log published it, so the
+ * viewer can only ask the server for paths that list already carries. Patches
+ * load lazily as files are visited and stay cached for the life of the
+ * viewer; the reducers live in `diff-viewer.ts`.
+ */
+export interface DiffViewerState {
+  round: number;
+  /** The commit range the design log recorded for the round. */
+  base: string;
+  head: string;
+  files: readonly DesignFileChange[];
+  /** Index into `files` of the file on screen. */
+  index: number;
+  /** Index of the hunk the arrow keys are on within the file's patch. */
+  hunk: number;
+  /** Fetched patches by path; a present slot doubles as the in-flight guard. */
+  patches: Readonly<Record<string, DiffPatchSlot>>;
+}
+
 export interface ConversationEntry {
   id: string;
   kind:
@@ -337,6 +374,7 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     selectedTodoIndex: null,
     roundFocus: 'transcript',
     overlay: null,
+    diffViewer: null,
     chatOpen: false,
     activeChatThreadId: DEFAULT_CHAT_THREAD_ID,
     chatConversation: [],
@@ -1449,10 +1487,18 @@ function normalizeRoundFocus(state: SessionState): SessionState {
 
 /** Escape from a round view: close whatever is layered over it, all of it. */
 export function closeOverlays(state: SessionState): SessionState {
-  if (state.layout.right === null && !state.chatOpen && state.overlay === null) return state;
+  if (
+    state.layout.right === null &&
+    !state.chatOpen &&
+    state.overlay === null &&
+    state.diffViewer === null
+  ) {
+    return state;
+  }
   return {
     ...state,
     overlay: null,
+    diffViewer: null,
     chatOpen: false,
     layout: {right: null, focus: 'left', zoomedPane: null},
   };
@@ -2097,6 +2143,7 @@ export function showLive(state: SessionState): SessionState {
   return {
     ...state,
     overlay: null,
+    diffViewer: null,
     chatOpen: false,
     hypothesisDetail: null,
     hypothesisScope: null,

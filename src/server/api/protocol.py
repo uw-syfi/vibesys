@@ -126,6 +126,22 @@ class DesignQuery(Request):
     type: Literal["query.design"] = "query.design"
 
 
+class DesignPatchQuery(Request):
+    """Request one file's unified patch from a round's commit range.
+
+    ``base`` and ``head`` are a round's own range exactly as ``query.design``
+    published it (``DesignRound.base`` and ``DesignRound.commit``), and
+    ``path`` must be one of that round's listed file changes. The server
+    validates all three, so a client cannot diff arbitrary revisions or read
+    paths the design log filtered out.
+    """
+
+    type: Literal["query.design_patch"] = "query.design_patch"
+    base: str
+    head: str
+    path: str
+
+
 class EventsQuery(Request):  # noqa: D101  # tracked: #288
     type: Literal["query.events"] = "query.events"
     after_sequence: int = Field(default=0, ge=0)
@@ -167,6 +183,7 @@ ProtocolRequest = Annotated[
     | PerformanceQuery
     | ExperimentQuery
     | DesignQuery
+    | DesignPatchQuery
     | EventsQuery
     | SubscribeRequest,
     Field(discriminator="type"),
@@ -372,7 +389,36 @@ class DesignRound(ProtocolModel):
     round: int
     # The round's end-of-round checkpoint, and the head of the diffed range.
     commit: str | None = None
+    # The other end of that range, as the projection derived it. Publishing it
+    # lets a client ask ``query.design_patch`` for exactly the range ``files``
+    # describes instead of re-deriving one. None when no base resolved, in
+    # which case ``files`` is None too.
+    base: str | None = None
     files: list[DesignFileChange] | None = None
+
+
+class DesignPatch(ProtocolModel):
+    """One file's unified patch text from a round's commit range.
+
+    ``patch`` is the raw ``git diff`` output for the one file (rename
+    detection on, so a renamed file arrives as a single patch spanning both
+    paths). None means the workspace repository could not produce the text
+    (repository missing or unreadable), which is distinct from an empty
+    string, a file the range lists but whose content did not change.
+
+    ``truncated`` marks a patch cut at the server's size bound. The echoed
+    range and paths let a client show the exact ``git diff`` command that
+    reproduces the full output externally.
+    """
+
+    base: str
+    head: str
+    path: str
+    # The pre-rename path, echoed from the round's file list when the change
+    # is a rename, so the external-command hint can name both sides.
+    renamed_from: str | None = None
+    patch: str | None = None
+    truncated: bool = False
 
 
 class Response(ProtocolModel):  # noqa: D101  # tracked: #288
@@ -408,6 +454,8 @@ class Response(ProtocolModel):  # noqa: D101  # tracked: #288
     design: list[DesignRound] = Field(default_factory=list)
     # Same bootstrap-versus-empty distinction as ``experiments_ready``.
     design_ready: bool | None = None
+    # None means the run has not attached yet, so no patch can be produced.
+    design_patch: DesignPatch | None = None
 
     @classmethod
     def from_exception(

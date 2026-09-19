@@ -1,5 +1,16 @@
 import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} from '@opentui/core';
-import {focusedPane, type RightPane, type SessionState} from '../session-model.js';
+import {
+  type DiffLineTone,
+  diffHunkDisplayLine,
+  diffViewerLines,
+  diffViewerTitle,
+} from '../diff-viewer.js';
+import {
+  type DiffViewerState,
+  focusedPane,
+  type RightPane,
+  type SessionState,
+} from '../session-model.js';
 import {applyPaneFocus} from './focus.js';
 import {scrim, type Theme} from './theme.js';
 
@@ -12,6 +23,23 @@ const TITLE: Record<OverlayKind, string> = {
 };
 
 const HINT = 'Esc to close · PgUp/PgDn: scroll';
+const DIFF_HINT = '←→: file · ↑↓: hunk · PgUp/PgDn: scroll · Esc: close';
+
+/**
+ * Add and remove carry the two verdict colours; hunk headers take the accent
+ * so `↑↓` lands somewhere visible; git's own headers recede as chrome; and
+ * the viewer's notices (truncation, a failed query, a missing repository)
+ * take the warning tone because each one says the patch on screen is not the
+ * whole story.
+ */
+function diffToneColor(theme: Theme, tone: DiffLineTone): string {
+  if (tone === 'add') return theme.success;
+  if (tone === 'remove') return theme.error;
+  if (tone === 'hunk') return theme.info;
+  if (tone === 'meta') return theme.textSubtle;
+  if (tone === 'notice') return theme.warning;
+  return theme.textPrimary;
+}
 
 /**
  * The share of the screen the box takes. It is applied in whole rows and
@@ -53,6 +81,7 @@ export class OverlayView {
   #renderedKind: OverlayKind | null = null;
   #renderedContent = '';
   #renderedPane: RightPane | null = null;
+  #renderedDiff: DiffViewerState | null = null;
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -133,6 +162,7 @@ export class OverlayView {
     this.#renderedKind = null;
     this.#renderedContent = '';
     this.#renderedPane = null;
+    this.#renderedDiff = null;
   }
 
   /**
@@ -143,6 +173,15 @@ export class OverlayView {
    * box with none of the focus treatment on the one thing taking keystrokes.
    */
   render(state: SessionState, pane: RightPane | null = null): void {
+    // The diff viewer is the innermost layer this box can carry, so it wins
+    // over both an ordinary overlay and the narrow-terminal pane fallback,
+    // exactly as its keybinding block precedes theirs.
+    if (state.diffViewer !== null) {
+      this.#renderDiff(state.diffViewer);
+      return;
+    }
+    this.#renderedDiff = null;
+    this.#hint.content = HINT;
     if (pane !== null) {
       this.#renderPane(state, pane);
       return;
@@ -196,6 +235,53 @@ export class OverlayView {
     } else this.#body(pane.content, this.#theme.textPrimary);
   }
 
+  /**
+   * The per-round diff viewer. Unlike the other modes, the body is one
+   * renderable per row, unwrapped: a patch line's row index is then its line
+   * index, which is what lets hunk navigation scroll straight to the `@@`
+   * header `diffHunkDisplayLine` names. Rebuilt only when the file on screen
+   * or its patch slot changes; a hunk move reuses the rows and just scrolls.
+   */
+  #renderDiff(viewer: DiffViewerState): void {
+    this.output.visible = true;
+    this.#applyGeometry();
+    const previous = this.#renderedDiff;
+    if (previous === viewer) return;
+    this.#renderedDiff = viewer;
+    // The next ordinary overlay or pane repaints its own chrome and content
+    // rather than inheriting the diff's.
+    this.#renderedKind = null;
+    this.#renderedContent = '';
+    this.#renderedPane = null;
+    this.#hint.content = DIFF_HINT;
+    this.output.borderColor = this.#theme.info;
+    this.output.title = ` ${diffViewerTitle(viewer)} `;
+    if (previous === null || !sameDiffBody(previous, viewer)) {
+      this.#clear();
+      for (const line of diffViewerLines(viewer)) {
+        this.#scroll.add(
+          new TextRenderable(this.renderer, {
+            content: line.text,
+            fg: diffToneColor(this.#theme, line.tone),
+            width: '100%',
+            height: 1,
+            flexShrink: 0,
+            wrapMode: 'none',
+            truncate: true,
+          }),
+        );
+      }
+      // A fresh body starts at the top, where the file header and git's own
+      // header lines say what the patch is, rather than at the first hunk.
+      this.#scroll.scrollTo(0);
+      return;
+    }
+    if (previous.hunk !== viewer.hunk) {
+      const target = diffHunkDisplayLine(viewer);
+      if (target !== null) this.#scroll.scrollTo(target);
+    }
+  }
+
   /** One wrapped block in the scroll viewport, rebuilt per overlay or pane. */
   #body(content: string, fg: string): void {
     this.#scroll.add(
@@ -230,4 +316,23 @@ export class OverlayView {
       child.destroyRecursively();
     }
   }
+}
+
+/**
+ * Whether two viewer states draw the same rows: the same file of the same
+ * range, holding the same patch slot. A hunk move passes, which is what lets
+ * `#renderDiff` scroll instead of rebuilding several thousand patch rows.
+ */
+function sameDiffBody(previous: DiffViewerState, next: DiffViewerState): boolean {
+  if (
+    previous.round !== next.round ||
+    previous.base !== next.base ||
+    previous.head !== next.head ||
+    previous.index !== next.index ||
+    previous.files !== next.files
+  ) {
+    return false;
+  }
+  const path = next.files[next.index]?.path;
+  return path !== undefined && previous.patches[path] === next.patches[path];
 }

@@ -77,6 +77,7 @@ export function bindKeybindings(
       key.name === 'f4' &&
       controller.state.chatOpen === false &&
       controller.state.overlay === null &&
+      controller.state.diffViewer === null &&
       controller.state.themePicker === null &&
       controller.state.chatMenu === null
     ) {
@@ -140,10 +141,12 @@ export function bindKeybindings(
     }
     // The focused pane takes the scroll keys. Escape belongs to the modal/pane
     // ladder below, so a right pane's own Escape waits until any modal chat in
-    // front of it has already closed.
+    // front of it has already closed. The diff viewer opens over this pane
+    // with the focus unmoved, so while it is up the scroll keys are its.
     if (
       controller.state.layout.focus === 'right' &&
       controller.state.layout.right !== null &&
+      controller.state.diffViewer === null &&
       (key.name === 'pageup' || key.name === 'pagedown')
     ) {
       actions.scrollRightPane(key.name === 'pageup' ? -1 : 1);
@@ -164,6 +167,23 @@ export function bindKeybindings(
       else if (key.name === 'return' || key.name === 'enter') controller.applySelectedTheme();
       // The picker is modal: keys it does not use are swallowed here so they
       // cannot move panes or type into the still-focused input behind it.
+      key.preventDefault();
+      return;
+    }
+    // The diff viewer sits in front of the command overlay in the ladder: its
+    // Escape closes only the viewer, where the overlay's Escape below returns
+    // to the live view and would tear down the drill-down under the diff.
+    if (controller.state.diffViewer !== null) {
+      if (key.name === 'escape') controller.closeDiffViewer();
+      else if (key.name === 'left') controller.moveDiffFile(-1);
+      else if (key.name === 'right') controller.moveDiffFile(1);
+      else if (key.name === 'up') controller.moveDiffHunk(-1);
+      else if (key.name === 'down') controller.moveDiffHunk(1);
+      else if (key.name === 'pageup' || key.name === 'pagedown') {
+        actions.scrollOverlay(key.name === 'pageup' ? -1 : 1);
+      }
+      // Modal like the overlay below: everything it does not handle is
+      // swallowed so keys cannot reach the panes or the command input.
       key.preventDefault();
       return;
     }
@@ -210,6 +230,19 @@ export function bindKeybindings(
       controller.state.layout.right !== null
     ) {
       controller.closePane();
+      key.preventDefault();
+      return;
+    }
+    // The design pane summarizes each round's files; `d` opens the newest
+    // round's patches in the diff viewer. Typing keeps priority, so a command
+    // with a `d` in it is never hijacked.
+    if (
+      key.name === 'd' &&
+      controller.state.layout.focus === 'right' &&
+      controller.state.layout.right?.view === 'design' &&
+      actions.inputIsEmpty()
+    ) {
+      controller.openRoundDiff();
       key.preventDefault();
       return;
     }
@@ -318,6 +351,10 @@ export function bindKeybindings(
         // behind it must not move the operator somewhere they cannot see.
         if (!actions.inputIsEmpty()) return;
         if (controller.state.overlay === null) controller.enterExperimentDrilldown();
+      } else if (key.name === 'd' && detailOpen) {
+        // The selected round's diff. Typing keeps priority, like Enter above.
+        if (!actions.inputIsEmpty()) return;
+        if (controller.state.overlay === null) controller.openRoundDiff();
       } else return;
       key.preventDefault();
       return;

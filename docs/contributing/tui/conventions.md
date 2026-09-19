@@ -98,6 +98,16 @@ as its own contents, so `F4` over it leaves the layout alone.
 focus to the left column. It never quits the application. This is CUA, and it is
 the one movement rule the current bindings already keep.
 
+### `d` opens the diff of the selected round
+
+`tig` is the source: its default keymap opens the diff view with `d`. Here `d`
+opens the round diff viewer from the design pane and from a round drill-down,
+and only while the command input is empty, so typing keeps priority and a
+command containing a `d` is never hijacked. The viewer is a modal: it swallows
+every key it does not handle, `←` and `→` move by file, `↑` and `↓` by hunk,
+Page Up and Page Down scroll, and its Escape closes the viewer alone, per
+[Esc goes back one level](#esc-goes-back-one-level).
+
 ### A resize moves columns, and only columns
 
 `<` and `>` change a pane's width by whole columns (`PANE_WIDTH_STEP`), the way

@@ -70,7 +70,7 @@ const LOG_KEY_HELP = `↑↓ or scroll: select · Enter/click: open hypothesis �
 // the new token costs the tokens behind it on a narrow terminal.
 const LOG_CHAT_KEY_HELP = `↑↓: select · Enter/click: hypothesis · <>=: width · Tab: complete · Ctrl+W: chat · F4: zoom · ${COMMAND_NAMES['open-round']} --N`;
 const HYPOTHESIS_KEY_HELP =
-  '↑↓: select round · Enter/click: trajectory · Tab: complete · PgUp/PgDn: scroll · Esc: hypotheses';
+  '↑↓: select round · Enter/click: trajectory · d: diff · Tab: complete · PgUp/PgDn: scroll · Esc: hypotheses';
 /** Bezel, one content row, bezel. See the header frame below. */
 const HEADER_FRAME_HEIGHT = 3;
 
@@ -562,7 +562,12 @@ export function createOpenTuiApp(
     experimentLog.output.visible = showExperimentLog;
     rightPane.render(state, showRightPane, rightWidth);
     overlay.render(state, paneFallback);
-    overlay.renderScrim(state.overlay !== null || state.chatOpen || state.themePicker !== null);
+    overlay.renderScrim(
+      state.overlay !== null ||
+        state.diffViewer !== null ||
+        state.chatOpen ||
+        state.themePicker !== null,
+    );
     themePicker.render(state);
     chat.render(state);
     conversationActivityBar.render(state, !showLog);

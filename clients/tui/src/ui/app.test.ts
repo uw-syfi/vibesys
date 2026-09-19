@@ -14,6 +14,13 @@ import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing'
 import type {ChatOptions, HypothesisEntry} from '@vibesys/backend-client';
 import {type CoreRunStatus, DEFAULT_CHAT_THREAD_ID} from '@vibesys/core-state';
 import {chatHelpText, parseCommand} from '../commands.js';
+import {
+  closeDiffViewer,
+  diffRoundRange,
+  moveDiffFile,
+  moveDiffHunk,
+  openDiffViewer,
+} from '../diff-viewer.js';
 import type {SessionController} from '../session-controller.js';
 import {
   activeChatThreadSettings,
@@ -5506,6 +5513,76 @@ describe('theming', () => {
     // Stage facts stay on the round's own row, stated once.
     expect(annotated).not.toContain('Outcome proven');
   });
+
+  it("opens the selected round's diff with d and closes only the viewer on Escape", async () => {
+    const testRenderer = await createTestRenderer({width: 200, height: 30});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    controller.publish({
+      ...controller.state,
+      hypothesisDetail: {entryKey: 'H-07', selectedRound: 41},
+      designLog: [
+        {
+          round: 41,
+          base: 'aaa1111',
+          commit: 'bbb2222',
+          files: [
+            {path: 'src/ring.rs', change: 'added'},
+            {path: 'src/lib.rs', change: 'modified'},
+          ],
+        },
+      ],
+    });
+    await testRenderer.waitForFrame(value => value.includes('Hypothesis H-07'));
+
+    testRenderer.mockInput.pressKey('d');
+    const open = await frameAfter(testRenderer);
+    expect(controller.state.diffViewer).toMatchObject({round: 41, index: 0});
+    expect(open).toContain('Diff · Round 41 · src/ring.rs (1/2)');
+    // The fake never fetches, so the slot on screen is the loading row.
+    expect(open).toContain('Loading patch');
+    expect(open).toContain('←→: file');
+
+    testRenderer.mockInput.pressKey('ARROW_RIGHT');
+    const second = await frameAfter(testRenderer);
+    expect(second).toContain('src/lib.rs (2/2)');
+
+    // Escape is contained: the viewer closes, the drill-down stays.
+    testRenderer.mockInput.pressKey('ESCAPE');
+    await frameAfterEscape(testRenderer);
+    expect(controller.state.diffViewer).toBeNull();
+    expect(controller.state.hypothesisDetail).toEqual({entryKey: 'H-07', selectedRound: 41});
+  });
+
+  it("opens the newest round's diff with d from the focused design pane", async () => {
+    const testRenderer = await createTestRenderer({width: 200, height: 30});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    controller.publish({
+      ...controller.state,
+      designLog: [
+        {
+          round: 41,
+          base: 'aaa1111',
+          commit: 'bbb2222',
+          files: [{path: 'src/ring.rs', change: 'added'}],
+        },
+      ],
+    });
+    await controller.openPane('design');
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.focus).toBe('right');
+
+    testRenderer.mockInput.pressKey('d');
+    const frame = await frameAfter(testRenderer);
+    expect(controller.state.diffViewer).toMatchObject({round: 41});
+    expect(frame).toContain('Diff · Round 41 · src/ring.rs (1/1)');
+  });
+
   it('keeps the hypothesis title through a no-op state notification', async () => {
     // Clicking an already-focused log area calls focusPane('left'), which
     // returns the same state; the controller notifies every listener anyway.
@@ -7505,6 +7582,29 @@ class FakeController implements SessionController {
   }
   leaveHypothesisDetail(): void {
     this.publish(leaveHypothesisDetail(this.state));
+  }
+  /** Opens without fetching: patch slots stay empty, so rows show loading. */
+  openRoundDiff(roundNumber?: number): void {
+    const rounds = this.state.designLog ?? [];
+    const selected = roundNumber ?? this.state.hypothesisDetail?.selectedRound ?? null;
+    const candidates = selected === null ? rounds : rounds.filter(r => r.round === selected);
+    for (let index = candidates.length - 1; index >= 0; index -= 1) {
+      const round = candidates[index];
+      const range = round === undefined ? null : diffRoundRange(round);
+      if (range !== null) {
+        this.publish(openDiffViewer(this.state, range));
+        return;
+      }
+    }
+  }
+  closeDiffViewer(): void {
+    this.publish(closeDiffViewer(this.state));
+  }
+  moveDiffFile(delta: number): void {
+    this.publish(moveDiffFile(this.state, delta));
+  }
+  moveDiffHunk(delta: number): void {
+    this.publish(moveDiffHunk(this.state, delta));
   }
 
   subscribe(listener: (state: SessionState) => void): () => void {

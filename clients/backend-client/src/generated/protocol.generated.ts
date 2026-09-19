@@ -13,6 +13,7 @@ export type Request =
   | PerformanceQuery
   | ExperimentQuery
   | DesignQuery
+  | DesignPatchQuery
   | EventsQuery
   | SubscribeRequest;
 export type ProtocolVersion = 1;
@@ -77,20 +78,27 @@ export type Type11 = "query.design";
 export type ProtocolVersion12 = 1;
 export type RequestId12 = string;
 export type Timestamp12 = string;
-export type Type12 = "query.events";
-export type AfterSequence = number;
-export type BeforeSequence = number | null;
-export type TimeoutMs = number;
+export type Type12 = "query.design_patch";
+export type Base = string;
+export type Head = string;
+export type Path = string;
 export type ProtocolVersion13 = 1;
 export type RequestId13 = string;
 export type Timestamp13 = string;
-export type Type13 = "subscribe";
-export type AfterSequence1 = number;
-export type Tail = number | null;
-export type StoreId = string;
+export type Type13 = "query.events";
+export type AfterSequence = number;
+export type BeforeSequence = number | null;
+export type TimeoutMs = number;
 export type ProtocolVersion14 = 1;
 export type RequestId14 = string;
 export type Timestamp14 = string;
+export type Type14 = "subscribe";
+export type AfterSequence1 = number;
+export type Tail = number | null;
+export type StoreId = string;
+export type ProtocolVersion15 = 1;
+export type RequestId15 = string;
+export type Timestamp15 = string;
 export type Ok = boolean;
 export type Error = string | null;
 export type Id = string;
@@ -151,7 +159,7 @@ export type TuiTheme =
   | "catppuccin-latte"
   | "high-contrast-dark"
   | "high-contrast-light";
-export type ProtocolVersion15 = 1;
+export type ProtocolVersion16 = 1;
 export type RunId1 = string;
 export type Sequence = number;
 /**
@@ -184,10 +192,10 @@ export type Provider3 = string | null;
 export type Model3 = string | null;
 export type ActiveExecutions = ActiveAgentExecution[];
 export type ChatThreads = ChatThreadInfo[];
-export type ProtocolVersion16 = 1;
+export type ProtocolVersion17 = 1;
 export type Sequence1 = number;
 export type RunId2 = string;
-export type Timestamp15 = string;
+export type Timestamp16 = string;
 export type EventType =
   | "server_started"
   | "server_ready"
@@ -518,26 +526,33 @@ export type RemovedHypothesisIds = string[];
 export type ExperimentsReady = boolean | null;
 export type Round2 = number;
 export type Commit2 = string | null;
+export type Base1 = string | null;
 export type Files = DesignFileChange[] | null;
-export type Path = string;
+export type Path1 = string;
 export type Change = "added" | "modified" | "deleted" | "renamed";
 export type RenamedFrom = string | null;
 export type Design = DesignRound[];
 export type DesignReady = boolean | null;
+export type Base2 = string;
+export type Head1 = string;
+export type Path2 = string;
+export type RenamedFrom1 = string | null;
+export type Patch = string | null;
+export type Truncated = boolean;
 export type ServerMessage = SubscribedMessage | EventMessage | EventBatchMessage | ProtocolErrorMessage;
-export type Type14 = "subscribed";
-export type RequestId15 = string;
+export type Type15 = "subscribed";
+export type RequestId16 = string;
 export type RunId4 = string;
 export type LatestSequence = number;
-export type Type15 = "event";
-export type Type16 = "event_batch";
+export type Type16 = "event";
+export type Type17 = "event_batch";
 export type Events1 = RunEvent[];
 export type ThroughSequence = number;
 export type ActiveExecutions1 = ActiveAgentExecution[];
 export type StoreId1 = string;
 export type HistoryAfterSequence = number;
-export type Type17 = "protocol_error";
-export type RequestId16 = string | null;
+export type Type18 = "protocol_error";
+export type RequestId17 = string | null;
 export type Code2 = string;
 export type Message1 = string;
 
@@ -667,28 +682,46 @@ export interface DesignQuery {
   timestamp?: Timestamp11;
   type?: Type11;
 }
-export interface EventsQuery {
+/**
+ * Request one file's unified patch from a round's commit range.
+ *
+ * ``base`` and ``head`` are a round's own range exactly as ``query.design``
+ * published it (``DesignRound.base`` and ``DesignRound.commit``), and
+ * ``path`` must be one of that round's listed file changes. The server
+ * validates all three, so a client cannot diff arbitrary revisions or read
+ * paths the design log filtered out.
+ */
+export interface DesignPatchQuery {
   protocol_version?: ProtocolVersion12;
   request_id?: RequestId12;
   timestamp?: Timestamp12;
   type?: Type12;
+  base: Base;
+  head: Head;
+  path: Path;
+}
+export interface EventsQuery {
+  protocol_version?: ProtocolVersion13;
+  request_id?: RequestId13;
+  timestamp?: Timestamp13;
+  type?: Type13;
   after_sequence?: AfterSequence;
   before_sequence?: BeforeSequence;
   timeout_ms?: TimeoutMs;
 }
 export interface SubscribeRequest {
-  protocol_version?: ProtocolVersion13;
-  request_id?: RequestId13;
-  timestamp?: Timestamp13;
-  type?: Type13;
+  protocol_version?: ProtocolVersion14;
+  request_id?: RequestId14;
+  timestamp?: Timestamp14;
+  type?: Type14;
   after_sequence?: AfterSequence1;
   tail?: Tail;
   store_id?: StoreId;
 }
 export interface Response {
-  protocol_version?: ProtocolVersion14;
-  request_id: RequestId14;
-  timestamp?: Timestamp14;
+  protocol_version?: ProtocolVersion15;
+  request_id: RequestId15;
+  timestamp?: Timestamp15;
   ok?: Ok;
   error?: Error;
   diagnostic?: Diagnostic | null;
@@ -706,6 +739,7 @@ export interface Response {
   experiments_ready?: ExperimentsReady;
   design?: Design;
   design_ready?: DesignReady;
+  design_patch?: DesignPatch | null;
 }
 /**
  * Structured, provider-neutral description of an operator diagnostic.
@@ -780,7 +814,7 @@ export interface InteractiveSetupDefaults {
   theme: TuiTheme;
 }
 export interface RunSnapshot {
-  protocol_version?: ProtocolVersion15;
+  protocol_version?: ProtocolVersion16;
   run_id: RunId1;
   sequence: Sequence;
   status: RunStatus;
@@ -823,10 +857,10 @@ export interface AgentExecutionActivityData {
  * object, which lets ``EventStore`` replay history without copying it.
  */
 export interface RunEvent {
-  protocol_version?: ProtocolVersion16;
+  protocol_version?: ProtocolVersion17;
   sequence?: Sequence1;
   run_id?: RunId2;
-  timestamp: Timestamp15;
+  timestamp: Timestamp16;
   type: EventType;
   text?: Text2;
   diagnostic?: Diagnostic | null;
@@ -1266,28 +1300,50 @@ export interface ExperimentUpdate {
 export interface DesignRound {
   round: Round2;
   commit?: Commit2;
+  base?: Base1;
   files?: Files;
 }
 /**
  * One workspace file a round's commit range touched.
  */
 export interface DesignFileChange {
-  path: Path;
+  path: Path1;
   change: Change;
   renamed_from?: RenamedFrom;
 }
+/**
+ * One file's unified patch text from a round's commit range.
+ *
+ * ``patch`` is the raw ``git diff`` output for the one file (rename
+ * detection on, so a renamed file arrives as a single patch spanning both
+ * paths). None means the workspace repository could not produce the text
+ * (repository missing or unreadable), which is distinct from an empty
+ * string, a file the range lists but whose content did not change.
+ *
+ * ``truncated`` marks a patch cut at the server's size bound. The echoed
+ * range and paths let a client show the exact ``git diff`` command that
+ * reproduces the full output externally.
+ */
+export interface DesignPatch {
+  base: Base2;
+  head: Head1;
+  path: Path2;
+  renamed_from?: RenamedFrom1;
+  patch?: Patch;
+  truncated?: Truncated;
+}
 export interface SubscribedMessage {
-  type?: Type14;
-  request_id: RequestId15;
+  type?: Type15;
+  request_id: RequestId16;
   run_id: RunId4;
   latest_sequence: LatestSequence;
 }
 export interface EventMessage {
-  type?: Type15;
+  type?: Type16;
   event: RunEvent;
 }
 export interface EventBatchMessage {
-  type?: Type16;
+  type?: Type17;
   events: Events1;
   through_sequence?: ThroughSequence;
   active_executions?: ActiveExecutions1;
@@ -1295,8 +1351,8 @@ export interface EventBatchMessage {
   history_after_sequence?: HistoryAfterSequence;
 }
 export interface ProtocolErrorMessage {
-  type?: Type17;
-  request_id?: RequestId16;
+  type?: Type18;
+  request_id?: RequestId17;
   code: Code2;
   message: Message1;
   diagnostic?: Diagnostic | null;
