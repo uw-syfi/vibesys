@@ -20,13 +20,7 @@ prefixes = [
   "clients/tui/src/",
   "docs/contributing/tui/",
 ]
-# TEMPORARY: old location of the TUI conventions doc, now
-# docs/contributing/tui/conventions.md. Open PRs #691 and #719 still modify the
-# old path until they merge main (git follows the rename). Drop this entry once
-# both have merged.
-paths = [
-  "docs/contributing/tui-conventions.md",
-]
+paths = []
 additional_checks = []
 
 [capabilities.server]

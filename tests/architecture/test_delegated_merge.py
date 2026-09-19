@@ -285,8 +285,7 @@ def test_checked_in_policy_loads_and_hard_denies() -> None:
     "filenames",
     [
         ["docs/contributing/tui/README.md"],
-        ["docs/contributing/tui/conventions.md"],
-        ["docs/contributing/tui-conventions.md", "clients/tui/src/app.ts"],
+        ["docs/contributing/tui/conventions.md", "clients/tui/src/app.ts"],
     ],
 )
 def test_checked_in_policy_lets_tui_members_land_tui_docs(filenames: list[str]) -> None:
@@ -299,13 +298,14 @@ def test_checked_in_policy_lets_tui_members_land_tui_docs(filenames: list[str]) 
     assert {"ayanbinrafaih", "nano-ai"} <= policy.capabilities["tui"].members
 
 
-def test_checked_in_policy_keeps_other_contributing_docs_out_of_scope() -> None:
+@pytest.mark.parametrize(
+    "filename", ["docs/contributing/other.md", "docs/contributing/tui-conventions.md"]
+)
+def test_checked_in_policy_keeps_other_contributing_docs_out_of_scope(filename: str) -> None:
     policy = load_policy()
 
     with pytest.raises(MergeRefusalError, match="does not match"):
-        authorize_files(
-            [[{"filename": "docs/contributing/other.md"}]], changed_files=1, policy=policy
-        )
+        authorize_files([[{"filename": filename}]], changed_files=1, policy=policy)
 
 
 @pytest.mark.parametrize(
