@@ -1,5 +1,15 @@
 import {describe, expect, it} from 'bun:test';
-import type {HypothesisRound} from '@vibesys/backend-client';
+import {create, type MessageInitShape} from '@bufbuild/protobuf';
+import {
+  CandidateDisposition,
+  DesignChange,
+  type DesignFileChange,
+  DesignFileChangeSchema,
+  type HypothesisRound,
+  HypothesisOutcome,
+  HypothesisRoundSchema,
+  RoundReviewVerdict,
+} from '@vibesys/backend-client';
 import type {DesignRoundView} from '../session-model.js';
 import {
   designRoundHeading,
@@ -10,8 +20,16 @@ import {
   renderDesignSummary,
 } from './design-log.js';
 
-function record(overrides: Partial<HypothesisRound> = {}): HypothesisRound {
-  return {round: 1, passed: false, reviewed: false, ...overrides};
+function record(overrides: MessageInitShape<typeof HypothesisRoundSchema> = {}): HypothesisRound {
+  return create(HypothesisRoundSchema, {round: 1, passed: false, reviewed: false, ...overrides});
+}
+
+function fileChange(path: string, change: DesignChange, renamedFrom?: string): DesignFileChange {
+  return create(DesignFileChangeSchema, {
+    path,
+    change,
+    ...(renamedFrom === undefined ? {} : {renamedFrom}),
+  });
 }
 
 function view(overrides: Partial<DesignRoundView> = {}): DesignRoundView {
@@ -20,27 +38,27 @@ function view(overrides: Partial<DesignRoundView> = {}): DesignRoundView {
 
 describe('file change formatting', () => {
   it('gives each change kind its own glyph', () => {
-    expect(fileChangeGlyph('added')).toBe('+');
-    expect(fileChangeGlyph('deleted')).toBe('-');
-    expect(fileChangeGlyph('renamed')).toBe('→');
-    expect(fileChangeGlyph('modified')).toBe('~');
+    expect(fileChangeGlyph(DesignChange.ADDED)).toBe('+');
+    expect(fileChangeGlyph(DesignChange.DELETED)).toBe('-');
+    expect(fileChangeGlyph(DesignChange.RENAMED)).toBe('→');
+    expect(fileChangeGlyph(DesignChange.MODIFIED)).toBe('~');
   });
 
   it('names the old path of a rename and only that', () => {
     expect(
-      formatFileChange({path: 'src/lib.rs', change: 'renamed', renamed_from: 'src/queue.rs'}),
+      formatFileChange(fileChange('src/lib.rs', DesignChange.RENAMED, 'src/queue.rs')),
     ).toBe('→ src/lib.rs (was src/queue.rs)');
-    expect(formatFileChange({path: 'src/ring.rs', change: 'added'})).toBe('+ src/ring.rs');
-    expect(formatFileChange({path: 'src/ffi.rs', change: 'deleted'})).toBe('- src/ffi.rs');
+    expect(formatFileChange(fileChange('src/ring.rs', DesignChange.ADDED))).toBe('+ src/ring.rs');
+    expect(formatFileChange(fileChange('src/ffi.rs', DesignChange.DELETED))).toBe('- src/ffi.rs');
   });
 
   it('tallies per kind in a fixed order and drops empty kinds', () => {
     expect(
       fileChangeCounts([
-        {path: 'a', change: 'modified'},
-        {path: 'b', change: 'added'},
-        {path: 'c', change: 'added'},
-        {path: 'd', change: 'renamed', renamed_from: 'e'},
+        fileChange('a', DesignChange.MODIFIED),
+        fileChange('b', DesignChange.ADDED),
+        fileChange('c', DesignChange.ADDED),
+        fileChange('d', DesignChange.RENAMED, 'e'),
       ]),
     ).toBe('+2 ~1 →1');
     expect(fileChangeCounts([])).toBeNull();
@@ -53,10 +71,10 @@ describe('designStageSummary', () => {
       designStageSummary(
         view({
           record: record({
-            hypothesis_outcome: 'proven',
-            judge_verdict: 'pass',
-            official_evaluation: true,
-            candidate_disposition: 'pareto_frontier',
+            hypothesisOutcome: HypothesisOutcome.PROVEN,
+            judgeVerdict: RoundReviewVerdict.PASS,
+            officialEvaluation: true,
+            candidateDisposition: CandidateDisposition.PARETO_FRONTIER,
             commit: '0123456789abcdef0123456789abcdef01234567',
           }),
         }),
@@ -95,10 +113,10 @@ describe('renderDesignSummary', () => {
       view({
         hypothesisId: 'H-01',
         title: 'Pad the indices',
-        record: record({perf_metric: 2400, perf_unit: 'ops/s', perf_delta_pct: 12.5}),
+        record: record({perfMetric: 2400, perfUnit: 'ops/s', perfDeltaPct: 12.5}),
         files: [
-          {path: 'src/ring.rs', change: 'added'},
-          {path: 'src/lib.rs', change: 'modified'},
+          fileChange('src/ring.rs', DesignChange.ADDED),
+          fileChange('src/lib.rs', DesignChange.MODIFIED),
         ],
       }),
     ]);
@@ -113,10 +131,9 @@ describe('renderDesignSummary', () => {
   });
 
   it('elides file names past the inline limit into a count', () => {
-    const files = Array.from({length: 6}, (_, index) => ({
-      path: `src/file-${index}.rs`,
-      change: 'modified' as const,
-    }));
+    const files = Array.from({length: 6}, (_, index) =>
+      fileChange(`src/file-${index}.rs`, DesignChange.MODIFIED),
+    );
     const rendered = renderDesignSummary([view({files})]);
     expect(rendered).toContain('src/file-3.rs, +2 more');
     expect(rendered).not.toContain('src/file-4.rs');

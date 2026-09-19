@@ -1,7 +1,13 @@
 import {describe, expect, test} from 'bun:test';
 import {rgbToHex, type TextRenderable} from '@opentui/core';
 import {createTestRenderer} from '@opentui/core/testing';
-import type {HypothesisRound} from '@vibesys/backend-client';
+import {create} from '@bufbuild/protobuf';
+import {
+  HypothesisEntrySchema,
+  type HypothesisRound,
+  HypothesisRoundSchema,
+  RoundReviewVerdict,
+} from '@vibesys/backend-client';
 import type {RoundSummary} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
@@ -396,25 +402,36 @@ describe('RoundRailView profile-skipped rounds', () => {
   });
 });
 
+const REVIEW_VERDICTS = {
+  pass: RoundReviewVerdict.PASS,
+  fail: RoundReviewVerdict.FAIL,
+  deferred: RoundReviewVerdict.DEFERRED,
+} as const;
+
 describe('RoundRailView judge verdict', () => {
   /** A single completed round whose experiment-log record carries `verdict`. */
   function verdictState(verdict: 'pass' | 'fail' | 'deferred' | null | undefined): SessionState {
     const base = railState(1);
-    const record: HypothesisRound = {
+    const record: HypothesisRound = create(HypothesisRoundSchema, {
       round: 1,
       passed: verdict === 'pass',
       reviewed: true,
-      // Omitted rather than set to `undefined`: a round the judge has not
-      // reached yet has no `judge_verdict` key at all, same as the backend
-      // sends it (exactOptionalPropertyTypes forbids the key set to
-      // `undefined` explicitly).
-      ...(verdict !== undefined ? {judge_verdict: verdict} : {}),
-    };
+      // Left unset rather than set to `undefined`: a round the judge has not
+      // reached yet has no verdict at all, same as the backend sends it.
+      ...(verdict ? {judgeVerdict: REVIEW_VERDICTS[verdict]} : {}),
+    });
     return {
       ...base,
       selectedRound: 1,
       experimentLog: {
-        entries: [{hypothesis_id: 'H-01', first_round: 1, last_round: 1, rounds: [record]}],
+        entries: [
+          create(HypothesisEntrySchema, {
+            hypothesisId: 'H-01',
+            firstRound: 1,
+            lastRound: 1,
+            rounds: [record],
+          }),
+        ],
         selectedId: null,
         pending: false,
         error: null,
@@ -491,20 +508,20 @@ describe('RoundRailView judge verdict', () => {
       core: {...base.core, rounds: [{number: 999, status: 'completed'}]},
       experimentLog: {
         entries: [
-          {
-            hypothesis_id: 'H-01',
-            first_round: 999,
-            last_round: 999,
+          create(HypothesisEntrySchema, {
+            hypothesisId: 'H-01',
+            firstRound: 999,
+            lastRound: 999,
             rounds: [
               {
                 round: 999,
                 passed: false,
                 reviewed: true,
-                judge_verdict: 'fail',
-                perf_delta_pct: -100,
+                judgeVerdict: RoundReviewVerdict.FAIL,
+                perfDeltaPct: -100,
               },
             ],
-          },
+          }),
         ],
         selectedId: null,
         pending: false,

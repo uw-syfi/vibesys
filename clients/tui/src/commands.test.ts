@@ -37,19 +37,19 @@ const SHARED = [
 describe('parseCommand', () => {
   it('parses the command surface into discriminated actions', () => {
     expect(onCommand('/help')).toEqual({kind: 'help'});
-    expect(onCommand('/pause')).toEqual({kind: 'request', request: {type: 'command.pause'}});
-    expect(onCommand('/resume')).toEqual({kind: 'request', request: {type: 'command.resume'}});
-    expect(onCommand('/stop')).toEqual({kind: 'request', request: {type: 'command.stop'}});
+    expect(onCommand('/pause')).toEqual({kind: 'request', request: {case: 'pause', value: {}}});
+    expect(onCommand('/resume')).toEqual({kind: 'request', request: {case: 'resume', value: {}}});
+    expect(onCommand('/stop')).toEqual({kind: 'request', request: {case: 'stop', value: {}}});
     expect(onCommand('/steer prioritize the KV cache path')).toEqual({
       kind: 'request',
-      request: {type: 'command.steer', text: 'prioritize the KV cache path'},
+      request: {case: 'steer', value: {text: 'prioritize the KV cache path'}},
     });
     expect(onCommand('/open-round')).toEqual({kind: 'openRound'});
     expect(onCommand('/open-round --3')).toEqual({kind: 'openRound', round: 3});
     expect(onCommand('/open-round 3')).toEqual({kind: 'openRound', round: 3});
     expect(onCommand('/perf')).toMatchObject({
       kind: 'request',
-      request: {type: 'query.performance'},
+      request: {case: 'performance', value: {}},
       responseView: 'perf',
       paneView: 'perf',
     });
@@ -57,7 +57,7 @@ describe('parseCommand', () => {
     // reaches the right pane exactly the way /perf does.
     expect(onCommand('/design')).toEqual({
       kind: 'request',
-      request: {type: 'query.design'},
+      request: {case: 'design', value: {}},
       paneView: 'design',
     });
     // Modal surfaces stay modal: no pane routing on any of them.
@@ -127,16 +127,16 @@ describe('argument-contract enforcement', () => {
   });
 
   it('still accepts no-argument commands with no trailing text', () => {
-    expect(onCommand('/pause')).toEqual({kind: 'request', request: {type: 'command.pause'}});
+    expect(onCommand('/pause')).toEqual({kind: 'request', request: {case: 'pause', value: {}}});
     // Trailing whitespace alone is not an argument.
-    expect(onCommand('/pause   ')).toEqual({kind: 'request', request: {type: 'command.pause'}});
+    expect(onCommand('/pause   ')).toEqual({kind: 'request', request: {case: 'pause', value: {}}});
     expect(onChat('/clear')).toEqual({kind: 'chatClear'});
   });
 
   it('leaves commands that take arguments unaffected', () => {
     expect(onCommand('/steer look at the cache')).toEqual({
       kind: 'request',
-      request: {type: 'command.steer', text: 'look at the cache'},
+      request: {case: 'steer', value: {text: 'look at the cache'}},
     });
     expect(onCommand('/theme solarized-light')).toEqual({
       kind: 'theme',
@@ -237,7 +237,7 @@ describe('cross-surface parity', () => {
   });
 
   it('matches command names case-insensitively on both surfaces', () => {
-    const resume = {kind: 'request', request: {type: 'command.resume'}} as const;
+    const resume = {kind: 'request', request: {case: 'resume', value: {}}} as const;
     expect(onCommand('/Pause')).toEqual(onCommand('/pause'));
     expect(onChat('/PAUSE')).toEqual(onCommand('/pause'));
     expect(onChat('/Resume')).toEqual(resume);
@@ -262,7 +262,7 @@ describe('chat-only commands', () => {
   it('resumes the paused run from /resume on both surfaces, and switches threads with /switch', () => {
     // /resume no longer collides: it means the run everywhere, and the chat's
     // own thread switch has its own name.
-    expect(onChat('/resume')).toEqual({kind: 'request', request: {type: 'command.resume'}});
+    expect(onChat('/resume')).toEqual({kind: 'request', request: {case: 'resume', value: {}}});
     expect(onChat('/switch')).toEqual({kind: 'chatSwitch'});
   });
 

@@ -307,7 +307,7 @@ export function upgradeRecord(desc: DescMessage, record: Record<string, unknown>
 
 /** Mirrors `upgrade.upgrade_event`: the version 2 JSON object for a version 1 record. */
 export function upgradeEvent(record: RunEventRecord): JsonObject {
-  if (record.protocol_version === PROTOCOL_VERSION) return record as JsonObject;
+  if (record['protocol_version'] === PROTOCOL_VERSION) return record as JsonObject;
   const upgraded = convert(RunEventSchema, without(record, 'data', 'invocation_id'));
   upgraded['protocol_version'] = PROTOCOL_VERSION;
   // v1 mirrored the two ids in both directions; v2 keeps the canonical one.

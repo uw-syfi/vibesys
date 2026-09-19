@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'bun:test';
-import type {RunEvent} from '@vibesys/backend-client';
+import {EventType, type RunEvent} from '@vibesys/backend-client';
+import {makeEvent, timestampOf} from '@vibesys/backend-client/testing';
 import {applyRunMapEvent, type CoreRunStatus} from '@vibesys/core-state';
 import {
   initialSessionState,
@@ -84,15 +85,13 @@ function withTitle(title: string): SessionState {
  * projection seeds from it, which is where `perf_eval` becomes selectable.
  */
 function perfEvalStart(): RunEvent {
-  return {
+  return makeEvent(EventType.AGENT_EXECUTION_STARTED, {
     sequence: 1,
-    timestamp: '2026-01-01T00:00:01Z',
-    type: 'agent_execution_started',
-    execution_id: 'exec-1',
-    invocation_id: 'exec-1',
-    agent_kind: 'perf_eval',
-    round_label: 'perf_eval iter 4',
-  };
+    timestamp: timestampOf('2026-01-01T00:00:01Z'),
+    executionId: 'exec-1',
+    agentKind: 'perf_eval',
+    roundLabel: 'perf_eval iter 4',
+  });
 }
 
 /** How many times `needle` appears in `text`, for grapheme-integrity checks. */

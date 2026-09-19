@@ -1,4 +1,11 @@
+import {create, fromJson, type JsonValue} from '@bufbuild/protobuf';
+import {ValueSchema} from '@bufbuild/protobuf/wkt';
 import {describe, expect, it} from 'bun:test';
+import {
+  type CommandResultPayload,
+  ToolResultDataSchema,
+  type ToolResultData,
+} from '@vibesys/backend-client';
 import {
   elapsedLabel,
   jsonShapeSummary,
@@ -8,6 +15,18 @@ import {
   toolResultPreview,
   unwrapShellCommand,
 } from './previews.js';
+
+function jsonPayload(value: JsonValue): ToolResultData['payload'] {
+  return create(ToolResultDataSchema, {
+    payload: {case: 'json', value: {value: fromJson(ValueSchema, value)}},
+  }).payload;
+}
+
+function commandPayload(init: Partial<Omit<CommandResultPayload, '$typeName'>>): ToolResultData['payload'] {
+  return create(ToolResultDataSchema, {
+    payload: {case: 'command', value: {stdout: '', stderr: '', ...init}},
+  }).payload;
+}
 
 describe('conversation previews', () => {
   it('formats and truncates typed tool arguments without changing the source data', () => {
@@ -68,47 +87,26 @@ describe('conversation previews', () => {
 describe('typed tool result previews', () => {
   it('pretty-prints a json payload from the parsed value without re-sniffing', () => {
     // Python-repr content would defeat the string sniffer; the payload wins.
-    const preview = toolResultPreview("{'rows': [1, 2]}", {
-      kind: 'json',
-      value: {rows: [1, 2]},
-    });
+    const preview = toolResultPreview("{'rows': [1, 2]}", jsonPayload({rows: [1, 2]}));
 
     expect(preview.content).toBe('{\n  "rows": [\n    1,\n    2\n  ]\n}');
   });
 
   it('lays out a command payload as stdout, labeled stderr, and exit code', () => {
-    const preview = toolResultPreview('build output\n', {
-      kind: 'command',
-      stdout: 'build output\n',
-      stderr: 'warning: deprecated\n',
-      exit_code: 2,
-      duration: 1.5,
-    });
+    const preview = toolResultPreview('build output\n', commandPayload({stdout: 'build output\n', stderr: 'warning: deprecated\n', exitCode: 2, duration: 1.5}));
 
     // A blank line before the label so stderr reads as its own section.
     expect(preview.content).toBe('build output\n\nstderr:\nwarning: deprecated\nexit code: 2');
   });
 
   it('omits the stderr label and exit-code line when they carry nothing', () => {
-    const preview = toolResultPreview('ok', {
-      kind: 'command',
-      stdout: 'ok',
-      stderr: '',
-      exit_code: null,
-      duration: null,
-    });
+    const preview = toolResultPreview('ok', commandPayload({stdout: 'ok', stderr: ''}));
 
     expect(preview.content).toBe('ok');
   });
 
   it('falls back to the raw content when a command payload is empty', () => {
-    const preview = toolResultPreview('raw text', {
-      kind: 'command',
-      stdout: '',
-      stderr: '',
-      exit_code: null,
-      duration: null,
-    });
+    const preview = toolResultPreview('raw text', commandPayload({stdout: '', stderr: ''}));
 
     expect(preview.content).toBe('raw text');
   });
@@ -123,8 +121,8 @@ describe('typed tool result previews', () => {
   it('collapses long payload-rendered output like the fallback path', () => {
     const value = Object.fromEntries(Array.from({length: 20}, (_, index) => [`k${index}`, index]));
 
-    const collapsed = toolResultPreview('irrelevant', {kind: 'json', value});
-    const expanded = toolResultPreview('irrelevant', {kind: 'json', value}, true);
+    const collapsed = toolResultPreview('irrelevant', jsonPayload(value));
+    const expanded = toolResultPreview('irrelevant', jsonPayload(value), true);
 
     expect(collapsed.collapsible).toBe(true);
     expect(collapsed.hiddenLines).toBeGreaterThan(0);
@@ -245,7 +243,7 @@ describe('tool call argument truncation', () => {
 describe('collapsed typed result summaries', () => {
   it('reports exit status, wall time, and output size for a long command result', () => {
     const stdout = `${Array.from({length: 37}, (_, index) => `line ${index}`).join('\n')}\n`;
-    const payload = {kind: 'command', stdout, stderr: '', exit_code: 1, duration: 0.44} as const;
+    const payload = commandPayload({stdout: stdout, stderr: '', exitCode: 1, duration: 0.44});
 
     const collapsed = toolResultPreview('irrelevant', payload);
 
@@ -256,13 +254,7 @@ describe('collapsed typed result summaries', () => {
 
   it('separates stdout and stderr and names the exit code when expanded', () => {
     const stdout = `${Array.from({length: 8}, (_, index) => `out ${index}`).join('\n')}\n`;
-    const payload = {
-      kind: 'command',
-      stdout,
-      stderr: 'thread panicked\n',
-      exit_code: 101,
-      duration: 2,
-    } as const;
+    const payload = commandPayload({stdout: stdout, stderr: 'thread panicked\n', exitCode: 101, duration: 2});
 
     const expanded = toolResultPreview('irrelevant', payload, true);
 
@@ -273,7 +265,7 @@ describe('collapsed typed result summaries', () => {
 
   it('falls back to the first meaningful line when a command reports no status', () => {
     const stdout = `\n\nfirst real line\n${'tail\n'.repeat(20)}`;
-    const payload = {kind: 'command', stdout, stderr: '', exit_code: null, duration: null} as const;
+    const payload = commandPayload({stdout: stdout, stderr: ''});
 
     expect(toolResultPreview('irrelevant', payload).content).toBe('first real line · 23 lines');
   });
@@ -281,11 +273,11 @@ describe('collapsed typed result summaries', () => {
   it('shows a json result as its top-level shape while collapsed', () => {
     const value = Object.fromEntries(Array.from({length: 9}, (_, index) => [`k${index}`, index]));
 
-    const collapsed = toolResultPreview('irrelevant', {kind: 'json', value});
+    const collapsed = toolResultPreview('irrelevant', jsonPayload(value));
 
     expect(collapsed.content).toBe('{keys: k0, k1, k2, k3, +5 more}');
     expect(collapsed.collapsible).toBe(true);
-    expect(toolResultPreview('irrelevant', {kind: 'json', value}, true).content).toContain(
+    expect(toolResultPreview('irrelevant', jsonPayload(value), true).content).toContain(
       '"k8": 8',
     );
   });
@@ -293,7 +285,7 @@ describe('collapsed typed result summaries', () => {
   it('shows an array json result as its length', () => {
     const value = Array.from({length: 12}, (_, index) => ({index}));
 
-    expect(toolResultPreview('irrelevant', {kind: 'json', value}).content).toBe('[12 items]');
+    expect(toolResultPreview('irrelevant', jsonPayload(value)).content).toBe('[12 items]');
     expect(jsonShapeSummary([])).toBe('[0 items]');
     expect(jsonShapeSummary([1])).toBe('[1 item]');
     expect(jsonShapeSummary({})).toBe('{}');

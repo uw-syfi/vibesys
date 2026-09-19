@@ -165,9 +165,11 @@ describe('renderPerformanceCurve', () => {
   });
 
   it('renders a description-only context when only the prose is known', () => {
-    const chart = renderPerformanceCurve([], [], {
-      objectiveDescription: 'Maximize queue throughput.',
-    });
+    const chart = renderPerformanceCurve(
+      [],
+      [],
+      create(PerformanceContextSchema, {objectiveDescription: 'Maximize queue throughput.'}),
+    );
 
     expect(chart).toContain('Measures  Maximize queue throughput.');
     expect(chart).not.toContain('Metric ');
