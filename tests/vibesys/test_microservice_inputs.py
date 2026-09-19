@@ -179,9 +179,7 @@ def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() ->
     assert (HOTEL_BENCHMARK_ROOT / "telemetry.toml").is_file()
     assert (HOTEL_OWNER_ROOT / "evaluator" / "go.mod").is_file()
     assert (HOTEL_OWNER_ROOT / "evaluator" / "runtime.mod").is_file()
-    assert (
-        HOTEL_OWNER_ROOT / "evaluator" / "cmd" / "hotel-correctness" / "main.go"
-    ).is_file()
+    assert (HOTEL_OWNER_ROOT / "evaluator" / "cmd" / "hotel-correctness" / "main.go").is_file()
     assert bundle.manifest.workspace is not None
     assert bundle.manifest.workspace.sources[0].commit == (
         "867806e575e1f7fb24437ae969910ddb17a76121"
