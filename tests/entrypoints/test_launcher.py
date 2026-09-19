@@ -413,7 +413,7 @@ def test_ensure_built_runs_pnpm_steps(monkeypatch, tmp_path):  # noqa: ANN001, A
 
     monkeypatch.setattr(cli, "_pnpm_argv", lambda: ["/usr/bin/pnpm"])
     calls: list[list[str]] = []
-    cwds: list[str] = []
+    cwds: list[str | None] = []
 
     def _run(cmd, cwd=None, capture_output=False, text=False, check=False):  # noqa: ANN001, ANN202, ARG001, FBT002  # tracked: #288
         calls.append(cmd)
