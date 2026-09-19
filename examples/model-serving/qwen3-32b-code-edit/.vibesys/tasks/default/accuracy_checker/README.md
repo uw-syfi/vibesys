@@ -30,4 +30,4 @@ uv run python checker.py --url http://localhost:8000 --num-samples 10
   echoes the buggy input verbatim will often pass — buggy programs in
   this dataset are typically very close to their fixes. If you need
   bypass detection, check the per-sample diff stats from
-  `bench/benchmark.py` (token-level alignment vs. the prediction).
+  `.vibesys/tasks/default/benchmark/benchmark.py` (token-level alignment vs. the prediction).

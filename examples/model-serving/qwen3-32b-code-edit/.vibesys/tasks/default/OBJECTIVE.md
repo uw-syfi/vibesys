@@ -1,6 +1,6 @@
-Maximize **single-batch end-to-end completion throughput** (median completion tokens per second) for **code-debug** edits driven by `bench/benchmark.py`. The target model is `Qwen/Qwen3-32B`. Implement an OpenAI-style **predicted-outputs** server: each request body carries a `prediction.content` field (the buggy original code), and the server consumes that prediction as the draft sequence in a speculative-decoding loop against the target.
+Maximize **single-batch end-to-end completion throughput** (median completion tokens per second) for **code-debug** edits driven by `.vibesys/tasks/default/benchmark/benchmark.py`. The target model is `Qwen/Qwen3-32B`. Implement an OpenAI-style **predicted-outputs** server: each request body carries a `prediction.content` field (the buggy original code), and the server consumes that prediction as the draft sequence in a speculative-decoding loop against the target.
 
-**Headline metric**: `median_tok_per_sec` from `bench/benchmark.py`'s JSON output ("Primary metric: median_tok_per_sec = ..."). Single-batch (concurrency 1), tokens counted by re-tokenizing the concatenated server response. This is the only number `perf_metric` should record.
+**Headline metric**: `median_tok_per_sec` from `.vibesys/tasks/default/benchmark/benchmark.py`'s JSON output ("Primary metric: median_tok_per_sec = ..."). Single-batch (concurrency 1), tokens counted by re-tokenizing the concatenated server response. This is the only number `perf_metric` should record.
 
 ## Server contract
 
