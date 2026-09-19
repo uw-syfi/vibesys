@@ -13,7 +13,6 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -55,7 +54,9 @@ class _ShellJudgeBackend:
             timeout=timeout,
             check=False,
         )
-        return SimpleNamespace(exit_code=proc.returncode, output=proc.stdout)
+        return SandboxExecutionResult(
+            output=proc.stdout, exit_code=proc.returncode, stdout=proc.stdout
+        )
 
 
 def _gate_ctx_with(backend: object, benchmark_command: str = "benchmark") -> MagicMock:
@@ -115,24 +116,6 @@ def test_accuracy_gate_publishes_sandbox_streams_with_accurate_labels() -> None:
     assert [(payload.stream, payload.content) for payload in payloads] == [
         ("stdout", "normal output\n"),
         ("stderr", "fatal error\n"),
-    ]
-
-
-def test_accuracy_gate_keeps_combined_only_backend_compatibility() -> None:
-    ctx = MagicMock()
-    ctx.judge_accuracy_command = "check"
-    ctx.trusted_input_changes.return_value = []
-    ctx.judge_backend.execute.return_value = SimpleNamespace(
-        output="legacy combined output",
-        exit_code=1,
-        truncated=False,
-    )
-
-    run_accuracy_gate(ctx, process_id="accuracy-1")
-
-    payloads = [call.kwargs["data"] for call in ctx.events.emit.call_args_list]
-    assert [(payload.stream, payload.content) for payload in payloads] == [
-        ("stdout", "legacy combined output")
     ]
 
 
@@ -217,11 +200,15 @@ def test_a_timed_out_benchmarks_late_result_cannot_be_read_by_the_next_run() -> 
         def execute(self, command, timeout=None):  # noqa: ANN001, ANN202, ARG002  # tracked: #288
             self.commands.append(command)
             if "cat " not in command:  # the cleanup rm
-                return SimpleNamespace(exit_code=0, output="")
+                return SandboxExecutionResult(output="", exit_code=0)
             path = _transport_artifact(command)
             path.write_text('{"tok_per_sec": 999.0}')
             orphans.append(path)
-            return SimpleNamespace(exit_code=-1, output="Command timed out after 5s")
+            return SandboxExecutionResult(
+                output="Command timed out after 5s",
+                exit_code=-1,
+                stdout="Command timed out after 5s",
+            )
 
     try:
         first = run_benchmark_gate(
@@ -331,7 +318,9 @@ def _accuracy_ctx(*, exit_code: int = 0, output: str = "checked") -> MagicMock:
     ctx = MagicMock()
     ctx.judge_accuracy_command = "trusted-check"
     ctx.trusted_input_changes.return_value = []
-    ctx.judge_backend.execute.return_value = SimpleNamespace(exit_code=exit_code, output=output)
+    ctx.judge_backend.execute.return_value = SandboxExecutionResult(
+        output=output, exit_code=exit_code, stdout=output
+    )
     return ctx
 
 

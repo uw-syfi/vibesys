@@ -15,14 +15,14 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from deepagents.backends.protocol import SandboxBackendProtocol
+    from vs_sandbox.execution import Sandbox
 
 
 @dataclass(frozen=True)
 class BeforeReadyContext:
     """Resources available while a sandbox is transitioning to ready."""
 
-    sandbox: SandboxBackendProtocol
+    sandbox: Sandbox
 
 
 class SandboxLifecycleHooks:
@@ -60,7 +60,7 @@ class SandboxLifecycle:
         """Return the hooks providers in their deterministic execution order."""
         return self._hooks
 
-    def before_ready(self, sandbox: SandboxBackendProtocol) -> None:
+    def before_ready(self, sandbox: Sandbox) -> None:
         """Run every provider's hook, stopping at the first failure."""
         context = BeforeReadyContext(sandbox=sandbox)
         for provider in self._hooks:

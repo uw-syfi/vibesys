@@ -29,12 +29,11 @@ from vs_evaluator_protocol import (
     parse_records,
     read_measurement,
 )
-from vs_sandbox import SandboxExecutionResult
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from deepagents.backends.protocol import ExecuteResponse
+    from vs_sandbox import SandboxExecutionResult
 
 # Truncation lengths for gate failure output. All three values are defined
 # here so that the logged window, the agent-feedback window, and the record
@@ -204,14 +203,10 @@ def _publish_subprocess_output(
     ctx: LoopContext,
     *,
     process_id: str,
-    result: ExecuteResponse,
+    result: SandboxExecutionResult,
     process_kind: str = "accuracy_checker",
 ) -> None:
-    streams = (
-        (("stdout", result.stdout), ("stderr", result.stderr))
-        if isinstance(result, SandboxExecutionResult)
-        else (("stdout", result.output),)
-    )
+    streams = (("stdout", result.stdout), ("stderr", result.stderr))
     for stream, content in streams:
         if content:
             ctx.events.emit(

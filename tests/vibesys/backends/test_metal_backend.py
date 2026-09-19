@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 
 import pytest
-from deepagents.backends import LocalShellBackend
 
 from entrypoints.headless import _add_common_args
 from vibesys import backends
@@ -13,6 +12,7 @@ from vibesys.backends import SandboxKind
 from vibesys.backends.local import LocalBackend
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
+from vs_sandbox import LocalShellSandbox
 
 
 def _make_backend(tmp_path) -> LocalBackend:  # noqa: ANN001  # tracked: #288
@@ -40,7 +40,7 @@ class TestMetalSandbox:
             log_path=None,
             extra_env={"FOO": "bar"},
         )
-        assert isinstance(sb, LocalShellBackend)
+        assert isinstance(sb, LocalShellSandbox)
 
     def test_docker_raises(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
         impl = _make_backend(tmp_path)

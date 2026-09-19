@@ -36,9 +36,7 @@ from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
 
 if TYPE_CHECKING:
-    # Annotation only; deepagents pulls langchain + anthropic (~seconds).
-    from deepagents.backends.protocol import SandboxBackendProtocol
-
+    from vs_sandbox.execution import Sandbox
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
@@ -124,9 +122,9 @@ class TrainiumBackend:
         container_image: str | None = None,
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
-    ) -> SandboxBackendProtocol:
-        # Deferred: the sandbox classes subclass deepagents' BaseSandbox, which
-        # pulls langchain + anthropic. Registration must stay import-cheap.
+    ) -> Sandbox:
+        # Deferred: importing DockerSandbox registers process-wide signal and
+        # atexit handlers. Registration must stay side-effect free.
         from vs_sandbox import DockerSandbox  # noqa: PLC0415  # tracked: #288
 
         bind_mounts = list(bind_mounts or [])

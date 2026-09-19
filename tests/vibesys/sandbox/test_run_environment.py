@@ -56,9 +56,8 @@ from vs_sandbox import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from deepagents.backends.protocol import SandboxBackendProtocol
-
     from vibesys.backends.base import ContentionMonitor
+    from vs_sandbox.execution import Sandbox
 
 
 # A committed two-file overlay, not a submodule: the contract under test is
@@ -124,7 +123,7 @@ class FakeBackend:
         self.sandbox = MagicMock()
         self.calls: list[tuple[SandboxKind, dict[str, Any]]] = []
 
-    def make_sandbox(self, kind: SandboxKind, **kwargs: Any) -> SandboxBackendProtocol:  # noqa: ANN401  # tracked: #288
+    def make_sandbox(self, kind: SandboxKind, **kwargs: Any) -> Sandbox:  # noqa: ANN401  # tracked: #288
         self.calls.append((kind, kwargs))
         if kind is SandboxKind.DOCKER:
             # A real DockerSandbox derives agent_path from (host_workspace,
@@ -150,7 +149,7 @@ def _request(tmp_path: Path, backend: FakeBackend, **overrides: Any) -> RunEnvir
         workspace=workspace,
         ref_dir=None,
         backend=backend,
-        agent_backend="deepagents",
+        agent_backend="stub",
         cli_provider=None,
         run_id="run-123",
     )
@@ -1165,7 +1164,7 @@ def test_cli_container_env_and_setup_agree_on_the_container_environment(tmp_path
 
 def test_cli_container_env_is_none_for_a_non_cli_agent_backend(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     backend = FakeBackend()
-    request = _request(tmp_path, backend, agent_backend="deepagents", cli_provider="codex")
+    request = _request(tmp_path, backend, agent_backend="stub", cli_provider="codex")
 
     assert _cli_container_env(request) is None
 
@@ -1683,13 +1682,13 @@ def test_modal_environment_prompt_notes_reuse_workspace_uv_cache(tmp_path):  # n
     assert "excluding `.venv` and `.cache`" in notes
 
 
-def test_modal_environment_with_deepagents_uses_docker_too(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    """The deepagents path also runs locally in Docker now — Modal is a
+def test_modal_environment_with_stub_agent_backend_uses_docker_too(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    """A non-cli agent backend also runs locally in Docker: Modal is a
     dispatch target, not a runtime for the agent."""
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    env.open(_request(tmp_path, backend, agent_backend="deepagents"))
+    env.open(_request(tmp_path, backend, agent_backend="stub"))
 
     assert backend.calls[0][0] is SandboxKind.DOCKER
 

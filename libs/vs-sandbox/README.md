@@ -7,12 +7,16 @@ This is an internal import package shipped by the `vibesys` distribution. It
 is not published as a separate Python distribution.
 
 `vs-sandbox` owns the sandbox execution backends that do not depend on
-VibeSys: container-backed workspaces implementing the `deepagents`
-`BaseSandbox` protocol, host process confinement, plus Modal model-weight volume provisioning.
+VibeSys: container-backed workspaces, an unconfined local shell sandbox, host process
+confinement, plus Modal model-weight volume provisioning.
 Applications wire these into their own run-environment policy.
 
 ## Concepts
 
+- `Sandbox` is the command-execution protocol (`id`, `execute`) every sandbox
+  kind satisfies; `SandboxExecutionResult` is its bounded result.
+- `LocalShellSandbox` runs shell commands directly on the host with no
+  isolation, for backends that have no container.
 - `DockerSandbox` runs agent operations in a local Docker container with
   host bind mounts, and cleans up tracked containers on exit or SIGINT.
 - `HostResource` and related declaration types form a backend-neutral SDK for

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import argparse
 
-from deepagents.backends import LocalShellBackend
-
 from entrypoints.headless import _add_common_args
 from vibesys import backends
 from vibesys.backends import SandboxKind
@@ -14,7 +12,7 @@ from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, RocmComputeBackendFragment
 from vibesys.prompts.renderer import _FRAGMENT_IMPLS, ComputeBackendFragment
-from vs_sandbox import DockerSandbox, HostResource, HostResourceAccess
+from vs_sandbox import DockerSandbox, HostResource, HostResourceAccess, LocalShellSandbox
 
 
 def _make_backend(tmp_path, devices=("/dev/kfd", "/dev/dri/renderD128")) -> RocmBackend:  # noqa: ANN001  # tracked: #288
@@ -45,7 +43,7 @@ class TestRocmSandbox:
             log_path=None,
             extra_env={"FOO": "bar"},
         )
-        assert isinstance(sb, LocalShellBackend)
+        assert isinstance(sb, LocalShellSandbox)
 
     def test_docker_forwards_kfd_and_dri_without_gpus_flag(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
         """AMD GPUs come in via --device, not the NVIDIA-only --gpus."""

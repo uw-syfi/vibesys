@@ -112,10 +112,8 @@ for attempt in range(5):
 """
 
 if TYPE_CHECKING:
-    # Annotation only; deepagents pulls langchain + anthropic (~seconds).
-    from deepagents.backends.protocol import SandboxBackendProtocol
-
     from vs_project import StateNamespace
+    from vs_sandbox.execution import Sandbox
 
 
 @dataclass(frozen=True)
@@ -208,7 +206,7 @@ class RunEnvironmentRequest:  # noqa: D101  # tracked: #288
 class _AgentPathSandbox(Protocol):
     """The one lookup ``AgentPaths`` construction needs from a started sandbox.
 
-    Narrower than ``SandboxBackendProtocol``: a host-only sandbox never
+    Narrower than ``Sandbox``: a host-only sandbox never
     reaches this contract (``LocalEnvironment`` builds host paths directly),
     while every ``SandboxKind.DOCKER`` build
     (:class:`~vs_sandbox.docker_sandbox.DockerSandbox`) satisfies it.
@@ -218,7 +216,7 @@ class _AgentPathSandbox(Protocol):
 
 
 class RunEnvironmentSession(Protocol):  # noqa: D101  # tracked: #288
-    sandbox: SandboxBackendProtocol
+    sandbox: Sandbox
     view: RunEnvironmentView
 
     def __enter__(self) -> RunEnvironmentSession: ...  # noqa: D105  # tracked: #288
@@ -287,10 +285,10 @@ class _NoopWorkspaceRecovery:
         return CandidateRuntime(view.prompt_notes, view.deployment_namespace)
 
 
-def _start_sandbox(sandbox: SandboxBackendProtocol) -> None:
+def _start_sandbox(sandbox: Sandbox) -> None:
     """Start the container of a sandbox kind that owns one.
 
-    ``SandboxBackendProtocol`` is the command-execution contract and says
+    ``Sandbox`` is the command-execution contract and says
     nothing about container lifetime, so the lookup stays dynamic. Every
     Docker- and Modal-kind sandbox this module builds implements ``start``.
     """
@@ -301,7 +299,7 @@ def _start_sandbox(sandbox: SandboxBackendProtocol) -> None:
     start()
 
 
-def _stop_sandbox(sandbox: SandboxBackendProtocol) -> None:
+def _stop_sandbox(sandbox: Sandbox) -> None:
     """Stop the sandbox's container, if it owns one."""
     stop = getattr(sandbox, "stop", None)
     if callable(stop):
@@ -310,7 +308,7 @@ def _stop_sandbox(sandbox: SandboxBackendProtocol) -> None:
 
 @dataclass
 class _DefaultRunEnvironmentSession:
-    sandbox: SandboxBackendProtocol
+    sandbox: Sandbox
     view: RunEnvironmentView
     stop_on_close: bool = False
     _closed: bool = False
@@ -550,7 +548,7 @@ class SkyPilotEnvironmentConfig:
 
 @dataclass
 class _SkyPilotRunEnvironmentSession:
-    sandbox: SandboxBackendProtocol
+    sandbox: Sandbox
     view: RunEnvironmentView
     bridge: SkyPilotBridge
     _closed: bool = False

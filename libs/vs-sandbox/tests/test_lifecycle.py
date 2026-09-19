@@ -15,7 +15,7 @@ from vs_sandbox import (
 )
 
 if TYPE_CHECKING:
-    from deepagents.backends.protocol import SandboxBackendProtocol
+    from vs_sandbox.execution import Sandbox
 
 
 @dataclass
@@ -32,8 +32,8 @@ class _FailingHooks(SandboxLifecycleHooks):
         raise ValueError("setup exploded")  # noqa: TRY003
 
 
-def _sandbox() -> SandboxBackendProtocol:
-    return cast("SandboxBackendProtocol", object())
+def _sandbox() -> Sandbox:
+    return cast("Sandbox", object())
 
 
 def test_base_hooks_are_a_noop() -> None:

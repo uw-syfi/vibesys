@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import argparse
 
-from deepagents.backends import LocalShellBackend
-
 from entrypoints.headless import _add_common_args
 from vibesys import backends
 from vibesys.backends import SandboxKind
 from vibesys.backends.trainium import TrainiumBackend
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
-from vs_sandbox import DockerSandbox, HostResource, HostResourceAccess
+from vs_sandbox import DockerSandbox, HostResource, HostResourceAccess, LocalShellSandbox
 
 
 def _make_backend(tmp_path, devices=("/dev/neuron0",)) -> TrainiumBackend:  # noqa: ANN001  # tracked: #288
@@ -42,7 +40,7 @@ class TestTrainiumSandbox:
             log_path=None,
             extra_env={"FOO": "bar"},
         )
-        assert isinstance(sb, LocalShellBackend)
+        assert isinstance(sb, LocalShellSandbox)
 
     def test_docker_forwards_neuron_devices_and_no_gpus(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
         impl = _make_backend(tmp_path, devices=["/dev/neuron0", "/dev/neuron1"])

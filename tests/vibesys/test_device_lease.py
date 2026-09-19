@@ -14,9 +14,8 @@ from vibesys.sandbox.run_environment import AgentPaths, RunEnvironmentView
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from deepagents.backends.protocol import SandboxBackendProtocol
-
     from vibesys.backends.base import ContentionMonitor, SandboxKind
+    from vs_sandbox.execution import Sandbox
 
 
 class _FakeDevice:
@@ -36,7 +35,7 @@ class _FakeBackend:
     def __init__(self, selected_device: _FakeDevice | None = None) -> None:
         self.selected_device = selected_device
 
-    def make_sandbox(self, kind: SandboxKind, **kwargs: Any) -> SandboxBackendProtocol:  # noqa: ANN401  # tracked: #288
+    def make_sandbox(self, kind: SandboxKind, **kwargs: Any) -> Sandbox:  # noqa: ANN401  # tracked: #288
         raise NotImplementedError
 
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:  # noqa: ARG002  # tracked: #288
