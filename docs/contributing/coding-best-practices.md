@@ -42,7 +42,7 @@ path.
   because the edge is undeclared. Tach is the single boundary tool. The libs
   DAG holds because every lib edge is explicit (only `vs_project` to
   `vs_loop_state` exists); reject any new one in review. The generated graphs
-  are linked from [architecture.md](architecture.md); after editing `tach.toml`, run
+  are in [architecture.md](architecture.md); after editing `tach.toml`, run
   `uv run python scripts/check_tach_graph.py --write`.
 
 When one part of the application describes behavior and another part applies

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Keep the Mermaid module graph files under docs/figures/ current.
+"""Keep the Mermaid module graph in docs/contributing/architecture.md current.
 
 `tach show --mermaid` renders the module graph declared in `tach.toml`. This
-script writes two whole generated files:
+script embeds two views between marker comments in the architecture doc:
 
-    1. docs/figures/tach-module-graph.mmd, the full graph, and
-    2. docs/figures/tach-module-graph-core.mmd, the core strongly connected
-       component (the known cycle), filtered from the full graph.
+    1. the full graph, and
+    2. the core strongly connected component (the known cycle), filtered from
+       the full graph so the cycle is legible.
 
 Tach's edge order is not guaranteed stable, so edges are sorted. Only the local
 Mermaid output is used; never `tach show --web`, which uploads the graph.
@@ -24,8 +24,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-FULL = Path("docs/figures/tach-module-graph.mmd")
-CORE_VIEW = Path("docs/figures/tach-module-graph-core.mmd")
+DOC = Path("docs/contributing/architecture.md")
+START = "<!-- tach-graph:start -->"
+END = "<!-- tach-graph:end -->"
 
 # Modules of the known core cycle, using the exact names from tach.toml.
 CORE = frozenset(
@@ -71,10 +72,38 @@ def mermaid(edges: list[tuple[str, str]]) -> str:
     return "\n".join(lines)
 
 
-def render_files(edges: list[tuple[str, str]]) -> dict[Path, str]:
-    """Return the generated files: the full graph and the core-cycle view."""
+def render_block(edges: list[tuple[str, str]]) -> str:
+    """Build the marked region: the full graph plus the core-cycle view."""
     core = [e for e in edges if e[0] in CORE and e[1] in CORE]
-    return {FULL: mermaid(edges) + "\n", CORE_VIEW: mermaid(core) + "\n"}
+    return "\n".join(
+        [
+            START,
+            "## Full graph",
+            "",
+            "```mermaid",
+            mermaid(edges),
+            "```",
+            "",
+            "## Core cycle",
+            "",
+            "Edges among the modules of the known strongly connected core.",
+            "",
+            "```mermaid",
+            mermaid(core),
+            "```",
+            END,
+        ]
+    )
+
+
+def splice(text: str, block: str) -> str:
+    """Replace the marked region of `text` with `block`."""
+    start = text.find(START)
+    end = text.find(END)
+    if start == -1 or end == -1 or end < start:
+        msg = f"{DOC} is missing the {START} / {END} markers"
+        raise ValueError(msg)
+    return text[:start] + block + text[end + len(END) :]
 
 
 def main() -> int:
@@ -86,28 +115,22 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=Path())
     args = parser.parse_args()
 
+    doc = args.root / DOC
     try:
-        expected = render_files(tach_edges())
-    except (OSError, subprocess.CalledProcessError) as exc:
+        current = doc.read_text()
+        expected = splice(current, render_block(tach_edges()))
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_TOOL_ERROR
 
-    stale = []
-    for rel, text in expected.items():
-        path = args.root / rel
-        current = path.read_text() if path.exists() else None
-        if current == text:
-            continue
-        if args.write:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
-            print(f"updated {rel}")
-        else:
-            stale.append(str(rel))
-    if stale:
+    if args.write:
+        if expected != current:
+            doc.write_text(expected)
+            print(f"updated {DOC}")
+        return EXIT_OK
+    if expected != current:
         print(
-            f"stale tach graph: {', '.join(stale)}. "
-            "Run: uv run python scripts/check_tach_graph.py --write",
+            f"{DOC} tach graph is stale. Run: uv run python scripts/check_tach_graph.py --write",
             file=sys.stderr,
         )
         return EXIT_STALE

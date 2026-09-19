@@ -173,8 +173,8 @@ jobs:
       - name: Check Tach module boundaries
         run: uv run tach check
 
-      # docs/figures/tach-module-graph*.mmd are generated from tach.toml;
-      # refresh with `scripts/check_tach_graph.py --write`.
+      # The Mermaid graphs in docs/contributing/architecture.md are generated
+      # from tach.toml; refresh with `scripts/check_tach_graph.py --write`.
       - name: Check Tach module graph doc is current
         run: uv run python scripts/check_tach_graph.py --check
 
