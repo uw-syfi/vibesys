@@ -36,7 +36,7 @@ report the same errors.
 | `/open-round` | Open the rounds behind the selected hypothesis. |
 | `/open-round --N` | Open round N, inside whichever hypothesis owns it. |
 | `/perf` | Plot the recorded performance metric by round, in the right pane. |
-| `/design` | Summarize what each round changed in the workspace, in the right pane. With that pane focused, `d` opens the newest round's diff. |
+| `/design` | Summarize what each round changed in the workspace, in the right pane. |
 | `/todos` | Expand or collapse the visible agent's todo list. |
 | `/prompt` | Expand or collapse the latest prompt in view. |
 | `/theme` | Pick a theme from a keyboard-navigable list; `/theme <name>` switches immediately. |
@@ -178,7 +178,7 @@ modal they used before panes existed. That modal is the same surface as the
 pane, so it keeps the pane's title and its focus marker rather than reading as a
 generic dialog. The layout re-flows on resize in either direction.
 
-`/help`, `/theme`, the round diff viewer, and errors stay modal. While any of them is open, a scrim
+`/help`, `/theme`, and errors stay modal. While any of them is open, a scrim
 dims the entire screen behind it, so the modal is the only surface left at full
 contrast and the operator can tell where a keystroke will land. The scrim is a
 translucent paint on an absolutely positioned box that joins no flex row: the
@@ -241,17 +241,6 @@ the tabs, the agents graph takes 40% of the width, never less than it needs to
 name every agent in full (selected included) and never more than its stages can
 use, and the transcript takes the rest. Where that and the transcript's floor do
 not both fit, the agents stack in a narrow list instead, names still in full.
-
-`d` over the selected round in a drill-down, or over the design pane, opens
-the round's diff: the changed files as unified patches, one file at a time,
-fetched as they are viewed. `←` and `→` move between files, `↑` and `↓`
-between hunks, Page Up and Page Down scroll, and Escape closes the viewer and
-nothing behind it. Added and removed lines carry their own tones, so a patch
-reads without color. A patch past the server's size bound is cut at a line
-boundary and says so, quoting the exact `git diff` command that reproduces
-the full output outside the TUI. Reopening a recorded run whose workspace
-repository is gone keeps the file list; the patch view explains why the
-content is unavailable instead of rendering nothing.
 
 The launcher retains terminal results until the operator exits. If the backend
 fails to start, its log tail is printed before the temporary session directory
