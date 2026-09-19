@@ -126,16 +126,21 @@ role check, and audit comments keep `GITHUB_TOKEN`.
    read. Leave every other permission unset. Disable the webhook. Do not add
    the app to any branch protection or ruleset bypass list.
 2. Install it on this repository only.
-3. Add repository secrets `MERGE_QUEUE_APP_ID` (the app id) and
+3. Add repository secrets `MERGE_QUEUE_APP_ID` and
    `MERGE_QUEUE_APP_PRIVATE_KEY` (the full PEM, including the header and footer
-   lines).
+   lines). Despite its name, `MERGE_QUEUE_APP_ID` must hold the app's Client
+   ID (shown as `Client ID` on the app settings page, like `Iv23...`), not the
+   numeric App ID. The workflow passes it as the action's `client-id` input;
+   using the wrong value fails with `'Issuer' claim ('iss') must be an Integer`.
 
 To rotate the key, generate a new private key in the app settings, replace
 `MERGE_QUEUE_APP_PRIVATE_KEY`, run `/merge-scoped` on a small in-scope pull
 request to confirm, then delete the old key in the app settings.
 
 If either secret is missing, the mint step fails and the job stops before the
-script runs, so nothing is landed. If the step is skipped or produces an empty
+script runs, so nothing is landed. A failed `Mint landing token` step, which leaves no bot
+comment on the pull request, means the App secrets are wrong or missing. Check
+the job log. If the step is skipped or produces an empty
 token, the script refuses with a message naming the landing token, before any
 landing write. It never falls back to `GITHUB_TOKEN`.
 

@@ -1157,7 +1157,7 @@ def test_workflow_uses_trusted_default_branch_and_pinned_actions() -> None:
     mint = next(step for step in steps if step.get("id") == "landing-token")
     assert mint["uses"].startswith("actions/create-github-app-token@")
     assert mint["with"] == {
-        "app-id": "${{ secrets.MERGE_QUEUE_APP_ID }}",
+        "client-id": "${{ secrets.MERGE_QUEUE_APP_ID }}",
         "private-key": "${{ secrets.MERGE_QUEUE_APP_PRIVATE_KEY }}",
         "repositories": "${{ github.event.repository.name }}",
         "permission-pull-requests": "write",

@@ -35,12 +35,13 @@ jobs:
       # landing writes (enqueue, async merge, direct merge) use a short-lived App
       # installation token. Reads, the role check, and audit comments keep
       # GITHUB_TOKEN. The job `if:` above limits this step to '/merge-' comments
-      # on pull requests.
+      # on pull requests. MERGE_QUEUE_APP_ID holds the app's Client ID (not the
+      # numeric App ID), which is what the `client-id` input takes.
       - name: Mint landing token
         id: landing-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ secrets.MERGE_QUEUE_APP_ID }}
+          client-id: ${{ secrets.MERGE_QUEUE_APP_ID }}
           private-key: ${{ secrets.MERGE_QUEUE_APP_PRIVATE_KEY }}
           repositories: ${{ github.event.repository.name }}
           permission-pull-requests: write
