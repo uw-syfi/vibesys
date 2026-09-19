@@ -106,7 +106,10 @@ jobs:
 
   build:
     name: Build ${{ matrix.target }}
-    needs: release-context
+    # Not gated on release-context: that job only sanity-checks version
+    # metadata and shares no output the build steps consume, so making the
+    # (much longer) per-platform builds wait on it is pure serialization.
+    # aggregate below still requires both to succeed.
     permissions:
       contents: read
     strategy:
@@ -152,6 +155,22 @@ jobs:
         run: |
           corepack enable
           corepack install --global pnpm@11.11.0
+
+      # Resolved after pnpm exists rather than hardcoded: the store location
+      # is pnpm's to choose, and a wrong path caches an empty directory
+      # silently. Same pattern as the `tui` job in test.yml.
+      - name: Locate the pnpm store
+        run: echo "PNPM_STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+
+      - name: Cache the pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.PNPM_STORE_PATH }}
+          # Keyed on matrix.target, not runner.os: linux-x86_64 and
+          # linux-aarch64 share an OS but not an architecture, and OpenTUI's
+          # native optional dependencies differ per architecture.
+          key: pnpm-store-${{ matrix.target }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ matrix.target }}-
 
       - name: Install Python dependencies
         run: uv sync --dev
