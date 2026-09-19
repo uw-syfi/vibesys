@@ -794,7 +794,6 @@ describe('core state projection', () => {
       data: {
         kind: 'invocation_finished',
         error: null,
-        result: null,
       },
     });
     const failed = reduceEvent(initialCoreState(), {
