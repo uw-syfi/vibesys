@@ -22,4 +22,4 @@ The accuracy application uses the packaged evaluator's generic Go runner and
 HTTP transport. `.vibesys/tasks/compose/evaluator/run.py` creates a temporary Go module file resolving
 that exact package, without modifying the shared checker sources. The benchmark
 uses the package's `servicebench` command. Source-tree Go tests continue to use
-`evaluator/go.mod`.
+`.vibesys/tasks/compose/evaluator/go.mod`.
