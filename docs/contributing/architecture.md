@@ -58,6 +58,7 @@ graph TD
     vibesys.agents --> vibesys
     vibesys.agents --> vibesys.render
     vibesys.backends --> vibesys
+    vibesys.domains --> vibesys
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
     vibesys.prompts --> vibesys
@@ -177,6 +178,7 @@ graph TD
     vibesys.agents --> vs_sandbox
     vibesys.backends --> vibesys
     vibesys.backends --> vs_sandbox
+    vibesys.domains --> vibesys
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
     vibesys.evaluators --> vs_sandbox
