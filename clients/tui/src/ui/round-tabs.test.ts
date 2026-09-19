@@ -171,6 +171,17 @@ describe('tabWindow', () => {
     expect(tabWindow(eight(3), 1, null, 27)).toEqual({first: 1, last: 2});
   });
 
+  test('includes slots and both marker reserves in the exact-fit budget', () => {
+    // The middle slot uses 8 columns. Each marker uses 3 columns plus a 2-column
+    // gap, and the view owns 2 edge columns: 8 + 5 + 5 + 2 = 20.
+    expect(tabWindow(eight(3), 1, null, 20)).toEqual({first: 1, last: 1});
+    expect(tabWindow(eight(3), 1, null, 19)).toBeNull();
+  });
+
+  test('accounts for nonuniform slot widths while expanding', () => {
+    expect(tabWindow([4, 12, 4, 4], 1, null, 28)).toEqual({first: 0, last: 1});
+  });
+
   test('grows from the selection, taking the later side on a tie', () => {
     expect(tabWindow(eight(10), 5, null, 40)).toEqual({first: 4, last: 6});
   });
@@ -369,6 +380,7 @@ describe('RoundTabsView', () => {
     expect(cellsOf(cells, 'r2')[0]?.bg).toBe(theme.canvas);
   });
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
   test('keeps every colour on the fill readable, in every theme', async () => {
     const failures: string[] = [];
     for (const each of listThemes()) {

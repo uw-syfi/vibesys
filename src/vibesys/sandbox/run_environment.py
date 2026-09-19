@@ -46,6 +46,7 @@ from vibesys.constants import DEFAULT_AGENT_BACKEND, PROJECT_ROOT
 from vibesys.domains.environment import EnvironmentBindMount  # noqa: TC001  # tracked: #288
 from vibesys.evaluators import (
     PROJECT_ROOT_TOKEN,
+    PYTHON_TOKEN,
     CargoGitToolSpec,
     EvaluatorToolError,
     EvaluatorToolLifecycleHooks,
@@ -1312,13 +1313,10 @@ def _environment_command(  # noqa: PLR0913  # tracked: #288
 ) -> str | None:
     """Translate semantic paths in argv, then quote the translated command.
 
-    ``agent_path`` is the started sandbox's own lookup
-    (:meth:`~vs_sandbox.docker_sandbox.DockerSandbox.agent_path`), consulted
-    for the evaluator package root when the caller has one and does not pass
-    an explicit ``evaluator_package_root`` override. A caller with no sandbox
-    yet (or one whose evaluator package lives at a remote-synced path outside
-    the container's own resource list, such as Modal's and SkyPilot's
-    dispatch wrappers) keeps passing an explicit override instead.
+    ``agent_path`` maps evaluator paths through the started sandbox when the
+    caller does not pass an explicit ``evaluator_package_root`` override.
+    Callers without a sandbox, including remote dispatch wrappers, pass an
+    explicit override instead.
     """
     if command is None:
         return None
@@ -1326,8 +1324,10 @@ def _environment_command(  # noqa: PLR0913  # tracked: #288
         arguments = shlex.split(command)
     except ValueError as exc:
         raise ValueError(f"invalid evaluator command: {exc}") from exc  # noqa: TRY003
-    project_root = "/workspace" if isolated else str(request.workspace)
-    replacements = [(PROJECT_ROOT_TOKEN, project_root)]
+    replacements = [
+        (PROJECT_ROOT_TOKEN, "/workspace" if isolated else str(request.workspace)),
+        (PYTHON_TOKEN, "python3" if isolated else sys.executable),
+    ]
     if request.evaluator_package_root is not None:
         if evaluator_package_root is not None:
             translated_root = evaluator_package_root

@@ -119,6 +119,16 @@ def test_resume_adopts_objectives_omitted_by_legacy_agent_manifest() -> None:
     assert _resume_configuration_update(recorded, requested) == requested
 
 
+def test_resume_does_not_adopt_objectives_for_profile_guided_run() -> None:
+    requested = _configuration().model_copy(
+        update={"outer_loop": "profile-guided", "objectives": ("throughput:max",)}
+    )
+    recorded = AgentRunConfiguration.model_validate(requested.model_dump(exclude={"objectives"}))
+
+    with pytest.raises(ConfigurationError, match="objectives"):
+        _resume_configuration_update(recorded, requested)
+
+
 def _write_project(root: Path, *, evaluator_name: str = "checker") -> Path:
     root.mkdir()
     (root / "OBJECTIVE.md").write_text("Make the queue faster.\n")

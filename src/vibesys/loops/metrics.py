@@ -113,6 +113,16 @@ class MetricSpace(BaseModel):
             return None
         return next((item for item in self.objectives if item.name == metric), None)
 
+    def signed_primary(self, value: float) -> float:
+        """Orient a headline value so larger ranks better in this space.
+
+        The empty compatibility space keeps the original scalar maximization
+        semantics. A configured space applies its primary axis direction;
+        callers use this only for values representing that headline axis.
+        """
+        primary = self.primary
+        return value if primary is None else primary.signed(value)
+
     def direction(self, measurement: Measurement | None) -> Literal["max", "min"] | None:
         """Resolve which way is better for *measurement*.
 

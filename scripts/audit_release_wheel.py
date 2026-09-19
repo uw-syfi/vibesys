@@ -42,7 +42,7 @@ _LINUX_MACHINES = {
     "linux-x86_64": "Advanced Micro Devices X86-64",
     "linux-aarch64": "AArch64",
 }
-_MACOS_ARCHES = {"macos-x86_64": "x86_64", "macos-arm64": "arm64"}
+_MACOS_ARCHES = {"macos-arm64": "arm64"}
 _MACOS_SYSTEM_PREFIXES = ("/usr/lib/", "/System/Library/")
 _MACHO_DYLIB_COMMANDS = frozenset(
     {"LC_LOAD_DYLIB", "LC_LOAD_WEAK_DYLIB", "LC_REEXPORT_DYLIB", "LC_LOAD_UPWARD_DYLIB"}

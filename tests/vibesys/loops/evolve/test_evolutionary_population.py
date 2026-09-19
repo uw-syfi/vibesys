@@ -26,6 +26,10 @@ _TPUT_LAT = _space(
     Objective(name="tput", direction="max"),
     Objective(name="lat", direction="min"),
 )
+_LAT_QUALITY = _space(
+    Objective(name="lat", direction="min"),
+    Objective(name="quality", direction="max"),
+)
 
 # ---------------------------------------------------------------------------
 # Population: basic accessors
@@ -316,6 +320,30 @@ def test_select_parent_pareto_mode_falls_back_to_scalar_when_bias_zero():  # noq
     assert counts[1] > 90
 
 
+def test_select_parent_scalar_fallback_respects_min_primary() -> None:
+    pop = Population(
+        [
+            _multi(1, {"lat": 10.0, "quality": 80.0}),
+            _multi(2, {"lat": 100.0, "quality": 90.0}),
+        ]
+    )
+    rng = random.Random(0)  # noqa: S311  # deterministic selection test
+
+    counts = Counter(
+        _selected_id(
+            pop.select_parent(
+                rng=rng,
+                space=_LAT_QUALITY,
+                frontier_bias=0.0,
+                temperature=0.01,
+            )
+        )
+        for _ in range(100)
+    )
+
+    assert counts[1] > 90
+
+
 def test_select_parent_falls_back_when_frontier_is_empty():  # noqa: ANN201  # tracked: #288
     """No individual reports both objectives → frontier is empty →
     even with bias=1.0, scalar softmax kicks in so the loop isn't blocked."""
@@ -330,6 +358,30 @@ def test_select_parent_falls_back_when_frontier_is_empty():  # noqa: ANN201  # t
     # We get *some* individual via scalar fallback rather than None.
     assert pick is not None
     assert pick.id in (1, 2)
+
+
+def test_select_parent_empty_frontier_fallback_respects_min_primary() -> None:
+    pop = Population(
+        [
+            _multi(1, {"lat": 10.0}),
+            _multi(2, {"lat": 100.0}),
+        ]
+    )
+    rng = random.Random(0)  # noqa: S311  # deterministic selection test
+
+    counts = Counter(
+        _selected_id(
+            pop.select_parent(
+                rng=rng,
+                space=_LAT_QUALITY,
+                frontier_bias=1.0,
+                temperature=0.01,
+            )
+        )
+        for _ in range(100)
+    )
+
+    assert counts[1] > 90
 
 
 def test_select_inspirations_pareto_mode_pulls_from_frontier_first():  # noqa: ANN201  # tracked: #288
@@ -384,6 +436,27 @@ def test_select_inspirations_backfills_when_frontier_smaller_than_k_top():  # no
     # perf_metric == primary metric (set in _multi). For non-frontier pool
     # {3, 4}, primaries are 70 and 60 → id=3 before id=4.
     assert ids[1:] == [3, 4]
+
+
+def test_select_inspiration_backfill_respects_min_primary() -> None:
+    pop = Population(
+        [
+            _multi(1, {"lat": 10.0, "quality": 100.0}),
+            _multi(2, {"lat": 12.0, "quality": 110.0}),
+            _multi(3, {"lat": 20.0, "quality": 80.0}),
+            _multi(4, {"lat": 30.0, "quality": 70.0}),
+        ]
+    )
+
+    picks = pop.select_inspirations(
+        parent_id=1,
+        k_top=3,
+        k_random=0,
+        rng=random.Random(0),  # noqa: S311  # deterministic selection test
+        space=_LAT_QUALITY,
+    )
+
+    assert [pick.id for pick in picks] == [2, 3, 4]
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])

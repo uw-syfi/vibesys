@@ -1,11 +1,13 @@
 # Publishing VibeSys
 
-VibeSys publishes four native wheels and no source distribution:
+VibeSys publishes three native wheels and no source distribution:
 
 - Linux x86-64 (`manylinux_2_28_x86_64`)
 - Linux ARM64 (`manylinux_2_28_aarch64`)
-- macOS Intel (`macosx_13_0_x86_64`)
 - macOS Apple Silicon (`macosx_13_0_arm64`)
+
+macOS Intel (`macosx_13_0_x86_64`) is not published. It was dropped in favor
+of Apple Silicon-only macOS support.
 
 ## One-time external setup
 
@@ -23,7 +25,7 @@ Configure a pending Trusted Publisher on PyPI with this exact tuple:
 - Workflow filename: `publish.yml`
 - Environment: `pypi`
 
-The publish job receives `id-token: write` only after the four unprivileged
+The publish job receives `id-token: write` only after the three unprivileged
 build jobs and the unprivileged aggregate verifier succeed. It downloads only
 the aggregate-verified `release-dist` artifact.
 
@@ -38,7 +40,7 @@ the aggregate-verified `release-dist` artifact.
 3. Create the `v<version>` tag on that commit and publish a GitHub release for
    the tag. Do not invoke production publishing manually. A published release
    is the only production trigger.
-4. Wait for all four native builders, aggregate verification, approval of the
+4. Wait for all three native builders, aggregate verification, approval of the
    `pypi` environment, and Trusted Publishing to finish. Publishing is
    serialized, and an in-progress publication is never canceled by a newer
    workflow run.

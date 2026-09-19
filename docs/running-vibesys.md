@@ -73,8 +73,8 @@ image source or a different run environment. `--docker` and
 bundles do not opt in through a root `Dockerfile`, because that file commonly
 belongs to the candidate application.
 
-The `agent`, `plain`, and `evolve` outer loops all use this model. Local, Docker,
-and Modal execution change where commands run, not the task layout. Task
+All outer loops use this model. Local, Docker, and Modal execution change where
+commands run, not the task layout. Task
 commands always start in the repository root. `.vibesys` is mounted read-only
 for coding agents. Machine-local state is outside their workspace.
 

@@ -27,6 +27,16 @@ interface StatusUsageSource {
   status: ExecutionStatus;
 }
 
+interface ResolvedStatusUsageSource {
+  generationStartedAt: string | null;
+  status: ExecutionStatus;
+}
+
+interface UsageModelBackfill {
+  model: string | null;
+  unresolved: boolean;
+}
+
 const statusUsageSources = new WeakMap<object, StatusUsageSource>();
 const unresolvedStatusUsageModels = new WeakSet<object>();
 
@@ -128,13 +138,44 @@ export function mergeExecutionStatusUsagePrefix(
   const olderUsageCandidate = olderUsage === usage ? null : olderUsage;
   const source = statusUsageSources.get(usage);
   if (source === undefined) {
-    if (!unresolvedStatusUsageModels.has(usage) || olderUsageCandidate === null) return usage;
-    const merged = {...usage, model: olderUsageCandidate.model};
-    if (merged.model === null && unresolvedStatusUsageModels.has(olderUsageCandidate)) {
-      unresolvedStatusUsageModels.add(merged);
-    }
-    return merged;
+    return mergeUnresolvedUsageModel(usage, olderUsageCandidate);
   }
+  const resolved = resolveStatusUsageSource(source, statuses, olderStatuses, prefixEvents);
+  if (resolved.status.inputTokens === null) return usage;
+  const model = backfillUsageModel(usage, olderUsageCandidate);
+  const merged: ExecutionUsage = {
+    inputTokens: resolved.status.inputTokens,
+    contextWindow: resolved.status.contextWindow,
+    model: model.model,
+  };
+  statusUsageSources.set(merged, {
+    ...source,
+    generationStartedAt: resolved.generationStartedAt,
+    status: resolved.status,
+  });
+  if (model.unresolved) unresolvedStatusUsageModels.add(merged);
+  return merged;
+}
+
+/** Preserves identity unless a source-less status usage still needs an older model. */
+function mergeUnresolvedUsageModel(
+  usage: ExecutionUsage,
+  olderUsage: ExecutionUsage | null,
+): ExecutionUsage {
+  if (!unresolvedStatusUsageModels.has(usage) || olderUsage === null) return usage;
+  const model = backfillUsageModel(usage, olderUsage);
+  const merged = {...usage, model: model.model};
+  if (model.unresolved) unresolvedStatusUsageModels.add(merged);
+  return merged;
+}
+
+/** Resolves the status fields owned by the usage-producing suffix update. */
+function resolveStatusUsageSource(
+  source: StatusUsageSource,
+  statuses: StatusMap,
+  olderStatuses: StatusMap,
+  prefixEvents: readonly RunEvent[],
+): ResolvedStatusUsageSource {
   const generationStartedAt =
     source.generationStartedAt ??
     latestExecutionStart(prefixEvents, source.executionId, source.sequence);
@@ -150,21 +191,22 @@ export function mergeExecutionStatusUsagePrefix(
     projected !== undefined && projected.sequence === source.sequence
       ? projected
       : mergeStatus(eligibleOlder, source.status);
-  if (status.inputTokens === null) return usage;
-  let model = usage.model;
-  let modelNeedsBackfill = unresolvedStatusUsageModels.has(usage);
-  if (modelNeedsBackfill && olderUsageCandidate !== null) {
-    model = olderUsageCandidate.model;
-    modelNeedsBackfill = model === null && unresolvedStatusUsageModels.has(olderUsageCandidate);
+  return {generationStartedAt, status};
+}
+
+/** Backfills only models that originated from status events without model metadata. */
+function backfillUsageModel(
+  usage: ExecutionUsage,
+  olderUsage: ExecutionUsage | null,
+): UsageModelBackfill {
+  if (!unresolvedStatusUsageModels.has(usage) || olderUsage === null) {
+    return {model: usage.model, unresolved: unresolvedStatusUsageModels.has(usage)};
   }
-  const merged: ExecutionUsage = {
-    inputTokens: status.inputTokens,
-    contextWindow: status.contextWindow,
+  const model = olderUsage.model;
+  return {
     model,
+    unresolved: model === null && unresolvedStatusUsageModels.has(olderUsage),
   };
-  statusUsageSources.set(merged, {...source, generationStartedAt, status});
-  if (modelNeedsBackfill) unresolvedStatusUsageModels.add(merged);
-  return merged;
 }
 
 function needsModelBackfill(current: ExecutionUsage | null): boolean {

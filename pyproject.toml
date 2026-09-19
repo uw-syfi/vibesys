@@ -177,10 +177,36 @@ allowlist = [
     "src/vibesys/_model_config/",
 ]
 
+[tool.vibesys.file_length]
+# God-file ceiling for first-party Python, in physical lines (`wc -l`).
+# Enforced by `scripts/check_file_length.py`. Ruff's C901/PL rules bound
+# individual functions but say nothing about how many of them one module may
+# accumulate, and `biome.json` has the TypeScript counterpart
+# (`style/noExcessiveLinesPerFile`) at the same 2000-line ceiling.
+max_lines = 2000
+
+# Directories scanned for `*.py`. Any path with a `tests` or `__pycache__`
+# component is skipped: long test modules are normal, and `biome.json`
+# exempts `*.test.ts` from its file-length rule for the same reason.
+roots = ["src", "libs", "scripts", "sdk"]
+
+# Temporary migration debt only. Do not add entries or raise recorded counts.
+# Remove each entry as its file is refactored below the ceiling. Exceeding a
+# recorded count fails, and an entry that drops back to 2000 or below is stale.
+# These counts record the existing debt on 2026-09-13.
+[tool.vibesys.file_length.allowlist]
+# The agent loop: round orchestration, agent invocation, and result handling in
+# one module. The largest single refactor target in the repo.
+"src/vibesys/loops/agent/loop.py" = 3704
+# CLI entry point; every subcommand's argument wiring lives here.
+"src/entrypoints/headless.py" = 2663
+# Sandbox run environment: setup, execution, and teardown across strategies.
+"src/vibesys/sandbox/run_environment.py" = 2253
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests", "libs/vs-loop-state/src", "libs/vs-loop-state/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
+src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests", "libs/vs-loop-state/src", "libs/vs-loop-state/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
 # resources/skills/ vendors reference code (submodule checkouts and copied
 # reference material) that VibeSys does not own and does not hold to repo
 # lint standards; see the UP040/UP046/UP047 note below.
@@ -257,6 +283,7 @@ root = [
     ".",
     "src",
     "tests",
+    "resources/evaluators/microservice",
     "libs/vs-evaluator-protocol/src",
     "libs/vs-feature-flags/src",
     "libs/vs-github/src",
@@ -275,6 +302,7 @@ root = [
 include = [
     "src",
     "tests",
+    "resources/evaluators/microservice/kubernetes_runtime",
     "libs/vs-evaluator-protocol/src",
     "libs/vs-evaluator-protocol/tests",
     "libs/vs-feature-flags/src",

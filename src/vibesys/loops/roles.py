@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 EXPECTED_AGENT_ROLES: Mapping[str, tuple[str, ...]] = {
     "agent": ("orchestrator", "implementer", "judge", "profiler"),
+    "profile-guided": ("orchestrator", "implementer", "judge", "profiler"),
     "plain": ("implementer", "judge", "perf_eval"),
     "evolve": ("implementer", "judge", "profiler"),
 }
