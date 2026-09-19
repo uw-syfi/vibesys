@@ -238,7 +238,7 @@ configuration is accepted only by the selected adapter.
 See the checked-in workloads for complete examples:
 
 - `examples/microservices/hotel-correctness/.vibesys/tasks/compose/benchmark/workload.toml`
-- `examples/microservices/train-ticket/benchmark/workload.toml`
+- `examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml`
 - `examples/microservices/repositories/deathstarbench/.vibesys/tasks/social-network-read-timeline/benchmark/workload.toml`
 - `examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml`
 
@@ -248,7 +248,7 @@ From the repository root:
 
 ```bash
 go -C resources/evaluators/microservice run ./cmd/servicebench \
-  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --workload "$PWD/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" \
   --base-url http://localhost:8080 \
   --output-json /tmp/result.json \
   --output-raw /tmp/requests.ndjson
@@ -293,7 +293,7 @@ Validate a workload and its registered extensions without running traffic:
 
 ```bash
 go -C resources/evaluators/microservice run ./cmd/servicebench \
-  --workload "$PWD/examples/microservices/train-ticket/benchmark/workload.toml" \
+  --workload "$PWD/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" \
   --validate-only
 ```
 
