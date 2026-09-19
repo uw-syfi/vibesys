@@ -19,8 +19,11 @@ from pathlib import Path
 from typing import Never, cast
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+# Root for `scripts.*`; `packaging/` holds top-level modules (no __init__.py,
+# so it cannot shadow the PyPA `packaging` library).
+for _path in (REPO_ROOT, REPO_ROOT / "packaging"):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 from release_versions import (  # noqa: E402
     ReleaseVersionSyntaxError,
@@ -288,7 +291,9 @@ def _fail(message: str) -> Never:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target", required=True, help="Target key from wheel_targets.py")
+    parser.add_argument(
+        "--target", required=True, help="Target key from packaging/wheel_targets.py"
+    )
     parser.add_argument("--bun", required=True, type=Path, help="Pinned Bun executable")
     parser.add_argument("--output-dir", type=Path, default=Path("dist"))
     return parser.parse_args()

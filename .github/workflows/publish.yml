@@ -21,11 +21,6 @@ on:
       # contracts every built wheel is checked against.
       - 'setup.py'
       - 'MANIFEST.in'
-      - 'packaging_support.py'
-      - 'resources_packaging.py'
-      - 'tui_packaging.py'
-      - 'wheel_targets.py'
-      - 'release_versions.py'
       - 'packaging/**'
       - 'scripts/__init__.py'
       - 'scripts/build_release_wheel.py'
@@ -310,7 +305,7 @@ jobs:
           else
             uv run python scripts/check_release_version.py --wheel-dir dist/release
           fi
-          uv run python - <<'PY'
+          PYTHONPATH=packaging uv run python - <<'PY'
           from pathlib import Path
           from scripts.check_release_version import check_release_version
           from scripts.verify_release_wheel import verify_wheel

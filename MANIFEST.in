@@ -1,10 +1,10 @@
 # Include every build helper needed by the isolated PEP 517 environment.
 include setup.py
-include packaging_support.py
-include resources_packaging.py
-include tui_packaging.py
-include release_versions.py
-include wheel_targets.py
+include packaging/packaging_support.py
+include packaging/resources_packaging.py
+include packaging/tui_packaging.py
+include packaging/release_versions.py
+include packaging/wheel_targets.py
 include third_party/bun/LICENSE
 
 # Include the Python package roots owned by the root distribution.

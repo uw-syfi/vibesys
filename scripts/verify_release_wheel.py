@@ -21,8 +21,11 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+# Root for `scripts.*`; `packaging/` holds top-level modules (no __init__.py,
+# so it cannot shadow the PyPA `packaging` library).
+for _path in (REPO_ROOT, REPO_ROOT / "packaging"):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 from release_versions import (  # noqa: E402
     ReleaseVersionSyntaxError,

@@ -21,6 +21,9 @@ from setuptools.dist import Distribution as _Distribution
 
 _REPO_ROOT = Path(__file__).parent.resolve()
 sys.path.insert(0, str(_REPO_ROOT))
+# Build helpers live in packaging/ as top-level modules. There is deliberately no
+# packaging/__init__.py: a `packaging` package would shadow the PyPA library.
+sys.path.insert(0, str(_REPO_ROOT / "packaging"))
 
 from packaging_support import (  # noqa: E402
     clear_distribution_build_outputs,

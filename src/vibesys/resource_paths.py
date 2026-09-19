@@ -2,7 +2,7 @@
 
 Profiler support packages and the preset skills library live under
 ``resources/`` in a checkout. The wheel build stages the same trees into the
-``vibesys._resources`` package directory (see ``resources_packaging.py``), so
+``vibesys._resources`` package directory (see ``packaging/resources_packaging.py``), so
 an installed ``vibesys`` finds them without a checkout. The checkout always
 wins when both exist: a developer editing ``resources/`` must see their edits,
 not a stale staged copy.
