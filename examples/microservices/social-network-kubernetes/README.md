@@ -12,12 +12,12 @@ Prepare the `vibesys-k8s-social` kind cluster, then run:
 
 ```bash
 vibesys --local --run-environment local --profiler none \
-  --input examples/microservices/social-network-kubernetes
+  --input examples/microservices/social-network-kubernetes --task kubernetes
 ```
 
 The accuracy gate runs the light semantically validated workload. The official
 benchmark uses the full read-heavy workload and requires every operation type
-to succeed. Both commands consume the packaged workload definition, outside
+to succeed. Both commands consume the task-owned workload definition, outside
 the mutable candidate checkout. Profiling remains disabled until Kubernetes
 telemetry capture is available.
 

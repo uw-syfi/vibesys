@@ -13,9 +13,9 @@ vibesys --runs-dir /path/to/runs --local --run-environment local --profiler none
 
 The task pins DeathStarBench commit
 `867806e575e1f7fb24437ae969910ddb17a76121`. It builds the candidate Hotel image,
-loads it into kind, deploys the packaged namespace-scoped manifests, waits for
+loads it into kind, deploys the task-owned namespace-scoped manifests, waits for
 HTTP readiness, and forwards the frontend. Runtime configuration and manifests
-live under `resources/evaluators/microservice/kubernetes_examples/hotel-reservation`.
+live in `.vibesys/tasks/kubernetes/` (see its README for provenance).
 Use a dedicated cluster and sufficient capacity for the application and MongoDB
 pods. Concurrent evaluations must not reuse the configured local forward port.
 

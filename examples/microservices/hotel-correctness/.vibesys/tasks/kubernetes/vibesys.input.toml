@@ -11,7 +11,7 @@ version = "0.1.0"
 entrypoint = "kubernetes-runtime"
 args = [
   "--config",
-  "${PACKAGE_ROOT}/kubernetes_examples/hotel-reservation/runtime.yaml",
+  "${PROJECT_ROOT}/.vibesys/tasks/kubernetes/runtime.yaml",
   "--candidate-dir",
   "${PROJECT_ROOT}",
   "--",
@@ -43,7 +43,7 @@ timeout_seconds = 1200
 entrypoint = "kubernetes-runtime"
 args = [
   "--config",
-  "${PACKAGE_ROOT}/kubernetes_examples/hotel-reservation/runtime.yaml",
+  "${PROJECT_ROOT}/.vibesys/tasks/kubernetes/runtime.yaml",
   "--candidate-dir",
   "${PROJECT_ROOT}",
   "--",

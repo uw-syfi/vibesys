@@ -10,12 +10,12 @@ version = "0.1.0"
 [accuracy]
 entrypoint = "kubernetes-runtime"
 args = [
-  "--config", "${PACKAGE_ROOT}/kubernetes_examples/train-ticket/runtime.yaml",
+  "--config", "${PROJECT_ROOT}/.vibesys/tasks/kubernetes/runtime.yaml",
   "--candidate-dir", "${PROJECT_ROOT}",
   "--",
   "go", "-C", "${PACKAGE_ROOT}", "run", "./cmd/servicebench",
   "--mode", "accuracy",
-  "--workload", "${PACKAGE_ROOT}/kubernetes_examples/train-ticket/workload.toml",
+  "--workload", "${PROJECT_ROOT}/.vibesys/tasks/kubernetes/workload.toml",
   "--seed", "random",
   "--target", "config=${ENDPOINT:config}",
   "--target", "station=${ENDPOINT:station}",
@@ -29,11 +29,11 @@ timeout_seconds = 1200
 [benchmark]
 entrypoint = "kubernetes-runtime"
 args = [
-  "--config", "${PACKAGE_ROOT}/kubernetes_examples/train-ticket/runtime.yaml",
+  "--config", "${PROJECT_ROOT}/.vibesys/tasks/kubernetes/runtime.yaml",
   "--candidate-dir", "${PROJECT_ROOT}",
   "--",
   "go", "-C", "${PACKAGE_ROOT}", "run", "./cmd/servicebench",
-  "--workload", "${PACKAGE_ROOT}/kubernetes_examples/train-ticket/workload.toml",
+  "--workload", "${PROJECT_ROOT}/.vibesys/tasks/kubernetes/workload.toml",
   "--seed", "random",
   "--fixture-seed", "random",
   "--target", "config=${ENDPOINT:config}",

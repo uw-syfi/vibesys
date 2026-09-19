@@ -1,5 +1,6 @@
 """Standalone Kubernetes inputs must validate without repository submodules."""
 
+import importlib.util
 import tomllib
 from itertools import pairwise
 from pathlib import Path
@@ -9,7 +10,7 @@ import pytest
 import yaml
 
 from vibesys.evaluators import PROJECT_ROOT_TOKEN
-from vibesys.input_manifest import load_input_bundle, load_project_task
+from vibesys.input_manifest import load_project_task
 from vibesys.run.project import ProjectProvisioningSpec, provision_project
 from vibesys.run.workspace import GitSourceSpec, Workspace
 from vibesys.sandbox.run_environment import LocalEnvironment
@@ -18,6 +19,11 @@ from vs_project import Project
 PROJECT_ROOT = Path(__file__).parents[2]
 MICROSERVICE_ROOT = PROJECT_ROOT / "examples" / "microservices"
 PACKAGE_ROOT = PROJECT_ROOT / "resources" / "evaluators" / "microservice"
+TASK_DIRS = {
+    "hotel-reservation": MICROSERVICE_ROOT / "hotel-correctness/.vibesys/tasks/kubernetes",
+    "social-network": MICROSERVICE_ROOT / "social-network-kubernetes/.vibesys/tasks/kubernetes",
+    "train-ticket": MICROSERVICE_ROOT / "train-ticket-kubernetes/.vibesys/tasks/kubernetes",
+}
 KUBERNETES_SCENARIOS = {
     "hotel-reservation": "867806e575e1f7fb24437ae969910ddb17a76121",
     "social-network": "867806e575e1f7fb24437ae969910ddb17a76121",
@@ -37,8 +43,9 @@ def test_kubernetes_input_uses_packaged_lifecycle_and_pinned_source(
     scenario: str, commit: str
 ) -> None:
     root = MICROSERVICE_ROOT / f"{scenario}-kubernetes"
-    bundle = load_input_bundle(root)
-    config = PACKAGE_ROOT / "kubernetes_examples" / scenario / "runtime.yaml"
+    project = Project.open(root)
+    bundle = load_project_task(project, project.select_task("kubernetes"))
+    config = f"{PROJECT_ROOT_TOKEN}/.vibesys/tasks/kubernetes/runtime.yaml"
 
     assert bundle.evaluator_package_digest is not None
     assert bundle.manifest.workspace is not None
@@ -47,7 +54,7 @@ def test_kubernetes_input_uses_packaged_lifecycle_and_pinned_source(
         "${PYTHON}",
         str(PACKAGE_ROOT / "kubernetes_runtime" / "cli.py"),
     )
-    assert ("--config", str(config)) in set(pairwise(bundle.benchmark_command))
+    assert ("--config", config) in set(pairwise(bundle.benchmark_command))
     assert ("--candidate-dir", PROJECT_ROOT_TOKEN) in set(pairwise(bundle.benchmark_command))
     assert bundle.benchmark_result is not None
     assert bundle.benchmark_result.json_argument == "--output-json"
@@ -57,7 +64,7 @@ def test_kubernetes_input_uses_packaged_lifecycle_and_pinned_source(
 
 @pytest.mark.parametrize("scenario", KUBERNETES_SCENARIOS)
 def test_kubernetes_assets_are_namespace_scoped_and_build_candidate_images(scenario: str) -> None:
-    directory = PACKAGE_ROOT / "kubernetes_examples" / scenario
+    directory = TASK_DIRS[scenario]
     config = yaml.safe_load((directory / "runtime.yaml").read_text())
     resources = [
         resource
@@ -84,14 +91,16 @@ def test_kubernetes_assets_are_namespace_scoped_and_build_candidate_images(scena
 
 
 def test_train_ticket_accuracy_uses_all_named_service_forwards() -> None:
-    bundle = load_input_bundle(MICROSERVICE_ROOT / "train-ticket-kubernetes")
+    project = Project.open(MICROSERVICE_ROOT / "train-ticket-kubernetes")
+    bundle = load_project_task(project, project.select_task("kubernetes"))
     assert ("--mode", "accuracy") in set(pairwise(bundle.accuracy_command))
     for target in ("config", "station", "train", "travel", "route", "price"):
         assert f"{target}=${{ENDPOINT:{target}}}" in bundle.accuracy_command
 
 
 def test_social_accuracy_runs_semantically_validated_light_profile() -> None:
-    bundle = load_input_bundle(MICROSERVICE_ROOT / "social-network-kubernetes")
+    project = Project.open(MICROSERVICE_ROOT / "social-network-kubernetes")
+    bundle = load_project_task(project, project.select_task("kubernetes"))
     pairs = set(pairwise(bundle.accuracy_command))
     assert ("--profile", "light") in pairs
     assert ("--seed", "random") in pairs
@@ -100,7 +109,7 @@ def test_social_accuracy_runs_semantically_validated_light_profile() -> None:
 
 def test_train_ticket_workload_preserves_canonical_semantic_mix() -> None:
     reference = MICROSERVICE_ROOT / "train-ticket" / "benchmark" / "workload.toml"
-    packaged = PACKAGE_ROOT / "kubernetes_examples" / "train-ticket" / "workload.toml"
+    packaged = TASK_DIRS["train-ticket"] / "workload.toml"
     expected = tomllib.loads(reference.read_text())
     actual = tomllib.loads(packaged.read_text())
     for field in ("application", "load", "operations", "objective", "constraints"):
@@ -108,7 +117,7 @@ def test_train_ticket_workload_preserves_canonical_semantic_mix() -> None:
 
 
 def test_hotel_crash_stops_volatile_cache_but_preserves_mongodb() -> None:
-    path = PACKAGE_ROOT / "kubernetes_examples" / "hotel-reservation" / "runtime.yaml"
+    path = TASK_DIRS["hotel-reservation"] / "runtime.yaml"
     config = yaml.safe_load(path.read_text())
     restarted = {deployment["name"] for deployment in config["restart_deployments"]}
     assert restarted == {
@@ -189,3 +198,16 @@ def test_hotel_native_task_materializes_shared_checker(
     ):
         assert (destination / path).read_bytes() == (source / path).read_bytes()
     assert not (destination / "vibesys.input.toml").exists()
+
+
+def test_train_ticket_manifest_matches_generator_output() -> None:
+    directory = TASK_DIRS["train-ticket"]
+    spec = importlib.util.spec_from_file_location(
+        "train_ticket_generate_manifest", directory / "generate_manifest.py"
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    generated = yaml.safe_dump_all(module.objects(), sort_keys=False)
+    assert (directory / "manifest.yaml").read_text(encoding="utf-8") == generated

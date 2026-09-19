@@ -18,11 +18,11 @@ Prepare kind cluster `vibesys-k8s-train` with context
 
 ```bash
 vibesys --local --run-environment local --profiler none \
-  --input examples/microservices/train-ticket-kubernetes
+  --input examples/microservices/train-ticket-kubernetes --task kubernetes
 ```
 
 The accuracy and benchmark commands address the six application services
-through evaluator-owned port-forwards and consume a packaged workload. Each
+through evaluator-owned port-forwards and consume a task-owned workload. Each
 invocation creates and removes its own namespace. Profiling remains disabled
 until Kubernetes telemetry capture is available.
 

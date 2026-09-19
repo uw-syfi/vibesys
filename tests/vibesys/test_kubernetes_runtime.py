@@ -18,8 +18,9 @@ import yaml
 from pydantic import ValidationError
 
 EVALUATOR_ROOT = Path(__file__).parents[2] / "resources/evaluators/microservice"
-SOCIAL_CONFIG = EVALUATOR_ROOT / "kubernetes_examples/social-network/runtime.yaml"
-TRAIN_CONFIG = EVALUATOR_ROOT / "kubernetes_examples/train-ticket/runtime.yaml"
+EXAMPLES_ROOT = Path(__file__).parents[2] / "examples/microservices"
+SOCIAL_CONFIG = EXAMPLES_ROOT / "social-network-kubernetes/.vibesys/tasks/kubernetes/runtime.yaml"
+TRAIN_CONFIG = EXAMPLES_ROOT / "train-ticket-kubernetes/.vibesys/tasks/kubernetes/runtime.yaml"
 sys.path.insert(0, str(EVALUATOR_ROOT))
 
 from kubernetes_runtime import (  # noqa: E402

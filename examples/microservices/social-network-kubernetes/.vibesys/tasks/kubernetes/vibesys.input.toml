@@ -10,11 +10,11 @@ version = "0.1.0"
 [accuracy]
 entrypoint = "kubernetes-runtime"
 args = [
-  "--config", "${PACKAGE_ROOT}/kubernetes_examples/social-network/runtime.yaml",
+  "--config", "${PROJECT_ROOT}/.vibesys/tasks/kubernetes/runtime.yaml",
   "--candidate-dir", "${PROJECT_ROOT}",
   "--",
   "go", "-C", "${PACKAGE_ROOT}", "run", "./cmd/servicebench",
-  "--workload", "${PACKAGE_ROOT}/kubernetes_examples/social-network/workload.toml",
+  "--workload", "${PROJECT_ROOT}/.vibesys/tasks/kubernetes/workload.toml",
   "--base-url", "${BASE_URL}",
   "--profile", "light",
   "--seed", "random",
@@ -25,11 +25,11 @@ timeout_seconds = 900
 [benchmark]
 entrypoint = "kubernetes-runtime"
 args = [
-  "--config", "${PACKAGE_ROOT}/kubernetes_examples/social-network/runtime.yaml",
+  "--config", "${PROJECT_ROOT}/.vibesys/tasks/kubernetes/runtime.yaml",
   "--candidate-dir", "${PROJECT_ROOT}",
   "--",
   "go", "-C", "${PACKAGE_ROOT}", "run", "./cmd/servicebench",
-  "--workload", "${PACKAGE_ROOT}/kubernetes_examples/social-network/workload.toml",
+  "--workload", "${PROJECT_ROOT}/.vibesys/tasks/kubernetes/workload.toml",
   "--base-url", "${BASE_URL}",
   "--seed", "random",
   "--fixture-seed", "random",
