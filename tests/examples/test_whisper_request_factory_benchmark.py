@@ -7,7 +7,7 @@ from typing import TypedDict, cast
 
 from vibesys.input_manifest import load_input_bundle
 
-_REPO_ROOT = Path(__file__).parents[1]
+_REPO_ROOT = Path(__file__).parents[2]
 _TASK_ROOT = _REPO_ROOT / "examples" / "model-serving" / "whisper-large-v3"
 _TRACE_PATH = _TASK_ROOT / "benchmark" / "requests.jsonl"
 _CLIPS = (

@@ -1,7 +1,7 @@
 """Typed loader for ``examples/registry.toml`` and the fail-closed discovery around it.
 
 ``examples/registry.toml`` is the one place that declares every runnable
-example. The guard tests in ``tests/architecture/test_example_registry.py``
+example. The guard tests in ``tests/examples/test_example_registry.py``
 read it through this module, so the CI checks iterate the registry rather than
 a glob, and an example that is added without an entry fails a test.
 """

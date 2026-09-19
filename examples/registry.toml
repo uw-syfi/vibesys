@@ -1,5 +1,5 @@
 # Registry of every runnable example under examples/. One [[example]] table per example.
-# tests/architecture/test_example_registry.py iterates this file and fails if a directory
+# tests/examples/test_example_registry.py iterates this file and fails if a directory
 # that looks like an example is missing from it. See docs/contributing/examples.md.
 #
 # Static checks run for every entry and every task, always: validate (vibesys validate),

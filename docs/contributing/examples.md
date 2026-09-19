@@ -3,7 +3,7 @@
 Every runnable example under `examples/` is declared in
 [`examples/registry.toml`](https://github.com/uw-syfi/vibesys/blob/main/examples/registry.toml).
 CI iterates that file, not a glob, so an example that is not registered fails
-`tests/architecture/test_example_registry.py` (the failure prints the entry to
+`tests/examples/test_example_registry.py` (the failure prints the entry to
 add).
 
 An example is a directory with a root `vibesys.input.toml` or `OBJECTIVE.md`

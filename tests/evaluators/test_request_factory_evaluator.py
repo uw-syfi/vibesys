@@ -18,7 +18,7 @@ from vibesys.evaluators import (
 if TYPE_CHECKING:
     from types import ModuleType
 
-_PACKAGE_ROOT = Path(__file__).parents[1] / "resources" / "evaluators" / "request-factory"
+_PACKAGE_ROOT = Path(__file__).parents[2] / "resources" / "evaluators" / "request-factory"
 
 
 def _load_script(name: str) -> ModuleType:

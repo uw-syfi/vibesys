@@ -132,7 +132,7 @@ def test_ci_fetches_external_repos_and_runs_this_module() -> None:
     job = workflow.split("\n  validate-examples:", 1)[1].split("\n  # ", 1)[0]
     assert "scripts/example_repositories.py" in job
     assert 'VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS: "1"' in job
-    assert "tests/architecture/test_example_registry.py" in job
+    assert "tests/examples/test_example_registry.py" in job
 
 
 # --- validation through the CLI entry point ---------------------------------

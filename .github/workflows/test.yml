@@ -100,7 +100,7 @@ jobs:
               - 'scripts/example_repositories.py'
               - 'tests/vibesys/test_microservice_inputs.py'
               - 'tests/vibesys/test_input_sources.py'
-              - 'tests/architecture/test_example_registry.py'
+              - 'tests/examples/test_example_registry.py'
               - 'tests/support/example_registry.py'
               - 'src/vibesys/run/project_policy.py'
               # Scanned for stale `examples/...` path references.
@@ -456,7 +456,7 @@ jobs:
       - name: Check registered examples
         env:
           VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS: "1"
-        run: uv run python -m pytest tests/architecture/test_example_registry.py -v --no-cov
+        run: uv run python -m pytest tests/examples/test_example_registry.py -v --no-cov
 
       # The external repository is present here and nowhere else, so force the module to
       # fail rather than skip if the fetch above ever stops producing it.

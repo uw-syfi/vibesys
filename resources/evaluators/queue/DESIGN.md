@@ -417,7 +417,7 @@ The main checks for this design are:
 - `go test -race ./...` in `resources/evaluators/queue`;
 - Rust unit tests, formatting, and Clippy in `native_runner`;
 - Rust formatting and Clippy for the `queue-rs` example repository;
-- `tests/test_queue_evaluator.py` for manifest, package resolution, build,
+- `tests/examples/test_queue_evaluator.py` for manifest, package resolution, build,
   correctness, benchmark, and adversarial-history integration;
 - `tests/loops/agent/test_orchestrate.py` for framework accuracy and benchmark
   gate behavior.
