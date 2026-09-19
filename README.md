@@ -112,7 +112,9 @@ name = "cpu"
 ```
 
 See [`examples/`](examples/) for complete objectives and manifests across data
-structures, model serving, and microservices.
+structures, model serving, and microservices. New examples are registered in
+[`examples/registry.toml`](examples/registry.toml); see
+[Adding an example](docs/contributing/examples.md).
 
 Run from the project root:
 

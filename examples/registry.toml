@@ -1,0 +1,253 @@
+# Registry of every runnable example under examples/. One table-array entry per example.
+# Tests in tests/architecture/test_example_registry.py iterate this file, and fail if a
+# directory that looks like an example is missing from it. See docs/contributing/examples.md.
+#
+#   path           repo-relative example root
+#   layout         "task" (.vibesys/tasks/<task>/) or "legacy" (root vibesys.input.toml)
+#   tasks          "all" (default) or the exact task names on disk; legacy: omit
+#   requires       overlay | docker | kubernetes | gpu | model-weights
+#   status         validated     static checks pass; requires only "overlay"
+#                  live-only     static checks pass; a live run needs something CI lacks (reason)
+#                  known-failing a listed check fails today (reason, tracking, failing_checks);
+#                                the test fails once it passes, so remove the entry then
+#   failing_checks validate | trust-policy (known-failing only)
+#
+# Static checks run in CI for every entry: `vibesys validate` per task, ${PROJECT_ROOT}
+# path references exist, and (task layout) evaluator inputs are read-only for the agent.
+# No status runs an evaluator: live runs are not covered by CI.
+
+
+version = 1
+
+[[example]]
+path = "examples/data-structures/kvstore-default"
+layout = "legacy"
+requires = []
+status = "validated"
+
+[[example]]
+path = "examples/data-structures/prioqueue-mpmc"
+layout = "legacy"
+requires = []
+status = "validated"
+
+[[example]]
+path = "examples/data-structures/prioqueue-mpsc"
+layout = "legacy"
+requires = []
+status = "validated"
+
+[[example]]
+path = "examples/data-structures/prioqueue-spmc"
+layout = "legacy"
+requires = []
+status = "validated"
+
+[[example]]
+path = "examples/data-structures/prioqueue-spsc"
+layout = "legacy"
+requires = []
+status = "validated"
+
+[[example]]
+path = "examples/data-structures/repositories/queue-rs"
+layout = "task"
+requires = []
+status = "validated"
+
+[[example]]
+path = "examples/database/differential-dataflow"
+layout = "legacy"
+requires = []
+status = "validated"
+
+[[example]]
+path = "examples/kv-store"
+layout = "legacy"
+requires = []
+status = "validated"
+
+[[example]]
+path = "examples/microservices/hotel-correctness"
+layout = "task"
+requires = ["docker", "kubernetes"]
+status = "known-failing"
+reason = "benchmark/ and evaluator/ sit outside .vibesys/tasks, so the agent can edit files its own commands run"
+tracking = "https://github.com/uw-syfi/vibesys/pull/771"
+failing_checks = ["trust-policy"]
+
+[[example]]
+path = "examples/microservices/repositories/deathstarbench"
+layout = "task"
+requires = ["overlay", "docker"]
+status = "live-only"
+reason = "needs docker compose and the candidate repository build"
+
+[[example]]
+path = "examples/microservices/social-network-kubernetes"
+layout = "task"
+requires = ["kubernetes"]
+status = "live-only"
+reason = "needs a Kubernetes cluster"
+
+[[example]]
+path = "examples/microservices/train-ticket"
+layout = "legacy"
+requires = ["docker"]
+status = "live-only"
+reason = "needs docker compose and the candidate repository build"
+
+[[example]]
+path = "examples/microservices/train-ticket-kubernetes"
+layout = "task"
+requires = ["kubernetes"]
+status = "live-only"
+reason = "needs a Kubernetes cluster"
+
+[[example]]
+path = "examples/model-serving/Llama-3-8B"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/Llama-3-8B-trn2"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit"
+layout = "legacy"
+requires = ["model-weights"]
+status = "live-only"
+reason = "needs a Mac with Apple silicon and model weights"
+
+[[example]]
+path = "examples/model-serving/deepseek-v3.2-8xb200"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/glm-5.2-8xb200"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/kimi-k3-8xb200"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/llama-70b-2xh100"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/moonshine-streaming"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/moonshine-streaming-vllm"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/olmo-hybrid-prefix-caching"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/olmo-hybrid-prefix-caching-vllm"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/qwen3-32b-code-edit"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/qwen3.5-397b-a17b-4xb200"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/qwen3.6-35b-a3b-2xh100"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/repositories/sglang"
+layout = "task"
+requires = ["overlay", "gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/repositories/vllm"
+layout = "task"
+requires = ["overlay", "gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/repositories/vllm-omni"
+layout = "task"
+requires = ["overlay", "gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/show-o2-1.5B-HQ"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/show-o2-1.5B-HQ-h100"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+
+[[example]]
+path = "examples/model-serving/show-o2-1.5B-HQ-macbook"
+layout = "legacy"
+requires = ["model-weights"]
+status = "live-only"
+reason = "needs a Mac with Apple silicon and model weights"
+
+[[example]]
+path = "examples/model-serving/whisper-large-v3"
+layout = "legacy"
+requires = ["gpu", "model-weights"]
+status = "live-only"
+reason = "needs GPUs and model weights, which CI has neither of"
+

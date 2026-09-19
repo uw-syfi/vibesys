@@ -7,6 +7,8 @@ bundles, and the TUI.
 ## Before you change code
 
 - Read [`docs/contributing/coding-best-practices.md`](coding-best-practices.md).
+- Adding or moving an example? Register it in `examples/registry.toml`; see
+  [Adding an example](examples.md).
 - Keep changes within the owning package and preserve the framework boundaries.
 - Use the repository [pull request template](https://github.com/uw-syfi/vibesys/blob/main/.github/pull_request_template.md)
   when opening a PR.

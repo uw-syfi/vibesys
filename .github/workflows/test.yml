@@ -99,7 +99,13 @@ jobs:
               - 'scripts/example_repositories.py'
               - 'tests/vibesys/test_microservice_inputs.py'
               - 'tests/vibesys/test_input_sources.py'
-              - '.github/workflows/test.yml'
+              - 'tests/architecture/test_example_registry.py'
+              - 'tests/support/example_registry.py'
+              - 'src/vibesys/run/project_policy.py'
+              # Scanned for stale `examples/...` path references.
+              - 'docs/**'
+              - 'README.md'
+              - '.github/workflows/*.yml'
             # The agent image build: its Dockerfile, the module that builds
             # it, and the version pins it takes as build args.
             agent_image:
@@ -441,16 +447,15 @@ jobs:
       - name: Fetch repository-native example overlays
         run: uv run python scripts/example_repositories.py
 
-      - name: Validate example tasks
-        run: |
-          set -euo pipefail
-          for manifest in examples/*/repositories/*/.vibesys/tasks/*/vibesys.input.toml; do
-            repository="${manifest%%/.vibesys/*}"
-            task="$(basename "$(dirname "$manifest")")"
-            echo "::group::$repository --task $task"
-            uv run python -m entrypoints.headless validate "$repository" --task "$task"
-            echo "::endgroup::"
-          done
+      # Iterates examples/registry.toml, not a glob: every registered example
+      # (both layouts, every task) is validated through `vibesys validate`,
+      # its trust policy and path references are checked, and an example that
+      # is not registered fails the build. Overlays are fetched above, so a
+      # missing one must fail rather than skip.
+      - name: Check registered examples
+        env:
+          VIBESYS_REQUIRE_EXAMPLE_OVERLAYS: "1"
+        run: uv run python -m pytest tests/architecture/test_example_registry.py -v --no-cov
 
       # The overlay is present here and nowhere else, so force the module to
       # fail rather than skip if the fetch above ever stops producing it.
