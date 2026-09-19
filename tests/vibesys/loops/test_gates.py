@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from vibesys.evaluators.input_manifest import BenchmarkResult
 from vibesys.events import (
     CoreEvent,
     CoreEventType,
@@ -26,7 +27,6 @@ from vibesys.events import (
     GateKind,
     GateStartedData,
 )
-from vibesys.input_manifest import BenchmarkResult
 from vibesys.loops.gates import (
     _BENCHMARK_OUTPUT_PREFIX,
     read_protocol_benchmark,

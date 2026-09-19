@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibesys.agent_runner import log_json_and_print, log_prompt_markdown_and_print
 from vibesys.agents import build_agent_client
 from vibesys.agents.callbacks import AgentLogger
 from vibesys.agents.client import AgentClient
@@ -16,6 +15,7 @@ from vibesys.agents.drivers.agentshim import AgentShimDriver
 from vibesys.agents.progress import RoundProgress
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.config import Config
+from vibesys.render.log import log_json_and_print, log_prompt_markdown_and_print
 from vibesys.schemas import (
     IssueJudgeResponse,
     JudgeResponse,

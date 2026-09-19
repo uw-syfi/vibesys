@@ -53,8 +53,11 @@ from vibesys.context import create_candidate_context, create_run_context
 from vibesys.domains.base import DomainDefinition, DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
+from vibesys.evaluators.input_manifest import (  # noqa: TC001  # tracked: #288
+    BenchmarkResult,
+    WorkspaceSource,
+)
 from vibesys.events import FrameworkSource
-from vibesys.input_manifest import BenchmarkResult, WorkspaceSource  # noqa: TC001  # tracked: #288
 from vibesys.loops.evolve.population import (
     Individual,
     Population,

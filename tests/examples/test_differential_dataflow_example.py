@@ -12,7 +12,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from vibesys.input_manifest import load_input_bundle
+from vibesys.evaluators.input_manifest import load_input_bundle
 
 _REPO = Path(__file__).resolve().parents[2]
 _BUNDLE = _REPO / "examples" / "database" / "differential-dataflow"

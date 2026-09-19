@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from vibesys.input_manifest import (
+from vibesys.evaluators.input_manifest import (
     InputBundle,
     WorkspaceSource,
     load_input_bundle,

@@ -35,8 +35,8 @@ from vibesys.evaluators import (
     resolve_evaluator_package,
     tool_install_root,
 )
+from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.events import CoreEventType
-from vibesys.input_manifest import WorkspaceSource
 from vibesys.loops.agent.model import AgentRunState
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.run import (

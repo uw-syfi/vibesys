@@ -36,7 +36,7 @@ from vibesys.constants import (
 )
 from vibesys.context import create_run_context
 from vibesys.domains.registry import resolve_domain
-from vibesys.input_manifest import WorkspaceSource  # noqa: TC001  # tracked: #288
+from vibesys.evaluators.input_manifest import WorkspaceSource  # noqa: TC001  # tracked: #288
 from vibesys.loops.plain.render import render_all
 from vibesys.loops.plain.runner_ext import PlainLoopAgentClient
 from vibesys.loops.plain.state import PlainStateStore

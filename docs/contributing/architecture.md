@@ -66,6 +66,7 @@ graph TD
     vibesys.run --> vibesys
     vibesys.run --> vibesys.agents
     vibesys.run --> vibesys.backends
+    vibesys.run --> vibesys.evaluators
     vibesys.run --> vibesys.render
     vibesys.run --> vibesys.sandbox
     vibesys.sandbox --> vibesys
@@ -87,6 +88,7 @@ graph TD
     entrypoints --> vibesys
     entrypoints --> vibesys.agents
     entrypoints --> vibesys.domains
+    entrypoints --> vibesys.evaluators
     entrypoints --> vibesys.loops
     entrypoints --> vibesys.render
     entrypoints --> vibesys.run
@@ -144,8 +146,8 @@ graph TD
     server.integration --> vs_project
     server.journal --> server.diagnostics
     server.journal --> server.events
+    server.read_model --> server.controller
     server.read_model --> server.events
-    server.read_model --> server.integration
     server.runtime --> server.api
     server.runtime --> server.chat
     server.runtime --> server.controller
@@ -181,10 +183,12 @@ graph TD
     vibesys.domains --> vibesys
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
+    vibesys.evaluators --> vs_project
     vibesys.evaluators --> vs_sandbox
     vibesys.loops --> vibesys
     vibesys.loops --> vibesys.agents
     vibesys.loops --> vibesys.domains
+    vibesys.loops --> vibesys.evaluators
     vibesys.loops --> vibesys.prompts
     vibesys.loops --> vibesys.render
     vibesys.loops --> vibesys.run
@@ -200,6 +204,7 @@ graph TD
     vibesys.run --> vibesys
     vibesys.run --> vibesys.agents
     vibesys.run --> vibesys.backends
+    vibesys.run --> vibesys.evaluators
     vibesys.run --> vibesys.render
     vibesys.run --> vibesys.sandbox
     vibesys.run --> vs_github

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from vibesys.input_manifest import InputBundle
+    from vibesys.evaluators.input_manifest import InputBundle
 
 
 def load_objective(bundle: InputBundle) -> str:

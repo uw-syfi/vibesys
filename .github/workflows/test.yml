@@ -95,7 +95,7 @@ jobs:
               - 'examples/**'
               - '.gitmodules'
               - 'src/entrypoints/headless.py'
-              - 'src/vibesys/input_manifest.py'
+              - 'src/vibesys/evaluators/input_manifest.py'
               - 'src/vibesys/evaluators/**'
               - 'resources/evaluators/microservice/**'
               - 'scripts/example_repositories.py'

@@ -6,12 +6,61 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 from server.events import ConfigurationFailedData, EventStatus, EventType, RunEvent
 
 if TYPE_CHECKING:
-    from server.integration import RunIntegrationAdapter
+    from server.controller import ProjectRunState
+    from server.events import EventData
+
+
+class RunInspectionSource(Protocol):
+    """The slice of the run integration adapter that inspector queries read.
+
+    Declared here so this module does not import the adapter that constructs
+    the inspector.
+    """
+
+    @property
+    def project_run(self) -> ProjectRunState | None:
+        """Return the attached canonical project run, if available."""
+        ...
+
+    @property
+    def current_round(self) -> str | None:
+        """Return the current controlled round label."""
+        ...
+
+    @property
+    def log_dir(self) -> Path | None:
+        """Return the attached wire-journal directory."""
+        ...
+
+    def status(self) -> str:
+        """Return a compact human-readable run status."""
+        ...
+
+    def record(
+        self,
+        event_type: EventType,
+        text: str = "",
+        *,
+        data: EventData | None = None,
+        **fields: Any,  # noqa: ANN401
+    ) -> RunEvent:
+        """Record a server-only wire event."""
+        ...
+
+    def read_events(
+        self, after_sequence: int = 0, before_sequence: int | None = None
+    ) -> list[RunEvent]:
+        """Read canonical wire events within an optional cursor range."""
+        ...
+
+    def read_history_events(self) -> list[RunEvent]:
+        """Read canonical wire history for inspector queries."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -25,7 +74,7 @@ class _HistoryDocument:
 class RunInspector:
     """Answer operator questions without mutating agent behavior."""
 
-    def __init__(self, integration: RunIntegrationAdapter):  # noqa: ANN204, D107  # tracked: #288
+    def __init__(self, integration: RunInspectionSource):  # noqa: ANN204, D107  # tracked: #288
         self.integration = integration
 
     def answer(self, question: str) -> str:  # noqa: D102, PLR0911  # tracked: #288

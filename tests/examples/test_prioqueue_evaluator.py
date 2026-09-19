@@ -53,7 +53,9 @@ def _materialize_priority_queue_input(
     input_name: str,
     workspace: Path,
 ) -> Path:
-    from vibesys.input_manifest import load_input_bundle  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import (  # noqa: PLC0415  # tracked: #288
+        load_input_bundle,
+    )
 
     input_dir = project_root / "examples" / "data-structures" / input_name
     starter = project_root / "examples" / "starters" / "priority-queue-rs"
@@ -216,7 +218,9 @@ def test_priority_queue_manifests_invoke_go_evaluator_directly():  # noqa: ANN20
 
 
 def test_priority_queue_inputs_use_shared_editable_rust_starter():  # noqa: ANN201  # tracked: #288
-    from vibesys.input_manifest import load_input_bundle  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_manifest import (  # noqa: PLC0415  # tracked: #288
+        load_input_bundle,
+    )
 
     project_root = Path(__file__).parents[2]
     root = project_root / "examples" / "data-structures"

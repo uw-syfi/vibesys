@@ -8,7 +8,7 @@ those provider vocabularies to the neutral :class:`TodoItemData` contract so
 everything downstream of the output sink stays agent-agnostic.
 
 The deepagents backend additionally publishes todos from its graph state
-channel in :mod:`vibesys.agent_runner`; its ``write_todos`` tool call also
+channel in :mod:`vibesys.agents.runner`; its ``write_todos`` tool call also
 matches here, which is harmless because todo updates are full-list snapshots
 and re-publishing the same snapshot is idempotent for every consumer.
 

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vibesys.agents.provider_policy import cli_skill_dirs
-from vibesys.input_manifest import WorkspaceSource
+from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.input_project import materialize_input_project
 from vibesys.skills import foreign_platform_names, is_platforms_parent
 

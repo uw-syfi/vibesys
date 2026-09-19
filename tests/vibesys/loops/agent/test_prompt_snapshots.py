@@ -18,7 +18,7 @@ from vibesys.agents.cli_common import build_schema_hint
 from vibesys.constants import DomainName
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
-from vibesys.input_manifest import WorkspaceSource
+from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.schemas import (

@@ -16,9 +16,9 @@ from typing import TextIO
 
 from pydantic import BaseModel  # noqa: TC002  # tracked: #288
 
-from vibesys.agent_runner import log_and_print
 from vibesys.agents.provider_policy import cli_skill_dirs
 from vibesys.constants import ComputeBackend  # noqa: TC001  # tracked: #288
+from vibesys.render.log import log_and_print
 from vibesys.skills import foreign_platform_names, is_platforms_parent
 
 # Per-provider CLI skill-discovery paths, matching upstream

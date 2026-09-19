@@ -35,8 +35,8 @@ from vibesys.constants import (
     DomainName,
 )
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
-from vibesys.input_manifest import InputBundle, load_input_bundle, load_project_task
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.loops.roles import expected_agent_roles
 from vibesys.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind

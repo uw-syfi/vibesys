@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from vibesys.input_manifest import ProfileGuidedInput
+from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.loops.agent import profile_guidance as runner
 from vibesys.loops.agent.model import ProfileBottleneck
 

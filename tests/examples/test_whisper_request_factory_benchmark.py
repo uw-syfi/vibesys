@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import TypedDict, cast
 
-from vibesys.input_manifest import load_input_bundle
+from vibesys.evaluators.input_manifest import load_input_bundle
 
 _REPO_ROOT = Path(__file__).parents[2]
 _TASK_ROOT = _REPO_ROOT / "examples" / "model-serving" / "whisper-large-v3"

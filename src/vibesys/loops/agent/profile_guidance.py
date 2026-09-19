@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from vibesys.loops.agent.model import ProfileBottleneck
 
 if TYPE_CHECKING:
-    from vibesys.input_manifest import ProfileGuidedInput
+    from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.run import LoopContext
 
 _ATTRIBUTION_MARKER = "__VIBESYS_ATTRIBUTION_BEGIN__"

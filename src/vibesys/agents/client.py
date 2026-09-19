@@ -9,12 +9,6 @@ from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
-from vibesys.agent_runner import (
-    log_and_print,
-    log_json_and_print,
-    log_prompt_markdown_and_print,
-    parse_typed_response_text,
-)
 from vibesys.agents.cli_common import agent_label, materialize_skills
 from vibesys.agents.contracts import (
     AgentCapabilities,
@@ -33,9 +27,11 @@ from vibesys.agents.contracts import (
     session_spec_fingerprint,
 )
 from vibesys.agents.provider_policy import DEFAULT_CLI_PROVIDER
+from vibesys.agents.runner import parse_typed_response_text
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.agents.session_store import NullSessionStore, SessionStore
 from vibesys.events import CommandResultPayload, JsonResultPayload
+from vibesys.render.log import log_and_print, log_json_and_print, log_prompt_markdown_and_print
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping

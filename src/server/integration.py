@@ -27,6 +27,7 @@ from server.events import (
     PhaseData,
     RunEvent,
 )
+from server.read_model import RunInspector
 from server.run_lifecycle import RunTrigger
 from vibesys.agents.factory import supported_cli_providers
 from vibesys.render.sink import output_sink
@@ -365,8 +366,6 @@ class RunIntegrationAdapter:
                 provider=resolved_provider,
                 model=resolved_model,
             )
-
-        from server.read_model import RunInspector  # noqa: PLC0415
 
         previous = self._chat_factory
         if previous is not None:

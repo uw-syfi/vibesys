@@ -40,6 +40,7 @@ from vibesys.domains.environment import (
 )
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators import load_evaluator_package, tool_install_root
+from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.events import (
     AgentExecutionActivityData,
     AgentExecutionFinishedData,
@@ -52,7 +53,6 @@ from vibesys.events import (
     PhaseData,
     json_value,
 )
-from vibesys.input_manifest import WorkspaceSource
 from vibesys.llm_client import build_model
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,

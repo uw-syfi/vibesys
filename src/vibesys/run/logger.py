@@ -119,7 +119,7 @@ class RunLogger:
             return self.file.closed
 
     def lprint(self, text: str) -> None:  # noqa: D102  # tracked: #288
-        from vibesys.agent_runner import log_and_print  # noqa: PLC0415
+        from vibesys.render.log import log_and_print  # noqa: PLC0415
 
         log_and_print(text, self.writer)
 

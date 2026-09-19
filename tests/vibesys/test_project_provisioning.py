@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from vibesys.input_manifest import InputManifest, WorkspaceSource, load_input_bundle
+from vibesys.evaluators.input_manifest import InputManifest, WorkspaceSource, load_input_bundle
 from vibesys.run.project import (
     ProjectProvisioningError,
     ProjectProvisioningSpec,

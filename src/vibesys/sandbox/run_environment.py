@@ -56,7 +56,7 @@ from vibesys.evaluators import (
     tool_install_root,
     tool_path_replacements,
 )
-from vibesys.input_manifest import WorkspaceSource  # noqa: TC001  # tracked: #288
+from vibesys.evaluators.input_manifest import WorkspaceSource  # noqa: TC001  # tracked: #288
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.sandbox.modal_evaluator import encode_setup_command

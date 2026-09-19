@@ -10,7 +10,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from vibesys.input_manifest import (
+from vibesys.evaluators.input_manifest import (
     MANIFEST_NAME,
     EvaluatorInput,
     InputManifest,
@@ -33,7 +33,7 @@ class ProjectProvisioningSpec:
 
     ``workspace`` owns the copy and source-materialization mechanisms and must
     be rooted at the requested destination. The other paths are resolved input
-    dependencies, normally taken from :class:`~vibesys.input_manifest.InputBundle`.
+    dependencies, normally taken from :class:`~vibesys.evaluators.input_manifest.InputBundle`.
     """
 
     workspace: Workspace

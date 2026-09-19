@@ -9,7 +9,7 @@ import pytest
 
 from vibesys.constants import DomainName
 from vibesys.errors import ConfigurationError
-from vibesys.input_manifest import load_input_bundle
+from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.input_synthesis import (
     InputSynthesisError,
     SynthesizedInputSpec,

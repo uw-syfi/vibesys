@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from vibesys.evaluators import PROJECT_ROOT_TOKEN
-from vibesys.input_manifest import InputBundle, load_project_task
+from vibesys.evaluators.input_manifest import InputBundle, load_project_task
 from vs_project import Project, ProjectLayoutError
 
 PROJECT_ROOT = Path(__file__).parents[2]
