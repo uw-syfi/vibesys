@@ -21,6 +21,7 @@ import {
   graphWindow,
   layoutAgentGraph,
   NODE_HEIGHT,
+  selectionBackdrop,
 } from './agent-graph.js';
 import {agentRuntimeLabel} from './agent-runtime-label.js';
 import {fillLayer} from './box-fill.js';
@@ -350,6 +351,30 @@ export class AgentMapView {
     });
     this.#content.add(area);
     area.add(canvas);
+    // The canvas box is only ever as tall as the graph itself (`height:
+    // graph.height` above), with no row held back for a backdrop past the
+    // tallest column, so a backdrop cell's real safety bound is the space
+    // this method was actually given, not the graph's own footprint.
+    const bounds = {width: paneWidth - 4, height: graphRows};
+    const selectedNode = graph.nodes.find(node => node.phase.kind === selectedKind);
+    if (selectedNode !== undefined) {
+      // Painted first, so it sits behind the edges and the nodes drawn below:
+      // an edge or arrowhead cell that lands on it keeps its own glyph and
+      // foreground and simply picks up this background (`selectionBackdrop`).
+      // The bottom row is an upper-half block in the surface colour instead
+      // (`BackdropCell.half`).
+      for (const cell of selectionBackdrop(graph, selectedNode, bounds)) {
+        canvas.add(
+          new TextRenderable(this.renderer, {
+            content: cell.half ? '▀' : ' ',
+            ...(cell.half ? {fg: this.#theme.selectedSurface} : {bg: this.#theme.selectedSurface}),
+            position: 'absolute',
+            left: cell.x,
+            top: cell.y,
+          }),
+        );
+      }
+    }
     for (const run of edgeRuns(graph)) {
       canvas.add(
         new TextRenderable(this.renderer, {
@@ -400,9 +425,9 @@ export class AgentMapView {
       // one clears the filter: the same toggle Tab and Esc give the keyboard.
       onMouseUp: () => this.controller.selectAgent(phase.kind),
     });
-    // Inside the frame, so the fill stops at the border line instead of
-    // painting the ring the edges arrive at (tui-conventions.md).
-    if (selected) fillLayer(box, `agent-${phase.kind}-${node.y}-fill`, this.#theme.selectedSurface);
+    // No interior fill: the selected node stays plain canvas inside its
+    // border. Its backdrop is a separate rectangle drawn behind everything by
+    // `#renderGraph` (`selectionBackdrop`).
     const inner = node.width - 2;
     box.add(
       new TextRenderable(this.renderer, {
