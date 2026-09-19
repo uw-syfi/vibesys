@@ -36,6 +36,7 @@ import {
 } from './header.js';
 import {bindKeybindings} from './keybindings.js';
 import {OverlayView} from './overlay.js';
+import {PaletteView} from './palette.js';
 import {RightPaneView, rightPaneWidth, splitFits} from './right-pane.js';
 import {RoundRailView, roundRailColumns} from './round-rail.js';
 import {createMarkdownStyle} from './styles.js';
@@ -248,6 +249,7 @@ export function createOpenTuiApp(
   const experimentLog = new ExperimentLogView(renderer, controller, theme);
   const rightPane = new RightPaneView(renderer, theme, () => controller.focusPane('right'));
   const themePicker = new ThemePickerView(renderer, theme);
+  const palette = new PaletteView(renderer, theme);
   // Scrolling back past the rendered window materializes the next block of
   // history. The viewport owns scroll position, so it absorbs the height the
   // revealed cards add and the reader keeps looking at the same content.
@@ -347,6 +349,7 @@ export function createOpenTuiApp(
   root.add(overlay.scrim);
   root.add(overlay.output);
   root.add(themePicker.output);
+  root.add(palette.output);
   root.add(chat.output);
   renderer.root.add(root);
   commandInput.focus();
@@ -370,6 +373,7 @@ export function createOpenTuiApp(
     experimentLog.applyTheme(theme);
     rightPane.applyTheme(theme);
     themePicker.applyTheme(theme);
+    palette.applyTheme(theme);
     conversation.applyTheme(theme, markdownStyle);
     chat.applyTheme(theme, markdownStyle);
     chatPane.applyTheme(theme, markdownStyle);
@@ -565,9 +569,11 @@ export function createOpenTuiApp(
       state.overlay !== null ||
         state.diffViewer !== null ||
         state.chatOpen ||
-        state.themePicker !== null,
+        state.themePicker !== null ||
+        state.palette !== null,
     );
     themePicker.render(state);
+    palette.render(state);
     chat.render(state);
     conversationActivityBar.render(state, !showLog);
     // One cursor, three places it can be. The modal owns it while it is open;
@@ -637,6 +643,19 @@ export function createOpenTuiApp(
           ? 'Copied selected text · Ctrl+C exits when no text is selected'
           : 'Copy unavailable (OSC52) · selection kept · use your terminal copy command';
       help.content = transientStatus;
+    },
+    runPaletteSelection: () => {
+      const prefill = controller.executePaletteSelection();
+      if (prefill === null) return;
+      if (prefill.surface === 'chat') {
+        // The chat composer syncs from the shared draft on every render
+        // rather than owning its own text, so closing the palette (already
+        // done by `executePaletteSelection`) does not by itself repaint it.
+        chatDraft.value = prefill.text;
+        render(lastState);
+      } else {
+        commandInput.setValue(prefill.text);
+      }
     },
   });
   // Pane widths come from the terminal, so a resize has to redraw even though

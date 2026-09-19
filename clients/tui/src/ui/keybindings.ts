@@ -54,6 +54,8 @@ export interface KeybindingActions {
   scrollOverlay(delta: number): void;
   clearTransientStatus(): void;
   showClipboardStatus(result: Exclude<ClipboardCopyResult, 'no-selection'>): void;
+  /** Enter in the palette: runs the highlighted command, or drops it into the composer it opened over. */
+  runPaletteSelection(): void;
 }
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
@@ -84,6 +86,43 @@ export function bindKeybindings(
       controller.state.chatMenu === null
     ) {
       controller.togglePaneZoom();
+      key.preventDefault();
+      return;
+    }
+    // The palette is the one dedicated key this issue adds (#800); the
+    // conventions doc's keymap proposal leaves F1 unbound, and #711 owns
+    // choosing anything beyond it. Guarded the same way F4 is: every other
+    // modal gets first claim on the keys it already owns.
+    if (
+      key.name === 'f1' &&
+      controller.state.chatOpen === false &&
+      controller.state.overlay === null &&
+      controller.state.diffViewer === null &&
+      controller.state.themePicker === null &&
+      controller.state.chatMenu === null &&
+      controller.state.palette === null
+    ) {
+      controller.openPalette();
+      key.preventDefault();
+      return;
+    }
+    // The palette captures typed text itself, the same way the chat menu's
+    // custom-model entry does below: there is no focused OpenTUI widget
+    // behind it to hand printable keys to, so this router is the only place
+    // they are read. Checked ahead of the error banner and the input error
+    // (both below) even though the palette opens later on the ladder for
+    // everything else: F1 does not require either to be clear, so a banner
+    // or a stale input error can already be showing when the palette opens,
+    // and once it has, no other handler may claim so much as its own Escape.
+    if (controller.state.palette !== null) {
+      if (key.name === 'up') controller.movePaletteSelection(-1);
+      else if (key.name === 'down') controller.movePaletteSelection(1);
+      else if (key.name === 'escape') controller.closePalette();
+      else if (key.name === 'return' || key.name === 'enter') actions.runPaletteSelection();
+      else if (key.name === 'backspace') controller.backspacePaletteQuery();
+      else if (isPrintable(key)) controller.typePaletteQuery(key.sequence);
+      // Modal: keys it does not use are swallowed here so they cannot move
+      // panes or type into the still-focused input behind it.
       key.preventDefault();
       return;
     }

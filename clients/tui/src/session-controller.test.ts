@@ -9,20 +9,44 @@ import {
   type SubscribeOptions,
 } from '@vibesys/backend-client';
 import {resolveStartupTrace} from './boot-trace.js';
+import {fuzzyMatchCommands} from './commands.js';
 import {type ServerTransport, SocketSessionController} from './session-controller.js';
 import {chatPaneVisible, experimentLogVisible} from './session-model.js';
 
+/** The command-bar palette's current matches, by name, for asserting on what `/help` offers. */
+function paletteNames(controller: SocketSessionController): string[] {
+  const context = {surface: 'command' as const, chatDocked: chatPaneVisible(controller.state)};
+  return fuzzyMatchCommands('', context).map(command => command.name);
+}
+
+/** The chat palette's current matches, by name, for the chat-surface counterpart above. */
+function chatPaletteNames(controller: SocketSessionController): string[] {
+  const context = {surface: 'chat' as const, chatDocked: chatPaneVisible(controller.state)};
+  return fuzzyMatchCommands('', context).map(command => command.name);
+}
+
 describe('session controller', () => {
-  it('shows local help without sending a backend command', async () => {
+  it('opens the palette locally without sending a backend command', async () => {
     const transport = new FakeTransport();
     const controller = new SocketSessionController(transport);
 
     await controller.submitCommand('/help');
 
-    expect(controller.state.overlay?.kind).toBe('help');
-    expect(controller.state.overlay?.content).toContain('/open-round');
-    expect(controller.state.overlay?.content).not.toContain('Planned');
-    expect(controller.state.overlay?.content).not.toContain('/invocation');
+    expect(controller.state.palette).not.toBeNull();
+    expect(paletteNames(controller)).toContain('/open-round');
+    expect(transport.requests).toEqual([]);
+  });
+
+  it('opens the palette scoped to the chat surface from /help in the chat composer', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+
+    await controller.submitChat('/help');
+
+    expect(controller.state.palette).not.toBeNull();
+    // The chat surface leads with its own thread commands, which the command
+    // bar does not register at all.
+    expect(chatPaletteNames(controller)).toContain('/switch');
     expect(transport.requests).toEqual([]);
   });
 
@@ -432,7 +456,7 @@ describe('session controller', () => {
     expect(controller.state.experimentLog?.entries).toHaveLength(1);
   });
 
-  it('offers /chat in help only where the chat is not already on screen', async () => {
+  it('offers /chat in the palette only where the chat is not already on screen', async () => {
     const transport = new FakeTransport();
     transport.experiments = [
       entry('H-01', 1, 1, {rounds: [{round: 1, passed: true, reviewed: true}]}),
@@ -441,12 +465,12 @@ describe('session controller', () => {
     await controller.start();
 
     await controller.submitCommand('/help');
-    expect(controller.state.overlay?.content).not.toMatch(/\/chat\s/);
+    expect(paletteNames(controller)).not.toContain('/chat');
 
     // Inside a hypothesis the chat is a dialog again, so the command returns.
     controller.enterExperimentDrilldown();
     await controller.submitCommand('/help');
-    expect(controller.state.overlay?.content).toMatch(/\/chat\s/);
+    expect(paletteNames(controller)).toContain('/chat');
   });
 
   it('carries the modal conversation back into the docked pane', async () => {

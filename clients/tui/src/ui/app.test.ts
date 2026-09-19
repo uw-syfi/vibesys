@@ -23,7 +23,13 @@ import {
   setChatMenuCustomModel,
   setChatModelMenuOptions,
 } from '../chat-menu.js';
-import {chatHelpText, parseCommand} from '../commands.js';
+import {
+  availableCommands,
+  type CommandSurface,
+  chatHelpText,
+  fuzzyMatchCommands,
+  parseCommand,
+} from '../commands.js';
 import {
   closeDiffViewer,
   diffRoundRange,
@@ -31,10 +37,18 @@ import {
   moveDiffHunk,
   openDiffViewer,
 } from '../diff-viewer.js';
+import {
+  activeCommandSurface,
+  closePalette,
+  movePaletteSelection,
+  openPalette,
+  setPaletteQuery,
+} from '../palette-model.js';
 import type {SessionController} from '../session-controller.js';
 import {
   activeChatThreadSettings,
   type ChatThreadSettings,
+  chatPaneVisible,
   clearAgentSelection,
   clearEntrySelection,
   clearInputError,
@@ -4008,10 +4022,14 @@ describe('theming', () => {
     testRenderer.mockInput.pressEnter();
     await testRenderer.waitForFrame(() => controller.submissions.length === 1);
 
-    // One Enter runs the command; the table is still the view behind it.
+    // One Enter runs the command; the table underneath is untouched.
     expect(controller.submissions).toEqual(['/help']);
     expect(controller.state.hypothesisScope).toBeNull();
-    expect(await frameAfter(testRenderer)).toContain('Implementation Details');
+    // /help opens the palette rather than doing nothing; closing it again
+    // returns to exactly the table that was on screen before the command.
+    expect(controller.state.palette).not.toBeNull();
+    testRenderer.mockInput.pressKey('ESCAPE');
+    expect(await frameAfterEscape(testRenderer)).toContain('Implementation Details');
   });
 
   it('opens a command overlay on the log and leaves the table behind it', async () => {
@@ -6295,6 +6313,7 @@ describe('box fills', () => {
     'theme-picker',
     'chat-overlay',
     'command-input-suggestions',
+    'palette',
   ]);
 
   /** One per composer, and a composer is built per surface, so match the suffix. */
@@ -7271,6 +7290,444 @@ describe('single-key gating by the composer that owns the keyboard', () => {
   });
 });
 
+describe('command palette', () => {
+  it('opens with F1 over the command bar, listing exactly what availableCommands yields', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    const frame = await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    expect(controller.state.palette).toEqual({query: '', selected: 0});
+    for (const command of availableCommands({surface: 'command'})) {
+      expect(frame).toContain(command.name);
+    }
+    // Chat-only commands never belong on this surface, whatever the query.
+    expect(frame).not.toContain('/clear');
+    expect(frame).not.toContain('/model');
+    expect(frame).not.toContain('/switch');
+  });
+
+  it('opens with F1 over the docked, focused chat, listing exactly what availableCommands yields for chat', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    controller.publish({...controller.state, experimentLog: emptyLog(), layout: chatFocus()});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.focus).toBe('chat');
+
+    testRenderer.mockInput.pressKey('F1');
+    const frame = await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    expect(activeCommandSurface(controller.state)).toBe('chat');
+    for (const command of availableCommands({surface: 'chat'})) {
+      expect(frame).toContain(command.name);
+    }
+    // /chat is command-bar only; the chat has nothing for it to open.
+    expect(frame).not.toContain('/chat');
+  });
+
+  it('opens from /help on the command bar', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    await testRenderer.mockInput.typeText('/help');
+    testRenderer.mockInput.pressEnter();
+    const frame = await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    expect(controller.state.palette).not.toBeNull();
+    expect(frame).toContain('/open-round');
+  });
+
+  it('opens from /help in the chat composer', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    controller.publish({...controller.state, experimentLog: emptyLog(), layout: chatFocus()});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    await testRenderer.mockInput.typeText('/help');
+    testRenderer.mockInput.pressEnter();
+    const frame = await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    expect(controller.state.palette).not.toBeNull();
+    expect(activeCommandSurface(controller.state)).toBe('chat');
+    expect(frame).toContain('/switch');
+    expect(controller.chatSubmissions).toEqual([]);
+  });
+
+  it('filters the list live as the operator types', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    await testRenderer.mockInput.typeText('/steer');
+    const frame = await frameAfter(testRenderer);
+
+    expect(controller.state.palette?.query).toBe('/steer');
+    expect(frame).toContain('/steer');
+    expect(frame).not.toContain('/theme');
+  });
+
+  it('wraps the selection at both ends of the list with the arrow keys', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    const count = availableCommands({surface: 'command'}).length;
+    expect(controller.state.palette?.selected).toBe(0);
+
+    testRenderer.mockInput.pressKey('ARROW_UP');
+    await frameAfter(testRenderer);
+    expect(controller.state.palette?.selected).toBe(count - 1);
+
+    testRenderer.mockInput.pressKey('ARROW_DOWN');
+    await frameAfter(testRenderer);
+    expect(controller.state.palette?.selected).toBe(0);
+  });
+
+  it('Esc closes the palette without running anything, leaving an in-progress command-bar draft untouched', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    await testRenderer.mockInput.typeText('/st');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    testRenderer.mockInput.pressKey('ARROW_DOWN');
+    await testRenderer.mockInput.typeText('open');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('ESCAPE');
+    await frameAfterEscape(testRenderer);
+
+    expect(controller.state.palette).toBeNull();
+    expect(controller.submissions).toEqual([]);
+    const input = testRenderer.renderer.root.findDescendantById('command-input');
+    expect(input).toBeInstanceOf(InputRenderable);
+    if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
+    // The arrow and the typed filter query stayed inside the modal palette:
+    // nothing it read leaked into the box behind it.
+    expect(input.value).toBe('/st');
+  });
+
+  it('contains the palette over a focused docked chat, the same way the theme picker does', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    await frameAfter(testRenderer);
+
+    // Put the keys on the docked chat and start a draft in its composer.
+    testRenderer.mockInput.pressKey('w', {ctrl: true});
+    await frameAfter(testRenderer);
+    await testRenderer.mockInput.typeText('keep this');
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.focus).toBe('chat');
+
+    // A global key opens the palette without moving focus off the chat, so
+    // the composer stays focused behind it.
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    // The palette is modal: arrows drive its own selection rather than the
+    // chat composer's suggestions.
+    testRenderer.mockInput.pressKey('ARROW_DOWN');
+    await frameAfter(testRenderer);
+    expect(controller.state.palette?.selected).toBe(1);
+
+    // A printable key is swallowed as a filter keystroke instead of leaking
+    // into the composer.
+    await testRenderer.mockInput.typeText('z');
+    await frameAfter(testRenderer);
+
+    // Escape closes the palette rather than focusing the left pane behind it.
+    testRenderer.mockInput.pressKey('ESCAPE');
+    await frameAfterEscape(testRenderer);
+    expect(controller.state.palette).toBeNull();
+    expect(controller.state.layout.focus).toBe('chat');
+
+    // The draft is exactly what was typed before the palette opened: the
+    // arrow and the 'z' never reached the composer.
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.chatSubmissions.length === 1);
+    expect(controller.chatSubmissions).toEqual(['keep this']);
+    expect(controller.submissions).toEqual([]);
+  });
+
+  it('keeps Escape on the palette rather than an error banner open behind it', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const banner: NonNullable<SessionState['errorBanner']> = {
+      title: 'Run failed',
+      message: 'CliExitError: codex exited with code 1',
+      detail: null,
+      hint: null,
+      diagnosticId: 'diagnostic-1',
+      severity: 'fatal',
+      scope: 'run',
+      agentKind: null,
+      roundLabel: null,
+      invocationId: null,
+      count: 1,
+    };
+    controller.publish({...controller.state, errorBanner: banner});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('CliExitError'));
+
+    // F1 does not wait on the banner: a run can fail and the operator can
+    // still look commands up, so the palette opens on top of it.
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    expect(controller.state.errorBanner).not.toBeNull();
+
+    // The palette opened after the banner, so Escape belongs to it first:
+    // the banner's own Escape-to-dismiss must not steal the key out from
+    // under a modal that opened on top of it.
+    testRenderer.mockInput.pressKey('ESCAPE');
+    const frame = await frameAfterEscape(testRenderer);
+    expect(controller.state.palette).toBeNull();
+    expect(controller.state.errorBanner).not.toBeNull();
+    expect(frame).toContain('CliExitError');
+  });
+
+  it('does not open over the diff viewer: F1 waits like it does for every other modal', async () => {
+    const testRenderer = await createTestRenderer({width: 200, height: 30});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    controller.publish({
+      ...controller.state,
+      designLog: [
+        {
+          round: 41,
+          base: 'aaa1111',
+          commit: 'bbb2222',
+          files: [{path: 'src/ring.rs', change: 'added'}],
+        },
+      ],
+    });
+    await controller.openPane('design');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('d');
+    await testRenderer.waitForFrame(value => value.includes('Diff · Round 41'));
+    expect(controller.state.diffViewer).not.toBeNull();
+
+    // F1 sits above the viewer's containment block in the key ladder, so only
+    // its own guard keeps the palette from opening over the viewer: the same
+    // explicit modal list F4 checks.
+    testRenderer.mockInput.pressKey('F1');
+    const frame = await frameAfter(testRenderer);
+    expect(controller.state.palette).toBeNull();
+    expect(controller.state.diffViewer).not.toBeNull();
+    expect(frame).toContain('Diff · Round 41');
+    expect(frame).not.toContain('Commands');
+  });
+
+  it('takes d as a filter keystroke instead of opening the diff viewer behind it', async () => {
+    const testRenderer = await createTestRenderer({width: 200, height: 30});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    controller.publish({
+      ...controller.state,
+      designLog: [
+        {
+          round: 41,
+          base: 'aaa1111',
+          commit: 'bbb2222',
+          files: [{path: 'src/ring.rs', change: 'added'}],
+        },
+      ],
+    });
+    // The focused design pane is exactly where a bare d would open the diff
+    // viewer, so the palette's claim on the key is observable here.
+    await controller.openPane('design');
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.focus).toBe('right');
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    testRenderer.mockInput.pressKey('d');
+    await frameAfter(testRenderer);
+    expect(controller.state.palette?.query).toBe('d');
+    expect(controller.state.diffViewer).toBeNull();
+  });
+
+  it('Enter runs an argument-less command immediately and closes the palette, over the command bar', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    await testRenderer.mockInput.typeText('/pause');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.state.palette === null);
+
+    expect(controller.submissions).toEqual(['/pause']);
+    const input = testRenderer.renderer.root.findDescendantById('command-input');
+    expect(input).toBeInstanceOf(InputRenderable);
+    if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
+    expect(input.value).toBe('');
+  });
+
+  it('Enter runs an argument-less command immediately and closes the palette, over the chat surface', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    controller.publish({
+      ...controller.state,
+      experimentLog: emptyLog(),
+      layout: chatFocus(),
+      activeChatThreadId: 'thread-a',
+      core: {
+        ...controller.state.core,
+        chatThreads: [
+          ...controller.state.core.chatThreads,
+          {
+            id: 'thread-a',
+            title: 'GPU stalls',
+            driver: 'omnigent',
+            provider: 'claude',
+            model: 'opus',
+          },
+        ],
+      },
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    await testRenderer.mockInput.typeText('/clear');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.state.palette === null);
+
+    expect(controller.clearedSettings).toEqual([{provider: 'claude', model: 'opus'}]);
+    expect(controller.chatSubmissions).toEqual([]);
+  });
+
+  it('Enter pre-fills the command-bar composer for a command that takes arguments, without running it', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    await testRenderer.mockInput.typeText('/steer');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.state.palette === null);
+
+    expect(controller.submissions).toEqual([]);
+    const input = testRenderer.renderer.root.findDescendantById('command-input');
+    expect(input).toBeInstanceOf(InputRenderable);
+    if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
+    expect(input.value).toBe('/steer ');
+  });
+
+  it('Enter pre-fills the chat composer for a command that takes arguments, without running it', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    controller.publish({...controller.state, experimentLog: emptyLog(), layout: chatFocus()});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    await testRenderer.mockInput.typeText('/steer');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.state.palette === null);
+
+    expect(controller.chatSubmissions).toEqual([]);
+    const editor = testRenderer.renderer.root.findDescendantById('chat-dock-composer-editor');
+    expect(editor).toBeInstanceOf(TextareaRenderable);
+    if (!(editor instanceof TextareaRenderable)) throw new Error('composer editor was missing');
+    expect(editor.plainText).toBe('/steer ');
+  });
+
+  it("groups matches under the registry's section headers and shows each command's keybinding", async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    const frame = await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    // Registry order: general, then run, then view.
+    expect(frame.indexOf('General')).toBeGreaterThanOrEqual(0);
+    expect(frame.indexOf('General')).toBeLessThan(frame.indexOf('Run'));
+    expect(frame.indexOf('Run')).toBeLessThan(frame.indexOf('View'));
+
+    const rows = frameRows(frame);
+    const todosRow = rows.find(row => row.includes('/todos'));
+    const promptRow = rows.find(row => row.includes('/prompt'));
+    const pauseRow = rows.find(row => row.includes('/pause'));
+    expect(todosRow).toContain('[F2]');
+    expect(promptRow).toContain('[F3]');
+    expect(pauseRow).not.toContain('[');
+  });
+
+  it('hides /chat from the command-bar palette while the chat pane is docked beside it, honoring hiddenWhen', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    controller.publish({...controller.state, experimentLog: emptyLog()});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+    expect(chatPaneVisible(controller.state)).toBe(true);
+    expect(activeCommandSurface(controller.state)).toBe('command');
+
+    testRenderer.mockInput.pressKey('F1');
+    const frame = await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    expect(frame).not.toContain('/chat');
+    expect(frame).toContain('/pause');
+  });
+});
+
 /** The renderable behind a screen region, for asserting what a scrim covers. */
 function boxOf(testRenderer: TestRendererSetup, id: string): Renderable {
   const found = testRenderer.renderer.root.findDescendantById(id);
@@ -7405,6 +7862,7 @@ class FakeController implements SessionController {
       this.#notify();
     }
     if (value.trim() === '/theme') this.openThemePicker();
+    if (value.trim() === '/help') this.openPalette();
     return Promise.resolve();
   }
   closeChat(): void {
@@ -7469,6 +7927,47 @@ class FakeController implements SessionController {
   closeThemePicker(): void {
     this.publish(closeThemePicker(this.state));
   }
+  openPalette(): void {
+    this.publish(openPalette(this.state));
+  }
+  closePalette(): void {
+    this.publish(closePalette(this.state));
+  }
+  typePaletteQuery(text: string): void {
+    const palette = this.state.palette;
+    if (palette === null) return;
+    this.publish(setPaletteQuery(this.state, palette.query + text));
+  }
+  backspacePaletteQuery(): void {
+    const palette = this.state.palette;
+    if (palette === null) return;
+    this.publish(setPaletteQuery(this.state, palette.query.slice(0, -1)));
+  }
+  movePaletteSelection(delta: number): void {
+    const palette = this.state.palette;
+    if (palette === null) return;
+    const surface = activeCommandSurface(this.state);
+    const matches = fuzzyMatchCommands(palette.query, {
+      surface,
+      chatDocked: chatPaneVisible(this.state),
+    });
+    this.publish(movePaletteSelection(this.state, delta, matches.length));
+  }
+  executePaletteSelection(): {text: string; surface: CommandSurface} | null {
+    const palette = this.state.palette;
+    if (palette === null) return null;
+    const surface = activeCommandSurface(this.state);
+    const context = {surface, chatDocked: chatPaneVisible(this.state)};
+    const command = fuzzyMatchCommands(palette.query, context)[palette.selected];
+    this.publish(closePalette(this.state));
+    if (command === undefined) return null;
+    if (command.args === 'none') {
+      if (surface === 'chat') void this.submitChat(command.name);
+      else void this.submitCommand(command.name);
+      return null;
+    }
+    return {text: `${command.name} `, surface};
+  }
   /** Records the reveal path asking the backend for history it does not hold. */
   loadOlderHistory(): Promise<boolean> {
     this.historyLoads += 1;
@@ -7487,6 +7986,8 @@ class FakeController implements SessionController {
         this.openChatResumeMenu();
         return Promise.resolve();
       case 'help':
+        this.openPalette();
+        return Promise.resolve();
       case 'unknown':
         this.chatHelpShown.push(chatHelpText());
         return Promise.resolve();

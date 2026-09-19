@@ -27,6 +27,7 @@ export function openChatResumeMenu(state: SessionState): SessionState {
     ...state,
     overlay: null,
     themePicker: null,
+    palette: null,
     chatMenu: {
       kind: 'resume',
       title: 'Chat threads',
@@ -45,6 +46,7 @@ export function openChatModelMenu(state: SessionState): SessionState {
     ...state,
     overlay: null,
     themePicker: null,
+    palette: null,
     chatMenu: {
       kind: 'model',
       title: 'Harness and model',

@@ -23,7 +23,13 @@ import {
   setChatMenuCustomModel,
   setChatModelMenuOptions,
 } from './chat-menu.js';
-import {chatHelpText, helpText, type ParsedCommand, parseCommand} from './commands.js';
+import {
+  type CommandSurface,
+  chatHelpText,
+  fuzzyMatchCommands,
+  type ParsedCommand,
+  parseCommand,
+} from './commands.js';
 import {
   applyDiffPatch,
   closeDiffViewer,
@@ -38,6 +44,13 @@ import {
   moveDiffHunk,
   openDiffViewer,
 } from './diff-viewer.js';
+import {
+  activeCommandSurface,
+  closePalette,
+  movePaletteSelection,
+  openPalette,
+  setPaletteQuery,
+} from './palette-model.js';
 import {renderPerformanceCurve} from './performance-chart.js';
 import {
   activeChatThreadSettings,
@@ -188,6 +201,19 @@ export interface SessionController {
   moveThemeSelection(delta: number): void;
   applySelectedTheme(): void;
   closeThemePicker(): void;
+  /** Opens the command palette, scoped to whichever composer currently holds the keys. */
+  openPalette(): void;
+  closePalette(): void;
+  typePaletteQuery(text: string): void;
+  backspacePaletteQuery(): void;
+  movePaletteSelection(delta: number): void;
+  /**
+   * Enter in the palette. A no-argument command runs immediately and this
+   * returns null; a command that takes an argument returns the text and the
+   * surface for the caller to drop into that composer, rather than guessing
+   * blind at what the operator meant.
+   */
+  executePaletteSelection(): {text: string; surface: CommandSurface} | null;
   /** Loads the chunk of history just older than what is folded. Resolves false when history is already complete. */
   loadOlderHistory(): Promise<boolean>;
   subscribe(listener: (state: SessionState) => void): () => void;
@@ -530,6 +556,51 @@ export class SocketSessionController implements SessionController {
 
   closeThemePicker(): void {
     this.#setState(closeThemePicker(this.#state));
+  }
+
+  openPalette(): void {
+    this.#setState(openPalette(this.#state));
+  }
+
+  closePalette(): void {
+    this.#setState(closePalette(this.#state));
+  }
+
+  typePaletteQuery(text: string): void {
+    const palette = this.#state.palette;
+    if (palette === null) return;
+    this.#setState(setPaletteQuery(this.#state, palette.query + text));
+  }
+
+  backspacePaletteQuery(): void {
+    const palette = this.#state.palette;
+    if (palette === null) return;
+    this.#setState(setPaletteQuery(this.#state, palette.query.slice(0, -1)));
+  }
+
+  movePaletteSelection(delta: number): void {
+    const palette = this.#state.palette;
+    if (palette === null) return;
+    const matchCount = fuzzyMatchCommands(palette.query, this.#paletteContext()).length;
+    this.#setState(movePaletteSelection(this.#state, delta, matchCount));
+  }
+
+  executePaletteSelection(): {text: string; surface: CommandSurface} | null {
+    const palette = this.#state.palette;
+    if (palette === null) return null;
+    const context = this.#paletteContext();
+    const command = fuzzyMatchCommands(palette.query, context)[palette.selected];
+    this.#setState(closePalette(this.#state));
+    if (command === undefined) return null;
+    if (command.args === 'none') {
+      void this.#dispatchCommand(parseCommand(command.name, context));
+      return null;
+    }
+    return {text: `${command.name} `, surface: context.surface};
+  }
+
+  #paletteContext(): {surface: CommandSurface; chatDocked: boolean} {
+    return {surface: activeCommandSurface(this.#state), chatDocked: chatPaneVisible(this.#state)};
   }
 
   closeChat(): void {
@@ -1031,9 +1102,13 @@ export class SocketSessionController implements SessionController {
         this.openChatResumeMenu();
         return Promise.resolve();
       case 'help':
+        // The palette is the one /help surface, opened over whichever
+        // composer is focused; it lists exactly what this surface offers.
+        this.openPalette();
+        return Promise.resolve();
       case 'unknown':
-        // /help and any unrecognized slash input answer with the chat's own
-        // help rather than the global one or a global "unknown command" error.
+        // Any other unrecognized slash input answers with the chat's own
+        // help rather than a global "unknown command" error.
         this.#showChatHelp();
         return Promise.resolve();
       default:
@@ -1196,9 +1271,8 @@ export class SocketSessionController implements SessionController {
       case 'error':
         return this.#setState(reportError(this.#state, action.error, {scope: 'input'}));
       case 'help':
-        return this.#setState(
-          showDetail(this.#state, helpText({chatDocked: chatPaneVisible(this.#state)}), 'help'),
-        );
+        this.openPalette();
+        return;
       case 'openChat':
         this.#setState(openChat(this.#state));
         if (action.chatMessage) await this.sendChat(action.chatMessage);

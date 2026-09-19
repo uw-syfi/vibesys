@@ -18,6 +18,8 @@ export interface CommandInputPanel {
   suggestions: BoxRenderable;
   /** Narrows the completions to the commands the current view offers. */
   setCommandContext(context: CommandContext): void;
+  /** Replaces the box's contents outright, for a palette selection dropped in for the operator to finish typing. */
+  setValue(value: string): void;
   completeSuggestion(): boolean;
   navigateSuggestions(direction: 1 | -1): boolean;
   /** True when nothing is typed, so Enter belongs to whatever pane is behind. */
@@ -51,6 +53,27 @@ const COMMAND_CHROME = BOX_CHROME + 1;
 
 function commandSyntaxStyle(theme: Theme): SyntaxStyle {
   return SyntaxStyle.fromStyles({'slash-command': {fg: theme.accent, bold: true}});
+}
+
+/** Paints the hint row and box border for the given input-error message, or clears both when null. */
+function applyInputErrorState(
+  hint: TextRenderable,
+  box: BoxRenderable,
+  theme: Theme,
+  message: string | null,
+): void {
+  if (message === null) {
+    hint.content = RESTING_HINT;
+    hint.fg = theme.textSubtle;
+    box.borderColor = paneBorderColor(theme, false);
+    return;
+  }
+  // The glyph is the non-colour channel WCAG 1.4.1 asks for: the two
+  // high-contrast themes have almost no palette, so the error colour on
+  // its own would say nothing in them.
+  hint.content = `✗ ${message}`;
+  hint.fg = theme.error;
+  box.borderColor = theme.error;
 }
 
 interface CommandInputFrame {
@@ -235,6 +258,9 @@ export function createCommandInputPanel(
       context = next;
       updateDecorations(input.value);
     },
+    setValue(value: string): void {
+      input.value = value;
+    },
     completeSuggestion(): boolean {
       const value = menu.complete(input.value);
       if (value === null) return false;
@@ -252,18 +278,7 @@ export function createCommandInputPanel(
       const message = state.inputError;
       if (message === lastMessage) return;
       lastMessage = message;
-      if (message === null) {
-        hint.content = RESTING_HINT;
-        hint.fg = currentTheme.textSubtle;
-        box.borderColor = paneBorderColor(currentTheme, false);
-        return;
-      }
-      // The glyph is the non-colour channel WCAG 1.4.1 asks for: the two
-      // high-contrast themes have almost no palette, so the error colour on
-      // its own would say nothing in them.
-      hint.content = `✗ ${message}`;
-      hint.fg = currentTheme.error;
-      box.borderColor = currentTheme.error;
+      applyInputErrorState(hint, box, currentTheme, message);
     },
     applyTheme(next: Theme): void {
       currentTheme = next;

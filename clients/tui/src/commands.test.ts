@@ -6,6 +6,7 @@ import {
   COMMAND_SPECS,
   type CommandSurface,
   chatHelpText,
+  fuzzyMatchCommands,
   helpText,
   type ParsedCommand,
   parseCommand,
@@ -315,6 +316,92 @@ describe('suggestions filtered by surface', () => {
     expect(parseCommand('/chat', {surface: 'command', chatDocked: true})).toEqual({
       kind: 'openChat',
     });
+  });
+});
+
+describe('fuzzyMatchCommands', () => {
+  it('lists every available command in surface order on an empty query', () => {
+    expect(names(fuzzyMatchCommands('', {surface: 'command'}))).toEqual(
+      names(availableCommands({surface: 'command'})),
+    );
+    expect(names(fuzzyMatchCommands('', {surface: 'chat'}))).toEqual(
+      names(availableCommands({surface: 'chat'})),
+    );
+  });
+
+  it('matches a name by an in-order, non-contiguous subsequence', () => {
+    // "/prompt" is p-r-o-m-p-t; this query skips the "o" and the first "p".
+    expect(names(fuzzyMatchCommands('prmt', {surface: 'command'}))).toContain('/prompt');
+  });
+
+  it('matches a description the same way it matches a name', () => {
+    // "/steer"'s description is "Guide the next agent invocation: /steer
+    // <message>"; this query is "guide" with the "i" skipped.
+    expect(names(fuzzyMatchCommands('gude', {surface: 'command'}))).toContain('/steer');
+  });
+
+  it('matches case-insensitively', () => {
+    expect(names(fuzzyMatchCommands('OPEN-ROUND', {surface: 'command'}))).toContain('/open-round');
+  });
+
+  it('rejects a query whose letters are out of order, proving this is subsequence not substring', () => {
+    // "/model"'s letters reversed: every character occurs in the command's
+    // name and description, just not in this order, so it has to drop out.
+    expect(names(fuzzyMatchCommands('ledom', {surface: 'chat'}))).not.toContain('/model');
+  });
+
+  it('returns nothing for a query no command matches on either field', () => {
+    // No registered name, alias, or description contains a "z".
+    expect(fuzzyMatchCommands('zzzznotacommand', {surface: 'command'})).toEqual([]);
+  });
+
+  it('filters by surface the same way availableCommands does', () => {
+    // /clear is chat-only; the command bar never offers it, whatever the query.
+    expect(names(fuzzyMatchCommands('clear', {surface: 'chat'}))).toContain('/clear');
+    expect(names(fuzzyMatchCommands('clear', {surface: 'command'}))).not.toContain('/clear');
+  });
+
+  it('drops /chat once the chat is already docked, honoring hiddenWhen like availableCommands', () => {
+    expect(
+      names(fuzzyMatchCommands('/chat', {surface: 'command', chatDocked: true})),
+    ).not.toContain('/chat');
+    expect(names(fuzzyMatchCommands('/chat', {surface: 'command', chatDocked: false}))).toContain(
+      '/chat',
+    );
+  });
+
+  it('carries a keybinding where the registry declares one, and omits the field where it does not', () => {
+    const [todos] = fuzzyMatchCommands('/todos', {surface: 'command'});
+    expect(todos).toMatchObject({keybinding: 'F2'});
+    const [pause] = fuzzyMatchCommands('/pause', {surface: 'command'});
+    expect(pause).not.toHaveProperty('keybinding');
+  });
+
+  /**
+   * Registry-driven rather than name-enumerated: every command the registry
+   * declares for a surface has to turn up here, field for field, when queried
+   * by its own name. A command added to COMMAND_REGISTRY without touching this
+   * file, fuzzyMatchCommands, or the palette still has to satisfy this loop,
+   * which is the property #800 asks for.
+   */
+  it('surfaces every registered command with no list kept outside the registry', () => {
+    for (const spec of COMMAND_SPECS) {
+      for (const surface of spec.surfaces as readonly CommandSurface[]) {
+        const matches = fuzzyMatchCommands(spec.name, {surface});
+        const match = matches.find(candidate => candidate.name === spec.name);
+        const where = `${spec.name} on ${surface}`;
+        expect({where, match}).toEqual({
+          where,
+          match: {
+            name: spec.name,
+            description: spec.description,
+            section: spec.section,
+            args: spec.args,
+            ...(spec.keybinding === undefined ? {} : {keybinding: spec.keybinding}),
+          },
+        });
+      }
+    }
   });
 });
 

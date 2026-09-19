@@ -283,9 +283,10 @@ the binding and the key-help line says so.
 
 ### Naming
 
-Proposed prefixes and single keys, none of them bound today. The TUI's only
-prefix is `/`, and it means command (`/help`, `/theme`, `/open-round`), not
-search. There is no search and no `:` prefix. `F2`, `F3` and `F4` toggle todos,
+Proposed prefixes and single keys; of these, only `F1` is bound to its
+proposed meaning today. The TUI's only prefix is `/`, and it means command
+(`/help`, `/theme`, `/open-round`), not search. There is no search and no `:`
+prefix. `F1` opens the command palette, and `F2`, `F3` and `F4` toggle todos,
 the latest prompt, and pane zoom.
 
 | Key | Proposed meaning | Source | Bound to today |
@@ -295,7 +296,7 @@ the latest prompt, and pane zoom.
 | `?` | Help | `less`, `htop`, `tig`, `lazygit` | Nothing (`/help` instead) |
 | `q` | Quit a read-only view | `less`, `man`, `htop` | Nothing |
 | `Tab` / `Shift+Tab` | Next / previous pane | CUA | Next / previous agent |
-| `F1` | Help | CUA | Nothing |
+| `F1` | Help | CUA | Command palette (`/help`) |
 
 `/` for search is about as strong as unwritten consensus gets, which is the
 argument for moving commands to `:`. It is a proposal rather than a rule because

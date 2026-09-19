@@ -112,6 +112,8 @@ export interface SessionState {
   chatDockFits: boolean;
   /** Non-null while the theme list is open as a keyboard selection. */
   themePicker: ThemePicker | null;
+  /** Non-null while the command palette is open as a keyboard selection. */
+  palette: {readonly query: string; readonly selected: number} | null;
   /** Root-level error state, independent of the active transcript or log view. */
   errorBanner: ErrorBannerState | null;
   /**
@@ -397,6 +399,7 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     // the chat from the first frame rather than after a resize.
     chatDockFits: true,
     themePicker: null,
+    palette: null,
     errorBanner: null,
     inputError: null,
   };
@@ -1475,7 +1478,7 @@ export function setTheme(state: SessionState, themeName: ThemeName): SessionStat
 
 /** Opens the theme list as a selection, starting on the active theme. */
 export function openThemePicker(state: SessionState): SessionState {
-  return {...state, overlay: null, themePicker: {selected: state.themeName}};
+  return {...state, overlay: null, palette: null, themePicker: {selected: state.themeName}};
 }
 
 /**
