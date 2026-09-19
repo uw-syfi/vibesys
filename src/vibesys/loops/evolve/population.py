@@ -209,24 +209,25 @@ class Population:
             front = self.frontier(space)
             if front and rng.random() < frontier_bias:
                 return rng.choice(front)
-        return self._scalar_softmax_parent(rng=rng, temperature=temperature)
+        return self._scalar_softmax_parent(rng=rng, temperature=temperature, space=space)
 
     def _scalar_softmax_parent(
         self,
         *,
         rng: random.Random,
         temperature: float,
+        space: MetricSpace,
     ) -> Individual | None:
         ranked = [i for i in self.passed if i.perf_metric is not None]
         if not ranked:
             return None
         if len(ranked) == 1:
             return ranked[0]
-        perfs = [i.perf_metric for i in ranked if i.perf_metric is not None]
-        lo, hi = min(perfs), max(perfs)
+        scores = [space.signed_primary(i.perf_metric) for i in ranked if i.perf_metric is not None]
+        lo, hi = min(scores), max(scores)
         if hi - lo < 1e-12:  # noqa: PLR2004  # tracked: #288
             return rng.choice(ranked)
-        normed = [(p - lo) / (hi - lo) for p in perfs]
+        normed = [(score - lo) / (hi - lo) for score in scores]
         t = max(temperature, 1e-6)
         logits = [n / t for n in normed]
         m = max(logits)
@@ -282,7 +283,11 @@ class Population:
             if len(top) < k_top:
                 non_front = [i for i in pool if i.id not in front_ids and i.perf_metric is not None]
                 non_front.sort(
-                    key=lambda i: i.perf_metric if i.perf_metric is not None else float("-inf"),
+                    key=lambda i: (
+                        space.signed_primary(i.perf_metric)
+                        if i.perf_metric is not None
+                        else float("-inf")
+                    ),
                     reverse=True,
                 )
                 top.extend(non_front[: k_top - len(top)])

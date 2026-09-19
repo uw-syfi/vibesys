@@ -7,6 +7,8 @@ bundles, and the TUI.
 ## Before you change code
 
 - Read [`docs/contributing/coding-best-practices.md`](coding-best-practices.md).
+- Adding or moving an example? Register it in `examples/registry.toml`; see
+  [Adding an example](examples.md).
 - Keep changes within the owning package and preserve the framework boundaries.
 - Use the repository [pull request template](https://github.com/uw-syfi/vibesys/blob/main/.github/pull_request_template.md)
   when opening a PR.
@@ -92,7 +94,7 @@ git submodule update --init --recursive --checkout
 repository-native example's tasks skip when its submodule is absent, and CI's
 `validate-examples` job covers them instead. To get the same coverage locally
 without cloning the candidate repositories, fetch just their `.vibesys`
-overlays (a few MB and a few seconds, against hundreds of MB for a full
+directories (a few MB and a few seconds, against hundreds of MB for a full
 checkout):
 
 ```bash
@@ -130,6 +132,7 @@ pnpm check:ts
 When Python protocol models change, regenerate the files under
 `clients/backend-client/src/generated/` and review the diff.
 See the [TUI architecture guide](tui-architecture.md) for package ownership and dependency rules.
+TUI-specific contributor docs are indexed in [`tui/README.md`](tui/README.md).
 
 ## Extend VibeSys
 

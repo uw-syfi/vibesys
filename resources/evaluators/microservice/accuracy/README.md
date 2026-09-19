@@ -25,9 +25,25 @@ These primitives default to rejection so new accuracy adapters do not
 accidentally accept duplicate, partial, stale, unexpected, or malformed
 collections.
 
-Application endpoint mappings, seed oracles, entity relationships, and state
-transitions do not belong here. They live in `accuracyapps/` and remain
-independent of benchmark application validation.
+`Program`, `Reference`, and `VerifyProgram` provide a common model for
+application-owned sequential, concurrent, and crash-recovery checks. A program
+is replayable data containing calls, parallel call groups, and quiescent
+lifecycle events. The reference model defines one canonical sequential state
+transition; the verifier uses it directly for sequential calls and explores
+legal serializations for parallel groups. See [Event programs and reference
+oracles](PROGRAMS.md) for the complete contract, execution semantics,
+limitations, and an application-neutral example.
+
+`Case` and `VerifyCase` remain as a sequential compatibility API. The shared
+verifiers do not remove actions automatically, because doing so is unsafe for
+stateful histories without an application-specific dependency and reset
+contract.
+
+Application endpoint mappings, seed oracles, entity relationships, generated
+input grammars, and state transitions do not belong here. They live with the
+task or example and remain independent of benchmark application validation.
+`accuracyapps/` contains legacy bundled adapters for existing workloads; it is
+not required for task-owned extensions.
 
 The runner rejects readiness declarations that omit or invent workload targets
 and transport-gates every semantic readiness validator. Registry composition

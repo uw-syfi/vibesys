@@ -112,6 +112,14 @@ class LoopContext(Protocol):  # noqa: D101  # tracked: #288
 
     def persist_completed_round(self) -> None: ...  # noqa: D102  # tracked: #288
 
+    def publish_committed_state(  # noqa: D102
+        self,
+        namespace: str,
+        state: BaseModel,
+        *,
+        changed_keys: tuple[str, ...] | None = None,
+    ) -> None: ...
+
     def reselect_gpu(self) -> None: ...  # noqa: D102  # tracked: #288
 
     def wait_for_debug(self, step: str) -> None: ...  # noqa: D102  # tracked: #288

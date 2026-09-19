@@ -1,0 +1,163 @@
+# Registry of every runnable example under examples/. One [[example]] table per example.
+# tests/architecture/test_example_registry.py iterates this file and fails if a directory
+# that looks like an example is missing from it. See docs/contributing/examples.md.
+#
+# Static checks run for every entry and every task, always: validate (vibesys validate),
+# path-refs (${PROJECT_ROOT} paths in commands exist), trust-policy (files the commands
+# read are read-only for the agent). Stale examples/ references are checked repo-wide.
+# Needing docker, a cluster, a GPU or weights never exempts an example. The registry does
+# not track whether any real run exercises an example.
+#
+#   path        repo-relative example root
+#   layout      "task" (.vibesys/tasks/<task>/) or "legacy" (root vibesys.input.toml)
+#   tasks       "all" (default) or the exact task names on disk; legacy: omit
+#   external_repo  true (default false) when the task files and app source come from another
+#               repository that scripts/example_repositories.py checks out. Only this changes
+#               behavior: its checks run in CI (checkout required) and skip locally if absent
+#   known_failing  [{ check, reason, tracking }]: strict xfail; the test fails once the check
+#               passes, so entries only shrink
+#   skips       [{ check, reason }]: a check that cannot run because source is absent from
+#               the checkout; the test fails if the skip is no longer needed
+
+version = 1
+
+[[example]]
+path = "examples/data-structures/kvstore-default"
+layout = "task"
+
+[[example]]
+path = "examples/data-structures/prioqueue-mpmc"
+layout = "legacy"
+
+[[example]]
+path = "examples/data-structures/prioqueue-mpsc"
+layout = "legacy"
+
+[[example]]
+path = "examples/data-structures/prioqueue-spmc"
+layout = "legacy"
+
+[[example]]
+path = "examples/data-structures/prioqueue-spsc"
+layout = "legacy"
+
+[[example]]
+path = "examples/data-structures/repositories/queue-rs"
+layout = "task"
+
+[[example]]
+path = "examples/database/differential-dataflow"
+layout = "legacy"
+
+[[example]]
+path = "examples/kv-store"
+layout = "task"
+
+[[example]]
+path = "examples/microservices/hotel-correctness"
+layout = "task"
+
+[[example]]
+path = "examples/microservices/repositories/deathstarbench"
+layout = "task"
+external_repo = true
+skips = [{ check = "path-refs", reason = "external repo checkout has no candidate source for ${PROJECT_ROOT} paths to point at" }]
+
+[[example]]
+path = "examples/microservices/social-network-kubernetes"
+layout = "task"
+
+[[example]]
+path = "examples/microservices/train-ticket"
+layout = "task"
+
+[[example]]
+path = "examples/microservices/train-ticket-kubernetes"
+layout = "task"
+
+[[example]]
+path = "examples/model-serving/Llama-3-8B"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/Llama-3-8B-trn2"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/deepseek-v3.2-8xb200"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/glm-5.2-8xb200"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/kimi-k3-8xb200"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/llama-70b-2xh100"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/moonshine-streaming"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/moonshine-streaming-vllm"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/olmo-hybrid-prefix-caching"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/olmo-hybrid-prefix-caching-vllm"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/qwen3-32b-code-edit"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/qwen3.5-397b-a17b-4xb200"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/qwen3.6-35b-a3b-2xh100"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/repositories/sglang"
+layout = "task"
+external_repo = true
+
+[[example]]
+path = "examples/model-serving/repositories/vllm"
+layout = "task"
+external_repo = true
+
+[[example]]
+path = "examples/model-serving/repositories/vllm-omni"
+layout = "task"
+external_repo = true
+
+[[example]]
+path = "examples/model-serving/show-o2-1.5B-HQ"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/show-o2-1.5B-HQ-h100"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/show-o2-1.5B-HQ-macbook"
+layout = "legacy"
+
+[[example]]
+path = "examples/model-serving/whisper-large-v3"
+layout = "legacy"

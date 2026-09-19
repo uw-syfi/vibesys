@@ -15,6 +15,7 @@ import {
 import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
 import {
+  experimentLogVisible,
   focusedPane,
   scopedRounds,
   stripRounds,
@@ -30,11 +31,13 @@ import {
   graphWindow,
   layoutAgentGraph,
   NODE_HEIGHT,
+  selectionBackdrop,
 } from './agent-graph.js';
 import {agentRuntimeLabel} from './agent-runtime-label.js';
 import {fillLayer} from './box-fill.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {elapsedLabel} from './previews.js';
+import {splitFits} from './right-pane.js';
 import {mix, type Theme} from './theme.js';
 
 const STATUS_MARKER: Record<AgentPhase['status'], string> = {
@@ -54,8 +57,8 @@ const PANE_VCHROME = 2;
 const HEADING_ROWS = 1;
 /** Columns the transcript needs to stay worth reading beside the graph. */
 export const TRANSCRIPT_MIN = 42;
-/** Share of the terminal the graph takes when there is room for it. */
-const GRAPH_SHARE = 0.4;
+/** Share of the room left of the rail the graph takes when there is room for it. */
+const GRAPH_SHARE = 0.55;
 
 function statusColor(theme: Theme, status: AgentPhase['status']): string {
   if (status === 'active') return theme.success;
@@ -124,21 +127,170 @@ function selectedLabelWidth(phase: AgentPhase): number {
 }
 
 /**
- * Width for the Agents pane, or null when the terminal cannot carry a graph
- * that names every agent in full beside a readable transcript; the stacked list
- * takes over then. Derived from the terminal rather than fixed, so a wide
- * terminal gives the graph room while the transcript keeps its floor.
+ * The width at which every agent is already named in full: `graphPaneBounds`'s
+ * floor, using the selected-label width every node is sized for. Never
+ * narrower than the pane used to be: a one-stage round needs less room than
+ * the heading above it, and a wrapped heading reads worse than slack. Below
+ * this width a label starts losing characters to `…`.
  */
-export function agentPaneWidth(terminalWidth: number, phases: AgentPhase[]): number | null {
-  const bounds = graphPaneBounds(phases, selectedLabelWidth);
-  // Never narrower than the pane used to be: a one-stage round needs less room
-  // than the heading above it, and a wrapped heading reads worse than slack.
-  const floor = Math.max(bounds.min, STACKED_WIDTH);
-  const ceiling = Math.max(bounds.max, STACKED_WIDTH);
-  const room = terminalWidth - TRANSCRIPT_MIN;
+export function agentPaneFloor(phases: AgentPhase[]): number {
+  return Math.max(graphPaneBounds(phases, selectedLabelWidth).min, STACKED_WIDTH);
+}
+
+/**
+ * The width past which more columns stop being information: `graphPaneBounds`'s
+ * own `max`, the point its docstring already names as "extra columns add
+ * padding rather than information." Automatic sizing (`agentPaneWidth`) never
+ * grows past this either, so it is the natural ceiling for an explicit
+ * `<`/`>` override too (`clampGraphWidthOverride`): `>` stops here rather than
+ * padding, and never asks for less than automatic sizing would already give on
+ * the same terminal.
+ */
+export function agentPaneCeiling(phases: AgentPhase[]): number {
+  return Math.max(graphPaneBounds(phases, selectedLabelWidth).max, STACKED_WIDTH);
+}
+
+/**
+ * The narrowest pane an explicit `<`/`>` override may ask for: the wider of two
+ * floors, so this is not in general the narrowest a graph can be laid out in.
+ *
+ * The geometric floor is that width: every stage column at its own 14-column
+ * minimum (`NODE_WIDTH_MIN` in `agent-graph.ts`) plus one gutter of
+ * edge-routing room between each pair of columns, ignoring names entirely
+ * (`graphPaneBounds` with no `labelWidth` gives exactly this). Under it
+ * `fitNodeWidths` still refuses to shrink a column past its own minimum, so the
+ * columns plus gutters would add up to more than the pane was given and
+ * overflow its border instead of fitting inside it.
+ *
+ * `STACKED_WIDTH` is the other floor, carried for the same reason
+ * `agentPaneFloor` carries it: what an override buys is truncated agent names,
+ * and nothing else in the pane. Geometry alone asks for 18 columns at one stage
+ * and at a round that has not run, narrow enough to drop the heading's elapsed
+ * tail and wrap the empty-round placeholder onto a second row, which costs a
+ * graph row rather than revealing anything. From two stages up the geometric
+ * floor is the wider of the two and this one never binds.
+ */
+export function agentGraphMinWidth(phases: AgentPhase[]): number {
+  return Math.max(graphPaneBounds(phases).min, STACKED_WIDTH);
+}
+
+/**
+ * Every `availableWidth` below is the terminal width minus the rounds rail's
+ * column (`roundRailColumns` in `round-rail.ts`), so the graph and the width
+ * keys size against what the rail leaves and the transcript keeps its floor.
+ * The rail itself keeps its fixed width; `<`/`>`/`=` only move the panes.
+ *
+ * True while the room can carry a graph at all: even the narrowest one
+ * needs `TRANSCRIPT_MIN` columns left over for the transcript beside it. When
+ * this is false the stacked list is the pane, no override can change that, and
+ * `<`/`>` therefore store nothing rather than leaving behind a width this
+ * terminal was never allowed to draw.
+ */
+export function graphFits(availableWidth: number, phases: AgentPhase[]): boolean {
+  return availableWidth - TRANSCRIPT_MIN >= agentGraphMinWidth(phases);
+}
+
+/**
+ * Width for the Agents pane, or null when the room cannot carry a graph that
+ * names every agent in full beside a readable transcript; the stacked list
+ * takes over then. Derived from the room rather than fixed, so a wide terminal
+ * gives the graph room while the transcript keeps its floor.
+ */
+export function agentPaneWidth(availableWidth: number, phases: AgentPhase[]): number | null {
+  const floor = agentPaneFloor(phases);
+  const ceiling = agentPaneCeiling(phases);
+  const room = availableWidth - TRANSCRIPT_MIN;
   if (room < floor) return null;
-  const share = Math.round(terminalWidth * GRAPH_SHARE);
+  const share = Math.round(availableWidth * GRAPH_SHARE);
   return Math.min(ceiling, room, Math.max(floor, share));
+}
+
+/**
+ * Clamps a requested `<`/`>` override to a range that can actually be drawn:
+ * never narrower than `agentGraphMinWidth` (a node box plus its edge column),
+ * never wider than `agentPaneCeiling` (automatic sizing's own ceiling, past
+ * which more width is padding, not information), and never so wide the
+ * transcript would drop under `TRANSCRIPT_MIN`. The low and high bounds can
+ * invert on a terminal too narrow to hold even the low bound beside a
+ * readable transcript; the high bound then collapses to the low one rather
+ * than under it, and it is `agentPaneWidthWithOverride`'s job to notice the
+ * terminal cannot draw a graph at all in that case and fall back to the
+ * stacked list.
+ */
+export function clampGraphWidthOverride(
+  requested: number,
+  availableWidth: number,
+  phases: AgentPhase[],
+): number {
+  const low = agentGraphMinWidth(phases);
+  const high = Math.max(low, Math.min(agentPaneCeiling(phases), availableWidth - TRANSCRIPT_MIN));
+  return Math.min(high, Math.max(low, requested));
+}
+
+/**
+ * The Agents pane's width honoring an explicit `<`/`>` override, or `null`
+ * for #686's automatic sizing (`agentPaneWidth`) when there is none. `null`
+ * also covers the terminal being too narrow to draw a graph at all (not even
+ * `agentGraphMinWidth` fits beside a readable transcript), in which case an
+ * override cannot rescue it either, and the stacked list takes over exactly
+ * as it does automatically.
+ */
+export function agentPaneWidthWithOverride(
+  availableWidth: number,
+  phases: AgentPhase[],
+  override: number | null,
+): number | null {
+  if (override === null) return agentPaneWidth(availableWidth, phases);
+  if (!graphFits(availableWidth, phases)) return null;
+  return clampGraphWidthOverride(override, availableWidth, phases);
+}
+
+/**
+ * True while the Agents pane holds a slot in the content row: not eclipsed by
+ * the experiment log, not zoomed to a different pane, and not squeezed out by
+ * a visualization split that has room to open beside it. `app.ts`'s own
+ * `showAgents` and the `<`/`>` resize keys both read this, so a layout change
+ * cannot leave the render and the keybinding guard disagreeing about whether
+ * there is a pane on screen to resize.
+ */
+export function agentsPaneVisible(state: SessionState, terminalWidth: number): boolean {
+  if (experimentLogVisible(state)) return false;
+  const {zoomedPane, right} = state.layout;
+  if (zoomedPane !== null) return zoomedPane === 'agents';
+  return !(right !== null && splitFits(terminalWidth));
+}
+
+export interface AgentMapLayout {
+  paneWidth: number;
+  graphWidth: number | null;
+  graphRows: number;
+}
+
+/**
+ * Resolve the pane geometry once, before rendering chooses an empty, stacked,
+ * or graph presentation. `graphWidthOverride` is the user's `<`/`>` width, honored
+ * only outside zoom. An explicit width comes from zoom mode: it always
+ * owns the pane width, but still falls back to the stacked presentation when
+ * the graph cannot name every agent in full.
+ */
+export function agentMapLayout(
+  availableWidth: number,
+  phases: AgentPhase[],
+  widthOverride: number | undefined,
+  rows: number,
+  graphWidthOverride: number | null = null,
+): AgentMapLayout {
+  const graphWidth =
+    widthOverride === undefined
+      ? agentPaneWidthWithOverride(availableWidth, phases, graphWidthOverride)
+      : widthOverride >= graphPaneBounds(phases, selectedLabelWidth).min
+        ? widthOverride
+        : null;
+  return {
+    paneWidth: widthOverride ?? graphWidth ?? STACKED_WIDTH,
+    graphWidth,
+    graphRows: Math.max(0, rows - PANE_VCHROME - HEADING_ROWS),
+  };
 }
 
 const AGENTS_TITLE = 'Agents';
@@ -156,6 +308,7 @@ export class AgentMapView {
   #renderedState: SessionState | null = null;
   #renderedWidth = 0;
   #renderedRows = 0;
+  #renderedFocus = false;
   #elapsedTimer: ReturnType<typeof setInterval> | null = null;
   #runningRound: {round: RoundSummary; text: TextRenderable} | null = null;
   #spinnerFrame = 0;
@@ -210,66 +363,99 @@ export class AgentMapView {
   }
 
   /**
-   * `rows` is the pane's height including its border. A round whose stages
-   * stack taller than that is windowed rather than drawn off the bottom of the
-   * pane; callers that manage their own height (tests driving the view
-   * directly) can omit it and get the unclamped graph.
+   * `railWidth` is the column the rounds rail has taken, 0 when it is off
+   * screen. It sizes this pane against what is left, so the transcript keeps
+   * its floor beside a rail rather than being squeezed by it, and it says
+   * whether the rail is a surface the round keys can be on.
+   *
+   * `rows` is the pane's height including its border, the same budget the rail
+   * draws from. A round whose stages stack taller than that is windowed rather
+   * than drawn off the bottom of the pane; callers that manage their own height
+   * (tests driving the view directly) can omit it and get the unclamped graph.
    */
-  render(state: SessionState, widthOverride?: number, rows = Number.POSITIVE_INFINITY): void {
+  render(
+    state: SessionState,
+    widthOverride?: number,
+    railWidth = 0,
+    rows = Number.POSITIVE_INFINITY,
+  ): void {
     const phases = visiblePhases(state);
     // The pane's width follows the terminal, so a resize has to redraw even
-    // when the state is unchanged. A zoom hands the pane the whole terminal,
-    // and one narrower than the graph needs stacks the agents rather than cut a
-    // name.
+    // when the state is unchanged. A zoom hands the pane the whole terminal
+    // (`widthOverride`, this method's own parameter for that, distinct from
+    // `state.graphWidthOverride` below), and one narrower than the graph needs
+    // stacks the agents rather than cut a name.
     // Null either way means the stacked list: the pane is drawn at `paneWidth`
     // whatever that decides.
-    const graphWidth =
-      widthOverride === undefined
-        ? agentPaneWidth(this.renderer.terminalWidth, phases)
-        : widthOverride >= graphPaneBounds(phases, selectedLabelWidth).min
-          ? widthOverride
-          : null;
-    const paneWidth = widthOverride ?? graphWidth ?? STACKED_WIDTH;
+    // The graph is sized against the room left of the rail, so the transcript
+    // keeps its floor beside it; the rail's own width is fixed and no width
+    // control moves it.
+    const layout = agentMapLayout(
+      this.renderer.terminalWidth - railWidth,
+      phases,
+      widthOverride,
+      rows,
+      state.graphWidthOverride,
+    );
+    // A stale `rounds` focus lands here once the rail goes off screen, so the
+    // border follows the keys rather than the raw field: `keybindings` drives
+    // this pane in exactly that case, and a round view with no focus border on
+    // any pane is a view that does not say where its arrows go.
+    const focused =
+      focusedPane(state) === 'agents' && !(state.roundFocus === 'rounds' && railWidth > 0);
     if (
       state === this.#renderedState &&
-      paneWidth === this.#renderedWidth &&
-      rows === this.#renderedRows
+      layout.paneWidth === this.#renderedWidth &&
+      rows === this.#renderedRows &&
+      focused === this.#renderedFocus
     ) {
       return;
     }
     // Selection and focus are drawn into the nodes, so a change to either is a
     // reason to redraw even when the phases are identical.
     this.#renderedState = state;
-    this.#renderedWidth = paneWidth;
+    this.#renderedWidth = layout.paneWidth;
     this.#renderedRows = rows;
-    this.output.width = paneWidth;
+    this.#renderedFocus = focused;
+    this.output.width = layout.paneWidth;
     // The pane that owns the arrow keys says so, the way every other focusable
     // surface in the client does. `focusedPane` is that single authority:
     // reading `roundFocus` directly lit this pane while a visualization too
     // narrow to split held the keys.
-    applyPaneFocus(this.output, this.#theme, AGENTS_TITLE, focusedPane(state) === 'agents');
+    applyPaneFocus(this.output, this.#theme, AGENTS_TITLE, focused);
     this.#clear();
     if (phases.length === 0) {
-      // A round the run has not reached has no agents, and never will until it
-      // runs. "Waiting" would suggest something is on its way.
-      const roundNumber = visibleRoundNumber(state);
-      const round =
-        roundNumber === null
-          ? null
-          : (stripRounds(state).find(item => item.number === roundNumber) ?? null);
-      this.#content.add(
-        new TextRenderable(this.renderer, {
-          content:
-            round?.status === 'planned'
-              ? `Round ${roundNumber} has not run yet.`
-              : 'Waiting for phases…',
-          fg: this.#theme.textSubtle,
-          width: '100%',
-        }),
-      );
+      this.#renderEmptyState(state);
       return;
     }
 
+    this.#renderHeading(state, phases, layout.paneWidth);
+    this.#renderPhases(phases, state.selectedAgentKind, layout);
+    this.#syncElapsedTimer();
+    this.#syncSpinnerTimer();
+  }
+
+  #renderEmptyState(state: SessionState): void {
+    // A round the run has not reached has no agents, and never will until it
+    // runs. "Waiting" would suggest something is on its way.
+    const roundNumber = visibleRoundNumber(state);
+    const round =
+      roundNumber === null
+        ? null
+        : (stripRounds(state).find(item => item.number === roundNumber) ?? null);
+    this.#content.add(
+      new TextRenderable(this.renderer, {
+        content:
+          round?.status === 'planned'
+            ? `Round ${roundNumber} has not run yet.`
+            : 'Waiting for phases…',
+        fg: this.#theme.textSubtle,
+        width: '100%',
+      }),
+    );
+  }
+
+  #renderHeading(state: SessionState, phases: AgentPhase[], paneWidth: number): void {
     const roundNumber = visibleRoundNumber(state);
     const round =
       roundNumber === null
@@ -304,17 +490,13 @@ export class AgentMapView {
     // Elapsed time only advances while an agent is running, so the heading
     // ticks for exactly as long as one is.
     if (round !== null && hasActiveAgentTiming(round)) this.#runningRound = {round, text: heading};
-    if (graphWidth === null) this.#renderStacked(phases, state.selectedAgentKind);
+  }
+
+  #renderPhases(phases: AgentPhase[], selectedKind: string | null, layout: AgentMapLayout): void {
+    if (layout.graphWidth === null) this.#renderStacked(phases, selectedKind);
     else {
-      this.#renderGraph(
-        phases,
-        state.selectedAgentKind,
-        graphWidth,
-        Math.max(0, rows - PANE_VCHROME - HEADING_ROWS),
-      );
+      this.#renderGraph(phases, selectedKind, layout.graphWidth, layout.graphRows);
     }
-    this.#syncElapsedTimer();
-    this.#syncSpinnerTimer();
   }
 
   destroy(): void {
@@ -342,7 +524,7 @@ export class AgentMapView {
       this.#content.add(
         new TextRenderable(this.renderer, {
           // The oldest attempts are the ones dropped, so the count points up at
-          // them.
+          // them the way the rounds rail points at the rounds above its window.
           content: `↑ ${fitted.hidden}`,
           fg: this.#theme.textSubtle,
           width: '100%',
@@ -371,29 +553,31 @@ export class AgentMapView {
     });
     this.#content.add(area);
     area.add(canvas);
-    const runs = edgeRuns(graph);
-    const flowing = flowRuns(graph.nodes, runs);
-    const flowColors = edgeFlowColors(this.#theme);
-    for (const run of runs) {
-      const isFlow = flowing.has(run);
-      const text = new TextRenderable(this.renderer, {
-        content: isFlow
-          ? paintEdgeFlow(
-              run.glyphs,
-              this.#flowTick,
-              flowColors.live,
-              flowColors.brighter,
-              flowColors.brightest,
-            )
-          : run.glyphs,
-        ...(isFlow ? {} : {fg: edgeColor(this.#theme, run.tone)}),
-        position: 'absolute',
-        left: run.x,
-        top: run.y,
-      });
-      canvas.add(text);
-      if (isFlow) this.#flowEdges.push({text, glyphs: run.glyphs});
+    // The canvas box is only ever as tall as the graph itself (`height:
+    // graph.height` above), with no row held back for a backdrop past the
+    // tallest column, so a backdrop cell's real safety bound is the space
+    // this method was actually given, not the graph's own footprint.
+    const bounds = {width: paneWidth - 4, height: graphRows};
+    const selectedNode = graph.nodes.find(node => node.phase.kind === selectedKind);
+    if (selectedNode !== undefined) {
+      // Painted first, so it sits behind the edges and the nodes drawn below:
+      // an edge or arrowhead cell that lands on it keeps its own glyph and
+      // foreground and simply picks up this background (`selectionBackdrop`).
+      // The bottom row is an upper-half block in the surface colour instead
+      // (`BackdropCell.half`).
+      for (const cell of selectionBackdrop(graph, selectedNode, bounds)) {
+        canvas.add(
+          new TextRenderable(this.renderer, {
+            content: cell.half ? '▀' : ' ',
+            ...(cell.half ? {fg: this.#theme.selectedSurface} : {bg: this.#theme.selectedSurface}),
+            position: 'absolute',
+            left: cell.x,
+            top: cell.y,
+          }),
+        );
+      }
     }
+    this.#addEdges(canvas, graph);
     for (const node of graph.nodes) {
       canvas.add(this.#renderNode(node.phase, node.phase.kind === selectedKind, node));
     }
@@ -417,7 +601,7 @@ export class AgentMapView {
       // "implementer" and "implement…" at the widths a four-stage round leaves.
       border: true,
       // Square, and not because of the fill: that sits on an inner layer
-      // (tui-conventions.md), so the shape is free either way and this is a
+      // (tui/conventions.md), so the shape is free either way and this is a
       // look decision. A stage reads as a slot in a pipeline rather than as a
       // card, and the map's edges arrive at its sides. Unconditional rather
       // than square-only-when-selected, because swapping the shape on
@@ -433,9 +617,9 @@ export class AgentMapView {
       // one clears the filter: the same toggle Tab and Esc give the keyboard.
       onMouseUp: () => this.controller.selectAgent(phase.kind),
     });
-    // Inside the frame, so the fill stops at the border line instead of
-    // painting the ring the edges arrive at (tui-conventions.md).
-    if (selected) fillLayer(box, `agent-${phase.kind}-${node.y}-fill`, this.#theme.selectedSurface);
+    // No interior fill: the selected node stays plain canvas inside its
+    // border. Its backdrop is a separate rectangle drawn behind everything by
+    // `#renderGraph` (`selectionBackdrop`).
     const inner = node.width - 2;
     const label = new TextRenderable(this.renderer, {
       content: truncate(nodeLabel(phase, selected, this.#spinnerFrame), inner),
@@ -461,6 +645,37 @@ export class AgentMapView {
       }),
     );
     return box;
+  }
+
+  /**
+   * Edge runs over the backdrop: each run keeps its tone colour, except the runs
+   * carrying the live band, which are painted per cell and registered so the
+   * flow tick can repaint them in place.
+   */
+  #addEdges(canvas: BoxRenderable, graph: AgentGraph): void {
+    const runs = edgeRuns(graph);
+    const flowing = flowRuns(graph.nodes, runs);
+    const flowColors = edgeFlowColors(this.#theme);
+    for (const run of runs) {
+      const isFlow = flowing.has(run);
+      const text = new TextRenderable(this.renderer, {
+        content: isFlow
+          ? paintEdgeFlow(
+              run.glyphs,
+              this.#flowTick,
+              flowColors.live,
+              flowColors.brighter,
+              flowColors.brightest,
+            )
+          : run.glyphs,
+        ...(isFlow ? {} : {fg: edgeColor(this.#theme, run.tone)}),
+        position: 'absolute',
+        left: run.x,
+        top: run.y,
+      });
+      canvas.add(text);
+      if (isFlow) this.#flowEdges.push({text, glyphs: run.glyphs});
+    }
   }
 
   /** The pane before the graph: used when the terminal is too narrow for it. */
@@ -737,8 +952,8 @@ function truncate(text: string, width: number): string {
 
 /**
  * The agent-active elapsed time of the round on screen: wall clock minus the
- * gaps where no agent was running, which is what the round tabs report for the
- * live round.
+ * gaps where no agent was running, which is what the rounds rail reports for
+ * the running round.
  */
 function headingLabel(roundNumber: number | null, round: RoundSummary | null): string {
   if (roundNumber === null) return 'Run flow';

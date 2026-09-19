@@ -58,6 +58,34 @@ interface Columns {
   claimWidth: number;
 }
 
+type LogRenderMode =
+  | {kind: 'detail'; entry: HypothesisEntry}
+  | {kind: 'error'; message: string}
+  | {kind: 'loading'}
+  | {kind: 'kickoff'; activity: HypothesisPlanningActivity}
+  | {kind: 'table'}
+  | {kind: 'empty'};
+
+type TableRowPlan =
+  | {kind: 'hypothesis'; entry: HypothesisEntry; key: string; index: number; selected: boolean}
+  | {kind: 'round'; roundNumber: number; index: number; selected: boolean}
+  | {kind: 'activity-heading'}
+  | {
+      kind: 'activity';
+      item: Extract<ExperimentIndexItem, {kind: 'activity'}>;
+      existingHypotheses: number;
+      selected: boolean;
+    };
+
+interface TablePlan {
+  columns: Columns;
+  header: string;
+  rows: TableRowPlan[];
+  selectedRenderIndex: number;
+  renderedRows: number;
+  footer: string;
+}
+
 export class ExperimentLogView {
   readonly output: BoxRenderable;
   readonly #fill: BoxRenderable;
@@ -93,7 +121,7 @@ export class ExperimentLogView {
       onMouseUp: () => this.controller.focusPane('left'),
     });
     // The pane surface, on its own layer so the rounded frame stays rounded
-    // (tui-conventions.md). Same call as `chat-pane`.
+    // (tui/conventions.md). Same call as `chat-pane`.
     this.#fill = fillLayer(this.output, 'experiment-log-fill', theme.canvas);
     this.#header = new TextRenderable(renderer, {
       content: '',
@@ -109,7 +137,7 @@ export class ExperimentLogView {
     // collapses it to height 0 before every render, and only `#renderTable`
     // opens it back to 1. Inside the table view that height is fixed
     // regardless of how many rows follow, so it is a permanent row there
-    // (tui-conventions.md, "nothing moves that does not have to") without
+    // (tui/conventions.md, "nothing moves that does not have to") without
     // taxing views that have no header row to rule under.
     this.#headerRule = new TextRenderable(renderer, {
       content: '',
@@ -199,40 +227,33 @@ export class ExperimentLogView {
     this.#renderedWidth = width;
     this.#clear();
 
-    if (detail !== null) {
-      this.#renderDetail(detail, state);
+    const mode = planLogRenderMode(state);
+    if (mode.kind === 'detail') {
+      this.#renderDetail(mode.entry, state);
       if (previousDetailKey !== state.hypothesisDetail?.entryKey) this.#rows.scrollTo(0);
       return;
     }
-
-    if (log.error !== null) {
+    if (mode.kind === 'error') {
       this.#header.content = '';
-      this.#line(log.error, this.#theme.conversation.failure.content);
-      this.#footerLine.content = '';
+      this.#line(mode.message, this.#theme.conversation.failure.content);
       return;
     }
-    if (log.pending) {
+    if (mode.kind === 'loading') {
       this.#header.content = '';
       this.#line('Loading experiments...', this.#theme.textSubtle);
-      this.#footerLine.content = '';
       return;
     }
-    const activity = hypothesisPlanningActivity(state);
-    if (log.entries.length === 0) {
-      if (activity !== null && unownedExperimentRounds(state).length === 0) {
-        this.#renderKickoff(activity, state);
-        return;
-      }
-      if (unownedExperimentRounds(state).length > 0) {
-        this.#renderTable(state);
-        return;
-      }
-      this.#header.content = '';
-      this.#line('No hypotheses have been recorded yet.', this.#theme.textSubtle);
-      this.#footerLine.content = 'The first one appears once the orchestrator has planned a round.';
+    if (mode.kind === 'kickoff') {
+      this.#renderKickoff(mode.activity, state);
       return;
     }
-    this.#renderTable(state);
+    if (mode.kind === 'table') {
+      this.#renderTable(state);
+      return;
+    }
+    this.#header.content = '';
+    this.#line('No hypotheses have been recorded yet.', this.#theme.textSubtle);
+    this.#footerLine.content = 'The first one appears once the orchestrator has planned a round.';
   }
 
   #renderKickoff(activity: HypothesisPlanningActivity, state: SessionState): void {
@@ -265,62 +286,32 @@ export class ExperimentLogView {
   }
 
   #renderTable(state: SessionState): void {
-    const log = state.experimentLog;
-    if (log === null) return;
-    const columns = resolveColumns(this.#bodyWidth());
-    const items = experimentIndexItems(state);
-    const selected = selectedExperimentIndexItem(state);
-    this.#header.content = headerRow(columns, measuredDirection(log.entries));
-    // A permanent rule under the header (tui-conventions.md, "nothing moves
+    const plan = planTable(state, this.#bodyWidth());
+    if (plan === null) return;
+    this.#header.content = plan.header;
+    // A permanent rule under the header (tui/conventions.md, "nothing moves
     // that does not have to"): fixed at height 1 regardless of row count, so
     // it reads as a header rather than as one more line of text that happens
     // to sit above the rows.
     this.#headerRule.height = 1;
     this.#headerRule.content = '─'.repeat(this.#bodyWidth());
-    let selectedRenderIndex = 0;
-    let renderedRows = 0;
-    for (const [navigationIndex, item] of items.entries()) {
-      const isSelected = item.key === selected?.key;
-      if (item.kind === 'hypothesis') {
-        const entryIndex = log.entries.indexOf(item.entry);
-        this.#row(item.entry, item.key, columns, isSelected, entryIndex);
-        if (isSelected) selectedRenderIndex = renderedRows;
-        renderedRows += 1;
-      } else if (item.kind === 'round') {
-        this.#roundRow(item.roundNumber, columns, isSelected, navigationIndex);
-        if (isSelected) selectedRenderIndex = renderedRows;
-        renderedRows += 1;
-      } else {
+    for (const row of plan.rows) {
+      if (row.kind === 'hypothesis') {
+        this.#row(row.entry, row.key, plan.columns, row.selected, row.index);
+      } else if (row.kind === 'round') {
+        this.#roundRow(row.roundNumber, plan.columns, row.selected, row.index);
+      } else if (row.kind === 'activity-heading') {
         this.#line('CURRENT ACTIVITY', this.#theme.textSubtle);
-        renderedRows += 1;
-        this.#renderActivity(item, log.entries.length, isSelected);
-        if (isSelected) selectedRenderIndex = renderedRows;
-        renderedRows += 1;
+      } else {
+        this.#renderActivity(row.item, row.existingHypotheses, row.selected);
       }
     }
     // Keyboard selection nudges the scroll position only when the row would
     // otherwise be off screen, so the wheel stays in charge the rest of the
     // time. Computed rather than deferred to scrollChildIntoView, which needs
     // a layout pass the freshly added rows have not had yet.
-    this.#followSelection(selectedRenderIndex, renderedRows);
-    const selectedNavigationIndex =
-      selected === null ? 0 : items.findIndex(item => item.key === selected.key);
-    const position = `${Math.max(0, selectedNavigationIndex) + 1}/${items.length}`;
-    // The hint is the first thing to give up room; truncating it mid-word
-    // reads as breakage rather than as a narrow terminal.
-    const hint =
-      this.#bodyWidth() >= HINT_MIN_WIDTH
-        ? '↑↓ or scroll: select · Enter or click: open hypothesis'
-        : '↑↓ · Enter';
-    // The common landing state: a round has run (unlike the zero-row empty
-    // state above) but the orchestrator has not yet attached a hypothesis to
-    // it. The position/hint pair describes navigating a hypothesis list that
-    // does not exist yet here, so the next-step sentence replaces it instead
-    // of competing with it.
-    this.#footerLine.content =
-      log.entries.length === 0
-        ? 'The first hypothesis appears once the orchestrator forms one.'
-        : `${position} · ${hint}`;
+    this.#followSelection(plan.selectedRenderIndex, plan.renderedRows);
+    this.#footerLine.content = plan.footer;
   }
 
   #renderDetail(entry: HypothesisEntry, state: SessionState): void {
@@ -365,7 +356,7 @@ export class ExperimentLogView {
     }
     this.#renderRoundDesign(state, selectedRound);
     this.#footerLine.content =
-      '↑↓: select round · Enter or click: open trajectory · Esc: hypotheses';
+      '↑↓: select round · Enter or click: open trajectory · d: diff · Esc: hypotheses';
   }
 
   /**
@@ -913,15 +904,11 @@ export function hypothesisMetadata(entry: HypothesisEntry): string {
  * direction as words, then the absolute value, its baseline, and the causal
  * delta the table compresses into one cell.
  */
+
 function measurementMetadata(entry: HypothesisEntry): string[] {
   const parts: string[] = [];
   const name = entry.perf_metric_name ?? null;
-  const direction =
-    entry.perf_direction === 'max'
-      ? 'maximize'
-      : entry.perf_direction === 'min'
-        ? 'minimize'
-        : null;
+  const direction = measurementDirection(entry.perf_direction);
   if (name !== null) parts.push(`Metric ${name}${direction === null ? '' : ` (${direction})`}`);
   else if (direction !== null) parts.push(`Direction ${direction}`);
   // Legacy rounds recorded the metric name as the unit; once the name clause
@@ -945,6 +932,98 @@ function measurementMetadata(entry: HypothesisEntry): string[] {
   const reason = deltaReasonLabel(entry.perf_delta_reason);
   if (reason !== null) parts.push(reason);
   return parts;
+}
+
+function planLogRenderMode(state: SessionState): LogRenderMode {
+  const detail = detailedHypothesis(state);
+  if (detail !== null) return {kind: 'detail', entry: detail};
+  const log = state.experimentLog;
+  if (log?.error !== null && log?.error !== undefined) return {kind: 'error', message: log.error};
+  if (log?.pending === true) return {kind: 'loading'};
+  const activity = hypothesisPlanningActivity(state);
+  const unowned = unownedExperimentRounds(state);
+  if (log?.entries.length === 0 && activity !== null && unowned.length === 0)
+    return {kind: 'kickoff', activity};
+  if (log?.entries.length === 0 && unowned.length === 0) return {kind: 'empty'};
+  return {kind: 'table'};
+}
+
+function planTable(state: SessionState, bodyWidth: number): TablePlan | null {
+  const log = state.experimentLog;
+  if (log === null) return null;
+  const columns = resolveColumns(bodyWidth);
+  const items = experimentIndexItems(state);
+  const selected = selectedExperimentIndexItem(state);
+  const rowPlan = planTableRows(log.entries, items, selected?.key);
+  const selectedIndex = selected === null ? 0 : items.findIndex(item => item.key === selected.key);
+  const position = `${Math.max(0, selectedIndex) + 1}/${items.length}`;
+  const hint =
+    bodyWidth >= HINT_MIN_WIDTH
+      ? '↑↓ or scroll: select · Enter or click: open hypothesis'
+      : '↑↓ · Enter';
+  return {
+    columns,
+    header: headerRow(columns, measuredDirection(log.entries)),
+    rows: rowPlan.rows,
+    selectedRenderIndex: rowPlan.selectedRenderIndex,
+    renderedRows: rowPlan.renderedRows,
+    footer:
+      log.entries.length === 0
+        ? 'The first hypothesis appears once the orchestrator forms one.'
+        : `${position} · ${hint}`,
+  };
+}
+
+function planTableRows(
+  entries: readonly HypothesisEntry[],
+  items: readonly ExperimentIndexItem[],
+  selectedKey: string | undefined,
+): Pick<TablePlan, 'rows' | 'selectedRenderIndex' | 'renderedRows'> {
+  const rows: TableRowPlan[] = [];
+  let selectedRenderIndex = 0;
+  let renderedRows = 0;
+  for (const [index, item] of items.entries()) {
+    const selected = item.key === selectedKey;
+    const itemRows = tableRowsForItem(item, index, entries, selected);
+    rows.push(...itemRows);
+    if (selected) selectedRenderIndex = renderedRows + (item.kind === 'activity' ? 1 : 0);
+    renderedRows += itemRows.length;
+  }
+  return {rows, selectedRenderIndex, renderedRows};
+}
+
+function tableRowsForItem(
+  item: ExperimentIndexItem,
+  index: number,
+  entries: readonly HypothesisEntry[],
+  selected: boolean,
+): TableRowPlan[] {
+  if (item.kind === 'hypothesis') {
+    return [
+      {
+        kind: 'hypothesis',
+        entry: item.entry,
+        key: item.key,
+        index: entries.indexOf(item.entry),
+        selected,
+      },
+    ];
+  }
+  if (item.kind === 'round') {
+    return [{kind: 'round', roundNumber: item.roundNumber, index, selected}];
+  }
+  return [
+    {kind: 'activity-heading'},
+    {kind: 'activity', item, existingHypotheses: entries.length, selected},
+  ];
+}
+
+function measurementDirection(
+  direction: HypothesisEntry['perf_direction'],
+): 'maximize' | 'minimize' | null {
+  if (direction === 'max') return 'maximize';
+  if (direction === 'min') return 'minimize';
+  return null;
 }
 
 /**

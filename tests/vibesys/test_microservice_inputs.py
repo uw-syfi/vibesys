@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from vibesys.evaluators import PROJECT_ROOT_TOKEN
-from vibesys.input_manifest import InputBundle, load_input_bundle, load_project_task
+from vibesys.input_manifest import InputBundle, load_project_task
 from vs_project import Project, ProjectLayoutError
 
 PROJECT_ROOT = Path(__file__).parents[2]
@@ -15,23 +15,31 @@ MICROSERVICE_ROOT = PROJECT_ROOT / "examples" / "microservices"
 DEATHSTAR_ROOT = MICROSERVICE_ROOT / "repositories" / "deathstarbench"
 # The DeathStarBench tasks live in a submodule, so a plain checkout does not
 # have them and these assertions skip. CI's ``validate-examples`` job fetches
-# the ``.vibesys`` overlay and sets this, turning a missing overlay into a
+# the ``.vibesys`` directory and sets this, turning a missing external repository into a
 # failure rather than a silent loss of coverage.
-_REQUIRE_EXAMPLE_OVERLAYS = os.environ.get("VIBESYS_REQUIRE_EXAMPLE_OVERLAYS") == "1"
+_REQUIRE_EXAMPLE_EXTERNAL_REPOS = os.environ.get("VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS") == "1"
 try:
     DEATHSTAR_LAYOUT = Project.open(DEATHSTAR_ROOT)
     DEATHSTAR_LAYOUT.discover_tasks()
 except ProjectLayoutError as error:
-    if _REQUIRE_EXAMPLE_OVERLAYS:
+    if _REQUIRE_EXAMPLE_EXTERNAL_REPOS:
         raise
     pytest.skip(
         f"DeathStarBench repository example is not initialized: {error}"
-        " (set VIBESYS_REQUIRE_EXAMPLE_OVERLAYS=1 to force)",
+        " (set VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS=1 to force)",
         allow_module_level=True,
     )
 DEATHSTAR_TASKS = {task.name.value: task for task in DEATHSTAR_LAYOUT.discover_tasks()}
-LEGACY_SCENARIOS = (MICROSERVICE_ROOT / "train-ticket",)
+TRAIN_TICKET_TASK = MICROSERVICE_ROOT / "train-ticket" / ".vibesys" / "tasks" / "default"
+HOTEL_CORRECTNESS_ROOT = MICROSERVICE_ROOT / "hotel-correctness"
 HOTEL_TEMP_ROOT = Path("/") / "tmp" / "vibesys-hotel-reservation" / "otel"
+HOTEL_OWNER_ROOT = HOTEL_CORRECTNESS_ROOT / ".vibesys" / "tasks" / "compose"
+HOTEL_BENCHMARK_ROOT = HOTEL_OWNER_ROOT / "benchmark"
+
+
+def _train_ticket_bundle() -> InputBundle:
+    project = Project.open(MICROSERVICE_ROOT / "train-ticket")
+    return load_project_task(project, project.select_task(None))
 
 
 def _deathstar_bundle(task_name: str) -> InputBundle:
@@ -42,14 +50,15 @@ def _adjacent_pairs(command: tuple[str, ...]) -> set[tuple[str, str]]:
     return set(pairwise(command))
 
 
-def test_legacy_microservice_scenario_uses_source_evaluator() -> None:
-    bundle = load_input_bundle(MICROSERVICE_ROOT / "train-ticket")
+def test_train_ticket_benchmark_uses_packaged_evaluator() -> None:
+    bundle = _train_ticket_bundle()
 
-    assert bundle.evaluator_path == PROJECT_ROOT / "resources" / "evaluators" / "microservice"
+    assert bundle.evaluator_path is None
+    assert bundle.evaluator_package_digest is not None
     assert bundle.benchmark_command[:5] == (
         "go",
         "-C",
-        "_evaluator/microservice",
+        str(PROJECT_ROOT / "resources" / "evaluators" / "microservice"),
         "run",
         "./cmd/servicebench",
     )
@@ -87,16 +96,17 @@ def test_microservice_scenarios_are_discovered() -> None:
         "hotel-reservation",
         "social-network-read-timeline",
     }
-    assert {path.name for path in LEGACY_SCENARIOS} == {"train-ticket"}
+    assert TRAIN_TICKET_TASK.is_dir()
+    assert HOTEL_CORRECTNESS_ROOT.is_dir()
 
 
-def test_train_ticket_accuracy_uses_source_evaluator() -> None:
-    bundle = load_input_bundle(MICROSERVICE_ROOT / "train-ticket")
+def test_train_ticket_accuracy_uses_packaged_evaluator() -> None:
+    bundle = _train_ticket_bundle()
 
     assert bundle.accuracy_command[:5] == (
         "go",
         "-C",
-        "_evaluator/microservice",
+        str(PROJECT_ROOT / "resources" / "evaluators" / "microservice"),
         "run",
         "./cmd/servicebench",
     )
@@ -104,13 +114,24 @@ def test_train_ticket_accuracy_uses_source_evaluator() -> None:
 
 
 def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() -> None:
-    bundle = _deathstar_bundle("hotel-reservation")
+    project = Project.open(HOTEL_CORRECTNESS_ROOT)
+    task = next(task for task in project.discover_tasks() if task.name.value == "compose")
+    bundle = load_project_task(project, task)
     accuracy_pairs = _adjacent_pairs(bundle.accuracy_command)
     benchmark_pairs = _adjacent_pairs(bundle.benchmark_command)
-    assert bundle.accuracy_command[:5] == (
+    package = PROJECT_ROOT / "resources" / "evaluators" / "microservice"
+    assert bundle.evaluator_path is None
+    assert bundle.evaluator_package_digest is not None
+    assert bundle.accuracy_command[:4] == (
+        "${PYTHON}",
+        "${PROJECT_ROOT}/.vibesys/tasks/compose/evaluator/run.py",
+        "--package-root",
+        str(package),
+    )
+    assert bundle.benchmark_command[:5] == (
         "go",
         "-C",
-        str(PROJECT_ROOT / "resources" / "evaluators" / "microservice"),
+        str(package),
         "run",
         "./cmd/servicebench",
     )
@@ -120,11 +141,15 @@ def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() ->
     assert ("--fixture-seed", "random") in benchmark_pairs
     assert (
         "--candidate-dir",
-        f"{PROJECT_ROOT_TOKEN}/hotelReservation",
+        f"{PROJECT_ROOT_TOKEN}/deathstarbench/hotelReservation",
     ) in accuracy_pairs
     assert (
         "--workload",
-        f"{PROJECT_ROOT_TOKEN}/.vibesys/tasks/hotel-reservation/benchmark/workload.toml",
+        f"{PROJECT_ROOT_TOKEN}/.vibesys/tasks/compose/benchmark/workload.toml",
+    ) in accuracy_pairs
+    assert (
+        "--workload",
+        f"{PROJECT_ROOT_TOKEN}/.vibesys/tasks/compose/benchmark/workload.toml",
     ) in benchmark_pairs
     assert (
         "--run-command-json",
@@ -132,7 +157,7 @@ def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() ->
     ) in accuracy_pairs
     assert (
         "--stop-command-json",
-        '["docker","compose","stop","-t","10","frontend","geo","profile","rate",'
+        '["docker","compose","kill","frontend","geo","profile","rate",'
         '"recommendation","reservation","search","user"]',
     ) in accuracy_pairs
     assert (
@@ -151,14 +176,27 @@ def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() ->
     run_argv = json.loads(run_command)
     assert run_argv[:2] == ["sh", "-c"]
     assert 'go -C "$1" run ./cmd/otelinject' in run_argv[2]
-    assert run_argv[4] == str(PROJECT_ROOT / "resources" / "evaluators" / "microservice")
-    assert run_argv[5] == f"{PROJECT_ROOT_TOKEN}/hotelReservation/docker-compose.yml"
+    assert run_argv[4] == str(package)
+    assert run_argv[5] == (
+        f"{PROJECT_ROOT_TOKEN}/deathstarbench/hotelReservation/docker-compose.yml"
+    )
+    assert run_argv[6] == f"{PROJECT_ROOT_TOKEN}/.vibesys/tasks/compose/benchmark/telemetry.toml"
+    assert (HOTEL_BENCHMARK_ROOT / "workload.toml").is_file()
+    assert (HOTEL_BENCHMARK_ROOT / "telemetry.toml").is_file()
+    assert (HOTEL_OWNER_ROOT / "evaluator" / "go.mod").is_file()
+    assert (HOTEL_OWNER_ROOT / "evaluator" / "runtime.mod").is_file()
+    assert (HOTEL_OWNER_ROOT / "evaluator" / "cmd" / "hotel-correctness" / "main.go").is_file()
+    assert bundle.manifest.workspace is not None
+    assert bundle.manifest.workspace.sources[0].commit == (
+        "867806e575e1f7fb24437ae969910ddb17a76121"
+    )
+    assert bundle.manifest.workspace.sources[0].dest == "deathstarbench"
 
 
 @pytest.mark.parametrize(
     "scenario_path",
     [
-        MICROSERVICE_ROOT / "train-ticket",
+        TRAIN_TICKET_TASK,
         DEATHSTAR_TASKS["hotel-reservation"].path,
         DEATHSTAR_TASKS["social-network-read-timeline"].path,
     ],

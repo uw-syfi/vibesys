@@ -1,0 +1,8 @@
+# The checker, benchmark, and profiler scripts use only the Python standard
+# library (argparse, json, os, subprocess, statistics, ...). No third-party
+# Python packages are required.
+#
+# System / toolchain prerequisites (NOT pip-installable) are documented in
+# README.md: a Rust toolchain (cargo, offline against the warm ~/.cargo cache);
+# valgrind + callgrind_annotate for the profiler; and a nightly Rust toolchain
+# with rust-src for the ThreadSanitizer gate.

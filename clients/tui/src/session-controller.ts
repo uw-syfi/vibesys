@@ -1,5 +1,6 @@
 import {
   type EventSubscription,
+  type ExperimentCursor,
   PersistentEventStream,
   type ProtocolResponse,
   type RequestInput,
@@ -12,6 +13,20 @@ import {
 import {DEFAULT_CHAT_THREAD_ID, hasRunEnded} from '@vibesys/core-state';
 import type {StartupTrace} from './boot-trace.js';
 import {chatHelpText, helpText, type ParsedCommand, parseCommand} from './commands.js';
+import {
+  applyDiffPatch,
+  closeDiffViewer,
+  currentDiffFile,
+  type DiffPatchKey,
+  type DiffRoundRange,
+  diffRangeExplanation,
+  diffRoundRange,
+  failDiffPatch,
+  markDiffPatchLoading,
+  moveDiffFile,
+  moveDiffHunk,
+  openDiffViewer,
+} from './diff-viewer.js';
 import {renderPerformanceCurve} from './performance-chart.js';
 import {
   activeChatThreadSettings,
@@ -47,6 +62,7 @@ import {
   leaveHypothesisDetail,
   markEventStreamAvailable,
   markEventStreamUnavailable,
+  mergeExperimentEntries,
   moveChatMenuSelection,
   moveExperimentSelection,
   moveHypothesisRoundSelection,
@@ -78,8 +94,10 @@ import {
   setChatMenuCustomModel,
   setChatModelMenuOptions,
   setChatThreadPending,
+  setChatWidthOverride,
   setDesignLog,
   setExperiments,
+  setGraphWidthOverride,
   setPaneContent,
   setTheme,
   showDetail,
@@ -127,6 +145,10 @@ export interface SessionController {
   focusRound(focus: RoundFocus): void;
   selectNextTodo(delta: number): void;
   toggleTodos(): void;
+  /** `<`/`>`: the Agents pane's explicit column width, already clamped; `=`: null. */
+  setGraphWidthOverride(width: number | null): void;
+  /** `<`/`>`: the docked chat pane's explicit column width, already clamped; `=`: null. */
+  setChatWidthOverride(width: number | null): void;
   /** Expands the latest prompt in view; the view owns what "latest" means. */
   togglePrompt(): void;
   onTogglePrompt(handler: () => void): void;
@@ -149,6 +171,17 @@ export interface SessionController {
   enterExperimentDrilldown(): void;
   leaveExperimentDrilldown(): void;
   leaveHypothesisDetail(): void;
+  /**
+   * `d`: the diff viewer on one round's recorded commit range. Without a
+   * round it opens the drill-down's selected round, or the newest round the
+   * design log can diff.
+   */
+  openRoundDiff(roundNumber?: number): void;
+  closeDiffViewer(): void;
+  /** `←`/`→` in the diff viewer: the previous/next changed file. */
+  moveDiffFile(delta: number): void;
+  /** `↑`/`↓` in the diff viewer: the previous/next hunk of the patch. */
+  moveDiffHunk(delta: number): void;
   openThemePicker(): void;
   moveThemeSelection(delta: number): void;
   applySelectedTheme(): void;
@@ -187,6 +220,8 @@ const BACKFILL_CHUNK = 1_000;
  * outage gets the full schedule again.
  */
 const RECONNECT_DELAYS_MS: readonly number[] = [500, 1_000, 2_000, 4_000, 8_000];
+type EventBatchMessage = Extract<ServerMessage, {events: RunEvent[]}>;
+type ProtocolErrorMessage = Extract<ServerMessage, {message: string}>;
 
 export class SocketSessionController implements SessionController {
   #state: SessionState;
@@ -198,6 +233,14 @@ export class SocketSessionController implements SessionController {
   /** Single-flight guard for semantic experiment-log invalidations. */
   #experimentFetch: Promise<void> | null = null;
   #experimentRefreshPending = false;
+  /** Last server projection applied completely to the local experiment log. */
+  #experimentCursor: ExperimentCursor | null = null;
+  /** Highest semantic invalidation observed while connected. */
+  #experimentTarget: Pick<ExperimentCursor, 'run_id' | 'revision'> | null = null;
+  #experimentForceRefresh = false;
+  /** Changes whenever an unknown invalidation makes an in-flight answer stale. */
+  #experimentRefreshGeneration = 0;
+  #streamConnected = false;
   /**
    * When the client first asked for experiments, and whether the answer has
    * been timed yet. The first request can be answered `experiments_ready:
@@ -304,11 +347,20 @@ export class SocketSessionController implements SessionController {
         onConnectionState: state => this.#onConnectionState(state),
       }),
     ]);
+    this.#streamConnected = this.#state.eventStreamAvailable;
   }
 
   #onConnectionState(state: StreamConnectionState): void {
     if (state.status === 'connected') {
+      const reconnected = this.#streamConnected;
+      this.#streamConnected = true;
       this.#setState(markEventStreamAvailable(this.#state));
+      if (reconnected && this.#state.experimentLog !== null) {
+        this.#experimentRefreshGeneration += 1;
+        this.#experimentForceRefresh = true;
+        if (this.#experimentFetch !== null) this.#experimentRefreshPending = true;
+        void this.#loadExperiments();
+      }
     } else {
       this.#setState(
         reportCaughtError(markEventStreamUnavailable(this.#state), state.error, 'transport'),
@@ -445,6 +497,14 @@ export class SocketSessionController implements SessionController {
 
   toggleTodos(): void {
     this.#setState(toggleTodos(this.#state));
+  }
+
+  setGraphWidthOverride(width: number | null): void {
+    this.#setState(setGraphWidthOverride(this.#state, width));
+  }
+
+  setChatWidthOverride(width: number | null): void {
+    this.#setState(setChatWidthOverride(this.#state, width));
   }
 
   setTheme(themeName: ThemeName): void {
@@ -763,6 +823,83 @@ export class SocketSessionController implements SessionController {
     this.#setState(leaveHypothesisDetail(this.#state));
   }
 
+  openRoundDiff(roundNumber?: number): void {
+    const resolved = this.#resolveDiffRange(roundNumber);
+    if (typeof resolved === 'string') {
+      // Nothing to diff is an answer, not an error: the explanation goes in
+      // the same detail overlay a command's answer would.
+      this.#setState(showDetail(this.#state, resolved));
+      return;
+    }
+    this.#setState(openDiffViewer(this.#state, resolved));
+    void this.#ensureDiffPatch();
+  }
+
+  closeDiffViewer(): void {
+    this.#setState(closeDiffViewer(this.#state));
+  }
+
+  moveDiffFile(delta: number): void {
+    this.#setState(moveDiffFile(this.#state, delta));
+    void this.#ensureDiffPatch();
+  }
+
+  moveDiffHunk(delta: number): void {
+    this.#setState(moveDiffHunk(this.#state, delta));
+  }
+
+  /**
+   * The round the viewer opens: the named round, else the drill-down's
+   * selected round, else the newest round the design log can diff. Returns
+   * the explanation to show instead when no range can be diffed.
+   */
+  #resolveDiffRange(roundNumber: number | undefined): DiffRoundRange | string {
+    const rounds = this.#state.designLog;
+    if (rounds === null || rounds.length === 0) {
+      return 'No design rounds have loaded yet, so there is no diff to open.';
+    }
+    const selected = roundNumber ?? this.#state.hypothesisDetail?.selectedRound ?? null;
+    if (selected !== null) {
+      const round = rounds.find(candidate => candidate.round === selected);
+      if (round === undefined) return `Round ${selected} has no recorded design changes.`;
+      return diffRoundRange(round) ?? diffRangeExplanation(round);
+    }
+    for (let index = rounds.length - 1; index >= 0; index -= 1) {
+      const round = rounds[index];
+      if (round === undefined) continue;
+      const range = diffRoundRange(round);
+      if (range !== null) return range;
+    }
+    return 'No recorded round has a commit range to diff.';
+  }
+
+  /**
+   * Fetches the patch for the file the viewer is on, at most once per file:
+   * the slot `markDiffPatchLoading` claims doubles as the in-flight guard, so
+   * revisiting a file rerenders what it already holds and only an unvisited
+   * file costs a query. A failure lands in the slot as an explanation rather
+   * than the error banner: the viewer is modal, so its own body is where the
+   * operator is looking.
+   */
+  async #ensureDiffPatch(): Promise<void> {
+    const viewer = this.#state.diffViewer;
+    const file = viewer === null ? null : currentDiffFile(viewer);
+    if (viewer === null || file === null || viewer.patches[file.path] !== undefined) return;
+    const key: DiffPatchKey = {base: viewer.base, head: viewer.head, path: file.path};
+    this.#setState(markDiffPatchLoading(this.#state, file.path));
+    try {
+      const response = await this.client.request({type: 'query.design_patch', ...key});
+      const patch = response.design_patch ?? null;
+      this.#setState(
+        patch === null
+          ? failDiffPatch(this.#state, key, 'The run has not attached yet.')
+          : applyDiffPatch(this.#state, patch),
+      );
+    } catch (error) {
+      this.#setState(failDiffPatch(this.#state, key, errorMessage(error)));
+    }
+  }
+
   async #loadExperiments(): Promise<void> {
     this.#experimentsRequestedAt ??= performance.now();
     if (this.#experimentFetch !== null) return this.#experimentFetch;
@@ -778,12 +915,59 @@ export class SocketSessionController implements SessionController {
   }
 
   async #requestExperiments(): Promise<void> {
+    const generation = this.#experimentRefreshGeneration;
     try {
-      const response = await this.client.request({type: 'query.experiments'});
+      const response = await this.client.request({
+        type: 'query.experiments',
+        ...(this.#experimentCursor === null ? {} : {after: this.#experimentCursor}),
+      });
       if (response.experiments_ready === false) return;
       const entries = response.experiments ?? [];
-      this.#setState(setExperiments(this.#state, entries));
-      this.#traceExperimentsLoaded(entries.length);
+      const update = response.experiment_update;
+      if (this.#experimentResponseStale(generation, update)) {
+        this.#experimentRefreshPending = true;
+        return;
+      }
+      if (update === undefined || update === null) {
+        this.#experimentCursor = null;
+        this.#experimentTarget = null;
+        this.#experimentForceRefresh = false;
+        this.#setState(setExperiments(this.#state, entries));
+      } else if (update.reset) {
+        this.#experimentCursor = {
+          run_id: update.run_id,
+          projection_id: update.projection_id,
+          revision: update.through_revision,
+        };
+        this.#clearSatisfiedExperimentTarget();
+        this.#setState(setExperiments(this.#state, entries));
+      } else if (
+        this.#experimentCursor === null ||
+        this.#experimentCursor.run_id !== update.run_id ||
+        this.#experimentCursor.projection_id !== update.projection_id ||
+        this.#experimentCursor.revision !== update.from_revision
+      ) {
+        // Never apply a delta to an unproven base. The queued cursor-free
+        // request deterministically recovers with a full server snapshot.
+        this.#experimentCursor = null;
+        this.#experimentForceRefresh = true;
+        this.#experimentRefreshPending = true;
+        return;
+      } else {
+        this.#experimentCursor = {
+          run_id: update.run_id,
+          projection_id: update.projection_id,
+          revision: update.through_revision,
+        };
+        this.#clearSatisfiedExperimentTarget();
+        const merged = mergeExperimentEntries(
+          this.#state.experimentLog?.entries ?? [],
+          entries,
+          update.removed_hypothesis_ids ?? [],
+        );
+        this.#setState(setExperiments(this.#state, merged));
+      }
+      this.#traceExperimentsLoaded(this.#state.experimentLog?.entries.length ?? entries.length);
     } catch (error) {
       const message = errorMessage(error);
       this.#setState(reportCaughtError(failExperiments(this.#state, message), error, 'request'));
@@ -1051,87 +1235,97 @@ export class SocketSessionController implements SessionController {
   }
 
   #onMessage(message: ServerMessage, resumed: boolean): void {
-    if (message.type === 'event') {
+    const events = this.#dispatchMessage(message, resumed);
+    if (events === null) return;
+    this.#refreshExperimentsFor(events);
+    this.#refreshPaneFor(events);
+  }
+
+  #dispatchMessage(message: ServerMessage, resumed: boolean): readonly RunEvent[] | null {
+    if ('event' in message) {
       this.#setState(applyEvent(this.#state, message.event));
-      this.#refreshExperimentsFor([message.event]);
-      this.#refreshPaneFor([message.event]);
+      return [message.event];
     }
-    if (message.type === 'event_batch') {
-      if (resumed) {
-        const store = message.store_id ?? '';
-        const knownStoreChanged = Boolean(this.#storeId && store && store !== this.#storeId);
-        if (knownStoreChanged) {
-          // The run swapped its durable log while the stream was severed. The
-          // resume named the store we last folded, so the server dropped our
-          // cursor and replayed the live store from its floor: this batch
-          // supersedes the fold rather than extending it, exactly as a
-          // mid-stream swap does on the boot dial.
-          const declared = message.history_after_sequence ?? 0;
-          this.#storeId = store;
-          this.#declaredFloor = declared;
-          this.#setState(
-            applyEventRebootstrap(
-              this.#state,
-              message.events,
-              message.active_executions,
-              message.through_sequence,
-              this.#resetHistoryFloor(declared),
-            ),
-          );
-          this.#recordSpine(message.events, declared);
-        } else {
-          if (store) this.#storeId = store;
-          // A resumed subscription replays exactly the events after the
-          // client's own cursor and declares no history floor of its own
-          // (`history_after_sequence` 0 on every batch). Taking that literally
-          // would mark history complete and quietly break scroll-back, so the
-          // floor bookkeeping keeps the boot subscription's answers and the
-          // batch folds at the floor already in state.
-          this.#setState(
-            applyEventBatch(
-              this.#state,
-              message.events,
-              message.active_executions,
-              message.through_sequence,
-              this.#state.core.historyAfterSequence,
-            ),
-          );
-        }
-      } else {
-        const declared = message.history_after_sequence ?? 0;
-        const store = message.store_id ?? '';
-        const rebootstrap =
-          (this.#storeId !== null && store !== this.#storeId) ||
-          (this.#declaredFloor !== null && declared > this.#declaredFloor);
-        this.#storeId = store;
-        this.#declaredFloor = declared;
-        const floor = rebootstrap
-          ? this.#resetHistoryFloor(declared)
-          : this.#lowerHistoryFloor(declared);
-        const apply = rebootstrap ? applyEventRebootstrap : applyEventBatch;
-        this.#setState(
-          apply(
-            this.#state,
-            message.events,
-            message.active_executions,
-            message.through_sequence,
-            floor,
-          ),
-        );
-        this.#recordSpine(message.events, declared);
-      }
-      this.#refreshExperimentsFor(message.events);
-      this.#refreshPaneFor(message.events);
+    if ('events' in message) {
+      this.#reconcileBatch(message, resumed);
+      return message.events;
     }
-    if (message.type === 'protocol_error') {
-      this.#streamProtocolError = true;
+    if (!('message' in message)) return null;
+    const protocolError = message as ProtocolErrorMessage;
+    this.#streamProtocolError = true;
+    this.#setState(
+      reportError(markEventStreamUnavailable(this.#state), protocolError.message, {
+        scope: 'protocol',
+        diagnostic: protocolError.diagnostic ?? null,
+      }),
+    );
+    return null;
+  }
+
+  #reconcileBatch(message: EventBatchMessage, resumed: boolean): void {
+    if (resumed) {
+      this.#reconcileResumedBatch(message);
+      return;
+    }
+    this.#reconcileFreshBatch(message);
+  }
+
+  #reconcileResumedBatch(message: EventBatchMessage): void {
+    const store = message.store_id ?? '';
+    const knownStoreChanged = Boolean(this.#storeId && store && store !== this.#storeId);
+    if (knownStoreChanged) {
+      // A changed store invalidates the cursor and its folded state. The
+      // resumed batch is therefore a fresh bootstrap, including spine tracking.
+      const declared = message.history_after_sequence ?? 0;
+      this.#storeId = store;
+      this.#declaredFloor = declared;
       this.#setState(
-        reportError(markEventStreamUnavailable(this.#state), message.message, {
-          scope: 'protocol',
-          diagnostic: message.diagnostic ?? null,
-        }),
+        applyEventRebootstrap(
+          this.#state,
+          message.events,
+          message.active_executions,
+          message.through_sequence,
+          this.#resetHistoryFloor(declared),
+        ),
       );
+      this.#recordSpine(message.events, declared);
+      return;
     }
+    if (store) this.#storeId = store;
+    // Resumed batches declare no new floor. Keep the current floor so
+    // scrollback remains available after reconnecting.
+    this.#setState(
+      applyEventBatch(
+        this.#state,
+        message.events,
+        message.active_executions,
+        message.through_sequence,
+        this.#state.core.historyAfterSequence,
+      ),
+    );
+  }
+
+  #reconcileFreshBatch(message: EventBatchMessage): void {
+    const declared = message.history_after_sequence ?? 0;
+    const store = message.store_id ?? '';
+    const rebootstrap =
+      (this.#storeId !== null && store !== this.#storeId) ||
+      (this.#declaredFloor !== null && declared > this.#declaredFloor);
+    this.#storeId = store;
+    this.#declaredFloor = declared;
+    const floor = rebootstrap
+      ? this.#resetHistoryFloor(declared)
+      : this.#lowerHistoryFloor(declared);
+    this.#setState(
+      (rebootstrap ? applyEventRebootstrap : applyEventBatch)(
+        this.#state,
+        message.events,
+        message.active_executions,
+        message.through_sequence,
+        floor,
+      ),
+    );
+    this.#recordSpine(message.events, declared);
   }
 
   /**
@@ -1182,10 +1376,67 @@ export class SocketSessionController implements SessionController {
    */
   #refreshExperimentsFor(events: readonly RunEvent[]): void {
     if (this.#state.experimentLog === null) return;
-    const relevant = events.some(event => event.type === 'experiments_changed');
-    if (!relevant) return;
+    let relevant = false;
+    for (const event of events) {
+      if (event.type !== 'experiments_changed') continue;
+      relevant = true;
+      this.#noteExperimentsChanged(event);
+    }
+    if (!relevant || !this.#experimentRefreshNeeded()) return;
     if (this.#experimentFetch !== null) this.#experimentRefreshPending = true;
     void this.#loadExperiments();
+  }
+
+  /** True when a response was fetched for an older refresh or for another run's cursor. */
+  #experimentResponseStale(
+    generation: number,
+    update: {run_id: string} | null | undefined,
+  ): boolean {
+    return (
+      generation !== this.#experimentRefreshGeneration ||
+      (update !== undefined &&
+        update !== null &&
+        this.#experimentTarget !== null &&
+        this.#experimentTarget.run_id !== update.run_id)
+    );
+  }
+
+  #noteExperimentsChanged(event: RunEvent): void {
+    const revision = event.data?.kind === 'experiments_changed' ? event.data.revision : null;
+    const runId = event.run_id ?? this.#experimentCursor?.run_id;
+    if (revision === undefined || revision === null || runId === undefined) {
+      this.#experimentRefreshGeneration += 1;
+      this.#experimentForceRefresh = true;
+    } else if (
+      this.#experimentTarget === null ||
+      this.#experimentTarget.run_id !== runId ||
+      revision > this.#experimentTarget.revision
+    ) {
+      this.#experimentTarget = {run_id: runId, revision};
+    }
+  }
+
+  #experimentRefreshNeeded(): boolean {
+    if (this.#experimentForceRefresh) return true;
+    if (this.#experimentTarget === null || this.#experimentCursor === null) return true;
+    return (
+      this.#experimentTarget.run_id !== this.#experimentCursor.run_id ||
+      this.#experimentTarget.revision > this.#experimentCursor.revision
+    );
+  }
+
+  #clearSatisfiedExperimentTarget(): void {
+    const cursor = this.#experimentCursor;
+    const target = this.#experimentTarget;
+    if (
+      cursor !== null &&
+      target !== null &&
+      cursor.run_id === target.run_id &&
+      cursor.revision >= target.revision
+    ) {
+      this.#experimentTarget = null;
+    }
+    this.#experimentForceRefresh = false;
   }
 
   #setState(state: SessionState): void {

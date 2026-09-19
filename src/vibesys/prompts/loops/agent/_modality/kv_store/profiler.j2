@@ -6,7 +6,7 @@ A CPU-bound TCP server; key axes are **throughput** (ops/sec), **p99 latency** (
 
 1. Start the server: `./run.sh 6380 &`
 2. Find its PID: `PID=$(lsof -ti tcp:6380 -s tcp:LISTEN)`
-3. Drive load in the background: `uv run python {{ bench_path }}/benchmark.py --port 6380 &`
+3. Drive load in the background: `{{ benchmark_command }} --port 6380 &`
 4. Sample it:
    - Python: `py-spy record -o /tmp/profile.svg --pid $PID --duration 10`
    - Native (C / Rust / Go): `perf record -p $PID -g -- sleep 10 && perf report`

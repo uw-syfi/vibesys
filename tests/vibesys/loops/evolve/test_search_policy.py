@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 import shutil
 from collections.abc import Iterable, Iterator  # noqa: TC003  # tracked: #288
@@ -35,7 +36,7 @@ def _individual(
     *,
     parent_id: int | None = None,
     generation: int = 0,
-    perf: float = 10.0,
+    perf: float | None = 10.0,
     metrics: dict[str, float] | None = None,
 ) -> Individual:
     return Individual(
@@ -496,6 +497,37 @@ def test_primary_min_objective_is_signed_for_openevolve_fitness(tmp_path) -> Non
     )
 
     assert policy._database.programs["vibesys-1"].metrics["combined_score"] == -20.0  # noqa: SLF001  # tracked: #288
+
+
+@pytest.mark.parametrize(
+    ("objective", "expected"),
+    [
+        (Objective(name="latency_ms", direction="max"), 20.0),
+        (Objective(name="latency_ms", direction="min"), -20.0),
+    ],
+)
+def test_primary_direction_signs_openevolve_perf_fallback(
+    objective: Objective,
+    expected: float,
+) -> None:
+    space = MetricSpace(objectives=(objective,))
+    individual = _individual(1, perf=20.0)
+
+    assert OpenEvolveSearchPolicy._combined_score(individual, space) == expected  # noqa: SLF001
+
+
+def test_zero_perf_fallback_is_still_oriented_by_min_primary() -> None:
+    space = MetricSpace(objectives=(Objective(name="latency_ms", direction="min"),))
+    individual = _individual(1, perf=0.0)
+
+    score = OpenEvolveSearchPolicy._combined_score(individual, space)  # noqa: SLF001
+    assert math.copysign(1.0, score) == -1.0
+
+
+def test_missing_perf_fallback_stays_neutral() -> None:
+    space = MetricSpace(objectives=(Objective(name="latency_ms", direction="min"),))
+
+    assert OpenEvolveSearchPolicy._combined_score(_individual(1, perf=None), space) == 0.0  # noqa: SLF001
 
 
 @pytest.mark.parametrize(

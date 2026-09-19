@@ -7,11 +7,11 @@ import zipfile
 from typing import TYPE_CHECKING
 
 import pytest
-from packaging.version import Version
-from scripts.check_release_version import (
+from check_release_version import (
     ReleaseVersionError,
     check_release_version,
 )
+from packaging.version import Version
 from wheel_targets import TARGETS
 
 if TYPE_CHECKING:

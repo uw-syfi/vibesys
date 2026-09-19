@@ -1,0 +1,16 @@
+version = 1
+
+[agent]
+domain = "generic"
+
+[accuracy]
+command = ["uv", "run", "python", ".vibesys/tasks/default/accuracy_checker/checker.py"]
+timeout_seconds = 120
+
+[benchmark]
+command = ["uv", "run", "python", ".vibesys/tasks/default/benchmark/benchmark.py"]
+timeout_seconds = 300
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "throughput_ops_per_sec"

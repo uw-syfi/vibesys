@@ -45,15 +45,16 @@ func (c runnerClient) Invoke(ctx context.Context, _ api.Invocation) api.Protocol
 func (runnerClient) Close() error { return nil }
 
 type runnerApplication struct {
-	restart    bool
-	pass       bool
-	probeCount int
-	permissive bool
-	panicCheck bool
-	properties []api.AccuracyProperty
-	minimum    int
-	extra      int
-	capacity   int
+	restart        bool
+	splitLifecycle bool
+	pass           bool
+	probeCount     int
+	permissive     bool
+	panicCheck     bool
+	properties     []api.AccuracyProperty
+	minimum        int
+	extra          int
+	capacity       int
 }
 
 func (runnerApplication) Name() string { return "runner-test" }
@@ -138,6 +139,19 @@ func (a runnerApplication) Check(
 			return errors.New("restart missing")
 		}
 		if err := check.Restart(ctx); err != nil {
+			return err
+		}
+		recorder.AddChecks(1)
+		return recorder.Pass("restart")
+	}
+	if a.splitLifecycle {
+		if check.Crash == nil || check.Start == nil {
+			return errors.New("split lifecycle missing")
+		}
+		if err := check.Crash(ctx); err != nil {
+			return err
+		}
+		if err := check.Start(ctx); err != nil {
 			return err
 		}
 		recorder.AddChecks(1)
@@ -289,6 +303,19 @@ func TestRunnerProvesStopBeforeRestart(t *testing.T) {
 	result := runTestAccuracy(
 		t,
 		runnerApplication{pass: true, restart: true},
+		runnerLifecycle{serving: serving},
+		serving,
+	)
+	if !result.Valid || !result.Properties["restart"] {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestRunnerExposesSeparateCrashAndStart(t *testing.T) {
+	serving := &atomic.Bool{}
+	result := runTestAccuracy(
+		t,
+		runnerApplication{pass: true, splitLifecycle: true},
 		runnerLifecycle{serving: serving},
 		serving,
 	)

@@ -313,7 +313,7 @@ def test_extract_flag_rejects_a_missing_value() -> None:
     assert exc.value.diagnostic.code == "invalid_arguments"
 
 
-@pytest.mark.parametrize("loop", ["agent", "plain", "evolve"])
+@pytest.mark.parametrize("loop", ["agent", "profile-guided", "plain", "evolve"])
 def test_extract_loop_selection(loop: str) -> None:
     selected, rest = _extract_loop_selection(["--outer-loop", loop, "--input", "x"])
     assert selected == loop
@@ -325,6 +325,20 @@ def test_extract_loop_selection_defaults_to_agent_and_rejects_unknown() -> None:
     with pytest.raises(ConfigurationError) as exc:
         _extract_loop_selection(["--outer-loop", "unknown"])
     assert exc.value.diagnostic.stage == "argument_parsing"
+
+
+def test_profile_guided_loop_requires_and_accepts_manifest_capability(tmp_path: Path) -> None:
+    project = _write_input_project(tmp_path)
+    command = ["--outer-loop", "profile-guided", "--input", str(project)]
+    with pytest.raises(ConfigurationError) as exc:
+        parse_cli_invocation(command)
+    assert exc.value.diagnostic.code == "missing_profile_guided_input"
+
+    with (project / "vibesys.input.toml").open("a") as manifest:
+        manifest.write('\n[profile_guided]\ncommand = ["python", "profile.py"]\n')
+    invocation = parse_cli_invocation(command)
+    assert invocation.loop_kind == "profile-guided"
+    assert invocation.args.input_bundle.manifest.profile_guided is not None
 
 
 @pytest.mark.parametrize("loop", ["agent", "plain", "evolve"])

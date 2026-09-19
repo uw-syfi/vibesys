@@ -53,6 +53,11 @@ export interface SessionState {
    */
   roundFocus: RoundFocus;
   overlay: OverlayPanel | null;
+  /**
+   * The modal per-round diff viewer, layered over the overlay in the key
+   * ladder so its Escape closes only the viewer. Null while closed.
+   */
+  diffViewer: DiffViewerState | null;
   chatOpen: boolean;
   /** The thread the chat surfaces show and the composer submits to. */
   activeChatThreadId: string;
@@ -66,6 +71,27 @@ export interface SessionState {
   /** Non-null while the composer's inline command menu is open. */
   chatMenu: ChatMenu | null;
   todosExpanded: boolean;
+  /**
+   * Explicit column width for the Agents pane, set and stepped by `<`/`>` and
+   * cleared by `=`. `null` means automatic: `agent-map.ts#agentPaneWidth`
+   * decides, exactly as it always has, including its no-truncation floor and
+   * the stacked-list fallback on a narrow terminal. Once set it is sticky, so
+   * the pane stops following the terminal and stops growing with longer agent
+   * names until `=` hands it back; an explicit width that drifted would not be
+   * one, and `=` is what keeps that from being a trap. Session-only view state:
+   * it carries no `agent.toml` key and does not persist past this process.
+   */
+  graphWidthOverride: number | null;
+  /**
+   * Explicit column width for the docked chat pane on the home page, set and
+   * stepped by `<`/`>` and cleared by `=`. `null` means automatic:
+   * `chat-pane.ts#chatPaneWidth` decides, exactly as it always has. Mirrors
+   * `graphWidthOverride` above in shape and in the reason it exists: an
+   * explicit width is sticky, and `=` is what keeps that from being a trap.
+   * Session-only view state: it carries no `agent.toml` key and does not
+   * persist past this process.
+   */
+  chatWidthOverride: number | null;
   themeName: ThemeName;
   experimentLog: ExperimentLogState | null;
   /**
@@ -125,8 +151,8 @@ export interface ErrorBannerState {
   count: number;
 }
 
-/** The agent graph on the left, or the transcript on the right. */
-export type RoundFocus = 'agents' | 'transcript';
+/** The rounds rail (a selector, reported as `agents` by `focusedPane`), the graph, or the transcript. */
+export type RoundFocus = 'rounds' | 'agents' | 'transcript';
 
 /**
  * The experiment log is open when this is non-null. Selection is held as a
@@ -270,6 +296,38 @@ export interface OverlayPanel {
   content: string;
 }
 
+/**
+ * One file's patch as the diff viewer holds it. `patch: null` is the server
+ * reporting that the workspace repository could not produce text, which is a
+ * different fact from an empty patch, so the viewer explains the absence
+ * instead of rendering nothing.
+ */
+export type DiffPatchSlot =
+  | {kind: 'loading'}
+  | {kind: 'loaded'; patch: string | null; truncated: boolean}
+  | {kind: 'error'; message: string};
+
+/**
+ * The modal per-round diff viewer. One file is on screen at a time; `files`
+ * is the round's change list exactly as the design log published it, so the
+ * viewer can only ask the server for paths that list already carries. Patches
+ * load lazily as files are visited and stay cached for the life of the
+ * viewer; the reducers live in `diff-viewer.ts`.
+ */
+export interface DiffViewerState {
+  round: number;
+  /** The commit range the design log recorded for the round. */
+  base: string;
+  head: string;
+  files: readonly DesignFileChange[];
+  /** Index into `files` of the file on screen. */
+  index: number;
+  /** Index of the hunk the arrow keys are on within the file's patch. */
+  hunk: number;
+  /** Fetched patches by path; a present slot doubles as the in-flight guard. */
+  patches: Readonly<Record<string, DiffPatchSlot>>;
+}
+
 export interface ConversationEntry {
   id: string;
   kind:
@@ -316,6 +374,7 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     selectedTodoIndex: null,
     roundFocus: 'transcript',
     overlay: null,
+    diffViewer: null,
     chatOpen: false,
     activeChatThreadId: DEFAULT_CHAT_THREAD_ID,
     chatConversation: [],
@@ -324,6 +383,8 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     chatPendingThreads: {},
     chatMenu: null,
     todosExpanded: false,
+    graphWidthOverride: null,
+    chatWidthOverride: null,
     themeName,
     // The experiment log is the landing view: a run's history reads as a short
     // list of claims before it reads as a long list of rounds.
@@ -675,72 +736,129 @@ export function openExperimentLog(state: SessionState): SessionState {
 export function setExperiments(state: SessionState, entries: HypothesisEntry[]): SessionState {
   const log = state.experimentLog;
   if (log === null) return state;
+
   const activity = hypothesisPlanningActivity(state);
-  const selectedActivityRound =
-    log.selectedActivity === true
-      ? (log.selectedActivityRound ?? activity?.roundNumber ?? null)
-      : null;
-  const orderedEntries = [...entries].sort(compareHypothesisEntries);
-  const keys = orderedEntries.map(entryKey);
-  const materializedActivity =
-    selectedActivityRound === null
-      ? undefined
-      : orderedEntries.find(entry => scopeRounds(entry).includes(selectedActivityRound));
-  // Keep the operator's row when it still exists; otherwise fall back to the
-  // active hypothesis, then to the first row.
-  const selectedId =
-    materializedActivity !== undefined
-      ? entryKeyFor(orderedEntries, materializedActivity)
-      : log.selectedId !== null && keys.includes(log.selectedId)
-        ? log.selectedId
-        : (keys[orderedEntries.findIndex(entry => entry.active === true)] ?? keys[0] ?? null);
-  const unownedRounds = unownedExperimentRounds(state, orderedEntries);
-  const currentUnownedRound = log.selectedUnownedRound;
-  const selectedUnownedRound =
-    currentUnownedRound !== undefined &&
-    currentUnownedRound !== null &&
-    unownedRounds.includes(currentUnownedRound)
-      ? currentUnownedRound
-      : orderedEntries.length === 0
-        ? (unownedRounds[0] ?? null)
-        : null;
-  const currentDetail = state.hypothesisDetail;
-  const detailEntry =
-    currentDetail === null
-      ? undefined
-      : orderedEntries.find((entry, index) => entryKey(entry, index) === currentDetail.entryKey);
-  const detailRounds = detailEntry === undefined ? [] : scopeRounds(detailEntry);
-  const hypothesisDetail =
-    currentDetail === null || detailEntry === undefined
-      ? null
-      : {
-          entryKey: currentDetail.entryKey,
-          selectedRound:
-            currentDetail.selectedRound !== null &&
-            detailRounds.includes(currentDetail.selectedRound)
-              ? currentDetail.selectedRound
-              : (detailRounds.at(-1) ?? null),
-        };
+  const indexed = orderAndIndexExperiments(entries);
+  const selection = reconcileExperimentSelection(log, indexed, activity);
+  const unownedRounds = unownedExperimentRounds(state, indexed.entries);
+  const selectedUnownedRound = reconcileUnownedRoundSelection(
+    log.selectedUnownedRound,
+    unownedRounds,
+    indexed.entries.length === 0,
+  );
+  const hypothesisDetail = reconcileHypothesisDetail(state.hypothesisDetail, indexed.entries);
   const refreshed: SessionState = {
     ...state,
     hypothesisDetail,
     experimentLog: {
       ...log,
-      entries: orderedEntries,
-      selectedId,
-      selectedActivity: materializedActivity === undefined && log.selectedActivity === true,
-      selectedActivityRound: materializedActivity === undefined ? selectedActivityRound : null,
+      entries: indexed.entries,
+      ...selection,
       selectedUnownedRound,
       pending: false,
       error: null,
     },
   };
-  if (state.hypothesisScope === null) return refreshed;
+  return refreshLiveHypothesisScope(state, refreshed);
+}
+
+interface IndexedExperiments {
+  entries: HypothesisEntry[];
+  keys: string[];
+}
+
+/** Establish the canonical response order once and retain its stable row identities. */
+function orderAndIndexExperiments(entries: HypothesisEntry[]): IndexedExperiments {
+  const ordered = [...entries].sort(compareHypothesisEntries);
+  return {entries: ordered, keys: ordered.map(entryKey)};
+}
+
+type ExperimentSelection = Pick<
+  ExperimentLogState,
+  'selectedId' | 'selectedActivity' | 'selectedActivityRound'
+>;
+
+/** Reconcile the selected index row, including planning work that became persistent. */
+function reconcileExperimentSelection(
+  log: ExperimentLogState,
+  indexed: IndexedExperiments,
+  activity: HypothesisPlanningActivity | null,
+): ExperimentSelection {
+  const selectedActivityRound =
+    log.selectedActivity === true
+      ? (log.selectedActivityRound ?? activity?.roundNumber ?? null)
+      : null;
+  const materializedActivity =
+    selectedActivityRound === null
+      ? undefined
+      : indexed.entries.find(entry => scopeRounds(entry).includes(selectedActivityRound));
+  // Keep the operator's row when it still exists; otherwise fall back to the
+  // active hypothesis, then to the first row.
+  const selectedId =
+    materializedActivity !== undefined
+      ? entryKeyFor(indexed.entries, materializedActivity)
+      : log.selectedId !== null && indexed.keys.includes(log.selectedId)
+        ? log.selectedId
+        : (indexed.keys[indexed.entries.findIndex(entry => entry.active === true)] ??
+          indexed.keys[0] ??
+          null);
+  return {
+    selectedId,
+    selectedActivity: materializedActivity === undefined && log.selectedActivity === true,
+    selectedActivityRound: materializedActivity === undefined ? selectedActivityRound : null,
+  };
+}
+
+/** Keep an unowned-round cursor only while that row remains in the refreshed index. */
+function reconcileUnownedRoundSelection(
+  current: number | null | undefined,
+  unownedRounds: number[],
+  hasNoHypotheses: boolean,
+): number | null {
+  if (current !== undefined && current !== null && unownedRounds.includes(current)) return current;
+  return hasNoHypotheses ? (unownedRounds[0] ?? null) : null;
+}
+
+/** Keep an open summary on the same hypothesis and fall back to its latest available round. */
+function reconcileHypothesisDetail(
+  currentDetail: HypothesisDetail | null,
+  entries: HypothesisEntry[],
+): HypothesisDetail | null {
+  const detailEntry =
+    currentDetail === null
+      ? undefined
+      : entries.find((entry, index) => entryKey(entry, index) === currentDetail.entryKey);
+  const detailRounds = detailEntry === undefined ? [] : scopeRounds(detailEntry);
+  if (currentDetail === null || detailEntry === undefined) return null;
+  return {
+    entryKey: currentDetail.entryKey,
+    selectedRound:
+      currentDetail.selectedRound !== null && detailRounds.includes(currentDetail.selectedRound)
+        ? currentDetail.selectedRound
+        : (detailRounds.at(-1) ?? null),
+  };
+}
+
+/** Re-derive an open trajectory's scope from the refreshed ownership payload. */
+function refreshLiveHypothesisScope(previous: SessionState, refreshed: SessionState): SessionState {
+  if (previous.hypothesisScope === null) return refreshed;
   // A live scope must describe the fresh payload: a continuation round joins
   // its hypothesis's scope, and a scope whose hypothesis vanished degrades to
   // the round on screen rather than keeping the stale title over it.
-  const anchor = visibleRoundNumber(state);
+  const anchor = visibleRoundNumber(previous);
   return anchor === null ? refreshed : {...refreshed, ...scopeStateForRound(refreshed, anchor)};
+}
+
+/** Apply delta replacements and removals by the protocol's stable identity. */
+export function mergeExperimentEntries(
+  current: readonly HypothesisEntry[],
+  replacements: readonly HypothesisEntry[],
+  removedIds: readonly string[],
+): HypothesisEntry[] {
+  const entries = new Map(current.map(entry => [entry.hypothesis_id, entry]));
+  for (const entry of replacements) entries.set(entry.hypothesis_id, entry);
+  for (const hypothesisId of removedIds) entries.delete(hypothesisId);
+  return [...entries.values()];
 }
 
 export function failExperiments(state: SessionState, error: string): SessionState {
@@ -910,14 +1028,9 @@ export function enterExperimentDrilldown(state: SessionState): SessionState {
     const roundNumber = state.hypothesisDetail.selectedRound;
     return roundNumber === null ? state : (enterExperimentRound(state, roundNumber) ?? state);
   }
-  const activity = hypothesisPlanningActivity(state);
-  if (
-    activity !== null &&
-    (state.experimentLog?.selectedActivity === true ||
-      (state.experimentLog?.entries.length === 0 &&
-        (state.experimentLog?.selectedUnownedRound ?? null) === null))
-  ) {
-    return enterUnownedExperimentRound(state, activity.roundNumber) ?? state;
+  const activityRound = selectedPlanningActivityRound(state);
+  if (activityRound !== null) {
+    return enterUnownedExperimentRound(state, activityRound) ?? state;
   }
   const selectedRound =
     state.experimentLog?.selectedUnownedRound ??
@@ -928,6 +1041,16 @@ export function enterExperimentDrilldown(state: SessionState): SessionState {
   const entry = selectedExperiment(state);
   if (entry === null || state.hypothesisScope !== null) return state;
   return openHypothesisDetail(state);
+}
+
+/** The live planning round when it is the selected, or only, index item. */
+function selectedPlanningActivityRound(state: SessionState): number | null {
+  const activity = hypothesisPlanningActivity(state);
+  if (activity === null) return null;
+  const log = state.experimentLog;
+  const selected = log?.selectedActivity === true;
+  const onlyItem = log?.entries.length === 0 && (log.selectedUnownedRound ?? null) === null;
+  return selected || onlyItem ? activity.roundNumber : null;
 }
 
 /** Leaves a trajectory for its hypothesis summary, preserving the round cursor. */
@@ -1364,10 +1487,18 @@ function normalizeRoundFocus(state: SessionState): SessionState {
 
 /** Escape from a round view: close whatever is layered over it, all of it. */
 export function closeOverlays(state: SessionState): SessionState {
-  if (state.layout.right === null && !state.chatOpen && state.overlay === null) return state;
+  if (
+    state.layout.right === null &&
+    !state.chatOpen &&
+    state.overlay === null &&
+    state.diffViewer === null
+  ) {
+    return state;
+  }
   return {
     ...state,
     overlay: null,
+    diffViewer: null,
     chatOpen: false,
     layout: {right: null, focus: 'left', zoomedPane: null},
   };
@@ -1436,7 +1567,7 @@ export function focusedPane(state: SessionState): PaneId {
   if (state.layout.right !== null) {
     return state.layout.focus === 'right' ? 'performance' : 'transcript';
   }
-  return state.roundFocus;
+  return state.roundFocus === 'rounds' ? 'agents' : state.roundFocus;
 }
 
 /**
@@ -1886,10 +2017,21 @@ export function reportError(
   if (report.scope === 'input') {
     return {...state, inputError: message};
   }
+
+  const banner = errorBannerFromReport(message, report);
+  const existing = state.errorBanner;
+  if (existing === null || !equivalentError(existing, banner)) {
+    return {...state, errorBanner: banner};
+  }
+  return {...state, errorBanner: mergeEquivalentError(existing, banner)};
+}
+
+/** Normalize the report boundary into the complete state consumed by the banner view. */
+function errorBannerFromReport(message: string, report: ErrorReport): ErrorBannerState {
   const diagnostic = report.diagnostic ?? null;
   const scope = diagnostic?.scope ?? report.scope;
   const severity = diagnosticSeverity(diagnostic?.severity) ?? report.severity ?? 'recoverable';
-  const banner: ErrorBannerState = {
+  return {
     title: report.title ?? errorTitle(scope),
     message: diagnostic?.summary || message || 'An unknown error occurred.',
     detail: diagnostic?.detail ?? report.detail ?? null,
@@ -1902,27 +2044,28 @@ export function reportError(
     invocationId: report.invocationId ?? null,
     count: 1,
   };
-  const existing = state.errorBanner;
-  if (existing === null || !equivalentError(existing, banner)) {
-    return {...state, errorBanner: banner};
-  }
-  const promoted = existing.severity === 'fatal' || severity === 'fatal' ? 'fatal' : 'recoverable';
+}
+
+/** Fold a repeated report into the standing banner without losing established identity. */
+function mergeEquivalentError(
+  existing: ErrorBannerState,
+  incoming: ErrorBannerState,
+): ErrorBannerState {
+  const promoted =
+    existing.severity === 'fatal' || incoming.severity === 'fatal' ? 'fatal' : 'recoverable';
   return {
-    ...state,
-    errorBanner: {
-      ...existing,
-      message: moreInformativeMessage(existing.message, banner.message),
-      detail: moreInformativeMessage(existing.detail ?? '', banner.detail ?? '') || null,
-      hint: moreInformativeMessage(existing.hint ?? '', banner.hint ?? '') || null,
-      severity: promoted,
-      title: promoted === 'fatal' ? banner.title : existing.title,
-      scope: promoted === 'fatal' ? banner.scope : existing.scope,
-      diagnosticId: existing.diagnosticId ?? banner.diagnosticId,
-      agentKind: existing.agentKind ?? banner.agentKind,
-      roundLabel: existing.roundLabel ?? banner.roundLabel,
-      invocationId: existing.invocationId ?? banner.invocationId,
-      count: existing.count + 1,
-    },
+    ...existing,
+    message: moreInformativeMessage(existing.message, incoming.message),
+    detail: moreInformativeMessage(existing.detail ?? '', incoming.detail ?? '') || null,
+    hint: moreInformativeMessage(existing.hint ?? '', incoming.hint ?? '') || null,
+    severity: promoted,
+    title: promoted === 'fatal' ? incoming.title : existing.title,
+    scope: promoted === 'fatal' ? incoming.scope : existing.scope,
+    diagnosticId: existing.diagnosticId ?? incoming.diagnosticId,
+    agentKind: existing.agentKind ?? incoming.agentKind,
+    roundLabel: existing.roundLabel ?? incoming.roundLabel,
+    invocationId: existing.invocationId ?? incoming.invocationId,
+    count: existing.count + 1,
   };
 }
 
@@ -2000,6 +2143,7 @@ export function showLive(state: SessionState): SessionState {
   return {
     ...state,
     overlay: null,
+    diffViewer: null,
     chatOpen: false,
     hypothesisDetail: null,
     hypothesisScope: null,
@@ -2065,6 +2209,26 @@ export function visiblePhases(state: SessionState): AgentPhase[] {
 
 export function toggleTodos(state: SessionState): SessionState {
   return {...state, todosExpanded: !state.todosExpanded};
+}
+
+/**
+ * `<`/`>`: sets the Agents pane's explicit column width. `=`: clears it back
+ * to automatic (`null`). The value handed in is already clamped by the caller
+ * (`agent-map.ts#clampGraphWidthOverride`), which needs the terminal width and
+ * the visible phases to do that; this reducer only applies it.
+ */
+export function setGraphWidthOverride(state: SessionState, width: number | null): SessionState {
+  return state.graphWidthOverride === width ? state : {...state, graphWidthOverride: width};
+}
+
+/**
+ * `<`/`>`: sets the docked chat pane's explicit column width. `=`: clears it
+ * back to automatic (`null`). The value handed in is already clamped by the
+ * caller (`chat-pane.ts#clampChatWidthOverride`), which needs the terminal
+ * width and the right pane's width to do that; this reducer only applies it.
+ */
+export function setChatWidthOverride(state: SessionState, width: number | null): SessionState {
+  return state.chatWidthOverride === width ? state : {...state, chatWidthOverride: width};
 }
 
 /**

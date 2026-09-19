@@ -1,0 +1,6 @@
+[[objective]]
+name = "cpu_seconds"
+direction = "min"
+
+[pareto]
+relative_noise = 0.02

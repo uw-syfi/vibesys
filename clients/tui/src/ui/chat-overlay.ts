@@ -78,7 +78,7 @@ export class ChatOverlayView {
       paddingLeft: 1,
       paddingRight: 1,
       border: true,
-      // Square with an outer fill, the overlay exception (tui-conventions.md):
+      // Square with an outer fill, the overlay exception (tui/conventions.md):
       // the fill is what makes this modal opaque over the run behind it, ring
       // included, and a fill that reaches the ring needs a square corner.
       borderStyle: 'single',

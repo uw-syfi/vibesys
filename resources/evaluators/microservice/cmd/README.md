@@ -1,11 +1,15 @@
 # Commands
 
-This directory contains executable composition roots for the evaluator. A
-command may select concrete application adapters and protocol drivers, parse
-user-facing flags, and connect those pieces to the shared engine.
+This directory contains bundled executable composition roots. A command selects
+concrete application adapters and protocol drivers, then delegates flag parsing
+and execution to `servicebenchcli`.
 
-Reusable scheduling, transport, configuration, and application behavior must
-remain in their owning packages rather than accumulating in a command. This
-keeps the command thin and makes the core testable with fake extensions.
+Reusable scheduling, transport, configuration, and CLI behavior must remain in
+their owning packages rather than accumulating in a command. Task-specific
+correctness and its composition root belong with the task or example. This
+keeps bundled commands thin and prevents the generic command from importing
+every task oracle.
 
-`servicebench/` is currently the only command.
+`servicebench/` supplies the legacy bundled registrations to
+`servicebenchcli.Run`. New task commands should use the same API with their own
+`composition.Registration` values.
