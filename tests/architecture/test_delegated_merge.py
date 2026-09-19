@@ -31,6 +31,7 @@ from scripts.delegated_merge import (
     QueueEnqueue,
     QueueState,
     RepositoryRole,
+    StackedQueueEnqueue,
     api_failure_message,
     authorize_check_job,
     authorize_event,
@@ -41,6 +42,7 @@ from scripts.delegated_merge import (
     choose_strategy,
     load_policy,
     read_queue_state,
+    read_stack_position,
     run,
     select_workflow_run,
 )
@@ -556,7 +558,11 @@ class FakeGitHubAPI:
         state_data: object = "default",
         merge_response: object = None,
         filename: str = "owned/core/events.py",
+        stack: object = None,
+        async_response: object = "default",
     ) -> None:
+        self.stack = stack
+        self.async_response = async_response
         self.state_data = state_data
         self.merge_response = merge_response or {"merged": True, "sha": "merge456"}
         self.filename = filename
@@ -574,7 +580,10 @@ class FakeGitHubAPI:
             return {"permission": "read", "role_name": "triage"}
         if endpoint == "repos/uw-syfi/vibesys/pulls/42":
             self.pull_reads += 1
-            return _pull(head={"sha": "abc123" if self.pull_reads == 1 else self.refreshed_sha})
+            return _pull(
+                head={"sha": "abc123" if self.pull_reads == 1 else self.refreshed_sha},
+                stack=self.stack,
+            )
         if endpoint.endswith("/files?per_page=100") and paginate:
             return [[{"filename": self.filename}]]
         if "/actions/workflows/test.yml/runs?" in endpoint:
@@ -603,6 +612,19 @@ class FakeGitHubAPI:
 
     def write(self, endpoint: str, *, method: str, payload: Mapping[str, object]) -> object:
         self.writes.append((endpoint, method, dict(payload)))
+        if endpoint.endswith("/merge-async"):
+            if self.async_response != "default":
+                return self.async_response
+            return {
+                "status": "pending",
+                "details": {
+                    "message": "Merge request enqueued.",
+                    "uuid": "u-1",
+                    "merge_method": payload["merge_method"],
+                    "merge_action": payload["merge_action"],
+                    "expected_head_sha": payload["sha"],
+                },
+            }
         return self.merge_response
 
     def graphql(self, query: str, variables: Mapping[str, object]) -> object:
@@ -794,6 +816,146 @@ def test_queue_lookup_failure_never_merges_or_enqueues(
     with pytest.raises(GitHubAPIError):
         run(event_path, api=api)
     assert api.writes == []
+
+
+STACK_BOTTOM = {"base": {"ref": "main", "sha": "b"}, "position": 1, "size": 2}
+
+
+def test_stacked_bottom_pull_request_uses_the_async_api_pinned_to_the_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    _use_test_policy(monkeypatch)
+    api = FakeGitHubAPI(queue={"id": "Q"}, stack=STACK_BOTTOM)
+
+    assert run(event_path, api=api) == Enqueued()
+    assert api.pull_reads == 2
+    assert api.writes == [
+        (
+            "repos/uw-syfi/vibesys/pulls/42/merge-async",
+            "PUT",
+            {"sha": "abc123", "merge_method": "squash", "merge_action": "merge_queue"},
+        )
+    ]
+    assert not any("enqueuePullRequest" in query for query, _ in api.graphql_calls)
+
+
+def test_stacked_mode_keeps_scope_and_head_refusals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    _use_test_policy(monkeypatch)
+    stale = FakeGitHubAPI(queue={"id": "Q"}, stack=STACK_BOTTOM, refreshed_sha="new789")
+    with pytest.raises(MergeRefusalError, match="changed during validation"):
+        run(event_path, api=stale)
+    out_of_scope = FakeGitHubAPI(queue={"id": "Q"}, stack=STACK_BOTTOM, filename="elsewhere/x.py")
+    with pytest.raises(MergeRefusalError, match="does not match"):
+        run(event_path, api=out_of_scope)
+    assert stale.writes == out_of_scope.writes == []
+
+
+@pytest.mark.parametrize(
+    ("stack", "queue", "match"),
+    [
+        ({"base": {"ref": "main"}, "position": 2}, {"id": "Q"}, "bottom pull request"),
+        (STACK_BOTTOM, None, "merge queue"),
+        ({"base": {"ref": "main"}}, {"id": "Q"}, "stack position"),
+        ({"base": {"ref": "main"}, "position": 0}, {"id": "Q"}, "stack position"),
+        ("stacked", {"id": "Q"}, "not an object"),
+    ],
+)
+def test_stacked_pull_requests_fail_closed_unless_bottom_with_a_queue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stack: object, queue: object, match: str
+) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    _use_test_policy(monkeypatch)
+    api = FakeGitHubAPI(queue=queue, stack=stack)
+
+    with pytest.raises(MergeRefusalError, match=match):
+        run(event_path, api=api)
+    assert api.writes == []
+    assert not any("enqueuePullRequest" in query for query, _ in api.graphql_calls)
+
+
+def test_stack_position_reads_only_the_stack_object() -> None:
+    assert read_stack_position(_pull()) is None
+    assert read_stack_position(_pull(stack=None)) is None
+    assert read_stack_position(_pull(stack=STACK_BOTTOM)) == 1
+
+
+def test_selector_routes_stacked_bottom_to_the_async_strategy() -> None:
+    api = FakeGitHubAPI()
+    queued = QueueState("id", queue_required=True, in_queue=False)
+    assert isinstance(choose_strategy(queued, api, stack_position=1), StackedQueueEnqueue)
+    assert isinstance(choose_strategy(queued, api), QueueEnqueue)
+
+
+def _async_answer(**details: object) -> dict[str, object]:
+    merged = {
+        "message": "m",
+        "uuid": "u-1",
+        "merge_method": "squash",
+        "merge_action": "merge_queue",
+        "expected_head_sha": "abc123",
+    }
+    merged.update(details)
+    return {"status": "pending", "details": merged}
+
+
+def test_async_strategy_reports_already_queued_and_refuses_unconfirmed_answers() -> None:
+    queued = {"status": "enqueued", "details": {"message": "Pull request is already in the queue."}}
+    api = FakeGitHubAPI(async_response=queued)
+    assert StackedQueueEnqueue(api).land(_land_request()) == AlreadyQueued()
+
+    bad_answers: list[object] = [
+        "not-an-object",
+        {"status": "pending"},
+        {"status": "merged", "details": {"message": "m", "sha": "s"}},
+        {"status": "failed", "details": {"message": "m"}},
+        _async_answer(uuid=""),
+        _async_answer(expected_head_sha="other"),
+        _async_answer(merge_action="direct_merge"),
+    ]
+    for answer in bad_answers:
+        with pytest.raises(MergeRefusalError):
+            StackedQueueEnqueue(FakeGitHubAPI(async_response=answer)).land(_land_request())
+
+
+def test_async_failure_names_the_step_and_never_leaks_the_response_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    secret = "ghs_SECRETTOKEN0123"  # noqa: S105
+    body = json.dumps({"message": f"This pull request is part of a stack {secret}"})
+
+    def failing(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert kwargs.get("input") is None or "merge_queue" in str(kwargs["input"])
+        return subprocess.CompletedProcess(
+            ["gh"], 1, stdout=body, stderr=f"gh: {secret} (HTTP 422)\n"
+        )
+
+    class AsyncFails(FakeGitHubAPI):
+        def write(self, endpoint: str, *, method: str, payload: Mapping[str, object]) -> object:
+            if endpoint.endswith("/merge-async"):
+                return GitHubAPI(_runner=failing).write(endpoint, method=method, payload=payload)
+            return super().write(endpoint, method=method, payload=payload)
+
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    _use_test_policy(monkeypatch)
+    monkeypatch.setattr("sys.argv", ["delegated_merge", "--event", str(event_path)])
+    api = AsyncFails(queue={"id": "Q"}, stack=STACK_BOTTOM)
+    monkeypatch.setattr(delegated_merge, "GitHubAPI", lambda: api)
+
+    assert delegated_merge.main() == 1
+    captured = capsys.readouterr()
+    assert captured.err.strip() == (
+        "Scoped merge refused: validation could not be completed safely "
+        "(step: async enqueue request; HTTP 422)."
+    )
+    assert secret not in captured.err + str(api.writes)
 
 
 class _FailingAPI(FakeGitHubAPI):

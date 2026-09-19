@@ -62,8 +62,9 @@ API. Missing or malformed policy fails closed.
 ### Direct merge and merge queue
 
 All scope and policy checks are independent of how the pull request lands.
-After they pass, one of two landing strategies runs, chosen by a GraphQL read of
-`repository.mergeQueue(branch: "main")`:
+After they pass, one of three landing strategies runs, chosen by a GraphQL read of
+`repository.mergeQueue(branch: "main")` and the `stack` field of the pull
+request REST object:
 
 - No merge queue on `main`: `DirectMerge` calls the pull request merge API with
   the validated head SHA. The comment reads ``Scoped merge completed at `<sha>` ``.
@@ -72,9 +73,25 @@ After they pass, one of two landing strategies runs, chosen by a GraphQL read of
   `Scoped merge enqueued: ...` and states that nothing is merged yet. The
   queue's own `merge_group` CI is the final gate and performs the merge. No
   merge SHA is reported for an enqueue.
+- Merge queue on `main` and the pull request is in a native GitHub stack:
+  GitHub rejects `enqueuePullRequest` for stack members and requires the
+  [asynchronous merge API](https://docs.github.com/rest/pulls/pulls#merge-a-pull-request-asynchronously),
+  so `StackedQueueEnqueue` sends `PUT /repos/{owner}/{repo}/pulls/{n}/merge-async`
+  with `sha` (the validated head), `merge_method`, and `merge_action:
+  merge_queue`. A `pending` answer means the request was accepted and runs in
+  the background; the comment is the same `Scoped merge enqueued: ...` text. The
+  answer must echo the validated head as `expected_head_sha`, otherwise the
+  command refuses.
 
-A repeated `/merge-scoped` on a pull request already in the queue posts no
-comment and changes nothing. If the queue state cannot be read or parsed, the
+That API merges every pull request in the stack up to and including the
+requested one, and only the requested pull request is scope-validated. The
+command therefore refuses stacked pull requests that are not at position 1
+(bottom), that have no readable position, or whose base branch has no merge
+queue. Land the lower pull requests first. A pull request without a `stack`
+object is unstacked and uses the first two strategies.
+
+A repeated `/merge-scoped` on a pull request already in the queue (or reported
+`enqueued` by the async API) posts no comment and changes nothing. If the queue state cannot be read or parsed, the
 command refuses and neither merges nor enqueues. If the queue is enabled after
 the state was read, the direct merge is refused by GitHub and reported as a
 refusal, never as success. The `enqueuePullRequest` mutation needs
@@ -82,6 +99,10 @@ refusal, never as success. The `enqueuePullRequest` mutation needs
 `GITHUB_TOKEN` is accepted for enqueueing has not been exercised against a real
 queue; if GitHub rejects it, the command refuses safely and a dedicated token
 would be needed.
+
+The async endpoint has not been exercised against a real stacked pull request:
+the shape above follows GitHub's REST description. Confirm with a stack whose
+bottom pull request is in scope.
 
 To verify after enabling the queue with group size 1, comment `/merge-scoped`
 on a low-risk in-scope pull request and confirm it is enqueued and then merged

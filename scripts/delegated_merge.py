@@ -119,7 +119,7 @@ class LandingRequest:
 class LandingStrategy(Protocol):
     """Lands a validated pull request, or raises ``MergeRefusalError``."""
 
-    def land(self, request: LandingRequest) -> Merged | Enqueued:
+    def land(self, request: LandingRequest) -> LandOutcome:
         """Merge or enqueue the request."""
 
 
@@ -634,9 +634,71 @@ class QueueEnqueue:
         return Enqueued()
 
 
-def choose_strategy(state: QueueState, api: GitHubClient) -> LandingStrategy:
-    """Pick the landing mode from the observed queue state."""
-    return QueueEnqueue(api) if state.queue_required else DirectMerge(api)
+@dataclass(frozen=True)
+class StackedQueueEnqueue:
+    """Enqueue a pull request that is the bottom of a native GitHub stack.
+
+    GitHub rejects the ``enqueuePullRequest`` mutation for stack members and
+    requires the asynchronous merge REST API. That API merges every pull request
+    in the stack up to and including the requested one, so ``select_strategy``
+    only routes the bottom pull request (position 1) here: the one pull request
+    whose scope was validated is then the only one landed.
+    """
+
+    api: GitHubClient
+
+    def land(self, request: LandingRequest) -> Enqueued | AlreadyQueued:
+        """Request an asynchronous merge-queue entry pinned to the validated head."""
+        repository = quote(request.repository, safe="/")
+        with _step("async enqueue request"):
+            written = self.api.write(
+                f"repos/{repository}/pulls/{request.number}/merge-async",
+                method="PUT",
+                payload={
+                    "sha": request.head_sha,
+                    "merge_method": request.merge_method,
+                    "merge_action": "merge_queue",
+                },
+            )
+        response = _mapping(written, "async merge response")
+        details = _mapping(response.get("details"), "async merge details")
+        status = response.get("status")
+        if status == "enqueued":
+            return AlreadyQueued()
+        if status != "pending":
+            _refuse("GitHub did not accept the asynchronous merge request")
+        _string(details.get("uuid"), "async merge request id")
+        if details.get("expected_head_sha") != request.head_sha:
+            _refuse("GitHub pinned the asynchronous merge to a different head")
+        if details.get("merge_action") not in {"default", "merge_queue"}:
+            _refuse("GitHub selected a direct merge for the asynchronous request")
+        return Enqueued()
+
+
+def read_stack_position(pull: object) -> int | None:
+    """Return this pull request's one-based stack position, or None if unstacked.
+
+    A present but unreadable ``stack`` object fails closed rather than being
+    treated as unstacked, since the wrong strategy would merge unvalidated work.
+    """
+    raw = _mapping(pull, "pull request").get("stack")
+    if raw is None:
+        return None
+    stack = _mapping(raw, "pull request stack")
+    return _positive_int(stack.get("position"), "pull request stack position")
+
+
+def choose_strategy(
+    state: QueueState, api: GitHubClient, *, stack_position: int | None = None
+) -> LandingStrategy:
+    """Pick the landing mode from the observed queue state and stack membership."""
+    if stack_position is None:
+        return QueueEnqueue(api) if state.queue_required else DirectMerge(api)
+    if stack_position != 1:
+        _refuse("only the bottom pull request of a stack can be merged; land the lower ones first")
+    if not state.queue_required:
+        _refuse("stacked pull requests are only supported when the base branch has a merge queue")
+    return StackedQueueEnqueue(api)
 
 
 def run(event_path: Path, *, api: GitHubClient) -> LandOutcome:
@@ -687,7 +749,8 @@ def run(event_path: Path, *, api: GitHubClient) -> LandOutcome:
     refreshed_sha = authorize_pull_request(refreshed, policy=policy, expected_number=event.number)
     if refreshed_sha != head_sha:
         _refuse("the pull request changed during validation; rerun the command")
-    return choose_strategy(queue, api).land(
+    strategy = choose_strategy(queue, api, stack_position=read_stack_position(refreshed))
+    return strategy.land(
         LandingRequest(
             repository=policy.repository,
             number=event.number,
