@@ -5,8 +5,8 @@
 script embeds three views between marker comments in the architecture doc:
 
     1. a high-level overview collapsed to top-level packages,
-    2. the core strongly connected component (the known cycle), filtered from
-       the full graph so the cycle is legible, and
+    2. the `vibesys.*` core modules, filtered from the full graph so the
+       layering is legible, and
     3. the full module graph.
 
 Tach's edge order is not guaranteed stable, so edges are sorted. Only the local
@@ -28,22 +28,6 @@ from pathlib import Path
 DOC = Path("docs/contributing/architecture.md")
 START = "[//]: # (tach-graph:start)"
 END = "[//]: # (tach-graph:end)"
-
-# Modules of the known core cycle, using the exact names from tach.toml.
-CORE = frozenset(
-    {
-        "vibesys",
-        "vibesys.agents",
-        "vibesys.run",
-        "vibesys.render",
-        "vibesys.sandbox",
-        "vibesys.backends",
-        "vibesys.skypilot",
-        "vibesys.domains",
-        "vibesys.prompts",
-        "vibesys.evaluators",
-    }
-)
 
 EDGE_TOKENS = 3
 EXIT_OK = 0
@@ -79,9 +63,14 @@ def collapse(edges: list[tuple[str, str]]) -> list[tuple[str, str]]:
     return sorted(e for e in folded if e[0] != e[1])
 
 
+def is_core(module: str) -> bool:
+    """Return whether `module` is the bare `vibesys` root or one of its children."""
+    return module == "vibesys" or module.startswith("vibesys.")
+
+
 def render_block(edges: list[tuple[str, str]]) -> str:
     """Build the marked region: overview, core-cycle view, then full graph."""
-    core = [e for e in edges if e[0] in CORE and e[1] in CORE]
+    core = [e for e in edges if is_core(e[0]) and is_core(e[1])]
     return "\n".join(
         [
             START,
@@ -94,9 +83,9 @@ def render_block(edges: list[tuple[str, str]]) -> str:
             mermaid(collapse(edges)),
             "```",
             "",
-            "## Core cycle",
+            "## Core layers",
             "",
-            "Edges among the modules of the known strongly connected core.",
+            "Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbids cycles.",
             "",
             "```mermaid",
             mermaid(core),

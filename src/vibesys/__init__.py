@@ -8,6 +8,6 @@ dependencies like ``langchain_core`` via package-level re-exports.
 
 Import what you need by full module path, e.g.::
 
-    from vibesys.agents.callbacks import AgentLogger
+    from vibesys.agents import build_agent_client
     from vibesys.loops.agent.loop import run_agent_loop
 """
