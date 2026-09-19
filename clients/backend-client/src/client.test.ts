@@ -160,16 +160,17 @@ describe('ServerClient', () => {
           if (request['type'] !== 'query.chat') return;
           socket.once('close', () => resolveChatSocketClosed?.());
           setTimeout(() => {
-            socket.write(
-              `${JSON.stringify({
-                ...successResponse(request['request_id'] as string),
-                chat: {
-                  question: 'what happened?',
-                  answer: 'The agent finished its investigation.',
-                  effect: 'none',
-                },
-              })}\n`,
-            );
+            const response = JSON.stringify({
+              ...successResponse(request['request_id'] as string),
+              chat: {
+                question: 'what happened?',
+                answer: 'The agent finished its investigation.',
+                effect: 'none',
+              },
+            });
+            const middle = Math.floor(response.length / 2);
+            socket.write(response.slice(0, middle));
+            socket.write(`${response.slice(middle)}\n`);
           }, 50);
         });
       },
@@ -184,6 +185,20 @@ describe('ServerClient', () => {
         await chatSocketClosed;
       },
       {requestTimeoutMs: 20},
+    );
+  });
+
+  it('rejects malformed responses on a long-running connection', async () => {
+    await withServer(
+      socket =>
+        respondToLines(socket, request => {
+          if (request['type'] === 'query.chat') socket.write('{not-json}\n');
+        }),
+      async client => {
+        await expect(client.request({type: 'query.chat', text: 'what happened?'})).rejects.toThrow(
+          'Invalid server response JSON',
+        );
+      },
     );
   });
 
