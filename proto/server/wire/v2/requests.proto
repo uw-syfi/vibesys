@@ -1,0 +1,129 @@
+// Client-to-server requests. One envelope with a typed oneof body.
+syntax = "proto3";
+
+package server.wire.v2;
+
+import "google/protobuf/timestamp.proto";
+
+// Chat backend that runs an experiment-chat thread.
+enum ChatDriver {
+  CHAT_DRIVER_UNSPECIFIED = 0;
+  CHAT_DRIVER_AGENTSHIM = 1;
+  CHAT_DRIVER_OMNIGENT = 2;
+}
+
+// Pause after the agent call in flight reaches its boundary.
+message PauseCommand {}
+
+message ResumeCommand {}
+
+message SteerCommand {
+  // Non-empty; the server rejects an empty text.
+  string text = 1;
+}
+
+// Stop the run at the next invocation boundary.
+message StopCommand {}
+
+message SnapshotQuery {}
+
+message ChatQuery {
+  string text = 1;
+  // Absent targets the default thread, preserving pre-thread clients.
+  optional string thread_id = 2;
+}
+
+// Create a new experiment-chat thread with its own agent selection. Omitted
+// fields resolve to the run's configured driver, provider, and model. Clients
+// omit driver so every thread inherits the run's.
+message ChatThreadCreateQuery {
+  optional ChatDriver driver = 1;
+  optional string provider = 2;
+  optional string model = 3;
+  // Without a title the server derives one from the thread's first message.
+  optional string title = 4;
+}
+
+// Request the agent selections this run's experiment chat offers.
+message ChatOptionsQuery {}
+
+// Request the launch-directory configuration defaults a terminal client applies.
+message TuiDefaultsQuery {}
+
+message HistoryQuery {}
+
+message PerformanceQuery {}
+
+// Client's last completely applied experiment projection.
+message ExperimentCursor {
+  string run_id = 1;
+  string projection_id = 2;
+  uint32 revision = 3;
+}
+
+// Request the hypothesis-level experiment log for the attached run.
+message ExperimentQuery {
+  // Absent for legacy clients, which continue receiving a complete snapshot.
+  optional ExperimentCursor after = 1;
+}
+
+// Request the per-round design log for the attached run.
+message DesignQuery {}
+
+// Request one file's unified patch from a round's commit range. base and head
+// are a round's own range as the design log published it, and path must be one
+// of that round's listed file changes. The server validates all three.
+message DesignPatchQuery {
+  string base = 1;
+  string head = 2;
+  string path = 3;
+}
+
+message EventsQuery {
+  uint32 after_sequence = 1;
+  // Exclusive upper bound: the result is after_sequence < sequence <
+  // before_sequence. Absent keeps the open-ended read. Must be at least 1 when
+  // present.
+  optional uint32 before_sequence = 2;
+  // Long-poll wait, 0 to 30000 milliseconds.
+  uint32 timeout_ms = 3;
+}
+
+message SubscribeRequest {
+  uint32 after_sequence = 1;
+  // Replay from max(after_sequence, latest_sequence - tail) instead of
+  // after_sequence. Must be at least 1 when present. A server that predates the
+  // field rejects it as an unknown field, so that rejection is the capability
+  // probe.
+  optional uint32 tail = 2;
+  // The store the client's after_sequence numbers, as the last batch named it.
+  // A resume across a dropped connection carries it so the server can tell
+  // whether the cursor still belongs to the live store. Empty means resume the
+  // cursor as before.
+  string store_id = 3;
+}
+
+// Envelope for every client request. Exactly one body must be set.
+message Request {
+  uint32 protocol_version = 1;
+  string request_id = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  oneof body {
+    PauseCommand pause = 10;
+    ResumeCommand resume = 11;
+    SteerCommand steer = 12;
+    StopCommand stop = 13;
+    SnapshotQuery snapshot = 14;
+    ChatQuery chat = 15;
+    ChatThreadCreateQuery chat_thread_create = 16;
+    ChatOptionsQuery chat_options = 17;
+    TuiDefaultsQuery tui_defaults = 18;
+    HistoryQuery history = 19;
+    PerformanceQuery performance = 20;
+    ExperimentQuery experiments = 21;
+    DesignQuery design = 22;
+    DesignPatchQuery design_patch = 23;
+    EventsQuery events = 24;
+    SubscribeRequest subscribe = 25;
+  }
+}

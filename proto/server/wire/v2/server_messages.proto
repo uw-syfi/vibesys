@@ -1,0 +1,46 @@
+// Server-to-client messages on a subscribed stream.
+syntax = "proto3";
+
+package server.wire.v2;
+
+import "server/wire/v2/common.proto";
+import "server/wire/v2/events.proto";
+import "server/wire/v2/snapshot.proto";
+
+message SubscribedMessage {
+  string request_id = 1;
+  string run_id = 2;
+  uint32 latest_sequence = 3;
+}
+
+message EventBatchMessage {
+  repeated RunEvent events = 1;
+  uint32 through_sequence = 2;
+  repeated ActiveAgentExecution active_executions = 3;
+  // Names the event store these sequences number. Sequences are comparable only
+  // within one store, so a batch whose id differs from the previous one
+  // supersedes what the client folded rather than extending it. Empty means the
+  // server does not report store identity.
+  string store_id = 4;
+  // Every event in this stream's history has sequence greater than this. 0
+  // means the full history was delivered. Carried on every batch of the
+  // subscription, live ones included.
+  uint32 history_after_sequence = 5;
+}
+
+message ProtocolErrorMessage {
+  optional string request_id = 1;
+  string code = 2;
+  string message = 3;
+  optional Diagnostic diagnostic = 4;
+}
+
+// Envelope for every server push. Exactly one body is set.
+message ServerMessage {
+  oneof body {
+    SubscribedMessage subscribed = 1;
+    RunEvent event = 2;
+    EventBatchMessage event_batch = 3;
+    ProtocolErrorMessage protocol_error = 4;
+  }
+}

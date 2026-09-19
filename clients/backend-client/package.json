@@ -31,5 +31,8 @@
     "@types/node": "^24.0.0",
     "json-schema-to-typescript": "^15.0.4",
     "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.15.0"
   }
 }

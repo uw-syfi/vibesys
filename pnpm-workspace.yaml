@@ -5,4 +5,5 @@ injectWorkspacePackages: true
 nodeLinker: hoisted
 
 allowBuilds:
+  '@bufbuild/buf': true
   esbuild: true

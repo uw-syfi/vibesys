@@ -1,0 +1,12 @@
+# Protocol Buffers workspace for the backend<->frontend control protocol.
+# The .proto files under proto/ are the single source of truth; see
+# docs/contributing/development.md ("Wire protocol").
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE

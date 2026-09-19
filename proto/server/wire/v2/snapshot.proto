@@ -1,0 +1,61 @@
+// Run snapshot and the projections that ride along with it.
+syntax = "proto3";
+
+package server.wire.v2;
+
+import "google/protobuf/timestamp.proto";
+import "server/wire/v2/common.proto";
+
+// What an agent execution is doing right now.
+enum ExecutionActivityMode {
+  EXECUTION_ACTIVITY_MODE_UNSPECIFIED = 0;
+  EXECUTION_ACTIVITY_MODE_THINKING = 1;
+  EXECUTION_ACTIVITY_MODE_RESPONDING = 2;
+  EXECUTION_ACTIVITY_MODE_TOOL = 3;
+  EXECUTION_ACTIVITY_MODE_WAITING = 4;
+}
+
+// Complete current activity for an active agent execution.
+message AgentExecutionActivityData {
+  ExecutionActivityMode mode = 1;
+  string summary = 2;
+  optional string tool = 3;
+}
+
+// One agent execution that has started and not finished.
+message ActiveAgentExecution {
+  string execution_id = 1;
+  string agent_kind = 2;
+  string round_label = 3;
+  string stage = 4;
+  optional uint32 attempt = 5;
+  string assignment = 6;
+  google.protobuf.Timestamp started_at = 7;
+  AgentExecutionActivityData activity = 8;
+  optional string driver = 9;
+  optional string provider = 10;
+  optional string model = 11;
+}
+
+// Resolved identity and agent settings of one experiment-chat thread.
+message ChatThreadInfo {
+  string thread_id = 1;
+  string title = 2;
+  string driver = 3;
+  string provider = 4;
+  string model = 5;
+}
+
+// Server-owned projection of a run at one event sequence.
+message RunSnapshot {
+  uint32 protocol_version = 1;
+  string run_id = 2;
+  uint32 sequence = 3;
+  RunStatus status = 4;
+  optional string agent_kind = 5;
+  optional string round_label = 6;
+  repeated ActiveAgentExecution active_executions = 7;
+  // A thread's title is backfilled from a later chat event, so a client that
+  // folds only a tail cannot rebuild the registry from the events it holds.
+  repeated ChatThreadInfo chat_threads = 8;
+}

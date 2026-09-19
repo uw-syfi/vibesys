@@ -82,6 +82,10 @@ path = "server.event_index"
 depends_on = []
 
 [[modules]]
+path = "server.wire"
+depends_on = []
+
+[[modules]]
 path = "server.events"
 depends_on = ["server.diagnostics", "server.run_lifecycle", "server.event_index"]
 

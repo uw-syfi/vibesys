@@ -1,0 +1,65 @@
+// Shared enums and diagnostics used by every message family in this package.
+syntax = "proto3";
+
+package server.wire.v2;
+
+// Lifecycle status of one run, as frontends observe it.
+//
+// PAUSING and PAUSED are distinct because a pause is applied only at an
+// invocation boundary; STOPPING and STOPPED split the same way for a stop.
+enum RunStatus {
+  RUN_STATUS_UNSPECIFIED = 0;
+  RUN_STATUS_STARTING = 1;
+  RUN_STATUS_RUNNING = 2;
+  RUN_STATUS_PAUSING = 3;
+  RUN_STATUS_PAUSED = 4;
+  RUN_STATUS_STOPPING = 5;
+  RUN_STATUS_STOPPED = 6;
+  RUN_STATUS_COMPLETED = 7;
+  RUN_STATUS_FAILED = 8;
+}
+
+// Boundary at which a diagnostic was raised.
+enum DiagnosticScope {
+  DIAGNOSTIC_SCOPE_UNSPECIFIED = 0;
+  DIAGNOSTIC_SCOPE_CONFIGURATION = 1;
+  DIAGNOSTIC_SCOPE_INVOCATION = 2;
+  DIAGNOSTIC_SCOPE_PHASE = 3;
+  DIAGNOSTIC_SCOPE_RUN = 4;
+  DIAGNOSTIC_SCOPE_REQUEST = 5;
+  DIAGNOSTIC_SCOPE_PROTOCOL = 6;
+  DIAGNOSTIC_SCOPE_TRANSPORT = 7;
+}
+
+// Operator-visible seriousness of a diagnostic.
+enum DiagnosticSeverity {
+  DIAGNOSTIC_SEVERITY_UNSPECIFIED = 0;
+  DIAGNOSTIC_SEVERITY_WARNING = 1;
+  DIAGNOSTIC_SEVERITY_ERROR = 2;
+  DIAGNOSTIC_SEVERITY_FATAL = 3;
+}
+
+// Whether retrying the failed operation is expected to help.
+enum DiagnosticRetryability {
+  DIAGNOSTIC_RETRYABILITY_UNSPECIFIED = 0;
+  DIAGNOSTIC_RETRYABILITY_AUTOMATIC = 1;
+  DIAGNOSTIC_RETRYABILITY_MANUAL = 2;
+  DIAGNOSTIC_RETRYABILITY_NEVER = 3;
+  DIAGNOSTIC_RETRYABILITY_UNKNOWN = 4;
+}
+
+// Structured, provider-neutral description of an operator diagnostic.
+message Diagnostic {
+  string id = 1;
+  string code = 2;
+  string summary = 3;
+  optional string detail = 4;
+  optional string hint = 5;
+  DiagnosticScope scope = 6;
+  DiagnosticSeverity severity = 7;
+  DiagnosticRetryability retryability = 8;
+  optional string cause_id = 9;
+  optional string debug_ref = 10;
+  // Which subsystem raised the diagnostic (for example "git_tracking").
+  optional string source = 11;
+}

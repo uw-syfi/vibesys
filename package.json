@@ -11,10 +11,16 @@
     "test:ts-architecture": "node --test scripts/check_ts_architecture.test.mjs",
     "build:clients": "pnpm --filter @vibesys/tui... build",
     "check:clients": "pnpm --filter @vibesys/backend-client check && pnpm --filter @vibesys/core-state check && pnpm --filter @vibesys/tui check",
+    "proto:lint": "buf lint",
+    "proto:breaking": "node scripts/check_proto_breaking.mjs",
+    "proto:generate": "buf generate",
+    "proto:check": "buf generate && git diff --exit-code -- src/server/wire/v2 clients/backend-client/src/gen",
     "test:clients": "pnpm test:ts-architecture && pnpm --filter @vibesys/backend-client test && pnpm --filter @vibesys/core-state test && pnpm --filter @vibesys/tui test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.3",
+    "@bufbuild/buf": "^1.73.0",
+    "@bufbuild/protoc-gen-es": "^2.15.0",
     "dependency-cruiser": "16.10.4"
   }
 }

@@ -1,0 +1,18 @@
+# Local code generation for the control protocol. Everything runs from
+# repo-pinned tools: buf and protoc-gen-es from pnpm, protoc from the
+# grpcio-tools wheel in the uv dev group. Run `pnpm proto:generate`.
+version: v2
+plugins:
+  # Python messages land beside the hand-written server package, so the
+  # generated `server.wire.v2` import path matches the proto package.
+  - protoc_builtin: python
+    protoc_path: [uv, run, --no-sync, python, -m, grpc_tools.protoc]
+    out: src
+  - protoc_builtin: pyi
+    protoc_path: [uv, run, --no-sync, python, -m, grpc_tools.protoc]
+    out: src
+  - local: node_modules/.bin/protoc-gen-es
+    out: clients/backend-client/src/gen
+    opt:
+      - target=ts
+      - import_extension=js

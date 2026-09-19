@@ -1,0 +1,315 @@
+// Server replies to requests, and the projections they carry.
+syntax = "proto3";
+
+package server.wire.v2;
+
+import "google/protobuf/timestamp.proto";
+import "server/wire/v2/common.proto";
+import "server/wire/v2/events.proto";
+import "server/wire/v2/snapshot.proto";
+
+enum CommandAction {
+  COMMAND_ACTION_UNSPECIFIED = 0;
+  COMMAND_ACTION_PAUSE = 1;
+  COMMAND_ACTION_RESUME = 2;
+  COMMAND_ACTION_STEER = 3;
+  COMMAND_ACTION_STOP = 4;
+}
+
+enum CommandAckStatus {
+  COMMAND_ACK_STATUS_UNSPECIFIED = 0;
+  COMMAND_ACK_STATUS_PENDING = 1;
+  COMMAND_ACK_STATUS_CONSUMED = 2;
+}
+
+enum ObjectiveDirection {
+  OBJECTIVE_DIRECTION_UNSPECIFIED = 0;
+  OBJECTIVE_DIRECTION_MAX = 1;
+  OBJECTIVE_DIRECTION_MIN = 2;
+}
+
+// Implementer-declared or framework-resolved outcome of a hypothesis. The
+// union of the two vocabularies, because either can reach a round record.
+enum HypothesisOutcome {
+  HYPOTHESIS_OUTCOME_UNSPECIFIED = 0;
+  HYPOTHESIS_OUTCOME_CONTINUE = 1;
+  HYPOTHESIS_OUTCOME_SUPPORTED = 2;
+  HYPOTHESIS_OUTCOME_NOMINATED = 3;
+  HYPOTHESIS_OUTCOME_DISPROVEN = 4;
+  HYPOTHESIS_OUTCOME_IMPLEMENTATION_FAILED = 5;
+  HYPOTHESIS_OUTCOME_INCONCLUSIVE = 6;
+  HYPOTHESIS_OUTCOME_BLOCKED = 7;
+  HYPOTHESIS_OUTCOME_PROVEN = 8;
+  HYPOTHESIS_OUTCOME_REJECTED = 9;
+  HYPOTHESIS_OUTCOME_UNMEASURED = 10;
+}
+
+// A round's own review state; DEFERRED means sparse-review policy skipped the
+// judge.
+enum RoundReviewVerdict {
+  ROUND_REVIEW_VERDICT_UNSPECIFIED = 0;
+  ROUND_REVIEW_VERDICT_PASS = 1;
+  ROUND_REVIEW_VERDICT_FAIL = 2;
+  ROUND_REVIEW_VERDICT_DEFERRED = 3;
+}
+
+enum CandidateDisposition {
+  CANDIDATE_DISPOSITION_UNSPECIFIED = 0;
+  CANDIDATE_DISPOSITION_UNASSESSED = 1;
+  CANDIDATE_DISPOSITION_DISCARD = 2;
+  CANDIDATE_DISPOSITION_PREREQUISITE = 3;
+  CANDIDATE_DISPOSITION_PARETO_FRONTIER = 4;
+}
+
+// Why a headline measurement carries no causal delta.
+enum PerfDeltaReason {
+  PERF_DELTA_REASON_UNSPECIFIED = 0;
+  PERF_DELTA_REASON_NO_BASELINE_YET = 1;
+  PERF_DELTA_REASON_BASELINE_UNRESOLVED = 2;
+  PERF_DELTA_REASON_NOT_FRAMEWORK_MEASURED = 3;
+}
+
+// Orchestrator strategy, separate from empirical resolution.
+enum StrategyDisposition {
+  STRATEGY_DISPOSITION_UNSPECIFIED = 0;
+  STRATEGY_DISPOSITION_AVAILABLE = 1;
+  STRATEGY_DISPOSITION_PARKED = 2;
+  STRATEGY_DISPOSITION_ABANDONED = 3;
+}
+
+enum DesignChange {
+  DESIGN_CHANGE_UNSPECIFIED = 0;
+  DESIGN_CHANGE_ADDED = 1;
+  DESIGN_CHANGE_MODIFIED = 2;
+  DESIGN_CHANGE_DELETED = 3;
+  DESIGN_CHANGE_RENAMED = 4;
+}
+
+enum ChatModelSource {
+  CHAT_MODEL_SOURCE_UNSPECIFIED = 0;
+  CHAT_MODEL_SOURCE_RUN = 1;
+  CHAT_MODEL_SOURCE_ROLE = 2;
+  CHAT_MODEL_SOURCE_SUGGESTED = 3;
+}
+
+enum RepositoryVisibility {
+  REPOSITORY_VISIBILITY_UNSPECIFIED = 0;
+  REPOSITORY_VISIBILITY_PRIVATE = 1;
+  REPOSITORY_VISIBILITY_PUBLIC = 2;
+  REPOSITORY_VISIBILITY_INTERNAL = 3;
+}
+
+enum TuiTheme {
+  TUI_THEME_UNSPECIFIED = 0;
+  TUI_THEME_DARK = 1;
+  TUI_THEME_LIGHT = 2;
+  TUI_THEME_SOLARIZED_DARK = 3;
+  TUI_THEME_SOLARIZED_LIGHT = 4;
+  TUI_THEME_CATPPUCCIN_MOCHA = 5;
+  TUI_THEME_CATPPUCCIN_LATTE = 6;
+  TUI_THEME_HIGH_CONTRAST_DARK = 7;
+  TUI_THEME_HIGH_CONTRAST_LIGHT = 8;
+}
+
+message CommandAck {
+  CommandAction action = 1;
+  CommandAckStatus status = 2;
+}
+
+message ChatResult {
+  string question = 1;
+  string answer = 2;
+  // Echoes the requested thread; absent is the default thread.
+  optional string thread_id = 3;
+}
+
+message PerformanceRound {
+  uint32 round = 1;
+  // Finite by contract; the server rejects NaN and infinities.
+  double perf_metric = 2;
+  string perf_unit = 3;
+  bool passed = 4;
+  bool profile_skipped = 5;
+}
+
+// What the performance plot measures and how to read it. Every field is
+// optional so the section can describe the objective before the first
+// measurement.
+message PerformanceContext {
+  optional string objective_metric = 1;
+  optional string objective_unit = 2;
+  optional ObjectiveDirection objective_direction = 3;
+  optional double objective_baseline_value = 4;
+  optional uint32 objective_baseline_round = 5;
+  optional string objective_baseline_commit = 6;
+  optional string objective_description = 7;
+}
+
+// One round belonging to a hypothesis, for the experiment-log drill-down.
+// The single source for every per-round fact the server publishes.
+message HypothesisRound {
+  uint32 round = 1;
+  bool passed = 2;
+  bool reviewed = 3;
+  // Absent when the record predates a member or carries a value the framework
+  // no longer defines: unreadable and unrecorded are the same to a client.
+  optional HypothesisOutcome hypothesis_outcome = 4;
+  // The round's own review state. Distinct from HypothesisEntry.judge_verdict.
+  optional RoundReviewVerdict judge_verdict = 5;
+  optional double perf_metric = 6;
+  optional string perf_unit = 7;
+  // Causal delta against the round's own baseline; absent when the round made
+  // no comparable measurement.
+  optional double perf_delta_pct = 8;
+  optional string commit = 9;
+  bool official_evaluation = 10;
+  optional CandidateDisposition candidate_disposition = 11;
+}
+
+// One unit of investigation: a hypothesis and every round it spans.
+message HypothesisEntry {
+  string hypothesis_id = 1;
+  // False when the records carry no hypothesis_id; clients render a placeholder.
+  bool identified = 2;
+  // Server-derived display title.
+  optional string title = 3;
+  optional string claim = 4;
+  optional string action = 5;
+  uint32 first_round = 6;
+  uint32 last_round = 7;
+  repeated HypothesisRound rounds = 8;
+  // Copied from the server's typed hypothesis state, never recomputed.
+  optional string resolved_outcome = 9;
+  // Independent review from the authoritative hypothesis state.
+  optional JudgeVerdict judge_verdict = 10;
+  optional double perf_metric = 11;
+  optional string perf_unit = 12;
+  optional double perf_delta_pct = 13;
+  // Identity of the measured metric, so clients can label the bare number.
+  optional string perf_metric_name = 14;
+  // Which way improvement points; absent when no direction was recorded.
+  optional ObjectiveDirection perf_direction = 15;
+  optional double perf_baseline_value = 16;
+  optional uint32 perf_baseline_round = 17;
+  optional string perf_baseline_commit = 18;
+  // Why perf_delta_pct is absent, when the server can say.
+  optional PerfDeltaReason perf_delta_reason = 19;
+  // Integration, not truth: the framework's explicit retention decision.
+  optional bool kept = 20;
+  optional StrategyDisposition strategy_disposition = 21;
+  optional string strategy_reason = 22;
+  bool active = 23;
+}
+
+// How to apply Response.experiments to a client's prior snapshot. A reset
+// replaces the entire list. A delta replaces entries by hypothesis id and then
+// removes the named ids. from_revision is absent for a reset.
+message ExperimentUpdate {
+  string run_id = 1;
+  string projection_id = 2;
+  optional uint32 from_revision = 3;
+  uint32 through_revision = 4;
+  bool reset = 5;
+  repeated string removed_hypothesis_ids = 6;
+}
+
+// One workspace file a round's commit range touched.
+message DesignFileChange {
+  string path = 1;
+  DesignChange change = 2;
+  // The pre-rename path, present exactly when change is RENAMED.
+  optional string renamed_from = 3;
+}
+
+// What one round changed in the workspace. Deliberately narrow: every other
+// per-round fact crosses the protocol on HypothesisRound.
+message DesignRound {
+  uint32 round = 1;
+  // The round's end-of-round checkpoint, and the head of the diffed range.
+  optional string commit = 2;
+  optional string base = 3;
+  // Absent means the range could not be resolved; distinct from an empty
+  // list, so presence is carried by the wrapper.
+  optional DesignFiles files = 4;
+}
+
+// Wrapper that lets DesignRound.files distinguish unresolved from empty.
+message DesignFiles {
+  repeated DesignFileChange changes = 1;
+}
+
+// One file's unified patch text from a round's commit range.
+message DesignPatch {
+  string base = 1;
+  string head = 2;
+  string path = 3;
+  optional string renamed_from = 4;
+  // Raw git diff output. Absent when the repository could not produce it,
+  // which is distinct from an empty string.
+  optional string patch = 5;
+  // True when the patch was cut at the server's size bound.
+  bool truncated = 6;
+}
+
+message ChatModelOption {
+  string model = 1;
+  ChatModelSource source = 2;
+  bool default = 3;
+}
+
+message ChatProviderOptions {
+  string provider = 1;
+  repeated ChatModelOption models = 2;
+}
+
+// The agent selections this run's experiment chat offers.
+message ChatOptions {
+  repeated ChatProviderOptions providers = 1;
+}
+
+// Launch-directory configuration defaults a terminal client applies.
+message TuiDefaults {
+  string runs_dir = 1;
+  string input_path = 2;
+  string experiment_name = 3;
+  optional string repository_owner = 4;
+  string repository_name = 5;
+  RepositoryVisibility visibility = 6;
+  TuiTheme theme = 7;
+}
+
+// Reply to one request. Sections are optional; which are set depends on the
+// request. ok is false on failure, in which case error and diagnostic are set.
+message Response {
+  uint32 protocol_version = 1;
+  string request_id = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  bool ok = 4;
+  optional string error = 5;
+  optional Diagnostic diagnostic = 6;
+  optional CommandAck ack = 7;
+  optional ChatResult chat = 8;
+  optional ChatThreadInfo chat_thread = 9;
+  // Absent means the run has not attached its agent selection yet, distinct
+  // from a run that offers no provider at all.
+  optional ChatOptions chat_options = 10;
+  // Absent means the server has no defaults provider, so the client keeps its
+  // own built-in defaults.
+  optional TuiDefaults tui_defaults = 11;
+  optional RunSnapshot snapshot = 12;
+  repeated RunEvent events = 13;
+  repeated PerformanceRound performance = 14;
+  // Absent means the run has not recorded what its metric is.
+  optional PerformanceContext performance_context = 15;
+  repeated HypothesisEntry experiments = 16;
+  // Present on revision-aware servers. The experiments list is complete when
+  // reset is true and contains only replacements when reset is false.
+  optional ExperimentUpdate experiment_update = 17;
+  // False means canonical project/run state is not attached yet, which is
+  // distinct from an authoritative empty experiment log.
+  optional bool experiments_ready = 18;
+  repeated DesignRound design = 19;
+  optional bool design_ready = 20;
+  // Absent means the run has not attached yet, so no patch can be produced.
+  optional DesignPatch design_patch = 21;
+}

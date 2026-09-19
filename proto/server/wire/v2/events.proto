@@ -1,0 +1,436 @@
+// The append-only run event: envelope, closed enums, and every payload.
+//
+// The payload of an event is a typed oneof on RunEvent, so a payload type
+// exists in exactly one place and a client switches on the oneof case instead
+// of a string discriminator. Free-form producer data (tool arguments, agent
+// results) is google.protobuf.Struct or Value.
+syntax = "proto3";
+
+package server.wire.v2;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "server/wire/v2/common.proto";
+import "server/wire/v2/snapshot.proto";
+
+// Closed set of event kinds. The oneof case on RunEvent carries the payload;
+// several kinds have no payload and some share one (phase_started and
+// phase_finished both carry PhaseData).
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_SERVER_STARTED = 1;
+  EVENT_TYPE_SERVER_READY = 2;
+  EVENT_TYPE_CONFIGURATION_FAILED = 3;
+  EVENT_TYPE_RUN_STARTED = 4;
+  EVENT_TYPE_EXPERIMENTS_CHANGED = 5;
+  EVENT_TYPE_RUN_INTERRUPTED = 6;
+  EVENT_TYPE_RUN_STATUS_CHANGED = 7;
+  EVENT_TYPE_CHAT = 8;
+  EVENT_TYPE_CHAT_THREAD_CREATED = 9;
+  EVENT_TYPE_STATUS_QUERY = 10;
+  EVENT_TYPE_CONTROL = 11;
+  EVENT_TYPE_INVOCATION_STARTED = 12;
+  EVENT_TYPE_INVOCATION_FINISHED = 13;
+  EVENT_TYPE_AGENT_EXECUTION_STARTED = 14;
+  EVENT_TYPE_AGENT_EXECUTION_ACTIVITY_CHANGED = 15;
+  EVENT_TYPE_AGENT_EXECUTION_FINISHED = 16;
+  EVENT_TYPE_PHASE_STARTED = 17;
+  EVENT_TYPE_PHASE_FINISHED = 18;
+  EVENT_TYPE_AGENT_OUTPUT_CHUNK = 19;
+  EVENT_TYPE_SUBPROCESS_OUTPUT = 20;
+  EVENT_TYPE_JUDGE_RESULT = 21;
+  EVENT_TYPE_BENCHMARK_RESULT = 22;
+  EVENT_TYPE_ROUND_FINISHED = 23;
+  EVENT_TYPE_RUN_FINISHED = 24;
+  EVENT_TYPE_RUN_FAILED = 25;
+  EVENT_TYPE_OUTPUT = 26;
+  EVENT_TYPE_TOOL_CALL = 27;
+  EVENT_TYPE_TOOL_RESULT = 28;
+  EVENT_TYPE_TODO_UPDATE = 29;
+  EVENT_TYPE_USAGE_UPDATE = 30;
+  EVENT_TYPE_GATE_STARTED = 31;
+  EVENT_TYPE_GATE_FINISHED = 32;
+  EVENT_TYPE_WORKSPACE_SNAPSHOT = 33;
+  EVENT_TYPE_RUN_CONFIGURED = 34;
+  EVENT_TYPE_FRAMEWORK_WARNING = 35;
+}
+
+// Lifecycle status attached to an event when applicable.
+enum EventStatus {
+  EVENT_STATUS_UNSPECIFIED = 0;
+  EVENT_STATUS_ACTIVE = 1;
+  EVENT_STATUS_ANSWERED = 2;
+  EVENT_STATUS_PENDING = 3;
+  EVENT_STATUS_CONSUMED = 4;
+  EVENT_STATUS_COMPLETED = 5;
+  EVENT_STATUS_FAILED = 6;
+  EVENT_STATUS_CANCELLED = 7;
+  EVENT_STATUS_INTERRUPTED = 8;
+}
+
+// Which host stream a captured line of output came from.
+enum OutputStream {
+  OUTPUT_STREAM_UNSPECIFIED = 0;
+  OUTPUT_STREAM_STDOUT = 1;
+  OUTPUT_STREAM_STDERR = 2;
+}
+
+// Presentation channel for streamed agent output.
+enum AgentOutputChannel {
+  AGENT_OUTPUT_CHANNEL_UNSPECIFIED = 0;
+  AGENT_OUTPUT_CHANNEL_ASSISTANT = 1;
+  AGENT_OUTPUT_CHANNEL_ANALYSIS = 2;
+  AGENT_OUTPUT_CHANNEL_TOOL = 3;
+  AGENT_OUTPUT_CHANNEL_DIAGNOSTIC = 4;
+  AGENT_OUTPUT_CHANNEL_PROMPT = 5;
+}
+
+// Framework-owned gates a candidate passes through.
+enum GateKind {
+  GATE_KIND_UNSPECIFIED = 0;
+  GATE_KIND_VALIDATION = 1;
+  GATE_KIND_ACCURACY = 2;
+  GATE_KIND_BENCHMARK = 3;
+}
+
+// Framework subsystems that emit framework events.
+enum FrameworkSource {
+  FRAMEWORK_SOURCE_UNSPECIFIED = 0;
+  FRAMEWORK_SOURCE_GATES = 1;
+  FRAMEWORK_SOURCE_GIT_TRACKING = 2;
+  FRAMEWORK_SOURCE_LOOP = 3;
+  FRAMEWORK_SOURCE_GPU = 4;
+  FRAMEWORK_SOURCE_SKYPILOT = 5;
+  FRAMEWORK_SOURCE_OTHER = 6;
+}
+
+enum ExperimentsChangeReason {
+  EXPERIMENTS_CHANGE_REASON_UNSPECIFIED = 0;
+  EXPERIMENTS_CHANGE_REASON_PROJECT_ATTACHED = 1;
+  EXPERIMENTS_CHANGE_REASON_ACTIVE_HYPOTHESIS_CHANGED = 2;
+  EXPERIMENTS_CHANGE_REASON_ROUND_PERSISTED = 3;
+}
+
+// Verdict of one judge invocation.
+enum JudgeVerdict {
+  JUDGE_VERDICT_UNSPECIFIED = 0;
+  JUDGE_VERDICT_PASS = 1;
+  JUDGE_VERDICT_FAIL = 2;
+}
+
+// Judge outcome recorded when a round ends; SKIPPED means no judge ran.
+enum RoundJudgeVerdict {
+  ROUND_JUDGE_VERDICT_UNSPECIFIED = 0;
+  ROUND_JUDGE_VERDICT_PASS = 1;
+  ROUND_JUDGE_VERDICT_FAIL = 2;
+  ROUND_JUDGE_VERDICT_SKIPPED = 3;
+}
+
+message ChatData {
+  string answer = 1;
+  // The authoritative thread title, set on the turn that titles a previously
+  // untitled thread so clients learn it from replay.
+  optional string thread_title = 2;
+  // Identity of the turn this answer closes: the id the turn's streamed chunks
+  // carried. Absent on records written before the field existed.
+  optional string invocation_id = 3;
+}
+
+// Identity and resolved agent settings for one experiment-chat thread. The
+// default thread is implicit and never records one of these.
+message ChatThreadCreatedData {
+  string thread_id = 1;
+  string title = 2;
+  string driver = 3;
+  string provider = 4;
+  string model = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message InvocationStartedData {
+  string system_prompt = 1;
+  string user_prompt = 2;
+}
+
+message InvocationFinishedData {
+  // Absent means the invocation produced no result.
+  optional google.protobuf.Value result = 1;
+  optional string error = 2;
+}
+
+// Semantic context for one prompt-to-result agent execution.
+message AgentExecutionStartedData {
+  string stage = 1;
+  optional uint32 attempt = 2;
+  string system_prompt = 3;
+  string user_prompt = 4;
+  AgentExecutionActivityData activity = 5;
+  optional string driver = 6;
+  optional string provider = 7;
+  optional string model = 8;
+}
+
+// Terminal result for one agent execution.
+message AgentExecutionFinishedData {
+  optional google.protobuf.Value result = 1;
+  optional string error = 2;
+}
+
+message OutputData {
+  OutputStream stream = 1;
+  string source = 2;
+  string content = 3;
+}
+
+message ServerReadyData {
+  // Transport the server speaks. Always "jsonl" today.
+  string socket_protocol = 1;
+}
+
+message RunStartedData {
+  string outer_loop = 1;
+  string input = 2;
+  uint32 max_rounds = 3;
+  // The agent roles the loop can run per round. Empty on events recorded
+  // before the field existed.
+  repeated string expected_roles = 4;
+}
+
+message RunInterruptedData {
+  string reason = 1;
+  optional string signal = 2;
+}
+
+// One move of the run through its lifecycle: status is the new value and
+// previous the one it replaced.
+message RunStatusChangedData {
+  RunStatus status = 1;
+  RunStatus previous = 2;
+}
+
+message ExperimentsChangedData {
+  ExperimentsChangeReason reason = 1;
+  // Persisted projection revision. Absent preserves events recorded before
+  // revisioned experiment queries existed.
+  optional uint32 revision = 2;
+}
+
+message ConfigurationFailedData {
+  string code = 1;
+  string stage = 2;
+  string message = 3;
+  optional string usage = 4;
+  int32 exit_code = 5;
+}
+
+message PhaseData {
+  string phase = 1;
+  optional uint32 attempt = 2;
+}
+
+// Structured progress readings for one agent invocation, carried on
+// presentation events so renderers format their own status prefix.
+message AgentStatusData {
+  optional string progress = 1;
+  optional string agent_label = 2;
+  double elapsed_seconds = 3;
+  uint32 input_tokens = 4;
+  optional uint32 context_window = 5;
+}
+
+message AgentOutputChunkData {
+  AgentOutputChannel channel = 1;
+  string content = 2;
+  optional AgentStatusData status = 3;
+}
+
+message ToolCallData {
+  string tool = 1;
+  optional string call_id = 2;
+  google.protobuf.Struct args = 3;
+  optional AgentStatusData status = 4;
+}
+
+// Structured result of a command-style tool execution.
+message CommandResultPayload {
+  string stdout = 1;
+  string stderr = 2;
+  optional int32 exit_code = 3;
+  // Wall-clock execution time in seconds.
+  optional double duration = 4;
+}
+
+// A tool result that is a JSON object or array, already parsed.
+message JsonResultPayload {
+  google.protobuf.Value value = 1;
+}
+
+message ToolResultData {
+  string tool = 1;
+  optional string call_id = 2;
+  // Raw, always-present result text. Frontends render payload when present
+  // and fall back to this.
+  string content = 3;
+  bool is_error = 4;
+  oneof payload {
+    CommandResultPayload command = 5;
+    JsonResultPayload json = 6;
+  }
+}
+
+message TodoItemData {
+  string content = 1;
+  // Expected values are pending, in_progress, and completed, but the field
+  // stays open: todo payloads originate from agent tool calls and an unknown
+  // status must degrade in the renderer.
+  string status = 2;
+}
+
+message TodoUpdateData {
+  repeated TodoItemData todos = 1;
+}
+
+message UsageUpdateData {
+  uint32 input_tokens = 1;
+  optional uint32 context_window = 2;
+  optional string model = 3;
+}
+
+message SubprocessOutputData {
+  string process_id = 1;
+  string process_kind = 2;
+  OutputStream stream = 3;
+  string content = 4;
+}
+
+message JudgeResultData {
+  JudgeVerdict verdict = 1;
+  string feedback = 2;
+  uint32 attempt = 3;
+}
+
+message BenchmarkResultData {
+  string metric = 1;
+  // Finite by contract; the server rejects NaN and infinities.
+  double value = 2;
+  string unit = 3;
+}
+
+message RoundFinishedData {
+  uint32 attempts = 1;
+  RoundJudgeVerdict judge_verdict = 2;
+  optional double perf_metric = 3;
+  optional string perf_unit = 4;
+  // True when no fresh profile ran this round; such a round records no perf
+  // reading.
+  bool profile_skipped = 5;
+}
+
+// One framework gate began evaluating the current candidate. Every start is
+// followed by exactly one GateFinishedData for the same gate and recipe.
+message GateStartedData {
+  GateKind gate = 1;
+  // The validation recipe being executed; absent for accuracy and benchmark.
+  optional string recipe = 2;
+  // The trusted command the gate runs, when one is configured.
+  optional string command = 3;
+  FrameworkSource source = 4;
+  optional string source_label = 5;
+}
+
+// Outcome of one framework gate; the envelope status carries pass or fail.
+message GateFinishedData {
+  GateKind gate = 1;
+  optional string recipe = 2;
+  // True when a prior pass for the exact same input was reused.
+  bool reused = 3;
+  // metric, value, and unit are set only on a passing benchmark gate.
+  optional string metric = 4;
+  optional double value = 5;
+  optional string unit = 6;
+  // Trailing command output on failure.
+  optional string output_tail = 7;
+  FrameworkSource source = 8;
+  optional string source_label = 9;
+}
+
+// A git tracker outcome. Exactly one aspect is populated per event: a
+// snapshot carries label, a trusted-input baseline carries baseline, and a
+// snapshot-exclusion change carries excluded_paths.
+message WorkspaceSnapshotData {
+  string label = 1;
+  optional string commit = 2;
+  optional string baseline = 3;
+  repeated string excluded_paths = 4;
+  FrameworkSource source = 5;
+}
+
+// One per run: the resolved configuration a loop starts with.
+message RunConfiguredData {
+  string run_log_path = 1;
+  string project_root = 2;
+  optional string model = 3;
+  // First line of the objective only; the full text lives in run state.
+  optional string objective = 4;
+  optional string search_policy = 5;
+  bool benchmark_contract = 6;
+  optional string pareto_objectives = 7;
+  FrameworkSource source = 8;
+}
+
+// A non-fatal framework fault an operator should see.
+message FrameworkWarningData {
+  string summary = 1;
+  optional string detail = 2;
+  FrameworkSource source = 3;
+  optional string source_label = 4;
+}
+
+// One reproducible human, control, or invocation event.
+message RunEvent {
+  uint32 protocol_version = 1;
+  uint32 sequence = 2;
+  string run_id = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  EventType type = 5;
+  string text = 6;
+  optional Diagnostic diagnostic = 7;
+  optional EventStatus status = 8;
+  optional string round_label = 9;
+  optional string agent_kind = 10;
+  optional string execution_id = 11;
+  // Which experiment-chat thread a chat event belongs to. Absent is the
+  // default thread.
+  optional string chat_thread_id = 12;
+  oneof data {
+    ChatData chat = 20;
+    ChatThreadCreatedData chat_thread_created = 21;
+    InvocationStartedData invocation_started = 22;
+    InvocationFinishedData invocation_finished = 23;
+    AgentExecutionStartedData agent_execution_started = 24;
+    AgentExecutionActivityData agent_execution_activity_changed = 25;
+    AgentExecutionFinishedData agent_execution_finished = 26;
+    OutputData output = 27;
+    ServerReadyData server_ready = 28;
+    RunStartedData run_started = 29;
+    RunInterruptedData run_interrupted = 30;
+    RunStatusChangedData run_status_changed = 31;
+    ExperimentsChangedData experiments_changed = 32;
+    ConfigurationFailedData configuration_failed = 33;
+    PhaseData phase = 34;
+    AgentOutputChunkData agent_output_chunk = 35;
+    SubprocessOutputData subprocess_output = 36;
+    JudgeResultData judge_result = 37;
+    BenchmarkResultData benchmark_result = 38;
+    RoundFinishedData round_finished = 39;
+    ToolCallData tool_call = 40;
+    ToolResultData tool_result = 41;
+    TodoUpdateData todo_update = 42;
+    UsageUpdateData usage_update = 43;
+    GateStartedData gate_started = 44;
+    GateFinishedData gate_finished = 45;
+    WorkspaceSnapshotData workspace_snapshot = 46;
+    RunConfiguredData run_configured = 47;
+    FrameworkWarningData framework_warning = 48;
+  }
+}
