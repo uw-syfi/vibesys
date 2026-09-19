@@ -188,6 +188,84 @@ export function layoutAgentGraph(
   return {nodes, cells, width, height: tallest};
 }
 
+export interface BackdropCell {
+  x: number;
+  y: number;
+  /**
+   * A terminal cell is about twice as tall as it is wide, so a full-height
+   * bottom row reads twice as thick as the right column beside it. `half`
+   * cells are the bottom row (and the corner it shares with the right
+   * column): the renderer draws them as an upper-half block in
+   * `selectedSurface` foreground with no background, instead of a full cell.
+   */
+  half: boolean;
+}
+
+/**
+ * The room a renderer actually has to draw in: not `AgentGraph.width` and
+ * `.height`, which are only the footprint the nodes and edges themselves need
+ * and, for the last stage's column and for the tallest column's own row, end
+ * exactly where a backdrop cell would begin. `agent-map.ts` hands in the
+ * canvas's real available size, the same numbers it already computed to lay
+ * the graph out and to window it into the pane's row budget.
+ */
+export interface CanvasBounds {
+  width: number;
+  height: number;
+}
+
+/**
+ * The visible cells of a copy of the selected node's own rectangle, offset
+ * one column right and one row down and painted behind everything else
+ * (`agent-map.ts#renderGraph`, in `theme.selectedSurface`): one column past
+ * the node's right border (rows `node.y + 1` through `node.y + NODE_HEIGHT -
+ * 1`, full cells) and one row past its bottom border (columns `node.x + 1`
+ * through `node.x + node.width`, half cells, `BackdropCell.half`), sharing
+ * one corner cell that the bottom row owns. Every other cell of the offset
+ * copy lands on `node` itself and is never drawn.
+ *
+ * An edge or arrowhead cell (`graph.cells`) is left in the returned list
+ * rather than pulled out of it: the renderer paints this backdrop before it
+ * draws the edges, so a cell that carries both keeps the edge's own glyph and
+ * foreground and simply picks up the backdrop colour as its background. A
+ * cell that sits inside another node's own rectangle is dropped instead,
+ * since that node cannot mask it the same way (its own interior is exactly as
+ * transparent), and a cell outside `bounds` is dropped too, standing in for
+ * the pane border. The last stage's column has no gutter reserved past it
+ * (`graph.width` ends exactly at its nodes' own right edge), so its right
+ * column is omitted whenever `bounds` has no slack past the graph's own
+ * width; a `bounds` wider than the graph draws it in full.
+ */
+export function selectionBackdrop(
+  graph: AgentGraph,
+  node: GraphNode,
+  bounds: CanvasBounds,
+): BackdropCell[] {
+  const onAnotherNode = (x: number, y: number): boolean =>
+    graph.nodes.some(
+      other =>
+        other !== node &&
+        x >= other.x &&
+        x < other.x + other.width &&
+        y >= other.y &&
+        y < other.y + NODE_HEIGHT,
+    );
+  const safe = (x: number, y: number): boolean =>
+    x >= 0 && x < bounds.width && y >= 0 && y < bounds.height && !onAnotherNode(x, y);
+
+  const cells = new Map<string, BackdropCell>();
+  const rightX = node.x + node.width;
+  // Full cells; the bottom row below picks up the shared corner instead.
+  for (let y = node.y + 1; y < node.y + NODE_HEIGHT; y += 1) {
+    if (safe(rightX, y)) cells.set(`${rightX},${y}`, {x: rightX, y, half: false});
+  }
+  const bottomY = node.y + NODE_HEIGHT;
+  for (let x = node.x + 1; x <= node.x + node.width; x += 1) {
+    if (safe(x, bottomY)) cells.set(`${x},${bottomY}`, {x, y: bottomY, half: true});
+  }
+  return [...cells.values()];
+}
+
 function columnHeight(count: number): number {
   return count === 0 ? 0 : count * NODE_HEIGHT + (count - 1) * ROW_GAP;
 }

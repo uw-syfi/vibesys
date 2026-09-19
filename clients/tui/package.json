@@ -33,17 +33,19 @@
     "test": "bun test --max-concurrency 1 src dev"
   },
   "dependencies": {
+    "@opentui/core": "0.4.3",
     "@vibesys/backend-client": "workspace:*",
     "@vibesys/core-state": "workspace:*",
-    "@opentui/core": "0.4.3"
+    "highlight.js": "11.11.2",
+    "lowlight": "3.3.0"
   },
   "bundledDependencies": [
     "@vibesys/backend-client",
     "@vibesys/core-state"
   ],
   "devDependencies": {
-    "@types/node": "^24.0.0",
     "@types/bun": "1.3.9",
+    "@types/node": "^24.0.0",
     "typescript": "^5.8.3"
   }
 }
