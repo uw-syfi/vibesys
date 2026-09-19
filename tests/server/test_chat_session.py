@@ -15,7 +15,7 @@ from server.chat.prompts import (
     experiment_chat_system_prompt,
 )
 from server.chat.session import ExperimentChatDependencies, ExperimentChatSession
-from server.events import EventType
+from server.wire.v2 import events_pb2
 from vibesys.agents.client import AgentClient
 from vibesys.agents.drivers import agentshim as agentshim_driver
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
@@ -318,9 +318,9 @@ def test_streamed_output_is_filed_under_the_thread_that_asked(
     chat.ask("what happened?")
 
     assert [
-        (event.agent_kind, event.chat_thread_id)
+        (event.agent_kind, event.chat_thread_id if event.HasField("chat_thread_id") else None)
         for event in parts.journal.read()
-        if event.type is EventType.AGENT_OUTPUT_CHUNK
+        if event.type == events_pb2.EVENT_TYPE_AGENT_OUTPUT_CHUNK
     ] == [("chat", thread_id)]
 
 

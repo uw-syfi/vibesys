@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from tests.server.support import build_server_parts
 
-from server.api.protocol import ChatQuery, ChatThreadCreateQuery
 from server.chat.factory import ChatAgentResources
 from server.diagnostics import DiagnosticScope, DiagnosticSeverity
-from server.events import EventStatus, EventType
-from server.integration import _CORE_FAILURE_CONTEXTS
+from server.integration import _CORE_FAILURE_CONTEXTS, _wire_payload
 from server.journal import DIAGNOSTIC_FAILURE_EVENTS
+from server.wire import messages
+from server.wire.v2 import events_pb2, snapshot_pb2
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.events import (
     AgentExecutionFinishedData,
@@ -116,10 +116,17 @@ def test_core_events_project_to_wire_journal_and_execution_activity(tmp_path):  
     assert [
         event.type
         for event in parts.journal.read()
-        if event.type in {EventType.TOOL_CALL, EventType.AGENT_OUTPUT_CHUNK}
-    ] == [EventType.TOOL_CALL, EventType.AGENT_OUTPUT_CHUNK]
+        if event.type
+        in {
+            events_pb2.EventType.EVENT_TYPE_TOOL_CALL,
+            events_pb2.EventType.EVENT_TYPE_AGENT_OUTPUT_CHUNK,
+        }
+    ] == [
+        events_pb2.EventType.EVENT_TYPE_TOOL_CALL,
+        events_pb2.EventType.EVENT_TYPE_AGENT_OUTPUT_CHUNK,
+    ]
     activity = parts.api.snapshot().active_executions[0].activity
-    assert activity.mode == "tool"
+    assert activity.mode == snapshot_pb2.ExecutionActivityMode.EXECUTION_ACTIVITY_MODE_TOOL
     assert activity.tool == "Bash"
     assert (tmp_path / "core-events.jsonl").is_file()
 
@@ -150,18 +157,18 @@ def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path):
     )
 
     events = parts.journal.read()
-    chunk = next(e for e in events if e.type is EventType.AGENT_OUTPUT_CHUNK)
+    chunk = next(e for e in events if e.type == events_pb2.EventType.EVENT_TYPE_AGENT_OUTPUT_CHUNK)
     assert chunk.agent_kind == "implementer"
-    gate = next(e for e in events if e.type is EventType.GATE_FINISHED)
-    assert gate.agent_kind is None
+    gate = next(e for e in events if e.type == events_pb2.EventType.EVENT_TYPE_GATE_FINISHED)
+    assert not gate.HasField("agent_kind")
     assert gate.round_label == "round-1"
-    assert gate.status is EventStatus.FAILED
+    assert gate.status == events_pb2.EventStatus.EVENT_STATUS_FAILED
     # A failed gate is an expected outcome, not a fault: no diagnostic.
-    assert gate.diagnostic is None
-    warning = next(e for e in events if e.type is EventType.FRAMEWORK_WARNING)
-    assert warning.agent_kind is None
-    assert warning.diagnostic is not None
-    assert warning.diagnostic.severity is DiagnosticSeverity.WARNING
+    assert not gate.HasField("diagnostic")
+    warning = next(e for e in events if e.type == events_pb2.EventType.EVENT_TYPE_FRAMEWORK_WARNING)
+    assert not warning.HasField("agent_kind")
+    assert warning.HasField("diagnostic")
+    assert warning.diagnostic.severity == DiagnosticSeverity.DIAGNOSTIC_SEVERITY_WARNING
     assert warning.diagnostic.summary == "profiler failed"
     assert warning.diagnostic.detail == "boom"
     assert warning.diagnostic.source == "loop"
@@ -194,30 +201,32 @@ def test_failed_core_events_project_with_synthesized_diagnostics(tmp_path):  # n
     )
 
     events = parts.journal.read()
-    execution = next(e for e in events if e.type is EventType.AGENT_EXECUTION_FINISHED)
-    assert execution.diagnostic is not None
+    execution = next(
+        e for e in events if e.type == events_pb2.EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED
+    )
+    assert execution.HasField("diagnostic")
     assert execution.diagnostic.code == "core_failure"
     assert execution.diagnostic.summary == "RuntimeError: boom"
-    assert execution.diagnostic.detail is None
-    assert execution.diagnostic.scope is DiagnosticScope.INVOCATION
-    assert execution.diagnostic.severity is DiagnosticSeverity.ERROR
+    assert not execution.diagnostic.HasField("detail")
+    assert execution.diagnostic.scope == DiagnosticScope.DIAGNOSTIC_SCOPE_INVOCATION
+    assert execution.diagnostic.severity == DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR
     assert execution.diagnostic.source == "loop"
     # The phase failure shares the execution's id, so it folds onto the same
     # diagnostic (the invocation's error) rather than minting a distinct
     # phase-scoped report the frontend would count as a second failure.
-    phase = next(e for e in events if e.type is EventType.PHASE_FINISHED)
-    assert phase.diagnostic is not None
+    phase = next(e for e in events if e.type == events_pb2.EventType.EVENT_TYPE_PHASE_FINISHED)
+    assert phase.HasField("diagnostic")
     assert phase.diagnostic.id == execution.diagnostic.id
     assert phase.diagnostic.summary == "RuntimeError: boom"
-    assert phase.diagnostic.scope is DiagnosticScope.INVOCATION
+    assert phase.diagnostic.scope == DiagnosticScope.DIAGNOSTIC_SCOPE_INVOCATION
     # The run-scoped terminal failure carries no execution_id and stays its own
     # fatal diagnostic.
-    terminal = next(e for e in events if e.type is EventType.RUN_FAILED)
-    assert terminal.diagnostic is not None
+    terminal = next(e for e in events if e.type == events_pb2.EventType.EVENT_TYPE_RUN_FAILED)
+    assert terminal.HasField("diagnostic")
     assert terminal.diagnostic.id != execution.diagnostic.id
     assert terminal.diagnostic.summary == "RuntimeError: boom"
-    assert terminal.diagnostic.scope is DiagnosticScope.RUN
-    assert terminal.diagnostic.severity is DiagnosticSeverity.FATAL
+    assert terminal.diagnostic.scope == DiagnosticScope.DIAGNOSTIC_SCOPE_RUN
+    assert terminal.diagnostic.severity == DiagnosticSeverity.DIAGNOSTIC_SEVERITY_FATAL
 
 
 def test_execution_failure_cascade_folds_to_one_diagnostic_per_execution(tmp_path):  # noqa: ANN001, ANN201
@@ -255,7 +264,7 @@ def test_execution_failure_cascade_folds_to_one_diagnostic_per_execution(tmp_pat
     first_diagnostics = [
         e.diagnostic
         for e in events
-        if e.execution_id == first.execution_id and e.diagnostic is not None
+        if e.execution_id == first.execution_id and e.HasField("diagnostic")
     ]
     # The journal folds the legacy invocation lifecycle onto the canonical one,
     # so the surviving cascade is the agent-execution and phase failures; both
@@ -266,7 +275,7 @@ def test_execution_failure_cascade_folds_to_one_diagnostic_per_execution(tmp_pat
     assert all(d.summary == "RuntimeError: boom" for d in first_diagnostics)
 
     second_event = next(e for e in events if e.execution_id == second.execution_id)
-    assert second_event.diagnostic is not None
+    assert second_event.HasField("diagnostic")
     assert second_event.diagnostic.id not in ids
     assert second_event.diagnostic.summary == "ValueError: nope"
 
@@ -287,7 +296,8 @@ def test_invocation_adapter_applies_steering_without_emitting_duplicate_lifecycl
 
     assert "measure latency first" in handle.user_prompt
     assert not any(
-        event.type is EventType.AGENT_EXECUTION_STARTED for event in parts.journal.read()
+        event.type == events_pb2.EventType.EVENT_TYPE_AGENT_EXECUTION_STARTED
+        for event in parts.journal.read()
     )
     assert len(parts.api.snapshot().active_executions) == 1
     parts.integration.invocations.finish(
@@ -333,9 +343,9 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path):  # noqa
     )
     assert detach is not None
 
-    response = parts.api.execute(ChatQuery(text="what improved?"))
+    response = parts.api.execute(messages.make_request("chat", text="what improved?"))
 
-    assert response.chat is not None
+    assert response.HasField("chat")
     assert response.chat.answer == "It improved in round 2."
     assert client.calls[0]["reuse_session"] is True
     assert client.calls[0]["session_key"] == AgentSessionKey(SessionScope.CHAT, "default")
@@ -385,7 +395,9 @@ def test_non_cli_run_rejects_new_chat_threads(tmp_path):  # noqa: ANN001, ANN201
     )
 
     with pytest.raises(ValueError, match="require the CLI agent backend"):
-        parts.api.execute(ChatThreadCreateQuery(provider="codex", model="gpt-test"))
+        parts.api.execute(
+            messages.make_request("chat_thread_create", provider="codex", model="gpt-test")
+        )
 
 
 def test_close_is_idempotent_and_stops_event_projection(tmp_path):  # noqa: ANN001, ANN201
@@ -398,13 +410,14 @@ def test_close_is_idempotent_and_stops_event_projection(tmp_path):  # noqa: ANN0
         data=AgentOutputChunkData(channel="assistant", content="after close"),
     )
 
-    assert not any(event.type is EventType.AGENT_OUTPUT_CHUNK for event in parts.journal.read())
+    assert not any(
+        event.type == events_pb2.EventType.EVENT_TYPE_AGENT_OUTPUT_CHUNK
+        for event in parts.journal.read()
+    )
 
 
 def test_run_started_expected_roles_round_trip_through_the_wire_bridge() -> None:
-    """The core payload bridges to the wire model with and without the field."""
-    from server.events import RunStartedData  # noqa: PLC0415
-    from server.integration import _EVENT_DATA_ADAPTER  # noqa: PLC0415
+    """The core payload bridges to the wire message with and without the field."""
     from vibesys.events import RunStartedData as CoreRunStartedData  # noqa: PLC0415
 
     advertised = CoreRunStartedData(
@@ -413,13 +426,11 @@ def test_run_started_expected_roles_round_trip_through_the_wire_bridge() -> None
         max_rounds=3,
         expected_roles=("implementer", "judge", "perf_eval"),
     )
-    wire = _EVENT_DATA_ADAPTER.validate_python(advertised.model_dump(mode="python"))
-    assert isinstance(wire, RunStartedData)
-    assert wire.expected_roles == ("implementer", "judge", "perf_eval")
+    wire = _wire_payload(advertised)
+    assert isinstance(wire, events_pb2.RunStartedData)
+    assert list(wire.expected_roles) == ["implementer", "judge", "perf_eval"]
 
-    # A recording that predates the field must still validate, as empty.
-    legacy = _EVENT_DATA_ADAPTER.validate_python(
-        {"kind": "run_started", "outer_loop": "plain", "input": "objective", "max_rounds": 3}
-    )
-    assert isinstance(legacy, RunStartedData)
-    assert legacy.expected_roles == ()
+    # A core payload that omits the field bridges as empty.
+    legacy = _wire_payload(CoreRunStartedData(outer_loop="plain", input="objective", max_rounds=3))
+    assert isinstance(legacy, events_pb2.RunStartedData)
+    assert list(legacy.expected_roles) == []

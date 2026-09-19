@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import itertools
 import json
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -13,25 +12,24 @@ from tests.server.support import build_server_parts
 if TYPE_CHECKING:
     from pathlib import Path
 
+from google.protobuf import struct_pb2
+
 from server.diagnostics import (
     DiagnosticRetryability,
     DiagnosticScope,
     DiagnosticSeverity,
 )
-from server.events import (
-    AgentExecutionActivityData,
-    AgentExecutionFinishedData,
-    AgentExecutionStartedData,
-    EventStatus,
-    EventType,
-    GateFinishedData,
-    GateKind,
-    JudgeResultData,
-    PhaseData,
-    RoundFinishedData,
-    RunEvent,
-    make_event,
-)
+from server.wire import codec, messages
+from server.wire.v2 import events_pb2, snapshot_pb2
+
+EventType = events_pb2.EventType
+EventStatus = events_pb2.EventStatus
+
+
+def _ok_struct():  # noqa: ANN202
+    struct = struct_pb2.Struct()
+    struct.update({"ok": True})
+    return struct
 
 
 def _events(path):  # noqa: ANN001, ANN202
@@ -41,54 +39,59 @@ def _events(path):  # noqa: ANN001, ANN202
 def _write_stored_events(log_dir, events):  # noqa: ANN001, ANN202
     log_dir.mkdir()
     (log_dir / "run-events.jsonl").write_text(
-        "".join(event.model_dump_json() + "\n" for event in events)
+        "".join(codec.dumps(event) + "\n" for event in events)
     )
 
 
 def _stored_event(sequence, event_type, status, data):  # noqa: ANN001, ANN202
-    return RunEvent(
+    return messages.make_event(
+        event_type,
+        data=data,
         sequence=sequence,
         run_id="persisted-run",
-        timestamp=datetime(2024, 1, 1, tzinfo=UTC),
-        type=event_type,
         status=status,
         agent_kind="implementer",
         round_label="round 1",
         execution_id="exec-1",
-        data=data,
     )
 
 
 def test_bootstrap_events_join_durable_history(tmp_path):  # noqa: ANN001, ANN201
     durable = build_server_parts(tmp_path / "durable")
-    durable.journal.record(EventType.RUN_FINISHED, status=EventStatus.COMPLETED)
+    durable.journal.record(
+        EventType.EVENT_TYPE_RUN_FINISHED, status=EventStatus.EVENT_STATUS_COMPLETED
+    )
 
     current = build_server_parts(tmp_path / "bootstrap")
-    current.journal.record(EventType.SERVER_READY, status=EventStatus.ACTIVE)
+    current.journal.record(
+        EventType.EVENT_TYPE_SERVER_READY, status=EventStatus.EVENT_STATUS_ACTIVE
+    )
     current.attach(tmp_path / "durable")
-    current.journal.record(EventType.RUN_STARTED, status=EventStatus.ACTIVE)
+    current.journal.record(EventType.EVENT_TYPE_RUN_STARTED, status=EventStatus.EVENT_STATUS_ACTIVE)
 
     # Each attach publishes the starting -> running transition, and the second
     # session's lands after the first session's terminal event: a client that
     # folds this history in order ends at `running`, not at the old `completed`.
     expected = [
-        EventType.SERVER_STARTED,
-        EventType.RUN_STATUS_CHANGED,
-        EventType.RUN_FINISHED,
-        EventType.SERVER_STARTED,
-        EventType.RUN_STATUS_CHANGED,
-        EventType.SERVER_READY,
-        EventType.RUN_STARTED,
+        EventType.EVENT_TYPE_SERVER_STARTED,
+        EventType.EVENT_TYPE_RUN_STATUS_CHANGED,
+        EventType.EVENT_TYPE_RUN_FINISHED,
+        EventType.EVENT_TYPE_SERVER_STARTED,
+        EventType.EVENT_TYPE_RUN_STATUS_CHANGED,
+        EventType.EVENT_TYPE_SERVER_READY,
+        EventType.EVENT_TYPE_RUN_STARTED,
     ]
     assert [event.type for event in current.journal.read()] == expected
     assert [event["type"] for event in _events(tmp_path / "durable/run-events.jsonl")] == [
-        event.value for event in expected
+        EventType.Name(event_type) for event_type in expected
     ]
 
 
 def test_attach_renumbering_bootstrap_events_starts_a_new_sequence_space(tmp_path):  # noqa: ANN001, ANN201
     durable = build_server_parts(tmp_path / "durable")
-    durable.journal.record(EventType.RUN_FINISHED, status=EventStatus.COMPLETED)
+    durable.journal.record(
+        EventType.EVENT_TYPE_RUN_FINISHED, status=EventStatus.EVENT_STATUS_COMPLETED
+    )
 
     current = build_server_parts(tmp_path / "bootstrap")
     bootstrap_store = current.journal.store_id_locked()
@@ -125,15 +128,15 @@ def test_phase_only_legacy_replay_translates_in_place(tmp_path):  # noqa: ANN001
         [
             _stored_event(
                 1,
-                EventType.PHASE_STARTED,
-                EventStatus.ACTIVE,
-                PhaseData(phase="implementer", attempt=1),
+                EventType.EVENT_TYPE_PHASE_STARTED,
+                EventStatus.EVENT_STATUS_ACTIVE,
+                events_pb2.PhaseData(phase="implementer", attempt=1),
             ),
             _stored_event(
                 2,
-                EventType.PHASE_FINISHED,
-                EventStatus.COMPLETED,
-                PhaseData(phase="implementer", attempt=1),
+                EventType.EVENT_TYPE_PHASE_FINISHED,
+                EventStatus.EVENT_STATUS_COMPLETED,
+                events_pb2.PhaseData(phase="implementer", attempt=1),
             ),
         ],
     )
@@ -144,47 +147,53 @@ def test_phase_only_legacy_replay_translates_in_place(tmp_path):  # noqa: ANN001
     sequences = [event.sequence for event in events]
     assert all(left < right for left, right in itertools.pairwise(sequences)), sequences
     started, finished = events[0], events[1]
-    assert started.type is EventType.AGENT_EXECUTION_STARTED
+    assert started.type == EventType.EVENT_TYPE_AGENT_EXECUTION_STARTED
     assert started.sequence == 1
-    assert isinstance(started.data, AgentExecutionStartedData)
-    assert started.data.stage == "implementer"
-    assert started.data.attempt == 1
-    assert finished.type is EventType.AGENT_EXECUTION_FINISHED
+    assert started.WhichOneof("data") == "agent_execution_started"
+    assert started.agent_execution_started.stage == "implementer"
+    assert started.agent_execution_started.attempt == 1
+    assert finished.type == EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED
     assert finished.sequence == 2
-    assert finished.status is EventStatus.COMPLETED
+    assert finished.status == EventStatus.EVENT_STATUS_COMPLETED
     assert not any(
-        event.type in {EventType.PHASE_STARTED, EventType.PHASE_FINISHED} for event in events
+        event.type in {EventType.EVENT_TYPE_PHASE_STARTED, EventType.EVENT_TYPE_PHASE_FINISHED}
+        for event in events
     )
 
 
 def test_modern_phase_events_replay_unchanged(tmp_path):  # noqa: ANN001, ANN201
     """Phase events with a canonical lifecycle sibling pass through untouched."""
     log_dir = tmp_path / "modern"
-    activity = AgentExecutionActivityData(mode="thinking", summary="Implementing")
+    activity = snapshot_pb2.AgentExecutionActivityData(
+        mode=snapshot_pb2.ExecutionActivityMode.EXECUTION_ACTIVITY_MODE_THINKING,
+        summary="Implementing",
+    )
     stored = [
         _stored_event(
             1,
-            EventType.AGENT_EXECUTION_STARTED,
-            EventStatus.ACTIVE,
-            AgentExecutionStartedData(stage="implementer", attempt=1, activity=activity),
+            EventType.EVENT_TYPE_AGENT_EXECUTION_STARTED,
+            EventStatus.EVENT_STATUS_ACTIVE,
+            events_pb2.AgentExecutionStartedData(stage="implementer", attempt=1, activity=activity),
         ),
         _stored_event(
             2,
-            EventType.PHASE_STARTED,
-            EventStatus.ACTIVE,
-            PhaseData(phase="implementer", attempt=1),
+            EventType.EVENT_TYPE_PHASE_STARTED,
+            EventStatus.EVENT_STATUS_ACTIVE,
+            events_pb2.PhaseData(phase="implementer", attempt=1),
         ),
         _stored_event(
             3,
-            EventType.AGENT_EXECUTION_FINISHED,
-            EventStatus.COMPLETED,
-            AgentExecutionFinishedData(result={"ok": True}),
+            EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED,
+            EventStatus.EVENT_STATUS_COMPLETED,
+            events_pb2.AgentExecutionFinishedData(
+                result=struct_pb2.Value(struct_value=_ok_struct())
+            ),
         ),
         _stored_event(
             4,
-            EventType.PHASE_FINISHED,
-            EventStatus.COMPLETED,
-            PhaseData(phase="implementer", attempt=1),
+            EventType.EVENT_TYPE_PHASE_FINISHED,
+            EventStatus.EVENT_STATUS_COMPLETED,
+            events_pb2.PhaseData(phase="implementer", attempt=1),
         ),
     ]
     _write_stored_events(log_dir, stored)
@@ -192,8 +201,8 @@ def test_modern_phase_events_replay_unchanged(tmp_path):  # noqa: ANN001, ANN201
     parts = build_server_parts(log_dir)
     events = parts.journal.read()
 
-    assert [event.model_dump_json() for event in events[: len(stored)]] == [
-        event.model_dump_json() for event in stored
+    assert [codec.dumps(event) for event in events[: len(stored)]] == [
+        codec.dumps(event) for event in stored
     ]
 
 
@@ -211,44 +220,47 @@ def test_invocation_and_terminal_failure_share_diagnostic_identity(tmp_path):  #
         for event in parts.journal.read()
         if event.type
         in {
-            EventType.AGENT_EXECUTION_FINISHED,
-            EventType.PHASE_FINISHED,
-            EventType.RUN_FAILED,
+            EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED,
+            EventType.EVENT_TYPE_PHASE_FINISHED,
+            EventType.EVENT_TYPE_RUN_FAILED,
         }
     ]
-    assert execution_event.diagnostic is not None
+    assert execution_event.HasField("diagnostic")
     assert phase.diagnostic == execution_event.diagnostic
-    assert terminal.diagnostic is not None
+    assert terminal.HasField("diagnostic")
     assert terminal.diagnostic.id == execution_event.diagnostic.id
-    assert terminal.diagnostic.scope is DiagnosticScope.INVOCATION
-    assert execution_event.diagnostic.severity is DiagnosticSeverity.ERROR
-    assert terminal.diagnostic.severity is DiagnosticSeverity.FATAL
-    assert terminal.diagnostic.retryability is DiagnosticRetryability.UNKNOWN
-    assert isinstance(execution_event.data, AgentExecutionFinishedData)
-    assert execution_event.data.error == "Agent execution failed"
+    assert terminal.diagnostic.scope == DiagnosticScope.DIAGNOSTIC_SCOPE_INVOCATION
+    assert execution_event.diagnostic.severity == DiagnosticSeverity.DIAGNOSTIC_SEVERITY_ERROR
+    assert terminal.diagnostic.severity == DiagnosticSeverity.DIAGNOSTIC_SEVERITY_FATAL
+    assert (
+        terminal.diagnostic.retryability == DiagnosticRetryability.DIAGNOSTIC_RETRYABILITY_UNKNOWN
+    )
+    assert execution_event.WhichOneof("data") == "agent_execution_finished"
+    assert execution_event.agent_execution_finished.error == "Agent execution failed"
     assert terminal.diagnostic.detail == ("RuntimeError: token=[REDACTED] agent process exited")
 
 
 @pytest.mark.parametrize(
     "event_type",
     [
-        EventType.CONFIGURATION_FAILED,
-        EventType.INVOCATION_FINISHED,
-        EventType.AGENT_EXECUTION_FINISHED,
-        EventType.PHASE_FINISHED,
-        EventType.RUN_FAILED,
-        EventType.RUN_INTERRUPTED,
+        EventType.EVENT_TYPE_CONFIGURATION_FAILED,
+        EventType.EVENT_TYPE_INVOCATION_FINISHED,
+        EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED,
+        EventType.EVENT_TYPE_PHASE_FINISHED,
+        EventType.EVENT_TYPE_RUN_FAILED,
+        EventType.EVENT_TYPE_RUN_INTERRUPTED,
     ],
 )
 def test_operational_failure_events_require_diagnostics(
-    tmp_path: Path, event_type: EventType
+    tmp_path: Path, event_type: EventType.ValueType
 ) -> None:
     parts = build_server_parts(tmp_path)
-    for status in (EventStatus.FAILED, "failed"):
-        with pytest.raises(ValueError, match="must include a diagnostic"):
-            parts.journal.record(event_type, status=status)
     with pytest.raises(ValueError, match="must include a diagnostic"):
-        parts.journal.append(make_event(event_type, "boom", status=EventStatus.FAILED))
+        parts.journal.record(event_type, status=EventStatus.EVENT_STATUS_FAILED)
+    with pytest.raises(ValueError, match="must include a diagnostic"):
+        parts.journal.append(
+            messages.make_event(event_type, "boom", status=EventStatus.EVENT_STATUS_FAILED)
+        )
 
 
 def test_append_accepts_failed_gate_outcomes_without_diagnostics(tmp_path):  # noqa: ANN001, ANN201
@@ -256,37 +268,43 @@ def test_append_accepts_failed_gate_outcomes_without_diagnostics(tmp_path):  # n
     # so the append invariant must leave it diagnostic-less.
     parts = build_server_parts(tmp_path)
     gate = parts.journal.append(
-        make_event(
-            EventType.GATE_FINISHED,
-            status=EventStatus.FAILED,
-            data=GateFinishedData(gate=GateKind.ACCURACY, output_tail="mismatch"),
+        messages.make_event(
+            EventType.EVENT_TYPE_GATE_FINISHED,
+            status=EventStatus.EVENT_STATUS_FAILED,
+            data=events_pb2.GateFinishedData(
+                gate=events_pb2.GateKind.GATE_KIND_ACCURACY, output_tail="mismatch"
+            ),
         )
     )
-    assert gate.diagnostic is None
+    assert not gate.HasField("diagnostic")
 
 
 def test_semantic_failure_events_do_not_require_diagnostics(tmp_path):  # noqa: ANN001, ANN201
     parts = build_server_parts(tmp_path)
     judge = parts.journal.record(
-        EventType.JUDGE_RESULT,
-        status=EventStatus.FAILED,
-        data=JudgeResultData(verdict="fail", feedback="incorrect", attempt=1),
+        EventType.EVENT_TYPE_JUDGE_RESULT,
+        status=EventStatus.EVENT_STATUS_FAILED,
+        data=events_pb2.JudgeResultData(
+            verdict=events_pb2.JudgeVerdict.JUDGE_VERDICT_FAIL, feedback="incorrect", attempt=1
+        ),
     )
     round_finished = parts.journal.record(
-        EventType.ROUND_FINISHED,
-        status=EventStatus.FAILED,
-        data=RoundFinishedData(attempts=1, judge_verdict="fail"),
+        EventType.EVENT_TYPE_ROUND_FINISHED,
+        status=EventStatus.EVENT_STATUS_FAILED,
+        data=events_pb2.RoundFinishedData(
+            attempts=1, judge_verdict=events_pb2.RoundJudgeVerdict.ROUND_JUDGE_VERDICT_FAIL
+        ),
     )
-    assert judge.diagnostic is None
-    assert round_finished.diagnostic is None
+    assert not judge.HasField("diagnostic")
+    assert not round_finished.HasField("diagnostic")
 
 
 def test_capture_failure_emits_nothing_on_success(tmp_path):  # noqa: ANN001, ANN201
     parts = build_server_parts(tmp_path)
     before = parts.journal.read()
     with parts.journal.capture_failure(
-        event_type=EventType.PHASE_FINISHED,
-        scope=DiagnosticScope.PHASE,
+        event_type=EventType.EVENT_TYPE_PHASE_FINISHED,
+        scope=DiagnosticScope.DIAGNOSTIC_SCOPE_PHASE,
         operation="Background maintenance",
     ):
         pass
@@ -301,10 +319,10 @@ def test_capture_failure_records_once_and_reraises(tmp_path):  # noqa: ANN001, A
     with (
         pytest.raises(KeyboardInterrupt) as raised,
         parts.journal.capture_failure(
-            event_type=EventType.PHASE_FINISHED,
-            scope=DiagnosticScope.PHASE,
+            event_type=EventType.EVENT_TYPE_PHASE_FINISHED,
+            scope=DiagnosticScope.DIAGNOSTIC_SCOPE_PHASE,
             operation="Background maintenance",
-            data=PhaseData(phase="maintenance", attempt=1),
+            data=events_pb2.PhaseData(phase="maintenance", attempt=1),
             agent_kind="maintenance",
             round_label="round 1",
         ),
@@ -315,11 +333,11 @@ def test_capture_failure_records_once_and_reraises(tmp_path):  # noqa: ANN001, A
     events = parts.journal.read()
     assert len(events) == len(before) + 1
     captured = events[-1]
-    assert captured.status is EventStatus.FAILED
-    assert captured.data == PhaseData(phase="maintenance", attempt=1)
-    assert captured.diagnostic is not None
+    assert captured.status == EventStatus.EVENT_STATUS_FAILED
+    assert captured.phase == events_pb2.PhaseData(phase="maintenance", attempt=1)
+    assert captured.HasField("diagnostic")
     assert captured.diagnostic.summary == "Background maintenance failed"
-    assert not any(event.type is EventType.RUN_FAILED for event in events)
+    assert not any(event.type == EventType.EVENT_TYPE_RUN_FAILED for event in events)
 
 
 def test_nonterminal_failure_helpers_reject_wrong_event_owners(tmp_path):  # noqa: ANN001, ANN201
@@ -327,17 +345,17 @@ def test_nonterminal_failure_helpers_reject_wrong_event_owners(tmp_path):  # noq
     before = parts.journal.read()
     with pytest.raises(ValueError, match="without owning run termination"):
         parts.journal.record_failure(
-            EventType.JUDGE_RESULT,
+            EventType.EVENT_TYPE_JUDGE_RESULT,
             RuntimeError("incorrect result"),
-            scope=DiagnosticScope.PHASE,
+            scope=DiagnosticScope.DIAGNOSTIC_SCOPE_PHASE,
             operation="Judge",
         )
-    for event_type in (EventType.CONFIGURATION_FAILED, EventType.RUN_FAILED):
+    for event_type in (EventType.EVENT_TYPE_CONFIGURATION_FAILED, EventType.EVENT_TYPE_RUN_FAILED):
         with (
             pytest.raises(ValueError, match="without owning run termination"),
             parts.journal.capture_failure(
                 event_type=event_type,
-                scope=DiagnosticScope.RUN,
+                scope=DiagnosticScope.DIAGNOSTIC_SCOPE_RUN,
                 operation="Background maintenance",
             ),
         ):
@@ -359,10 +377,11 @@ def test_terminal_wrapper_reuses_cause_diagnostic(tmp_path):  # noqa: ANN001, AN
     execution_event, terminal = [
         event
         for event in parts.journal.read()
-        if event.type in {EventType.AGENT_EXECUTION_FINISHED, EventType.RUN_FAILED}
+        if event.type
+        in {EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED, EventType.EVENT_TYPE_RUN_FAILED}
     ]
-    assert execution_event.diagnostic is not None
-    assert terminal.diagnostic is not None
+    assert execution_event.HasField("diagnostic")
+    assert terminal.HasField("diagnostic")
     assert terminal.diagnostic.id == execution_event.diagnostic.id
     assert terminal.diagnostic.detail == (
         "RuntimeError: run cleanup failed <- RuntimeError: token=[REDACTED] agent process exited"

@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.server.support import build_server_parts
 
-from server.api.protocol import ChatQuery
 from server.chat.manager import ChatAnswer
-from server.events import EventType
+from server.wire import codec, messages
+from server.wire.v2 import events_pb2
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -29,31 +29,33 @@ def test_chat_response_excludes_concurrent_run_events(tmp_path: Path) -> None:
 
     parts.chat.install_default_handler(handler)
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        pending = pool.submit(parts.api.execute, ChatQuery(text="what changed?"))
+        pending = pool.submit(
+            parts.api.execute, messages.make_request("chat", text="what changed?")
+        )
         assert handler_started.wait(timeout=2)
         for index in range(1_000):
             parts.journal.publish_output("stdout", f"optimizer output {index}\n")
         release_handler.set()
         response = pending.result(timeout=2)
 
-    assert response.chat is not None
+    assert response.HasField("chat")
     assert response.chat.answer == "bounded answer"
     assert len(response.events) == 1
-    assert response.events[0].type is EventType.CHAT
+    assert response.events[0].type == events_pb2.EVENT_TYPE_CHAT
     assert response.events[0].text == "what changed?"
 
     history = parts.journal.read()
-    assert sum(event.type is EventType.OUTPUT for event in history) == 1_000
+    assert sum(event.type == events_pb2.EVENT_TYPE_OUTPUT for event in history) == 1_000
     assert history[-1] == response.events[0]
-    assert len(response.model_dump_json()) < 1_000
+    assert len(codec.dumps(response)) < 1_000
 
 
 def test_unknown_thread_chat_response_has_no_events(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
 
-    response = parts.api.execute(ChatQuery(text="hello?", thread_id="missing"))
+    response = parts.api.execute(messages.make_request("chat", text="hello?", thread_id="missing"))
 
-    assert response.chat is not None
+    assert response.HasField("chat")
     assert "Unknown experiment chat thread 'missing'" in response.chat.answer
     assert response.events == []
 

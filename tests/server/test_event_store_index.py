@@ -15,35 +15,55 @@ import pytest
 import server.event_index as event_index_module
 import server.events as events_module
 from server.event_index import event_index_path, load_event_index
-from server.events import EventStore, EventType, RunEvent, make_event
+from server.events import EventStore
 from server.journal import EventJournal
+from server.wire import codec, messages
+from server.wire.v2 import events_pb2
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import BinaryIO
 
-type _ScannedHeader = tuple[int, EventType, str | None, str | None]
+type _ScannedHeader = tuple[int, int, str | None, str | None]
 type _SidecarMutation = Callable[[dict[str, object], list[list[object]]], None]
 
+ET = events_pb2.EventType
 _TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 
 
-def _event(sequence: int, text: str) -> RunEvent:
-    return RunEvent(
-        sequence=sequence,
-        run_id="persisted-run",
-        timestamp=_TIMESTAMP,
-        type=EventType.OUTPUT,
-        text=text,
+def _event(sequence: int, text: str) -> events_pb2.RunEvent:
+    event = messages.make_event(ET.EVENT_TYPE_OUTPUT, text)
+    event.sequence = sequence
+    event.run_id = "persisted-run"
+    event.timestamp.CopyFrom(messages.from_datetime(_TIMESTAMP))
+    return event
+
+
+def _v1_line(sequence: int, text: str) -> str:
+    """One journal line as the Pydantic-era recorder wrote it (protocol version 1)."""
+    return json.dumps(
+        {
+            "protocol_version": 1,
+            "sequence": sequence,
+            "run_id": "persisted-run",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "type": "output",
+            "text": text,
+        }
     )
 
 
 def _write(path: Path, sequences: list[int], *, terminate: bool = True) -> None:
     content = "\n".join(
-        _event(sequence, f"event-{index}").model_dump_json()
-        for index, sequence in enumerate(sequences)
+        codec.dumps(_event(sequence, f"event-{index}")) for index, sequence in enumerate(sequences)
     )
     path.write_text(content + ("\n" if terminate else ""))
+
+
+def _write_v1(path: Path, sequences: list[int]) -> None:
+    path.write_text(
+        "".join(_v1_line(sequence, f"event-{i}") + "\n" for i, sequence in enumerate(sequences))
+    )
 
 
 def _rewrite_sidecar(path: Path, mutate: _SidecarMutation) -> None:
@@ -83,7 +103,7 @@ def test_a_valid_record_rejected_by_the_header_scan_is_validated_in_place(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "events.jsonl"
-    encoded = _event(1, "coerced").model_dump_json().replace('"sequence":1', '"sequence":"1"')
+    encoded = codec.dumps(_event(1, "coerced")).replace('"sequence":1', '"sequence":"1"')
     path.write_text(encoded + "\n")
 
     def reject_read_bytes(_path: Path) -> None:
@@ -132,7 +152,7 @@ def _count_header_scans(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 
 def _append(path: Path, sequence: int, text: str) -> None:
     with path.open("a", encoding="utf-8") as stream:
-        stream.write(_event(sequence, text).model_dump_json() + "\n")
+        stream.write(codec.dumps(_event(sequence, text)) + "\n")
 
 
 def test_grown_source_scans_only_the_suffix_and_extends_the_index(
@@ -197,14 +217,14 @@ def test_edit_near_the_boundary_with_growth_is_rejected(tmp_path: Path) -> None:
 
 def test_interior_edit_with_growth_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
-    _write(path, list(range(1, 3_000)))
+    _write(path, list(range(1, 6_000)))
     EventStore(path, run_id="first")
     assert path.stat().st_size > 8 * 64 * 1024
     boundary = path.stat().st_size
     with path.open("r+b") as stream:
         stream.seek(boundary * 4 // 8 + 10)  # inside a sampled window
         stream.write(b"#")
-    _append(path, 3_000, "appended")
+    _append(path, 6_000, "appended")
 
     assert load_event_index(path) is None
 
@@ -249,7 +269,7 @@ def test_sidecar_of_another_version_is_rejected(tmp_path: Path) -> None:
     EventStore(path, run_id="first")
 
     def bump(header: dict[str, object], _records: list[list[object]]) -> None:
-        header["version"] = 1
+        header["version"] = 2  # the version that stored lower-case event type names
 
     _rewrite_sidecar(event_index_path(path), bump)
 
@@ -269,10 +289,10 @@ def test_journal_attach_reuses_the_index_despite_server_started(
 
     attach()  # creates the log; there is nothing to index yet
     for index in range(50):
-        attach().record(EventType.OUTPUT, f"seed-{index}")
+        attach().record(ET.EVENT_TYPE_OUTPUT, f"seed-{index}")
     first = attach()  # its cold scan is the first to publish the sidecar
     for index in range(3):
-        first.record(EventType.OUTPUT, f"line-{index}")
+        first.record(ET.EVENT_TYPE_OUTPUT, f"line-{index}")
     assert event_index_path(events_path).exists()
     loaded = load_event_index(events_path)
     assert loaded is not None
@@ -285,7 +305,7 @@ def test_journal_attach_reuses_the_index_despite_server_started(
     # Only the lines appended since the sidecar was written are scanned.
     assert scanned[0] == len(events_path.read_text().splitlines()) - indexed_lines - 1
     assert scanned[0] == 4 < indexed_lines
-    started = [event for event in second.read() if event.type is EventType.SERVER_STARTED]
+    started = [event for event in second.read() if event.type == ET.EVENT_TYPE_SERVER_STARTED]
     assert len(started) == 53
 
 
@@ -302,7 +322,7 @@ def test_source_change_during_scan_does_not_publish_an_index(
         if not changed:
             changed = True
             with path.open("a", encoding="utf-8") as stream:
-                stream.write(_event(3, "concurrent").model_dump_json() + "\n")
+                stream.write(codec.dumps(_event(3, "concurrent")) + "\n")
         return scan_header(line)
 
     monkeypatch.setattr(events_module, "_scan_header_fields", change_during_scan)
@@ -328,7 +348,7 @@ def test_source_change_while_loading_sidecar_rejects_the_cache(
         if not changed:
             changed = True
             with path.open("a", encoding="utf-8") as output:
-                output.write(_event(3, "concurrent").model_dump_json() + "\n")
+                output.write(codec.dumps(_event(3, "concurrent")) + "\n")
         return valid
 
     monkeypatch.setattr(event_index_module, "_valid_footer", change_after_validation)
@@ -416,14 +436,70 @@ def test_unknown_cached_event_type_is_rebuilt_from_jsonl(tmp_path: Path) -> None
     index_path = event_index_path(path)
 
     def replace_type(_header: dict[str, object], records: list[list[object]]) -> None:
-        records[0][4] = "future_event"
+        records[0][4] = "EVENT_TYPE_FUTURE_EVENT"
 
     _rewrite_sidecar(index_path, replace_type)
 
     store = EventStore(path, run_id="second")
 
-    assert [event.type for event in store.read()] == [EventType.OUTPUT, EventType.OUTPUT]
+    assert [event.type for event in store.read()] == [ET.EVENT_TYPE_OUTPUT, ET.EVENT_TYPE_OUTPUT]
     assert load_event_index(path) is not None
+
+
+def test_cached_lowercase_event_type_is_rebuilt_from_jsonl(tmp_path: Path) -> None:
+    """A sidecar that still carries version 1 spellings must not be trusted."""
+    path = tmp_path / "events.jsonl"
+    _write(path, [1, 2])
+    EventStore(path, run_id="first")
+
+    def lowercase_type(_header: dict[str, object], records: list[list[object]]) -> None:
+        records[0][4] = "output"
+
+    _rewrite_sidecar(event_index_path(path), lowercase_type)
+
+    store = EventStore(path, run_id="second")
+
+    assert [event.type for event in store.read()] == [ET.EVENT_TYPE_OUTPUT, ET.EVENT_TYPE_OUTPUT]
+
+
+def test_v1_journal_is_indexed_with_v2_type_names_and_reused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A journal recorded before the wire upgrade scans, indexes, and warm-attaches."""
+    path = tmp_path / "events.jsonl"
+    _write_v1(path, [1, 2, 3])
+    original = path.read_bytes()
+
+    first = EventStore(path, run_id="first")
+
+    assert [event.text for event in first.read()] == ["event-0", "event-1", "event-2"]
+    loaded = load_event_index(path)
+    assert loaded is not None
+    assert {record.event_type for record in loaded.records} == {"EVENT_TYPE_OUTPUT"}
+    scanned = _count_header_scans(monkeypatch)
+    second = EventStore(path, run_id="second")
+    assert scanned[0] == 0
+    assert second.last_sequence == 3
+    assert path.read_bytes() == original
+
+
+def test_mixed_v1_and_v2_journal_grows_by_suffix_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "events.jsonl"
+    _write_v1(path, [1, 2])
+    EventStore(path, run_id="first")
+    _append(path, 3, "v2-appended")
+    scanned = _count_header_scans(monkeypatch)
+
+    store = EventStore(path, run_id="second")
+
+    assert scanned[0] == 1
+    assert [(event.sequence, event.text) for event in store.read()] == [
+        (1, "event-0"),
+        (2, "event-1"),
+        (3, "v2-appended"),
+    ]
 
 
 def test_non_ascii_sidecar_checksum_is_a_cache_miss(tmp_path: Path) -> None:
@@ -460,7 +536,7 @@ def test_valid_unterminated_record_stays_outside_the_safe_cache_boundary(
     store = EventStore(path, run_id="second")
 
     assert scanned == 1
-    store.append(make_event(EventType.OUTPUT, "third"))
+    store.append(messages.make_event(ET.EVENT_TYPE_OUTPUT, "third"))
     assert [event.text for event in EventStore(path, run_id="third").read()] == [
         "event-0",
         "event-1",
@@ -477,7 +553,7 @@ def test_malformed_tail_stays_repairable_after_warm_attach(tmp_path: Path) -> No
     assert [event.text for event in first.read()] == ["event-0"]
 
     second = EventStore(path, run_id="second")
-    second.append(make_event(EventType.OUTPUT, "after repair"))
+    second.append(messages.make_event(ET.EVENT_TYPE_OUTPUT, "after repair"))
 
     assert [event.text for event in EventStore(path, run_id="third").read()] == [
         "event-0",
@@ -492,7 +568,7 @@ def test_legacy_sequence_repair_survives_cache_reuse_and_rebuild(tmp_path: Path)
     assert [event.sequence for event in EventStore(path, run_id="first").read()] == [2, 3, 4]
     warm = EventStore(path, run_id="second")
     assert [event.sequence for event in warm.read()] == [2, 3, 4]
-    warm.append(make_event(EventType.OUTPUT, "appended"))
+    warm.append(messages.make_event(ET.EVENT_TYPE_OUTPUT, "appended"))
 
     assert [event.sequence for event in EventStore(path, run_id="third").read()] == [2, 3, 4, 5]
 

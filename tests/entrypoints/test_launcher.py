@@ -420,12 +420,12 @@ def test_ensure_built_runs_pnpm_steps(monkeypatch, tmp_path):  # noqa: ANN001, A
 
     monkeypatch.setattr(cli.subprocess, "run", _run)
     assert cli._ensure_source_tui_built(tmp_path) is True  # noqa: SLF001  # tracked: #288
-    assert [c[1] for c in calls] == ["install", "--dir", "build:clients"]
+    assert [c[1] for c in calls] == ["install", "build:clients"]
 
 
 def test_ensure_built_reports_install_failure(monkeypatch, tmp_path, capsys):  # noqa: ANN001, ANN201
     # tmp_path has no node_modules, so this exercises the install step (not
-    # the codegen/build steps).
+    # the build step).
     from types import SimpleNamespace  # noqa: PLC0415  # tracked: #288
 
     monkeypatch.setattr(cli, "_pnpm_argv", lambda: ["/usr/bin/pnpm"])
@@ -453,8 +453,8 @@ def test_ensure_built_skips_install_when_fresh(monkeypatch, tmp_path):  # noqa: 
 
     monkeypatch.setattr(cli.subprocess, "run", _run)
     assert cli._ensure_source_tui_built(tmp_path) is True  # noqa: SLF001  # tracked: #288
-    # No "install" call: codegen/build run directly.
-    assert [c[1] for c in calls] == ["--dir", "build:clients"]
+    # No "install" call: the build runs directly.
+    assert [c[1] for c in calls] == ["build:clients"]
 
 
 def test_ensure_built_retries_with_install_after_build_failure(monkeypatch, tmp_path):  # noqa: ANN001, ANN201
@@ -468,16 +468,16 @@ def test_ensure_built_retries_with_install_after_build_failure(monkeypatch, tmp_
 
     def _run(cmd, cwd=None, capture_output=False, text=False, check=False):  # noqa: ANN001, ANN202, ARG001, FBT002  # tracked: #288
         calls.append(cmd)
-        if cmd[-1] == "generate:protocol" and not state["failed_once"]:
+        if cmd[-1] == "build:clients" and not state["failed_once"]:
             state["failed_once"] = True
             return SimpleNamespace(returncode=1, stdout="", stderr="stale-deps")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(cli.subprocess, "run", _run)
     assert cli._ensure_source_tui_built(tmp_path) is True  # noqa: SLF001  # tracked: #288
-    # generate:protocol failed once -> forced install -> generate:protocol and
-    # build:clients both retried and succeeded.
-    assert [c[1] for c in calls] == ["--dir", "install", "--dir", "build:clients"]
+    # build:clients failed once -> forced install -> build:clients retried and
+    # succeeded.
+    assert [c[1] for c in calls] == ["build:clients", "install", "build:clients"]
 
 
 def test_ensure_built_reports_build_failure_after_retry(monkeypatch, tmp_path, capsys):  # noqa: ANN001, ANN201
@@ -488,7 +488,7 @@ def test_ensure_built_reports_build_failure_after_retry(monkeypatch, tmp_path, c
     monkeypatch.setattr(cli, "_write_install_stamp", lambda _root: None)
 
     def _run(cmd, cwd=None, capture_output=False, text=False, check=False):  # noqa: ANN001, ANN202, ARG001, FBT002  # tracked: #288
-        if cmd[-1] == "generate:protocol":
+        if cmd[-1] == "build:clients":
             return SimpleNamespace(returncode=1, stdout="proto-out", stderr="proto-err")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -629,9 +629,8 @@ def test_needs_rebuild_on_core_state_source_change(tmp_path):  # noqa: ANN001, A
 
 
 def test_needs_rebuild_ignores_unrelated_backend_file(tmp_path):  # noqa: ANN001, ANN201
-    # src/server no longer feeds `generate:protocol` in its entirety;
-    # a change to an unrelated module in that package must not trigger a
-    # rebuild.
+    # No Python module under src/server feeds the bundle; a change there must
+    # not trigger a rebuild.
     root = _make_checkout(tmp_path)
     dist = root / "clients" / "tui" / "dist"
     unrelated = root / "src" / "server" / "inspector.py"
@@ -645,33 +644,19 @@ def test_needs_rebuild_ignores_unrelated_backend_file(tmp_path):  # noqa: ANN001
     assert cli._needs_rebuild(root) is False  # noqa: SLF001
 
 
-def test_needs_rebuild_on_protocol_codegen_file(tmp_path):  # noqa: ANN001, ANN201
-    # protocol.py directly shapes the generated JSON schema, so it must still
-    # trigger a rebuild even though src/server is no longer watched
-    # wholesale.
+def test_needs_rebuild_on_generated_protocol_change(tmp_path):  # noqa: ANN001, ANN201
+    # The generated protocol types are committed under backend-client/src/gen,
+    # so a protocol change reaches the bundle through a watched directory.
     root = _make_checkout(tmp_path)
     dist = root / "clients" / "tui" / "dist"
-    protocol = root / "src" / "server" / "api" / "protocol.py"
-    protocol.parent.mkdir(parents=True)
-    protocol.write_text("# protocol\n")
+    generated = root / "clients" / "backend-client" / "src" / "gen" / "server" / "wire" / "v2"
+    generated.mkdir(parents=True)
+    messages = generated / "responses_pb.ts"
+    messages.write_text("export {};\n")
     _set_mtime(root / "clients" / "tui" / "src" / "app.ts", 1000)
     _set_mtime(dist / "index.js", 2000)
     _set_mtime(dist / "launcher.js", 2000)
-    _set_mtime(protocol, 3000)
-
-    assert cli._needs_rebuild(root) is True  # noqa: SLF001
-
-
-def test_needs_rebuild_on_client_settings_change(tmp_path):  # noqa: ANN001, ANN201
-    root = _make_checkout(tmp_path)
-    dist = root / "clients" / "tui" / "dist"
-    settings = root / "src" / "server" / "settings.py"
-    settings.parent.mkdir(parents=True)
-    settings.write_text("# client settings\n")
-    _set_mtime(root / "clients" / "tui" / "src" / "app.ts", 1000)
-    _set_mtime(dist / "index.js", 2000)
-    _set_mtime(dist / "launcher.js", 2000)
-    _set_mtime(settings, 3000)
+    _set_mtime(messages, 3000)
 
     assert cli._needs_rebuild(root) is True  # noqa: SLF001
 
@@ -679,15 +664,12 @@ def test_needs_rebuild_on_client_settings_change(tmp_path):  # noqa: ANN001, ANN
 def test_stale_reason_reports_first_offending_path(tmp_path):  # noqa: ANN001, ANN201
     root = _make_checkout(tmp_path)
     dist = root / "clients" / "tui" / "dist"
-    protocol = root / "src" / "server" / "api" / "protocol.py"
-    protocol.parent.mkdir(parents=True)
-    protocol.write_text("# protocol\n")
-    _set_mtime(root / "clients" / "tui" / "src" / "app.ts", 1000)
+    source = root / "clients" / "tui" / "src" / "app.ts"
+    _set_mtime(source, 3000)
     _set_mtime(dist / "index.js", 2000)
     _set_mtime(dist / "launcher.js", 2000)
-    _set_mtime(protocol, 3000)
 
-    assert cli._stale_reason(root) == "src/server/api/protocol.py"  # noqa: SLF001
+    assert cli._stale_reason(root) == "clients/tui/src/app.ts"  # noqa: SLF001
 
 
 def test_stale_reason_none_when_fresh(tmp_path):  # noqa: ANN001, ANN201
@@ -705,7 +687,7 @@ def test_run_source_tui_prints_stale_and_rebuilt_messages(monkeypatch, tmp_path,
     monkeypatch.setattr(cli, "_node_executable", lambda: Path("/usr/bin/node"))
     monkeypatch.setattr(cli, "_node_major", lambda _node: 20)
     monkeypatch.setattr(cli, "_needs_rebuild", lambda _root: True)
-    monkeypatch.setattr(cli, "_stale_reason", lambda _root: "src/server/api/protocol.py")
+    monkeypatch.setattr(cli, "_stale_reason", lambda _root: "clients/tui/src/app.ts")
     monkeypatch.setattr(cli, "_ensure_source_tui_built", lambda _root: True)
     monkeypatch.setattr(cli.subprocess, "call", lambda *a, **k: 0)  # noqa: ARG005
 
@@ -713,7 +695,7 @@ def test_run_source_tui_prints_stale_and_rebuilt_messages(monkeypatch, tmp_path,
 
     assert rc == 0
     err = capsys.readouterr().err
-    assert "TUI bundle is stale (changed: src/server/api/protocol.py); rebuilding" in err
+    assert "TUI bundle is stale (changed: clients/tui/src/app.ts); rebuilding" in err
     assert "TUI bundle rebuilt (" in err
 
 

@@ -1,6 +1,5 @@
 """Composition and terminal-event tests for the interactive server runtime."""
 
-import json
 import socket
 import threading
 import time
@@ -10,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from server.api.protocol import StopCommand, SubscribeRequest
 from server.api.service import RunApi
 from server.chat.manager import ChatManager
 from server.controller import RunController
@@ -18,8 +16,12 @@ from server.execution import ExecutionTracker
 from server.integration import RunIntegrationAdapter
 from server.journal import EventJournal
 from server.runtime import ServerRuntime
+from server.wire import codec, messages
+from server.wire.v2 import common_pb2, events_pb2, server_messages_pb2
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, EventStatus
+
+RUN_FINISHED = events_pb2.EventType.EVENT_TYPE_RUN_FINISHED
 
 
 def _await_socket(socket_path: Path) -> None:
@@ -29,23 +31,32 @@ def _await_socket(socket_path: Path) -> None:
 
 
 @contextmanager
-def _subscription(socket_path: Path) -> Generator[Callable[[], dict]]:
+def _subscription(socket_path: Path) -> Generator[Callable[[], server_messages_pb2.ServerMessage]]:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(5)
         client.connect(str(socket_path))
         with client.makefile("rwb") as stream:
-            stream.write(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
+            request = messages.make_request("subscribe", after_sequence=0)
+            stream.write(codec.dumps(request).encode() + b"\n")
             stream.flush()
-            yield lambda: json.loads(stream.readline())
+            yield lambda: codec.loads(server_messages_pb2.ServerMessage, stream.readline())
 
 
-def _collect_until(socket_path: Path, terminal_type: str, received: list[dict]) -> None:
+def _batch(message: server_messages_pb2.ServerMessage) -> list[events_pb2.RunEvent]:
+    return list(message.event_batch.events)
+
+
+def _collect_until(
+    socket_path: Path,
+    terminal_type: events_pb2.EventType.ValueType,
+    received: list[events_pb2.RunEvent],
+) -> None:
     _await_socket(socket_path)
     with _subscription(socket_path) as read:
         while True:
-            events = read().get("events", [])
+            events = _batch(read())
             received.extend(events)
-            if any(event["type"] == terminal_type for event in events):
+            if any(event.type == terminal_type for event in events):
                 return
 
 
@@ -66,10 +77,10 @@ def test_runtime_explicitly_composes_server_components(tmp_path):  # noqa: ANN00
 def test_runtime_streams_success_before_client_disconnect(tmp_path):  # noqa: ANN001, ANN201
     socket_path = tmp_path / "control.sock"
     runtime = ServerRuntime(socket_path=socket_path)
-    received: list[dict] = []
+    received: list[events_pb2.RunEvent] = []
     subscriber = threading.Thread(
         target=_collect_until,
-        args=(socket_path, "run_finished", received),
+        args=(socket_path, RUN_FINISHED, received),
     )
     subscriber.start()
 
@@ -78,8 +89,8 @@ def test_runtime_streams_success_before_client_disconnect(tmp_path):  # noqa: AN
     subscriber.join(timeout=5)
     assert value == "ran"
     assert not subscriber.is_alive()
-    assert any(event["type"] == "server_ready" for event in received)
-    assert sum(event["type"] == "run_finished" for event in received) == 1
+    assert any(event.type == events_pb2.EventType.EVENT_TYPE_SERVER_READY for event in received)
+    assert sum(event.type == RUN_FINISHED for event in received) == 1
     assert not socket_path.exists()
 
 
@@ -98,11 +109,11 @@ def test_runtime_waits_for_reconnected_subscriber_before_teardown(tmp_path: Path
     def drive_reconnect() -> None:
         _await_socket(socket_path)
         with _subscription(socket_path) as read:
-            assert read()["type"] == "subscribed"
+            assert read().WhichOneof("body") == "subscribed"
         with _subscription(socket_path) as read:
-            assert read()["type"] == "subscribed"
+            assert read().WhichOneof("body") == "subscribed"
             release_run.set()
-            while not any(event["type"] == "run_finished" for event in read().get("events", [])):
+            while not any(event.type == RUN_FINISHED for event in _batch(read())):
                 pass
             returned_while_attached.append(run_returned.wait(timeout=1.0))
 
@@ -131,16 +142,17 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path):  # noqa: ANN0
     """
     socket_path = tmp_path / "control.sock"
     runtime = ServerRuntime(socket_path=socket_path)
-    received: list[dict] = []
+    received: list[events_pb2.RunEvent] = []
 
     def collect_until_stopped() -> None:
         _await_socket(socket_path)
         with _subscription(socket_path) as read:
             while True:
-                events = read().get("events", [])
+                events = _batch(read())
                 received.extend(events)
                 if any(
-                    event["type"] == "run_status_changed" and event["data"]["status"] == "stopped"
+                    event.type == events_pb2.EventType.EVENT_TYPE_RUN_STATUS_CHANGED
+                    and event.run_status_changed.status == common_pb2.RunStatus.RUN_STATUS_STOPPED
                     for event in events
                 ):
                     return
@@ -149,7 +161,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path):  # noqa: ANN0
     subscriber.start()
 
     def run() -> str:
-        runtime.api.execute(StopCommand())
+        runtime.api.execute(messages.make_request("stop"))
         runtime.controller.before_agent("implementer", "round 1", "work")
         return "unreachable"
 
@@ -158,22 +170,31 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path):  # noqa: ANN0
     subscriber.join(timeout=5)
     assert value is None
     assert not subscriber.is_alive()
-    terminal = ("run_finished", "run_failed", "run_interrupted")
-    assert not any(event["type"] in terminal for event in received)
+    terminal = (
+        events_pb2.EventType.EVENT_TYPE_RUN_FINISHED,
+        events_pb2.EventType.EVENT_TYPE_RUN_FAILED,
+        events_pb2.EventType.EVENT_TYPE_RUN_INTERRUPTED,
+    )
+    assert not any(event.type in terminal for event in received)
     statuses = [
-        event["data"]["status"] for event in received if event["type"] == "run_status_changed"
+        event.run_status_changed.status
+        for event in received
+        if event.type == events_pb2.EventType.EVENT_TYPE_RUN_STATUS_CHANGED
     ]
-    assert statuses[-2:] == ["stopping", "stopped"]
+    assert statuses[-2:] == [
+        common_pb2.RunStatus.RUN_STATUS_STOPPING,
+        common_pb2.RunStatus.RUN_STATUS_STOPPED,
+    ]
     assert not socket_path.exists()
 
 
 def test_runtime_does_not_duplicate_core_terminal_event(tmp_path):  # noqa: ANN001, ANN201
     socket_path = tmp_path / "control.sock"
     runtime = ServerRuntime(socket_path=socket_path)
-    received: list[dict] = []
+    received: list[events_pb2.RunEvent] = []
     subscriber = threading.Thread(
         target=_collect_until,
-        args=(socket_path, "run_finished", received),
+        args=(socket_path, RUN_FINISHED, received),
     )
     subscriber.start()
 
@@ -187,17 +208,17 @@ def test_runtime_does_not_duplicate_core_terminal_event(tmp_path):  # noqa: ANN0
 
     subscriber.join(timeout=5)
     assert not subscriber.is_alive()
-    assert sum(event["type"] == "run_finished" for event in received) == 1
-    assert sum(event.type.value == "run_finished" for event in runtime.journal.read()) == 1
+    assert sum(event.type == RUN_FINISHED for event in received) == 1
+    assert sum(event.type == RUN_FINISHED for event in runtime.journal.read()) == 1
 
 
 def test_runtime_streams_configuration_failure_without_run_failure(tmp_path):  # noqa: ANN001, ANN201
     socket_path = tmp_path / "control.sock"
     runtime = ServerRuntime(socket_path=socket_path)
-    received: list[dict] = []
+    received: list[events_pb2.RunEvent] = []
     subscriber = threading.Thread(
         target=_collect_until,
-        args=(socket_path, "configuration_failed", received),
+        args=(socket_path, events_pb2.EventType.EVENT_TYPE_CONFIGURATION_FAILED, received),
     )
     subscriber.start()
     failure = ConfigurationError(
@@ -215,8 +236,12 @@ def test_runtime_streams_configuration_failure_without_run_failure(tmp_path):  #
     assert raised.value is failure
     subscriber.join(timeout=5)
     assert not subscriber.is_alive()
-    event = next(event for event in received if event["type"] == "configuration_failed")
-    assert event["data"]["code"] == "invalid_arguments"
-    assert event["data"]["message"] == "unknown token=[REDACTED] option --bad"
-    assert event["data"]["usage"] == "usage: vibesys --token=[REDACTED]"
-    assert not any(event["type"] == "run_failed" for event in received)
+    event = next(
+        event
+        for event in received
+        if event.type == events_pb2.EventType.EVENT_TYPE_CONFIGURATION_FAILED
+    )
+    assert event.configuration_failed.code == "invalid_arguments"
+    assert event.configuration_failed.message == "unknown token=[REDACTED] option --bad"
+    assert event.configuration_failed.usage == "usage: vibesys --token=[REDACTED]"
+    assert not any(event.type == events_pb2.EventType.EVENT_TYPE_RUN_FAILED for event in received)

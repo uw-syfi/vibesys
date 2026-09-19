@@ -5,8 +5,8 @@ from pathlib import Path
 from tests.server.support import build_server_parts
 
 from server.diagnostics import DiagnosticScope
-from server.events import ConfigurationFailedData, EventStatus, EventType
 from server.read_model import RunInspector
+from server.wire.v2 import events_pb2
 from vs_loop_state import RoundRecord
 from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
 
@@ -81,15 +81,15 @@ def test_inspector_explains_latest_failed_execution(tmp_path):  # noqa: ANN001, 
 def test_inspector_explains_configuration_failure(tmp_path):  # noqa: ANN001, ANN201
     parts = build_server_parts(tmp_path)
     parts.journal.record(
-        EventType.CONFIGURATION_FAILED,
+        events_pb2.EventType.EVENT_TYPE_CONFIGURATION_FAILED,
         "Model credentials are missing",
-        status=EventStatus.FAILED,
+        status=events_pb2.EventStatus.EVENT_STATUS_FAILED,
         diagnostic=parts.journal.diagnostic_for(
             RuntimeError("Model credentials are missing"),
-            scope=DiagnosticScope.CONFIGURATION,
+            scope=DiagnosticScope.DIAGNOSTIC_SCOPE_CONFIGURATION,
             operation="Configuration",
         ),
-        data=ConfigurationFailedData(
+        data=events_pb2.ConfigurationFailedData(
             code="model_auth_missing",
             stage="model_setup",
             message="Model credentials are missing",

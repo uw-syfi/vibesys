@@ -3,29 +3,26 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
+from google.protobuf import struct_pb2
 from tests.server.support import build_server_parts
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-from server.events import (
-    AgentExecutionActivityData,
-    AgentExecutionStartedData,
-    EventStatus,
-    EventStore,
-    EventType,
-    InvocationFinishedData,
-    InvocationStartedData,
-    RunEvent,
-    TodoItemData,
-    TodoUpdateData,
-    ToolCallData,
-    ToolResultData,
-)
+from server.events import EventStore
+from server.execution import activity
+from server.wire import messages
+from server.wire.v2 import common_pb2, events_pb2
+
+EventType = events_pb2.EventType
+EventStatus = events_pb2.EventStatus
+
+
+def _opt(message, field):  # noqa: ANN001, ANN202
+    return getattr(message, field) if message.HasField(field) else None
 
 
 def test_explicit_executions_are_independent_and_finish_idempotently(tmp_path):  # noqa: ANN001, ANN201
@@ -48,12 +45,13 @@ def test_explicit_executions_are_independent_and_finish_idempotently(tmp_path): 
     ]
 
     events = parts.journal.read()
-    assert sum(event.type is EventType.AGENT_EXECUTION_STARTED for event in events) == 2
-    assert sum(event.type is EventType.AGENT_EXECUTION_FINISHED for event in events) == 1
-    assert not {EventType.INVOCATION_STARTED, EventType.INVOCATION_FINISHED}.intersection(
-        event.type for event in events
-    )
-    assert sum(event.type is EventType.PHASE_STARTED for event in events) == 2
+    assert sum(event.type == EventType.EVENT_TYPE_AGENT_EXECUTION_STARTED for event in events) == 2
+    assert sum(event.type == EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED for event in events) == 1
+    assert not {
+        EventType.EVENT_TYPE_INVOCATION_STARTED,
+        EventType.EVENT_TYPE_INVOCATION_FINISHED,
+    }.intersection(event.type for event in events)
+    assert sum(event.type == EventType.EVENT_TYPE_PHASE_STARTED for event in events) == 2
 
 
 @pytest.mark.parametrize(
@@ -86,14 +84,18 @@ def test_execution_identity_is_recorded_in_events_and_checkpoints(
     )
 
     started = next(
-        event for event in parts.journal.read() if event.type is EventType.AGENT_EXECUTION_STARTED
+        event
+        for event in parts.journal.read()
+        if event.type == EventType.EVENT_TYPE_AGENT_EXECUTION_STARTED
     )
-    assert isinstance(started.data, AgentExecutionStartedData)
-    assert (started.data.driver, started.data.provider, started.data.model) == expected
+    data = started.agent_execution_started
+    assert tuple(_opt(data, field) for field in ("driver", "provider", "model")) == expected
     active = parts.api.snapshot().active_executions
-    assert (active[0].driver, active[0].provider, active[0].model) == expected
+    assert tuple(_opt(active[0], field) for field in ("driver", "provider", "model")) == expected
     checkpointed = parts.api.subscription_checkpoint(0).active_executions
-    assert (checkpointed[0].driver, checkpointed[0].provider, checkpointed[0].model) == expected
+    assert (
+        tuple(_opt(checkpointed[0], field) for field in ("driver", "provider", "model")) == expected
+    )
 
 
 def test_activity_tracks_todos_and_parallel_tools(tmp_path):  # noqa: ANN001, ANN201
@@ -101,34 +103,36 @@ def test_activity_tracks_todos_and_parallel_tools(tmp_path):  # noqa: ANN001, AN
     execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
     publish = parts.executions.publish_presentation
     publish(
-        EventType.TODO_UPDATE,
-        TodoUpdateData(todos=[TodoItemData(content="Run queue tests", status="in_progress")]),
+        EventType.EVENT_TYPE_TODO_UPDATE,
+        events_pb2.TodoUpdateData(
+            todos=[events_pb2.TodoItemData(content="Run queue tests", status="in_progress")]
+        ),
         invocation_id=execution.execution_id,
     )
     publish(
-        EventType.TOOL_CALL,
-        ToolCallData(tool="Bash", args={}),
+        EventType.EVENT_TYPE_TOOL_CALL,
+        events_pb2.ToolCallData(tool="Bash"),
         invocation_id=execution.execution_id,
     )
     publish(
-        EventType.TOOL_CALL,
-        ToolCallData(tool="Read", args={}),
+        EventType.EVENT_TYPE_TOOL_CALL,
+        events_pb2.ToolCallData(tool="Read"),
         invocation_id=execution.execution_id,
     )
     publish(
-        EventType.TOOL_RESULT,
-        ToolResultData(tool="Read", content="ok"),
+        EventType.EVENT_TYPE_TOOL_RESULT,
+        events_pb2.ToolResultData(tool="Read", content="ok"),
         invocation_id=execution.execution_id,
     )
     assert parts.api.snapshot().active_executions[0].activity.tool == "Bash"
 
     publish(
-        EventType.TOOL_RESULT,
-        ToolResultData(tool="Bash", content="ok"),
+        EventType.EVENT_TYPE_TOOL_RESULT,
+        events_pb2.ToolResultData(tool="Bash", content="ok"),
         invocation_id=execution.execution_id,
     )
-    assert parts.api.snapshot().active_executions[0].activity == AgentExecutionActivityData(
-        mode="thinking", summary="Run queue tests"
+    assert parts.api.snapshot().active_executions[0].activity == activity(
+        "thinking", "Run queue tests"
     )
 
 
@@ -137,35 +141,39 @@ def test_terminal_todo_clears_stale_summary(tmp_path, terminal_todo_status):  # 
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
     parts.executions.publish_presentation(
-        EventType.TODO_UPDATE,
-        TodoUpdateData(todos=[TodoItemData(content="Run tests", status="in_progress")]),
+        EventType.EVENT_TYPE_TODO_UPDATE,
+        events_pb2.TodoUpdateData(
+            todos=[events_pb2.TodoItemData(content="Run tests", status="in_progress")]
+        ),
         invocation_id=execution.execution_id,
     )
     parts.executions.publish_presentation(
-        EventType.TODO_UPDATE,
-        TodoUpdateData(todos=[TodoItemData(content="Run tests", status=terminal_todo_status)]),
+        EventType.EVENT_TYPE_TODO_UPDATE,
+        events_pb2.TodoUpdateData(
+            todos=[events_pb2.TodoItemData(content="Run tests", status=terminal_todo_status)]
+        ),
         invocation_id=execution.execution_id,
     )
-    assert parts.api.snapshot().active_executions[0].activity == AgentExecutionActivityData(
-        mode="thinking", summary="Thinking"
-    )
+    assert parts.api.snapshot().active_executions[0].activity == activity("thinking", "Thinking")
 
 
 def test_terminal_todo_preserves_active_tool(tmp_path):  # noqa: ANN001, ANN201
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
     parts.executions.publish_presentation(
-        EventType.TOOL_CALL,
-        ToolCallData(tool="Bash", args={}),
+        EventType.EVENT_TYPE_TOOL_CALL,
+        events_pb2.ToolCallData(tool="Bash"),
         invocation_id=execution.execution_id,
     )
     parts.executions.publish_presentation(
-        EventType.TODO_UPDATE,
-        TodoUpdateData(todos=[TodoItemData(content="Run tests", status="completed")]),
+        EventType.EVENT_TYPE_TODO_UPDATE,
+        events_pb2.TodoUpdateData(
+            todos=[events_pb2.TodoItemData(content="Run tests", status="completed")]
+        ),
         invocation_id=execution.execution_id,
     )
-    assert parts.api.snapshot().active_executions[0].activity == AgentExecutionActivityData(
-        mode="tool", summary="Using Bash", tool="Bash"
+    assert parts.api.snapshot().active_executions[0].activity == activity(
+        "tool", "Using Bash", "Bash"
     )
 
 
@@ -179,10 +187,11 @@ def test_checkpoint_watermark_and_active_state_are_consistent(tmp_path):  # noqa
     assert [item.execution_id for item in active] == [execution.execution_id]
     assert active[0].activity.summary == "Reviewing"
     started = next(
-        event for event in checkpoint.events if event.type is EventType.AGENT_EXECUTION_STARTED
+        event
+        for event in checkpoint.events
+        if event.type == EventType.EVENT_TYPE_AGENT_EXECUTION_STARTED
     )
-    assert isinstance(started.data, AgentExecutionStartedData)
-    assert started.data.activity == active[0].activity
+    assert started.agent_execution_started.activity == active[0].activity
 
     parts.controller.after_agent("judge", "round-2", execution_id=execution.execution_id)
     checkpoint = parts.api.subscription_checkpoint(checkpoint.through_sequence)
@@ -196,14 +205,13 @@ def test_attach_merges_bootstrap_and_durable_execution_history(tmp_path):  # noq
     execution_id = "a" * 32
     durable = EventStore(durable_dir / "run-events.jsonl", "run-1")
     durable.append(
-        RunEvent(
-            timestamp=datetime.now(UTC),
-            type=EventType.INVOCATION_STARTED,
-            status=EventStatus.ACTIVE,
+        messages.make_event(
+            EventType.EVENT_TYPE_INVOCATION_STARTED,
+            status=EventStatus.EVENT_STATUS_ACTIVE,
             agent_kind="implementer",
             round_label="round-1-implementer",
-            invocation_id=execution_id,
-            data=InvocationStartedData(system_prompt="system", user_prompt="prior work"),
+            execution_id=execution_id,
+            data=events_pb2.InvocationStartedData(system_prompt="system", user_prompt="prior work"),
         )
     )
 
@@ -220,13 +228,14 @@ def test_attach_merges_bootstrap_and_durable_execution_history(tmp_path):  # noq
     events = checkpoint.events
     assert [event.sequence for event in events] == list(range(1, checkpoint.through_sequence + 1))
     assert any(
-        event.type is EventType.AGENT_EXECUTION_STARTED and event.execution_id == execution_id
+        event.type == EventType.EVENT_TYPE_AGENT_EXECUTION_STARTED
+        and event.execution_id == execution_id
         for event in events
     )
     assert [
-        event.data.content
+        event.agent_output_chunk.content
         for event in events
-        if event.data is not None and event.data.kind == "agent_output_chunk"
+        if event.type == EventType.EVENT_TYPE_AGENT_OUTPUT_CHUNK
     ] == ["bootstrap work", "current work"]
 
 
@@ -234,13 +243,13 @@ def test_streamed_text_does_not_override_active_tool(tmp_path):  # noqa: ANN001,
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
     parts.executions.publish_presentation(
-        EventType.TOOL_CALL,
-        ToolCallData(tool="Bash", args={}),
+        EventType.EVENT_TYPE_TOOL_CALL,
+        events_pb2.ToolCallData(tool="Bash"),
         invocation_id=execution.execution_id,
     )
     parts.executions.publish_agent_output("still working", invocation_id=execution.execution_id)
-    assert parts.api.snapshot().active_executions[0].activity == AgentExecutionActivityData(
-        mode="tool", summary="Using Bash", tool="Bash"
+    assert parts.api.snapshot().active_executions[0].activity == activity(
+        "tool", "Using Bash", "Bash"
     )
 
 
@@ -260,9 +269,9 @@ def test_chat_execution_is_isolated_from_run_control(tmp_path):  # noqa: ANN001,
     parts.controller.after_agent("chat", "experiment-chat", execution_id=chat.execution_id)
     # A presentation-only execution is not a run-control boundary, so the
     # pending pause is still pending rather than applied.
-    assert parts.api.snapshot().status == "pausing"
+    assert parts.api.snapshot().status == common_pb2.RunStatus.RUN_STATUS_PAUSING
     parts.controller.after_agent("implementer", "round-1", execution_id=main.execution_id)
-    assert parts.api.snapshot().status == "paused"
+    assert parts.api.snapshot().status == common_pb2.RunStatus.RUN_STATUS_PAUSED
 
     paused_chat = parts.controller.start_agent_execution(
         "chat",
@@ -272,7 +281,7 @@ def test_chat_execution_is_isolated_from_run_control(tmp_path):  # noqa: ANN001,
         participates_in_run_control=False,
     )
     parts.controller.after_agent("chat", "experiment-chat", execution_id=paused_chat.execution_id)
-    assert parts.api.snapshot().status == "paused"
+    assert parts.api.snapshot().status == common_pb2.RunStatus.RUN_STATUS_PAUSED
 
 
 def _chat_execution(parts, thread_id):  # noqa: ANN001, ANN202
@@ -291,11 +300,16 @@ def _chat_execution(parts, thread_id):  # noqa: ANN001, ANN202
     )
 
 
-def _presentation_threads(parts) -> list[tuple[EventType, str | None]]:  # noqa: ANN001
+def _presentation_threads(parts) -> list[tuple[EventType.ValueType, str | None]]:  # noqa: ANN001
     return [
-        (event.type, event.chat_thread_id)
+        (event.type, _opt(event, "chat_thread_id"))
         for event in parts.journal.read()
-        if event.type in {EventType.AGENT_OUTPUT_CHUNK, EventType.TOOL_CALL, EventType.TOOL_RESULT}
+        if event.type
+        in {
+            EventType.EVENT_TYPE_AGENT_OUTPUT_CHUNK,
+            EventType.EVENT_TYPE_TOOL_CALL,
+            EventType.EVENT_TYPE_TOOL_RESULT,
+        }
     ]
 
 
@@ -305,16 +319,16 @@ def test_chat_presentation_events_carry_the_thread_that_asked(tmp_path: Path) ->
     with _chat_execution(parts, "thread-a"):
         parts.executions.publish_agent_output("partial ")
         parts.executions.publish_presentation(
-            EventType.TOOL_CALL, ToolCallData(tool="Read", args={})
+            EventType.EVENT_TYPE_TOOL_CALL, events_pb2.ToolCallData(tool="Read")
         )
         parts.executions.publish_presentation(
-            EventType.TOOL_RESULT, ToolResultData(tool="Read", content="ok")
+            EventType.EVENT_TYPE_TOOL_RESULT, events_pb2.ToolResultData(tool="Read", content="ok")
         )
 
     assert _presentation_threads(parts) == [
-        (EventType.AGENT_OUTPUT_CHUNK, "thread-a"),
-        (EventType.TOOL_CALL, "thread-a"),
-        (EventType.TOOL_RESULT, "thread-a"),
+        (EventType.EVENT_TYPE_AGENT_OUTPUT_CHUNK, "thread-a"),
+        (EventType.EVENT_TYPE_TOOL_CALL, "thread-a"),
+        (EventType.EVENT_TYPE_TOOL_RESULT, "thread-a"),
     ]
 
 
@@ -325,12 +339,14 @@ def test_default_chat_presentation_matches_its_terminal_answer(tmp_path: Path) -
         parts.executions.publish_agent_output("partial ")
     parts.chat.chat("status?")
 
-    answer = next(event for event in parts.journal.read() if event.type is EventType.CHAT)
+    answer = next(
+        event for event in parts.journal.read() if event.type == EventType.EVENT_TYPE_CHAT
+    )
     # The default chat has no thread ID on the wire, so its streamed output has
     # to be absent the same way its answer is, or the two land in different
     # client transcripts.
-    assert answer.chat_thread_id is None
-    assert _presentation_threads(parts) == [(EventType.AGENT_OUTPUT_CHUNK, None)]
+    assert not answer.HasField("chat_thread_id")
+    assert _presentation_threads(parts) == [(EventType.EVENT_TYPE_AGENT_OUTPUT_CHUNK, None)]
 
 
 def test_presentation_events_outside_chat_carry_no_thread(tmp_path: Path) -> None:
@@ -344,10 +360,10 @@ def test_presentation_events_outside_chat_carry_no_thread(tmp_path: Path) -> Non
     ):
         parts.executions.publish_agent_output("working")
         parts.executions.publish_presentation(
-            EventType.TOOL_CALL, ToolCallData(tool="Bash", args={})
+            EventType.EVENT_TYPE_TOOL_CALL, events_pb2.ToolCallData(tool="Bash")
         )
 
-    assert all(event.chat_thread_id is None for event in parts.journal.read())
+    assert not any(event.HasField("chat_thread_id") for event in parts.journal.read())
 
 
 def test_presentation_scope_restores_the_enclosing_scope(tmp_path: Path) -> None:
@@ -369,9 +385,12 @@ def test_presentation_scope_restores_the_enclosing_scope(tmp_path: Path) -> None
     parts.executions.publish_agent_output("unscoped")
 
     assert [
-        (event.agent_kind, event.round_label, event.execution_id, event.chat_thread_id)
+        tuple(
+            _opt(event, field)
+            for field in ("agent_kind", "round_label", "execution_id", "chat_thread_id")
+        )
         for event in parts.journal.read()
-        if event.type is EventType.AGENT_OUTPUT_CHUNK
+        if event.type == EventType.EVENT_TYPE_AGENT_OUTPUT_CHUNK
     ] == [
         ("implementer", "round-1", "inner", None),
         ("chat", "experiment-chat", "outer", "thread-a"),
@@ -394,10 +413,10 @@ def test_cancellation_and_run_finish_terminalize_activity(tmp_path):  # noqa: AN
     terminal = {
         event.execution_id: event.status
         for event in parts.journal.read()
-        if event.type is EventType.AGENT_EXECUTION_FINISHED
+        if event.type == EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED
     }
-    assert terminal[cancelled.execution_id] is EventStatus.CANCELLED
-    assert terminal[dangling.execution_id] is EventStatus.INTERRUPTED
+    assert terminal[cancelled.execution_id] == EventStatus.EVENT_STATUS_CANCELLED
+    assert terminal[dangling.execution_id] == EventStatus.EVENT_STATUS_INTERRUPTED
     assert parts.api.snapshot().active_executions == []
 
 
@@ -405,37 +424,37 @@ def test_legacy_invocations_project_without_becoming_live(tmp_path):  # noqa: AN
     execution_id = "a" * 32
     store = EventStore(tmp_path / "run-events.jsonl", "legacy")
     store.append(
-        RunEvent(
-            timestamp=datetime.now(UTC),
-            type=EventType.INVOCATION_STARTED,
-            status=EventStatus.ACTIVE,
+        messages.make_event(
+            EventType.EVENT_TYPE_INVOCATION_STARTED,
+            status=EventStatus.EVENT_STATUS_ACTIVE,
             agent_kind="implementer",
             round_label="round-1",
-            invocation_id=execution_id,
-            data=InvocationStartedData(system_prompt="system", user_prompt="work"),
+            execution_id=execution_id,
+            data=events_pb2.InvocationStartedData(system_prompt="system", user_prompt="work"),
         )
     )
     parts = build_server_parts(tmp_path)
 
     event = next(
-        event for event in parts.journal.read() if event.type is EventType.AGENT_EXECUTION_STARTED
+        event
+        for event in parts.journal.read()
+        if event.type == EventType.EVENT_TYPE_AGENT_EXECUTION_STARTED
     )
     assert event.execution_id == execution_id
     assert parts.api.snapshot().active_executions == []
 
     assert parts.journal._store is not None  # noqa: SLF001
     parts.journal._store.append(  # noqa: SLF001
-        RunEvent(
-            timestamp=datetime.now(UTC),
-            type=EventType.INVOCATION_FINISHED,
-            status=EventStatus.COMPLETED,
+        messages.make_event(
+            EventType.EVENT_TYPE_INVOCATION_FINISHED,
+            status=EventStatus.EVENT_STATUS_COMPLETED,
             agent_kind="implementer",
             round_label="round-1",
-            invocation_id=execution_id,
-            data=InvocationFinishedData(result="done"),
+            execution_id=execution_id,
+            data=events_pb2.InvocationFinishedData(result=struct_pb2.Value(string_value="done")),
         )
     )
-    assert parts.journal.read()[-1].type is EventType.AGENT_EXECUTION_FINISHED
+    assert parts.journal.read()[-1].type == EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED
 
 
 def test_failed_lifecycle_append_does_not_advance_active_state(
@@ -447,7 +466,7 @@ def test_failed_lifecycle_append_does_not_advance_active_state(
     append = store.append
 
     def fail_start(event):  # noqa: ANN001, ANN202
-        if event.type is EventType.AGENT_EXECUTION_STARTED:
+        if event.type == EventType.EVENT_TYPE_AGENT_EXECUTION_STARTED:
             raise OSError("disk full")  # noqa: TRY003
         return append(event)
 
@@ -460,7 +479,7 @@ def test_failed_lifecycle_append_does_not_advance_active_state(
     execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
 
     def fail_finish(event):  # noqa: ANN001, ANN202
-        if event.type is EventType.AGENT_EXECUTION_FINISHED:
+        if event.type == EventType.EVENT_TYPE_AGENT_EXECUTION_FINISHED:
             raise OSError("disk full")  # noqa: TRY003
         return append(event)
 

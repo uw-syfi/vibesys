@@ -3,7 +3,9 @@
 import pytest
 from pydantic import ValidationError
 
-from server.api.protocol import PerformanceRound
+from server.wire import validate
+from server.wire.codec import WireError
+from server.wire.v2 import responses_pb2
 from vibesys.schemas import (
     HYPOTHESIS_TITLE_MAX_LEN,
     ImplementerResponse,
@@ -130,12 +132,14 @@ def test_performance_stats_reject_non_finite_values(value):  # noqa: ANN001, ANN
             throughput=ThroughputStats(request_throughput=1.0, token_throughput=1.0),
         )
 
-    with pytest.raises(ValidationError, match="finite number"):
-        PerformanceRound(
-            round=1,
-            perf_metric=value,
-            perf_unit="req/s",
-            passed=True,
+    with pytest.raises(WireError, match="finite number"):
+        validate.validate_message(
+            responses_pb2.PerformanceRound(
+                round=1,
+                perf_metric=value,
+                perf_unit="req/s",
+                passed=True,
+            )
         )
 
 

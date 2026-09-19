@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 from tests.server.support import build_server_parts
 
 from server.api.performance import build_performance_context, summarize_objective
-from server.api.protocol import PerformanceQuery
+from server.wire import messages
+from server.wire.v2 import responses_pb2
 from vibesys.loops.agent.model import AgentRunState, Hypothesis, HypothesisMeasurement
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.schemas import OrchestratorPlan
@@ -121,13 +122,13 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
         )
     )
 
-    response = _service(project, run_id).execute(PerformanceQuery())
+    response = _service(project, run_id).execute(messages.make_request("performance"))
 
+    assert response.HasField("performance_context")
     context = response.performance_context
-    assert context is not None
     assert context.objective_metric == "total_ops_per_sec"
     assert context.objective_unit == "total_ops_per_sec"
-    assert context.objective_direction == "max"
+    assert context.objective_direction == responses_pb2.OBJECTIVE_DIRECTION_MAX
     assert context.objective_baseline_value == 1000.0
     assert context.objective_baseline_round == 1
     assert context.objective_baseline_commit == "e17fce8123abc"
@@ -140,22 +141,22 @@ def test_service_names_the_objective_before_the_first_measurement(tmp_path: Path
     project, run_id = _project_run(tmp_path / "project", ("total_ops_per_sec:max",))
     AgentRunStateStore(project.state.portable_namespace(run_id, "agent")).save(AgentRunState())
 
-    response = _service(project, run_id).execute(PerformanceQuery())
+    response = _service(project, run_id).execute(messages.make_request("performance"))
 
     assert response.performance == []
+    assert response.HasField("performance_context")
     context = response.performance_context
-    assert context is not None
     assert context.objective_metric == "total_ops_per_sec"
-    assert context.objective_direction == "max"
-    assert context.objective_baseline_value is None
-    assert context.objective_description is None
+    assert context.objective_direction == responses_pb2.OBJECTIVE_DIRECTION_MAX
+    assert not context.HasField("objective_baseline_value")
+    assert not context.HasField("objective_description")
 
 
 def test_service_returns_no_context_without_an_attached_run() -> None:
-    response = build_server_parts().api.execute(PerformanceQuery())
+    response = build_server_parts().api.execute(messages.make_request("performance"))
 
     assert response.performance == []
-    assert response.performance_context is None
+    assert not response.HasField("performance_context")
 
 
 def test_build_context_copies_the_newest_measurement_as_one_tuple() -> None:
@@ -186,7 +187,7 @@ def test_build_context_copies_the_newest_measurement_as_one_tuple() -> None:
 
     assert context is not None
     assert context.objective_unit == "ops/s"
-    assert context.objective_direction == "max"
+    assert context.objective_direction == responses_pb2.OBJECTIVE_DIRECTION_MAX
     assert context.objective_baseline_value == 1000.0
     assert context.objective_baseline_round == 1
     assert context.objective_baseline_commit == "abc1234"
@@ -198,7 +199,7 @@ def test_build_context_falls_back_to_the_manifest_direction() -> None:
     context = build_performance_context(state, objectives=("total_ops_per_sec:min",))
 
     assert context is not None
-    assert context.objective_direction == "min"
+    assert context.objective_direction == responses_pb2.OBJECTIVE_DIRECTION_MIN
 
 
 def test_build_context_is_none_with_nothing_to_say() -> None:
@@ -210,7 +211,7 @@ def test_build_context_carries_prose_before_the_metric_is_known() -> None:
     context = build_performance_context(None, objectives=(), objective_description="How it runs.")
 
     assert context is not None
-    assert context.objective_metric is None
+    assert not context.HasField("objective_metric")
     assert context.objective_description == "How it runs."
 
 

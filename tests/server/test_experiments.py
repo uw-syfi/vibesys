@@ -14,8 +14,8 @@ from server.api.experiments import (
     ExperimentQueryResult,
     build_experiment_log,
 )
-from server.api.protocol import ExperimentCursor, ExperimentQuery, HypothesisEntry, PerformanceQuery
-from server.events import EventType, ExperimentsChangedData
+from server.wire import codec, messages
+from server.wire.v2 import events_pb2, requests_pb2, responses_pb2
 from vibesys.loops.agent.model import (
     AgentRunState,
     Hypothesis,
@@ -26,12 +26,7 @@ from vibesys.loops.agent.model import (
 )
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.metrics import MetricSpace, Objective
-from vibesys.schemas import (
-    CandidateDisposition,
-    HypothesisOutcome,
-    OrchestratorPlan,
-    PerfDeltaReason,
-)
+from vibesys.schemas import HypothesisOutcome, OrchestratorPlan, PerfDeltaReason
 from vs_loop_state import MetricComparison, PerfProvenance, RoundRecord
 from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
 
@@ -168,10 +163,10 @@ def test_round_carries_its_own_verdict_and_causal_delta() -> None:
     (entry,) = build_experiment_log(state)
     (round_entry,) = entry.rounds
 
-    assert round_entry.judge_verdict == "deferred"
+    assert round_entry.judge_verdict == responses_pb2.ROUND_REVIEW_VERDICT_DEFERRED
     assert round_entry.perf_delta_pct == 12.5
-    assert round_entry.hypothesis_outcome == HypothesisResolution.PROVEN
-    assert round_entry.candidate_disposition == CandidateDisposition.PARETO_FRONTIER
+    assert round_entry.hypothesis_outcome == responses_pb2.HYPOTHESIS_OUTCOME_PROVEN
+    assert round_entry.candidate_disposition == responses_pb2.CANDIDATE_DISPOSITION_PARETO_FRONTIER
 
 
 def test_round_reads_an_implementer_outcome_from_its_own_vocabulary() -> None:
@@ -188,7 +183,7 @@ def test_round_reads_an_implementer_outcome_from_its_own_vocabulary() -> None:
 
     (entry,) = build_experiment_log(state)
 
-    assert entry.rounds[0].hypothesis_outcome == HypothesisOutcome.NOMINATED
+    assert entry.rounds[0].hypothesis_outcome == responses_pb2.HYPOTHESIS_OUTCOME_NOMINATED
 
 
 def test_round_drops_a_retired_outcome_rather_than_failing_the_log() -> None:
@@ -211,8 +206,8 @@ def test_round_drops_a_retired_outcome_rather_than_failing_the_log() -> None:
 
     (entry,) = build_experiment_log(state)
 
-    assert entry.rounds[0].hypothesis_outcome is None
-    assert entry.rounds[0].candidate_disposition is None
+    assert not entry.rounds[0].HasField("hypothesis_outcome")
+    assert not entry.rounds[0].HasField("candidate_disposition")
 
 
 def test_projection_uses_nested_rounds_and_one_official_measurement_tuple() -> None:
@@ -244,9 +239,9 @@ def test_projection_uses_nested_rounds_and_one_official_measurement_tuple() -> N
     assert [round_.round for round_ in entry.rounds] == [1, 2]
     assert (entry.first_round, entry.last_round) == (1, 2)
     assert entry.resolved_outcome == "disproven"
-    assert entry.judge_verdict == "pass"
+    assert entry.judge_verdict == events_pb2.JUDGE_VERDICT_PASS
     assert entry.kept is False
-    assert entry.strategy_disposition == "abandoned"
+    assert entry.strategy_disposition == responses_pb2.STRATEGY_DISPOSITION_ABANDONED
     # Do not combine the newer second-round value with the official first-round
     # causal comparison.
     assert (entry.perf_metric, entry.perf_unit, entry.perf_delta_pct) == (
@@ -256,7 +251,7 @@ def test_projection_uses_nested_rounds_and_one_official_measurement_tuple() -> N
     )
     assert (entry.perf_metric_name, entry.perf_direction, entry.perf_baseline_value) == (
         "throughput",
-        "max",
+        responses_pb2.OBJECTIVE_DIRECTION_MAX,
         110.0,
     )
 
@@ -321,36 +316,38 @@ def test_projection_carries_baseline_identity_and_the_no_delta_reason() -> None:
     measured, first, unresolved, reported = build_experiment_log(state)
 
     assert (measured.perf_baseline_round, measured.perf_baseline_commit) == (1, "c1")
-    assert measured.perf_delta_reason is None
-    assert first.perf_delta_reason is PerfDeltaReason.NO_BASELINE_YET
-    assert unresolved.perf_delta_reason is PerfDeltaReason.BASELINE_UNRESOLVED
-    assert (unresolved.perf_baseline_round, unresolved.perf_baseline_commit) == (None, None)
+    assert not measured.HasField("perf_delta_reason")
+    assert first.perf_delta_reason == responses_pb2.PERF_DELTA_REASON_NO_BASELINE_YET
+    assert unresolved.perf_delta_reason == responses_pb2.PERF_DELTA_REASON_BASELINE_UNRESOLVED
+    assert not unresolved.HasField("perf_baseline_round")
+    assert not unresolved.HasField("perf_baseline_commit")
     # The self-reported number itself stays off the entry-level measurement
     # tuple; only the reason says a number exists that nobody trusted-measured.
-    assert reported.perf_metric is None
-    assert reported.perf_delta_reason is PerfDeltaReason.NOT_FRAMEWORK_MEASURED
+    assert not reported.HasField("perf_metric")
+    assert reported.perf_delta_reason == responses_pb2.PERF_DELTA_REASON_NOT_FRAMEWORK_MEASURED
 
 
 def test_hypothesis_entry_round_trips_the_no_delta_reason() -> None:
     """The new fields survive the wire, and a legacy payload stays valid."""
-    entry = HypothesisEntry(
+    entry = responses_pb2.HypothesisEntry(
         hypothesis_id="H-01",
         first_round=1,
         last_round=1,
-        perf_delta_reason=PerfDeltaReason.BASELINE_UNRESOLVED,
+        perf_delta_reason=responses_pb2.PERF_DELTA_REASON_BASELINE_UNRESOLVED,
         perf_baseline_round=3,
         perf_baseline_commit="abc1234deadbeef",
     )
 
-    decoded = HypothesisEntry.model_validate_json(entry.model_dump_json())
-    assert decoded.perf_delta_reason is PerfDeltaReason.BASELINE_UNRESOLVED
+    decoded = codec.loads(responses_pb2.HypothesisEntry, codec.dumps(entry))
+    assert decoded.perf_delta_reason == responses_pb2.PERF_DELTA_REASON_BASELINE_UNRESOLVED
     assert (decoded.perf_baseline_round, decoded.perf_baseline_commit) == (3, "abc1234deadbeef")
 
-    legacy = HypothesisEntry.model_validate(
-        {"hypothesis_id": "H-02", "first_round": 1, "last_round": 1}
+    legacy = codec.from_dict(
+        responses_pb2.HypothesisEntry, {"hypothesis_id": "H-02", "first_round": 1, "last_round": 1}
     )
-    assert legacy.perf_delta_reason is None
-    assert (legacy.perf_baseline_round, legacy.perf_baseline_commit) == (None, None)
+    assert not legacy.HasField("perf_delta_reason")
+    assert not legacy.HasField("perf_baseline_round")
+    assert not legacy.HasField("perf_baseline_commit")
 
 
 def test_projection_surfaces_active_hypothesis_before_a_round_finishes() -> None:
@@ -419,7 +416,7 @@ def test_projection_title_is_none_without_any_text() -> None:
 
     (entry,) = build_experiment_log(AgentRunState(hypotheses=[hypothesis]))
 
-    assert entry.title is None
+    assert not entry.HasField("title")
 
 
 def test_projection_orders_hypotheses_by_started_round() -> None:
@@ -451,7 +448,9 @@ def test_revisioned_projection_returns_only_changed_entries() -> None:
     unchanged = projection.query(
         "run",
         "projection",
-        ExperimentCursor(run_id="run", projection_id=full.update.projection_id, revision=1),
+        requests_pb2.ExperimentCursor(
+            run_id="run", projection_id=full.update.projection_id, revision=1
+        ),
     )
     assert isinstance(unchanged, ExperimentQueryResult)
     assert unchanged.entries == []
@@ -465,7 +464,9 @@ def test_revisioned_projection_returns_only_changed_entries() -> None:
     delta = projection.query(
         "run",
         "projection",
-        ExperimentCursor(run_id="run", projection_id=full.update.projection_id, revision=1),
+        requests_pb2.ExperimentCursor(
+            run_id="run", projection_id=full.update.projection_id, revision=1
+        ),
     )
 
     assert isinstance(delta, ExperimentQueryResult)
@@ -498,7 +499,9 @@ def test_revisioned_projection_combines_remove_then_recreate_in_order() -> None:
     delta = projection.query(
         "run",
         "projection",
-        ExperimentCursor(run_id="run", projection_id=full.update.projection_id, revision=1),
+        requests_pb2.ExperimentCursor(
+            run_id="run", projection_id=full.update.projection_id, revision=1
+        ),
     )
 
     assert isinstance(delta, ExperimentQueryResult)
@@ -525,7 +528,9 @@ def test_revisioned_projection_resets_for_a_history_gap_or_run_change() -> None:
     gap = projection.query(
         "run",
         "projection",
-        ExperimentCursor(run_id="run", projection_id=full.update.projection_id, revision=1),
+        requests_pb2.ExperimentCursor(
+            run_id="run", projection_id=full.update.projection_id, revision=1
+        ),
     )
 
     assert isinstance(gap, ExperimentQueryResult)
@@ -537,7 +542,7 @@ def test_legacy_invalidation_forces_a_full_snapshot_at_the_same_revision() -> No
     projection = ExperimentProjection()
     old = AgentRunState(hypotheses=[_hypothesis("H-01", 1)])
     original = projection.replace("run", "projection", old)
-    stale_cursor = ExperimentCursor(
+    stale_cursor = requests_pb2.ExperimentCursor(
         run_id="run",
         projection_id=original.update.projection_id,
         revision=0,
@@ -568,7 +573,7 @@ def test_equal_revision_authoritative_snapshot_starts_a_new_cursor_chain() -> No
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=4)],
     )
     original = projection.replace("run", "projection", old)
-    stale_cursor = ExperimentCursor(
+    stale_cursor = requests_pb2.ExperimentCursor(
         run_id="run",
         projection_id=original.update.projection_id,
         revision=4,
@@ -650,7 +655,7 @@ def test_service_reads_only_authoritative_agent_state(tmp_path: Path) -> None:
         )
     )
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
-    response = parts.api.execute(ExperimentQuery())
+    response = parts.api.execute(messages.make_request("experiments"))
 
     assert [entry.hypothesis_id for entry in response.experiments] == ["H-01", "H-02"]
     assert response.experiments[1].active is True
@@ -672,8 +677,8 @@ def test_service_projects_committed_live_state_without_reloading_history(
     )
     store.save(initial)
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
-    full = parts.api.execute(ExperimentQuery())
-    assert full.experiment_update is not None
+    full = parts.api.execute(messages.make_request("experiments"))
+    assert full.HasField("experiment_update")
 
     changed = initial.clone()
     changed.experiment_revision = 2
@@ -682,8 +687,10 @@ def test_service_projects_committed_live_state_without_reloading_history(
     store.save(changed)
     parts.integration.publish_committed_state("agent", changed, changed_keys=("H-02",))
     parts.journal.record(
-        EventType.EXPERIMENTS_CHANGED,
-        data=ExperimentsChangedData(reason="round_persisted", revision=2),
+        events_pb2.EVENT_TYPE_EXPERIMENTS_CHANGED,
+        data=events_pb2.ExperimentsChangedData(
+            reason=events_pb2.EXPERIMENTS_CHANGE_REASON_ROUND_PERSISTED, revision=2
+        ),
     )
     monkeypatch.setattr(
         AgentRunStateStore,
@@ -692,17 +699,18 @@ def test_service_projects_committed_live_state_without_reloading_history(
     )
 
     delta = parts.api.execute(
-        ExperimentQuery(
-            after=ExperimentCursor(
+        messages.make_request(
+            "experiments",
+            after=requests_pb2.ExperimentCursor(
                 run_id=run_id,
                 projection_id=full.experiment_update.projection_id,
                 revision=1,
-            )
+            ),
         )
     )
 
     assert [entry.hypothesis_id for entry in delta.experiments] == ["H-02"]
-    assert delta.experiment_update is not None
+    assert delta.HasField("experiment_update")
     assert delta.experiment_update.reset is False
     assert delta.experiment_update.through_revision == 2
 
@@ -734,7 +742,7 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
 
     monkeypatch.setattr(AgentRunStateStore, "load_optional", delayed_load)
     with ThreadPoolExecutor(max_workers=1) as executor:
-        response_future = executor.submit(parts.api.execute, ExperimentQuery())
+        response_future = executor.submit(parts.api.execute, messages.make_request("experiments"))
         assert loaded.wait(timeout=5)
         changed = initial.clone()
         changed.experiment_revision = 2
@@ -743,14 +751,16 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
         store.save(changed)
         parts.integration.publish_committed_state("agent", changed, changed_keys=("H-01",))
         parts.journal.record(
-            EventType.EXPERIMENTS_CHANGED,
-            data=ExperimentsChangedData(reason="round_persisted", revision=2),
+            events_pb2.EVENT_TYPE_EXPERIMENTS_CHANGED,
+            data=events_pb2.ExperimentsChangedData(
+                reason=events_pb2.EXPERIMENTS_CHANGE_REASON_ROUND_PERSISTED, revision=2
+            ),
         )
         release.set()
         response = response_future.result(timeout=5)
 
     assert load_count == 1
-    assert response.experiment_update is not None
+    assert response.HasField("experiment_update")
     assert response.experiment_update.through_revision == 2
     assert response.experiments[0].action == "new committed contents"
 
@@ -769,8 +779,8 @@ def test_service_resets_when_another_project_attaches_with_the_same_run_id(
         project=first_project,
         run_id=run_id,
     )
-    first = parts.api.execute(ExperimentQuery())
-    assert first.experiment_update is not None
+    first = parts.api.execute(messages.make_request("experiments"))
+    assert first.HasField("experiment_update")
 
     second_project, _ = _project_run(tmp_path / "second")
     second_state = AgentRunState(
@@ -784,22 +794,25 @@ def test_service_resets_when_another_project_attaches_with_the_same_run_id(
         run_id=run_id,
     )
     parts.journal.record(
-        EventType.EXPERIMENTS_CHANGED,
-        data=ExperimentsChangedData(reason="project_attached"),
+        events_pb2.EVENT_TYPE_EXPERIMENTS_CHANGED,
+        data=events_pb2.ExperimentsChangedData(
+            reason=events_pb2.EXPERIMENTS_CHANGE_REASON_PROJECT_ATTACHED
+        ),
     )
 
     response = parts.api.execute(
-        ExperimentQuery(
-            after=ExperimentCursor(
+        messages.make_request(
+            "experiments",
+            after=requests_pb2.ExperimentCursor(
                 run_id=run_id,
                 projection_id=first.experiment_update.projection_id,
                 revision=1,
-            )
+            ),
         )
     )
 
     assert [entry.hypothesis_id for entry in response.experiments] == ["H-second"]
-    assert response.experiment_update is not None
+    assert response.HasField("experiment_update")
     assert response.experiment_update.reset is True
     assert response.experiment_update.projection_id != first.experiment_update.projection_id
 
@@ -811,7 +824,7 @@ def test_committed_state_is_projected_synchronously_before_later_mutation(tmp_pa
 
     parts.integration.publish_committed_state("agent", state)
     state.hypotheses[0].plan.task = "uncommitted mutation"
-    response = parts.api.execute(ExperimentQuery())
+    response = parts.api.execute(messages.make_request("experiments"))
 
     assert response.experiments[0].action == "test H-01"
 
@@ -839,7 +852,7 @@ def test_service_reads_performance_from_authoritative_agent_state(tmp_path: Path
         )
     )
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
-    response = parts.api.execute(PerformanceQuery())
+    response = parts.api.execute(messages.make_request("performance"))
 
     assert [(item.round, item.perf_metric) for item in response.performance] == [(1, 42.0)]
 
@@ -858,7 +871,7 @@ def test_service_adapts_legacy_state_read_only(tmp_path: Path) -> None:
     portable = project.state.portable_namespace(run_id, "agent")
     store = AgentRunStateStore(portable)
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
-    (entry,) = parts.api.execute(ExperimentQuery()).experiments
+    (entry,) = parts.api.execute(messages.make_request("experiments")).experiments
 
     assert entry.hypothesis_id == "H-01"
     assert entry.claim == "legacy claim"
@@ -902,7 +915,7 @@ def test_service_rebuilds_legacy_measurement_and_resolution_from_round_evidence(
         ),
     )
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
-    entries = parts.api.execute(ExperimentQuery()).experiments
+    entries = parts.api.execute(messages.make_request("experiments")).experiments
 
     regression = next(entry for entry in entries if entry.hypothesis_id == "H-regression")
     assert regression.resolved_outcome == "disproven"
@@ -917,7 +930,7 @@ def test_service_rebuilds_legacy_measurement_and_resolution_from_round_evidence(
         regression.perf_metric_name,
         regression.perf_direction,
         regression.perf_baseline_value,
-    ) == ("ops_s", "max", 100.0)
+    ) == ("ops_s", responses_pb2.OBJECTIVE_DIRECTION_MAX, 100.0)
 
 
 def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -> None:
@@ -983,7 +996,7 @@ def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -
         )
     )
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
-    entries = parts.api.execute(ExperimentQuery()).experiments
+    entries = parts.api.execute(messages.make_request("experiments")).experiments
 
     entry = next(item for item in entries if item.hypothesis_id == "H-within-noise")
     assert entry.resolved_outcome == "inconclusive"
@@ -992,7 +1005,7 @@ def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -
 def test_service_returns_authoritative_empty_log_after_attach(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
-    response = parts.api.execute(ExperimentQuery())
+    response = parts.api.execute(messages.make_request("experiments"))
 
     assert response.experiments == []
     assert response.experiments_ready is True

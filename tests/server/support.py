@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from server.chat.factory import ChatAgentBuilder
-    from server.settings import InteractiveSetupDefaults
+    from server.wire.v2 import responses_pb2
     from vs_project import Project
 
 
@@ -55,7 +55,7 @@ def build_server_parts(
     *,
     project: Project | None = None,
     run_id: str | None = None,
-    tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
+    tui_defaults: Callable[[], responses_pb2.TuiDefaults] | None = None,
     chat_agent_builder: ChatAgentBuilder | None = None,
 ) -> ServerParts:
     """Compose real server components and optionally attach durable state."""

@@ -1,21 +1,22 @@
 """Tests for the best-effort tool-result classifier."""
 
 import pytest
+from google.protobuf import json_format
 
-from server.events import JsonResultPayload
 from server.tool_payloads import classify_tool_result
+from server.wire.v2 import events_pb2
 
 
 class TestClassifyToolResult:
     def test_json_object_is_classified_with_parsed_value(self) -> None:
         payload = classify_tool_result('{"metric": "throughput", "value": 2400}')
-        assert isinstance(payload, JsonResultPayload)
-        assert payload.value == {"metric": "throughput", "value": 2400}
+        assert isinstance(payload, events_pb2.JsonResultPayload)
+        assert json_format.MessageToDict(payload.value) == {"metric": "throughput", "value": 2400}
 
     def test_json_array_is_classified_despite_surrounding_whitespace(self) -> None:
         payload = classify_tool_result('  \n [1, {"a": true}, null] \n')
-        assert isinstance(payload, JsonResultPayload)
-        assert payload.value == [1, {"a": True}, None]
+        assert isinstance(payload, events_pb2.JsonResultPayload)
+        assert json_format.MessageToDict(payload.value) == [1, {"a": True}, None]
 
     @pytest.mark.parametrize("content", ["42", '"text"', "null", "true"])
     def test_scalar_json_is_not_classified(self, content: str) -> None:

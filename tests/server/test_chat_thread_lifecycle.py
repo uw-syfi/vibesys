@@ -5,7 +5,6 @@ from __future__ import annotations
 import concurrent.futures
 import threading
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -14,7 +13,8 @@ from tests.server.support import ServerParts, build_server_parts
 from server.chat.factory import ChatAgentResources, ExperimentChatFactory
 from server.chat.manager import ChatAnswer, ChatThreadHandle
 from server.chat.options import ChatRunSettings
-from server.events import ChatThreadCreatedData, EventType, make_event
+from server.wire import messages
+from server.wire.v2 import events_pb2
 from vibesys.run.integration import AgentSelection
 
 if TYPE_CHECKING:
@@ -24,17 +24,19 @@ if TYPE_CHECKING:
     from vibesys.run.integration import RunAttachment
 
 
-def _remember_thread(parts: ServerParts, thread_id: str = "thread-1") -> ChatThreadCreatedData:
-    spec = ChatThreadCreatedData(
+def _remember_thread(
+    parts: ServerParts, thread_id: str = "thread-1"
+) -> events_pb2.ChatThreadCreatedData:
+    spec = events_pb2.ChatThreadCreatedData(
         thread_id=thread_id,
         driver="agentshim",
         provider="codex",
         model="gpt-test",
-        created_at=datetime.now(UTC),
+        created_at=messages.now(),
     )
     parts.chat.apply_replayed_event(
-        make_event(
-            EventType.CHAT_THREAD_CREATED,
+        messages.make_event(
+            events_pb2.EVENT_TYPE_CHAT_THREAD_CREATED,
             chat_thread_id=thread_id,
             agent_kind="chat",
             data=spec,
@@ -191,12 +193,12 @@ def test_thread_turns_serialize_and_shutdown_drains_queued_borrowers(tmp_path: P
         model: str | None,
     ) -> ChatThreadHandle:
         return ChatThreadHandle(
-            spec=ChatThreadCreatedData(
+            spec=events_pb2.ChatThreadCreatedData(
                 thread_id=thread_id,
                 driver=driver or "agentshim",
                 provider=provider or "codex",
                 model=model or "gpt-test",
-                created_at=datetime.now(UTC),
+                created_at=messages.now(),
             ),
             handler=handler,
             close=resource_closed.set,
@@ -298,12 +300,12 @@ def test_thread_creation_finishing_during_shutdown_is_closed_without_publish(
         construction_started.set()
         assert release_construction.wait(timeout=2)
         return ChatThreadHandle(
-            spec=ChatThreadCreatedData(
+            spec=events_pb2.ChatThreadCreatedData(
                 thread_id=thread_id,
                 driver=driver or "agentshim",
                 provider=provider or "codex",
                 model=model or "gpt-test",
-                created_at=datetime.now(UTC),
+                created_at=messages.now(),
             ),
             handler=lambda _question: ChatAnswer(text="unused", invocation_id="exec-unused"),
             close=close,

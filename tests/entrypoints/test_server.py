@@ -37,7 +37,7 @@ def test_tui_defaults_use_launch_config_and_normalize_runs_dir(
     defaults = json.loads(capsys.readouterr().out)
     assert defaults["runs_dir"] == str((tmp_path / "runs").resolve())
     assert defaults["repository_owner"] == "my-lab"
-    assert defaults["theme"] == "high-contrast-dark"
+    assert defaults["theme"] == "TUI_THEME_HIGH_CONTRAST_DARK"
 
 
 def test_tui_defaults_reject_a_missing_explicit_config(

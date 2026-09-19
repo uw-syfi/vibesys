@@ -8,65 +8,57 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict, Unpack
 
 import pytest
+from google.protobuf.message import Message
 from tests.server.support import ServerParts, build_server_parts
 
-from server.api.protocol import EventsQuery, SnapshotQuery, SubscribeRequest
 from server.api.service import RunApi
-from server.events import (
-    ChatData,
-    ChatThreadCreatedData,
-    EventData,
-    EventStore,
-    EventType,
-    OutputData,
-    RoundFinishedData,
-    RunEvent,
-    RunStartedData,
-)
+from server.events import EventStore
 from server.journal import _BOOTSTRAP_SPINE_TYPES
 from server.transport.unix_jsonl import UnixJsonlServer
+from server.wire import codec, messages
+from server.wire.codec import WireError
+from server.wire.v2 import events_pb2, requests_pb2
 
-_TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
+_TIMESTAMP = messages.from_datetime(datetime(2026, 1, 1, tzinfo=UTC))
 _ROUND_EVERY = 25
 
 
-class _EventFields(TypedDict, total=False):
-    """Run-event fields varied by the fixture builder."""
-
-    data: EventData
-    chat_thread_id: str
-    round_label: str
-    text: str
-
-
-def _event(sequence: int, event_type: EventType, **fields: Unpack[_EventFields]) -> RunEvent:
-    return RunEvent(
+def _event(
+    sequence: int,
+    event_type: events_pb2.EventType.ValueType,
+    *,
+    text: str = "",
+    data: Message | None = None,
+    **fields: str,
+) -> events_pb2.RunEvent:
+    return messages.make_event(
+        event_type,
+        text,
+        data=data,
         sequence=sequence,
         run_id="persisted-run",
         timestamp=_TIMESTAMP,
-        type=event_type,
         **fields,
     )
 
 
-def _round_log(count: int, *, with_threads: bool = False) -> list[RunEvent]:
+def _round_log(count: int, *, with_threads: bool = False) -> list[events_pb2.RunEvent]:
     events = [
         _event(
             1,
-            EventType.RUN_STARTED,
-            data=RunStartedData(outer_loop="agent", input="objective", max_rounds=24),
+            events_pb2.EVENT_TYPE_RUN_STARTED,
+            data=events_pb2.RunStartedData(outer_loop="agent", input="objective", max_rounds=24),
         )
     ]
     if with_threads:
         events.append(
             _event(
                 2,
-                EventType.CHAT_THREAD_CREATED,
+                events_pb2.EVENT_TYPE_CHAT_THREAD_CREATED,
                 chat_thread_id="thread-1",
-                data=ChatThreadCreatedData(
+                data=events_pb2.ChatThreadCreatedData(
                     thread_id="thread-1",
                     driver="agentshim",
                     provider="claude",
@@ -80,28 +72,34 @@ def _round_log(count: int, *, with_threads: bool = False) -> list[RunEvent]:
             events.append(
                 _event(
                     sequence,
-                    EventType.ROUND_FINISHED,
+                    events_pb2.EVENT_TYPE_ROUND_FINISHED,
                     round_label=f"round-{sequence // _ROUND_EVERY}",
-                    data=RoundFinishedData(attempts=1, judge_verdict="pass"),
+                    data=events_pb2.RoundFinishedData(
+                        attempts=1, judge_verdict=events_pb2.ROUND_JUDGE_VERDICT_PASS
+                    ),
                 )
             )
         elif with_threads and sequence == count - 1:
             events.append(
                 _event(
                     sequence,
-                    EventType.CHAT,
+                    events_pb2.EVENT_TYPE_CHAT,
                     text="why did round two regress?",
                     chat_thread_id="thread-1",
-                    data=ChatData(answer="because", thread_title="why did round two regress?"),
+                    data=events_pb2.ChatData(
+                        answer="because", thread_title="why did round two regress?"
+                    ),
                 )
             )
         else:
             events.append(
                 _event(
                     sequence,
-                    EventType.OUTPUT,
+                    events_pb2.EVENT_TYPE_OUTPUT,
                     text=f"line-{sequence}",
-                    data=OutputData(stream="stdout", content=f"line-{sequence}"),
+                    data=events_pb2.OutputData(
+                        stream=events_pb2.OUTPUT_STREAM_STDOUT, content=f"line-{sequence}"
+                    ),
                 )
             )
     return events
@@ -111,41 +109,41 @@ def _spine_records(floor: int) -> int:
     return 1 + floor // _ROUND_EVERY
 
 
-def _write_log(log_dir: Path, events: list[RunEvent]) -> Path:
+def _write_log(log_dir: Path, events: list[events_pb2.RunEvent]) -> Path:
     log_dir.mkdir(parents=True, exist_ok=True)
     (log_dir / "run-events.jsonl").write_text(
-        "".join(event.model_dump_json() + "\n" for event in events)
+        "".join(codec.dumps(event) + "\n" for event in events)
     )
     return log_dir
 
 
-def _attach(tmp_path: Path, events: list[RunEvent]) -> ServerParts:
+def _attach(tmp_path: Path, events: list[events_pb2.RunEvent]) -> ServerParts:
     return build_server_parts(_write_log(tmp_path / "logs", events))
 
 
 @contextmanager
 def _subscribed_client(
-    socket_path: Path, request: SubscribeRequest
+    socket_path: Path, request: requests_pb2.Request
 ) -> Generator[Callable[[], dict]]:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(10)
         client.connect(str(socket_path))
         with client.makefile("rwb") as stream:
-            stream.write(request.model_dump_json().encode() + b"\n")
+            stream.write(codec.dumps(request).encode() + b"\n")
             stream.flush()
             yield lambda: json.loads(stream.readline())
 
 
 @contextmanager
-def _live_subscription(api: RunApi, request: SubscribeRequest) -> Generator[Callable[[], dict]]:
+def _live_subscription(api: RunApi, request: requests_pb2.Request) -> Generator[Callable[[], dict]]:
     socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"  # noqa: S108
     with UnixJsonlServer(socket_path, api), _subscribed_client(socket_path, request) as read:
         yield read
 
 
-def _subscribe(api: RunApi, request: SubscribeRequest) -> tuple[dict, dict]:
+def _subscribe(api: RunApi, request: requests_pb2.Request) -> tuple[dict, dict]:
     with _live_subscription(api, request) as read:
-        return read(), read()
+        return read()["subscribed"], read()["event_batch"]
 
 
 @pytest.mark.parametrize("tail", [None, 40])
@@ -153,13 +151,16 @@ def test_subscription_replays_requested_history(tmp_path, tail):  # noqa: ANN001
     parts = _attach(tmp_path, _round_log(200))
     latest = parts.api.snapshot().sequence
 
-    subscribed, batch = _subscribe(parts.api, SubscribeRequest(after_sequence=0, tail=tail))
+    _subscribed, batch = _subscribe(
+        parts.api, messages.make_request("subscribe", after_sequence=0, tail=tail)
+    )
 
-    assert subscribed["type"] == "subscribed"
     floor = 0 if tail is None else latest - tail
-    assert batch["history_after_sequence"] == floor
+    assert batch.get("history_after_sequence", 0) == floor
     assert batch["through_sequence"] == latest
-    replayed_tail = [event["sequence"] for event in batch["events"] if event["sequence"] > floor]
+    replayed_tail = [
+        event["sequence"] for event in batch.get("events", []) if event["sequence"] > floor
+    ]
     assert replayed_tail == list(range(floor + 1, latest + 1))
 
 
@@ -168,13 +169,15 @@ def test_tail_replays_pre_floor_run_spine_in_order(tmp_path):  # noqa: ANN001, A
     latest = parts.api.snapshot().sequence
     floor = latest - 40
 
-    _subscribed, batch = _subscribe(parts.api, SubscribeRequest(after_sequence=0, tail=40))
+    _subscribed, batch = _subscribe(
+        parts.api, messages.make_request("subscribe", after_sequence=0, tail=40)
+    )
 
-    sequences = [event["sequence"] for event in batch["events"]]
+    sequences = [event["sequence"] for event in batch.get("events", [])]
     assert sequences == sorted(sequences)
-    pre_floor = [event for event in batch["events"] if event["sequence"] <= floor]
-    assert [event["type"] for event in pre_floor] == ["run_started"] + [
-        "round_finished" for _ in range(floor // _ROUND_EVERY)
+    pre_floor = [event for event in batch.get("events", []) if event["sequence"] <= floor]
+    assert [event["type"] for event in pre_floor] == ["EVENT_TYPE_RUN_STARTED"] + [
+        "EVENT_TYPE_ROUND_FINISHED" for _ in range(floor // _ROUND_EVERY)
     ]
 
 
@@ -182,21 +185,27 @@ def test_tail_without_spine_events_delivers_only_suffix(tmp_path):  # noqa: ANN0
     events = [
         _event(
             sequence,
-            EventType.OUTPUT,
-            data=OutputData(stream="stdout", content=f"line-{sequence}"),
+            events_pb2.EVENT_TYPE_OUTPUT,
+            data=events_pb2.OutputData(
+                stream=events_pb2.OUTPUT_STREAM_STDOUT, content=f"line-{sequence}"
+            ),
         )
         for sequence in range(1, 121)
     ]
     parts = _attach(tmp_path, events)
     latest = parts.api.snapshot().sequence
 
-    _subscribed, batch = _subscribe(parts.api, SubscribeRequest(after_sequence=0, tail=20))
+    _subscribed, batch = _subscribe(
+        parts.api, messages.make_request("subscribe", after_sequence=0, tail=20)
+    )
 
-    assert [event["sequence"] for event in batch["events"]] == list(range(latest - 19, latest + 1))
+    assert [event["sequence"] for event in batch.get("events", [])] == list(
+        range(latest - 19, latest + 1)
+    )
 
 
 def _spine_type_values() -> set[str]:
-    return {event_type.value for event_type in _BOOTSTRAP_SPINE_TYPES}
+    return {events_pb2.EventType.Name(event_type) for event_type in _BOOTSTRAP_SPINE_TYPES}
 
 
 def test_bootstrap_tail_stays_bounded_when_events_land_mid_bootstrap(  # noqa: ANN201
@@ -220,11 +229,13 @@ def test_bootstrap_tail_stays_bounded_when_events_land_mid_bootstrap(  # noqa: A
 
     monkeypatch.setattr(parts.api, "subscription_bootstrap", bursty_bootstrap)
 
-    subscribed, batch = _subscribe(parts.api, SubscribeRequest(after_sequence=0, tail=tail))
+    subscribed, batch = _subscribe(
+        parts.api, messages.make_request("subscribe", after_sequence=0, tail=tail)
+    )
 
-    floor = batch["history_after_sequence"]
+    floor = batch.get("history_after_sequence", 0)
     through = batch["through_sequence"]
-    ordinary = [event for event in batch["events"] if event["sequence"] > floor]
+    ordinary = [event for event in batch.get("events", []) if event["sequence"] > floor]
     context = (
         f"pre-burst watermarks {pre_burst_watermarks or None}, checkpoint watermark {through}, "
         f"requested tail {tail}, ordinary bootstrap events {len(ordinary)}"
@@ -235,9 +246,9 @@ def test_bootstrap_tail_stays_bounded_when_events_land_mid_bootstrap(  # noqa: A
     assert through == parts.api.latest_sequence, context
     assert floor == through - tail, context
     assert subscribed["latest_sequence"] == through, context
-    pre_floor = [event for event in batch["events"] if event["sequence"] <= floor]
+    pre_floor = [event for event in batch.get("events", []) if event["sequence"] <= floor]
     assert all(event["type"] in _spine_type_values() for event in pre_floor), context
-    assert all(event["sequence"] <= through for event in batch["events"]), context
+    assert all(event["sequence"] <= through for event in batch.get("events", [])), context
 
 
 def test_bootstrap_failure_surfaces_after_the_handshake(  # noqa: ANN201
@@ -251,16 +262,16 @@ def test_bootstrap_failure_surfaces_after_the_handshake(  # noqa: ANN201
 
     monkeypatch.setattr(parts.api, "subscription_bootstrap", failing_bootstrap)
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
-        subscribed = read()
-        failure = read()
+    with _live_subscription(
+        parts.api, messages.make_request("subscribe", after_sequence=0, tail=40)
+    ) as read:
+        subscribed = read()["subscribed"]
+        failure = read()["protocol_error"]
 
     # The dial itself must succeed: the client probes tail support by dialing
     # and treats a pre-handshake failure as a server without the field, so a
     # transient replay fault would otherwise trigger a full-history retry.
-    assert subscribed["type"] == "subscribed"
     assert subscribed["latest_sequence"] == latest
-    assert failure["type"] == "protocol_error"
     assert failure["code"] == "stream_failed"
 
 
@@ -276,8 +287,8 @@ def test_subscription_bootstrap_captures_one_atomic_state(tmp_path):  # noqa: AN
     ordinary = [event.sequence for event in bootstrap.events if event.sequence > bootstrap.floor]
     assert ordinary == list(range(bootstrap.floor + 1, bootstrap.through_sequence + 1))
     pre_floor = [event for event in bootstrap.events if event.sequence <= bootstrap.floor]
-    assert [event.type for event in pre_floor] == [EventType.RUN_STARTED] + [
-        EventType.ROUND_FINISHED
+    assert [event.type for event in pre_floor] == [events_pb2.EVENT_TYPE_RUN_STARTED] + [
+        events_pb2.EVENT_TYPE_ROUND_FINISHED
     ] * (bootstrap.floor // _ROUND_EVERY)
     assert bootstrap.active_executions == []
 
@@ -301,18 +312,20 @@ def test_bootstrap_tail_stays_bounded_under_concurrent_appends(tmp_path):  # noq
     writer = threading.Thread(target=append_live_output)
     writer.start()
     try:
-        _subscribed, batch = _subscribe(parts.api, SubscribeRequest(after_sequence=0, tail=tail))
+        _subscribed, batch = _subscribe(
+            parts.api, messages.make_request("subscribe", after_sequence=0, tail=tail)
+        )
     finally:
         stop.set()
         writer.join(timeout=5)
     assert not writer.is_alive()
 
-    floor = batch["history_after_sequence"]
-    ordinary = [event for event in batch["events"] if event["sequence"] > floor]
+    floor = batch.get("history_after_sequence", 0)
+    ordinary = [event for event in batch.get("events", []) if event["sequence"] > floor]
     assert len(ordinary) <= tail
-    pre_floor = [event for event in batch["events"] if event["sequence"] <= floor]
+    pre_floor = [event for event in batch.get("events", []) if event["sequence"] <= floor]
     assert all(event["type"] in _spine_type_values() for event in pre_floor)
-    assert all(event["sequence"] <= batch["through_sequence"] for event in batch["events"])
+    assert all(event["sequence"] <= batch["through_sequence"] for event in batch.get("events", []))
 
 
 def test_checkpoint_parses_only_tail_and_spine(tmp_path):  # noqa: ANN001, ANN201
@@ -332,31 +345,49 @@ def test_checkpoint_parses_only_tail_and_spine(tmp_path):  # noqa: ANN001, ANN20
 
 def test_events_query_is_half_open_and_backfills_without_gaps(tmp_path):  # noqa: ANN001, ANN201
     parts = _attach(tmp_path, _round_log(200))
-    response = parts.api.execute(EventsQuery(after_sequence=50, before_sequence=60))
+    response = parts.api.execute(
+        messages.make_request("events", after_sequence=50, before_sequence=60)
+    )
     assert [event.sequence for event in response.events] == list(range(51, 60))
 
     floor = 150
     collected: list[int] = []
     while floor > 0:
         after = max(0, floor - 40)
-        response = parts.api.execute(EventsQuery(after_sequence=after, before_sequence=floor + 1))
+        response = parts.api.execute(
+            messages.make_request("events", after_sequence=after, before_sequence=floor + 1)
+        )
         collected = [event.sequence for event in response.events] + collected
         floor = after
     assert collected == list(range(1, 151))
 
 
-@pytest.mark.parametrize("before_sequence", [0, -1])
-def test_events_query_rejects_meaningless_upper_bound(before_sequence):  # noqa: ANN001, ANN201
-    with pytest.raises(ValueError):  # noqa: PT011
-        EventsQuery(after_sequence=0, before_sequence=before_sequence)
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"events": {"before_sequence": 0}},
+        {"events": {"before_sequence": -1}},
+        {"events": {"after_sequence": -1}},
+        {"events": {"timeout_ms": 30_001}},
+        {"subscribe": {"tail": 0}},
+        {"subscribe": {"tail": -1}},
+        {"subscribe": {"after_sequence": -1}},
+        {"steer": {"text": ""}},
+    ],
+)
+def test_request_bounds_are_rejected_at_the_wire(body):  # noqa: ANN001, ANN201
+    with pytest.raises(WireError) as failure:
+        codec.parse_request(json.dumps({"protocol_version": 2, **body}))
+
+    assert failure.value.code == "invalid_message"
 
 
 def test_snapshot_reconstructs_chat_threads_from_full_history(tmp_path):  # noqa: ANN001, ANN201
     parts = _attach(tmp_path, _round_log(200, with_threads=True))
 
-    response = parts.api.execute(SnapshotQuery())
+    response = parts.api.execute(messages.make_request("snapshot"))
 
-    assert response.snapshot is not None
+    assert response.HasField("snapshot")
     assert [(thread.thread_id, thread.title) for thread in response.snapshot.chat_threads] == [
         ("thread-1", "why did round two regress?")
     ]
@@ -366,22 +397,24 @@ def test_snapshot_reconstructs_chat_threads_from_full_history(tmp_path):  # noqa
 def test_late_attach_rebootstraps_at_fresh_tail_with_spine(tmp_path):  # noqa: ANN001, ANN201
     parts = build_server_parts(tmp_path / "server")
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
-        assert read()["type"] == "subscribed"
-        bootstrap = read()
+    with _live_subscription(
+        parts.api, messages.make_request("subscribe", after_sequence=0, tail=40)
+    ) as read:
+        assert "subscribed" in read()
+        bootstrap = read()["event_batch"]
         parts.attach(_write_log(tmp_path / "logs", _round_log(200)))
-        batch = read()
+        batch = read()["event_batch"]
 
-    assert bootstrap["history_after_sequence"] == 0
+    assert bootstrap.get("history_after_sequence", 0) == 0
     latest = parts.api.snapshot().sequence
     floor = latest - 40
-    assert batch["history_after_sequence"] == floor
+    assert batch.get("history_after_sequence", 0) == floor
     assert batch["through_sequence"] == latest
-    pre_floor = [event for event in batch["events"] if event["sequence"] <= floor]
-    assert [event["type"] for event in pre_floor] == ["run_started"] + [
-        "round_finished" for _ in range(floor // _ROUND_EVERY)
+    pre_floor = [event for event in batch.get("events", []) if event["sequence"] <= floor]
+    assert [event["type"] for event in pre_floor] == ["EVENT_TYPE_RUN_STARTED"] + [
+        "EVENT_TYPE_ROUND_FINISHED" for _ in range(floor // _ROUND_EVERY)
     ]
-    assert len(batch["events"]) <= 40 + _spine_records(floor)
+    assert len(batch.get("events", [])) <= 40 + _spine_records(floor)
 
 
 def test_late_attach_rebootstraps_a_run_log_shorter_than_the_tail(tmp_path):  # noqa: ANN001, ANN201
@@ -393,21 +426,23 @@ def test_late_attach_rebootstraps_a_run_log_shorter_than_the_tail(tmp_path):  # 
     parts = build_server_parts(tmp_path / "server")
     tail = 1_000
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=tail)) as read:
-        assert read()["type"] == "subscribed"
-        bootstrap = read()
+    with _live_subscription(
+        parts.api, messages.make_request("subscribe", after_sequence=0, tail=tail)
+    ) as read:
+        assert "subscribed" in read()
+        bootstrap = read()["event_batch"]
         parts.attach(_write_log(tmp_path / "logs", _round_log(200)))
-        batch = read()
+        batch = read()["event_batch"]
 
     latest = parts.api.snapshot().sequence
     assert latest < tail
     assert batch["store_id"] != bootstrap["store_id"]
-    assert batch["history_after_sequence"] == 0
+    assert batch.get("history_after_sequence", 0) == 0
     assert batch["through_sequence"] == latest
     # A whole-log replay, so the client re-folds to exactly what the durable
     # store holds, starting at the ``run_started`` the stale cursor covered.
-    assert [event["sequence"] for event in batch["events"]] == list(range(1, latest + 1))
-    assert batch["events"][0]["type"] == "run_started"
+    assert [event["sequence"] for event in batch.get("events", [])] == list(range(1, latest + 1))
+    assert batch["events"][0]["type"] == "EVENT_TYPE_RUN_STARTED"
 
 
 def test_resume_across_a_store_swap_rebootstraps(tmp_path):  # noqa: ANN001, ANN201
@@ -418,27 +453,29 @@ def test_resume_across_a_store_swap_rebootstraps(tmp_path):  # noqa: ANN001, ANN
     # since the whole durable log fits inside the tail the boot dialed.
     parts = build_server_parts(tmp_path / "server")
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=1_000)) as read:
-        assert read()["type"] == "subscribed"
-        bootstrap = read()
+    with _live_subscription(
+        parts.api, messages.make_request("subscribe", after_sequence=0, tail=1_000)
+    ) as read:
+        assert "subscribed" in read()
+        bootstrap = read()["event_batch"]
     cursor = bootstrap["through_sequence"]
 
     parts.attach(_write_log(tmp_path / "logs", _round_log(200)))
     latest = parts.api.snapshot().sequence
     assert latest < 1_000
 
-    subscribed, batch = _subscribe(
-        parts.api, SubscribeRequest(after_sequence=cursor, store_id=bootstrap["store_id"])
+    _subscribed, batch = _subscribe(
+        parts.api,
+        messages.make_request("subscribe", after_sequence=cursor, store_id=bootstrap["store_id"]),
     )
 
-    assert subscribed["type"] == "subscribed"
     assert batch["store_id"] != bootstrap["store_id"]
-    assert batch["history_after_sequence"] == 0
+    assert batch.get("history_after_sequence", 0) == 0
     assert batch["through_sequence"] == latest
     # A whole-log replay from sequence 1, so the resumed client re-folds to what
     # the durable store holds instead of extending its stale cursor.
-    assert [event["sequence"] for event in batch["events"]] == list(range(1, latest + 1))
-    assert batch["events"][0]["type"] == "run_started"
+    assert [event["sequence"] for event in batch.get("events", [])] == list(range(1, latest + 1))
+    assert batch["events"][0]["type"] == "EVENT_TYPE_RUN_STARTED"
 
 
 def test_resume_within_the_same_store_extends_from_the_cursor(tmp_path):  # noqa: ANN001, ANN201
@@ -446,20 +483,21 @@ def test_resume_within_the_same_store_extends_from_the_cursor(tmp_path):  # noqa
     # reconnect with no swap streams incrementally rather than re-bootstrapping.
     parts = _attach(tmp_path, _round_log(50))
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=1_000)) as read:
-        assert read()["type"] == "subscribed"
-        bootstrap = read()
+    with _live_subscription(
+        parts.api, messages.make_request("subscribe", after_sequence=0, tail=1_000)
+    ) as read:
+        assert "subscribed" in read()
+        bootstrap = read()["event_batch"]
     store = bootstrap["store_id"]
     cursor = bootstrap["through_sequence"]
 
-    subscribed, batch = _subscribe(
-        parts.api, SubscribeRequest(after_sequence=cursor, store_id=store)
+    _subscribed, batch = _subscribe(
+        parts.api, messages.make_request("subscribe", after_sequence=cursor, store_id=store)
     )
 
-    assert subscribed["type"] == "subscribed"
     assert batch["store_id"] == store
     assert batch["through_sequence"] == cursor
-    assert batch["events"] == []
+    assert "events" not in batch
 
 
 def test_attach_into_an_empty_log_keeps_the_subscription_streaming(tmp_path):  # noqa: ANN001, ANN201
@@ -468,26 +506,30 @@ def test_attach_into_an_empty_log_keeps_the_subscription_streaming(tmp_path):  #
     # the store keeps its identity and the stream stays incremental.
     parts = build_server_parts(tmp_path / "server")
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
-        assert read()["type"] == "subscribed"
-        bootstrap = read()
+    with _live_subscription(
+        parts.api, messages.make_request("subscribe", after_sequence=0, tail=40)
+    ) as read:
+        assert "subscribed" in read()
+        bootstrap = read()["event_batch"]
         parts.attach(tmp_path / "logs")
         parts.journal.publish_output("stdout", "first line of the run")
-        batch = read()
+        batch = read()["event_batch"]
 
     assert batch["store_id"] == bootstrap["store_id"]
-    assert [event["type"] for event in batch["events"]] == ["output"]
-    assert batch["events"][0]["sequence"] == bootstrap["through_sequence"] + 1
+    assert [event["type"] for event in batch.get("events", [])] == ["EVENT_TYPE_OUTPUT"]
+    assert batch.get("events", [])[0]["sequence"] == bootstrap["through_sequence"] + 1
 
 
 def test_live_batches_carry_the_store_they_were_read_from(tmp_path):  # noqa: ANN001, ANN201
     parts = _attach(tmp_path, _round_log(50))
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
+    with _live_subscription(
+        parts.api, messages.make_request("subscribe", after_sequence=0, tail=40)
+    ) as read:
         read()
-        bootstrap = read()
+        bootstrap = read()["event_batch"]
         parts.journal.publish_output("stdout", "one more line")
-        batch = read()
+        batch = read()["event_batch"]
 
     store_id = parts.journal.store_id_locked()
     assert store_id != ""
@@ -516,15 +558,17 @@ def test_late_attach_does_not_parse_skipped_history(tmp_path):  # noqa: ANN001, 
     log_dir = _write_log(tmp_path / "logs", _round_log(count))
     parts = build_server_parts(tmp_path / "server")
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
+    with _live_subscription(
+        parts.api, messages.make_request("subscribe", after_sequence=0, tail=40)
+    ) as read:
         read()
         read()
         parts.attach(log_dir)
-        batch = read()
+        batch = read()["event_batch"]
 
     store = parts.journal._store  # noqa: SLF001
     assert store is not None
-    floor = batch["history_after_sequence"]
+    floor = batch.get("history_after_sequence", 0)
     attach_only = EventStore(log_dir / "run-events.jsonl", run_id="persisted-run")
     assert store.parsed_record_count <= (
         attach_only.parsed_record_count + 40 + _spine_records(floor) + 5
@@ -536,30 +580,32 @@ def test_live_append_keeps_existing_tail_floor(tmp_path):  # noqa: ANN001, ANN20
     parts = _attach(tmp_path, _round_log(200))
     floor = parts.api.snapshot().sequence - 40
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
+    with _live_subscription(
+        parts.api, messages.make_request("subscribe", after_sequence=0, tail=40)
+    ) as read:
         read()
         read()
         parts.journal.publish_output("stdout", "one more line")
-        batch = read()
+        batch = read()["event_batch"]
 
-    assert batch["history_after_sequence"] == floor
-    assert [event["type"] for event in batch["events"]] == ["output"]
+    assert batch.get("history_after_sequence", 0) == floor
+    assert [event["type"] for event in batch.get("events", [])] == ["EVENT_TYPE_OUTPUT"]
 
 
 def test_disconnect_wait_blocks_until_last_subscriber_closes(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
     socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"  # noqa: S108
-    request = SubscribeRequest(after_sequence=0)
+    request = messages.make_request("subscribe", after_sequence=0)
 
     with UnixJsonlServer(socket_path, parts.api) as server:
         with _subscribed_client(socket_path, request) as read:
-            assert read()["type"] == "subscribed"
+            assert "subscribed" in read()
         parts.journal.publish_output("stdout", "wake the first handler")
         # With no subscriber left, the wait returns; it must not poison later waits.
         server.wait_for_subscriber_disconnect()
 
         with _subscribed_client(socket_path, request) as read:
-            assert read()["type"] == "subscribed"
+            assert "subscribed" in read()
             unblocked = threading.Event()
 
             def wait_for_disconnect() -> None:

@@ -9,8 +9,9 @@ import pytest
 from tests.server.support import build_server_parts
 
 from server.api.design import _PATCH_CHAR_LIMIT, DesignLog
-from server.api.protocol import DesignPatchQuery, DesignQuery
 from server.api.workspace_git import WorkspacePatchReader
+from server.wire import codec, enums, messages
+from server.wire.v2 import responses_pb2
 from vibesys.loops.agent.model import AgentRunState, Hypothesis
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.run.git_events import NullGitTrackerEvents
@@ -113,6 +114,14 @@ def _no_patch(_base: str, _head: str, _paths: tuple[str, ...]) -> str | None:
     return None
 
 
+def _kind(change: responses_pb2.DesignFileChange) -> str:
+    return enums.text(responses_pb2.DesignChange, change.change)
+
+
+def _renamed(change: responses_pb2.DesignFileChange) -> str | None:
+    return change.renamed_from if change.HasField("renamed_from") else None
+
+
 def _tracked(workspace: Path) -> DesignLog:
     """Bind a projection to the real read-only git callables for *workspace*."""
     tracker = GitTracker(workspace, run_id="design-test", events=NullGitTrackerEvents())
@@ -168,13 +177,15 @@ def test_design_log_derives_per_round_file_changes(tmp_path: Path) -> None:
     # against, so a patch query can only name ranges the log itself used.
     assert (first_entry.base, first_entry.commit) == (baseline, first)
     assert (second_entry.base, second_entry.commit) == (first, second)
-    assert first_entry.files is not None
-    assert sorted((change.change, change.path) for change in first_entry.files) == [
+    assert first_entry.HasField("files")
+    assert sorted((_kind(change), change.path) for change in first_entry.files.changes) == [
         ("added", "src/ffi.rs"),
         ("modified", "src/lib.rs"),
     ]
-    assert second_entry.files is not None
-    assert [(change.change, change.path, change.renamed_from) for change in second_entry.files] == [
+    assert second_entry.HasField("files")
+    assert [
+        (_kind(change), change.path, _renamed(change)) for change in second_entry.files.changes
+    ] == [
         ("deleted", "src/ffi.rs", None),
         ("renamed", "src/queue.rs", "src/lib.rs"),
     ]
@@ -196,11 +207,11 @@ def test_design_log_publishes_only_the_round_and_its_files(tmp_path: Path) -> No
         state, baseline="0" * 40
     )
 
-    assert entry.model_dump() == {
+    assert codec.to_dict(entry) == {
         "round": 1,
         "commit": "a" * 40,
         "base": "0" * 40,
-        "files": [],
+        "files": {},
     }
 
 
@@ -237,8 +248,8 @@ def test_design_log_measures_a_reverted_hypothesis_from_its_parent(tmp_path: Pat
 
     # Against round 1 the range would also claim queue.rs reverted; against
     # the hypothesis's own parent it is exactly the new file.
-    assert second_entry.files is not None
-    assert [(change.change, change.path) for change in second_entry.files] == [
+    assert second_entry.HasField("files")
+    assert [(_kind(change), change.path) for change in second_entry.files.changes] == [
         ("added", "batching.rs")
     ]
 
@@ -262,7 +273,7 @@ def test_design_log_leaves_unresolvable_ranges_unknown(tmp_path: Path) -> None:
 
     # Round 1 recorded no checkpoint; round 2's range does not resolve in a
     # repository that never held those objects. Both stay None, never [].
-    assert [entry.files for entry in entries] == [None, None]
+    assert [entry.HasField("files") for entry in entries] == [False, False]
 
 
 def test_design_log_never_passes_a_non_hex_commit_to_git(tmp_path: Path) -> None:
@@ -289,7 +300,7 @@ def test_design_log_never_passes_a_non_hex_commit_to_git(tmp_path: Path) -> None
     )
 
     assert attempted == []
-    assert [entry.files for entry in entries] == [None]
+    assert [entry.HasField("files") for entry in entries] == [False]
 
 
 def test_diff_name_status_rejects_a_revision_expression(tmp_path: Path) -> None:
@@ -347,8 +358,10 @@ def test_design_log_drops_a_rename_out_of_framework_memory(tmp_path: Path) -> No
         workspace=tmp_path, diff=lambda _base, _head: output, patch=_no_patch
     ).rounds(state, baseline="0" * 40)
 
-    assert entry.files is not None
-    assert [(change.change, change.path) for change in entry.files] == [("modified", "src/lib.rs")]
+    assert entry.HasField("files")
+    assert [(_kind(change), change.path) for change in entry.files.changes] == [
+        ("modified", "src/lib.rs")
+    ]
 
 
 def test_design_log_caches_each_commit_range(tmp_path: Path) -> None:
@@ -404,9 +417,9 @@ def test_design_log_retries_a_failed_range(tmp_path: Path) -> None:
     (failed,) = design.rounds(state, baseline="0" * 40)
     (recovered,) = design.rounds(state, baseline="0" * 40)
 
-    assert failed.files is None
-    assert recovered.files is not None
-    assert [change.path for change in recovered.files] == ["src/lib.rs"]
+    assert not failed.HasField("files")
+    assert recovered.HasField("files")
+    assert [change.path for change in recovered.files.changes] == ["src/lib.rs"]
 
 
 def test_design_log_evicts_oldest_ranges_past_capacity(tmp_path: Path) -> None:
@@ -455,23 +468,23 @@ def test_design_patch_covers_every_change_kind(tmp_path: Path) -> None:
     design = _tracked(workspace)
 
     modified = design.patch(base, head, "lib.rs")
-    assert modified.patch is not None
+    assert modified.HasField("patch")
     assert "-fn main() {}" in modified.patch
     assert "+fn main() { fast() }" in modified.patch
 
     added = design.patch(base, head, "new.rs")
-    assert added.patch is not None
+    assert added.HasField("patch")
     assert "new file mode" in added.patch
     assert "+pub fn newer() {}" in added.patch
 
     deleted = design.patch(base, head, "gone.rs")
-    assert deleted.patch is not None
+    assert deleted.HasField("patch")
     assert "deleted file mode" in deleted.patch
     assert "-obsolete" in deleted.patch
 
     renamed = design.patch(base, head, "ffi2.rs")
     assert renamed.renamed_from == "ffi.rs"
-    assert renamed.patch is not None
+    assert renamed.HasField("patch")
     assert "rename from ffi.rs" in renamed.patch
     assert "rename to ffi2.rs" in renamed.patch
 
@@ -490,7 +503,7 @@ def test_design_patch_truncates_at_the_size_bound(tmp_path: Path) -> None:
     result = _tracked(workspace).patch(base, head, "table.rs")
 
     assert result.truncated is True
-    assert result.patch is not None
+    assert result.HasField("patch")
     assert len(result.patch) <= _PATCH_CHAR_LIMIT
     # The cut lands on a line boundary, so the tail line is never garbled.
     assert result.patch.endswith("\n")
@@ -557,8 +570,8 @@ def test_design_patch_caches_successes_and_retries_failures(tmp_path: Path) -> N
 
     # The failure is reported, not cached; the success is cached, so the
     # third read runs no git at all.
-    assert failed.patch is None
-    assert recovered.patch is not None
+    assert not failed.HasField("patch")
+    assert recovered.HasField("patch")
     assert repeated.patch == recovered.patch
     assert len(calls) == 2
 
@@ -575,7 +588,7 @@ def test_design_patch_degrades_when_the_file_list_is_unreadable(tmp_path: Path) 
 
     result = design.patch("a" * 40, "b" * 40, "lib.rs")
 
-    assert result.patch is None
+    assert not result.HasField("patch")
     assert result.truncated is False
     assert attempted == []
 
@@ -634,14 +647,16 @@ def test_service_builds_design_from_workspace_history(tmp_path: Path) -> None:
     )
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
 
-    response = parts.api.execute(DesignQuery())
+    response = parts.api.execute(messages.make_request("design"))
 
     assert response.design_ready is True
     (entry,) = response.design
     assert entry.round == 1
     assert entry.commit == first
-    assert entry.files is not None
-    assert [(change.change, change.path) for change in entry.files] == [("added", "ring.rs")]
+    assert entry.HasField("files")
+    assert [(_kind(change), change.path) for change in entry.files.changes] == [
+        ("added", "ring.rs")
+    ]
 
 
 def test_service_serves_patches_for_published_design_ranges(tmp_path: Path) -> None:
@@ -661,26 +676,30 @@ def test_service_serves_patches_for_published_design_ranges(tmp_path: Path) -> N
     )
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
 
-    (entry,) = parts.api.execute(DesignQuery()).design
+    (entry,) = parts.api.execute(messages.make_request("design")).design
     assert (entry.base, entry.commit) == (baseline, first)
     # The client echoes the published range back; use the same values here.
-    response = parts.api.execute(DesignPatchQuery(base=baseline, head=first, path="ring.rs"))
+    response = parts.api.execute(
+        messages.make_request("design_patch", base=baseline, head=first, path="ring.rs")
+    )
 
     assert response.ok is True
+    assert response.HasField("design_patch")
     patch = response.design_patch
-    assert patch is not None
     assert patch.truncated is False
-    assert patch.patch is not None
+    assert patch.HasField("patch")
     assert "+ring buffer" in patch.patch
 
 
 def test_service_reports_no_design_patch_before_attach(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
 
-    response = parts.api.execute(DesignPatchQuery(base="a" * 40, head="b" * 40, path="ring.rs"))
+    response = parts.api.execute(
+        messages.make_request("design_patch", base="a" * 40, head="b" * 40, path="ring.rs")
+    )
 
     assert response.ok is True
-    assert response.design_patch is None
+    assert not response.HasField("design_patch")
 
 
 def test_service_reuses_one_design_projection_per_run(tmp_path: Path) -> None:
@@ -701,9 +720,9 @@ def test_service_reuses_one_design_projection_per_run(tmp_path: Path) -> None:
     )
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
 
-    parts.api.execute(DesignQuery())
+    parts.api.execute(messages.make_request("design"))
     design = parts.api._design  # noqa: SLF001
-    parts.api.execute(DesignQuery())
+    parts.api.execute(messages.make_request("design"))
 
     assert design is not None
     assert parts.api._design is design  # noqa: SLF001
@@ -712,7 +731,7 @@ def test_service_reuses_one_design_projection_per_run(tmp_path: Path) -> None:
 def test_service_reports_design_not_ready_before_attach(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
 
-    response = parts.api.execute(DesignQuery())
+    response = parts.api.execute(messages.make_request("design"))
 
     assert response.design == []
     assert response.design_ready is False
