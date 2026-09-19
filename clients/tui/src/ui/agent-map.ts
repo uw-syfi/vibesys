@@ -48,8 +48,8 @@ const PANE_VCHROME = 2;
 const HEADING_ROWS = 1;
 /** Columns the transcript needs to stay worth reading beside the graph. */
 export const TRANSCRIPT_MIN = 42;
-/** Share of the terminal the graph takes when there is room for it. */
-const GRAPH_SHARE = 0.4;
+/** Share of the room left of the rail the graph takes when there is room for it. */
+const GRAPH_SHARE = 0.55;
 
 function statusColor(theme: Theme, status: AgentPhase['status']): string {
   if (status === 'active') return theme.success;
@@ -136,28 +136,33 @@ export function agentGraphMinWidth(phases: AgentPhase[]): number {
 }
 
 /**
- * True while the terminal can carry a graph at all: even the narrowest one
+ * Every `availableWidth` below is the terminal width minus the rounds rail's
+ * column (`roundRailColumns` in `round-rail.ts`), so the graph and the width
+ * keys size against what the rail leaves and the transcript keeps its floor.
+ * The rail itself keeps its fixed width; `<`/`>`/`=` only move the panes.
+ *
+ * True while the room can carry a graph at all: even the narrowest one
  * needs `TRANSCRIPT_MIN` columns left over for the transcript beside it. When
  * this is false the stacked list is the pane, no override can change that, and
  * `<`/`>` therefore store nothing rather than leaving behind a width this
  * terminal was never allowed to draw.
  */
-export function graphFits(terminalWidth: number, phases: AgentPhase[]): boolean {
-  return terminalWidth - TRANSCRIPT_MIN >= agentGraphMinWidth(phases);
+export function graphFits(availableWidth: number, phases: AgentPhase[]): boolean {
+  return availableWidth - TRANSCRIPT_MIN >= agentGraphMinWidth(phases);
 }
 
 /**
- * Width for the Agents pane, or null when the terminal cannot carry a graph
- * that names every agent in full beside a readable transcript; the stacked list
- * takes over then. Derived from the terminal rather than fixed, so a wide
- * terminal gives the graph room while the transcript keeps its floor.
+ * Width for the Agents pane, or null when the room cannot carry a graph that
+ * names every agent in full beside a readable transcript; the stacked list
+ * takes over then. Derived from the room rather than fixed, so a wide terminal
+ * gives the graph room while the transcript keeps its floor.
  */
-export function agentPaneWidth(terminalWidth: number, phases: AgentPhase[]): number | null {
+export function agentPaneWidth(availableWidth: number, phases: AgentPhase[]): number | null {
   const floor = agentPaneFloor(phases);
   const ceiling = agentPaneCeiling(phases);
-  const room = terminalWidth - TRANSCRIPT_MIN;
+  const room = availableWidth - TRANSCRIPT_MIN;
   if (room < floor) return null;
-  const share = Math.round(terminalWidth * GRAPH_SHARE);
+  const share = Math.round(availableWidth * GRAPH_SHARE);
   return Math.min(ceiling, room, Math.max(floor, share));
 }
 
@@ -175,11 +180,11 @@ export function agentPaneWidth(terminalWidth: number, phases: AgentPhase[]): num
  */
 export function clampGraphWidthOverride(
   requested: number,
-  terminalWidth: number,
+  availableWidth: number,
   phases: AgentPhase[],
 ): number {
   const low = agentGraphMinWidth(phases);
-  const high = Math.max(low, Math.min(agentPaneCeiling(phases), terminalWidth - TRANSCRIPT_MIN));
+  const high = Math.max(low, Math.min(agentPaneCeiling(phases), availableWidth - TRANSCRIPT_MIN));
   return Math.min(high, Math.max(low, requested));
 }
 
@@ -192,13 +197,13 @@ export function clampGraphWidthOverride(
  * as it does automatically.
  */
 export function agentPaneWidthWithOverride(
-  terminalWidth: number,
+  availableWidth: number,
   phases: AgentPhase[],
   override: number | null,
 ): number | null {
-  if (override === null) return agentPaneWidth(terminalWidth, phases);
-  if (!graphFits(terminalWidth, phases)) return null;
-  return clampGraphWidthOverride(override, terminalWidth, phases);
+  if (override === null) return agentPaneWidth(availableWidth, phases);
+  if (!graphFits(availableWidth, phases)) return null;
+  return clampGraphWidthOverride(override, availableWidth, phases);
 }
 
 /**
@@ -230,7 +235,7 @@ export interface AgentMapLayout {
  * the graph cannot name every agent in full.
  */
 export function agentMapLayout(
-  terminalWidth: number,
+  availableWidth: number,
   phases: AgentPhase[],
   widthOverride: number | undefined,
   rows: number,
@@ -238,7 +243,7 @@ export function agentMapLayout(
 ): AgentMapLayout {
   const graphWidth =
     widthOverride === undefined
-      ? agentPaneWidthWithOverride(terminalWidth, phases, graphWidthOverride)
+      ? agentPaneWidthWithOverride(availableWidth, phases, graphWidthOverride)
       : widthOverride >= graphPaneBounds(phases, selectedLabelWidth).min
         ? widthOverride
         : null;
@@ -264,6 +269,7 @@ export class AgentMapView {
   #renderedState: SessionState | null = null;
   #renderedWidth = 0;
   #renderedRows = 0;
+  #renderedFocus = false;
   #elapsedTimer: ReturnType<typeof setInterval> | null = null;
   #runningRound: {round: RoundSummary; text: TextRenderable} | null = null;
 
@@ -305,13 +311,22 @@ export class AgentMapView {
   }
 
   /**
-   * `rows` is the pane's height including its border. A round whose stages
-   * stack taller than that is windowed rather than drawn off the bottom of the
-   * pane; callers that manage their own height (tests driving the view
-   * directly) can omit it and get the unclamped graph.
+   * `railWidth` is the column the rounds rail has taken, 0 when it is off
+   * screen. It sizes this pane against what is left, so the transcript keeps
+   * its floor beside a rail rather than being squeezed by it, and it says
+   * whether the rail is a surface the round keys can be on.
+   *
+   * `rows` is the pane's height including its border, the same budget the rail
+   * draws from. A round whose stages stack taller than that is windowed rather
+   * than drawn off the bottom of the pane; callers that manage their own height
+   * (tests driving the view directly) can omit it and get the unclamped graph.
    */
-
-  render(state: SessionState, widthOverride?: number, rows = Number.POSITIVE_INFINITY): void {
+  render(
+    state: SessionState,
+    widthOverride?: number,
+    railWidth = 0,
+    rows = Number.POSITIVE_INFINITY,
+  ): void {
     const phases = visiblePhases(state);
     // The pane's width follows the terminal, so a resize has to redraw even
     // when the state is unchanged. A zoom hands the pane the whole terminal
@@ -320,17 +335,27 @@ export class AgentMapView {
     // stacks the agents rather than cut a name.
     // Null either way means the stacked list: the pane is drawn at `paneWidth`
     // whatever that decides.
+    // The graph is sized against the room left of the rail, so the transcript
+    // keeps its floor beside it; the rail's own width is fixed and no width
+    // control moves it.
     const layout = agentMapLayout(
-      this.renderer.terminalWidth,
+      this.renderer.terminalWidth - railWidth,
       phases,
       widthOverride,
       rows,
       state.graphWidthOverride,
     );
+    // A stale `rounds` focus lands here once the rail goes off screen, so the
+    // border follows the keys rather than the raw field: `keybindings` drives
+    // this pane in exactly that case, and a round view with no focus border on
+    // any pane is a view that does not say where its arrows go.
+    const focused =
+      focusedPane(state) === 'agents' && !(state.roundFocus === 'rounds' && railWidth > 0);
     if (
       state === this.#renderedState &&
       layout.paneWidth === this.#renderedWidth &&
-      rows === this.#renderedRows
+      rows === this.#renderedRows &&
+      focused === this.#renderedFocus
     ) {
       return;
     }
@@ -339,12 +364,13 @@ export class AgentMapView {
     this.#renderedState = state;
     this.#renderedWidth = layout.paneWidth;
     this.#renderedRows = rows;
+    this.#renderedFocus = focused;
     this.output.width = layout.paneWidth;
     // The pane that owns the arrow keys says so, the way every other focusable
     // surface in the client does. `focusedPane` is that single authority:
     // reading `roundFocus` directly lit this pane while a visualization too
     // narrow to split held the keys.
-    applyPaneFocus(this.output, this.#theme, AGENTS_TITLE, focusedPane(state) === 'agents');
+    applyPaneFocus(this.output, this.#theme, AGENTS_TITLE, focused);
     this.#clear();
     if (phases.length === 0) {
       this.#renderEmptyState(state);
@@ -444,7 +470,7 @@ export class AgentMapView {
       this.#content.add(
         new TextRenderable(this.renderer, {
           // The oldest attempts are the ones dropped, so the count points up at
-          // them.
+          // them the way the rounds rail points at the rounds above its window.
           content: `↑ ${fitted.hidden}`,
           fg: this.#theme.textSubtle,
           width: '100%',
@@ -727,8 +753,8 @@ function truncate(text: string, width: number): string {
 
 /**
  * The agent-active elapsed time of the round on screen: wall clock minus the
- * gaps where no agent was running, which is what the round tabs report for the
- * live round.
+ * gaps where no agent was running, which is what the rounds rail reports for
+ * the running round.
  */
 function headingLabel(roundNumber: number | null, round: RoundSummary | null): string {
   if (roundNumber === null) return 'Run flow';

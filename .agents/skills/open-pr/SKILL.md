@@ -124,7 +124,23 @@ Use this repository's template headings exactly:
 - `Correctness properties`: List invariants, contracts, expected behaviors, and compatibility constraints preserved or introduced.
 - `Testing`: List exact commands/workflows and their results.
 
-Keep the title concrete and behavior-oriented. Avoid generic titles such as "Update files" or "Fix tests."
+## PR Title
+
+PRs are squash-merged, so the PR title becomes the commit subject on `main`. Use:
+
+```
+<type>(<optional scope>): <imperative summary>
+```
+
+- `type`: one of `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`. Lowercase.
+- `scope`: optional, lowercase. Omit it for `src/vibesys` (the core package) and for cross-cutting changes. For documentation under `docs/`, use the scope of the area it describes (e.g. `docs(ui): ...`), or none for general guides. Otherwise use: `ui` for client-side code under `clients/` (TUI, core-state), `client` for the backend client crate, `server` for `src/server`, `example` for `examples/`, `website` for `website/` (the docs site build, theme, and deploy), and the library directory name for `libs/` (e.g. `vs-sandbox`, `vs-project`).
+- Summary: imperative mood, lowercase first word, no trailing period, about 72 characters or fewer, describing the behavior change rather than the files touched.
+- Do not add the PR number; GitHub appends it on squash merge.
+- Each PR in a stack gets its own type based on what that PR does.
+
+Examples: `feat(ui): resize the docked chat pane by columns`, `fix: retry synthesized implementer responses instead of spending a round`.
+
+Avoid generic summaries such as "update files" or "fix tests."
 
 ## VibeSys Review Notes
 

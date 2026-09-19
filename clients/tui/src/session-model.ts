@@ -151,8 +151,8 @@ export interface ErrorBannerState {
   count: number;
 }
 
-/** The agent graph on the left, or the transcript on the right. */
-export type RoundFocus = 'agents' | 'transcript';
+/** The rounds rail (a selector, reported as `agents` by `focusedPane`), the graph, or the transcript. */
+export type RoundFocus = 'rounds' | 'agents' | 'transcript';
 
 /**
  * The experiment log is open when this is non-null. Selection is held as a
@@ -1567,7 +1567,7 @@ export function focusedPane(state: SessionState): PaneId {
   if (state.layout.right !== null) {
     return state.layout.focus === 'right' ? 'performance' : 'transcript';
   }
-  return state.roundFocus;
+  return state.roundFocus === 'rounds' ? 'agents' : state.roundFocus;
 }
 
 /**

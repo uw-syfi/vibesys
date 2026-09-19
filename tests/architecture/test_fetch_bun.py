@@ -8,7 +8,7 @@ import zipfile
 from typing import TYPE_CHECKING
 
 import pytest
-from scripts.fetch_bun import BunFetchError, fetch_bun
+from fetch_bun import BunFetchError, fetch_bun
 from wheel_targets import TARGETS
 
 if TYPE_CHECKING:

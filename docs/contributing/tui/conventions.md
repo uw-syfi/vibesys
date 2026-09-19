@@ -83,10 +83,16 @@ were shipped wrong once:
   visualization is drawn through the overlay, and that overlay is then the
   performance pane, with its title and its marker.
 
-The round tabs are not a pane. They are one row across the top of the round
-view, `[` and `]` or a click switch the round from anywhere, and they take no
-arrow keys, so `←` and `→` move only between the agents graph and the
-transcript.
+The rounds rail is the one deliberate exception to the second case. It is a
+selector column at the left of the round view, not a content pane: `focusedPane`
+reports the agents side while the rail holds `roundFocus`, so `F4` zooms the
+agents pane rather than a column with nothing to enlarge. The rail draws its own
+focus border from `roundFocus`, and the agents pane suppresses its own while the
+rail is on screen and holds the keys, so exactly one border is lit. `←` and `→`
+step rounds, agents, transcript and clamp at the ends, and `↑` and `↓` step
+rounds while the rail holds focus. When a resize hides the rail (`roundRailColumns`
+is 0) a stale `rounds` focus falls through to the agents pane, so the keys never
+drive an invisible selection.
 
 Zoom is a separate question from focus. `visiblePaneIds` is the set the content
 row can be given to, and the todo list is deliberately not in it: it is as tall
@@ -117,6 +123,15 @@ experiment log absorbs the remainder from rather than holding a width of its
 own. Not a ratio: a share of the terminal that a floor then rounds away is a
 key press that did nothing, and the width the operator sees is what they are
 aiming at.
+
+The rounds rail is not one of those panes: it keeps its fixed 28 columns (13 in
+the compact band, none below 85 terminal columns) and no resize key moves it.
+The Agents pane's width, its automatic share, its floor and ceiling, and the
+clamp the keys apply are all measured against the room the rail leaves
+(`terminalWidth - roundRailColumns`), so the transcript keeps its floor beside
+the rail. Whether the rail is on screen changes the numbers the keys clamp to,
+never whether they work. A zoom, the log, and an open split hide the rail, and
+the pane then measures against the whole terminal again.
 
 An explicit width is sticky, so `=` gives it back, the way `<C-w>=` does in vim.
 Without it one press would cost the pane its automatic sizing for the life of

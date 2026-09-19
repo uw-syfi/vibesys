@@ -10,7 +10,6 @@ import platform
 import shutil
 import stat
 import subprocess
-import sys
 import tempfile
 import tomllib
 from collections.abc import Callable, Sequence
@@ -18,17 +17,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Never, cast
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from release_versions import (  # noqa: E402
+from release_versions import (
     ReleaseVersionSyntaxError,
     npm_release_identity,
     python_release_identity,
 )
-from tui_packaging import BUN_VERSION, validate_tui_payload  # noqa: E402
-from wheel_targets import resolve_wheel_target  # noqa: E402
+from tui_packaging import BUN_VERSION, validate_tui_payload
+from wheel_targets import resolve_wheel_target
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 _WORKSPACE_RUNTIME_PACKAGES = ("@vibesys/backend-client", "@vibesys/core-state")
@@ -288,7 +285,9 @@ def _fail(message: str) -> Never:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target", required=True, help="Target key from wheel_targets.py")
+    parser.add_argument(
+        "--target", required=True, help="Target key from packaging/wheel_targets.py"
+    )
     parser.add_argument("--bun", required=True, type=Path, help="Pinned Bun executable")
     parser.add_argument("--output-dir", type=Path, default=Path("dist"))
     return parser.parse_args()

@@ -151,7 +151,7 @@ def test_tracked_submodule_initialization_commands_override_the_opt_out() -> Non
 
 
 def _load_packaging_support() -> ModuleType:
-    module_path = PROJECT_ROOT / "packaging_support.py"
+    module_path = PROJECT_ROOT / "packaging" / "packaging_support.py"
     assert module_path.is_file()
     spec = importlib.util.spec_from_file_location("packaging_support", module_path)
     assert spec is not None

@@ -13,18 +13,15 @@ from pathlib import Path
 from typing import Never, cast
 
 from packaging.version import Version
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from release_versions import (  # noqa: E402
+from release_versions import (
     ReleaseIdentity,
     ReleaseVersionSyntaxError,
     npm_release_identity,
     python_release_identity,
 )
-from wheel_targets import TARGETS  # noqa: E402
+from wheel_targets import TARGETS
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseVersionError(RuntimeError):

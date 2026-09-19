@@ -19,18 +19,15 @@ from typing import TYPE_CHECKING, Never, cast
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from release_versions import (  # noqa: E402
+from release_versions import (
     ReleaseVersionSyntaxError,
     npm_release_identity,
     python_release_identity,
 )
-from tui_packaging import BUN_VERSION  # noqa: E402
-from wheel_targets import TARGETS, WheelTarget  # noqa: E402
+from tui_packaging import BUN_VERSION
+from wheel_targets import TARGETS, WheelTarget
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 if TYPE_CHECKING:
     from email.message import Message

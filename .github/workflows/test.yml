@@ -58,6 +58,7 @@ jobs:
               - 'libs/**'
               - 'sdk/**'
               - 'scripts/**'
+              - 'packaging/**'
               - 'tach.toml'
               - '.github/delegated-merge.toml'
               - '.github/workflows/delegated-merge.yml'
@@ -82,7 +83,7 @@ jobs:
               - 'src/server/controller.py'
               - 'src/server/diagnostics.py'
               - 'src/server/settings.py'
-              - 'scripts/fetch_bun.py'
+              - 'packaging/fetch_bun.py'
               - 'scripts/check_ts_architecture.test.mjs'
               - 'scripts/check_ts_package_manifests.mjs'
               - '.github/workflows/test.yml'
@@ -242,7 +243,7 @@ jobs:
 
       - name: Set up verified Bun 1.3.9 for OpenTUI
         run: |
-          python3 scripts/fetch_bun.py --target linux-x86_64 --output "$RUNNER_TEMP/bun/bin/bun"
+          python3 packaging/fetch_bun.py --target linux-x86_64 --output "$RUNNER_TEMP/bun/bin/bun"
           echo "$RUNNER_TEMP/bun/bin" >> "$GITHUB_PATH"
 
       - name: Install uv

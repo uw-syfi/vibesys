@@ -5,6 +5,7 @@ import {
   chatPaneVisible,
   experimentLogVisible,
   focusedPane,
+  type RoundFocus,
   todoListFocused,
   visiblePhases,
 } from '../session-model.js';
@@ -20,6 +21,7 @@ import {chatPaneWidthWithOverride, clampChatWidthOverride} from './chat-pane.js'
 import type {ClipboardCopyResult, SelectionClipboard} from './clipboard.js';
 import {PANE_WIDTH_STEP} from './pane-resize.js';
 import {rightPaneWidth, splitFits} from './right-pane.js';
+import {roundRailColumns} from './round-rail.js';
 
 export interface KeybindingActions {
   completeInput(): boolean;
@@ -393,18 +395,37 @@ export function bindKeybindings(
     // Like Enter above, pane focus and round navigation yield to a typed
     // command: cursor keys and brackets belong to a non-empty input.
     if ((key.name === 'left' || key.name === 'right') && actions.inputIsEmpty()) {
-      // The round view is two panes, agents then transcript, so each arrow names
-      // its side and holds there at the edge. The round tabs are not a pane.
-      controller.focusRound(key.name === 'left' ? 'agents' : 'transcript');
+      // Left to right, the round view drills rounds -> agents -> transcript, so
+      // the arrows step across that order and clamp at the ends. The rail joins
+      // the order only when it is on screen; narrower than that the view is just
+      // agents and transcript, as before.
+      const order: RoundFocus[] =
+        roundRailColumns(controller.state, renderer.terminalWidth) > 0
+          ? ['rounds', 'agents', 'transcript']
+          : ['agents', 'transcript'];
+      const current = order.indexOf(controller.state.roundFocus);
+      const base = current === -1 ? order.indexOf('agents') : current;
+      const next = Math.min(order.length - 1, Math.max(0, base + (key.name === 'left' ? -1 : 1)));
+      controller.focusRound(order[next] as RoundFocus);
       key.preventDefault();
       return;
     }
     if (key.name === 'up' || key.name === 'down') {
       if (!actions.navigateSuggestions(key.name === 'up' ? -1 : 1)) {
-        // `roundFocus` can sit parked on the agents pane while a visualization
-        // hides it, so the keys follow the pane that is actually on screen:
-        // the same authority the focus border reads.
-        if (focusedPane(controller.state) === 'agents') {
+        // A resize can hide the rail while focus still reads `rounds`; stepping it
+        // then would move an invisible selection. Only drive the rail while it is
+        // on screen, otherwise `rounds` coerces to the agents pane (the side
+        // `focusedPane` already reports it as) so the keys stay on a live surface.
+        const railFocused =
+          controller.state.roundFocus === 'rounds' &&
+          roundRailColumns(controller.state, renderer.terminalWidth) > 0;
+        if (railFocused) {
+          if (key.name === 'down') controller.selectNextRound();
+          else controller.selectPreviousRound();
+        } else if (focusedPane(controller.state) === 'agents') {
+          // `roundFocus` can sit parked on the agents pane while a visualization
+          // hides it, so the keys follow the pane that is actually on screen:
+          // the same authority the focus border reads.
           if (key.name === 'down') controller.selectNextAgent();
           else controller.selectPreviousAgent();
         } else {
@@ -476,7 +497,10 @@ export function bindKeybindings(
       agentsPaneVisible(controller.state, renderer.terminalWidth)
     ) {
       const phases = visiblePhases(controller.state);
-      const terminalWidth = renderer.terminalWidth;
+      // The rail keeps its fixed width and the keys only move the panes, so the
+      // graph sizes against the room the rail leaves, as `AgentMapView` does.
+      const terminalWidth =
+        renderer.terminalWidth - roundRailColumns(controller.state, renderer.terminalWidth);
       if (key.name === '=') actions.setGraphWidthOverride(null);
       // A terminal too narrow for even the narrowest graph is the stacked list
       // whatever the override says, so a press there would store a width this

@@ -13,7 +13,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from scripts import verify_release_wheel as verifier
+import verify_release_wheel as verifier
 from wheel_targets import TARGETS
 
 FRAMEWORK_PACKAGES = (

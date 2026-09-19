@@ -14,12 +14,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Never
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+from tui_packaging import BUN_VERSION
+from wheel_targets import TARGETS
 
-from tui_packaging import BUN_VERSION  # noqa: E402
-from wheel_targets import TARGETS  # noqa: E402
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 BUN_RELEASE_ROOT = "https://github.com/oven-sh/bun/releases/download"
 Downloader = Callable[[str], bytes]

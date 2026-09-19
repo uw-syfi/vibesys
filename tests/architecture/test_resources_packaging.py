@@ -6,9 +6,9 @@ from pathlib import Path  # noqa: TC003  # tracked: #288
 
 import pytest
 
-# `resources_packaging` is a repo-root, build-time module (imported by
+# `resources_packaging` is a build-time module in `packaging/` (imported by
 # setup.py). It is not part of the installed package; pytest picks it up via
-# `pythonpath = ["."]`, and the type checker via `[tool.ty.environment] root`.
+# `pythonpath = [".", "packaging"]`, and the type checker via `[tool.ty.environment] root`.
 from resources_packaging import (
     PackagingError,
     stage_resources,

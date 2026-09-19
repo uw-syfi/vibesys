@@ -15,11 +15,9 @@ from collections.abc import Callable, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Never, cast
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+from wheel_targets import TARGETS, WheelTarget, resolve_wheel_target
 
-from wheel_targets import TARGETS, WheelTarget, resolve_wheel_target  # noqa: E402
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 _POLICY_PATH = REPO_ROOT / "packaging" / "manylinux_2_28-policy.json"
