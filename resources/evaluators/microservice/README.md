@@ -237,7 +237,7 @@ configuration is accepted only by the selected adapter.
 
 See the checked-in workloads for complete examples:
 
-- `examples/microservices/hotel-correctness/benchmark/workload.toml`
+- `examples/microservices/hotel-correctness/.vibesys/tasks/compose/benchmark/workload.toml`
 - `examples/microservices/train-ticket/benchmark/workload.toml`
 - `examples/microservices/repositories/deathstarbench/.vibesys/tasks/social-network-read-timeline/benchmark/workload.toml`
 - `examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml`

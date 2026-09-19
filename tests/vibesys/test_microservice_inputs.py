@@ -33,7 +33,8 @@ DEATHSTAR_TASKS = {task.name.value: task for task in DEATHSTAR_LAYOUT.discover_t
 LEGACY_SCENARIOS = (MICROSERVICE_ROOT / "train-ticket",)
 HOTEL_CORRECTNESS_ROOT = MICROSERVICE_ROOT / "hotel-correctness"
 HOTEL_TEMP_ROOT = Path("/") / "tmp" / "vibesys-hotel-reservation" / "otel"
-HOTEL_BENCHMARK_ROOT = HOTEL_CORRECTNESS_ROOT / "benchmark"
+HOTEL_OWNER_ROOT = HOTEL_CORRECTNESS_ROOT / ".vibesys" / "tasks" / "compose"
+HOTEL_BENCHMARK_ROOT = HOTEL_OWNER_ROOT / "benchmark"
 
 
 def _deathstar_bundle(task_name: str) -> InputBundle:
@@ -117,7 +118,7 @@ def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() ->
     assert bundle.evaluator_package_digest is not None
     assert bundle.accuracy_command[:4] == (
         "${PYTHON}",
-        "${PROJECT_ROOT}/evaluator/run.py",
+        "${PROJECT_ROOT}/.vibesys/tasks/compose/evaluator/run.py",
         "--package-root",
         str(package),
     )
@@ -138,11 +139,11 @@ def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() ->
     ) in accuracy_pairs
     assert (
         "--workload",
-        f"{PROJECT_ROOT_TOKEN}/benchmark/workload.toml",
+        f"{PROJECT_ROOT_TOKEN}/.vibesys/tasks/compose/benchmark/workload.toml",
     ) in accuracy_pairs
     assert (
         "--workload",
-        f"{PROJECT_ROOT_TOKEN}/benchmark/workload.toml",
+        f"{PROJECT_ROOT_TOKEN}/.vibesys/tasks/compose/benchmark/workload.toml",
     ) in benchmark_pairs
     assert (
         "--run-command-json",
@@ -173,13 +174,13 @@ def test_hotel_accuracy_and_benchmark_preserve_randomized_stateful_workload() ->
     assert run_argv[5] == (
         f"{PROJECT_ROOT_TOKEN}/deathstarbench/hotelReservation/docker-compose.yml"
     )
-    assert run_argv[6] == f"{PROJECT_ROOT_TOKEN}/benchmark/telemetry.toml"
+    assert run_argv[6] == f"{PROJECT_ROOT_TOKEN}/.vibesys/tasks/compose/benchmark/telemetry.toml"
     assert (HOTEL_BENCHMARK_ROOT / "workload.toml").is_file()
     assert (HOTEL_BENCHMARK_ROOT / "telemetry.toml").is_file()
-    assert (HOTEL_CORRECTNESS_ROOT / "evaluator" / "go.mod").is_file()
-    assert (HOTEL_CORRECTNESS_ROOT / "evaluator" / "runtime.mod").is_file()
+    assert (HOTEL_OWNER_ROOT / "evaluator" / "go.mod").is_file()
+    assert (HOTEL_OWNER_ROOT / "evaluator" / "runtime.mod").is_file()
     assert (
-        HOTEL_CORRECTNESS_ROOT / "evaluator" / "cmd" / "hotel-correctness" / "main.go"
+        HOTEL_OWNER_ROOT / "evaluator" / "cmd" / "hotel-correctness" / "main.go"
     ).is_file()
     assert bundle.manifest.workspace is not None
     assert bundle.manifest.workspace.sources[0].commit == (
