@@ -12,19 +12,13 @@ examples under `examples/<family>/repositories/` are registered with
 `requires = ["overlay"]`. Baselines, starters, and evaluator sources are not
 examples and are not registered.
 
-## Two axes
+## Static checks run for every example
 
-**Static checks** (structure and configuration) run for every entry and every
-task, always. Needing docker, a cluster, a GPU, or model weights never exempts
-an example: none of them is needed to validate a manifest.
-
-**Live coverage** is the `live` field (`none`, `manual`, `ci`): whether any
-real run exercises the example. It never changes which static checks run.
-`requires` documents what a live run needs.
-
-Every entry currently has `live = "none"`. That records only that nobody has
-written down which examples are run by hand or in CI; it is not a claim that
-none are. Set `manual` or `ci` when you know.
+Static checks (structure and configuration) run for every registered example
+and every task, always. Needing docker, a cluster, a GPU, or model weights
+never exempts an example: none of them is needed to validate a manifest. There
+is no live-coverage tracking in the registry; add a field for it only when a
+check consumes it.
 
 ## Entry fields
 
@@ -33,8 +27,7 @@ none are. Set `manual` or `ci` when you know.
 | `path` | Repo-relative example root. |
 | `layout` | `task` or `legacy`. |
 | `tasks` | `"all"` (default) or the exact task names on disk. Omit for legacy. |
-| `live` | `none`, `manual`, or `ci`. |
-| `requires` | `overlay`, `docker`, `kubernetes`, `gpu`, `model-weights` (documentation). |
+| `requires` | `overlay`, `docker`, `kubernetes`, `gpu`, `model-weights`. Only `overlay` affects CI behavior (the overlay must be present); the others are hints. |
 | `known_failing` | `[{ check, reason, tracking }]`: a static check that fails today. |
 | `skips` | `[{ check, reason }]`: a check that cannot run because source is absent from the checkout. |
 

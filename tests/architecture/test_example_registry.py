@@ -361,7 +361,7 @@ def test_stale_reference_exclusions_are_current() -> None:
     [
         {"layout": "legacy", "tasks": ["a"]},
         {"surprise": 1},
-        {"live": "sometimes"},
+        {"live": "none"},  # a stale field must fail loudly
         {"known_failing": [{"check": "validate", "reason": "x"}]},
         {
             "skips": [{"check": "path-refs", "reason": "x"}],
@@ -370,6 +370,6 @@ def test_stale_reference_exclusions_are_current() -> None:
     ],
 )
 def test_registry_entry_model_rejects_inconsistent_entries(fields: dict[str, object]) -> None:
-    base = {"path": "examples/x", "layout": "task", "live": "none"}
-    with pytest.raises(ValueError, match=r"examples/x|surprise|Extra|live|tracking"):
+    base = {"path": "examples/x", "layout": "task"}
+    with pytest.raises(ValueError, match=r"examples/x|surprise|Extra|live|tracking|forbidden"):
         ExampleEntry.model_validate({**base, **fields})

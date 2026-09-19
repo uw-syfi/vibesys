@@ -2,20 +2,17 @@
 # tests/architecture/test_example_registry.py iterates this file and fails if a directory
 # that looks like an example is missing from it. See docs/contributing/examples.md.
 #
-# Two independent axes:
-#   STATIC checks run for every entry and every task, always: validate (vibesys validate),
-#   path-refs (${PROJECT_ROOT} paths in commands exist), trust-policy (files the commands
-#   read are read-only for the agent). Stale examples/ references are checked repo-wide.
-#   Needing docker, a cluster, a GPU or weights never exempts an example.
-#   LIVE coverage is the `live` field only and never changes the static checks.
+# Static checks run for every entry and every task, always: validate (vibesys validate),
+# path-refs (${PROJECT_ROOT} paths in commands exist), trust-policy (files the commands
+# read are read-only for the agent). Stale examples/ references are checked repo-wide.
+# Needing docker, a cluster, a GPU or weights never exempts an example. The registry does
+# not track whether any real run exercises an example.
 #
 #   path        repo-relative example root
 #   layout      "task" (.vibesys/tasks/<task>/) or "legacy" (root vibesys.input.toml)
 #   tasks       "all" (default) or the exact task names on disk; legacy: omit
-#   live        none | manual | ci: whether any real run exercises the example.
-#               Every entry is "none" because nobody recorded which are run; not a claim.
-#   requires    documentation of what a live run needs: overlay | docker | kubernetes |
-#               gpu | model-weights ("overlay" is fetched in CI, so its static checks run)
+#   requires    overlay | docker | kubernetes | gpu | model-weights. Only "overlay" changes
+#               behavior (the overlay is fetched in CI and must be present); the rest are hints
 #   known_failing  [{ check, reason, tracking }]: strict xfail; the test fails once the check
 #               passes, so entries only shrink
 #   skips       [{ check, reason }]: a check that cannot run because source is absent from
@@ -26,204 +23,170 @@ version = 1
 [[example]]
 path = "examples/data-structures/kvstore-default"
 layout = "task"
-live = "none"
 requires = []
 
 [[example]]
 path = "examples/data-structures/prioqueue-mpmc"
 layout = "legacy"
-live = "none"
 requires = []
 
 [[example]]
 path = "examples/data-structures/prioqueue-mpsc"
 layout = "legacy"
-live = "none"
 requires = []
 
 [[example]]
 path = "examples/data-structures/prioqueue-spmc"
 layout = "legacy"
-live = "none"
 requires = []
 
 [[example]]
 path = "examples/data-structures/prioqueue-spsc"
 layout = "legacy"
-live = "none"
 requires = []
 
 [[example]]
 path = "examples/data-structures/repositories/queue-rs"
 layout = "task"
-live = "none"
 requires = []
 
 [[example]]
 path = "examples/database/differential-dataflow"
 layout = "legacy"
-live = "none"
 requires = []
 
 [[example]]
 path = "examples/kv-store"
 layout = "task"
-live = "none"
 requires = []
 
 [[example]]
 path = "examples/microservices/hotel-correctness"
 layout = "task"
-live = "none"
 requires = ["docker", "kubernetes"]
 
 [[example]]
 path = "examples/microservices/repositories/deathstarbench"
 layout = "task"
-live = "none"
 requires = ["overlay", "docker"]
 skips = [{ check = "path-refs", reason = "overlay checkout has no candidate source for ${PROJECT_ROOT} paths to point at" }]
 
 [[example]]
 path = "examples/microservices/social-network-kubernetes"
 layout = "task"
-live = "none"
 requires = ["kubernetes"]
 
 [[example]]
 path = "examples/microservices/train-ticket"
 layout = "task"
-live = "none"
 requires = ["docker"]
 
 [[example]]
 path = "examples/microservices/train-ticket-kubernetes"
 layout = "task"
-live = "none"
 requires = ["kubernetes"]
 
 [[example]]
 path = "examples/model-serving/Llama-3-8B"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/Llama-3-8B-trn2"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit"
 layout = "legacy"
-live = "none"
 requires = ["model-weights"]
 
 [[example]]
 path = "examples/model-serving/deepseek-v3.2-8xb200"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/glm-5.2-8xb200"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/kimi-k3-8xb200"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/llama-70b-2xh100"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/moonshine-streaming"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/moonshine-streaming-vllm"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/olmo-hybrid-prefix-caching"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/olmo-hybrid-prefix-caching-vllm"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/qwen3-32b-code-edit"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/qwen3.5-397b-a17b-4xb200"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/qwen3.6-35b-a3b-2xh100"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/repositories/sglang"
 layout = "task"
-live = "none"
 requires = ["overlay", "gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/repositories/vllm"
 layout = "task"
-live = "none"
 requires = ["overlay", "gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/repositories/vllm-omni"
 layout = "task"
-live = "none"
 requires = ["overlay", "gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/show-o2-1.5B-HQ"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/show-o2-1.5B-HQ-h100"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]
 
 [[example]]
 path = "examples/model-serving/show-o2-1.5B-HQ-macbook"
 layout = "legacy"
-live = "none"
 requires = ["model-weights"]
 
 [[example]]
 path = "examples/model-serving/whisper-large-v3"
 layout = "legacy"
-live = "none"
 requires = ["gpu", "model-weights"]

@@ -33,16 +33,8 @@ class Layout(StrEnum):
     LEGACY = "legacy"  # root `vibesys.input.toml` and `OBJECTIVE.md`
 
 
-class Live(StrEnum):
-    """Whether any real run exercises the example. Never changes the static checks."""
-
-    NONE = "none"  # no real run is recorded
-    MANUAL = "manual"  # a maintainer runs it by hand
-    CI = "ci"  # a CI job runs it
-
-
 class Requirement(StrEnum):
-    """What a live run needs beyond a plain checkout (documentation only)."""
+    """What running an example needs beyond a plain checkout. Only OVERLAY changes CI behavior."""
 
     OVERLAY = "overlay"  # `.vibesys/` fetched by scripts/example_repositories.py
     DOCKER = "docker"
@@ -86,7 +78,6 @@ class ExampleEntry(BaseModel):
     path: str  # repo-relative POSIX path
     layout: Layout
     tasks: Literal["all"] | tuple[str, ...] = "all"  # legacy examples have no tasks
-    live: Live
     requires: tuple[Requirement, ...] = ()
     known_failing: tuple[KnownFailing, ...] = ()
     skips: tuple[Skip, ...] = ()
@@ -200,5 +191,5 @@ def suggested_entry(path: str) -> str:
     requires = '["overlay"]' if path in submodule_example_paths() else "[]"
     return (
         f'[[example]]\npath = "{path}"\nlayout = "{layout}"\n'
-        f'live = "none"  # none | manual | ci\nrequires = {requires}'
+        f"requires = {requires}"
     )
