@@ -19,36 +19,40 @@ the Python `vibesys` package in the Python environment you want to use, or set
 ## Operator interface
 
 Use Experiment chat for ordinary questions about the current run. The command
-input accepts these slash commands:
+input accepts these slash commands, and `F1` opens them as a searchable
+palette:
 
-Every command below is defined once in a shared registry, so the command bar and
-the chat resolve the same name to the same action, match case-insensitively, and
-report the same errors.
+Every command below is defined once in a shared registry, so the command bar
+and the chat resolve the same name to the same action, match
+case-insensitively, and report the same errors. The palette row is the one
+exception: it opens the whole list rather than running a single entry from
+it, so it has no slash name of its own.
 
-| Command | Behavior |
-| --- | --- |
-| `/help` | Show the commands available on the current surface. |
-| `/chat` | Put the pane keys on the docked chat, or open it as a modal where it cannot dock; `/chat <question>` asks immediately. Command bar only, since the chat has nothing to open. |
-| | Every command below works in the chat too, and does the same thing as in the command bar. |
-| `/pause` | Pause after the current agent call finishes. |
-| `/resume` | Resume a paused run. Works from the command bar and the chat. |
-| `/stop` | Stop the run after the current agent call finishes. The journal records the stop and the run reads `stopped`, not failed; it can be reopened or resumed later. Signals remain the escalation path for a backend that stopped responding. |
-| `/steer <message>` | Queue an instruction that is appended to the next agent invocation's prompt. |
-| `/open-round` | Open the rounds behind the selected hypothesis. |
-| `/open-round --N` | Open round N, inside whichever hypothesis owns it. |
-| `/perf` | Plot the recorded performance metric by round, in the right pane. |
-| `/design` | Summarize what each round changed in the workspace, in the right pane. With that pane focused, `d` opens the newest round's diff. |
-| `/todos` | Expand or collapse the visible agent's todo list. |
-| `/prompt` | Expand or collapse the latest prompt in view. |
-| `/theme` | Pick a theme from a keyboard-navigable list; `/theme <name>` switches immediately. |
+| Command | Behavior | Keybinding |
+| --- | --- | --- |
+| `/help` | Show this help. Lists the commands available on the current surface. | |
+| Command palette | Lists every command the way `/help` does, but keyboard-navigable: type to filter, arrows to move, Enter to run the highlighted command. | `F1` |
+| `/chat` | Open experiment chat. Puts the pane keys on the docked chat, or opens it as a modal where it cannot dock; `/chat <question>` asks immediately. Command bar only, since the chat has nothing to open. | |
+| | Every command below works in the chat too, and does the same thing as in the command bar. | |
+| `/pause` | Pause after the current agent call. Takes effect once the current call finishes. | |
+| `/resume` | Resume a paused run. Works from the command bar and the chat. | |
+| `/stop` | Stop the run after the current agent call. Takes effect once the current call finishes. The journal records the stop and the run reads `stopped`, not failed; it can be reopened or resumed later. Signals remain the escalation path for a backend that stopped responding. | |
+| `/steer <message>` | Guide the next agent invocation: `/steer <message>`. Queues an instruction that is appended to the next agent invocation's prompt. | |
+| `/open-round` | Open the selected hypothesis, or `/open-round --N` for round N. With no argument, opens the rounds behind the selected hypothesis. | |
+| `/open-round --N` | Open round N, inside whichever hypothesis owns it. | |
+| `/perf` | Plot performance by round in the right pane. Uses the recorded performance metric. | |
+| `/design` | Summarize each round’s file changes in the right pane. Describes what changed in the workspace; with that pane focused, `d` opens the newest round's diff. | |
+| `/todos` | Expand or collapse the visible agent's todo list. | `F2` |
+| `/prompt` | Expand or collapse the latest prompt in view. | `F3` |
+| `/theme` | List themes, or switch with `/theme <name>`. The list is keyboard-navigable; naming a theme switches immediately without opening it. | |
 
 The chat composer adds its own thread commands, which exist only in the chat:
 
-| Command | Behavior |
-| --- | --- |
-| `/clear` | Start a fresh thread with the current thread's agent and model. |
-| `/model` | Pick a harness and model, and start a thread on it. |
-| `/switch` | Switch to another chat thread. |
+| Command | Behavior | Keybinding |
+| --- | --- | --- |
+| `/clear` | Start a fresh thread with this thread’s agent and model. | |
+| `/model` | Pick a harness and model, and start a thread on it. | |
+| `/switch` | Switch to another chat thread. | |
 
 ### Experiment log
 

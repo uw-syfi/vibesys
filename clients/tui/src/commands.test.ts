@@ -190,42 +190,157 @@ describe('argument-contract enforcement', () => {
 });
 
 /**
- * The README is the only copy of the command list outside the registry, and it
- * is what a reader consults before the help text. Asserting it against the
- * registry is what keeps the two from drifting the way the pre-registry tables
- * did.
+ * The README is the only copy of the command list outside the registry, and
+ * it is what a reader consults before the help text. Asserting its names,
+ * descriptions, and keybindings against the registry is what keeps the two
+ * from drifting the way the pre-registry tables did. `F1` has no registry
+ * entry to check against (it opens the palette rather than running a
+ * command), so it gets its own row shape and its own check, against
+ * keybindings.ts instead of COMMAND_SPECS.
  */
 describe('README command tables', () => {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const keybindingsSource = readFileSync(new URL('./ui/keybindings.ts', import.meta.url), 'utf8');
 
-  /** The `/name` of every table row in a section, deduplicated in document order. */
-  const documentedCommands = (heading: string, nextHeading: string): string[] => {
+  const COMMAND_TABLE_HEADING = '| Command | Behavior | Keybinding |';
+  const CHAT_ONLY_HEADING = 'The chat composer adds';
+  const EXPERIMENT_LOG_HEADING = '### Experiment log';
+
+  /**
+   * One parsed `| Command | Behavior | Keybinding |` row. `name` is `''` for
+   * a row with no slash command: the chat-forwarding note, or a key-only row
+   * like F1's.
+   */
+  interface DocumentedRow {
+    readonly name: string;
+    readonly description: string;
+    readonly keybinding: string;
+  }
+
+  /**
+   * Parses one line as a `| Command | Behavior | Keybinding |` data row.
+   * Returns `null` for anything that is not a 3-column table row (blank
+   * lines, prose), and for the header and its `---` divider, which are
+   * structural rather than data.
+   */
+  const parseTableRow = (line: string): DocumentedRow | null => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) return null;
+    const cells = trimmed
+      .slice(1, -1)
+      .split('|')
+      .map(cell => cell.trim());
+    if (cells.length !== 3) return null;
+    const nameCell = cells[0] ?? '';
+    const descriptionCell = cells[1] ?? '';
+    const keybindingCell = cells[2] ?? '';
+    if (nameCell === 'Command' || /^-+$/.test(nameCell)) return null; // header, divider
+    return {
+      name: /^`(\/[a-z][a-z0-9-]*)/i.exec(nameCell)?.[1] ?? '',
+      description: descriptionCell.replace(/`/g, ''),
+      // The whole cell must be one code span, which is what distinguishes a
+      // real key ("`F1`") from the header's plain "Keybinding" and from a
+      // blank cell.
+      keybinding: /^`([^`]+)`$/.exec(keybindingCell)?.[1] ?? '',
+    };
+  };
+
+  /** Splits a section of the README into its table rows, in document order. */
+  const tableRows = (heading: string, nextHeading: string): DocumentedRow[] => {
     const start = readme.indexOf(heading);
     expect(start).toBeGreaterThanOrEqual(0);
     const end = readme.indexOf(nextHeading, start + heading.length);
     expect(end).toBeGreaterThan(start);
     const section = readme.slice(start, end);
-    const documented: string[] = [];
+    const rows: DocumentedRow[] = [];
     for (const line of section.split('\n')) {
-      const name = /^\|\s*`(\/[a-z][a-z0-9-]*)/.exec(line)?.[1];
-      if (name !== undefined && !documented.includes(name)) documented.push(name);
+      const row = parseTableRow(line);
+      if (row !== null) rows.push(row);
     }
-    return documented;
+    return rows;
   };
+
+  /**
+   * Every command row keyed by name, first occurrence only: `/open-round`'s
+   * second row documents the `--N` form, not a second description or
+   * keybinding to check.
+   */
+  const commandRowsByName = (heading: string, nextHeading: string): Map<string, DocumentedRow> => {
+    const byName = new Map<string, DocumentedRow>();
+    for (const row of tableRows(heading, nextHeading)) {
+      if (row.name !== '' && !byName.has(row.name)) byName.set(row.name, row);
+    }
+    return byName;
+  };
+
+  /** Rows with no slash command: a documented keybinding with nothing to type, like F1's palette. */
+  const keyRows = (heading: string, nextHeading: string): DocumentedRow[] =>
+    tableRows(heading, nextHeading).filter(row => row.name === '' && row.keybinding !== '');
+
+  /** The `/name` of every command row in a section, deduplicated in document order. */
+  const documentedCommands = (heading: string, nextHeading: string): string[] => [
+    ...commandRowsByName(heading, nextHeading).keys(),
+  ];
 
   const specNames = (predicate: (surfaces: readonly CommandSurface[]) => boolean): string[] =>
     COMMAND_SPECS.filter(spec => predicate(spec.surfaces)).map(spec => spec.name);
 
   it('documents exactly the commands the command bar offers, in registry order', () => {
-    expect(documentedCommands('| Command | Behavior |', 'The chat composer adds')).toEqual(
+    expect(documentedCommands(COMMAND_TABLE_HEADING, CHAT_ONLY_HEADING)).toEqual(
       specNames(surfaces => surfaces.includes('command')),
     );
   });
 
   it('documents exactly the chat-only commands, in registry order', () => {
-    expect(documentedCommands('The chat composer adds', '### Experiment log')).toEqual(
+    expect(documentedCommands(CHAT_ONLY_HEADING, EXPERIMENT_LOG_HEADING)).toEqual(
       specNames(surfaces => !surfaces.includes('command')),
     );
+  });
+
+  /**
+   * Descriptions and keybindings come from COMMAND_SPECS, not a second
+   * hand-typed list: retyping the registry's text here would recreate the
+   * exact drift this guard exists to catch. A row documents its command's
+   * description as a complete leading sentence and may add detail after it;
+   * what it cannot do is start with anything else, or disagree about the key
+   * that runs it.
+   */
+  it('matches every documented description and keybinding to the registry', () => {
+    const commandRows = new Map([
+      ...commandRowsByName(COMMAND_TABLE_HEADING, CHAT_ONLY_HEADING),
+      ...commandRowsByName(CHAT_ONLY_HEADING, EXPERIMENT_LOG_HEADING),
+    ]);
+    for (const spec of COMMAND_SPECS) {
+      const row = commandRows.get(spec.name);
+      const description = row?.description ?? '<no row documents this command>';
+      expect(`${spec.name} description: ${description}`).toContain(
+        `${spec.name} description: ${spec.description}.`,
+      );
+      const keybinding = row?.keybinding ?? '<no row documents this command>';
+      expect(`${spec.name} keybinding: ${keybinding}`).toBe(
+        `${spec.name} keybinding: ${spec.keybinding ?? ''}`,
+      );
+    }
+  });
+
+  /**
+   * A keybinding with nothing to type, like F1 opening the command palette,
+   * has no COMMAND_SPECS entry to check against: it is exactly the row the
+   * name-only regex above could never see (#857), the structural gap this
+   * second path closes. What ties the row to reality instead is
+   * keybindings.ts: the key it names must be one the router actually reads,
+   * so a typo, a row for a key nothing binds, or a rebind that leaves the row
+   * behind, all fail here.
+   */
+  it('documents every key-only row against a real binding in keybindings.ts', () => {
+    const rows = keyRows(COMMAND_TABLE_HEADING, CHAT_ONLY_HEADING);
+    expect(rows.map(row => row.keybinding)).toContain('F1');
+    for (const row of rows) {
+      const binds = keybindingsSource.includes(`key.name === '${row.keybinding.toLowerCase()}'`);
+      expect(`${row.keybinding} row binds in keybindings.ts: ${binds}`).toBe(
+        `${row.keybinding} row binds in keybindings.ts: true`,
+      );
+    }
   });
 });
 
