@@ -319,9 +319,9 @@ class AgentEnvironment(Protocol):
     """A live agent-construction environment opened for one run.
 
     Returned by `vibesys.api.session.RunAgentHost.open_agent_environment`.
-    Carries exactly what `server.chat.factory.build_chat_agent` reads today
-    from a `RunAttachment`'s `agent_runtime` plus the `RunEnvironmentSession`
-    it opens by hand: the construction inputs (`config`, `compute_backend`,
+    Carries exactly what `server.chat.factory.build_chat_agent` needs to build
+    a sibling agent over the run's workspace: the construction inputs (`config`,
+    `compute_backend`,
     `skill_source_dirs`, `project_path_policy`, `host_resources`), the opened
     sandbox's shape (`backends`, `use_docker`, `isolated`), its path
     translation (`agent_path`), and its lifetime (`close`).
