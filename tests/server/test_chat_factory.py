@@ -113,10 +113,6 @@ def _attachment(tmp_path: Path) -> RunAttachment:
             provider="claude",
             model="claude-haiku-4-5",
         ),
-        # `agent_runtime` is unused by `build_chat_agent` since it now reads
-        # construction inputs from the `AgentEnvironment` handle the fake
-        # session returns instead.
-        agent_runtime=cast("Any", None),
     )
 
 

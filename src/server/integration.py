@@ -25,7 +25,7 @@ from server.events import (
     RunEvent,
 )
 from server.read_model import RunInspector
-from server.run_attachment import AgentRuntimeResources, AgentSelection, RunAttachment
+from server.run_attachment import AgentSelection, RunAttachment
 from server.run_lifecycle import RunTrigger
 from vibesys.api import supported_cli_providers
 from vibesys.events import CoreEventType
@@ -248,8 +248,8 @@ class RunIntegrationAdapter:
         argument did, just type-erased at the core/application boundary.
         *session* is threaded through to `ExperimentChatFactory` so it can
         open its own agent-construction environment through
-        `vibesys.api.RunSession.open_agent_environment` instead of the core
-        internals `agent_runtime` used to expose. Durable attach used to be
+        `vibesys.api.RunSession.open_agent_environment` instead of reading core
+        sandbox internals off the handoff. Durable attach used to be
         the first action `attach_run` took before building `RunAttachment`;
         it stays first here so the wire journal is attached before any
         experiment-chat setup that might read it.
@@ -266,16 +266,6 @@ class RunIntegrationAdapter:
                 provider=handoff.provider,
                 model=handoff.model,
                 role_models=handoff.role_models,
-            ),
-            agent_runtime=AgentRuntimeResources(
-                config=handoff.config,
-                compute_backend=handoff.compute_backend,
-                skill_source_dirs=handoff.skill_source_dirs,
-                environment=handoff.environment,
-                environment_request=handoff.environment_request,
-                run_environment_sandboxed=handoff.run_environment_sandboxed,
-                project_path_policy=handoff.project_path_policy,
-                host_resources=handoff.host_resources,
             ),
         )
         self._detach_run = self._attach_run(attachment, session)

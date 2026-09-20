@@ -391,7 +391,6 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path):  # noqa
             log_dir=project.state.log_directory(run_id),
             agent_backend="cli",
             agent_defaults=AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
-            agent_runtime=cast("Any", None),
         ),
         cast("Any", object()),
     )
@@ -446,7 +445,6 @@ def test_non_cli_run_rejects_new_chat_threads(tmp_path):  # noqa: ANN001, ANN201
             log_dir=project.state.log_directory(run_id),
             agent_backend="stub",
             agent_defaults=AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
-            agent_runtime=cast("Any", None),
         ),
         cast("Any", object()),
     )
