@@ -1,5 +1,7 @@
 """Repository-native VibeSys project layout and typed state persistence."""
 
+from vs_project._git_events import GitTrackerEvents, NullGitTrackerEvents
+from vs_project._git_tracker import FrameworkSnapshotStatus, GitTracker
 from vs_project._layout import (
     AmbiguousTaskError,
     ConfigurationRoot,
@@ -14,7 +16,13 @@ from vs_project._layout import (
     TasksRoot,
     UnsafeProjectPathError,
 )
+from vs_project._logger import RunLogger
 from vs_project._resume import ResumeConfigurationComparison, compare_resume_configurations
+from vs_project._socket import (
+    MAX_SOCKET_PATH_BYTES,
+    SocketPathTooLongError,
+    validate_socket_path,
+)
 from vs_project._state import (
     PROJECT_SCHEMA_VERSION,
     RUN_SCHEMA_VERSION,
@@ -47,17 +55,22 @@ from vs_project.errors import ProjectError
 from vs_project.project import Project
 
 __all__ = [
+    "MAX_SOCKET_PATH_BYTES",
     "PROJECT_SCHEMA_VERSION",
     "RUN_SCHEMA_VERSION",
     "AgentRunConfiguration",
     "AmbiguousTaskError",
     "ConfigurationRoot",
     "EvolveRunConfiguration",
+    "FrameworkSnapshotStatus",
     "GitObjectId",
     "GitSnapshotFile",
     "GitSnapshotPlan",
+    "GitTracker",
+    "GitTrackerEvents",
     "InvalidTaskDefinitionError",
     "InvalidTaskNameError",
+    "NullGitTrackerEvents",
     "PlainRunConfiguration",
     "Project",
     "ProjectError",
@@ -71,9 +84,11 @@ __all__ = [
     "ResumeConfigurationComparison",
     "RunConfiguration",
     "RunEnvironmentRecord",
+    "RunLogger",
     "RunManifest",
     "RunResourceRequest",
     "RunSchemaMigrationRequiredError",
+    "SocketPathTooLongError",
     "StateFile",
     "StateModelNotFoundError",
     "StateNamespace",
@@ -89,4 +104,5 @@ __all__ = [
     "generate_run_id",
     "is_project_state_path",
     "serialize_round",
+    "validate_socket_path",
 ]

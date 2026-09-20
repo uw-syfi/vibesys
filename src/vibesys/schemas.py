@@ -18,8 +18,9 @@ output lives here, organized by purpose:
   - Mutator (evolve loop):
                           MutatorResponse
 
-This module has no local imports, so templates and tests can pull
-schemas in without dragging in the rest of the agent runtime.
+This module has no local imports besides the dependency-free ``vs_loop_state``
+leaf lib, so templates and tests can pull schemas in without dragging in the
+rest of the agent runtime.
 """
 
 from enum import StrEnum
@@ -27,6 +28,18 @@ from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator
+
+from vs_loop_state import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    PerfDeltaReason,  # noqa: F401
+)
+
+# HypothesisOutcome, CandidateDisposition, and PerfDeltaReason live in
+# vs_loop_state so that server code can import them without deep-importing
+# vibesys internals. Re-exported here so existing core call sites keep
+# working unchanged. PerfDeltaReason needs the explicit re-export waiver
+# because nothing else in this module references it directly.
 
 # ===========================================================================
 # Enums
@@ -36,63 +49,6 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator
 class Verdict(StrEnum):  # noqa: D101  # tracked: #288
     PASS = "pass"  # noqa: S105  # tracked: #288
     FAIL = "fail"
-
-
-class HypothesisOutcome(StrEnum):
-    """Implementer-owned status for the active experimental hypothesis.
-
-    ``SUPPORTED`` and ``NOMINATED`` are deliberately distinct from
-    ``PROVEN``: an implementer may submit evidence for independent review,
-    but only the judge can establish that the scoped hypothesis held.
-    ``NOMINATED`` additionally asks the framework to run its global gates for
-    the current candidate checkpoint. It does not imply that the overall
-    objective or terminal target has been achieved.
-    """
-
-    CONTINUE = "continue"
-    SUPPORTED = "supported"
-    NOMINATED = "nominated"
-    DISPROVEN = "disproven"
-    IMPLEMENTATION_FAILED = "implementation_failed"
-    INCONCLUSIVE = "inconclusive"
-    BLOCKED = "blocked"
-
-
-class CandidateDisposition(StrEnum):
-    """How a measured candidate should be retained independently of its hypothesis.
-
-    Hypothesis truth and checkpoint utility are different questions. A causal
-    forecast can be disproven while its implementation still establishes a
-    useful throughput/latency tradeoff. These values keep that distinction
-    explicit without promoting provisional evidence to an official result.
-    """
-
-    UNASSESSED = "unassessed"
-    DISCARD = "discard"
-    PREREQUISITE = "prerequisite"
-    PARETO_FRONTIER = "pareto_frontier"
-
-
-class PerfDeltaReason(StrEnum):
-    """Why a headline measurement carries no causal delta.
-
-    Always re-derived from round evidence (``perf_provenance`` and the
-    baseline fields), never stored on the round record, so it cannot drift
-    from them. Absent entirely for records that predate provenance tracking:
-    a legacy absolute number keeps reading as a deliberate absolute rather
-    than being relabelled as unresolved.
-    """
-
-    # No trusted official measurement of the metric existed yet, so there was
-    # legitimately nothing to compare against.
-    NO_BASELINE_YET = "no_baseline_yet"
-    # Trusted measurements existed but none was admissible as this round's
-    # causal baseline: the lookup failed closed rather than inverting cause
-    # and effect.
-    BASELINE_UNRESOLVED = "baseline_unresolved"
-    # The only headline number is the implementer's own report, which the
-    # framework never orders against anything.
-    NOT_FRAMEWORK_MEASURED = "not_framework_measured"
 
 
 HypothesisStrategyDisposition = Literal["parked", "abandoned"]

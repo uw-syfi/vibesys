@@ -67,7 +67,7 @@ depends_on = ["vs_project", "vibesys.run", "vs_sandbox", "vibesys.agents", "vibe
 
 [[modules]]
 path = "server.transport"
-depends_on = ["server.api", "vibesys"]
+depends_on = ["server.api", "vibesys", "vs_project"]
 
 [[modules]]
 path = "server.controller"
@@ -119,7 +119,7 @@ depends_on = ["server.events"]
 
 [[modules]]
 path = "vibesys"
-depends_on = ["vs_feature_flags"]
+depends_on = ["vs_feature_flags", "vs_loop_state"]
 
 [[modules]]
 # The narrow public facade over core (see the vibesys.api boundary plan): the

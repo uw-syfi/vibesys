@@ -44,7 +44,7 @@ from vibesys.skypilot.runner import (
     SkyPilotControlPlaneError,
     SkyPilotJobStateError,
 )
-from vibesys.unix_socket import validate_socket_path
+from vs_project import validate_socket_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence

@@ -37,8 +37,7 @@ from vibesys.skypilot.runner import (
     JobStatus,
     SkyPilotJobRunner,
 )
-from vibesys.unix_socket import MAX_SOCKET_PATH_BYTES, SocketPathTooLongError
-from vs_project import StateNamespace
+from vs_project import MAX_SOCKET_PATH_BYTES, SocketPathTooLongError, StateNamespace
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

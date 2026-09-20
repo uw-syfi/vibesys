@@ -14,9 +14,13 @@ from server.events import RunEvent
 from server.execution import ActiveAgentExecution
 from server.run_lifecycle import RunStatus
 from server.settings import InteractiveSetupDefaults
-from vibesys.loops.agent.model import HypothesisResolution
-from vibesys.schemas import CandidateDisposition, HypothesisOutcome, PerfDeltaReason
-from vs_loop_state import JudgeVerdict
+from vs_loop_state import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    HypothesisResolution,
+    JudgeVerdict,
+    PerfDeltaReason,
+)
 
 PROTOCOL_VERSION = 1
 
