@@ -27,9 +27,11 @@ graph TD
     entrypoints --> vs_github
     entrypoints --> vs_project
     server --> vibesys
+    server --> vs_agent
     server --> vs_loop_state
     server --> vs_project
     server --> vs_sandbox
+    vibesys --> vs_agent
     vibesys --> vs_evaluator_protocol
     vibesys --> vs_feature_flags
     vibesys --> vs_github
@@ -50,8 +52,11 @@ graph TD
     vibesys.agents --> vibesys
     vibesys.agents --> vibesys.render
     vibesys.api --> vibesys
+    vibesys.api --> vibesys.agents
+    vibesys.api --> vibesys.domains
     vibesys.api --> vibesys.evaluators
     vibesys.api --> vibesys.loops
+    vibesys.api --> vibesys.render
     vibesys.api --> vibesys.run
     vibesys.api --> vibesys.sandbox
     vibesys.backends --> vibesys
@@ -109,8 +114,7 @@ graph TD
     entrypoints --> vibesys.sandbox
     entrypoints --> vs_github
     entrypoints --> vs_project
-    server --> vibesys
-    server --> vibesys.sandbox
+    server --> vs_agent
     server --> vs_project
     server --> vs_sandbox
     server.api --> server.chat
@@ -122,10 +126,7 @@ graph TD
     server.api --> server.journal
     server.api --> server.run_lifecycle
     server.api --> server.settings
-    server.api --> vibesys
     server.api --> vibesys.api
-    server.api --> vibesys.loops
-    server.api --> vibesys.run
     server.api --> vs_loop_state
     server.api --> vs_project
     server.chat --> server
@@ -134,9 +135,8 @@ graph TD
     server.chat --> server.execution
     server.chat --> server.journal
     server.chat --> server.run_lifecycle
-    server.chat --> vibesys.agents
-    server.chat --> vibesys.domains
-    server.chat --> vibesys.run
+    server.chat --> vibesys.api
+    server.chat --> vs_agent
     server.chat --> vs_project
     server.chat --> vs_sandbox
     server.controller --> server.diagnostics
@@ -151,7 +151,7 @@ graph TD
     server.execution --> server.diagnostics
     server.execution --> server.events
     server.execution --> server.journal
-    server.execution --> vibesys
+    server.execution --> vibesys.api
     server.integration --> server
     server.integration --> server.chat
     server.integration --> server.controller
@@ -161,10 +161,7 @@ graph TD
     server.integration --> server.journal
     server.integration --> server.read_model
     server.integration --> server.run_lifecycle
-    server.integration --> vibesys
-    server.integration --> vibesys.agents
-    server.integration --> vibesys.render
-    server.integration --> vibesys.run
+    server.integration --> vibesys.api
     server.integration --> vs_project
     server.journal --> server.diagnostics
     server.journal --> server.events
@@ -181,24 +178,27 @@ graph TD
     server.runtime --> server.read_model
     server.runtime --> server.settings
     server.runtime --> server.transport
-    server.runtime --> vibesys
     server.runtime --> vibesys.api
-    server.runtime --> vibesys.render
-    server.runtime --> vibesys.run
-    server.settings --> vibesys
+    server.settings --> vibesys.api
     server.tool_payloads --> server.events
     server.transport --> server.api
-    server.transport --> vibesys
+    server.transport --> vs_project
     vibesys --> vs_feature_flags
+    vibesys --> vs_loop_state
     vibesys.agents --> vibesys
     vibesys.agents --> vibesys.render
+    vibesys.agents --> vs_agent
     vibesys.agents --> vs_project
     vibesys.agents --> vs_sandbox
     vibesys.api --> vibesys
+    vibesys.api --> vibesys.agents
+    vibesys.api --> vibesys.domains
     vibesys.api --> vibesys.evaluators
     vibesys.api --> vibesys.loops
+    vibesys.api --> vibesys.render
     vibesys.api --> vibesys.run
     vibesys.api --> vibesys.sandbox
+    vibesys.api --> vs_agent
     vibesys.api --> vs_loop_state
     vibesys.api --> vs_project
     vibesys.api --> vs_sandbox
