@@ -2485,7 +2485,7 @@ class ReconnectTransport implements ServerTransport {
     tail: number | undefined;
     storeId: string | undefined;
   }> = [];
-  /** How many upcoming subscribes to reject before letting one through. */
+  /** How many upcoming subscribes the server refuses (a typed rejection). */
   refuseSubscribes = 0;
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
@@ -2510,7 +2510,7 @@ class ReconnectTransport implements ServerTransport {
     this.subscribeCalls.push({afterSequence, tail: options?.tail, storeId: options?.storeId});
     if (this.refuseSubscribes > 0) {
       this.refuseSubscribes -= 1;
-      return Promise.reject(new Error('connection refused'));
+      return Promise.reject(new ServerError('Extra inputs are not permitted: store_id'));
     }
     this.#message = onMessage;
     this.#disconnect = onDisconnect;
@@ -2917,7 +2917,7 @@ class HistoryTransport implements ServerTransport {
   readonly subscribeTails: Array<number | undefined> = [];
   /** Rejects a subscribe carrying `tail`, the way a server without the field does. */
   rejectTail = false;
-  /** Fails every subscribe, tail or not. */
+  /** Fails every subscribe that `rejectTail` did not already reject. */
   subscribeError: Error | null = null;
   /** Fails `query.events` instead of answering it. */
   eventsError: Error | null = null;
@@ -2957,10 +2957,10 @@ class HistoryTransport implements ServerTransport {
     options?: SubscribeOptions,
   ): Promise<EventSubscription> {
     this.subscribeTails.push(options?.tail);
-    if (this.subscribeError !== null) return Promise.reject(this.subscribeError);
     if (this.rejectTail && options?.tail !== undefined) {
       return Promise.reject(new ServerError('Extra inputs are not permitted: tail'));
     }
+    if (this.subscribeError !== null) return Promise.reject(this.subscribeError);
     this.#message = onMessage;
     return Promise.resolve({close: async () => undefined});
   }
